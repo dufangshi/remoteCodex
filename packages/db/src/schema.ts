@@ -1,0 +1,76 @@
+import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+
+export const hosts = sqliteTable('hosts', {
+  id: text('id').primaryKey(),
+  hostname: text('hostname').notNull(),
+  platform: text('platform').notNull(),
+  tailscaleName: text('tailscale_name'),
+  createdAt: text('created_at').notNull(),
+  lastSeenAt: text('last_seen_at').notNull()
+});
+
+export const workspaces = sqliteTable('workspaces', {
+  id: text('id').primaryKey(),
+  hostId: text('host_id').notNull(),
+  label: text('label').notNull(),
+  absPath: text('abs_path').notNull().unique(),
+  isFavorite: integer('is_favorite', { mode: 'boolean' }).notNull().default(false),
+  createdAt: text('created_at').notNull(),
+  lastOpenedAt: text('last_opened_at')
+});
+
+export const threads = sqliteTable('threads', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull(),
+  codexThreadId: text('codex_thread_id'),
+  title: text('title').notNull(),
+  model: text('model'),
+  approvalMode: text('approval_mode'),
+  status: text('status'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  lastTurnStartedAt: text('last_turn_started_at'),
+  lastTurnCompletedAt: text('last_turn_completed_at'),
+  lastViewedAt: text('last_viewed_at'),
+  isPinned: integer('is_pinned', { mode: 'boolean' }).notNull().default(false)
+});
+
+export const shellSessions = sqliteTable('shell_sessions', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull(),
+  threadId: text('thread_id'),
+  tmuxSessionName: text('tmux_session_name'),
+  cwd: text('cwd').notNull(),
+  status: text('status'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  lastActivityAt: text('last_activity_at')
+});
+
+export const viewerSessions = sqliteTable('viewer_sessions', {
+  id: text('id').primaryKey(),
+  threadId: text('thread_id'),
+  shellId: text('shell_id'),
+  connectedAt: text('connected_at').notNull(),
+  lastHeartbeatAt: text('last_heartbeat_at'),
+  activeTab: text('active_tab')
+});
+
+export const notifications = sqliteTable('notifications', {
+  id: text('id').primaryKey(),
+  threadId: text('thread_id'),
+  kind: text('kind').notNull(),
+  severity: text('severity').notNull(),
+  title: text('title').notNull(),
+  body: text('body').notNull(),
+  isRead: integer('is_read', { mode: 'boolean' }).notNull().default(false),
+  createdAt: text('created_at').notNull()
+});
+
+export const policies = sqliteTable('policies', {
+  id: text('id').primaryKey(),
+  key: text('key').notNull().unique(),
+  valueJson: text('value_json').notNull(),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull()
+});
