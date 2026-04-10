@@ -7,6 +7,7 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
+    host: '0.0.0.0',
     fs: {
       allow: [path.resolve(__dirname, '../..')]
     },
@@ -18,6 +19,9 @@ export default defineConfig({
         ws: true
       }
     }
+  },
+  preview: {
+    host: '0.0.0.0'
   },
   test: {
     environment: 'jsdom',

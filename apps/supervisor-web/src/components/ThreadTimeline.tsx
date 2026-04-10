@@ -76,6 +76,19 @@ function itemSurfaceClassName(kind: ThreadHistoryItemDto['kind']) {
   }
 }
 
+function overlayBadgeClassName(tone: 'user' | 'agent' | 'command' | 'action') {
+  switch (tone) {
+    case 'user':
+      return 'border-cyan-400/30 bg-cyan-400/12 text-cyan-200';
+    case 'agent':
+      return 'border-slate-300/35 bg-slate-200/14 text-slate-100';
+    case 'command':
+      return 'border-amber-300/30 bg-amber-300/12 text-amber-200';
+    case 'action':
+      return 'border-stone-700/90 bg-stone-900/75 text-stone-300';
+  }
+}
+
 function normalizeLines(text: string) {
   const lines = text.replace(/\r\n/g, '\n').split('\n');
 
@@ -337,16 +350,27 @@ const CompactMessageItem = memo(function CompactMessageItem({
 
   return (
     <div
-      className={`relative rounded-[1.2rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-3 py-2.5`}
+      className={`relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
     >
-      <div className="flex items-start gap-2.5">
+      <span
+        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${iconToneClassName}`}
+      >
+        <span className="scale-[0.78]">
+          <CompactMessageIcon kind={item.kind} />
+        </span>
+      </span>
+      <div className="flex min-w-0 items-start gap-0 pt-2 sm:gap-2.5 sm:pt-0">
         <div className="mt-0.5 flex shrink-0 items-center">
           <span
-            className={`inline-flex h-6 w-6 items-center justify-center rounded-full border ${iconToneClassName}`}
+            className={`hidden h-6 w-6 items-center justify-center rounded-full border sm:inline-flex ${iconToneClassName}`}
           >
             <CompactMessageIcon kind={item.kind} />
           </span>
-          {streaming && item.kind === 'agentMessage' && <RunningDots tone="emerald" />}
+          {streaming && item.kind === 'agentMessage' && (
+            <span className="hidden sm:inline-flex">
+              <RunningDots tone="emerald" />
+            </span>
+          )}
         </div>
         <div className="min-w-0 flex-1">
           {item.kind === 'agentMessage' ? (
@@ -367,6 +391,11 @@ const CompactMessageItem = memo(function CompactMessageItem({
           )}
         </div>
       </div>
+      {streaming && item.kind === 'agentMessage' && (
+        <span className="absolute left-5 top-0 inline-flex sm:hidden">
+          <RunningDots tone="emerald" />
+        </span>
+      )}
       {item.kind === 'agentMessage' && (
         <button
           type="button"
@@ -379,7 +408,7 @@ const CompactMessageItem = memo(function CompactMessageItem({
                 : 'Copy agent reply'
           }
           onClick={() => void handleCopy()}
-          className={`absolute bottom-2.5 right-2.5 inline-flex h-7 w-7 items-center justify-center rounded-full border backdrop-blur transition ${
+          className={`absolute bottom-0 right-0 inline-flex h-5 w-5 items-center justify-center rounded-tl-[0.7rem] rounded-br-[0.95rem] border shadow-sm shadow-stone-950/25 backdrop-blur transition sm:bottom-2.5 sm:right-2.5 sm:h-7 sm:w-7 sm:rounded-full ${
             copyState === 'copied'
               ? 'border-sky-300/40 bg-sky-300/16 text-sky-100'
               : copyState === 'failed'
@@ -387,7 +416,9 @@ const CompactMessageItem = memo(function CompactMessageItem({
                 : 'border-stone-700/90 bg-stone-900/60 text-stone-300 hover:bg-stone-800/92'
           }`}
         >
-          <CopyIcon />
+          <span className="scale-[0.72] sm:scale-100">
+            <CopyIcon />
+          </span>
         </button>
       )}
     </div>
@@ -405,43 +436,57 @@ const CommandItem = memo(function CommandItem({
 
   return (
     <div
-      className={`rounded-[1.2rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-3 py-2.5`}
+      className={`relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
     >
+      <span
+        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('command')}`}
+      >
+        <span className="scale-[0.78]">
+          <CommandIcon />
+        </span>
+      </span>
+      {isRunningHistoryStatus(item.status) && (
+        <span className="absolute left-5 top-0 inline-flex sm:hidden">
+          <RunningDots />
+        </span>
+      )}
       <div className="flex items-start gap-2.5">
-        <div className="mt-0.5 flex shrink-0 items-center">
+        <div className="mt-0.5 hidden shrink-0 items-center sm:flex">
           <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-amber-300/25 bg-amber-300/10 text-amber-200">
             <CommandIcon />
           </span>
           {isRunningHistoryStatus(item.status) && <RunningDots />}
         </div>
-        <div className="relative min-w-0 flex-1 rounded-xl border border-stone-800/80 bg-stone-950/45 px-3 py-2">
+        <div className="relative min-w-0 w-full flex-1 rounded-[0.9rem] border border-stone-800/80 bg-stone-950/45 px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2 sm:pt-2">
           <button
             type="button"
             aria-label="Expand command"
             title="Expand command"
             onClick={() => onOpen('Command Output', item.text)}
-            className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-full border border-stone-700/90 bg-stone-900/90 text-stone-300 transition hover:bg-stone-800"
+            className={`absolute right-0 top-0 inline-flex h-5 w-5 items-center justify-center rounded-bl-[0.7rem] rounded-tr-[0.9rem] border shadow-sm shadow-stone-950/25 transition sm:right-2 sm:top-2 sm:h-7 sm:w-7 sm:rounded-full ${overlayBadgeClassName('action')} hover:bg-stone-800`}
           >
-            <svg
-              aria-hidden="true"
-              viewBox="0 0 16 16"
-              className="h-3.5 w-3.5 fill-none stroke-current"
-              strokeWidth="1.45"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M6.25 2.75H2.75v3.5" />
-              <path d="M9.75 13.25h3.5v-3.5" />
-              <path d="m2.75 6.25 3.5-3.5" />
-              <path d="m9.75 9.75 3.5 3.5" />
-              <path d="M9.75 2.75h3.5v3.5" />
-              <path d="M6.25 13.25h-3.5v-3.5" />
-              <path d="m13.25 6.25-3.5-3.5" />
-              <path d="m6.25 9.75-3.5 3.5" />
-            </svg>
+            <span className="scale-[0.72] sm:scale-100">
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                className="h-3.5 w-3.5 fill-none stroke-current"
+                strokeWidth="1.45"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M6.25 2.75H2.75v3.5" />
+                <path d="M9.75 13.25h3.5v-3.5" />
+                <path d="m2.75 6.25 3.5-3.5" />
+                <path d="m9.75 9.75 3.5 3.5" />
+                <path d="M9.75 2.75h3.5v3.5" />
+                <path d="M6.25 13.25h-3.5v-3.5" />
+                <path d="m13.25 6.25-3.5-3.5" />
+                <path d="m6.25 9.75-3.5 3.5" />
+              </svg>
+            </span>
           </button>
           {item.status && (
-            <p className="pr-10 text-xs text-stone-500">{item.status}</p>
+            <p className="pr-8 text-xs text-stone-500 sm:pr-10">{item.status}</p>
           )}
           <button
             type="button"
@@ -449,7 +494,7 @@ const CommandItem = memo(function CommandItem({
             onClick={() => onOpen('Command Output', item.text)}
             className="mt-1 block w-full text-left"
           >
-            <pre className="pr-10 whitespace-pre-wrap break-words text-sm leading-6 text-stone-200">
+            <pre className="pr-8 whitespace-pre-wrap break-words text-sm leading-6 text-stone-200 sm:pr-10">
               {summary.previewText}
             </pre>
           </button>
@@ -466,7 +511,7 @@ const GenericHistoryItem = memo(function GenericHistoryItem({
 }) {
   return (
     <div
-      className={`rounded-[1.2rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-3 py-2.5`}
+      className={`min-w-0 w-full rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-[11px] uppercase tracking-[0.2em] text-stone-500">
@@ -566,7 +611,7 @@ function PendingRequestCard({
   }
 
   return (
-    <div className="rounded-[1.2rem] border border-sky-300/20 bg-sky-300/[0.06] px-4 py-3">
+    <div className="w-full rounded-[1rem] border border-sky-300/20 bg-sky-300/[0.06] px-3 py-3 sm:rounded-[1.2rem] sm:px-4">
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-sm font-medium text-sky-100">{request.title}</p>
@@ -730,7 +775,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
   scrollRootRef: RefObject<HTMLDivElement | null>;
 }) {
   return (
-    <article className="px-4 py-2.5 sm:px-6">
+    <article className="px-2 py-2 sm:px-6 sm:py-2.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0 flex flex-wrap items-center gap-2">
           <div className="flex flex-wrap items-center gap-2">
@@ -740,7 +785,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
             <time
               dateTime={turn.startedAt ?? undefined}
               title={formatLongTimestamp(turn.startedAt)}
-              className="text-xs text-stone-400 sm:text-sm"
+              className="text-[11px] text-stone-400 sm:text-sm"
             >
               {formatShortTimestamp(turn.startedAt)}
             </time>
@@ -751,7 +796,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
             </span>
           </div>
           {turn.error && (
-            <p className="text-xs text-rose-200 sm:text-sm">{turn.error}</p>
+            <p className="text-[11px] text-rose-200 sm:text-sm">{turn.error}</p>
           )}
         </div>
         <button
@@ -778,7 +823,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
       </div>
 
       {!isCollapsed && (
-        <div className="mt-2 space-y-1.5">
+        <div className="mt-1.5 space-y-1.5">
           {turn.items.map((item) => (
             <HistoryItemRow
               key={item.id}
@@ -923,7 +968,7 @@ export function ThreadTimeline({
           onScroll={handleScroll}
           className="min-h-0 flex-1 overflow-y-auto"
         >
-          <div className="sticky top-0 z-10 border-b border-stone-800/80 bg-stone-900/95 px-4 py-3 backdrop-blur sm:px-6">
+          <div className="sticky top-0 z-10 border-b border-stone-800/80 bg-stone-900/95 px-2.5 py-2.5 backdrop-blur sm:px-6 sm:py-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-sm text-stone-400">
                 {turns.length === 0
@@ -962,7 +1007,7 @@ export function ThreadTimeline({
           </div>
 
           {turns.length === 0 && !liveOutput && (
-            <div className="px-4 py-8 text-sm text-stone-500 sm:px-6">
+            <div className="px-2.5 py-8 text-sm text-stone-500 sm:px-6">
               Send the first prompt to start the thread.
             </div>
           )}
@@ -985,7 +1030,7 @@ export function ThreadTimeline({
           )}
 
           {livePlan && (
-            <div className="border-t border-sky-300/15 bg-sky-300/5 px-4 py-4 sm:px-6">
+            <div className="border-t border-sky-300/15 bg-sky-300/5 px-2.5 py-4 sm:px-6">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm font-medium text-sky-100">Plan update</p>
                 <span className="rounded-full border border-sky-300/40 px-2 py-1 text-[11px] uppercase tracking-[0.2em] text-sky-200">
@@ -1012,7 +1057,7 @@ export function ThreadTimeline({
           )}
 
           {pendingRequests.length > 0 && (
-            <div className="space-y-3 border-t border-stone-800/80 px-4 py-4 sm:px-6">
+            <div className="space-y-3 border-t border-stone-800/80 px-2.5 py-4 sm:px-6">
               {pendingRequests.map((request) => (
                 <PendingRequestCard
                   key={request.id}
@@ -1025,7 +1070,7 @@ export function ThreadTimeline({
           )}
 
           {liveOutput && !liveOutputAttachedToTurn && (
-            <div className="border-t border-stone-800/80 px-4 py-2.5 sm:px-6">
+            <div className="border-t border-stone-800/80 px-2.5 py-2.5 sm:px-6">
               <CompactMessageItem
                 item={{
                   id: 'live-agent-message-fallback',

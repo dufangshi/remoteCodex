@@ -448,11 +448,11 @@ export function ThreadDetailPage() {
       metaContent={metaContent}
       onRenameThread={handleRenameThread}
     >
-      <div className="flex h-[calc(100dvh-2rem)] max-h-[calc(100dvh-2rem)] flex-col overflow-hidden rounded-[2rem] border border-stone-800 bg-stone-900/85 shadow-2xl shadow-stone-950/20">
-        <header className="shrink-0 border-b border-stone-800 bg-stone-900/95 px-4 py-3 backdrop-blur sm:px-5">
+      <div className="-mx-4 flex h-[calc(100dvh-1rem)] max-h-[calc(100dvh-1rem)] flex-col overflow-hidden rounded-none border-y border-stone-800 bg-stone-900/85 shadow-2xl shadow-stone-950/20 sm:mx-0 sm:h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-2rem)] sm:rounded-[2rem] sm:border">
+        <header className="shrink-0 border-b border-stone-800 bg-stone-900/95 px-3 py-3 backdrop-blur sm:px-5">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <h2 className="truncate text-lg font-medium text-stone-100 sm:text-xl">
+              <h2 className="truncate text-base font-medium text-stone-100 sm:text-xl">
                 {detail?.thread.title ?? 'Loading thread'}
               </h2>
               <p className="mt-1 truncate text-xs text-stone-500">
