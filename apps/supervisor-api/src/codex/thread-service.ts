@@ -97,7 +97,9 @@ function isRemoteThreadBootstrapError(error: unknown) {
   return (
     error.message.includes('includeTurns is unavailable before first user message') ||
     error.message.includes('is not materialized yet') ||
-    error.message.includes('no rollout found for thread id')
+    error.message.includes('no rollout found for thread id') ||
+    error.message.includes('failed to load rollout') ||
+    (error.message.includes('rollout at') && error.message.includes('is empty'))
   );
 }
 

@@ -6,6 +6,7 @@ import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { buildApp } from './app';
+import { JsonRpcClientError } from '../../../packages/codex/src/index';
 import { FakeCodexManager } from './test/fakeCodexManager';
 
 describe('supervisor api', () => {
@@ -294,6 +295,64 @@ describe('supervisor api', () => {
       thread: {
         id: createdThread.id,
         title: 'Bootstrap Thread'
+      },
+      turns: []
+    });
+  });
+
+  it('treats an empty rollout read error as a bootstrap transient after the first prompt', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Empty Rollout Thread'
+      }
+    });
+
+    const createdThread = createResponse.json();
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'test plan mode'
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+
+    const promptedThread = promptResponse.json();
+    fakeCodexManager.readThreadErrors.set(
+      promptedThread.codexThreadId,
+      new JsonRpcClientError(
+        `failed to load rollout \`/Users/fonsh/.codex/sessions/2026/04/10/rollout-2026-04-10T15-50-02-${promptedThread.codexThreadId}.jsonl\` for thread ${promptedThread.codexThreadId}: rollout at /Users/fonsh/.codex/sessions/2026/04/10/rollout-2026-04-10T15-50-02-${promptedThread.codexThreadId}.jsonl is empty`,
+        'remote_error',
+        { code: -32600 }
+      )
+    );
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json()).toMatchObject({
+      thread: {
+        id: createdThread.id,
+        status: 'running',
+        summaryText: 'test plan mode'
       },
       turns: []
     });

@@ -45,6 +45,7 @@ export class FakeCodexManager extends EventEmitter {
 
   threads = new Map<string, CodexThreadRecord>();
   loadedThreadIds = new Set<string>();
+  readThreadErrors = new Map<string, JsonRpcClientError>();
 
   async start() {}
 
@@ -83,6 +84,11 @@ export class FakeCodexManager extends EventEmitter {
   }
 
   async readThread(threadId: string) {
+    const configuredError = this.readThreadErrors.get(threadId);
+    if (configuredError) {
+      throw configuredError;
+    }
+
     const thread = this.threads.get(threadId) ?? makeThread({ id: threadId });
     if (thread.turns.length === 0) {
       throw new JsonRpcClientError(
