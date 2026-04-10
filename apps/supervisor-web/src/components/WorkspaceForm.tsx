@@ -1,4 +1,13 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
+
+function inferWorkspaceLabel(absPath: string) {
+  const normalized = absPath.trim().replace(/[\\/]+$/, '');
+  if (!normalized) {
+    return '';
+  }
+
+  return normalized.split(/[\\/]/).filter(Boolean).at(-1) ?? '';
+}
 
 interface WorkspaceFormProps {
   initialPath?: string;
@@ -17,9 +26,23 @@ export function WorkspaceForm({
   busy = false,
   onSubmit
 }: WorkspaceFormProps) {
+  const initialAutoLabel = inferWorkspaceLabel(initialPath);
   const [absPath, setAbsPath] = useState(initialPath);
-  const [label, setLabel] = useState(initialLabel);
+  const [label, setLabel] = useState(initialLabel || initialAutoLabel);
   const [localError, setLocalError] = useState<string | null>(null);
+  const previousAutoLabelRef = useRef(initialAutoLabel);
+
+  useEffect(() => {
+    const nextAutoLabel = inferWorkspaceLabel(absPath);
+    setLabel((current) => {
+      if (!current.trim() || current === previousAutoLabelRef.current) {
+        return nextAutoLabel;
+      }
+
+      return current;
+    });
+    previousAutoLabelRef.current = nextAutoLabel;
+  }, [absPath]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -70,6 +93,9 @@ export function WorkspaceForm({
           placeholder="Optional override"
           className="mt-2 w-full rounded-2xl border border-stone-700 bg-stone-950 px-4 py-3 text-stone-100 outline-none transition focus:border-amber-300"
         />
+        <p className="mt-2 text-xs text-stone-500">
+          Defaults to the last folder name. You can override it.
+        </p>
       </div>
       {(localError || error) && (
         <div className="rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">

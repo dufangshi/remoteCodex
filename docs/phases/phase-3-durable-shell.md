@@ -251,7 +251,7 @@ session 命名规则必须稳定，可从 thread ID 推导。
 - [x] 已实现 imported thread 的持久化模型，并保存 `codex_session_id` 绑定关系。
 - [x] 已实现 supervisor 对现有 workspace 的路径匹配逻辑。
 - [x] 已实现当 workspace 不存在时，按路径最后一级目录名默认创建 workspace 的逻辑。
-- [ ] 已将“路径最后一级目录名作为默认 workspace 名称”的规则同步到正常 workspace 创建流程。
+- [x] 已将“路径最后一级目录名作为默认 workspace 名称”的规则同步到正常 workspace 创建流程。
 - [x] 已实现 imported thread 导入后仅查看历史、不自动 resume 的规则。
 - [x] 已实现继续发送新 prompt 前必须手动 `Resume / Connect` 的规则。
 - [x] 已实现对重复导入同一 `codex_session_id` 的防重处理。

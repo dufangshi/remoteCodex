@@ -33,4 +33,26 @@ describe('WorkspaceForm', () => {
       });
     });
   });
+
+  it('autofills the label from the last path segment and keeps manual overrides', async () => {
+    const onSubmit = vi.fn();
+    render(<WorkspaceForm onSubmit={onSubmit} />);
+
+    const pathInput = screen.getByLabelText(/absolute path/i);
+    const labelInput = screen.getByLabelText(/display label/i);
+
+    fireEvent.change(pathInput, {
+      target: { value: '/Users/fonsh/Desktop/remoteCodex' }
+    });
+    expect(labelInput).toHaveValue('remoteCodex');
+
+    fireEvent.change(labelInput, {
+      target: { value: 'Custom Name' }
+    });
+    fireEvent.change(pathInput, {
+      target: { value: '/Users/fonsh/Desktop/another-project' }
+    });
+
+    expect(labelInput).toHaveValue('Custom Name');
+  });
 });

@@ -46,12 +46,20 @@ export function WorkspacesPage() {
           <p className="text-xs uppercase tracking-[0.3em] text-stone-500">Workspace Registry</p>
           <h2 className="mt-2 text-3xl font-semibold text-stone-100">Your local projects</h2>
         </div>
-        <Link
-          to="/workspaces/new"
-          className="rounded-full bg-amber-200 px-5 py-3 font-medium text-stone-950 transition hover:bg-amber-100"
-        >
-          Add Workspace
-        </Link>
+        <div className="flex flex-wrap items-center gap-3">
+          <Link
+            to="/threads/import"
+            className="rounded-full border border-stone-700 px-5 py-3 font-medium text-stone-100 transition hover:border-stone-500 hover:bg-stone-900"
+          >
+            Import Session
+          </Link>
+          <Link
+            to="/workspaces/new"
+            className="rounded-full bg-amber-200 px-5 py-3 font-medium text-stone-950 transition hover:bg-amber-100"
+          >
+            Add Workspace
+          </Link>
+        </div>
       </div>
 
       {loading && (

@@ -1,4 +1,6 @@
 @import "tailwindcss";
+@source "../../../node_modules/streamdown/dist/*.js";
+@source "../../../node_modules/@streamdown/code/dist/*.js";
 
 :root {
   color: #f5f5f4;
@@ -9,6 +11,17 @@
     'IBM Plex Sans',
     'Segoe UI',
     sans-serif;
+  --background: oklch(0.19 0.01 84);
+  --foreground: oklch(0.97 0.01 84);
+  --card: oklch(0.24 0.01 84);
+  --card-foreground: oklch(0.97 0.01 84);
+  --muted: oklch(0.3 0.01 84);
+  --muted-foreground: oklch(0.77 0.01 84);
+  --border: oklch(0.34 0.01 84);
+  --input: oklch(0.34 0.01 84);
+  --primary: oklch(0.9 0.06 150);
+  --primary-foreground: oklch(0.18 0.01 84);
+  --radius: 0.875rem;
 }
 
 body {
@@ -29,4 +42,77 @@ a {
 button,
 input {
   font: inherit;
+}
+
+.agent-markdown {
+  font-size: 15px;
+  line-height: 1.6;
+  color: rgb(245 245 244);
+}
+
+.agent-markdown :where(h1, h2, h3, h4, h5, h6) {
+  margin: 0 0 0.45rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: rgb(250 250 249);
+}
+
+.agent-markdown :where(h1) {
+  font-size: 1.05rem;
+}
+
+.agent-markdown :where(h2) {
+  font-size: 1rem;
+}
+
+.agent-markdown :where(h3, h4, h5, h6) {
+  font-size: 0.95rem;
+}
+
+.agent-markdown :where(p, ul, ol, pre, blockquote, table) {
+  margin: 0;
+}
+
+.agent-markdown :where(p + p, p + ul, p + ol, ul + p, ol + p, pre + p, p + pre, blockquote + p, p + blockquote, table + p, p + table, ul + ul, ol + ol) {
+  margin-top: 0.65rem;
+}
+
+.agent-markdown :where(ul, ol) {
+  padding-left: 1.2rem;
+}
+
+.agent-markdown :where(li + li) {
+  margin-top: 0.2rem;
+}
+
+.agent-markdown :where(a) {
+  color: rgb(167 243 208);
+  text-decoration: underline;
+  text-decoration-color: rgb(110 231 183 / 0.45);
+  text-underline-offset: 0.18em;
+}
+
+.agent-markdown :where(blockquote) {
+  padding-left: 0.9rem;
+  border-left: 2px solid rgb(68 64 60);
+  color: rgb(214 211 209);
+}
+
+.agent-markdown :where(pre) {
+  overflow: auto;
+  border: 1px solid rgb(41 37 36);
+  border-radius: 0.95rem;
+  background: rgb(12 10 9 / 0.72);
+}
+
+.agent-markdown :where(:not(pre) > code) {
+  padding: 0.12rem 0.4rem;
+  border: 1px solid rgb(68 64 60 / 0.9);
+  border-radius: 0.45rem;
+  background: rgb(28 25 23 / 0.9);
+  font-size: 0.92em;
+}
+
+.agent-markdown :where(pre code) {
+  font-size: 0.9rem;
 }
