@@ -181,6 +181,31 @@ describe('supervisor api', () => {
     });
   });
 
+  it('updates a workspace label', async () => {
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = createResponse.json();
+    const updateResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/workspaces/${workspace.id}`,
+      payload: {
+        label: 'Renamed Workspace'
+      }
+    });
+
+    expect(updateResponse.statusCode).toBe(200);
+    expect(updateResponse.json()).toMatchObject({
+      id: workspace.id,
+      label: 'Renamed Workspace'
+    });
+  });
+
   it('rejects paths outside workspace root', async () => {
     const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'remote-codex-outside-'));
 
@@ -271,6 +296,43 @@ describe('supervisor api', () => {
         title: 'Bootstrap Thread'
       },
       turns: []
+    });
+  });
+
+  it('updates a thread title', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Rename Me'
+      }
+    });
+
+    const createdThread = createResponse.json();
+    const updateResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${createdThread.id}`,
+      payload: {
+        title: 'Renamed Thread'
+      }
+    });
+
+    expect(updateResponse.statusCode).toBe(200);
+    expect(updateResponse.json()).toMatchObject({
+      id: createdThread.id,
+      title: 'Renamed Thread'
     });
   });
 
@@ -464,6 +526,132 @@ describe('supervisor api', () => {
       workspace: {
         absPath: expectedWorkspacePath
       }
+    });
+  });
+
+  it('creates a plan decision request after a plan-mode turn completes and can implement it', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Plan Mode Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Plan the next change.',
+        collaborationMode: 'plan'
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+
+    const startedThread = promptResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const activeTurn = remoteThread?.turns.at(-1);
+    expect(activeTurn).toBeTruthy();
+
+    const completedTurn = {
+      ...activeTurn!,
+      status: 'completed' as const,
+      items: [
+        ...activeTurn!.items,
+        {
+          id: 'plan-item-1',
+          type: 'plan',
+          text: '# Plan\n\n- Inspect the implementation.\n- Apply one focused fix.\n- Verify the result.'
+        }
+      ]
+    };
+
+    fakeCodexManager.threads.set(startedThread.codexThreadId, {
+      ...remoteThread!,
+      status: { type: 'idle' },
+      turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: startedThread.codexThreadId,
+        turn: completedTurn
+      }
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json()).toMatchObject({
+      thread: {
+        id: createdThread.id,
+        collaborationMode: 'plan',
+        status: 'idle'
+      },
+      pendingRequests: [
+        {
+          kind: 'planDecision',
+          title: 'Plan ready',
+          questions: [
+            {
+              options: [
+                { label: 'Implement' },
+                { label: 'Stay in plan mode' }
+              ]
+            }
+          ]
+        }
+      ]
+    });
+
+    const planRequestId = detailResponse.json().pendingRequests[0].id;
+    const implementResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/requests/${encodeURIComponent(planRequestId)}/respond`,
+      payload: {
+        answers: {
+          'plan-decision': {
+            answers: ['Implement']
+          }
+        }
+      }
+    });
+
+    expect(implementResponse.statusCode).toBe(200);
+    expect(implementResponse.json()).toMatchObject({
+      thread: {
+        id: createdThread.id,
+        collaborationMode: 'default',
+        status: 'running',
+        summaryText: 'Implement the approved plan.'
+      },
+      pendingRequests: []
+    });
+    expect(implementResponse.json().turns.at(-1)).toMatchObject({
+      status: 'inProgress',
+      items: [
+        {
+          kind: 'userMessage',
+          text: 'Implement the approved plan.'
+        }
+      ]
     });
   });
 });

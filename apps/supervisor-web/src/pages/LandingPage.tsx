@@ -32,7 +32,7 @@ export function LandingPage() {
             <div className="mt-8 flex flex-wrap gap-4">
               <Link
                 to="/workspaces"
-                className="rounded-full bg-amber-200 px-5 py-3 font-medium text-stone-950 transition hover:bg-amber-100"
+                className="rounded-full bg-amber-300 px-5 py-3 font-medium text-stone-950 transition hover:bg-amber-200"
               >
                 Enter Workspace Console
               </Link>

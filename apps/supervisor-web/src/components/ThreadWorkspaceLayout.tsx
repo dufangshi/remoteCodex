@@ -1,5 +1,5 @@
-import { ReactNode, useMemo, useState } from 'react';
-import { Link, NavLink } from 'react-router-dom';
+import { KeyboardEvent, ReactNode, useMemo, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 
 import type {
   CodexStatusDto,
@@ -10,6 +10,7 @@ import {
   threadStatusClassName,
   threadStatusLabel,
 } from './threadPresentation';
+import { RenameDialog } from './RenameDialog';
 
 interface ThreadWorkspaceLayoutProps {
   threads: ThreadDto[];
@@ -21,6 +22,7 @@ interface ThreadWorkspaceLayoutProps {
   currentWorkspaceLabel?: string | null | undefined;
   workspaceLabels?: Record<string, string>;
   metaContent?: ReactNode;
+  onRenameThread?: ((threadId: string, title: string) => Promise<void> | void) | undefined;
   children: ReactNode;
 }
 
@@ -84,9 +86,14 @@ export function ThreadWorkspaceLayout({
   currentWorkspaceLabel = null,
   workspaceLabels = {},
   metaContent,
+  onRenameThread,
   children,
 }: ThreadWorkspaceLayoutProps) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
+  const [draftTitle, setDraftTitle] = useState('');
+  const [renamingThreadId, setRenamingThreadId] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   const visibleThreads = useMemo(() => {
     const scopedThreads = currentWorkspaceId
@@ -115,17 +122,62 @@ export function ThreadWorkspaceLayout({
   const threadScopeLabel =
     currentWorkspaceLabel ??
     (currentWorkspaceId ? 'Current workspace' : 'All threads');
+  const newThreadHref = currentWorkspaceId
+    ? `/threads/new?workspaceId=${encodeURIComponent(currentWorkspaceId)}`
+    : '/threads/new';
+
+  async function handleRenameThread(threadId: string) {
+    if (!onRenameThread) {
+      return;
+    }
+
+    const normalizedTitle = draftTitle.trim();
+    if (!normalizedTitle) {
+      return;
+    }
+
+    setRenamingThreadId(threadId);
+    try {
+      await onRenameThread(threadId, normalizedTitle);
+      setEditingThreadId(null);
+      setDraftTitle('');
+    } finally {
+      setRenamingThreadId(null);
+    }
+  }
+
+  function beginRenameThread(thread: ThreadDto) {
+    setEditingThreadId(thread.id);
+    setDraftTitle(thread.title);
+  }
+
+  function cancelRenameThread() {
+    setEditingThreadId(null);
+    setDraftTitle('');
+  }
+
+  function openThread(threadId: string) {
+    navigate(`/threads/${threadId}`);
+    setMobileSidebarOpen(false);
+  }
+
+  function handleCardKeyDown(event: KeyboardEvent<HTMLDivElement>, threadId: string) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      openThread(threadId);
+    }
+  }
 
   function renderSidebarContent() {
     return (
       <div className="space-y-4">
         <div className="rounded-[1.5rem] border border-stone-800 bg-stone-950/70 p-4">
           <div className="flex items-start justify-between gap-3">
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="text-xs uppercase tracking-[0.28em] text-stone-500">
                 Threads
               </p>
-              <p className="mt-2 text-base font-semibold text-stone-100">
+              <p className="mt-2 truncate text-base font-semibold text-stone-100" title={threadScopeLabel}>
                 {threadScopeLabel}
               </p>
               <p className="mt-1 text-sm text-stone-400">
@@ -142,9 +194,9 @@ export function ThreadWorkspaceLayout({
               {visibleThreads.length === 1 ? '' : 's'}
             </span>
             <Link
-              to="/threads/new"
+              to={newThreadHref}
               onClick={() => setMobileSidebarOpen(false)}
-              className="rounded-full bg-amber-200 px-3 py-2 font-medium text-stone-950 transition hover:bg-amber-100"
+              className="rounded-full bg-amber-300 px-3 py-2 font-medium text-stone-950 transition hover:bg-amber-200"
             >
               New Thread
             </Link>
@@ -177,25 +229,44 @@ export function ThreadWorkspaceLayout({
             <div className="space-y-2">
               {visibleThreads.map((thread) => {
                 const workspaceLabel = workspaceLabels[thread.workspaceId];
+                const isCurrentThread = currentThreadId === thread.id;
 
                 return (
-                  <NavLink
+                  <div
                     key={thread.id}
-                    to={`/threads/${thread.id}`}
-                    onClick={() => setMobileSidebarOpen(false)}
-                    className={({ isActive }) =>
-                      `block rounded-[1.35rem] border px-4 py-3 transition ${
-                        isActive
-                          ? 'border-amber-300/40 bg-amber-300/10 shadow-lg shadow-stone-950/20'
-                          : 'border-stone-800 bg-stone-900/75 hover:border-stone-700 hover:bg-stone-900'
-                      }`
-                    }
+                    role="link"
+                    tabIndex={0}
+                    onClick={() => openThread(thread.id)}
+                    onKeyDown={(event) => handleCardKeyDown(event, thread.id)}
+                    className={`block rounded-[1.35rem] border px-4 py-3 transition ${
+                      isCurrentThread
+                        ? 'border-amber-300/40 bg-amber-300/10 shadow-lg shadow-stone-950/20'
+                        : 'border-stone-800 bg-stone-900/75 hover:border-stone-700 hover:bg-stone-900'
+                    }`}
                   >
                     <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-stone-100">
-                          {thread.title}
-                        </p>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1">
+                          <p
+                            className="min-w-0 w-fit max-w-[calc(100%-1.1rem)] truncate text-sm font-medium text-stone-100"
+                            title={thread.title}
+                          >
+                            {thread.title}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              beginRenameThread(thread);
+                            }}
+                            aria-label={`Rename thread ${thread.title}`}
+                            className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-stone-500 transition hover:text-stone-100"
+                          >
+                            <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3 w-3 fill-current">
+                              <path d="m11.9 1.6 2.5 2.5-8.2 8.2-3.3.7.7-3.3 8.3-8.1Zm-7.3 8.7-.3 1.3 1.3-.3 6.9-6.9-1-1-6.9 6.9Zm8.8-7.8-1-1-1 1 1 1 1-1Z" />
+                            </svg>
+                          </button>
+                        </div>
                         {workspaceLabel && !currentWorkspaceId && (
                           <p className="mt-1 truncate text-xs text-stone-500">
                             {workspaceLabel}
@@ -218,7 +289,7 @@ export function ThreadWorkspaceLayout({
                       </time>
                       <span>{thread.model ?? 'No model'}</span>
                     </div>
-                  </NavLink>
+                  </div>
                 );
               })}
             </div>
@@ -244,41 +315,54 @@ export function ThreadWorkspaceLayout({
   }
 
   return (
-    <div className="flex min-h-[calc(100dvh-2rem)] flex-col gap-4 lg:grid lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]">
-      <div className="lg:hidden">
-        <button
-          type="button"
-          onClick={() => setMobileSidebarOpen((current) => !current)}
-          aria-expanded={mobileSidebarOpen}
-          className="flex w-full items-center justify-between rounded-[1.4rem] border border-stone-800 bg-stone-900/80 px-4 py-3 text-left"
-        >
-          <div>
-            <p className="text-xs uppercase tracking-[0.28em] text-stone-500">
-              Navigation
-            </p>
-            <p className="mt-1 text-sm font-medium text-stone-100">
-              {threadScopeLabel}
-            </p>
-          </div>
-          <span className="text-sm text-stone-400">
-            {mobileSidebarOpen ? 'Close' : 'Open'}
-          </span>
-        </button>
+    <>
+      <div className="flex min-h-[calc(100dvh-2rem)] flex-col gap-4 lg:grid lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]">
+        <div className="lg:hidden">
+          <button
+            type="button"
+            onClick={() => setMobileSidebarOpen((current) => !current)}
+            aria-expanded={mobileSidebarOpen}
+            className="flex w-full items-center justify-between rounded-[1.4rem] border border-stone-800 bg-stone-900/80 px-4 py-3 text-left"
+          >
+            <div>
+              <p className="text-xs uppercase tracking-[0.28em] text-stone-500">
+                Navigation
+              </p>
+              <p className="mt-1 text-sm font-medium text-stone-100">
+                {threadScopeLabel}
+              </p>
+            </div>
+            <span className="text-sm text-stone-400">
+              {mobileSidebarOpen ? 'Close' : 'Open'}
+            </span>
+          </button>
 
-        {mobileSidebarOpen && (
-          <aside className="mt-3 rounded-[1.8rem] border border-stone-800 bg-stone-900/95 p-4 shadow-2xl shadow-stone-950/20">
+          {mobileSidebarOpen && (
+            <aside className="mt-3 rounded-[1.8rem] border border-stone-800 bg-stone-900/95 p-4 shadow-2xl shadow-stone-950/20">
+              {renderSidebarContent()}
+            </aside>
+          )}
+        </div>
+
+        <aside className="hidden lg:block">
+          <div className="sticky top-4 rounded-[2rem] border border-stone-800 bg-stone-900/85 p-4 shadow-2xl shadow-stone-950/15 backdrop-blur">
             {renderSidebarContent()}
-          </aside>
-        )}
+          </div>
+        </aside>
+
+        <section className="min-w-0">{children}</section>
       </div>
 
-      <aside className="hidden lg:block">
-        <div className="sticky top-4 rounded-[2rem] border border-stone-800 bg-stone-900/85 p-4 shadow-2xl shadow-stone-950/15 backdrop-blur">
-          {renderSidebarContent()}
-        </div>
-      </aside>
-
-      <section className="min-w-0">{children}</section>
-    </div>
+      <RenameDialog
+        open={editingThreadId !== null}
+        title="Rename Thread"
+        label="Thread Title"
+        value={draftTitle}
+        busy={renamingThreadId !== null}
+        onChange={setDraftTitle}
+        onCancel={cancelRenameThread}
+        onSubmit={() => editingThreadId ? handleRenameThread(editingThreadId) : undefined}
+      />
+    </>
   );
 }

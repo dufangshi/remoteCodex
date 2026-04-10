@@ -23,7 +23,7 @@ function AppShell() {
   const navLinkClassName = ({ isActive }: { isActive: boolean }) =>
     `rounded-full px-3 py-2 transition ${
       isActive
-        ? 'bg-amber-200 text-stone-950'
+        ? 'bg-amber-300 text-stone-950'
         : 'text-stone-300 hover:bg-stone-800'
     }`;
 
@@ -63,7 +63,7 @@ function AppShell() {
                 <Link
                   to="/workspaces"
                   onClick={() => setNavOpen(false)}
-                  className="text-base font-semibold tracking-wide text-amber-200"
+                  className="text-base font-semibold tracking-wide text-amber-300"
                 >
                   Remote Codex
                 </Link>
@@ -79,13 +79,6 @@ function AppShell() {
                 className={navLinkClassName}
               >
                 Workspaces
-              </NavLink>
-              <NavLink
-                to="/workspaces/new"
-                onClick={() => setNavOpen(false)}
-                className={navLinkClassName}
-              >
-                Add Workspace
               </NavLink>
               <NavLink
                 to="/threads"

@@ -9,9 +9,11 @@ import {
   getWorkspaceRecordByPath,
   listWorkspaceRecords,
   touchWorkspaceOpenedAt,
+  updateWorkspaceLabel,
   updateWorkspaceFavorite
 } from '../../../../packages/db/src/index';
 import {
+  UpdateWorkspaceInput,
   WorkspaceDto,
   WorkspaceTreeDto
 } from '../../../../packages/shared/src/index';
@@ -28,6 +30,10 @@ const createWorkspaceSchema = z.object({
 
 const updateFavoriteSchema = z.object({
   isFavorite: z.boolean()
+});
+
+const updateWorkspaceSchema = z.object({
+  label: z.string().min(1)
 });
 
 const treeQuerySchema = z.object({
@@ -115,6 +121,32 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     });
 
     return toWorkspaceDto(created);
+  });
+
+  app.patch('/api/workspaces/:id', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = updateWorkspaceSchema.parse(request.body) satisfies UpdateWorkspaceInput;
+    const record = getWorkspaceRecordById(app.services.database.db, params.id);
+
+    if (!record) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Workspace was not found.'
+      });
+    }
+
+    const normalizedLabel = body.label.trim();
+    if (!normalizedLabel) {
+      throw new HttpError(400, {
+        code: 'bad_request',
+        message: 'Workspace label cannot be empty.'
+      });
+    }
+
+    updateWorkspaceLabel(app.services.database.db, params.id, normalizedLabel);
+    const updated = getWorkspaceRecordById(app.services.database.db, params.id);
+
+    return toWorkspaceDto(updated!);
   });
 
   app.post('/api/workspaces/:id/favorite', async (request) => {

@@ -36,6 +36,8 @@ export interface ModelOptionDto {
   description: string;
   isDefault: boolean;
   hidden: boolean;
+  supportedReasoningEfforts: ReasoningEffortOptionDto[];
+  defaultReasoningEffort: ReasoningEffortDto;
 }
 
 export interface VersionDto {
@@ -63,6 +65,10 @@ export interface CreateWorkspaceInput {
   label?: string;
 }
 
+export interface UpdateWorkspaceInput {
+  label: string;
+}
+
 export type ThreadSourceDto = 'supervisor' | 'local_codex_import';
 
 export interface UpdateWorkspaceFavoriteInput {
@@ -84,6 +90,13 @@ export interface WorkspaceTreeDto {
 }
 
 export type ApprovalMode = 'yolo' | 'guarded';
+export type ReasoningEffortDto = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export type CollaborationModeDto = 'default' | 'plan';
+
+export interface ReasoningEffortOptionDto {
+  reasoningEffort: ReasoningEffortDto;
+  description: string;
+}
 
 export type ThreadStatusDto =
   | 'idle'
@@ -100,6 +113,8 @@ export interface ThreadDto {
   source: ThreadSourceDto;
   title: string;
   model: string | null;
+  reasoningEffort: ReasoningEffortDto | null;
+  collaborationMode: CollaborationModeDto;
   approvalMode: ApprovalMode;
   status: ThreadStatusDto;
   summaryText: string | null;
@@ -136,11 +151,37 @@ export interface ThreadTurnDto {
   items: ThreadHistoryItemDto[];
 }
 
+export interface ThreadActionQuestionOptionDto {
+  label: string;
+  description: string;
+}
+
+export interface ThreadActionQuestionDto {
+  id: string;
+  header: string;
+  question: string;
+  isOther: boolean;
+  isSecret: boolean;
+  options: ThreadActionQuestionOptionDto[] | null;
+}
+
+export interface ThreadActionRequestDto {
+  id: string;
+  kind: 'requestUserInput' | 'planDecision';
+  title: string;
+  description: string | null;
+  turnId: string | null;
+  itemId: string | null;
+  createdAt: string;
+  questions: ThreadActionQuestionDto[];
+}
+
 export interface ThreadDetailDto {
   thread: ThreadDto;
   workspace: WorkspaceDto;
   workspacePathStatus: 'present' | 'missing';
   turns: ThreadTurnDto[];
+  pendingRequests: ThreadActionRequestDto[];
 }
 
 export interface CreateThreadInput {
@@ -150,22 +191,50 @@ export interface CreateThreadInput {
   approvalMode: ApprovalMode;
 }
 
+export interface UpdateThreadSettingsInput {
+  model?: string;
+  reasoningEffort?: ReasoningEffortDto | null;
+  collaborationMode?: CollaborationModeDto;
+}
+
+export interface UpdateThreadInput {
+  title: string;
+}
+
 export interface ImportThreadInput {
   sessionId: string;
 }
 
 export interface SendThreadPromptInput {
   prompt: string;
+  model?: string;
+  reasoningEffort?: ReasoningEffortDto | null;
+  collaborationMode?: CollaborationModeDto;
 }
 
 export interface InterruptTurnInput {
   turnId?: string;
 }
 
+export interface ResumeThreadInput {
+  model?: string;
+}
+
+export interface ThreadActionRequestAnswerDto {
+  answers: string[];
+}
+
+export interface RespondThreadActionRequestInput {
+  answers: Record<string, ThreadActionRequestAnswerDto>;
+}
+
 export interface ThreadEventEnvelope {
   type:
     | 'thread.updated'
     | 'thread.turn.started'
+    | 'thread.plan.updated'
+    | 'thread.request.created'
+    | 'thread.request.resolved'
     | 'thread.output.delta'
     | 'thread.turn.completed'
     | 'thread.turn.failed';

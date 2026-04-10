@@ -6,9 +6,12 @@ import {
   AppServerStatusSnapshot,
   CodexClientInfo,
   CodexModelRecord,
+  CodexServerRequest,
   CodexServerEvent,
   CodexThreadRecord,
   CodexTurnRecord,
+  ReasoningEffort,
+  ThreadResumeInput,
   ThreadStartInput,
   TurnStartInput
 } from './types';
@@ -59,7 +62,14 @@ function mapModel(record: any): CodexModelRecord {
     displayName: record.displayName,
     description: record.description,
     hidden: record.hidden,
-    isDefault: record.isDefault
+    isDefault: record.isDefault,
+    supportedReasoningEfforts: Array.isArray(record.supportedReasoningEfforts)
+      ? record.supportedReasoningEfforts.map((entry: any) => ({
+          reasoningEffort: entry.reasoningEffort,
+          description: entry.description
+        }))
+      : [],
+    defaultReasoningEffort: record.defaultReasoningEffort ?? 'medium'
   };
 }
 
@@ -162,7 +172,7 @@ export class CodexAppServerManager extends EventEmitter {
 
   async startThread(input: ThreadStartInput) {
     await this.ensureReady();
-    const response = await this.client!.request<{ thread: any; model: string }>('thread/start', {
+    const response = await this.client!.request<{ thread: any; model: string; reasoningEffort?: ReasoningEffort | null }>('thread/start', {
       cwd: input.cwd,
       model: input.model,
       approvalPolicy: input.approvalPolicy,
@@ -172,7 +182,8 @@ export class CodexAppServerManager extends EventEmitter {
 
     return {
       thread: mapThread(response.thread),
-      model: response.model
+      model: response.model,
+      reasoningEffort: response.reasoningEffort ?? null
     };
   }
 
@@ -185,15 +196,17 @@ export class CodexAppServerManager extends EventEmitter {
     return mapThread(response.thread);
   }
 
-  async resumeThread(threadId: string) {
+  async resumeThread(input: ThreadResumeInput) {
     await this.ensureReady();
-    const response = await this.client!.request<{ thread: any; model: string }>('thread/resume', {
-      threadId,
+    const response = await this.client!.request<{ thread: any; model: string; reasoningEffort?: ReasoningEffort | null }>('thread/resume', {
+      threadId: input.threadId,
+      model: input.model ?? null,
       persistExtendedHistory: true
     });
     return {
       thread: mapThread(response.thread),
-      model: response.model
+      model: response.model,
+      reasoningEffort: response.reasoningEffort ?? null
     };
   }
 
@@ -207,7 +220,19 @@ export class CodexAppServerManager extends EventEmitter {
           text: input.prompt,
           text_elements: []
         }
-      ]
+      ],
+      model: input.model ?? null,
+      effort: input.effort ?? null,
+      collaborationMode: input.collaborationMode
+        ? {
+            mode: input.collaborationMode,
+            settings: {
+              model: input.model ?? '',
+              reasoning_effort: input.effort ?? null,
+              developer_instructions: null
+            }
+          }
+        : null
     });
     return mapTurn(response.turn);
   }
@@ -219,6 +244,14 @@ export class CodexAppServerManager extends EventEmitter {
       turnId
     });
     return response.turn ? mapTurn(response.turn) : null;
+  }
+
+  respondToServerRequest(id: number, result: unknown) {
+    if (!this.client) {
+      throw new JsonRpcClientError('Codex app-server is unavailable.', 'app_server_unavailable');
+    }
+
+    this.client.respond(id, result);
   }
 
   private async doStart() {
@@ -271,6 +304,10 @@ export class CodexAppServerManager extends EventEmitter {
 
     client.on('notification', (notification) => {
       this.emit('notification', notification as CodexServerEvent);
+    });
+
+    client.on('request', (request) => {
+      this.emit('request', request as CodexServerRequest);
     });
 
     client.on('warning', (warning) => {

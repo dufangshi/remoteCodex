@@ -86,33 +86,73 @@ input {
 }
 
 .agent-markdown :where(a) {
-  color: rgb(167 243 208);
+  color: rgb(147 197 253);
   text-decoration: underline;
-  text-decoration-color: rgb(110 231 183 / 0.45);
+  text-decoration-color: rgb(96 165 250 / 0.45);
   text-underline-offset: 0.18em;
 }
 
 .agent-markdown :where(blockquote) {
   padding-left: 0.9rem;
-  border-left: 2px solid rgb(68 64 60);
-  color: rgb(214 211 209);
+  border-left: 2px solid rgb(71 85 105 / 0.9);
+  color: rgb(226 232 240);
 }
 
 .agent-markdown :where(pre) {
   overflow: auto;
-  border: 1px solid rgb(41 37 36);
+  border: 1px solid rgb(71 85 105 / 0.95);
   border-radius: 0.95rem;
-  background: rgb(12 10 9 / 0.72);
+  background:
+    linear-gradient(180deg, rgb(10 16 26 / 0.98), rgb(15 23 42 / 0.96));
+  box-shadow:
+    inset 0 1px 0 rgb(148 163 184 / 0.08),
+    0 10px 24px rgb(2 6 23 / 0.28);
 }
 
 .agent-markdown :where(:not(pre) > code) {
   padding: 0.12rem 0.4rem;
-  border: 1px solid rgb(68 64 60 / 0.9);
+  border: 1px solid rgb(71 85 105 / 0.95);
   border-radius: 0.45rem;
-  background: rgb(28 25 23 / 0.9);
+  background: rgb(15 23 42 / 0.92);
+  color: rgb(191 219 254);
   font-size: 0.92em;
 }
 
 .agent-markdown :where(pre code) {
   font-size: 0.9rem;
+  font-family:
+    'IBM Plex Mono',
+    'SFMono-Regular',
+    'SF Mono',
+    'Menlo',
+    monospace;
+  color: rgb(226 232 240);
+}
+
+.agent-markdown :where(pre code span) {
+  text-shadow: 0 0 0.01px currentColor;
+}
+
+.agent-markdown :where(pre code [style*="#79b8ff"]) {
+  color: rgb(125 211 252) !important;
+}
+
+.agent-markdown :where(pre code [style*="#b392f0"]) {
+  color: rgb(196 181 253) !important;
+}
+
+.agent-markdown :where(pre code [style*="#ffab70"]) {
+  color: rgb(253 186 116) !important;
+}
+
+.agent-markdown :where(pre code [style*="#85e89d"]) {
+  color: rgb(134 239 172) !important;
+}
+
+.agent-markdown :where(pre code [style*="#f97583"]) {
+  color: rgb(251 146 60) !important;
+}
+
+.agent-markdown :where(pre code [style*="#e1e4e8"]) {
+  color: rgb(226 232 240) !important;
 }

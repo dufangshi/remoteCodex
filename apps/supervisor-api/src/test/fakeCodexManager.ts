@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 
-import { CodexThreadRecord, JsonRpcClientError } from '../../../../packages/codex/src/index';
+import { CodexThreadRecord, JsonRpcClientError, ReasoningEffort } from '../../../../packages/codex/src/index';
 
 function makeThread(overrides: Partial<CodexThreadRecord> = {}): CodexThreadRecord {
   return {
@@ -31,10 +31,17 @@ export class FakeCodexManager extends EventEmitter {
       displayName: 'GPT-5',
       description: 'Default test model',
       hidden: false,
-      isDefault: true
+      isDefault: true,
+      supportedReasoningEfforts: [
+        { reasoningEffort: 'low' as ReasoningEffort, description: 'Fast responses' },
+        { reasoningEffort: 'medium' as ReasoningEffort, description: 'Balanced' },
+        { reasoningEffort: 'high' as ReasoningEffort, description: 'Deeper reasoning' }
+      ],
+      defaultReasoningEffort: 'medium' as ReasoningEffort
     }
   ];
   resumeModel = 'gpt-5';
+  resumeReasoningEffort: ReasoningEffort | null = 'medium';
 
   threads = new Map<string, CodexThreadRecord>();
   loadedThreadIds = new Set<string>();
@@ -70,7 +77,8 @@ export class FakeCodexManager extends EventEmitter {
     this.loadedThreadIds.add(thread.id);
     return {
       thread,
-      model: input.model
+      model: input.model,
+      reasoningEffort: 'medium' as ReasoningEffort
     };
   }
 
@@ -87,23 +95,30 @@ export class FakeCodexManager extends EventEmitter {
     return thread;
   }
 
-  async resumeThread(threadId: string) {
-    const thread = this.threads.get(threadId) ?? makeThread({ id: threadId });
+  async resumeThread(input: { threadId: string; model?: string | null }) {
+    const thread = this.threads.get(input.threadId) ?? makeThread({ id: input.threadId });
     if (thread.turns.length === 0) {
-      throw new JsonRpcClientError(`no rollout found for thread id ${threadId}`, 'remote_error', {
+      throw new JsonRpcClientError(`no rollout found for thread id ${input.threadId}`, 'remote_error', {
         code: -32600
       });
     }
 
-    this.loadedThreadIds.add(threadId);
+    this.loadedThreadIds.add(input.threadId);
     this.threads.set(thread.id, thread);
     return {
       thread,
-      model: this.resumeModel
+      model: input.model ?? this.resumeModel,
+      reasoningEffort: this.resumeReasoningEffort
     };
   }
 
-  async startTurn(input: { threadId: string; prompt: string }) {
+  async startTurn(input: {
+    threadId: string;
+    prompt: string;
+    model?: string | null;
+    effort?: ReasoningEffort | null;
+    collaborationMode?: 'default' | 'plan' | null;
+  }) {
     const existing = this.threads.get(input.threadId) ?? makeThread({ id: input.threadId });
     const turn = {
       id: `turn-${Date.now()}`,
@@ -121,6 +136,7 @@ export class FakeCodexManager extends EventEmitter {
       ...existing,
       preview: input.prompt,
       updatedAt: Math.floor(Date.now() / 1000),
+      status: { type: 'active', activeFlags: [] },
       turns: [...existing.turns, turn]
     });
     return turn;
@@ -134,4 +150,6 @@ export class FakeCodexManager extends EventEmitter {
       items: []
     };
   }
+
+  respondToServerRequest(_id: number, _result: unknown) {}
 }

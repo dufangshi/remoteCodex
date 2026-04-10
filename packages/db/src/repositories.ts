@@ -15,6 +15,8 @@ export interface CreateThreadRecordInput {
   workspaceId: string;
   title: string;
   model?: string | null;
+  reasoningEffort?: string | null;
+  collaborationMode?: string;
   approvalMode: string;
   codexThreadId?: string | null;
   summaryText?: string | null;
@@ -26,6 +28,8 @@ export interface UpdateThreadRecordInput {
   codexTurnId?: string | null;
   title?: string;
   model?: string | null;
+  reasoningEffort?: string | null;
+  collaborationMode?: string;
   approvalMode?: string;
   status?: string;
   summaryText?: string | null;
@@ -73,6 +77,10 @@ export function updateWorkspaceFavorite(
   db.update(workspaces).set({ isFavorite }).where(eq(workspaces.id, id)).run();
 }
 
+export function updateWorkspaceLabel(db: DatabaseClient, id: string, label: string) {
+  db.update(workspaces).set({ label }).where(eq(workspaces.id, id)).run();
+}
+
 export function touchWorkspaceOpenedAt(db: DatabaseClient, id: string) {
   db.update(workspaces)
     .set({ lastOpenedAt: new Date().toISOString() })
@@ -110,6 +118,8 @@ export function createThreadRecord(db: DatabaseClient, input: CreateThreadRecord
     source: input.source ?? 'supervisor',
     title: input.title,
     model: input.model ?? null,
+    reasoningEffort: input.reasoningEffort ?? null,
+    collaborationMode: input.collaborationMode ?? 'default',
     approvalMode: input.approvalMode,
     status: 'idle',
     summaryText: input.summaryText ?? null,

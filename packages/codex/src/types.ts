@@ -50,7 +50,22 @@ export interface CodexModelRecord {
   description: string;
   hidden: boolean;
   isDefault: boolean;
+  supportedReasoningEfforts: Array<{
+    reasoningEffort: ReasoningEffort;
+    description: string;
+  }>;
+  defaultReasoningEffort: ReasoningEffort;
 }
+
+export type ReasoningEffort =
+  | 'none'
+  | 'minimal'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'xhigh';
+
+export type CollaborationModeKind = 'default' | 'plan';
 
 export type CodexThreadStatus =
   | { type: 'notLoaded' }
@@ -97,9 +112,23 @@ export interface ThreadStartInput {
   approvalPolicy: 'never' | 'on-request';
 }
 
+export interface ThreadResumeInput {
+  threadId: string;
+  model?: string | null;
+}
+
 export interface TurnStartInput {
   threadId: string;
   prompt: string;
+  model?: string | null;
+  effort?: ReasoningEffort | null;
+  collaborationMode?: CollaborationModeKind | null;
+}
+
+export interface CodexServerRequest {
+  method: string;
+  id: number;
+  params: Record<string, unknown>;
 }
 
 export interface CodexTurnStartedEvent {
@@ -126,6 +155,7 @@ export type CodexServerEvent =
   | { method: 'thread/status/changed'; params: { threadId: string; status: CodexThreadStatus } }
   | { method: 'thread/name/updated'; params: { threadId: string; threadName?: string } }
   | { method: 'turn/started'; params: { threadId: string; turn: CodexTurnRecord } }
+  | { method: 'turn/plan/updated'; params: { threadId: string; turnId: string; explanation: string | null; plan: Array<{ step: string; status: string }> } }
   | { method: 'turn/completed'; params: { threadId: string; turn: CodexTurnRecord } }
   | { method: 'item/agentMessage/delta'; params: CodexOutputDeltaEvent }
   | { method: 'error'; params: { error: { message?: string }; willRetry: boolean; threadId: string; turnId: string } }

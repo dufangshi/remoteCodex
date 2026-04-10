@@ -3,7 +3,9 @@ import path from 'node:path';
 
 import {
   CodexAppServerManager,
+  CodexServerRequest,
   CodexServerEvent,
+  CollaborationModeKind,
   CodexThreadRecord,
   CodexTurnItem,
   CodexTurnRecord,
@@ -22,10 +24,16 @@ import {
 } from '../../../../packages/db/src/index';
 import {
   ApprovalMode,
+  CollaborationModeDto,
   CreateThreadInput,
   ImportThreadInput,
   ModelOptionDto,
+  ReasoningEffortDto,
+  RespondThreadActionRequestInput,
+  ResumeThreadInput,
   SendThreadPromptInput,
+  ThreadActionQuestionDto,
+  ThreadActionRequestDto,
   ThreadDetailDto,
   ThreadDto,
   ThreadEventEnvelope,
@@ -33,6 +41,7 @@ import {
   ThreadSourceDto,
   ThreadTurnDto,
   ThreadStatusDto,
+  UpdateThreadSettingsInput,
   WorkspaceDto
 } from '../../../../packages/shared/src/index';
 import { HttpError } from '../app';
@@ -40,9 +49,44 @@ import { SupervisorEventBus } from './event-bus';
 import { LocalCodexSessionStore } from './local-session-store';
 
 const DEFAULT_THREAD_TITLE = 'Untitled thread';
+const LOCAL_PLAN_DECISION_PREFIX = 'plan-decision:';
+const IMPLEMENT_APPROVED_PLAN_PROMPT = 'Implement the approved plan.';
+
+type PendingThreadRequestRecord =
+  | {
+      source: 'server';
+      serverRequestId: number;
+      request: ThreadActionRequestDto;
+    }
+  | {
+      source: 'planDecision';
+      request: ThreadActionRequestDto;
+    };
 
 function approvalModeToPolicy(approvalMode: ApprovalMode): 'never' | 'on-request' {
   return approvalMode === 'guarded' ? 'on-request' : 'never';
+}
+
+function normalizeReasoningEffort(
+  value: string | null | undefined
+): ReasoningEffortDto | null {
+  switch (value) {
+    case 'none':
+    case 'minimal':
+    case 'low':
+    case 'medium':
+    case 'high':
+    case 'xhigh':
+      return value;
+    default:
+      return null;
+  }
+}
+
+function normalizeCollaborationMode(
+  value: string | null | undefined
+): CollaborationModeDto {
+  return value === 'plan' ? 'plan' : 'default';
 }
 
 function isRemoteThreadBootstrapError(error: unknown) {
@@ -235,6 +279,8 @@ function turnToDto(turn: CodexTurnRecord): ThreadTurnDto {
 }
 
 export class ThreadService {
+  private readonly pendingRequests = new Map<string, Map<string, PendingThreadRequestRecord>>();
+
   constructor(
     private readonly db: DatabaseClient,
     private readonly codexManager: CodexAppServerManager,
@@ -244,6 +290,9 @@ export class ThreadService {
   ) {
     this.codexManager.on('notification', (event) => {
       void this.handleNotification(event as CodexServerEvent);
+    });
+    this.codexManager.on('request', (request) => {
+      void this.handleServerRequest(request as CodexServerRequest);
     });
   }
 
@@ -255,7 +304,12 @@ export class ThreadService {
       displayName: model.displayName,
       description: model.description,
       isDefault: model.isDefault,
-      hidden: model.hidden
+      hidden: model.hidden,
+      supportedReasoningEfforts: model.supportedReasoningEfforts.map((entry) => ({
+        reasoningEffort: entry.reasoningEffort,
+        description: entry.description
+      })),
+      defaultReasoningEffort: model.defaultReasoningEffort
     }));
   }
 
@@ -270,7 +324,11 @@ export class ThreadService {
           continue;
         }
 
-        updateThreadRecord(this.db, local.id, this.buildThreadPatch(remoteThread, local.model));
+        updateThreadRecord(
+          this.db,
+          local.id,
+          this.buildThreadPatch(remoteThread, local.model, local.reasoningEffort)
+        );
       }
     } catch {
       // Keep local state if codex is unavailable.
@@ -289,6 +347,10 @@ export class ThreadService {
     }
 
     const normalizedTitle = input.title?.trim() || DEFAULT_THREAD_TITLE;
+    const modelRecords = await this.codexManager.listModels().catch(() => []);
+    const matchedModel = modelRecords.find((entry) => entry.model === input.model);
+    const reasoningEffort =
+      normalizeReasoningEffort(matchedModel?.defaultReasoningEffort) ?? 'medium';
     const response = await this.codexManager.startThread({
       cwd: workspace.absPath,
       model: input.model,
@@ -299,6 +361,8 @@ export class ThreadService {
       workspaceId: workspace.id,
       title: normalizedTitle,
       model: input.model,
+      reasoningEffort,
+      collaborationMode: 'default',
       approvalMode: input.approvalMode,
       codexThreadId: response.thread.id,
       summaryText: response.thread.preview,
@@ -306,7 +370,11 @@ export class ThreadService {
     });
 
     updateThreadRecord(this.db, created.id, {
-      ...this.buildThreadPatch(response.thread, input.model),
+      ...this.buildThreadPatch(
+        response.thread,
+        input.model,
+        response.reasoningEffort ?? reasoningEffort
+      ),
       title: normalizedTitle === DEFAULT_THREAD_TITLE && response.thread.name ? response.thread.name : normalizedTitle
     });
 
@@ -353,6 +421,8 @@ export class ThreadService {
       workspaceId: workspace.id,
       title: localSession.title?.trim() || 'Untitled imported session',
       model: localSession.model,
+      reasoningEffort: null,
+      collaborationMode: 'default',
       approvalMode: 'yolo',
       codexThreadId: normalizedSessionId,
       summaryText:
@@ -408,7 +478,8 @@ export class ThreadService {
         thread: this.toThreadDto(updated, loadedIds),
         workspace: toWorkspaceDto(workspace),
         workspacePathStatus,
-        turns: localSession?.turns ?? []
+        turns: localSession?.turns ?? [],
+        pendingRequests: this.listPendingRequests(updated.id)
       };
     }
 
@@ -416,21 +487,35 @@ export class ThreadService {
       remoteThread.turns.length > 0 &&
       remoteThread.turns.every((turn) => turn.items.length === 0)
     ) {
-      remoteThread = (await this.codexManager.resumeThread(record.codexThreadId)).thread;
+      remoteThread = (
+        await this.codexManager.resumeThread({
+          threadId: record.codexThreadId
+        })
+      ).thread;
       loadedIds.add(record.codexThreadId);
     }
-    updateThreadRecord(this.db, record.id, this.buildThreadPatch(remoteThread, record.model));
+    updateThreadRecord(
+      this.db,
+      record.id,
+      this.buildThreadPatch(remoteThread, record.model, record.reasoningEffort)
+    );
 
     const updated = getThreadRecordById(this.db, record.id)!;
+    this.syncPendingPlanDecisionRequest(
+      updated.id,
+      updated.collaborationMode,
+      remoteThread
+    );
     return {
       thread: this.toThreadDto(updated, loadedIds),
       workspace: toWorkspaceDto(workspace),
       workspacePathStatus,
-      turns: remoteThread.turns.map(turnToDto)
+      turns: remoteThread.turns.map(turnToDto),
+      pendingRequests: this.listPendingRequests(updated.id)
     };
   }
 
-  async resumeThread(localThreadId: string): Promise<ThreadDetailDto> {
+  async resumeThread(localThreadId: string, input: ResumeThreadInput = {}): Promise<ThreadDetailDto> {
     const record = getThreadRecordById(this.db, localThreadId);
     if (!record || !record.codexThreadId) {
       throw new HttpError(404, {
@@ -441,7 +526,10 @@ export class ThreadService {
 
     let response;
     try {
-      response = await this.codexManager.resumeThread(record.codexThreadId);
+      response = await this.codexManager.resumeThread({
+        threadId: record.codexThreadId,
+        model: input.model ?? record.model ?? null
+      });
     } catch (error) {
       if (!isRemoteThreadBootstrapError(error)) {
         throw error;
@@ -453,7 +541,11 @@ export class ThreadService {
     updateThreadRecord(
       this.db,
       record.id,
-      this.buildThreadPatch(response.thread, record.model ?? response.model)
+      this.buildThreadPatch(
+        response.thread,
+        input.model ?? record.model ?? response.model,
+        response.reasoningEffort ?? record.reasoningEffort
+      )
     );
 
     return this.getThreadDetail(localThreadId);
@@ -493,9 +585,29 @@ export class ThreadService {
       });
     }
 
+    this.clearPendingPlanDecisionRequests(localThreadId, true);
+
+    const modelRecords = await this.codexManager.listModels().catch(() => []);
+    const defaultModel = modelRecords.find((entry) => entry.isDefault) ?? modelRecords[0] ?? null;
+    const effectiveModel = input.model ?? record.model ?? defaultModel?.model ?? null;
+    const collaborationMode =
+      input.collaborationMode ?? normalizeCollaborationMode(record.collaborationMode);
+    const effectiveReasoning =
+      input.reasoningEffort !== undefined
+        ? normalizeReasoningEffort(input.reasoningEffort)
+        : normalizeReasoningEffort(record.reasoningEffort);
+    const normalizedReasoning = this.normalizeReasoningForModel(
+      modelRecords,
+      effectiveModel,
+      effectiveReasoning
+    );
+
     const turn = await this.codexManager.startTurn({
       threadId: record.codexThreadId,
-      prompt
+      prompt,
+      model: effectiveModel,
+      effort: normalizedReasoning,
+      collaborationMode
     });
 
     const patch: Parameters<typeof updateThreadRecord>[2] = {
@@ -503,7 +615,10 @@ export class ThreadService {
       status: 'running',
       summaryText: prompt,
       lastError: null,
-      lastTurnStartedAt: new Date().toISOString()
+      lastTurnStartedAt: new Date().toISOString(),
+      model: effectiveModel,
+      reasoningEffort: normalizedReasoning,
+      collaborationMode
     };
 
     if (record.title === DEFAULT_THREAD_TITLE) {
@@ -514,6 +629,87 @@ export class ThreadService {
     const updated = getThreadRecordById(this.db, localThreadId)!;
 
     return this.toThreadDto(updated, new Set([record.codexThreadId]));
+  }
+
+  async updateThreadSettings(
+    localThreadId: string,
+    input: UpdateThreadSettingsInput
+  ): Promise<ThreadDto> {
+    const record = getThreadRecordById(this.db, localThreadId);
+    if (!record) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Thread was not found.'
+      });
+    }
+
+    const modelRecords = await this.codexManager.listModels().catch(() => []);
+    const fallbackModel = modelRecords.find((entry) => entry.isDefault) ?? modelRecords[0] ?? null;
+    const nextModel = input.model ?? record.model ?? fallbackModel?.model ?? null;
+    const requestedReasoning =
+      input.reasoningEffort !== undefined
+        ? normalizeReasoningEffort(input.reasoningEffort)
+        : normalizeReasoningEffort(record.reasoningEffort);
+    const nextReasoning = this.normalizeReasoningForModel(
+      modelRecords,
+      nextModel,
+      requestedReasoning
+    );
+    const nextCollaborationMode =
+      input.collaborationMode !== undefined
+        ? normalizeCollaborationMode(input.collaborationMode)
+        : normalizeCollaborationMode(record.collaborationMode);
+
+    if (nextCollaborationMode !== 'plan') {
+      this.clearPendingPlanDecisionRequests(localThreadId, true);
+    }
+
+    updateThreadRecord(this.db, localThreadId, {
+      model: nextModel,
+      reasoningEffort: nextReasoning,
+      collaborationMode: nextCollaborationMode
+    });
+
+    const updated = getThreadRecordById(this.db, localThreadId)!;
+    const loadedIds = new Set(await this.codexManager.listLoadedThreads().catch(() => []));
+    this.emitThreadEvent('thread.updated', updated.id, {
+      model: updated.model,
+      reasoningEffort: updated.reasoningEffort,
+      collaborationMode: updated.collaborationMode
+    });
+
+    return this.toThreadDto(updated, loadedIds);
+  }
+
+  async updateThreadTitle(localThreadId: string, title: string): Promise<ThreadDto> {
+    const record = getThreadRecordById(this.db, localThreadId);
+    if (!record) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Thread was not found.'
+      });
+    }
+
+    const normalizedTitle = title.trim();
+    if (!normalizedTitle) {
+      throw new HttpError(400, {
+        code: 'bad_request',
+        message: 'Thread title cannot be empty.'
+      });
+    }
+
+    updateThreadRecord(this.db, localThreadId, {
+      title: normalizedTitle
+    });
+
+    const updated = getThreadRecordById(this.db, localThreadId)!;
+    const loadedIds = new Set(await this.codexManager.listLoadedThreads().catch(() => []));
+
+    this.emitThreadEvent('thread.updated', updated.id, {
+      title: updated.title
+    });
+
+    return this.toThreadDto(updated, loadedIds);
   }
 
   async interruptThread(localThreadId: string, requestedTurnId?: string): Promise<ThreadDto> {
@@ -544,6 +740,68 @@ export class ThreadService {
 
     const updated = getThreadRecordById(this.db, localThreadId)!;
     return this.toThreadDto(updated, new Set());
+  }
+
+  async respondToRequest(
+    localThreadId: string,
+    requestId: string,
+    input: RespondThreadActionRequestInput
+  ): Promise<ThreadDetailDto> {
+    const record = getThreadRecordById(this.db, localThreadId);
+    if (!record) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Thread was not found.'
+      });
+    }
+
+    const pending = this.pendingRequests.get(localThreadId)?.get(requestId);
+    if (!pending) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Request was not found for this thread.'
+      });
+    }
+
+    if (pending.source === 'server') {
+      this.codexManager.respondToServerRequest(pending.serverRequestId, {
+        answers: input.answers
+      });
+      this.pendingRequests.get(localThreadId)?.delete(requestId);
+      if (this.pendingRequests.get(localThreadId)?.size === 0) {
+        this.pendingRequests.delete(localThreadId);
+      }
+    } else {
+      const selectedAnswer = Object.values(input.answers)[0]?.answers[0]?.trim().toLowerCase();
+      this.pendingRequests.get(localThreadId)?.delete(requestId);
+      if (this.pendingRequests.get(localThreadId)?.size === 0) {
+        this.pendingRequests.delete(localThreadId);
+      }
+
+      if (selectedAnswer === 'implement') {
+        if (record.source === 'local_codex_import' && record.codexThreadId) {
+          const loadedIds = new Set(await this.codexManager.listLoadedThreads().catch(() => []));
+          if (!loadedIds.has(record.codexThreadId)) {
+            await this.resumeThread(localThreadId, {
+              ...(record.model ? { model: record.model } : {})
+            });
+          }
+        }
+        await this.updateThreadSettings(localThreadId, {
+          collaborationMode: 'default'
+        });
+        await this.sendPrompt(localThreadId, {
+          prompt: IMPLEMENT_APPROVED_PLAN_PROMPT,
+          collaborationMode: 'default'
+        });
+      }
+    }
+
+    this.emitThreadEvent('thread.request.resolved', localThreadId, {
+      requestId
+    });
+
+    return this.getThreadDetail(localThreadId);
   }
 
   private async handleNotification(event: CodexServerEvent) {
@@ -598,6 +856,8 @@ export class ThreadService {
           return;
         }
 
+        this.clearPendingPlanDecisionRequests(record.id, true);
+
         updateThreadRecord(this.db, record.id, {
           codexTurnId: params.turn.id,
           status: 'running',
@@ -607,6 +867,25 @@ export class ThreadService {
 
         this.emitThreadEvent('thread.turn.started', record.id, {
           turnId: params.turn.id
+        });
+        return;
+      }
+      case 'turn/plan/updated': {
+        const params = event.params as {
+          threadId: string;
+          turnId: string;
+          explanation: string | null;
+          plan: Array<{ step: string; status: string }>;
+        };
+        const record = getThreadRecordByCodexThreadId(this.db, params.threadId);
+        if (!record) {
+          return;
+        }
+
+        this.emitThreadEvent('thread.plan.updated', record.id, {
+          turnId: params.turnId,
+          explanation: params.explanation,
+          plan: params.plan
         });
         return;
       }
@@ -647,6 +926,14 @@ export class ThreadService {
           lastError: params.turn.error?.message ?? null,
           lastTurnCompletedAt: new Date().toISOString()
         });
+        this.pendingRequests.delete(record.id);
+        if (
+          params.turn.status === 'completed' &&
+          normalizeCollaborationMode(record.collaborationMode) === 'plan' &&
+          params.turn.items.some((item) => item.type === 'plan')
+        ) {
+          this.createPendingPlanDecisionRequest(record.id, params.turn.id, true);
+        }
 
         this.emitThreadEvent(
           params.turn.status === 'failed' ? 'thread.turn.failed' : 'thread.turn.completed',
@@ -675,6 +962,7 @@ export class ThreadService {
           status: 'failed',
           lastError: params.error.message ?? 'Turn failed unexpectedly.'
         });
+        this.pendingRequests.delete(record.id);
 
         this.emitThreadEvent('thread.turn.failed', record.id, {
           turnId: params.turnId,
@@ -685,12 +973,84 @@ export class ThreadService {
     }
   }
 
-  private buildThreadPatch(remoteThread: CodexThreadRecord, model: string | null | undefined) {
+  private async handleServerRequest(request: CodexServerRequest) {
+    if (request.method !== 'item/tool/requestUserInput') {
+      return;
+    }
+
+    const params = request.params as {
+      threadId?: string;
+      turnId?: string;
+      itemId?: string;
+      questions?: Array<{
+        id: string;
+        header: string;
+        question: string;
+        isOther: boolean;
+        isSecret: boolean;
+        options: Array<{ label: string; description: string }> | null;
+      }>;
+    };
+
+    if (!params.threadId || !Array.isArray(params.questions)) {
+      return;
+    }
+
+    const record = getThreadRecordByCodexThreadId(this.db, params.threadId);
+    if (!record) {
+      return;
+    }
+
+    const questions: ThreadActionQuestionDto[] = params.questions.map((question) => ({
+      id: question.id,
+      header: question.header,
+      question: question.question,
+      isOther: question.isOther,
+      isSecret: question.isSecret,
+      options: question.options?.map((option) => ({
+        label: option.label,
+        description: option.description
+      })) ?? null
+    }));
+
+    const threadRequest: ThreadActionRequestDto = {
+      id: String(request.id),
+      kind: 'requestUserInput',
+      title: questions[0]?.header || 'User input required',
+      description: questions[0]?.question ?? null,
+      turnId: params.turnId ?? null,
+      itemId: params.itemId ?? null,
+      createdAt: new Date().toISOString(),
+      questions
+    };
+
+    let threadRequests = this.pendingRequests.get(record.id);
+    if (!threadRequests) {
+      threadRequests = new Map();
+      this.pendingRequests.set(record.id, threadRequests);
+    }
+    threadRequests.set(threadRequest.id, {
+      source: 'server',
+      serverRequestId: request.id,
+      request: threadRequest
+    });
+
+    this.emitThreadEvent('thread.request.created', record.id, {
+      request: threadRequest
+    });
+  }
+
+  private buildThreadPatch(
+    remoteThread: CodexThreadRecord,
+    model: string | null | undefined,
+    reasoningEffort: string | null | undefined
+  ) {
     return {
       codexThreadId: remoteThread.id,
       status: normalizeThreadStatus(remoteThread),
       summaryText: remoteThread.preview || null,
       model: model ?? null,
+      reasoningEffort: normalizeReasoningEffort(reasoningEffort),
       lastError:
         remoteThread.turns.find((turn) => turn.status === 'failed')?.error?.message ?? null,
       updatedAt: toIsoFromUnix(remoteThread.updatedAt)
@@ -705,6 +1065,8 @@ export class ThreadService {
       source: (record.source ?? 'supervisor') as ThreadSourceDto,
       title: record.title,
       model: record.model ?? null,
+      reasoningEffort: normalizeReasoningEffort(record.reasoningEffort),
+      collaborationMode: normalizeCollaborationMode(record.collaborationMode),
       approvalMode: (record.approvalMode ?? 'yolo') as ApprovalMode,
       status: (record.status ?? 'idle') as ThreadStatusDto,
       summaryText: record.summaryText ?? null,
@@ -730,5 +1092,149 @@ export class ThreadService {
       timestamp: new Date().toISOString(),
       payload
     });
+  }
+
+  private listPendingRequests(localThreadId: string): ThreadActionRequestDto[] {
+    return [...(this.pendingRequests.get(localThreadId)?.values() ?? [])].map((entry) => entry.request);
+  }
+
+  private createPendingPlanDecisionRequest(
+    localThreadId: string,
+    turnId: string,
+    emitEvents: boolean
+  ) {
+    this.clearPendingPlanDecisionRequests(localThreadId, false);
+
+    const request: ThreadActionRequestDto = {
+      id: `${LOCAL_PLAN_DECISION_PREFIX}${turnId}`,
+      kind: 'planDecision',
+      title: 'Plan ready',
+      description:
+        'Review the proposed plan. Implement will switch the thread back to default mode and start execution automatically.',
+      turnId,
+      itemId: null,
+      createdAt: new Date().toISOString(),
+      questions: [
+        {
+          id: 'plan-decision',
+          header: 'Next step',
+          question: 'Choose whether to implement this plan now or keep refining it in plan mode.',
+          isOther: false,
+          isSecret: false,
+          options: [
+            {
+              label: 'Implement',
+              description: 'Exit plan mode and continue with implementation immediately.'
+            },
+            {
+              label: 'Stay in plan mode',
+              description: 'Keep plan mode on so you can send feedback and request another plan.'
+            }
+          ]
+        }
+      ]
+    };
+
+    let threadRequests = this.pendingRequests.get(localThreadId);
+    if (!threadRequests) {
+      threadRequests = new Map();
+      this.pendingRequests.set(localThreadId, threadRequests);
+    }
+
+    threadRequests.set(request.id, {
+      source: 'planDecision',
+      request
+    });
+
+    if (emitEvents) {
+      this.emitThreadEvent('thread.request.created', localThreadId, {
+        request
+      });
+    }
+  }
+
+  private clearPendingPlanDecisionRequests(localThreadId: string, emitEvents: boolean) {
+    const threadRequests = this.pendingRequests.get(localThreadId);
+    if (!threadRequests) {
+      return;
+    }
+
+    const removedIds: string[] = [];
+    for (const [requestId, request] of threadRequests.entries()) {
+      if (request.source !== 'planDecision') {
+        continue;
+      }
+
+      threadRequests.delete(requestId);
+      removedIds.push(requestId);
+    }
+
+    if (threadRequests.size === 0) {
+      this.pendingRequests.delete(localThreadId);
+    }
+
+    if (!emitEvents) {
+      return;
+    }
+
+    removedIds.forEach((requestId) => {
+      this.emitThreadEvent('thread.request.resolved', localThreadId, {
+        requestId
+      });
+    });
+  }
+
+  private syncPendingPlanDecisionRequest(
+    localThreadId: string,
+    collaborationMode: string | null | undefined,
+    remoteThread: CodexThreadRecord
+  ) {
+    const latestTurn = remoteThread.turns.at(-1) ?? null;
+    const shouldHavePlanDecision =
+      normalizeCollaborationMode(collaborationMode) === 'plan' &&
+      latestTurn?.status === 'completed' &&
+      latestTurn.items.some((item) => item.type === 'plan');
+
+    if (!shouldHavePlanDecision || !latestTurn) {
+      this.clearPendingPlanDecisionRequests(localThreadId, false);
+      return;
+    }
+
+    const expectedRequestId = `${LOCAL_PLAN_DECISION_PREFIX}${latestTurn.id}`;
+    const existingRequest = this.pendingRequests.get(localThreadId)?.get(expectedRequestId);
+    if (existingRequest?.source === 'planDecision') {
+      return;
+    }
+
+    this.createPendingPlanDecisionRequest(localThreadId, latestTurn.id, false);
+  }
+
+  private normalizeReasoningForModel(
+    modelRecords: Array<{
+      model: string;
+      defaultReasoningEffort: string;
+      supportedReasoningEfforts: Array<{ reasoningEffort: string }>;
+    }>,
+    model: string | null,
+    requested: ReasoningEffortDto | null
+  ): ReasoningEffortDto | null {
+    if (!model) {
+      return requested;
+    }
+
+    const matchedModel = modelRecords.find((entry) => entry.model === model);
+    if (!matchedModel) {
+      return requested;
+    }
+
+    const supported = new Set(
+      matchedModel.supportedReasoningEfforts.map((entry) => entry.reasoningEffort)
+    );
+
+    if (requested && supported.has(requested)) {
+      return requested;
+    }
+
+    return normalizeReasoningEffort(matchedModel.defaultReasoningEffort);
   }
 }

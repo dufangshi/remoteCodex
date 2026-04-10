@@ -1,12 +1,13 @@
 import type { FormEvent } from 'react';
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import { ModelOptionDto, WorkspaceDto } from '../../../../packages/shared/src/index';
 import { ApiError, createThread, fetchCodexModels, fetchWorkspaces } from '../lib/api';
 
 export function ThreadNewPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [workspaces, setWorkspaces] = useState<WorkspaceDto[]>([]);
   const [models, setModels] = useState<ModelOptionDto[]>([]);
   const [workspaceId, setWorkspaceId] = useState('');
@@ -18,11 +19,16 @@ export function ThreadNewPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const requestedWorkspaceId = searchParams.get('workspaceId');
     Promise.all([fetchWorkspaces(), fetchCodexModels()])
       .then(([workspaceRecords, modelRecords]) => {
         setWorkspaces(workspaceRecords);
         setModels(modelRecords);
-        setWorkspaceId(workspaceRecords[0]?.id ?? '');
+        const initialWorkspaceId =
+          workspaceRecords.some((workspace) => workspace.id === requestedWorkspaceId)
+            ? requestedWorkspaceId!
+            : workspaceRecords[0]?.id ?? '';
+        setWorkspaceId(initialWorkspaceId);
         setModel(modelRecords.find((entry) => entry.isDefault)?.model ?? modelRecords[0]?.model ?? '');
       })
       .catch((caught) => {
@@ -31,7 +37,7 @@ export function ThreadNewPage() {
       .finally(() => {
         setLoading(false);
       });
-  }, []);
+  }, [searchParams]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -149,7 +155,7 @@ export function ThreadNewPage() {
           <button
             type="submit"
             disabled={busy || !workspaceId || !model}
-            className="rounded-full bg-amber-200 px-5 py-3 font-medium text-stone-950 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:bg-stone-700 disabled:text-stone-300"
+            className="rounded-full bg-amber-300 px-5 py-3 font-medium text-stone-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:bg-stone-700 disabled:text-stone-300"
           >
             {busy ? 'Creating...' : 'Create Thread'}
           </button>

@@ -20,6 +20,43 @@ class FakeWebSocket {
   close() {}
 }
 
+const modelOptionsResponse = [
+  {
+    id: 'model-option-1',
+    model: 'gpt-5',
+    displayName: 'GPT-5',
+    description: 'Default test model',
+    hidden: false,
+    isDefault: true,
+    supportedReasoningEfforts: [
+      {
+        reasoningEffort: 'medium',
+        description: 'Balanced'
+      }
+    ],
+    defaultReasoningEffort: 'medium'
+  },
+  {
+    id: 'model-option-2',
+    model: 'gpt-5.4',
+    displayName: 'GPT-5.4',
+    description: 'Imported session model',
+    hidden: false,
+    isDefault: false,
+    supportedReasoningEfforts: [
+      {
+        reasoningEffort: 'medium',
+        description: 'Balanced'
+      },
+      {
+        reasoningEffort: 'high',
+        description: 'Deeper reasoning'
+      }
+    ],
+    defaultReasoningEffort: 'medium'
+  }
+];
+
 describe('ThreadDetailPage', () => {
   beforeEach(() => {
     vi.stubGlobal('WebSocket', FakeWebSocket as any);
@@ -41,6 +78,13 @@ describe('ThreadDetailPage', () => {
           });
         }
 
+        if (url.includes('/api/codex/models')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => modelOptionsResponse,
+          });
+        }
+
         if (url.endsWith('/api/threads/thread-1')) {
           return Promise.resolve({
             ok: true,
@@ -52,6 +96,8 @@ describe('ThreadDetailPage', () => {
                 source: 'supervisor',
                 title: 'Demo Thread',
                 model: 'gpt-5',
+                reasoningEffort: 'medium',
+                collaborationMode: 'default',
                 approvalMode: 'yolo',
                 status: 'idle',
                 summaryText: 'Preview',
@@ -74,6 +120,7 @@ describe('ThreadDetailPage', () => {
                 lastOpenedAt: null,
               },
               workspacePathStatus: 'present',
+              pendingRequests: [],
               turns: [
                 {
                   id: 'turn-1',
@@ -104,6 +151,8 @@ describe('ThreadDetailPage', () => {
                 source: 'supervisor',
                 title: 'Demo Thread',
                 model: 'gpt-5',
+                reasoningEffort: 'medium',
+                collaborationMode: 'default',
                 approvalMode: 'yolo',
                 status: 'idle',
                 summaryText: 'Preview',
@@ -123,6 +172,8 @@ describe('ThreadDetailPage', () => {
                 source: 'supervisor',
                 title: 'Sibling Thread',
                 model: 'gpt-5-mini',
+                reasoningEffort: 'medium',
+                collaborationMode: 'default',
                 approvalMode: 'guarded',
                 status: 'running',
                 summaryText: null,
@@ -142,6 +193,8 @@ describe('ThreadDetailPage', () => {
                 source: 'supervisor',
                 title: 'Other Workspace Thread',
                 model: 'gpt-5-nano',
+                reasoningEffort: 'medium',
+                collaborationMode: 'default',
                 approvalMode: 'yolo',
                 status: 'idle',
                 summaryText: null,
@@ -208,6 +261,13 @@ describe('ThreadDetailPage', () => {
           });
         }
 
+        if (url.includes('/api/codex/models')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => modelOptionsResponse,
+          });
+        }
+
         if (url.endsWith('/api/threads/imported-thread')) {
           return Promise.resolve({
             ok: true,
@@ -219,6 +279,8 @@ describe('ThreadDetailPage', () => {
                 source: 'local_codex_import',
                 title: 'Imported Thread',
                 model: 'gpt-5.4',
+                reasoningEffort: 'medium',
+                collaborationMode: 'default',
                 approvalMode: 'yolo',
                 status: 'idle',
                 summaryText: 'Imported preview',
@@ -241,6 +303,7 @@ describe('ThreadDetailPage', () => {
                 lastOpenedAt: null,
               },
               workspacePathStatus: 'missing',
+              pendingRequests: [],
               turns: [],
             }),
           });
@@ -257,6 +320,8 @@ describe('ThreadDetailPage', () => {
                 source: 'local_codex_import',
                 title: 'Imported Thread',
                 model: 'gpt-5.4',
+                reasoningEffort: 'medium',
+                collaborationMode: 'default',
                 approvalMode: 'yolo',
                 status: 'idle',
                 summaryText: 'Imported preview',
@@ -294,5 +359,124 @@ describe('ThreadDetailPage', () => {
     expect(screen.getByText(/Imported local Codex session/i)).toBeInTheDocument();
     expect(screen.getByText(/Workspace path missing/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Send Prompt/i })).toBeDisabled();
+  });
+
+  it('hides the imported-session resume warning after the thread is connected', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.includes('/api/codex/status')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              state: 'ready',
+              transport: 'stdio',
+              lastStartedAt: new Date().toISOString(),
+              lastError: null,
+              restartCount: 0,
+            }),
+          });
+        }
+
+        if (url.includes('/api/codex/models')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => modelOptionsResponse,
+          });
+        }
+
+        if (url.endsWith('/api/threads/connected-imported-thread')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              thread: {
+                id: 'connected-imported-thread',
+                workspaceId: 'workspace-1',
+                codexThreadId: '019d6fb7-7033-7a30-a2c7-74d0919e87d4',
+                source: 'local_codex_import',
+                title: 'Connected Imported Thread',
+                model: 'gpt-5.4',
+                reasoningEffort: 'medium',
+                collaborationMode: 'default',
+                approvalMode: 'yolo',
+                status: 'idle',
+                summaryText: 'Imported preview',
+                lastError: null,
+                activeTurnId: null,
+                isLoaded: true,
+                isPinned: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                lastTurnStartedAt: null,
+                lastTurnCompletedAt: null,
+              },
+              workspace: {
+                id: 'workspace-1',
+                hostId: 'host-1',
+                label: 'Imported Workspace',
+                absPath: '/tmp/imported-project',
+                isFavorite: false,
+                createdAt: new Date().toISOString(),
+                lastOpenedAt: null,
+              },
+              workspacePathStatus: 'present',
+              pendingRequests: [],
+              turns: [],
+            }),
+          });
+        }
+
+        if (url.endsWith('/api/threads')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => [
+              {
+                id: 'connected-imported-thread',
+                workspaceId: 'workspace-1',
+                codexThreadId: '019d6fb7-7033-7a30-a2c7-74d0919e87d4',
+                source: 'local_codex_import',
+                title: 'Connected Imported Thread',
+                model: 'gpt-5.4',
+                reasoningEffort: 'medium',
+                collaborationMode: 'default',
+                approvalMode: 'yolo',
+                status: 'idle',
+                summaryText: 'Imported preview',
+                lastError: null,
+                activeTurnId: null,
+                isLoaded: true,
+                isPinned: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                lastTurnStartedAt: null,
+                lastTurnCompletedAt: null,
+              },
+            ],
+          });
+        }
+
+        return Promise.reject(new Error(`Unexpected request: ${url}`));
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/connected-imported-thread']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('heading', { level: 2, name: 'Connected Imported Thread' }),
+      ).toBeInTheDocument();
+    });
+
+    expect(
+      screen.queryByText(/History is available immediately\. Click Resume \/ Connect before sending a new prompt\./i),
+    ).not.toBeInTheDocument();
   });
 });

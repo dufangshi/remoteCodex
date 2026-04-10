@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -25,7 +25,7 @@ describe('ThreadsPage', () => {
     vi.stubGlobal('WebSocket', FakeWebSocket as any);
     vi.stubGlobal(
       'fetch',
-      vi.fn((input: RequestInfo | URL) => {
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         if (url.includes('/api/codex/status')) {
           return Promise.resolve({
@@ -53,7 +53,41 @@ describe('ThreadsPage', () => {
                 createdAt: new Date().toISOString(),
                 lastOpenedAt: null,
               },
+              {
+                id: 'workspace-2',
+                hostId: 'host-1',
+                label: 'Other Workspace',
+                absPath: '/tmp/other',
+                isFavorite: false,
+                createdAt: new Date().toISOString(),
+                lastOpenedAt: null,
+              },
             ],
+          });
+        }
+
+        if (url.endsWith('/api/threads/thread-1') && init?.method === 'PATCH') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              id: 'thread-1',
+              workspaceId: 'workspace-1',
+              codexThreadId: 'codex-1',
+              source: 'supervisor',
+              title: 'Renamed Thread',
+              model: 'gpt-5',
+              approvalMode: 'yolo',
+              status: 'idle',
+              summaryText: 'Preview',
+              lastError: null,
+              activeTurnId: null,
+              isLoaded: true,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: null,
+              lastTurnCompletedAt: null,
+            }),
           });
         }
 
@@ -65,11 +99,31 @@ describe('ThreadsPage', () => {
                 id: 'thread-1',
                 workspaceId: 'workspace-1',
                 codexThreadId: 'codex-1',
+                source: 'supervisor',
                 title: 'Demo Thread',
                 model: 'gpt-5',
                 approvalMode: 'yolo',
                 status: 'idle',
                 summaryText: 'Preview',
+                lastError: null,
+                activeTurnId: null,
+                isLoaded: true,
+                isPinned: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                lastTurnStartedAt: null,
+                lastTurnCompletedAt: null,
+              },
+              {
+                id: 'thread-2',
+                workspaceId: 'workspace-2',
+                codexThreadId: 'codex-2',
+                source: 'supervisor',
+                title: 'Other Thread',
+                model: 'gpt-5-mini',
+                approvalMode: 'yolo',
+                status: 'idle',
+                summaryText: 'Other Preview',
                 lastError: null,
                 activeTurnId: null,
                 isLoaded: true,
@@ -102,5 +156,49 @@ describe('ThreadsPage', () => {
     expect(
       screen.getByText(/Open a thread from the sidebar/i),
     ).toBeInTheDocument();
+  });
+
+  it('scopes by workspace query param and renames a thread only after save', async () => {
+    render(
+      <MemoryRouter initialEntries={['/threads?workspaceId=workspace-1']}>
+        <ThreadsPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Demo Workspace threads')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText('Other Thread')).not.toBeInTheDocument();
+    const newThreadLinks = screen.getAllByRole('link', { name: /New Thread/i });
+    expect(newThreadLinks.length).toBeGreaterThan(0);
+    newThreadLinks.forEach((link) => {
+      expect(link).toHaveAttribute('href', '/threads/new?workspaceId=workspace-1');
+    });
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Rename thread Demo Thread' }),
+    );
+    expect(
+      screen.getByRole('dialog', { name: 'Rename Thread' }),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Thread Title/i), {
+      target: { value: 'Renamed Thread' },
+    });
+
+    expect(
+      vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'PATCH'),
+    ).toBeUndefined();
+
+    fireEvent.click(screen.getByRole('button', { name: /Save/i }));
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Renamed Thread').length).toBeGreaterThan(0);
+    });
+
+    const patchCall = vi.mocked(fetch).mock.calls.find(
+      ([input, init]) => String(input).endsWith('/api/threads/thread-1') && init?.method === 'PATCH',
+    );
+    expect(patchCall?.[1]?.body).toBe(JSON.stringify({ title: 'Renamed Thread' }));
   });
 });

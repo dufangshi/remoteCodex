@@ -105,7 +105,7 @@ export function WorkspaceForm({
       <button
         type="submit"
         disabled={busy}
-        className="rounded-full bg-amber-200 px-5 py-3 font-medium text-stone-950 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:bg-stone-700 disabled:text-stone-300"
+        className="rounded-full bg-amber-300 px-5 py-3 font-medium text-stone-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:bg-stone-700 disabled:text-stone-300"
       >
         {busy ? 'Saving...' : submitLabel}
       </button>

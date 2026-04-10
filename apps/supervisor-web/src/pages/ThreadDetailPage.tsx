@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
 import {
   CodexStatusDto,
+  ModelOptionDto,
   ThreadDetailDto,
   ThreadDto,
 } from '../../../../packages/shared/src/index';
@@ -16,25 +17,70 @@ import {
 import {
   ApiError,
   connectSupervisorEvents,
+  fetchCodexModels,
   fetchCodexStatus,
   fetchThreads,
   fetchThreadDetail,
   interruptThread,
+  respondToThreadRequest,
   resumeThread,
   sendThreadPrompt,
+  updateThread,
+  updateThreadSettings,
 } from '../lib/api';
 
 export function ThreadDetailPage() {
   const { id = '' } = useParams();
+  const liveOutputBufferRef = useRef('');
+  const liveOutputFrameRef = useRef<number | null>(null);
   const [detail, setDetail] = useState<ThreadDetailDto | null>(null);
   const [threads, setThreads] = useState<ThreadDto[]>([]);
+  const [modelOptions, setModelOptions] = useState<ModelOptionDto[]>([]);
   const [status, setStatus] = useState<CodexStatusDto | null>(null);
   const [liveOutput, setLiveOutput] = useState('');
+  const [livePlan, setLivePlan] = useState<{
+    turnId: string;
+    explanation: string | null;
+    plan: Array<{ step: string; status: string }>;
+  } | null>(null);
   const [followTail, setFollowTail] = useState(true);
   const [scrollRequestKey, setScrollRequestKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [settingsBusy, setSettingsBusy] = useState(false);
+  const [respondingRequestId, setRespondingRequestId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  function flushBufferedLiveOutput() {
+    const buffered = liveOutputBufferRef.current;
+    liveOutputBufferRef.current = '';
+    liveOutputFrameRef.current = null;
+
+    if (!buffered) {
+      return;
+    }
+
+    setLiveOutput((current) => current + buffered);
+  }
+
+  function queueLiveOutputDelta(delta: string) {
+    liveOutputBufferRef.current += delta;
+    if (liveOutputFrameRef.current !== null) {
+      return;
+    }
+
+    liveOutputFrameRef.current = window.requestAnimationFrame(() => {
+      flushBufferedLiveOutput();
+    });
+  }
+
+  function clearBufferedLiveOutput() {
+    liveOutputBufferRef.current = '';
+    if (liveOutputFrameRef.current !== null) {
+      window.cancelAnimationFrame(liveOutputFrameRef.current);
+      liveOutputFrameRef.current = null;
+    }
+  }
 
   useEffect(() => {
     async function loadThreadDetail(showLoading = true) {
@@ -43,15 +89,17 @@ export function ThreadDetailPage() {
       }
       setError(null);
       try {
-        const [detailResponse, threadResponse, statusResponse] =
+        const [detailResponse, threadResponse, statusResponse, modelResponse] =
           await Promise.all([
             fetchThreadDetail(id),
             fetchThreads(),
             fetchCodexStatus(),
+            fetchCodexModels(),
           ]);
         setDetail(detailResponse);
         setThreads(threadResponse);
         setStatus(statusResponse);
+        setModelOptions(modelResponse);
       } catch (caught) {
         setError(
           caught instanceof Error
@@ -74,20 +122,49 @@ export function ThreadDetailPage() {
         event.type === 'thread.output.delta' &&
         typeof event.payload.delta === 'string'
       ) {
-        setLiveOutput((current) => current + event.payload.delta);
+        queueLiveOutputDelta(event.payload.delta);
       }
 
       if (
+        event.type === 'thread.turn.started' ||
         event.type === 'thread.turn.completed' ||
         event.type === 'thread.turn.failed' ||
-        event.type === 'thread.updated'
+        event.type === 'thread.updated' ||
+        event.type === 'thread.request.created' ||
+        event.type === 'thread.request.resolved'
       ) {
         void loadThreadDetail(false);
-        setLiveOutput('');
+        if (event.type === 'thread.turn.started') {
+          clearBufferedLiveOutput();
+          setLiveOutput('');
+        }
+        if (
+          event.type === 'thread.turn.completed' ||
+          event.type === 'thread.turn.failed'
+        ) {
+          clearBufferedLiveOutput();
+          setLiveOutput('');
+          setLivePlan(null);
+        }
+      }
+
+      if (
+        event.type === 'thread.plan.updated' &&
+        Array.isArray(event.payload.plan)
+      ) {
+        setLivePlan({
+          turnId: String(event.payload.turnId ?? ''),
+          explanation:
+            typeof event.payload.explanation === 'string'
+              ? event.payload.explanation
+              : null,
+          plan: event.payload.plan as Array<{ step: string; status: string }>,
+        });
       }
     });
 
     return () => {
+      clearBufferedLiveOutput();
       socket.close();
     };
   }, [id]);
@@ -95,15 +172,27 @@ export function ThreadDetailPage() {
   async function handlePrompt(prompt: string) {
     setBusy(true);
     setError(null);
+    clearBufferedLiveOutput();
     setLiveOutput('');
     setScrollRequestKey((current) => current + 1);
 
     try {
-      const thread = await sendThreadPrompt(id, { prompt });
+      const promptInput = {
+        prompt,
+        ...(detail?.thread.model ? { model: detail.thread.model } : {}),
+        ...(detail?.thread.reasoningEffort
+          ? { reasoningEffort: detail.thread.reasoningEffort }
+          : {}),
+        ...(detail?.thread.collaborationMode
+          ? { collaborationMode: detail.thread.collaborationMode }
+          : {}),
+      };
+      const thread = await sendThreadPrompt(id, promptInput);
       setDetail((current) => (current ? { ...current, thread } : current));
       setThreads((current) =>
         current.map((entry) => (entry.id === thread.id ? thread : entry)),
       );
+      setLivePlan(null);
     } catch (caught) {
       if (caught instanceof ApiError) {
         setError(caught.payload.message);
@@ -129,6 +218,7 @@ export function ThreadDetailPage() {
       setThreads((current) =>
         current.map((entry) => (entry.id === thread.id ? thread : entry)),
       );
+      clearBufferedLiveOutput();
       setLiveOutput('');
     } catch (caught) {
       setError(
@@ -142,9 +232,14 @@ export function ThreadDetailPage() {
   async function handleResume() {
     setBusy(true);
     setError(null);
+    clearBufferedLiveOutput();
+    setLiveOutput('');
 
     try {
-      const resumed = await resumeThread(id);
+      const resumed = await resumeThread(
+        id,
+        detail?.thread.model ? { model: detail.thread.model } : {},
+      );
       setDetail(resumed);
       setThreads((current) =>
         current.map((entry) =>
@@ -157,6 +252,126 @@ export function ThreadDetailPage() {
       );
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleUpdateThreadSettings(input: {
+    model?: string;
+    reasoningEffort?: ThreadDto['reasoningEffort'];
+    collaborationMode?: ThreadDto['collaborationMode'];
+  }) {
+    if (!detail) {
+      return;
+    }
+
+    const previousDetail = detail;
+    const optimisticThread = {
+      ...detail.thread,
+      ...(input.model !== undefined ? { model: input.model } : {}),
+      ...(input.reasoningEffort !== undefined
+        ? { reasoningEffort: input.reasoningEffort }
+        : {}),
+      ...(input.collaborationMode !== undefined
+        ? { collaborationMode: input.collaborationMode }
+        : {}),
+    };
+
+    setSettingsBusy(true);
+    setDetail((current) =>
+      current
+        ? {
+            ...current,
+            thread: optimisticThread,
+          }
+        : current,
+    );
+    setThreads((current) =>
+      current.map((entry) =>
+        entry.id === optimisticThread.id ? { ...entry, ...optimisticThread } : entry,
+      ),
+    );
+
+    try {
+      const updated = await updateThreadSettings(id, input);
+      setDetail((current) =>
+        current
+          ? {
+              ...current,
+              thread: updated,
+            }
+          : current,
+      );
+      setThreads((current) =>
+        current.map((entry) => (entry.id === updated.id ? updated : entry)),
+      );
+    } catch (caught) {
+      setDetail(previousDetail);
+      setThreads((current) =>
+        current.map((entry) =>
+          entry.id === previousDetail.thread.id ? previousDetail.thread : entry,
+        ),
+      );
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : 'Unable to update thread settings.',
+      );
+    } finally {
+      setSettingsBusy(false);
+    }
+  }
+
+  async function handleRespondToRequest(
+    requestId: string,
+    input: { answers: Record<string, { answers: string[] }> },
+  ) {
+    setRespondingRequestId(requestId);
+    setError(null);
+
+    try {
+      const updated = await respondToThreadRequest(id, requestId, input);
+      setDetail(updated);
+      setLivePlan(null);
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : 'Unable to answer this request.',
+      );
+    } finally {
+      setRespondingRequestId(null);
+    }
+  }
+
+  async function handleRenameThread(threadId: string, title: string) {
+    try {
+      const updated = await updateThread(threadId, { title });
+      setThreads((current) =>
+        current.map((entry) =>
+          entry.id === updated.id
+            ? {
+                ...entry,
+                title: updated.title,
+                updatedAt: updated.updatedAt,
+              }
+            : entry,
+        ),
+      );
+      setDetail((current) =>
+        current && current.thread.id === updated.id
+          ? {
+              ...current,
+              thread: {
+                ...current.thread,
+                title: updated.title,
+                updatedAt: updated.updatedAt,
+              },
+            }
+          : current,
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to rename thread.');
+      throw caught;
     }
   }
 
@@ -231,6 +446,7 @@ export function ThreadDetailPage() {
       currentWorkspaceId={detail?.thread.workspaceId}
       currentWorkspaceLabel={detail?.workspace.label}
       metaContent={metaContent}
+      onRenameThread={handleRenameThread}
     >
       <div className="flex h-[calc(100dvh-2rem)] max-h-[calc(100dvh-2rem)] flex-col overflow-hidden rounded-[2rem] border border-stone-800 bg-stone-900/85 shadow-2xl shadow-stone-950/20">
         <header className="shrink-0 border-b border-stone-800 bg-stone-900/95 px-4 py-3 backdrop-blur sm:px-5">
@@ -299,7 +515,7 @@ export function ThreadDetailPage() {
           </div>
         ) : detail ? (
           <>
-            {detail.thread.source === 'local_codex_import' && (
+            {detail.thread.source === 'local_codex_import' && !detail.thread.isLoaded && (
               <div className="shrink-0 border-b border-amber-500/20 bg-amber-500/10 px-5 py-4 text-sm text-amber-100 sm:px-6">
                 <p className="font-medium text-amber-50">Imported local Codex session</p>
                 <p className="mt-1 text-amber-100/90">
@@ -317,6 +533,10 @@ export function ThreadDetailPage() {
             )}
             <ThreadTimeline
               turns={detail.turns}
+              pendingRequests={detail.pendingRequests}
+              livePlan={livePlan}
+              respondingRequestId={respondingRequestId}
+              onRespondToRequest={handleRespondToRequest}
               liveOutput={liveOutput}
               followTail={followTail}
               scrollRequestKey={scrollRequestKey}
@@ -324,8 +544,12 @@ export function ThreadDetailPage() {
             />
             <ThreadComposer
               busy={busy}
+              settingsBusy={settingsBusy}
               error={null}
               model={detail.thread.model}
+              reasoningEffort={detail.thread.reasoningEffort}
+              collaborationMode={detail.thread.collaborationMode}
+              modelOptions={modelOptions}
               followTail={followTail}
               disabled={Boolean(promptDisabledReason)}
               disabledPlaceholder={promptDisabledReason ?? undefined}
@@ -333,6 +557,7 @@ export function ThreadDetailPage() {
               onSubmit={handlePrompt}
               onInterrupt={handleInterrupt}
               onToggleFollow={() => setFollowTail((current) => !current)}
+              onUpdateSettings={handleUpdateThreadSettings}
             />
           </>
         ) : (

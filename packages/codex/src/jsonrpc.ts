@@ -139,6 +139,11 @@ export class JsonRpcClient extends EventEmitter {
       return;
     }
 
+    if (typeof parsed.method === 'string' && typeof parsed.id === 'number') {
+      this.emit('request', parsed as unknown as JsonRpcRequest);
+      return;
+    }
+
     if (typeof parsed.id !== 'number') {
       return;
     }
@@ -163,5 +168,31 @@ export class JsonRpcClient extends EventEmitter {
     }
 
     request.resolve((parsed as unknown as JsonRpcSuccess).result);
+  }
+
+  respond(id: JsonRpcId, result: unknown) {
+    if (this.closed) {
+      throw new JsonRpcClientError('JSON-RPC client is closed.', 'client_closed');
+    }
+
+    this.output.write(`${JSON.stringify({ jsonrpc: '2.0', id, result })}\n`);
+  }
+
+  respondError(id: JsonRpcId, message: string, code = -32000, data?: unknown) {
+    if (this.closed) {
+      throw new JsonRpcClientError('JSON-RPC client is closed.', 'client_closed');
+    }
+
+    this.output.write(
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        id,
+        error: {
+          code,
+          message,
+          data
+        }
+      })}\n`
+    );
   }
 }

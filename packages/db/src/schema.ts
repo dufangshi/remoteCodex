@@ -27,6 +27,8 @@ export const threads = sqliteTable('threads', {
   source: text('source').notNull().default('supervisor'),
   title: text('title').notNull(),
   model: text('model'),
+  reasoningEffort: text('reasoning_effort'),
+  collaborationMode: text('collaboration_mode').notNull().default('default'),
   approvalMode: text('approval_mode'),
   status: text('status'),
   summaryText: text('summary_text'),

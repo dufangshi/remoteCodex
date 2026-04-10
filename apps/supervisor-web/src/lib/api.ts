@@ -6,11 +6,16 @@ import type {
   ImportThreadInput,
   InterruptTurnInput,
   ModelOptionDto,
+  RespondThreadActionRequestInput,
+  ResumeThreadInput,
   RuntimeConfigDto,
   SendThreadPromptInput,
   ThreadDetailDto,
   ThreadDto,
   ThreadEventEnvelope,
+  UpdateThreadSettingsInput,
+  UpdateThreadInput,
+  UpdateWorkspaceInput,
   UpdateWorkspaceFavoriteInput,
   WorkspaceDto,
   WorkspaceTreeDto
@@ -86,9 +91,10 @@ export function importThread(sessionId: ImportThreadInput['sessionId']) {
   });
 }
 
-export function resumeThread(id: string) {
+export function resumeThread(id: string, input: ResumeThreadInput = {}) {
   return request<ThreadDetailDto>(`/api/threads/${id}/resume`, {
-    method: 'POST'
+    method: 'POST',
+    ...(Object.keys(input).length > 0 ? { body: JSON.stringify(input) } : {})
   });
 }
 
@@ -106,9 +112,41 @@ export function interruptThread(id: string, input: InterruptTurnInput = {}) {
   });
 }
 
+export function updateThread(id: string, input: UpdateThreadInput) {
+  return request<ThreadDto>(`/api/threads/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input)
+  });
+}
+
+export function updateThreadSettings(id: string, input: UpdateThreadSettingsInput) {
+  return request<ThreadDto>(`/api/threads/${id}/settings`, {
+    method: 'PATCH',
+    body: JSON.stringify(input)
+  });
+}
+
+export function respondToThreadRequest(
+  id: string,
+  requestId: string,
+  input: RespondThreadActionRequestInput
+) {
+  return request<ThreadDetailDto>(`/api/threads/${id}/requests/${encodeURIComponent(requestId)}/respond`, {
+    method: 'POST',
+    body: JSON.stringify(input)
+  });
+}
+
 export function createWorkspace(input: CreateWorkspaceInput) {
   return request<WorkspaceDto>('/api/workspaces', {
     method: 'POST',
+    body: JSON.stringify(input)
+  });
+}
+
+export function updateWorkspace(id: string, input: UpdateWorkspaceInput) {
+  return request<WorkspaceDto>(`/api/workspaces/${id}`, {
+    method: 'PATCH',
     body: JSON.stringify(input)
   });
 }
