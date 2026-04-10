@@ -136,10 +136,13 @@ export interface ThreadHistoryItemDto {
     | 'plan'
     | 'reasoning'
     | 'commandExecution'
+    | 'webSearch'
     | 'fileChange'
     | 'toolCall'
     | 'other';
   text: string;
+  previewText?: string;
+  detailText?: string | null;
   status?: string | null;
 }
 

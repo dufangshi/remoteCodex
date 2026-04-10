@@ -332,6 +332,57 @@ describe('ThreadTimeline', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('renders web search items with a query preview and expandable details', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'search-1',
+                kind: 'webSearch',
+                text: 'latest remote codex release notes',
+                previewText: 'latest remote codex release notes',
+                detailText: [
+                  'Search query',
+                  '',
+                  '- latest remote codex release notes',
+                  '',
+                  'Sources',
+                  '',
+                  '- Release notes',
+                  '  https://example.com/releases',
+                ].join('\n'),
+                status: 'completed',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'Open full web search' }),
+    ).toHaveTextContent('latest remote codex release notes');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open full web search' }));
+
+    expect(
+      screen.getByRole('dialog', { name: 'Web Search Details' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('dialog', { name: 'Web Search Details' }),
+    ).toHaveTextContent('Release notes');
+    expect(
+      screen.getByRole('dialog', { name: 'Web Search Details' }),
+    ).toHaveTextContent('https://example.com/releases');
+  });
+
   it('renders streaming agent output inside the same agent message surface', async () => {
     render(
       <ThreadTimeline

@@ -84,8 +84,14 @@ export interface CodexTurnItem {
   summary?: string[];
   command?: string;
   aggregatedOutput?: string | null;
+  query?: string;
+  queries?: string[];
+  action?: unknown;
+  result?: unknown;
+  sources?: unknown;
   status?: string | null;
   changes?: unknown[];
+  [key: string]: unknown;
 }
 
 export interface CodexTurnRecord {

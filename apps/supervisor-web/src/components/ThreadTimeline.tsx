@@ -63,6 +63,8 @@ function itemSurfaceClassName(kind: ThreadHistoryItemDto['kind']) {
       return 'bg-slate-400/[0.11] text-stone-100 shadow-lg shadow-stone-950/10';
     case 'commandExecution':
       return 'bg-amber-500/[0.06] text-stone-200';
+    case 'webSearch':
+      return 'bg-sky-400/[0.07] text-stone-100';
     case 'reasoning':
       return 'bg-violet-500/[0.05] text-stone-300';
     case 'toolCall':
@@ -76,7 +78,9 @@ function itemSurfaceClassName(kind: ThreadHistoryItemDto['kind']) {
   }
 }
 
-function overlayBadgeClassName(tone: 'user' | 'agent' | 'command' | 'action') {
+function overlayBadgeClassName(
+  tone: 'user' | 'agent' | 'command' | 'search' | 'action',
+) {
   switch (tone) {
     case 'user':
       return 'border-cyan-400/30 bg-cyan-400/12 text-cyan-200';
@@ -84,6 +88,8 @@ function overlayBadgeClassName(tone: 'user' | 'agent' | 'command' | 'action') {
       return 'border-slate-300/35 bg-slate-200/14 text-slate-100';
     case 'command':
       return 'border-amber-300/30 bg-amber-300/12 text-amber-200';
+    case 'search':
+      return 'border-sky-300/35 bg-sky-300/14 text-sky-100';
     case 'action':
       return 'border-stone-700/90 bg-stone-900/75 text-stone-300';
   }
@@ -187,6 +193,22 @@ function CommandIcon() {
     >
       <path d="m4 5 2 2-2 2" />
       <path d="M7.75 9.5h4.25" />
+    </svg>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 fill-none stroke-current"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="7" cy="7" r="3.75" />
+      <path d="m10.25 10.25 3 3" />
     </svg>
   );
 }
@@ -504,6 +526,80 @@ const CommandItem = memo(function CommandItem({
   );
 });
 
+const WebSearchItem = memo(function WebSearchItem({
+  item,
+  onOpen,
+}: {
+  item: ThreadHistoryItemDto & { kind: 'webSearch' };
+  onOpen: (title: string, text: string) => void;
+}) {
+  const previewText = item.previewText?.trim() || item.text || 'Web search';
+  const detailText = item.detailText?.trim() || item.text || 'Web search';
+
+  return (
+    <div
+      className={`relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
+    >
+      <span
+        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('search')}`}
+      >
+        <span className="scale-[0.78]">
+          <SearchIcon />
+        </span>
+      </span>
+      <div className="flex items-start gap-2.5">
+        <div className="mt-0.5 hidden shrink-0 items-center sm:flex">
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-sky-300/25 bg-sky-300/10 text-sky-100">
+            <SearchIcon />
+          </span>
+        </div>
+        <div className="relative min-w-0 w-full flex-1 rounded-[0.9rem] border border-stone-800/80 bg-stone-950/45 px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2 sm:pt-2">
+          <button
+            type="button"
+            aria-label="Expand web search"
+            title="Expand web search"
+            onClick={() => onOpen('Web Search Details', detailText)}
+            className={`absolute right-0 top-0 inline-flex h-5 w-5 items-center justify-center rounded-bl-[0.7rem] rounded-tr-[0.9rem] border shadow-sm shadow-stone-950/25 transition sm:right-2 sm:top-2 sm:h-7 sm:w-7 sm:rounded-full ${overlayBadgeClassName('action')} hover:bg-stone-800`}
+          >
+            <span className="scale-[0.72] sm:scale-100">
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                className="h-3.5 w-3.5 fill-none stroke-current"
+                strokeWidth="1.45"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M6.25 2.75H2.75v3.5" />
+                <path d="M9.75 13.25h3.5v-3.5" />
+                <path d="m2.75 6.25 3.5-3.5" />
+                <path d="m9.75 9.75 3.5 3.5" />
+                <path d="M9.75 2.75h3.5v3.5" />
+                <path d="M6.25 13.25h-3.5v-3.5" />
+                <path d="m13.25 6.25-3.5-3.5" />
+                <path d="m6.25 9.75-3.5 3.5" />
+              </svg>
+            </span>
+          </button>
+          {item.status && (
+            <p className="pr-8 text-xs text-stone-500 sm:pr-10">{item.status}</p>
+          )}
+          <button
+            type="button"
+            aria-label="Open full web search"
+            onClick={() => onOpen('Web Search Details', detailText)}
+            className="mt-1 block w-full text-left"
+          >
+            <pre className="pr-8 whitespace-pre-wrap break-words text-sm leading-6 text-stone-100 sm:pr-10">
+              {previewText}
+            </pre>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+});
+
 const GenericHistoryItem = memo(function GenericHistoryItem({
   item,
 }: {
@@ -560,6 +656,19 @@ const HistoryItemRow = memo(function HistoryItemRow({
         item={
           item as ThreadHistoryItemDto & {
             kind: 'commandExecution';
+          }
+        }
+        onOpen={onOpenExpandedText}
+      />
+    );
+  }
+
+  if (item.kind === 'webSearch') {
+    return (
+      <WebSearchItem
+        item={
+          item as ThreadHistoryItemDto & {
+            kind: 'webSearch';
           }
         }
         onOpen={onOpenExpandedText}

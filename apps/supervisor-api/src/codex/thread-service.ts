@@ -208,6 +208,172 @@ function toWorkspaceDto(record: {
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function stringOrNull(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function stringArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry) => stringOrNull(entry))
+    .filter((entry): entry is string => Boolean(entry));
+}
+
+function uniqueStrings(values: Array<string | null | undefined>) {
+  return [...new Set(values.filter((value): value is string => Boolean(value?.trim())))];
+}
+
+interface WebSearchSourceRecord {
+  title: string | null;
+  url: string | null;
+  snippet: string | null;
+}
+
+function extractWebSearchQueries(item: CodexTurnItem) {
+  const action = isRecord(item.action) ? item.action : null;
+  const result = isRecord(item.result) ? item.result : null;
+
+  return uniqueStrings([
+    stringOrNull(item.query),
+    ...stringArray(item.queries),
+    action ? stringOrNull(action.query) : null,
+    ...(action ? stringArray(action.queries) : []),
+    action && isRecord(action.input) ? stringOrNull(action.input.query) : null,
+    result ? stringOrNull(result.query) : null,
+    ...(result ? stringArray(result.queries) : []),
+  ]);
+}
+
+function normalizeWebSearchSource(value: unknown): WebSearchSourceRecord | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const title = stringOrNull(value.title) ?? stringOrNull(value.name);
+  const url = stringOrNull(value.url) ?? stringOrNull(value.link);
+  const snippet =
+    stringOrNull(value.snippet) ??
+    stringOrNull(value.description) ??
+    stringOrNull(value.text);
+
+  if (!title && !url && !snippet) {
+    return null;
+  }
+
+  return { title, url, snippet };
+}
+
+function extractWebSearchSources(item: CodexTurnItem) {
+  const action = isRecord(item.action) ? item.action : null;
+  const result = isRecord(item.result) ? item.result : null;
+
+  const candidates: unknown[] = [
+    item.sources,
+    action?.sources,
+    result?.sources,
+    result?.results,
+    action?.results,
+    item.results,
+    item.searchResults,
+    item.webResults,
+  ];
+
+  const sources: WebSearchSourceRecord[] = [];
+
+  for (const candidate of candidates) {
+    if (!Array.isArray(candidate)) {
+      continue;
+    }
+
+    for (const entry of candidate) {
+      const normalized = normalizeWebSearchSource(entry);
+      if (normalized) {
+        sources.push(normalized);
+      }
+    }
+  }
+
+  return sources.filter((source, index, allSources) => {
+    return (
+      index ===
+      allSources.findIndex(
+        (entry) =>
+          entry.title === source.title &&
+          entry.url === source.url &&
+          entry.snippet === source.snippet,
+      )
+    );
+  });
+}
+
+function stringifyPayload(value: unknown) {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return null;
+  }
+}
+
+function formatWebSearchHistoryItem(item: CodexTurnItem): ThreadHistoryItemDto {
+  const queries = extractWebSearchQueries(item);
+  const sources = extractWebSearchSources(item);
+  const supplementalText = stringOrNull(item.text);
+  const previewText =
+    queries.length > 0
+      ? queries.length <= 2
+        ? queries.join('\n')
+        : `${queries[0]}\n${queries[1]}\n+${queries.length - 2} more queries`
+      : supplementalText ?? 'Web search';
+
+  const detailLines: string[] = [];
+
+  if (queries.length > 0) {
+    detailLines.push(queries.length === 1 ? 'Search query' : 'Search queries', '');
+    detailLines.push(...queries.map((query) => `- ${query}`), '');
+  }
+
+  if (sources.length > 0) {
+    detailLines.push('Sources', '');
+    for (const source of sources) {
+      detailLines.push(`- ${source.title ?? 'Untitled source'}`);
+      if (source.url) {
+        detailLines.push(`  ${source.url}`);
+      }
+      if (source.snippet) {
+        detailLines.push(`  ${source.snippet}`);
+      }
+    }
+    detailLines.push('');
+  }
+
+  if (supplementalText && !queries.includes(supplementalText)) {
+    detailLines.push('Additional text', '', supplementalText, '');
+  }
+
+  if (sources.length === 0) {
+    const rawPayload = stringifyPayload(item);
+    if (rawPayload) {
+      detailLines.push('Raw payload', '', rawPayload, '');
+    }
+  }
+
+  return {
+    id: item.id,
+    kind: 'webSearch',
+    text: previewText,
+    previewText,
+    detailText: detailLines.join('\n').trim() || null,
+    status: item.status ?? null,
+  };
+}
+
 function itemToHistoryItem(item: CodexTurnItem): ThreadHistoryItemDto {
   switch (item.type) {
     case 'userMessage':
@@ -245,6 +411,11 @@ function itemToHistoryItem(item: CodexTurnItem): ThreadHistoryItemDto {
         text: [item.command ?? '', item.aggregatedOutput ?? ''].filter(Boolean).join('\n\n'),
         status: item.status ?? null
       };
+    case 'webSearch':
+    case 'web_search':
+    case 'webSearchCall':
+    case 'web_search_call':
+      return formatWebSearchHistoryItem(item);
     case 'fileChange':
       return {
         id: item.id,

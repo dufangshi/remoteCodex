@@ -92,6 +92,8 @@ export function historyItemAccentClassName(kind: ThreadHistoryItemDto['kind']) {
       return 'border-emerald-400/45';
     case 'commandExecution':
       return 'border-amber-300/45';
+    case 'webSearch':
+      return 'border-sky-300/45';
     case 'reasoning':
       return 'border-violet-400/45';
     case 'toolCall':
@@ -113,6 +115,8 @@ export function historyItemLabel(kind: ThreadHistoryItemDto['kind']) {
       return 'Agent';
     case 'commandExecution':
       return 'Command';
+    case 'webSearch':
+      return 'Web Search';
     case 'reasoning':
       return 'Reasoning';
     case 'toolCall':

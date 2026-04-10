@@ -713,4 +713,94 @@ describe('supervisor api', () => {
       ]
     });
   });
+
+  it('maps web search turn items into dedicated history entries', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Web Search Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Search for the latest release notes.'
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+
+    const startedThread = promptResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const activeTurn = remoteThread?.turns.at(-1);
+    expect(activeTurn).toBeTruthy();
+
+    const completedTurn = {
+      ...activeTurn!,
+      status: 'completed' as const,
+      items: [
+        ...activeTurn!.items,
+        {
+          id: 'search-item-1',
+          type: 'web_search',
+          query: 'remote codex release notes',
+          action: {
+            sources: [
+              {
+                title: 'Release notes',
+                url: 'https://example.com/releases'
+              }
+            ]
+          },
+          status: 'completed'
+        }
+      ]
+    };
+
+    fakeCodexManager.threads.set(startedThread.codexThreadId, {
+      ...remoteThread!,
+      status: { type: 'idle' },
+      turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json().turns.at(-1)).toMatchObject({
+      status: 'completed',
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'webSearch',
+          text: 'remote codex release notes',
+          previewText: 'remote codex release notes',
+          status: 'completed'
+        })
+      ])
+    });
+    expect(
+      detailResponse
+        .json()
+        .turns.at(-1)
+        .items.find((item: any) => item.kind === 'webSearch').detailText
+    ).toContain('https://example.com/releases');
+  });
 });
