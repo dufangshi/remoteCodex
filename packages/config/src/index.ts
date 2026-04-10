@@ -10,6 +10,9 @@ export interface RuntimeConfig {
   appVersion: string;
   workspaceRoot: string;
   databaseUrl: string;
+  codexHome: string;
+  codexCommand: string;
+  codexAppServerStartTimeoutMs: number;
 }
 
 const envSchema = z.object({
@@ -19,7 +22,10 @@ const envSchema = z.object({
   APP_NAME: z.string().min(1).optional(),
   APP_VERSION: z.string().min(1).optional(),
   WORKSPACE_ROOT: z.string().optional(),
-  DATABASE_URL: z.string().optional()
+  DATABASE_URL: z.string().optional(),
+  CODEX_HOME: z.string().optional(),
+  CODEX_COMMAND: z.string().min(1).optional(),
+  CODEX_APP_SERVER_START_TIMEOUT_MS: z.coerce.number().int().positive().optional()
 });
 
 export function resolveDatabaseUrl(
@@ -51,6 +57,11 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
     appName: parsed.APP_NAME ?? 'Remote Codex Supervisor',
     appVersion: parsed.APP_VERSION ?? '0.1.0',
     workspaceRoot,
-    databaseUrl: resolveDatabaseUrl(nodeEnv, parsed.DATABASE_URL)
+    databaseUrl: resolveDatabaseUrl(nodeEnv, parsed.DATABASE_URL),
+    codexHome: parsed.CODEX_HOME?.trim()
+      ? path.resolve(parsed.CODEX_HOME)
+      : path.join(os.homedir(), '.codex'),
+    codexCommand: parsed.CODEX_COMMAND ?? 'codex',
+    codexAppServerStartTimeoutMs: parsed.CODEX_APP_SERVER_START_TIMEOUT_MS ?? 10_000
   };
 }

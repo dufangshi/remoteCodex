@@ -2,6 +2,7 @@ import Fastify, { FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
 import { ZodError } from 'zod';
 
+import { CodexAppServerManager, JsonRpcClientError } from '../../../packages/codex/src/index';
 import { loadRuntimeConfig, RuntimeConfig } from '../../../packages/config/src/index';
 import {
   createDatabase,
@@ -11,7 +12,12 @@ import {
 } from '../../../packages/db/src/index';
 import { ApiErrorShape } from '../../../packages/shared/src/index';
 import { WorkspaceServiceError } from '../../../packages/workspace/src/index';
+import { SupervisorEventBus } from './codex/event-bus';
+import { LocalCodexSessionStore } from './codex/local-session-store';
+import { ThreadService } from './codex/thread-service';
+import { registerCodexRoutes } from './routes/codex';
 import { registerSystemRoutes } from './routes/system';
+import { registerThreadRoutes } from './routes/threads';
 import { registerWorkspaceRoutes } from './routes/workspaces';
 
 class HttpError extends Error {
@@ -26,6 +32,9 @@ class HttpError extends Error {
 export interface AppServices {
   config: RuntimeConfig;
   database: DatabaseContext;
+  codexManager: CodexAppServerManager;
+  eventBus: SupervisorEventBus;
+  threadService: ThreadService;
 }
 
 declare module 'fastify' {
@@ -34,12 +43,37 @@ declare module 'fastify' {
   }
 }
 
-export function buildApp(options: { env?: NodeJS.ProcessEnv } = {}): FastifyInstance {
+export function buildApp(
+  options: {
+    env?: NodeJS.ProcessEnv;
+    codexManager?: CodexAppServerManager;
+  } = {}
+): FastifyInstance {
   const config = loadRuntimeConfig(options.env);
   runMigrations(config.databaseUrl);
 
   const database = createDatabase(config.databaseUrl);
   seedDefaults(database.db);
+  const eventBus = new SupervisorEventBus();
+  const localSessionStore = new LocalCodexSessionStore(config.codexHome);
+  const codexManager =
+    options.codexManager ??
+    new CodexAppServerManager({
+      command: config.codexCommand,
+      startupTimeoutMs: config.codexAppServerStartTimeoutMs,
+      clientInfo: {
+        name: 'remote-codex-supervisor',
+        title: config.appName,
+        version: config.appVersion
+      }
+    });
+  const threadService = new ThreadService(
+    database.db,
+    codexManager,
+    eventBus,
+    localSessionStore,
+    config.workspaceRoot
+  );
 
   const app = Fastify({
     logger: config.nodeEnv !== 'test'
@@ -47,21 +81,48 @@ export function buildApp(options: { env?: NodeJS.ProcessEnv } = {}): FastifyInst
 
   app.decorate('services', {
     config,
-    database
+    database,
+    codexManager,
+    eventBus,
+    threadService
   });
 
-  app.register(websocket);
+  app.register(async (realtimeApp) => {
+    await realtimeApp.register(websocket);
 
-  app.get('/ws', { websocket: true }, (socket) => {
-    socket.send(
-      JSON.stringify({
-        type: 'supervisor.connected',
-        timestamp: new Date().toISOString()
-      })
-    );
+    realtimeApp.route({
+      method: 'GET',
+      url: '/ws',
+      handler: (_request, reply) => {
+        reply.status(426).send({
+          code: 'bad_request',
+          message: 'Upgrade to websocket is required.'
+        } satisfies ApiErrorShape);
+      },
+      wsHandler: (socket) => {
+        socket.send(
+          JSON.stringify({
+            type: 'supervisor.connected',
+            timestamp: new Date().toISOString()
+          })
+        );
+
+        const unsubscribe = eventBus.onThreadEvent((event) => {
+          if (socket.readyState === 1) {
+            socket.send(JSON.stringify(event));
+          }
+        });
+
+        socket.on('close', () => {
+          unsubscribe();
+        });
+      }
+    });
   });
 
   app.register(registerSystemRoutes);
+  app.register(registerCodexRoutes);
+  app.register(registerThreadRoutes);
   app.register(registerWorkspaceRoutes);
 
   app.setNotFoundHandler((_request, reply) => {
@@ -113,6 +174,20 @@ export function buildApp(options: { env?: NodeJS.ProcessEnv } = {}): FastifyInst
       return;
     }
 
+    if (error instanceof JsonRpcClientError) {
+      const payload: ApiErrorShape = {
+        code: 'service_unavailable',
+        message: error.message
+      };
+
+      if (error.details) {
+        payload.details = error.details;
+      }
+
+      reply.status(503).send(payload);
+      return;
+    }
+
     requestLog(app, error);
     reply.status(500).send({
       code: 'internal_error',
@@ -121,7 +196,16 @@ export function buildApp(options: { env?: NodeJS.ProcessEnv } = {}): FastifyInst
   });
 
   app.addHook('onClose', async () => {
+    await codexManager.stop();
     database.sqlite.close();
+  });
+
+  app.addHook('onReady', async () => {
+    try {
+      await codexManager.start();
+    } catch (error) {
+      requestLog(app, error);
+    }
   });
 
   return app;

@@ -5,6 +5,16 @@
       "idx": 0,
       "tag": "0000_initial",
       "when": 1740000000000
+    },
+    {
+      "idx": 1,
+      "tag": "0001_thread_runtime_fields",
+      "when": 1740000001000
+    },
+    {
+      "idx": 2,
+      "tag": "0002_thread_source",
+      "when": 1740000002000
     }
   ]
 }

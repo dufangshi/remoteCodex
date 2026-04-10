@@ -13,6 +13,9 @@ describe('loadRuntimeConfig', () => {
     expect(config.port).toBe(8787);
     expect(config.workspaceRoot).toBe(os.homedir());
     expect(config.databaseUrl).toBe(path.resolve('.local', 'supervisor-dev.sqlite'));
+    expect(config.codexHome).toBe(path.join(os.homedir(), '.codex'));
+    expect(config.codexCommand).toBe('codex');
+    expect(config.codexAppServerStartTimeoutMs).toBe(10_000);
   });
 
   it('resolves production database to user home', () => {
@@ -27,7 +30,10 @@ describe('loadRuntimeConfig', () => {
       HOST: '0.0.0.0',
       PORT: '9999',
       WORKSPACE_ROOT: '/tmp/workspaces',
-      DATABASE_URL: '/tmp/db.sqlite'
+      DATABASE_URL: '/tmp/db.sqlite',
+      CODEX_HOME: '/tmp/codex-home',
+      CODEX_COMMAND: 'codex-custom',
+      CODEX_APP_SERVER_START_TIMEOUT_MS: '15000'
     });
 
     expect(config.nodeEnv).toBe('test');
@@ -35,5 +41,8 @@ describe('loadRuntimeConfig', () => {
     expect(config.port).toBe(9999);
     expect(config.workspaceRoot).toBe('/tmp/workspaces');
     expect(config.databaseUrl).toBe('/tmp/db.sqlite');
+    expect(config.codexHome).toBe('/tmp/codex-home');
+    expect(config.codexCommand).toBe('codex-custom');
+    expect(config.codexAppServerStartTimeoutMs).toBe(15_000);
   });
 });
