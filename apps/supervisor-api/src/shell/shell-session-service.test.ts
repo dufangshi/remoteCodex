@@ -76,6 +76,14 @@ describe('ShellSessionService', () => {
         async capturePane() {
           return '(base) shell test % ';
         },
+        async getPaneCursor() {
+          return {
+            cursorX: 20,
+            cursorY: 0,
+            paneWidth: 120,
+            paneHeight: 36,
+          };
+        },
         async killSession(sessionName: string) {
           sessionNames.delete(sessionName);
         },
@@ -105,7 +113,7 @@ describe('ShellSessionService', () => {
     expect(sessionNames.size).toBe(1);
   });
 
-  it('allows a single attached viewer and keeps the shell alive after detach', async () => {
+  it('lets a new viewer take over the shell attachment and keeps the shell alive after detach', async () => {
     const created = await service.createShellForThread(threadId);
     const shellId = created.shell?.id;
     expect(shellId).toBeTruthy();
@@ -116,17 +124,21 @@ describe('ShellSessionService', () => {
       onData: () => {},
     });
 
+    const secondAttachment = await service.attachShell(shellId!, {
+      cols: 120,
+      rows: 36,
+      onData: () => {},
+    });
+
+    expect(secondAttachment.viewerId).not.toBe(firstAttachment.viewerId);
+
     await expect(
-      service.attachShell(shellId!, {
-        cols: 120,
-        rows: 36,
-        onData: () => {},
-      }),
+      service.sendInput(shellId!, firstAttachment.viewerId, 'pwd\n'),
     ).rejects.toMatchObject({
-      code: 'viewer_conflict',
+      code: 'invalid_viewer',
     } satisfies Partial<ShellServiceError>);
 
-    await service.sendInput(shellId!, firstAttachment.viewerId, 'pwd\n');
+    await service.sendInput(shellId!, secondAttachment.viewerId, 'pwd\n');
     expect(sentInputs).toContain('pwd\n');
     expect(resizeCalls).toContainEqual({
       sessionName: expect.stringContaining('rcx-'),
@@ -134,10 +146,28 @@ describe('ShellSessionService', () => {
       rows: 36,
     });
 
-    await service.detachShell(shellId!, firstAttachment.viewerId);
+    await service.detachShell(shellId!, secondAttachment.viewerId);
     const stateAfterDetach = await service.getThreadShellState(threadId);
 
     expect(stateAfterDetach.state).toBe('detached');
+    expect(sessionNames.size).toBe(1);
+  });
+
+  it('revives an exited shell for the same thread', async () => {
+    const created = await service.createShellForThread(threadId);
+    const shellId = created.shell?.id;
+    expect(shellId).toBeTruthy();
+
+    await service.terminateShell(shellId!);
+    expect(sessionNames.size).toBe(0);
+
+    const revived = await service.createShellForThread(threadId, {
+      cols: 90,
+      rows: 28,
+    });
+
+    expect(revived.shell?.id).toBe(shellId);
+    expect(revived.state).toBe('detached');
     expect(sessionNames.size).toBe(1);
   });
 });

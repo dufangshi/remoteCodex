@@ -26,11 +26,26 @@ import { TmuxManager } from './tmux-manager';
 
 interface ShellAttachment {
   viewerId: string;
-  onData: (data: string, replace?: boolean) => void;
+  onData: (
+    data: string,
+    options?: {
+      replace?: boolean;
+      cursorX?: number;
+      cursorY?: number;
+      paneHeight?: number;
+    },
+  ) => void;
   pollHandle: NodeJS.Timeout;
   lastSnapshot: string;
   polling: boolean;
 }
+
+type ShellOutputOptions = {
+  replace?: boolean;
+  cursorX?: number;
+  cursorY?: number;
+  paneHeight?: number;
+};
 
 async function pathExists(filePath: string) {
   try {
@@ -91,6 +106,28 @@ function shellDtoStatus(
   }
 
   return 'not_found';
+}
+
+function shellOutputOptions(input: {
+  replace?: boolean;
+  cursorX?: number | undefined;
+  cursorY?: number | undefined;
+  paneHeight?: number | undefined;
+}): ShellOutputOptions {
+  const output: ShellOutputOptions = {};
+  if (input.replace) {
+    output.replace = true;
+  }
+  if (input.cursorX !== undefined) {
+    output.cursorX = input.cursorX;
+  }
+  if (input.cursorY !== undefined) {
+    output.cursorY = input.cursorY;
+  }
+  if (input.paneHeight !== undefined) {
+    output.paneHeight = input.paneHeight;
+  }
+  return output;
 }
 
 export class ShellServiceError extends Error {
@@ -207,22 +244,36 @@ export class ShellSessionService {
       );
     }
 
+    const tmuxSessionName = this.tmuxManager.sessionNameForThread(thread.id);
     const existing = getShellSessionRecordByThreadId(this.db, threadId);
+
     if (existing) {
-      throw new ShellServiceError(
-        'shell_exists',
-        'A durable shell already exists for this thread.',
-      );
+      const canRevive =
+        existing.status === 'exited' || existing.status === 'not_found';
+      if (!canRevive) {
+        throw new ShellServiceError(
+          'shell_exists',
+          'A durable shell already exists for this thread.',
+        );
+      }
+
+      updateShellSessionRecord(this.db, existing.id, {
+        tmuxSessionName,
+        cwd: workspace.absPath,
+        status: 'creating',
+        lastActivityAt: nowIso(),
+      });
     }
 
-    const tmuxSessionName = this.tmuxManager.sessionNameForThread(thread.id);
-    const record = createShellSessionRecord(this.db, {
-      workspaceId: workspace.id,
-      threadId: thread.id,
-      tmuxSessionName,
-      cwd: workspace.absPath,
-      status: 'creating',
-    });
+    const record =
+      existing ??
+      createShellSessionRecord(this.db, {
+        workspaceId: workspace.id,
+        threadId: thread.id,
+        tmuxSessionName,
+        cwd: workspace.absPath,
+        status: 'creating',
+      });
 
     this.emitShellEvent(record.id, 'shell.status', {
       threadId: thread.id,
@@ -230,12 +281,15 @@ export class ShellSessionService {
     });
 
     try {
-      await this.tmuxManager.createSession({
-        sessionName: tmuxSessionName,
-        cwd: workspace.absPath,
-        ...(options.cols !== undefined ? { cols: options.cols } : {}),
-        ...(options.rows !== undefined ? { rows: options.rows } : {}),
-      });
+      const existingSession = await this.tmuxManager.hasSession(tmuxSessionName);
+      if (!existingSession) {
+        await this.tmuxManager.createSession({
+          sessionName: tmuxSessionName,
+          cwd: workspace.absPath,
+          ...(options.cols !== undefined ? { cols: options.cols } : {}),
+          ...(options.rows !== undefined ? { rows: options.rows } : {}),
+        });
+      }
       updateShellSessionRecord(this.db, record.id, {
         status: 'running',
         lastActivityAt: nowIso(),
@@ -263,7 +317,15 @@ export class ShellSessionService {
     options: {
       cols: number;
       rows: number;
-      onData: (data: string, replace?: boolean) => void;
+      onData: (
+        data: string,
+        options?: {
+          replace?: boolean;
+          cursorX?: number;
+          cursorY?: number;
+          paneHeight?: number;
+        },
+      ) => void;
     },
   ) {
     const shell = getShellSessionRecordById(this.db, shellId);
@@ -275,11 +337,18 @@ export class ShellSessionService {
     const existingViewer = getViewerSessionRecordByShellId(this.db, shell.id);
     const existingAttachment = this.attachments.get(shell.id);
 
-    if (existingAttachment || existingViewer) {
-      throw new ShellServiceError(
-        'viewer_conflict',
-        'This shell is already attached in another browser session.',
-      );
+    if (existingAttachment) {
+      clearInterval(existingAttachment.pollHandle);
+      deleteViewerSessionRecord(this.db, existingAttachment.viewerId);
+      this.attachments.delete(shell.id);
+      this.emitShellEvent(shell.id, 'shell.detached', {
+        threadId,
+        state: 'detached',
+        viewerId: existingAttachment.viewerId,
+        reason: 'replaced',
+      });
+    } else if (existingViewer) {
+      deleteViewerSessionRecord(this.db, existingViewer.id);
     }
 
     const hasSession = await this.tmuxManager.hasSession(shellSessionName(shell));
@@ -309,6 +378,7 @@ export class ShellSessionService {
     );
 
     const initialSnapshot = await this.tmuxManager.capturePane(shellSessionName(shell));
+    const initialCursor = await this.tmuxManager.getPaneCursor(shellSessionName(shell));
     const attachment: ShellAttachment = {
       viewerId: viewer.id,
       onData: options.onData,
@@ -321,7 +391,15 @@ export class ShellSessionService {
     this.attachments.set(shell.id, attachment);
 
     if (initialSnapshot) {
-      options.onData(initialSnapshot, true);
+      options.onData(
+        initialSnapshot,
+        shellOutputOptions({
+          replace: true,
+          cursorX: initialCursor.cursorX,
+          cursorY: initialCursor.cursorY,
+          paneHeight: initialCursor.paneHeight,
+        }),
+      );
     }
 
     updateShellSessionRecord(this.db, shell.id, {
@@ -536,6 +614,7 @@ export class ShellSessionService {
       }
 
       const snapshot = await this.tmuxManager.capturePane(shellSessionName(shell));
+      const cursor = await this.tmuxManager.getPaneCursor(shellSessionName(shell));
       if (snapshot === attachment.lastSnapshot) {
         return;
       }
@@ -548,7 +627,15 @@ export class ShellSessionService {
         lastHeartbeatAt: nowIso(),
         activeTab: 'shell',
       });
-      attachment.onData(snapshot, true);
+      attachment.onData(
+        snapshot,
+        shellOutputOptions({
+          replace: true,
+          cursorX: cursor.cursorX,
+          cursorY: cursor.cursorY,
+          paneHeight: cursor.paneHeight,
+        }),
+      );
     } finally {
       attachment.polling = false;
     }

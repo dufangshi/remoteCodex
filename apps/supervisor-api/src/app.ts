@@ -158,14 +158,23 @@ export function buildApp(
               const attachment = await shellService.attachShell(parsed.shellId, {
                 cols: parsed.cols,
                 rows: parsed.rows,
-                onData: (data, replace) => {
+                onData: (data, options) => {
                   send({
                     type: 'shell.output',
                     shellId: parsed.shellId,
                     timestamp: new Date().toISOString(),
                     payload: {
                       data,
-                      ...(replace ? { replace: true } : {}),
+                      ...(options?.replace ? { replace: true } : {}),
+                      ...(options?.cursorX !== undefined
+                        ? { cursorX: options.cursorX }
+                        : {}),
+                      ...(options?.cursorY !== undefined
+                        ? { cursorY: options.cursorY }
+                        : {}),
+                      ...(options?.paneHeight !== undefined
+                        ? { paneHeight: options.paneHeight }
+                        : {}),
                     }
                   });
                 },

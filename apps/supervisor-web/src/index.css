@@ -169,3 +169,12 @@ input {
 .agent-markdown :where(pre code [style*="#e1e4e8"]) {
   color: rgb(226 232 240) !important;
 }
+
+.mobile-shell-selectable .xterm,
+.mobile-shell-selectable .xterm-screen,
+.mobile-shell-selectable .xterm-rows,
+.mobile-shell-selectable .xterm-rows > div {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+  touch-action: pan-y !important;
+}

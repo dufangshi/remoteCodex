@@ -173,7 +173,6 @@ export class TmuxManager {
       'capture-pane',
       '-p',
       '-e',
-      '-J',
       '-S',
       `-${historyLines}`,
       '-t',
@@ -185,6 +184,32 @@ export class TmuxManager {
     }
 
     return result.stdout;
+  }
+
+  async getPaneCursor(sessionName: string) {
+    const result = await this.execCommand(this.command, [
+      'display-message',
+      '-p',
+      '-t',
+      sessionName,
+      '#{cursor_x} #{cursor_y} #{pane_width} #{pane_height}',
+    ]);
+
+    if (result.exitCode !== 0) {
+      throw new Error(result.stderr.trim() || 'Unable to inspect tmux cursor.');
+    }
+
+    const [cursorX, cursorY, paneWidth, paneHeight] = result.stdout
+      .trim()
+      .split(/\s+/)
+      .map((value) => Number.parseInt(value, 10));
+
+    return {
+      cursorX: Number.isFinite(cursorX) ? cursorX : 0,
+      cursorY: Number.isFinite(cursorY) ? cursorY : 0,
+      paneWidth: Number.isFinite(paneWidth) ? paneWidth : 0,
+      paneHeight: Number.isFinite(paneHeight) ? paneHeight : 0,
+    };
   }
 
   async killSession(sessionName: string) {

@@ -20,23 +20,7 @@ interface ThreadShellPanelProps {
   threadId: string;
 }
 
-function statusToneClassName(status: ShellStatusDto) {
-  switch (status) {
-    case 'attached':
-      return 'border-emerald-300/35 bg-emerald-300/12 text-emerald-100';
-    case 'detached':
-    case 'running':
-      return 'border-sky-300/35 bg-sky-300/12 text-sky-100';
-    case 'creating':
-      return 'border-amber-300/35 bg-amber-300/12 text-amber-100';
-    case 'workspace_missing':
-    case 'not_found':
-    case 'exited':
-      return 'border-rose-300/35 bg-rose-300/12 text-rose-100';
-    case 'not_created':
-      return 'border-stone-700 bg-stone-900/80 text-stone-300';
-  }
-}
+type ToolboxFeedbackState = 'idle' | 'done' | 'failed';
 
 function statusLabel(status: ShellStatusDto) {
   switch (status) {
@@ -59,8 +43,129 @@ function statusLabel(status: ShellStatusDto) {
   }
 }
 
+function renderShellSnapshot(
+  terminal: Terminal,
+  snapshot: string,
+  cursorX?: number,
+  cursorY?: number,
+  paneHeight?: number,
+) {
+  const lines = snapshot.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  let frame = '\x1b[?7l\x1b[2J\x1b[H';
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line === undefined) {
+      continue;
+    }
+
+    frame += `\x1b[${index + 1};1H${line}`;
+  }
+
+  frame += '\x1b[?7h';
+  if (cursorX !== undefined && cursorY !== undefined) {
+    const historyOffset =
+      paneHeight !== undefined ? Math.max(0, lines.length - paneHeight) : 0;
+    frame += `\x1b[${historyOffset + cursorY + 1};${cursorX + 1}H`;
+  }
+
+  terminal.write(frame);
+}
+
+function controlSequenceForLetter(key: string) {
+  if (!/^[a-z]$/i.test(key)) {
+    return null;
+  }
+
+  return String.fromCharCode(key.toUpperCase().charCodeAt(0) - 64);
+}
+
+function getVisibleTerminalText(hostNode: HTMLDivElement | null) {
+  if (!hostNode) {
+    return '';
+  }
+
+  const rows = Array.from(hostNode.querySelectorAll('.xterm-rows > div'))
+    .map((row) => row.textContent ?? '')
+    .filter((line, index, items) => line.length > 0 || index < items.length - 1);
+
+  return rows.join('\n').trimEnd();
+}
+
+function WrenchIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-4 w-4 fill-none stroke-current"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M9.6 2.1a3.4 3.4 0 0 0 4.3 4.3l-6.4 6.4a1.8 1.8 0 1 1-2.6-2.6l6.4-6.4a3.4 3.4 0 0 0-1.7-1.7Z" />
+      <path d="m10.8 3.3 1.9 1.9" />
+    </svg>
+  );
+}
+
+function ConnectionIcon({ connected }: { connected: boolean }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-4.5 w-4.5 fill-none stroke-current"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m6.15 6.2 3.65 3.6" />
+      <path d="M5.05 8.1 3.2 9.95a1.6 1.6 0 0 1-2.25-2.25L2.8 5.85A1.6 1.6 0 0 1 5.05 8.1Z" />
+      <path d="m10.95 7.9 1.85-1.85a1.6 1.6 0 1 0-2.25-2.25L8.7 5.65A1.6 1.6 0 0 0 10.95 7.9Z" />
+      {!connected && <path d="M2.25 13.75 13.75 2.25" />}
+    </svg>
+  );
+}
+
+function ClipboardIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 fill-none stroke-current"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M5.5 3.25h5" />
+      <path d="M6.4 2h3.2a.9.9 0 0 1 .9.9v.35h1.3a1.2 1.2 0 0 1 1.2 1.2v7.35a1.2 1.2 0 0 1-1.2 1.2H4.2A1.2 1.2 0 0 1 3 11.8V4.45a1.2 1.2 0 0 1 1.2-1.2h1.3V2.9a.9.9 0 0 1 .9-.9Z" />
+    </svg>
+  );
+}
+
+function ControlIcon({
+  label,
+  tone = 'stone',
+}: {
+  label: string;
+  tone?: 'stone' | 'rose' | 'sky';
+}) {
+  const toneClassName =
+    tone === 'rose'
+      ? 'border-rose-300/35 bg-rose-300/14 text-rose-50'
+      : tone === 'sky'
+        ? 'border-sky-300/35 bg-sky-300/14 text-sky-50'
+        : 'border-stone-700/90 bg-stone-900/80 text-stone-100';
+
+  return (
+    <span
+      className={`inline-flex min-w-[3.45rem] items-center justify-center rounded-full border px-2.5 py-1.5 text-[11px] font-medium tracking-[0.12em] ${toneClassName}`}
+    >
+      {label}
+    </span>
+  );
+}
+
 export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
-  const terminalHostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<ReturnType<typeof connectShellSocket> | null>(null);
@@ -68,11 +173,52 @@ export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
   const shellIdRef = useRef<string | null>(null);
   const shellStateRef = useRef<ThreadShellStateDto | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const feedbackTimerRef = useRef<number | null>(null);
+  const [terminalHostNode, setTerminalHostNode] = useState<HTMLDivElement | null>(null);
   const [shellState, setShellState] = useState<ThreadShellStateDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [reconnectKey, setReconnectKey] = useState(0);
+  const [terminalReady, setTerminalReady] = useState(false);
+  const [isMobileShell, setIsMobileShell] = useState(false);
+  const [toolboxOpen, setToolboxOpen] = useState(false);
+  const [toolboxFeedback, setToolboxFeedback] = useState<{
+    tone: ToolboxFeedbackState;
+    text: string;
+  } | null>(null);
+
+  const setTransientToolboxFeedback = useCallback(
+    (tone: ToolboxFeedbackState, text: string) => {
+      setToolboxFeedback({ tone, text });
+      if (feedbackTimerRef.current !== null) {
+        window.clearTimeout(feedbackTimerRef.current);
+      }
+      feedbackTimerRef.current = window.setTimeout(() => {
+        setToolboxFeedback(null);
+        feedbackTimerRef.current = null;
+      }, 1800);
+    },
+    [],
+  );
+
+  const sendShellInput = useCallback((data: string) => {
+    const socket = socketRef.current;
+    const shellId = shellIdRef.current;
+    const viewerId = viewerIdRef.current;
+    if (!socket || !shellId || !viewerId) {
+      return false;
+    }
+
+    socket.send({
+      type: 'shell.input',
+      shellId,
+      viewerId,
+      data,
+    });
+    terminalRef.current?.focus();
+    return true;
+  }, []);
 
   const loadShellState = useCallback(async () => {
     setLoading(true);
@@ -102,7 +248,35 @@ export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
   }, [shellState]);
 
   useEffect(() => {
-    if (!terminalHostRef.current || terminalRef.current) {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia('(max-width: 767px), (hover: none) and (pointer: coarse)');
+    const update = () => {
+      setIsMobileShell(mediaQuery.matches);
+      if (!mediaQuery.matches) {
+        setToolboxOpen(false);
+      }
+    };
+
+    update();
+    mediaQuery.addEventListener('change', update);
+    return () => {
+      mediaQuery.removeEventListener('change', update);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (feedbackTimerRef.current !== null) {
+        window.clearTimeout(feedbackTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!terminalHostNode || terminalRef.current) {
       return;
     }
 
@@ -115,7 +289,7 @@ export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
         import('@xterm/addon-fit'),
       ]);
 
-      if (cancelled || !terminalHostRef.current) {
+      if (cancelled || !terminalHostNode) {
         return;
       }
 
@@ -149,10 +323,37 @@ export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
       });
       const fitAddon = new FitAddon();
       terminal.loadAddon(fitAddon);
-      terminal.open(terminalHostRef.current);
+      terminal.open(terminalHostNode);
       fitAddon.fit();
+      terminal.attachCustomKeyEventHandler((event) => {
+        if (isMobileShell || event.type !== 'keydown') {
+          return true;
+        }
+
+        if (
+          event.ctrlKey &&
+          !event.altKey &&
+          !event.metaKey &&
+          !event.shiftKey
+        ) {
+          const sequence = controlSequenceForLetter(event.key);
+          if (!sequence) {
+            return true;
+          }
+
+          if (sendShellInput(sequence)) {
+            event.preventDefault();
+            return false;
+          }
+
+          return true;
+        }
+
+        return true;
+      });
       terminalRef.current = terminal;
       fitAddonRef.current = fitAddon;
+      setTerminalReady(true);
 
       resizeObserverRef.current = new ResizeObserver(() => {
         fitAddon.fit();
@@ -166,19 +367,10 @@ export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
           });
         }
       });
-      resizeObserverRef.current.observe(terminalHostRef.current);
+      resizeObserverRef.current.observe(terminalHostNode);
 
       inputSubscription = terminal.onData((data) => {
-        if (!socketRef.current || !shellIdRef.current || !viewerIdRef.current) {
-          return;
-        }
-
-        socketRef.current.send({
-          type: 'shell.input',
-          shellId: shellIdRef.current,
-          viewerId: viewerIdRef.current,
-          data,
-        });
+        sendShellInput(data);
       });
     })();
 
@@ -187,11 +379,12 @@ export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
       inputSubscription?.dispose();
       resizeObserverRef.current?.disconnect();
       resizeObserverRef.current = null;
+      setTerminalReady(false);
       terminalRef.current?.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
     };
-  }, []);
+  }, [isMobileShell, sendShellInput, terminalHostNode]);
 
   useEffect(() => {
     const currentShellState = shellStateRef.current;
@@ -212,13 +405,14 @@ export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
     }
 
     const terminal = terminalRef.current;
-    if (!terminal) {
+    if (!terminal || !terminalReady) {
       return;
     }
 
     terminal.reset();
     setConnectionError(null);
     viewerIdRef.current = null;
+    terminal.focus();
 
     const shellSocket = connectShellSocket({
       onConnected: () => {
@@ -254,11 +448,20 @@ export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
         if (event.type === 'shell.output') {
           const data = typeof event.payload.data === 'string' ? event.payload.data : '';
           const replace = event.payload.replace === true;
+          const cursorX =
+            typeof event.payload.cursorX === 'number' ? event.payload.cursorX : undefined;
+          const cursorY =
+            typeof event.payload.cursorY === 'number' ? event.payload.cursorY : undefined;
+          const paneHeight =
+            typeof event.payload.paneHeight === 'number'
+              ? event.payload.paneHeight
+              : undefined;
           if (data) {
             if (replace) {
-              terminal.reset();
+              renderShellSnapshot(terminal, data, cursorX, cursorY, paneHeight);
+            } else {
+              terminal.write(data);
             }
-            terminal.write(data);
           }
           return;
         }
@@ -277,6 +480,36 @@ export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
                   }
                 : current,
             );
+          }
+          return;
+        }
+
+        if (event.type === 'shell.detached') {
+          const detachedViewerId = String(event.payload.viewerId ?? '');
+          const detachedReason = String(event.payload.reason ?? '');
+          if (detachedViewerId && detachedViewerId === viewerIdRef.current) {
+            viewerIdRef.current = null;
+            setShellState((current) =>
+              current
+                ? {
+                    ...current,
+                    state: 'detached',
+                    shell: current.shell
+                      ? {
+                          ...current.shell,
+                          status: 'detached',
+                          attachedViewerId: null,
+                        }
+                      : current.shell,
+                  }
+                : current,
+            );
+            if (detachedReason === 'replaced') {
+              setConnectionError('This shell connection was taken over by another device.');
+            } else {
+              setConnectionError(null);
+            }
+            shellSocket.socket.close();
           }
           return;
         }
@@ -354,7 +587,7 @@ export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
         socketRef.current = null;
       }
     };
-  }, [reconnectKey, shellState?.shell?.id]);
+  }, [reconnectKey, shellState?.shell?.id, terminalReady]);
 
   async function handleCreateShell() {
     setBusy(true);
@@ -376,6 +609,16 @@ export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
     }
   }
 
+  async function handleReconnectShell() {
+    if (status === 'exited' || status === 'not_found') {
+      await handleCreateShell();
+      return;
+    }
+
+    setConnectionError(null);
+    setReconnectKey((current) => current + 1);
+  }
+
   async function handleTerminateShell() {
     if (!shellState?.shell) {
       return;
@@ -395,8 +638,135 @@ export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
     }
   }
 
+  function handleDisconnectShell() {
+    const socket = socketRef.current;
+    const shellId = shellIdRef.current;
+    const viewerId = viewerIdRef.current;
+
+    if (!socket || !shellId) {
+      return;
+    }
+
+    if (viewerId) {
+      socket.send({
+        type: 'shell.detach',
+        shellId,
+        viewerId,
+      });
+    }
+
+    viewerIdRef.current = null;
+    socket.socket.close();
+    if (socketRef.current?.socket === socket.socket) {
+      socketRef.current = null;
+    }
+
+    setConnectionError(null);
+    setShellState((current) =>
+      current
+        ? {
+            ...current,
+            state: 'detached',
+            shell: current.shell
+              ? {
+                  ...current.shell,
+                  status: 'detached',
+                  attachedViewerId: null,
+                }
+              : current.shell,
+          }
+        : current,
+    );
+  }
+
+  async function handleConnectionToggle() {
+    if (busy || loading || status === 'creating' || status === 'workspace_missing') {
+      return;
+    }
+
+    if (status === 'attached') {
+      handleDisconnectShell();
+      return;
+    }
+
+    if (status === 'exited' || status === 'not_found' || !shellMeta) {
+      await handleCreateShell();
+      return;
+    }
+
+    await handleReconnectShell();
+  }
+
+  async function handlePasteFromClipboard() {
+    if (!navigator.clipboard?.readText) {
+      setTransientToolboxFeedback('failed', 'Paste is unavailable here');
+      return;
+    }
+
+    try {
+      const clipboardText = await navigator.clipboard.readText();
+      if (!clipboardText) {
+        setTransientToolboxFeedback('failed', 'Clipboard is empty');
+        return;
+      }
+
+      if (!sendShellInput(clipboardText)) {
+        setTransientToolboxFeedback('failed', 'Connect the shell first');
+        return;
+      }
+
+      setTransientToolboxFeedback('done', 'Pasted');
+    } catch {
+      setTransientToolboxFeedback('failed', 'Paste was blocked');
+    }
+  }
+
+  async function handleCopySelection() {
+    try {
+      const selectedText =
+        terminalRef.current?.getSelection()?.trim() ||
+        window.getSelection?.()?.toString().trim() ||
+        getVisibleTerminalText(terminalHostNode);
+
+      if (!selectedText) {
+        setTransientToolboxFeedback('failed', 'Nothing to copy');
+        return;
+      }
+
+      await navigator.clipboard.writeText(selectedText);
+      setTransientToolboxFeedback('done', 'Copied');
+    } catch {
+      setTransientToolboxFeedback('failed', 'Copy failed');
+    }
+  }
+
   const status = shellState?.state ?? 'not_created';
   const shellMeta = useMemo(() => shellState?.shell ?? null, [shellState?.shell]);
+  const shellInputEnabled = Boolean(viewerIdRef.current && shellMeta);
+  const connectionButtonDisabled =
+    busy || loading || status === 'creating' || status === 'workspace_missing';
+  const connectionButtonClassName =
+    status === 'attached'
+      ? 'border-emerald-300/45 bg-emerald-300/18 text-emerald-50 ring-1 ring-emerald-300/20 hover:bg-emerald-300/24'
+      : status === 'exited' || status === 'not_found'
+        ? 'border-amber-300/35 bg-amber-300/12 text-amber-50 hover:bg-amber-300/18'
+        : status === 'workspace_missing'
+          ? 'border-rose-300/35 bg-rose-300/12 text-rose-100'
+          : 'border-sky-300/35 bg-sky-300/12 text-sky-100 hover:bg-sky-300/18';
+  const connectionButtonLabel =
+    status === 'attached'
+      ? 'Disconnect shell'
+      : status === 'exited' || status === 'not_found'
+        ? 'Restart shell'
+        : shellMeta
+          ? 'Connect shell'
+          : 'Create shell';
+  const toolboxFeedbackToneClassName =
+    toolboxFeedback?.tone === 'done'
+      ? 'border-emerald-300/35 bg-emerald-300/12 text-emerald-50'
+      : toolboxFeedback?.tone === 'failed'
+        ? 'border-rose-300/35 bg-rose-300/12 text-rose-50'
+        : 'border-stone-700/90 bg-stone-900/90 text-stone-200';
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-stone-900/30">
@@ -409,31 +779,18 @@ export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <span
-              className={`rounded-full border px-2.5 py-1 text-[11px] uppercase tracking-[0.18em] ${statusToneClassName(status)}`}
+            <button
+              type="button"
+              aria-label={connectionButtonLabel}
+              title={`${connectionButtonLabel} (${statusLabel(status)})`}
+              disabled={connectionButtonDisabled}
+              onClick={() => void handleConnectionToggle()}
+              className={`inline-flex h-10 w-10 items-center justify-center rounded-full border shadow-lg shadow-stone-950/25 transition disabled:cursor-not-allowed disabled:opacity-60 ${connectionButtonClassName}`}
             >
-              {statusLabel(status)}
-            </span>
-            {!shellMeta && (
-              <button
-                type="button"
-                disabled={busy || loading || status === 'workspace_missing'}
-                onClick={() => void handleCreateShell()}
-                className="rounded-full bg-emerald-300 px-3 py-2 text-sm font-medium text-stone-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:bg-stone-700 disabled:text-stone-300"
-              >
-                {busy ? 'Creating...' : 'Create Shell'}
-              </button>
-            )}
+              <ConnectionIcon connected={status === 'attached'} />
+            </button>
             {shellMeta && (
               <>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => setReconnectKey((current) => current + 1)}
-                  className="rounded-full border border-sky-300/35 bg-sky-300/12 px-3 py-2 text-sm text-sky-100 transition hover:bg-sky-300/18 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  Reconnect
-                </button>
                 <button
                   type="button"
                   disabled={busy}
@@ -474,8 +831,148 @@ export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
           </div>
         ) : (
           <div className="h-full min-h-0 p-2 sm:p-3">
-            <div className="h-full rounded-[1.4rem] border border-stone-800 bg-[#0c1117] shadow-inner shadow-black/25">
-              <div ref={terminalHostRef} className="h-full w-full px-2 py-2 sm:px-3 sm:py-3" />
+            <div className="relative h-full rounded-[1.4rem] border border-stone-800 bg-[#0c1117] shadow-inner shadow-black/25">
+              <div
+                ref={setTerminalHostNode}
+                className={`h-full w-full px-2 py-2 sm:px-3 sm:py-3 ${isMobileShell ? 'mobile-shell-selectable' : ''}`}
+                onMouseDown={() => {
+                  terminalRef.current?.focus();
+                }}
+              />
+              {isMobileShell && (
+                <div className="pointer-events-none absolute bottom-3 right-3 z-20 flex flex-col items-end gap-2">
+                  {toolboxFeedback && (
+                    <div
+                      className={`pointer-events-auto rounded-full border px-3 py-1.5 text-[11px] shadow-lg shadow-stone-950/30 backdrop-blur ${toolboxFeedbackToneClassName}`}
+                    >
+                      {toolboxFeedback.text}
+                    </div>
+                  )}
+                  {toolboxOpen && (
+                    <div className="pointer-events-auto rounded-[1.2rem] border border-stone-700/90 bg-stone-950/92 p-2 shadow-2xl shadow-black/35 backdrop-blur">
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void handlePasteFromClipboard()}
+                          className="inline-flex items-center justify-center rounded-full border border-sky-300/35 bg-sky-300/12 px-2.5 py-2 text-sky-50"
+                        >
+                          <span className="inline-flex items-center gap-1.5">
+                            <ClipboardIcon />
+                            <span className="text-[11px] font-medium tracking-[0.12em]">
+                              Paste
+                            </span>
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleCopySelection()}
+                          className="inline-flex items-center justify-center rounded-full border border-stone-700/90 bg-stone-900/80 px-2.5 py-2 text-stone-100"
+                        >
+                          <span className="inline-flex items-center gap-1.5">
+                            <ClipboardIcon />
+                            <span className="text-[11px] font-medium tracking-[0.12em]">
+                              Copy
+                            </span>
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!shellInputEnabled}
+                          onClick={() => {
+                            if (sendShellInput('\u0003')) {
+                              setTransientToolboxFeedback('done', 'Sent Ctrl-C');
+                            } else {
+                              setTransientToolboxFeedback('failed', 'Connect the shell first');
+                            }
+                          }}
+                          className="disabled:opacity-45"
+                        >
+                          <ControlIcon label="CTRL-C" tone="rose" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!shellInputEnabled}
+                          onClick={() => {
+                            if (sendShellInput('\u0004')) {
+                              setTransientToolboxFeedback('done', 'Sent Ctrl-D');
+                            } else {
+                              setTransientToolboxFeedback('failed', 'Connect the shell first');
+                            }
+                          }}
+                          className="disabled:opacity-45"
+                        >
+                          <ControlIcon label="CTRL-D" tone="stone" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!shellInputEnabled}
+                          onClick={() => {
+                            if (sendShellInput('\u001b')) {
+                              setTransientToolboxFeedback('done', 'Sent Esc');
+                            } else {
+                              setTransientToolboxFeedback('failed', 'Connect the shell first');
+                            }
+                          }}
+                          className="disabled:opacity-45"
+                        >
+                          <ControlIcon label="ESC" tone="stone" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!shellInputEnabled}
+                          onClick={() => {
+                            if (sendShellInput('\t')) {
+                              setTransientToolboxFeedback('done', 'Sent Tab');
+                            } else {
+                              setTransientToolboxFeedback('failed', 'Connect the shell first');
+                            }
+                          }}
+                          className="disabled:opacity-45"
+                        >
+                          <ControlIcon label="TAB" tone="stone" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!shellInputEnabled}
+                          onClick={() => {
+                            if (sendShellInput('\u001b[A')) {
+                              setTransientToolboxFeedback('done', 'Sent Up');
+                            } else {
+                              setTransientToolboxFeedback('failed', 'Connect the shell first');
+                            }
+                          }}
+                          className="disabled:opacity-45"
+                        >
+                          <ControlIcon label="UP" tone="stone" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!shellInputEnabled}
+                          onClick={() => {
+                            if (sendShellInput('\u001b[B')) {
+                              setTransientToolboxFeedback('done', 'Sent Down');
+                            } else {
+                              setTransientToolboxFeedback('failed', 'Connect the shell first');
+                            }
+                          }}
+                          className="disabled:opacity-45"
+                        >
+                          <ControlIcon label="DOWN" tone="stone" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    aria-expanded={toolboxOpen}
+                    aria-label={toolboxOpen ? 'Close shell tools' : 'Open shell tools'}
+                    onClick={() => setToolboxOpen((current) => !current)}
+                    className="pointer-events-auto inline-flex h-11 w-11 items-center justify-center rounded-full border border-stone-700/90 bg-stone-950/90 text-stone-100 shadow-2xl shadow-black/35 backdrop-blur transition hover:bg-stone-900"
+                  >
+                    <WrenchIcon />
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
