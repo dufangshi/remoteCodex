@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createWorkspace, importThread, markWorkspaceOpened, resumeThread } from './api';
+import {
+  createThreadShell,
+  createWorkspace,
+  importThread,
+  markWorkspaceOpened,
+  resumeThread,
+  terminateShell,
+} from './api';
 
 describe('api request helper', () => {
   beforeEach(() => {
@@ -39,5 +46,17 @@ describe('api request helper', () => {
       const headers = new Headers(init?.headers);
       expect(headers.get('Content-Type')).toBe('application/json');
     }
+  });
+
+  it('keeps shell create and terminate request shapes aligned', async () => {
+    await createThreadShell('thread-1', { cols: 120, rows: 40 });
+    await terminateShell('shell-1');
+
+    const calls = vi.mocked(fetch).mock.calls;
+    expect(calls[0]?.[0]).toBe('/api/threads/thread-1/shell');
+    expect(calls[0]?.[1]?.method).toBe('POST');
+    expect(calls[0]?.[1]?.body).toBe(JSON.stringify({ cols: 120, rows: 40 }));
+    expect(calls[1]?.[0]).toBe('/api/shells/shell-1/terminate');
+    expect(calls[1]?.[1]?.method).toBe('POST');
   });
 });

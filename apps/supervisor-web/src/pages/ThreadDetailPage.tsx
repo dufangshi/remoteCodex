@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
 import {
@@ -8,6 +8,7 @@ import {
   ThreadDto,
 } from '../../../../packages/shared/src/index';
 import { ThreadComposer } from '../components/ThreadComposer';
+import { ThreadShellPanel } from '../components/ThreadShellPanel';
 import { ThreadTimeline } from '../components/ThreadTimeline';
 import { ThreadWorkspaceLayout } from '../components/ThreadWorkspaceLayout';
 import {
@@ -47,11 +48,12 @@ export function ThreadDetailPage() {
   const [scrollRequestKey, setScrollRequestKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [activeView, setActiveView] = useState<'chat' | 'shell'>('chat');
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [respondingRequestId, setRespondingRequestId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  function flushBufferedLiveOutput() {
+  const flushBufferedLiveOutput = useCallback(() => {
     const buffered = liveOutputBufferRef.current;
     liveOutputBufferRef.current = '';
     liveOutputFrameRef.current = null;
@@ -61,26 +63,29 @@ export function ThreadDetailPage() {
     }
 
     setLiveOutput((current) => current + buffered);
-  }
+  }, []);
 
-  function queueLiveOutputDelta(delta: string) {
-    liveOutputBufferRef.current += delta;
-    if (liveOutputFrameRef.current !== null) {
-      return;
-    }
+  const queueLiveOutputDelta = useCallback(
+    (delta: string) => {
+      liveOutputBufferRef.current += delta;
+      if (liveOutputFrameRef.current !== null) {
+        return;
+      }
 
-    liveOutputFrameRef.current = window.requestAnimationFrame(() => {
-      flushBufferedLiveOutput();
-    });
-  }
+      liveOutputFrameRef.current = window.requestAnimationFrame(() => {
+        flushBufferedLiveOutput();
+      });
+    },
+    [flushBufferedLiveOutput],
+  );
 
-  function clearBufferedLiveOutput() {
+  const clearBufferedLiveOutput = useCallback(() => {
     liveOutputBufferRef.current = '';
     if (liveOutputFrameRef.current !== null) {
       window.cancelAnimationFrame(liveOutputFrameRef.current);
       liveOutputFrameRef.current = null;
     }
-  }
+  }, []);
 
   useEffect(() => {
     async function loadThreadDetail(showLoading = true) {
@@ -167,7 +172,7 @@ export function ThreadDetailPage() {
       clearBufferedLiveOutput();
       socket.close();
     };
-  }, [id]);
+  }, [clearBufferedLiveOutput, id, queueLiveOutputDelta]);
 
   async function handlePrompt(prompt: string) {
     setBusy(true);
@@ -451,10 +456,28 @@ export function ThreadDetailPage() {
       <div className="-mx-4 flex h-[calc(100dvh-1rem)] max-h-[calc(100dvh-1rem)] flex-col overflow-hidden rounded-none border-y border-stone-800 bg-stone-900/85 shadow-2xl shadow-stone-950/20 sm:mx-0 sm:h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-2rem)] sm:rounded-[2rem] sm:border">
         <header className="shrink-0 border-b border-stone-800 bg-stone-900/95 px-3 py-3 backdrop-blur sm:px-5">
           <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <h2 className="truncate text-base font-medium text-stone-100 sm:text-xl">
-                {detail?.thread.title ?? 'Loading thread'}
-              </h2>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <h2 className="truncate text-base font-medium text-stone-100 sm:text-xl">
+                  {detail?.thread.title ?? 'Loading thread'}
+                </h2>
+                <div className="inline-flex rounded-full border border-stone-700 bg-stone-950/70 p-0.5">
+                  {(['chat', 'shell'] as const).map((view) => (
+                    <button
+                      key={view}
+                      type="button"
+                      onClick={() => setActiveView(view)}
+                      className={`rounded-full px-3 py-1.5 text-xs font-medium uppercase tracking-[0.18em] transition ${
+                        activeView === view
+                          ? 'bg-stone-100 text-stone-950'
+                          : 'text-stone-400 hover:text-stone-100'
+                      }`}
+                    >
+                      {view}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <p className="mt-1 truncate text-xs text-stone-500">
                 {detail?.workspace.label ?? 'Resolving workspace'}
               </p>
@@ -531,34 +554,40 @@ export function ThreadDetailPage() {
                 </p>
               </div>
             )}
-            <ThreadTimeline
-              turns={detail.turns}
-              pendingRequests={detail.pendingRequests}
-              livePlan={livePlan}
-              respondingRequestId={respondingRequestId}
-              onRespondToRequest={handleRespondToRequest}
-              liveOutput={liveOutput}
-              followTail={followTail}
-              scrollRequestKey={scrollRequestKey}
-              className="min-h-0 flex-1 bg-stone-900/30"
-            />
-            <ThreadComposer
-              busy={busy}
-              settingsBusy={settingsBusy}
-              error={null}
-              model={detail.thread.model}
-              reasoningEffort={detail.thread.reasoningEffort}
-              collaborationMode={detail.thread.collaborationMode}
-              modelOptions={modelOptions}
-              followTail={followTail}
-              disabled={Boolean(promptDisabledReason)}
-              disabledPlaceholder={promptDisabledReason ?? undefined}
-              canInterrupt={Boolean(detail.thread.activeTurnId)}
-              onSubmit={handlePrompt}
-              onInterrupt={handleInterrupt}
-              onToggleFollow={() => setFollowTail((current) => !current)}
-              onUpdateSettings={handleUpdateThreadSettings}
-            />
+            {activeView === 'chat' ? (
+              <>
+                <ThreadTimeline
+                  turns={detail.turns}
+                  pendingRequests={detail.pendingRequests}
+                  livePlan={livePlan}
+                  respondingRequestId={respondingRequestId}
+                  onRespondToRequest={handleRespondToRequest}
+                  liveOutput={liveOutput}
+                  followTail={followTail}
+                  scrollRequestKey={scrollRequestKey}
+                  className="min-h-0 flex-1 bg-stone-900/30"
+                />
+                <ThreadComposer
+                  busy={busy}
+                  settingsBusy={settingsBusy}
+                  error={null}
+                  model={detail.thread.model}
+                  reasoningEffort={detail.thread.reasoningEffort}
+                  collaborationMode={detail.thread.collaborationMode}
+                  modelOptions={modelOptions}
+                  followTail={followTail}
+                  disabled={Boolean(promptDisabledReason)}
+                  disabledPlaceholder={promptDisabledReason ?? undefined}
+                  canInterrupt={Boolean(detail.thread.activeTurnId)}
+                  onSubmit={handlePrompt}
+                  onInterrupt={handleInterrupt}
+                  onToggleFollow={() => setFollowTail((current) => !current)}
+                  onUpdateSettings={handleUpdateThreadSettings}
+                />
+              </>
+            ) : (
+              <ThreadShellPanel threadId={detail.thread.id} />
+            )}
           </>
         ) : (
           <div className="flex flex-1 items-center justify-center px-6 py-12 text-center text-stone-400">

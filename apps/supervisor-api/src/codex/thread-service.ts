@@ -5,7 +5,6 @@ import {
   CodexAppServerManager,
   CodexServerRequest,
   CodexServerEvent,
-  CollaborationModeKind,
   CodexThreadRecord,
   CodexTurnItem,
   CodexTurnRecord,

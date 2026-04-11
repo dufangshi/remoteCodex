@@ -10,9 +10,15 @@ import type {
   ResumeThreadInput,
   RuntimeConfigDto,
   SendThreadPromptInput,
+  ShellEventEnvelope,
+  ShellSessionDto,
+  SupervisorConnectedEnvelope,
+  SupervisorSocketClientEnvelope,
+  SupervisorSocketServerEnvelope,
   ThreadDetailDto,
   ThreadDto,
   ThreadEventEnvelope,
+  ThreadShellStateDto,
   UpdateThreadSettingsInput,
   UpdateThreadInput,
   UpdateWorkspaceInput,
@@ -77,6 +83,10 @@ export function fetchThreadDetail(id: string) {
   return request<ThreadDetailDto>(`/api/threads/${id}`);
 }
 
+export function fetchThreadShellState(id: string) {
+  return request<ThreadShellStateDto>(`/api/threads/${id}/shell`);
+}
+
 export function createThread(input: CreateThreadInput) {
   return request<ThreadDto>('/api/threads/start', {
     method: 'POST',
@@ -88,6 +98,19 @@ export function importThread(sessionId: ImportThreadInput['sessionId']) {
   return request<ThreadDetailDto>('/api/threads/import', {
     method: 'POST',
     body: JSON.stringify({ sessionId })
+  });
+}
+
+export function createThreadShell(id: string, input: { cols?: number; rows?: number } = {}) {
+  return request<ThreadShellStateDto>(`/api/threads/${id}/shell`, {
+    method: 'POST',
+    ...(Object.keys(input).length > 0 ? { body: JSON.stringify(input) } : {})
+  });
+}
+
+export function terminateShell(id: string) {
+  return request<ShellSessionDto>(`/api/shells/${id}/terminate`, {
+    method: 'POST'
   });
 }
 
@@ -184,8 +207,8 @@ export function connectSupervisorEvents(onEvent: (event: ThreadEventEnvelope) =>
 
   socket.addEventListener('message', (message) => {
     try {
-      const parsed = JSON.parse(message.data as string) as ThreadEventEnvelope | { type: string };
-      if ('threadId' in parsed) {
+      const parsed = JSON.parse(message.data as string) as SupervisorSocketServerEnvelope;
+      if ('threadId' in parsed && parsed.type.startsWith('thread.')) {
         onEvent(parsed);
       }
     } catch {
@@ -194,4 +217,40 @@ export function connectSupervisorEvents(onEvent: (event: ThreadEventEnvelope) =>
   });
 
   return socket;
+}
+
+export function connectShellSocket(
+  handlers: {
+    onConnected?: (event: SupervisorConnectedEnvelope) => void;
+    onShellEvent?: (event: ShellEventEnvelope) => void;
+  } = {}
+) {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const isLocalViteSession =
+    import.meta.env.DEV &&
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+  const socketHost = isLocalViteSession ? '127.0.0.1:8787' : window.location.host;
+  const socket = new WebSocket(`${protocol}//${socketHost}/ws`);
+
+  socket.addEventListener('message', (message) => {
+    try {
+      const parsed = JSON.parse(message.data as string) as SupervisorSocketServerEnvelope;
+      if (parsed.type === 'supervisor.connected') {
+        handlers.onConnected?.(parsed);
+        return;
+      }
+      if ('shellId' in parsed && parsed.type.startsWith('shell.')) {
+        handlers.onShellEvent?.(parsed);
+      }
+    } catch {
+      // Ignore malformed socket payloads.
+    }
+  });
+
+  return {
+    socket,
+    send(message: SupervisorSocketClientEnvelope) {
+      socket.send(JSON.stringify(message));
+    }
+  };
 }

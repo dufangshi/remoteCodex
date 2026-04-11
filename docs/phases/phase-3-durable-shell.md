@@ -239,14 +239,14 @@ session 命名规则必须稳定，可从 thread ID 推导。
 
 以下项目必须全部打钩，Phase 3 才算通过：
 
-- [ ] 已实现 `tmux` 的创建、查询、输入、输出、终止、状态检查封装。
-- [ ] 已建立稳定的 `tmux session name` 命名规则，可从 thread 唯一推导。
-- [ ] 已实现 `ShellSession` 服务，并持久化 thread、workspace、`tmux session` 的映射。
-- [ ] 已将 shell 创建规则改为“用户显式创建”，而不是创建 thread 时自动创建。
-- [ ] 已实现 shell 输出到 WebSocket、前端输入到 shell 的双向桥接。
-- [ ] 已实现 viewer detach 不影响 shell 存活的生命周期规则。
-- [ ] 已实现浏览器断线重连后的自动恢复或显式恢复能力。
-- [ ] 已实现 supervisor 重启后扫描并恢复既有 `tmux session` 的能力。
+- [x] 已实现 `tmux` 的创建、查询、输入、输出、终止、状态检查封装。
+- [x] 已建立稳定的 `tmux session name` 命名规则，可从 thread 唯一推导。
+- [x] 已实现 `ShellSession` 服务，并持久化 thread、workspace、`tmux session` 的映射。
+- [x] 已将 shell 创建规则改为“用户显式创建”，而不是创建 thread 时自动创建。
+- [x] 已实现 shell 输出到 WebSocket、前端输入到 shell 的双向桥接。
+- [x] 已实现 viewer detach 不影响 shell 存活的生命周期规则。
+- [x] 已实现浏览器断线重连后的自动恢复或显式恢复能力。
+- [x] 已实现 supervisor 重启后扫描并恢复既有 `tmux session` 的能力。
 - [x] 已实现通过本机 Codex `session id` 恢复 `cwd` 与 session 元信息的能力。
 - [x] 已实现 imported thread 的持久化模型，并保存 `codex_session_id` 绑定关系。
 - [x] 已实现 supervisor 对现有 workspace 的路径匹配逻辑。
@@ -255,10 +255,10 @@ session 命名规则必须稳定，可从 thread ID 推导。
 - [x] 已实现 imported thread 导入后仅查看历史、不自动 resume 的规则。
 - [x] 已实现继续发送新 prompt 前必须手动 `Resume / Connect` 的规则。
 - [x] 已实现对重复导入同一 `codex_session_id` 的防重处理。
-- [ ] 已明确区分并展示 viewer 断连、shell 退出、shell 未找到、workspace 路径缺失等状态。
-- [ ] 已在 UI 中提供稳定可用的 shell 主视图。
+- [x] 已明确区分并展示 viewer 断连、shell 退出、shell 未找到、workspace 路径缺失等状态。
+- [x] 已在 UI 中提供稳定可用的 shell 主视图。
 - [ ] 已保留只读 tree，并与 shell 所属 workspace、imported thread 所属 workspace 正确联动。
-- [ ] 已验证长任务在 viewer 断线期间不会被终止。
-- [ ] 已验证历史 thread 可重新接入其对应 shell。
-- [ ] 已验证本机已有 Codex session 可被正确导入并继续。
-- [ ] 已验证 `pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build` 全部通过。
+- [x] 已验证长任务在 viewer 断线期间不会被终止。
+- [x] 已验证历史 thread 可重新接入其对应 shell。
+- [x] 已验证本机已有 Codex session 可被正确导入并继续。
+- [x] 已验证 `pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build` 全部通过。

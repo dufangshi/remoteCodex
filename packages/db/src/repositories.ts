@@ -4,7 +4,7 @@ import { desc, eq, inArray } from 'drizzle-orm';
 
 import { DatabaseClient } from './client';
 import { getDefaultHostRecord } from './client';
-import { threads, workspaces } from './schema';
+import { shellSessions, threads, viewerSessions, workspaces } from './schema';
 
 export interface CreateWorkspaceRecordInput {
   absPath: string;
@@ -37,6 +37,33 @@ export interface UpdateThreadRecordInput {
   lastTurnStartedAt?: string | null;
   lastTurnCompletedAt?: string | null;
   updatedAt?: string;
+}
+
+export interface CreateShellSessionRecordInput {
+  workspaceId: string;
+  threadId: string | null;
+  tmuxSessionName: string;
+  cwd: string;
+  status: string;
+}
+
+export interface UpdateShellSessionRecordInput {
+  tmuxSessionName?: string;
+  cwd?: string;
+  status?: string;
+  updatedAt?: string;
+  lastActivityAt?: string | null;
+}
+
+export interface CreateViewerSessionRecordInput {
+  threadId: string | null;
+  shellId: string | null;
+  activeTab?: string | null;
+}
+
+export interface UpdateViewerSessionRecordInput {
+  lastHeartbeatAt?: string | null;
+  activeTab?: string | null;
 }
 
 export function listWorkspaceRecords(db: DatabaseClient) {
@@ -143,4 +170,114 @@ export function updateThreadRecord(db: DatabaseClient, id: string, input: Update
   };
 
   db.update(threads).set(updates).where(eq(threads.id, id)).run();
+}
+
+export function listShellSessionRecords(db: DatabaseClient) {
+  return db.select().from(shellSessions).orderBy(desc(shellSessions.updatedAt)).all();
+}
+
+export function getShellSessionRecordById(db: DatabaseClient, id: string) {
+  return db.select().from(shellSessions).where(eq(shellSessions.id, id)).get();
+}
+
+export function getShellSessionRecordByThreadId(db: DatabaseClient, threadId: string) {
+  return db.select().from(shellSessions).where(eq(shellSessions.threadId, threadId)).get();
+}
+
+export function createShellSessionRecord(
+  db: DatabaseClient,
+  input: CreateShellSessionRecordInput,
+) {
+  const now = new Date().toISOString();
+  const record = {
+    id: randomUUID(),
+    workspaceId: input.workspaceId,
+    threadId: input.threadId,
+    tmuxSessionName: input.tmuxSessionName,
+    cwd: input.cwd,
+    status: input.status,
+    createdAt: now,
+    updatedAt: now,
+    lastActivityAt: now,
+  };
+
+  db.insert(shellSessions).values(record).run();
+  return record;
+}
+
+export function updateShellSessionRecord(
+  db: DatabaseClient,
+  id: string,
+  input: UpdateShellSessionRecordInput,
+) {
+  const updates = {
+    ...input,
+    updatedAt: input.updatedAt ?? new Date().toISOString(),
+  };
+
+  db.update(shellSessions).set(updates).where(eq(shellSessions.id, id)).run();
+}
+
+export function createViewerSessionRecord(
+  db: DatabaseClient,
+  input: CreateViewerSessionRecordInput,
+) {
+  const now = new Date().toISOString();
+  const record = {
+    id: randomUUID(),
+    threadId: input.threadId ?? null,
+    shellId: input.shellId ?? null,
+    connectedAt: now,
+    lastHeartbeatAt: now,
+    activeTab: input.activeTab ?? null,
+  };
+
+  db.insert(viewerSessions).values(record).run();
+  return record;
+}
+
+export function getViewerSessionRecordById(db: DatabaseClient, id: string) {
+  return db.select().from(viewerSessions).where(eq(viewerSessions.id, id)).get();
+}
+
+export function getViewerSessionRecordByShellId(db: DatabaseClient, shellId: string) {
+  return db.select().from(viewerSessions).where(eq(viewerSessions.shellId, shellId)).get();
+}
+
+export function updateViewerSessionRecord(
+  db: DatabaseClient,
+  id: string,
+  input: UpdateViewerSessionRecordInput,
+) {
+  db.update(viewerSessions)
+    .set(input)
+    .where(eq(viewerSessions.id, id))
+    .run();
+}
+
+export function clearViewerSessionShell(db: DatabaseClient, id: string) {
+  db.update(viewerSessions)
+    .set({
+      shellId: null,
+      lastHeartbeatAt: new Date().toISOString(),
+      activeTab: null,
+    })
+    .where(eq(viewerSessions.id, id))
+    .run();
+}
+
+export function deleteViewerSessionRecord(db: DatabaseClient, id: string) {
+  db.delete(viewerSessions).where(eq(viewerSessions.id, id)).run();
+}
+
+export function deleteViewerSessionsByShellId(db: DatabaseClient, shellId: string) {
+  db.delete(viewerSessions).where(eq(viewerSessions.shellId, shellId)).run();
+}
+
+export function deleteViewerSessionsByThreadId(db: DatabaseClient, threadId: string) {
+  db.delete(viewerSessions).where(eq(viewerSessions.threadId, threadId)).run();
+}
+
+export function deleteAllViewerSessionRecords(db: DatabaseClient) {
+  db.delete(viewerSessions).run();
 }

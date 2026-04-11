@@ -10,15 +10,23 @@ import {
   runMigrations,
   seedDefaults
 } from '../../../packages/db/src/index';
-import { ApiErrorShape } from '../../../packages/shared/src/index';
+import {
+  ApiErrorShape,
+  ShellEventEnvelope,
+  SupervisorSocketClientEnvelope,
+  SupervisorSocketServerEnvelope,
+} from '../../../packages/shared/src/index';
 import { WorkspaceServiceError } from '../../../packages/workspace/src/index';
 import { SupervisorEventBus } from './codex/event-bus';
 import { LocalCodexSessionStore } from './codex/local-session-store';
 import { ThreadService } from './codex/thread-service';
 import { registerCodexRoutes } from './routes/codex';
+import { registerShellRoutes } from './routes/shells';
 import { registerSystemRoutes } from './routes/system';
 import { registerThreadRoutes } from './routes/threads';
 import { registerWorkspaceRoutes } from './routes/workspaces';
+import { ShellServiceError, ShellSessionService } from './shell/shell-session-service';
+import { TmuxManager } from './shell/tmux-manager';
 
 class HttpError extends Error {
   constructor(
@@ -35,6 +43,7 @@ export interface AppServices {
   codexManager: CodexAppServerManager;
   eventBus: SupervisorEventBus;
   threadService: ThreadService;
+  shellService: ShellSessionService;
 }
 
 declare module 'fastify' {
@@ -47,6 +56,7 @@ export function buildApp(
   options: {
     env?: NodeJS.ProcessEnv;
     codexManager?: CodexAppServerManager;
+    shellService?: ShellSessionService;
   } = {}
 ): FastifyInstance {
   const config = loadRuntimeConfig(options.env);
@@ -74,6 +84,9 @@ export function buildApp(
     localSessionStore,
     config.workspaceRoot
   );
+  const shellService =
+    options.shellService ??
+    new ShellSessionService(database.db, eventBus, new TmuxManager());
 
   const app = Fastify({
     logger: config.nodeEnv !== 'test'
@@ -84,7 +97,8 @@ export function buildApp(
     database,
     codexManager,
     eventBus,
-    threadService
+    threadService,
+    shellService
   });
 
   app.register(async (realtimeApp) => {
@@ -100,21 +114,120 @@ export function buildApp(
         } satisfies ApiErrorShape);
       },
       wsHandler: (socket) => {
-        socket.send(
-          JSON.stringify({
-            type: 'supervisor.connected',
-            timestamp: new Date().toISOString()
-          })
-        );
+        let attachedShell: { shellId: string; viewerId: string } | null = null;
+
+        function send(message: SupervisorSocketServerEnvelope) {
+          if (socket.readyState === 1) {
+            socket.send(JSON.stringify(message));
+          }
+        }
+
+        send({
+          type: 'supervisor.connected',
+          timestamp: new Date().toISOString()
+        });
 
         const unsubscribe = eventBus.onThreadEvent((event) => {
-          if (socket.readyState === 1) {
-            socket.send(JSON.stringify(event));
+          send(event);
+        });
+        const unsubscribeShell = eventBus.onShellEvent((event) => {
+          send(event);
+        });
+
+        socket.on('message', async (rawMessage: Buffer) => {
+          let parsed: SupervisorSocketClientEnvelope;
+          try {
+            parsed = JSON.parse(rawMessage.toString()) as SupervisorSocketClientEnvelope;
+          } catch {
+            return;
+          }
+
+          try {
+            if (parsed.type === 'shell.attach') {
+              if (
+                attachedShell &&
+                attachedShell.shellId !== parsed.shellId
+              ) {
+                await shellService.detachShell(
+                  attachedShell.shellId,
+                  attachedShell.viewerId,
+                );
+                attachedShell = null;
+              }
+
+              const attachment = await shellService.attachShell(parsed.shellId, {
+                cols: parsed.cols,
+                rows: parsed.rows,
+                onData: (data, replace) => {
+                  send({
+                    type: 'shell.output',
+                    shellId: parsed.shellId,
+                    timestamp: new Date().toISOString(),
+                    payload: {
+                      data,
+                      ...(replace ? { replace: true } : {}),
+                    }
+                  });
+                },
+              });
+              attachedShell = {
+                shellId: parsed.shellId,
+                viewerId: attachment.viewerId,
+              };
+              send({
+                type: 'shell.connected',
+                shellId: parsed.shellId,
+                timestamp: new Date().toISOString(),
+                payload: {
+                  viewerId: attachment.viewerId,
+                },
+              });
+              return;
+            }
+
+            if (parsed.type === 'shell.detach') {
+              await shellService.detachShell(parsed.shellId, parsed.viewerId);
+              if (
+                attachedShell?.shellId === parsed.shellId &&
+                attachedShell.viewerId === parsed.viewerId
+              ) {
+                attachedShell = null;
+              }
+              return;
+            }
+
+            if (parsed.type === 'shell.input') {
+              await shellService.sendInput(
+                parsed.shellId,
+                parsed.viewerId,
+                parsed.data,
+              );
+              return;
+            }
+
+            if (parsed.type === 'shell.resize') {
+              await shellService.resizeShell(
+                parsed.shellId,
+                parsed.viewerId,
+                parsed.cols,
+                parsed.rows,
+              );
+            }
+          } catch (error) {
+            send(makeShellErrorEnvelope(parsed.shellId, error));
           }
         });
 
         socket.on('close', () => {
+          if (attachedShell) {
+            void shellService.detachShell(
+              attachedShell.shellId,
+              attachedShell.viewerId,
+            ).catch(() => {});
+            attachedShell = null;
+          }
           unsubscribe();
+          unsubscribeShell();
         });
       }
     });
@@ -122,6 +235,7 @@ export function buildApp(
 
   app.register(registerSystemRoutes);
   app.register(registerCodexRoutes);
+  app.register(registerShellRoutes);
   app.register(registerThreadRoutes);
   app.register(registerWorkspaceRoutes);
 
@@ -174,6 +288,33 @@ export function buildApp(
       return;
     }
 
+    if (error instanceof ShellServiceError) {
+      const statusCode =
+        error.code === 'thread_not_found' || error.code === 'shell_not_found'
+          ? 404
+          : error.code === 'viewer_conflict' ||
+              error.code === 'shell_exists' ||
+              error.code === 'workspace_missing' ||
+              error.code === 'shell_not_running' ||
+              error.code === 'viewer_not_attached' ||
+              error.code === 'invalid_viewer'
+            ? 409
+            : 503;
+      reply.status(statusCode).send({
+        code:
+          statusCode === 404
+            ? 'not_found'
+            : statusCode === 409
+              ? 'conflict'
+              : 'service_unavailable',
+        message: error.message,
+        details: {
+          shellCode: error.code,
+        },
+      } satisfies ApiErrorShape);
+      return;
+    }
+
     if (error instanceof JsonRpcClientError) {
       const payload: ApiErrorShape = {
         code: 'service_unavailable',
@@ -196,6 +337,7 @@ export function buildApp(
   });
 
   app.addHook('onClose', async () => {
+    await shellService.stop();
     await codexManager.stop();
     database.sqlite.close();
   });
@@ -203,6 +345,7 @@ export function buildApp(
   app.addHook('onReady', async () => {
     try {
       await codexManager.start();
+      await shellService.syncShellStateOnStartup();
     } catch (error) {
       requestLog(app, error);
     }
@@ -221,3 +364,31 @@ function requestLog(app: FastifyInstance, error: unknown) {
 }
 
 export { HttpError };
+
+function makeShellErrorEnvelope(
+  shellId: string,
+  error: unknown,
+): ShellEventEnvelope {
+  if (error instanceof ShellServiceError) {
+    return {
+      type: 'shell.error',
+      shellId,
+      timestamp: new Date().toISOString(),
+      payload: {
+        code: error.code,
+        message: error.message,
+      },
+    };
+  }
+
+  return {
+    type: 'shell.error',
+    shellId,
+    timestamp: new Date().toISOString(),
+    payload: {
+      code: 'unknown',
+      message:
+        error instanceof Error ? error.message : 'Unexpected shell error.',
+    },
+  };
+}

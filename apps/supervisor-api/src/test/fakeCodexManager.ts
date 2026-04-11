@@ -157,5 +157,8 @@ export class FakeCodexManager extends EventEmitter {
     };
   }
 
-  respondToServerRequest(_id: number, _result: unknown) {}
+  respondToServerRequest(id: number, result: unknown) {
+    void id;
+    void result;
+  }
 }

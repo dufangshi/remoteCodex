@@ -8,7 +8,7 @@
     "build": "tsup src/index.ts --format esm --platform node --dts",
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run src/app.test.ts"
+    "test": "vitest run"
   },
   "dependencies": {
     "@fastify/websocket": "^11.0.2",

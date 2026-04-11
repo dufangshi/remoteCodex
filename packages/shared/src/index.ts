@@ -187,6 +187,62 @@ export interface ThreadDetailDto {
   pendingRequests: ThreadActionRequestDto[];
 }
 
+export type ShellStatusDto =
+  | 'not_created'
+  | 'creating'
+  | 'running'
+  | 'attached'
+  | 'detached'
+  | 'exited'
+  | 'not_found'
+  | 'workspace_missing';
+
+export interface ShellSessionDto {
+  id: string;
+  threadId: string;
+  workspaceId: string;
+  tmuxSessionName: string;
+  cwd: string;
+  status: Exclude<ShellStatusDto, 'not_created' | 'workspace_missing'>;
+  attachedViewerId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastActivityAt: string | null;
+}
+
+export interface ThreadShellStateDto {
+  threadId: string;
+  workspaceId: string;
+  workspacePathStatus: 'present' | 'missing';
+  state: ShellStatusDto;
+  shell: ShellSessionDto | null;
+}
+
+export interface ShellCreateInput {
+  cols?: number;
+  rows?: number;
+}
+
+export interface ShellAttachInput {
+  cols: number;
+  rows: number;
+}
+
+export interface ShellDetachInput {
+  viewerId: string;
+}
+
+export interface ShellInputInput {
+  viewerId: string;
+  data: string;
+}
+
+export interface ShellResizeInput {
+  viewerId: string;
+  cols: number;
+  rows: number;
+}
+
 export interface CreateThreadInput {
   workspaceId: string;
   title?: string;
@@ -245,3 +301,52 @@ export interface ThreadEventEnvelope {
   timestamp: string;
   payload: Record<string, unknown>;
 }
+
+export interface ShellEventEnvelope {
+  type:
+    | 'shell.connected'
+    | 'shell.status'
+    | 'shell.output'
+    | 'shell.detached'
+    | 'shell.exited'
+    | 'shell.error';
+  shellId: string;
+  timestamp: string;
+  payload: Record<string, unknown>;
+}
+
+export interface SupervisorConnectedEnvelope {
+  type: 'supervisor.connected';
+  timestamp: string;
+}
+
+export type SupervisorSocketServerEnvelope =
+  | SupervisorConnectedEnvelope
+  | ThreadEventEnvelope
+  | ShellEventEnvelope;
+
+export type SupervisorSocketClientEnvelope =
+  | {
+      type: 'shell.attach';
+      shellId: string;
+      cols: number;
+      rows: number;
+    }
+  | {
+      type: 'shell.detach';
+      shellId: string;
+      viewerId: string;
+    }
+  | {
+      type: 'shell.input';
+      shellId: string;
+      viewerId: string;
+      data: string;
+    }
+  | {
+      type: 'shell.resize';
+      shellId: string;
+      viewerId: string;
+      cols: number;
+      rows: number;
+    };
