@@ -17,12 +17,15 @@ import {
   DatabaseClient,
   deleteNotificationsByThreadId,
   deleteThreadRecord,
+  deleteThreadTurnMetadataByThreadId,
   deleteViewerSessionsByThreadId,
   getThreadRecordByCodexThreadId,
   getThreadRecordById,
   getWorkspaceRecordByPath,
   getWorkspaceRecordById,
+  listThreadTurnMetadataByThreadId,
   listThreadRecords,
+  upsertThreadTurnMetadata,
   updateThreadRecord
 } from '../../../../packages/db/src/index';
 import {
@@ -529,6 +532,24 @@ function turnToDto(turn: CodexTurnRecord): ThreadTurnDto {
   };
 }
 
+function buildTurnDto(
+  turn: ThreadTurnDto,
+  metadata:
+    | {
+        model: string | null;
+        reasoningEffort: string | null;
+        reasoningEffortAvailable: boolean | null;
+      }
+    | undefined,
+): ThreadTurnDto {
+  return {
+    ...turn,
+    model: metadata?.model ?? null,
+    reasoningEffort: normalizeReasoningEffort(metadata?.reasoningEffort),
+    reasoningEffortAvailable: metadata?.reasoningEffortAvailable ?? null,
+  };
+}
+
 function sliceTurnsForDetail<T extends { id: string }>(
   turns: T[],
   options: { limit?: number; beforeTurnId?: string } = {},
@@ -756,6 +777,12 @@ export class ThreadService {
 
     const loadedIds = new Set(await this.codexManager.listLoadedThreads().catch(() => []));
     const workspacePathStatus = (await pathExists(workspace.absPath)) ? 'present' : 'missing';
+    const turnMetadataById = new Map(
+      listThreadTurnMetadataByThreadId(this.db, localThreadId).map((entry) => [
+        entry.turnId,
+        entry,
+      ]),
+    );
     let remoteThread: CodexThreadRecord | null = null;
     try {
       remoteThread = await this.codexManager.readThread(record.codexThreadId);
@@ -773,7 +800,9 @@ export class ThreadService {
         thread: this.toThreadDto(updated, loadedIds),
         workspace: toWorkspaceDto(workspace),
         workspacePathStatus,
-        turns: pagedTurns.turns,
+        turns: pagedTurns.turns.map((turn) =>
+          buildTurnDto(turn, turnMetadataById.get(turn.id)),
+        ),
         totalTurnCount: pagedTurns.totalTurnCount,
         pendingRequests: this.listPendingRequests(updated.id)
       };
@@ -807,7 +836,9 @@ export class ThreadService {
       thread: this.toThreadDto(updated, loadedIds),
       workspace: toWorkspaceDto(workspace),
       workspacePathStatus,
-      turns: pagedTurns.turns.map(turnToDto),
+      turns: pagedTurns.turns.map((turn) =>
+        buildTurnDto(turnToDto(turn), turnMetadataById.get(turn.id)),
+      ),
       totalTurnCount: pagedTurns.totalTurnCount,
       pendingRequests: this.listPendingRequests(updated.id)
     };
@@ -994,6 +1025,16 @@ export class ThreadService {
       effort: normalizedReasoning,
       collaborationMode
     });
+    upsertThreadTurnMetadata(this.db, {
+      threadId: localThreadId,
+      turnId: turn.id,
+      model: effectiveModel,
+      reasoningEffort: normalizedReasoning,
+      reasoningEffortAvailable: this.reasoningEffortAvailableForModel(
+        modelRecords,
+        effectiveModel,
+      ),
+    });
 
     const patch: Parameters<typeof updateThreadRecord>[2] = {
       codexTurnId: turn.id,
@@ -1146,6 +1187,7 @@ export class ThreadService {
     this.dismissedPlanDecisionTurns.delete(localThreadId);
     deleteViewerSessionsByThreadId(this.db, localThreadId);
     deleteNotificationsByThreadId(this.db, localThreadId);
+    deleteThreadTurnMetadataByThreadId(this.db, localThreadId);
     deleteThreadRecord(this.db, localThreadId);
 
     return { id: localThreadId };
@@ -1659,5 +1701,24 @@ export class ThreadService {
     }
 
     return normalizeReasoningEffort(matchedModel.defaultReasoningEffort);
+  }
+
+  private reasoningEffortAvailableForModel(
+    modelRecords: Array<{
+      model: string;
+      supportedReasoningEfforts: Array<{ reasoningEffort: string }>;
+    }>,
+    model: string | null,
+  ): boolean | null {
+    if (!model) {
+      return null;
+    }
+
+    const matchedModel = modelRecords.find((entry) => entry.model === model);
+    if (!matchedModel) {
+      return null;
+    }
+
+    return matchedModel.supportedReasoningEfforts.length > 1;
   }
 }

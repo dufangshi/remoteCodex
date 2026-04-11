@@ -526,9 +526,80 @@ describe('ThreadTimeline', () => {
     );
 
     expect(screen.getByText('Turn 1')).toBeInTheDocument();
-    expect(screen.getByText('Sending')).toBeInTheDocument();
+    expect(screen.getByLabelText('Sending')).toBeInTheDocument();
     expect(screen.getByText('Ship this optimistic turn.')).toBeInTheDocument();
     expect(screen.getByText('streaming draft')).toBeInTheDocument();
+  });
+
+  it('shows per-turn model and reasoning metadata in the turn header', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            model: 'gpt-5.4',
+            reasoningEffort: 'high',
+            reasoningEffortAvailable: true,
+            items: [
+              {
+                id: 'agent-1',
+                kind: 'agentMessage',
+                text: 'Done.',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('gpt-5.4 · high')).toBeInTheDocument();
+    expect(screen.getByLabelText('Completed')).toBeInTheDocument();
+  });
+
+  it('shows -- for legacy turns and - for fixed-effort models', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'agent-1',
+                kind: 'agentMessage',
+                text: 'Legacy turn.',
+              },
+            ],
+          },
+          {
+            id: 'turn-2',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 2, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            model: 'gpt-5-mini',
+            reasoningEffort: null,
+            reasoningEffortAvailable: false,
+            items: [
+              {
+                id: 'agent-2',
+                kind: 'agentMessage',
+                text: 'Fixed effort turn.',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('-- · --')).toBeInTheDocument();
+    expect(screen.getByText('gpt-5-mini · -')).toBeInTheDocument();
   });
 
   it('auto-scrolls only while pinned near the bottom', async () => {

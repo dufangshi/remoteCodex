@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
 
-import { desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 
 import { DatabaseClient } from './client';
 import { getDefaultHostRecord } from './client';
 import {
   notifications,
   shellSessions,
+  threadTurnMetadata,
   threads,
   viewerSessions,
   workspaces,
@@ -45,6 +46,14 @@ export interface UpdateThreadRecordInput {
   lastTurnCompletedAt?: string | null;
   isConnected?: boolean;
   updatedAt?: string;
+}
+
+export interface UpsertThreadTurnMetadataInput {
+  threadId: string;
+  turnId: string;
+  model?: string | null;
+  reasoningEffort?: string | null;
+  reasoningEffortAvailable?: boolean | null;
 }
 
 export interface CreateShellSessionRecordInput {
@@ -191,6 +200,57 @@ export function deleteThreadRecord(db: DatabaseClient, id: string) {
 
 export function deleteThreadsByWorkspaceId(db: DatabaseClient, workspaceId: string) {
   db.delete(threads).where(eq(threads.workspaceId, workspaceId)).run();
+}
+
+export function listThreadTurnMetadataByThreadId(db: DatabaseClient, threadId: string) {
+  return db.select().from(threadTurnMetadata).where(eq(threadTurnMetadata.threadId, threadId)).all();
+}
+
+export function upsertThreadTurnMetadata(
+  db: DatabaseClient,
+  input: UpsertThreadTurnMetadataInput,
+) {
+  const now = new Date().toISOString();
+  const existing = db
+    .select()
+    .from(threadTurnMetadata)
+    .where(
+      and(
+        eq(threadTurnMetadata.threadId, input.threadId),
+        eq(threadTurnMetadata.turnId, input.turnId),
+      ),
+    )
+    .get();
+
+  if (existing) {
+    db.update(threadTurnMetadata)
+      .set({
+        model: input.model ?? null,
+        reasoningEffort: input.reasoningEffort ?? null,
+        reasoningEffortAvailable: input.reasoningEffortAvailable ?? null,
+        updatedAt: now,
+      })
+      .where(eq(threadTurnMetadata.id, existing.id))
+      .run();
+    return;
+  }
+
+  db.insert(threadTurnMetadata)
+    .values({
+      id: randomUUID(),
+      threadId: input.threadId,
+      turnId: input.turnId,
+      model: input.model ?? null,
+      reasoningEffort: input.reasoningEffort ?? null,
+      reasoningEffortAvailable: input.reasoningEffortAvailable ?? null,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .run();
+}
+
+export function deleteThreadTurnMetadataByThreadId(db: DatabaseClient, threadId: string) {
+  db.delete(threadTurnMetadata).where(eq(threadTurnMetadata.threadId, threadId)).run();
 }
 
 export function listShellSessionRecords(db: DatabaseClient) {

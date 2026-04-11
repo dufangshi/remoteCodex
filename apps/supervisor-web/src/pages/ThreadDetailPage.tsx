@@ -63,6 +63,9 @@ interface OptimisticTurnState {
   status: 'sending' | 'inProgress' | 'failed';
   error: string | null;
   prompt: string;
+  model: string | null;
+  reasoningEffort: ThreadDetailDto['thread']['reasoningEffort'];
+  reasoningEffortAvailable: boolean | null;
 }
 
 interface LocalAnsweredRequestNote {
@@ -99,6 +102,22 @@ function buildAnsweredRequestNote(
     title: request.title,
     summaryLines,
   };
+}
+
+function getReasoningEffortAvailability(
+  modelOptions: ModelOptionDto[],
+  model: string | null,
+) {
+  if (!model) {
+    return null;
+  }
+
+  const matchedModel = modelOptions.find((entry) => entry.model === model);
+  if (!matchedModel) {
+    return null;
+  }
+
+  return matchedModel.supportedReasoningEfforts.length > 1;
 }
 
 function CopyIcon() {
@@ -587,6 +606,8 @@ export function ThreadDetailPage() {
     setScrollRequestKey((current) => current + 1);
     const optimisticTurnId = `optimistic-${Date.now()}`;
     const optimisticStartedAt = new Date().toISOString();
+    const optimisticModel = detail?.thread.model ?? null;
+    const optimisticReasoningEffort = detail?.thread.reasoningEffort ?? null;
     setOptimisticTurn({
       id: optimisticTurnId,
       serverTurnId: null,
@@ -594,6 +615,12 @@ export function ThreadDetailPage() {
       status: 'sending',
       error: null,
       prompt: input.prompt,
+      model: optimisticModel,
+      reasoningEffort: optimisticReasoningEffort,
+      reasoningEffortAvailable: getReasoningEffortAvailability(
+        modelOptions,
+        optimisticModel,
+      ),
     });
 
     try {
@@ -1095,6 +1122,9 @@ export function ThreadDetailPage() {
           startedAt: optimisticTurn.startedAt,
           status: optimisticTurn.status,
           error: optimisticTurn.error,
+          model: optimisticTurn.model,
+          reasoningEffort: optimisticTurn.reasoningEffort,
+          reasoningEffortAvailable: optimisticTurn.reasoningEffortAvailable,
           items: [
             {
               id: `${optimisticTurn.id}-user-message`,

@@ -1104,10 +1104,10 @@ describe('ThreadDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
 
     expect(screen.getAllByText('Ship this optimistic prompt.').length).toBeGreaterThan(0);
-    expect(screen.getByText('Sending')).toBeInTheDocument();
+    expect(screen.getByLabelText('Sending')).toBeInTheDocument();
 
     await waitFor(() => {
-      expect(screen.getByText('Failed')).toBeInTheDocument();
+      expect(screen.getByLabelText('Failed')).toBeInTheDocument();
       expect(screen.getAllByText('Prompt delivery failed.').length).toBeGreaterThan(0);
     });
   });

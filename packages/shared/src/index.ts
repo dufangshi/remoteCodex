@@ -153,6 +153,9 @@ export interface ThreadTurnDto {
   startedAt: string | null;
   status: 'completed' | 'interrupted' | 'failed' | 'inProgress';
   error: string | null;
+  model?: string | null;
+  reasoningEffort?: ReasoningEffortDto | null;
+  reasoningEffortAvailable?: boolean | null;
   items: ThreadHistoryItemDto[];
 }
 

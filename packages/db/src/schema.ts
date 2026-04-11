@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 export const hosts = sqliteTable('hosts', {
   id: text('id').primaryKey(),
@@ -73,6 +73,28 @@ export const notifications = sqliteTable('notifications', {
   isRead: integer('is_read', { mode: 'boolean' }).notNull().default(false),
   createdAt: text('created_at').notNull()
 });
+
+export const threadTurnMetadata = sqliteTable(
+  'thread_turn_metadata',
+  {
+    id: text('id').primaryKey(),
+    threadId: text('thread_id').notNull(),
+    turnId: text('turn_id').notNull(),
+    model: text('model'),
+    reasoningEffort: text('reasoning_effort'),
+    reasoningEffortAvailable: integer('reasoning_effort_available', {
+      mode: 'boolean',
+    }),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => ({
+    threadTurnUnique: uniqueIndex('thread_turn_metadata_thread_turn_idx').on(
+      table.threadId,
+      table.turnId,
+    ),
+  }),
+);
 
 export const policies = sqliteTable('policies', {
   id: text('id').primaryKey(),

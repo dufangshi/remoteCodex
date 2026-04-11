@@ -458,6 +458,59 @@ describe('supervisor api', () => {
     });
   });
 
+  it('returns per-turn model metadata for turns started through the supervisor', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Turn Metadata Thread'
+      }
+    });
+
+    const createdThread = createResponse.json();
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Record the turn metadata.'
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+
+    const remoteThread = fakeCodexManager.threads.get(createdThread.codexThreadId);
+    expect(remoteThread).toBeTruthy();
+    remoteThread!.status = { type: 'idle' };
+    remoteThread!.turns = remoteThread!.turns.map((turn) => ({
+      ...turn,
+      status: 'completed' as const,
+    }));
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json().turns.at(-1)).toMatchObject({
+      model: 'gpt-5',
+      reasoningEffort: 'medium',
+      reasoningEffortAvailable: true,
+    });
+  });
+
   it('stores prompt attachments in the workspace temp directory and rewrites the prompt path', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',
