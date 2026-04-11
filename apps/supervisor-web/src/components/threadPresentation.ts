@@ -90,6 +90,8 @@ export function historyItemAccentClassName(kind: ThreadHistoryItemDto['kind']) {
       return 'border-cyan-400/45';
     case 'agentMessage':
       return 'border-emerald-400/45';
+    case 'image':
+      return 'border-indigo-300/45';
     case 'commandExecution':
       return 'border-amber-300/45';
     case 'webSearch':
@@ -113,6 +115,8 @@ export function historyItemLabel(kind: ThreadHistoryItemDto['kind']) {
       return 'User';
     case 'agentMessage':
       return 'Agent';
+    case 'image':
+      return 'Image';
     case 'commandExecution':
       return 'Command';
     case 'webSearch':

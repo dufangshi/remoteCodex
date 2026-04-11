@@ -725,6 +725,7 @@ export function ThreadDetailPage() {
             {activeView === 'chat' ? (
               <>
                 <ThreadTimeline
+                  threadId={detail.thread.id}
                   turns={detail.turns}
                   pendingRequests={detail.pendingRequests}
                   livePlan={livePlan}

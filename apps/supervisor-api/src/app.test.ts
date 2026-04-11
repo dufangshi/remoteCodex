@@ -460,6 +460,213 @@ describe('supervisor api', () => {
     expect(savedFiles[0]).toMatch(/^notes-[a-z0-9]{8}\.txt$/);
   });
 
+  it('accepts mobile photo uploads even when the browser sends an empty original file name', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Mobile Photo Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const manifest = [
+      {
+        clientId: 'attachment-1',
+        kind: 'photo',
+        originalName: '',
+        placeholder: '[PHOTO mobile-photo]'
+      }
+    ];
+    const multipart = buildMultipartPayload({
+      fields: {
+        prompt: 'Please inspect [PHOTO mobile-photo]',
+        attachmentManifest: JSON.stringify(manifest)
+      },
+      files: [
+        {
+          fieldName: 'attachments',
+          fileName: '',
+          contentType: 'image/heic',
+          content: Buffer.from('fake-heic')
+        }
+      ]
+    });
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: multipart.payload,
+      headers: {
+        'content-type': `multipart/form-data; boundary=${multipart.boundary}`
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+
+    const remoteThread = fakeCodexManager.threads.get(createdThread.codexThreadId);
+    const latestPrompt =
+      (remoteThread?.turns.at(-1) as any)?.items?.[0]?.content?.[0]?.text ?? '';
+    expect(latestPrompt).toContain('[PHOTO ./.temp/threads/');
+    expect(latestPrompt).toContain('/photo-');
+  });
+
+  it('accepts prompt attachments larger than 1 MB when still under the configured 25 MB limit', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Large Attachment Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const manifest = [
+      {
+        clientId: 'attachment-1',
+        kind: 'photo',
+        originalName: 'camera.jpg',
+        placeholder: '[PHOTO camera.jpg]'
+      }
+    ];
+    const multipart = buildMultipartPayload({
+      fields: {
+        prompt: 'Please inspect [PHOTO camera.jpg]',
+        attachmentManifest: JSON.stringify(manifest)
+      },
+      files: [
+        {
+          fieldName: 'attachments',
+          fileName: 'camera.jpg',
+          contentType: 'image/jpeg',
+          content: Buffer.alloc(2 * 1024 * 1024, 1)
+        }
+      ]
+    });
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: multipart.payload,
+      headers: {
+        'content-type': `multipart/form-data; boundary=${multipart.boundary}`
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+  });
+
+  it('maps image view history items and serves relative image assets for a thread', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Image History Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const imageBytes = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9sot4qkAAAAASUVORK5CYII=',
+      'base64'
+    );
+    const relativeImagePath = `./.temp/threads/${createdThread.id}/preview.png`;
+    const absoluteImagePath = path.join(
+      tempDir,
+      'workspace',
+      '.temp',
+      'threads',
+      createdThread.id,
+      'preview.png'
+    );
+    await fs.mkdir(path.dirname(absoluteImagePath), { recursive: true });
+    await fs.writeFile(absoluteImagePath, imageBytes);
+
+    const remoteThread = fakeCodexManager.threads.get(createdThread.codexThreadId);
+    expect(remoteThread).toBeTruthy();
+    remoteThread!.status = { type: 'idle' };
+    remoteThread!.turns = [
+      {
+        id: 'turn-image-1',
+        status: 'completed',
+        error: null,
+        items: [
+          {
+            id: 'image-item-1',
+            type: 'view_image',
+            text: 'Generated preview',
+            path: relativeImagePath
+          }
+        ]
+      } as any
+    ];
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json()).toMatchObject({
+      turns: [
+        {
+          items: [
+            {
+              kind: 'image',
+              text: 'Generated preview',
+              assetPath: relativeImagePath
+            }
+          ]
+        }
+      ]
+    });
+
+    const imageResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}/assets/image?path=${encodeURIComponent(relativeImagePath)}`
+    });
+
+    expect(imageResponse.statusCode).toBe(200);
+    expect(imageResponse.headers['content-type']).toContain('image/png');
+    expect(Buffer.compare(imageResponse.rawPayload, imageBytes)).toBe(0);
+  });
+
   it('updates a thread title', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',

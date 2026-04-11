@@ -28,6 +28,7 @@ import {
 } from './threadPresentation';
 
 interface ThreadTimelineProps {
+  threadId?: string;
   turns: ThreadTurnDto[];
   pendingRequests?: ThreadActionRequestDto[];
   livePlan?: {
@@ -62,6 +63,8 @@ function itemSurfaceClassName(kind: ThreadHistoryItemDto['kind']) {
       return 'bg-cyan-500/[0.045] text-stone-300';
     case 'agentMessage':
       return 'bg-slate-400/[0.11] text-stone-100 shadow-lg shadow-stone-950/10';
+    case 'image':
+      return 'bg-indigo-400/[0.07] text-stone-100';
     case 'commandExecution':
       return 'bg-amber-500/[0.06] text-stone-200';
     case 'webSearch':
@@ -210,6 +213,23 @@ function SearchIcon() {
     >
       <circle cx="7" cy="7" r="3.75" />
       <path d="m10.25 10.25 3 3" />
+    </svg>
+  );
+}
+
+function ImageIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 fill-none stroke-current"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="2.75" y="3" width="10.5" height="9.5" rx="1.5" />
+      <circle cx="6.1" cy="6.1" r="1.1" />
+      <path d="m4.5 10 2.2-2.2 1.9 1.9 1.1-1.1 1.8 1.8" />
     </svg>
   );
 }
@@ -581,6 +601,76 @@ const WebSearchItem = memo(function WebSearchItem({
   );
 });
 
+const ImageItem = memo(function ImageItem({
+  threadId,
+  item,
+  onOpen,
+}: {
+  threadId: string | undefined;
+  item: ThreadHistoryItemDto & { kind: 'image' };
+  onOpen: (title: string, text: string) => void;
+}) {
+  const assetPath = item.assetPath ?? item.detailText ?? null;
+  const imageUrl =
+    threadId && assetPath
+      ? `/api/threads/${threadId}/assets/image?path=${encodeURIComponent(assetPath)}`
+      : null;
+
+  return (
+    <div
+      className={`relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
+    >
+      <span
+        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('search')}`}
+      >
+        <span className="scale-[0.78]">
+          <ImageIcon />
+        </span>
+      </span>
+      <div className="flex items-start gap-2.5">
+        <div className="mt-0.5 hidden shrink-0 items-center sm:flex">
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-indigo-300/25 bg-indigo-300/10 text-indigo-100">
+            <ImageIcon />
+          </span>
+        </div>
+        <div className="min-w-0 w-full flex-1">
+          {imageUrl ? (
+            <button
+              type="button"
+              onClick={() => onOpen('Image Path', assetPath ?? item.text)}
+              className="block w-full text-left"
+            >
+              <img
+                src={imageUrl}
+                alt={item.text || 'Image preview'}
+                className="max-h-[24rem] w-full rounded-xl border border-stone-700/80 bg-stone-950 object-contain"
+                loading="lazy"
+              />
+            </button>
+          ) : (
+            <div className="rounded-xl border border-stone-700/80 bg-stone-950/45 px-3 py-3 text-sm text-stone-300">
+              {item.text}
+            </div>
+          )}
+          {assetPath && (
+            <button
+              type="button"
+              onClick={() => onOpen('Image Path', assetPath)}
+              className="mt-2 block max-w-full truncate text-left text-xs text-stone-400 hover:text-stone-200"
+              title={assetPath}
+            >
+              {assetPath}
+            </button>
+          )}
+          {item.status && (
+            <p className="mt-1 text-xs text-stone-500">{item.status}</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+});
+
 const GenericHistoryItem = memo(function GenericHistoryItem({
   item,
 }: {
@@ -610,10 +700,12 @@ const GenericHistoryItem = memo(function GenericHistoryItem({
 });
 
 const HistoryItemRow = memo(function HistoryItemRow({
+  threadId,
   item,
   scrollRootRef,
   onOpenExpandedText,
 }: {
+  threadId: string | undefined;
   item: ThreadHistoryItemDto;
   scrollRootRef: RefObject<HTMLDivElement | null>;
   onOpenExpandedText: (title: string, text: string) => void;
@@ -650,6 +742,20 @@ const HistoryItemRow = memo(function HistoryItemRow({
         item={
           item as ThreadHistoryItemDto & {
             kind: 'webSearch';
+          }
+        }
+        onOpen={onOpenExpandedText}
+      />
+    );
+  }
+
+  if (item.kind === 'image') {
+    return (
+      <ImageItem
+        threadId={threadId}
+        item={
+          item as ThreadHistoryItemDto & {
+            kind: 'image';
           }
         }
         onOpen={onOpenExpandedText}
@@ -848,6 +954,7 @@ function PendingRequestCard({
 }
 
 const ThreadTurnRow = memo(function ThreadTurnRow({
+  threadId,
   turn,
   absoluteIndex,
   isCollapsed,
@@ -856,6 +963,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
   onOpenExpandedText,
   scrollRootRef,
 }: {
+  threadId: string | undefined;
   turn: ThreadTurnDto;
   absoluteIndex: number;
   isCollapsed: boolean;
@@ -917,6 +1025,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
           {turn.items.map((item) => (
             <HistoryItemRow
               key={item.id}
+              threadId={threadId}
               item={item}
               scrollRootRef={scrollRootRef}
               onOpenExpandedText={onOpenExpandedText}
@@ -940,6 +1049,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
 });
 
 export function ThreadTimeline({
+  threadId,
   turns,
   pendingRequests = [],
   livePlan = null,
@@ -1131,9 +1241,10 @@ export function ThreadTimeline({
           {visibleTurns.length > 0 && (
             <div className="divide-y divide-stone-800/80">
               {visibleTurns.map((turn, visibleIndex) => (
-                <ThreadTurnRow
-                  key={turn.id}
-                  turn={turn}
+            <ThreadTurnRow
+              key={turn.id}
+              threadId={threadId}
+              turn={turn}
                   absoluteIndex={startIndex + visibleIndex + 1}
                   isCollapsed={collapsedTurns[turn.id] ?? false}
                   liveOutput={visibleIndex === liveOutputTurnIndex ? liveOutput : ''}

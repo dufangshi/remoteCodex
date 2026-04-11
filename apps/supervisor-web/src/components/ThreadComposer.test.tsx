@@ -1,5 +1,5 @@
 import { createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ThreadComposer } from './ThreadComposer';
 
@@ -45,6 +45,10 @@ const modelOptions = [
 ];
 
 describe('ThreadComposer', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('updates the model and resets reasoning effort to that model default', async () => {
     const onUpdateSettings = vi.fn().mockResolvedValue(undefined);
 
@@ -221,6 +225,53 @@ describe('ThreadComposer', () => {
             kind: 'file',
             originalName: 'notes.txt',
             placeholder: '[FILE notes.txt]',
+          }),
+        ],
+      });
+    });
+  });
+
+  it('falls back to a safe photo file name when the browser provides an empty one', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(Date, 'now').mockReturnValue(1712800000000);
+
+    const { container } = render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add attachment' }));
+    const photoInput = container.querySelector(
+      'input[type="file"][accept="image/*"]',
+    ) as HTMLInputElement | null;
+    expect(photoInput).toBeTruthy();
+
+    fireEvent.change(photoInput!, {
+      target: {
+        files: [new File(['img'], '', { type: 'image/heic' })],
+      },
+    });
+
+    expect(screen.getByLabelText('Prompt')).toHaveValue(
+      '[PHOTO photo-1712800000000.heic]',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({
+        prompt: '[PHOTO photo-1712800000000.heic]',
+        attachments: [
+          expect.objectContaining({
+            kind: 'photo',
+            originalName: 'photo-1712800000000.heic',
+            placeholder: '[PHOTO photo-1712800000000.heic]',
           }),
         ],
       });

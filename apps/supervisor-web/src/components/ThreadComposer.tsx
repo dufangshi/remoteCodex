@@ -94,6 +94,32 @@ function PlusIcon() {
   );
 }
 
+function normalizedAttachmentFileName(file: File, kind: PromptAttachmentKindDto) {
+  const trimmed = file.name.trim();
+  if (trimmed) {
+    return trimmed;
+  }
+
+  const fallbackExtension =
+    kind === 'photo'
+      ? file.type.includes('png')
+        ? '.png'
+        : file.type.includes('heic')
+          ? '.heic'
+          : file.type.includes('heif')
+            ? '.heif'
+            : file.type.includes('webp')
+              ? '.webp'
+              : '.jpg'
+      : '';
+  return `${kind === 'photo' ? 'photo' : 'file'}-${Date.now()}${fallbackExtension}`;
+}
+
+function normalizeAttachmentLabel(name: string) {
+  const sanitized = name.replace(/[\r\n[\]]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return sanitized || 'attachment';
+}
+
 function ChatIcon() {
   return (
     <svg
@@ -274,12 +300,17 @@ export function ThreadComposer({
     const nextFiles = Array.from(files);
     const usedPlaceholders = new Set<string>(attachments.map((entry) => entry.placeholder));
     const nextAttachments: ComposerAttachmentDraft[] = nextFiles.map((file) => {
-      const placeholder = buildAttachmentPlaceholder(kind, file.name, usedPlaceholders);
+      const originalName = normalizedAttachmentFileName(file, kind);
+      const placeholder = buildAttachmentPlaceholder(
+        kind,
+        normalizeAttachmentLabel(originalName),
+        usedPlaceholders,
+      );
       usedPlaceholders.add(placeholder);
       return {
         clientId: buildClientId(),
         kind,
-        originalName: file.name,
+        originalName,
         placeholder,
         file
       };

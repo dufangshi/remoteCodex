@@ -29,6 +29,9 @@ import { registerWorkspaceRoutes } from './routes/workspaces';
 import { ShellServiceError, ShellSessionService } from './shell/shell-session-service';
 import { TmuxManager } from './shell/tmux-manager';
 
+const MAX_PROMPT_ATTACHMENTS = 10;
+const MAX_PROMPT_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
 class HttpError extends Error {
   constructor(
     public readonly statusCode: number,
@@ -93,7 +96,12 @@ export function buildApp(
     logger: config.nodeEnv !== 'test'
   });
 
-  app.register(multipart);
+  app.register(multipart, {
+    limits: {
+      files: MAX_PROMPT_ATTACHMENTS,
+      fileSize: MAX_PROMPT_ATTACHMENT_BYTES,
+    },
+  });
 
   app.decorate('services', {
     config,
@@ -352,6 +360,43 @@ export function buildApp(
       }
 
       reply.status(503).send(payload);
+      return;
+    }
+
+    if (error instanceof ZodError) {
+      reply.status(400).send({
+        code: 'bad_request',
+        message: 'Request validation failed.',
+        details: {
+          issues: error.issues,
+        },
+      } satisfies ApiErrorShape);
+      return;
+    }
+
+    if (
+      error instanceof Error &&
+      'statusCode' in error &&
+      typeof error.statusCode === 'number' &&
+      error.statusCode >= 400 &&
+      error.statusCode < 500
+    ) {
+      if ('code' in error && error.code === 'FST_REQ_FILE_TOO_LARGE') {
+        reply.status(413).send({
+          code: 'bad_request',
+          message: `Each attachment must be ${MAX_PROMPT_ATTACHMENT_BYTES / (1024 * 1024)} MB or smaller.`,
+          details: {
+            fastifyCode: error.code,
+            maxBytes: MAX_PROMPT_ATTACHMENT_BYTES,
+          },
+        } satisfies ApiErrorShape);
+        return;
+      }
+
+      reply.status(error.statusCode).send({
+        code: 'bad_request',
+        message: error.message || 'Request could not be processed.',
+      } satisfies ApiErrorShape);
       return;
     }
 

@@ -13,7 +13,9 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "concurrently -n api,web -c blue,green \"pnpm --filter @remote-codex/supervisor-api dev\" \"pnpm --filter @remote-codex/supervisor-web dev\"",
+    "dev": "concurrently -k -n api,web -c blue,green \"pnpm --filter @remote-codex/supervisor-api dev\" \"pnpm --filter @remote-codex/supervisor-web dev\"",
+    "dev:stop": "node scripts/stop-dev-servers.mjs",
+    "dev:reset": "pnpm dev:stop && pnpm dev",
     "build": "pnpm -r --if-present build",
     "lint": "pnpm -r --if-present lint",
     "typecheck": "pnpm -r --if-present typecheck",

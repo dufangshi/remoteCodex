@@ -617,4 +617,35 @@ describe('ThreadTimeline', () => {
       },
     });
   });
+
+  it('renders image history items through the thread image proxy route', () => {
+    render(
+      <ThreadTimeline
+        threadId="thread-123"
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'image-1',
+                kind: 'image',
+                text: 'Screenshot preview',
+                assetPath: './.temp/threads/thread-123/screenshot.png',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    const image = screen.getByRole('img', { name: 'Screenshot preview' });
+    expect(image).toHaveAttribute(
+      'src',
+      '/api/threads/thread-123/assets/image?path=.%2F.temp%2Fthreads%2Fthread-123%2Fscreenshot.png',
+    );
+  });
 });

@@ -348,6 +348,45 @@ function stringifyPayload(value: unknown) {
   }
 }
 
+function extractImageAssetPath(item: CodexTurnItem) {
+  const candidates: unknown[] = [
+    item.path,
+    item.imagePath,
+    item.filePath,
+    isRecord(item.action) ? item.action.path : null,
+    isRecord(item.action) ? item.action.imagePath : null,
+    isRecord(item.result) ? item.result.path : null,
+    isRecord(item.result) ? item.result.imagePath : null,
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = stringOrNull(candidate);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return null;
+}
+
+function formatImageHistoryItem(item: CodexTurnItem): ThreadHistoryItemDto {
+  const assetPath = extractImageAssetPath(item);
+  const text =
+    stringOrNull(item.text) ??
+    assetPath ??
+    'Image view';
+
+  return {
+    id: item.id,
+    kind: 'image',
+    text,
+    previewText: text,
+    detailText: assetPath,
+    assetPath,
+    status: item.status ?? null,
+  };
+}
+
 function formatWebSearchHistoryItem(item: CodexTurnItem): ThreadHistoryItemDto {
   const queries = extractWebSearchQueries(item);
   const sources = extractWebSearchSources(item);
@@ -443,6 +482,11 @@ function itemToHistoryItem(item: CodexTurnItem): ThreadHistoryItemDto {
     case 'webSearchCall':
     case 'web_search_call':
       return formatWebSearchHistoryItem(item);
+    case 'imageView':
+    case 'image_view':
+    case 'viewImage':
+    case 'view_image':
+      return formatImageHistoryItem(item);
     case 'fileChange':
       return {
         id: item.id,

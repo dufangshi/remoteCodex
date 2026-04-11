@@ -65,6 +65,20 @@ export interface SendThreadPromptRequestInput extends SendThreadPromptInput {
   attachments?: PromptAttachmentUpload[];
 }
 
+function normalizedUploadFileName(attachment: PromptAttachmentUpload, index: number) {
+  const explicitName = attachment.originalName.trim();
+  if (explicitName) {
+    return explicitName;
+  }
+
+  const fileName = attachment.file.name.trim();
+  if (fileName) {
+    return fileName;
+  }
+
+  return attachment.kind === 'photo' ? `photo-${index + 1}.jpg` : `file-${index + 1}`;
+}
+
 export function fetchRuntimeConfig() {
   return request<RuntimeConfigDto>('/api/config/runtime');
 }
@@ -154,16 +168,20 @@ export function sendThreadPrompt(id: string, input: SendThreadPromptRequestInput
   }
 
   const manifest: PromptAttachmentManifestEntryDto[] = attachments.map(
-    ({ clientId, kind, originalName, placeholder }) => ({
-      clientId,
-      kind,
-      originalName,
-      placeholder
+    (attachment, index) => ({
+      clientId: attachment.clientId,
+      kind: attachment.kind,
+      originalName: normalizedUploadFileName(attachment, index),
+      placeholder: attachment.placeholder,
     }),
   );
   formData.append('attachmentManifest', JSON.stringify(manifest));
-  for (const attachment of attachments) {
-    formData.append('attachments', attachment.file, attachment.originalName);
+  for (const [index, attachment] of attachments.entries()) {
+    formData.append(
+      'attachments',
+      attachment.file,
+      normalizedUploadFileName(attachment, index),
+    );
   }
 
   return request<ThreadDto>(`/api/threads/${id}/prompt`, {

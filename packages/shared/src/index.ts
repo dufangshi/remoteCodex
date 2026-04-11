@@ -133,6 +133,7 @@ export interface ThreadHistoryItemDto {
   kind:
     | 'userMessage'
     | 'agentMessage'
+    | 'image'
     | 'plan'
     | 'reasoning'
     | 'commandExecution'
@@ -144,6 +145,7 @@ export interface ThreadHistoryItemDto {
   previewText?: string;
   detailText?: string | null;
   status?: string | null;
+  assetPath?: string | null;
 }
 
 export interface ThreadTurnDto {

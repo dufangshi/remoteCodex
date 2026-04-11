@@ -1,3 +1,5 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 
@@ -5,6 +7,8 @@ import {
   deleteShellSessionRecord,
   deleteViewerSessionsByShellId,
   getShellSessionRecordByThreadId,
+  getThreadRecordById,
+  getWorkspaceRecordById,
 } from '../../../../packages/db/src/index';
 import {
   ImportThreadInput,
@@ -35,7 +39,7 @@ const promptSchema = z.object({
 const promptAttachmentManifestEntrySchema = z.object({
   clientId: z.string().min(1),
   kind: z.enum(['photo', 'file']),
-  originalName: z.string().min(1),
+  originalName: z.string().optional(),
   placeholder: z.string().min(1),
 });
 
@@ -69,12 +73,23 @@ const respondThreadRequestSchema = z.object({
   }))
 });
 
+const threadImageQuerySchema = z.object({
+  path: z.string().min(1),
+});
+
 const MAX_PROMPT_ATTACHMENTS = 10;
 const MAX_PROMPT_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
 interface UploadedPromptAttachment {
   manifest: PromptAttachmentManifestEntryDto;
   buffer: Buffer;
+}
+
+function defaultAttachmentOriginalName(
+  kind: PromptAttachmentManifestEntryDto['kind'],
+  index: number,
+) {
+  return kind === 'photo' ? `photo-${index + 1}.jpg` : `file-${index + 1}`;
 }
 
 function toSendThreadPromptInput(body: {
@@ -99,7 +114,7 @@ async function parseMultipartPromptRequest(
   request: FastifyRequest,
 ) {
   const fields = new Map<string, string>();
-  const uploadedFiles: Buffer[] = [];
+  const uploadedFiles: Array<{ buffer: Buffer; filename: string | null }> = [];
 
   for await (const part of request.parts()) {
     if (part.type === 'file') {
@@ -118,7 +133,10 @@ async function parseMultipartPromptRequest(
         });
       }
 
-      uploadedFiles.push(buffer);
+      uploadedFiles.push({
+        buffer,
+        filename: part.filename?.trim() || null,
+      });
       continue;
     }
 
@@ -191,10 +209,19 @@ async function parseMultipartPromptRequest(
   }
 
   const attachments: UploadedPromptAttachment[] = [];
-  for (const [index, buffer] of uploadedFiles.entries()) {
+  for (const [index, file] of uploadedFiles.entries()) {
+    const fallbackName =
+      file.filename ??
+      defaultAttachmentOriginalName(manifest[index]!.kind, index);
+    const normalizedOriginalName =
+      manifest[index]!.originalName?.trim() || fallbackName;
+
     attachments.push({
-      manifest: manifest[index]!,
-      buffer,
+      manifest: {
+        ...manifest[index]!,
+        originalName: normalizedOriginalName,
+      },
+      buffer: file.buffer,
     });
   }
 
@@ -235,6 +262,77 @@ export async function registerThreadRoutes(app: FastifyInstance) {
   app.get('/api/threads/:id', async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     return app.services.threadService.getThreadDetail(params.id);
+  });
+
+  app.get('/api/threads/:id/assets/image', async (request, reply) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const query = threadImageQuerySchema.parse(request.query);
+    const record = getThreadRecordById(app.services.database.db, params.id);
+    if (!record) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Thread was not found.'
+      });
+    }
+
+    const workspace = getWorkspaceRecordById(app.services.database.db, record.workspaceId);
+    if (!workspace) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Workspace was not found for this thread.'
+      });
+    }
+
+    const candidatePath = path.isAbsolute(query.path)
+      ? query.path
+      : path.resolve(workspace.absPath, query.path);
+    const requestedPath = await fs.realpath(candidatePath).catch(() => null);
+    if (!requestedPath) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Image file was not found.'
+      });
+    }
+
+    const resolvedWorkspaceRoot = await fs
+      .realpath(app.services.config.workspaceRoot)
+      .catch(() => path.resolve(app.services.config.workspaceRoot));
+    const workspacePrefix = resolvedWorkspaceRoot.endsWith(path.sep)
+      ? resolvedWorkspaceRoot
+      : `${resolvedWorkspaceRoot}${path.sep}`;
+
+    if (
+      requestedPath !== resolvedWorkspaceRoot &&
+      !requestedPath.startsWith(workspacePrefix)
+    ) {
+      throw new HttpError(403, {
+        code: 'forbidden',
+        message: 'Image path must stay within the configured workspace root.'
+      });
+    }
+
+    const stats = await fs.stat(requestedPath).catch(() => null);
+    if (!stats?.isFile()) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Image file was not found.'
+      });
+    }
+
+    const lowerPath = requestedPath.toLowerCase();
+    const contentType =
+      lowerPath.endsWith('.png') ? 'image/png'
+        : lowerPath.endsWith('.jpg') || lowerPath.endsWith('.jpeg') ? 'image/jpeg'
+          : lowerPath.endsWith('.gif') ? 'image/gif'
+            : lowerPath.endsWith('.webp') ? 'image/webp'
+              : lowerPath.endsWith('.svg') ? 'image/svg+xml'
+                : lowerPath.endsWith('.heic') ? 'image/heic'
+                  : lowerPath.endsWith('.heif') ? 'image/heif'
+                    : 'application/octet-stream';
+
+    reply.header('Content-Type', contentType);
+    reply.header('Cache-Control', 'private, max-age=60');
+    return reply.send(await fs.readFile(requestedPath));
   });
 
   app.patch('/api/threads/:id', async (request) => {
