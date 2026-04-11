@@ -38,7 +38,8 @@ export const threads = sqliteTable('threads', {
   lastTurnStartedAt: text('last_turn_started_at'),
   lastTurnCompletedAt: text('last_turn_completed_at'),
   lastViewedAt: text('last_viewed_at'),
-  isPinned: integer('is_pinned', { mode: 'boolean' }).notNull().default(false)
+  isPinned: integer('is_pinned', { mode: 'boolean' }).notNull().default(false),
+  isConnected: integer('is_connected', { mode: 'boolean' }).notNull().default(true)
 });
 
 export const shellSessions = sqliteTable('shell_sessions', {

@@ -911,6 +911,43 @@ describe('supervisor api', () => {
     });
   });
 
+  it('disconnects a thread and marks it as not loaded', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5.3-codex',
+        approvalMode: 'yolo',
+        title: 'Disconnect Thread'
+      }
+    });
+
+    const createdThread = createResponse.json();
+
+    const disconnectResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/disconnect`
+    });
+
+    expect(disconnectResponse.statusCode).toBe(200);
+    expect(disconnectResponse.json()).toMatchObject({
+      thread: {
+        id: createdThread.id,
+        isLoaded: false
+      }
+    });
+  });
+
   it('imports a local Codex session and reuses transcript history before resume', async () => {
     const importedWorkspace = path.join(tempDir, 'imported-project');
     await fs.mkdir(importedWorkspace);

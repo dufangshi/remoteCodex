@@ -31,6 +31,7 @@ interface ThreadComposerProps {
   collaborationMode?: CollaborationModeDto;
   modelOptions?: ModelOptionDto[];
   followTail?: boolean;
+  threadConnected?: boolean;
   disabled?: boolean;
   disabledPlaceholder?: string | undefined;
   shellControlState?: ThreadShellControlState | null;
@@ -284,6 +285,7 @@ export function ThreadComposer({
   collaborationMode = 'default',
   modelOptions = [],
   followTail = false,
+  threadConnected = true,
   disabled = false,
   disabledPlaceholder,
   shellControlState = null,
@@ -770,6 +772,17 @@ export function ThreadComposer({
       ? 'Send shell input to the attached terminal...'
       : 'Ask Codex to inspect, modify, or explain code...');
   const interruptLabel = isShellView ? 'Send Ctrl-C' : 'Stop Current Turn';
+  const sendButtonLabel =
+    !threadConnected && busy
+      ? 'Connecting...'
+      : !threadConnected
+      ? 'Send'
+      : busy && !isShellView
+        ? 'Sending...'
+        : 'Send';
+  const sendButtonClassName = !threadConnected
+    ? 'bg-rose-400/92 text-rose-950 hover:bg-rose-300'
+    : 'bg-amber-300/95 text-stone-950 hover:bg-amber-200';
   const formClassName = edgeToEdgeMobile || isMobileShell
     ? 'relative z-20 shrink-0 bg-transparent px-3 pb-0 pt-3 sm:p-4'
     : 'relative z-20 shrink-0 border-t border-stone-800 bg-stone-950/95 p-3 backdrop-blur sm:p-4';
@@ -903,9 +916,9 @@ export function ThreadComposer({
             type="submit"
             aria-label={isShellView ? 'Send Shell Input' : 'Send Prompt'}
             disabled={busy || (activeView === 'chat' ? disabled : false)}
-            className="absolute bottom-2.5 right-2.5 rounded-full bg-amber-300/95 px-3.5 py-1.5 text-sm font-medium text-stone-950 shadow-lg shadow-stone-950/30 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:bg-stone-700 disabled:text-stone-300"
+            className={`absolute bottom-2.5 right-2.5 rounded-full px-3.5 py-1.5 text-sm font-medium shadow-lg shadow-stone-950/30 transition disabled:cursor-not-allowed disabled:bg-stone-700 disabled:text-stone-300 ${sendButtonClassName}`}
           >
-            {busy && !isShellView ? 'Sending...' : 'Send'}
+            {sendButtonLabel}
           </button>
 
           <div

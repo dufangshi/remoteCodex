@@ -22,6 +22,7 @@ import {
 import {
   ApiError,
   connectSupervisorEvents,
+  disconnectThread,
   fetchCodexModels,
   fetchCodexStatus,
   fetchThreads,
@@ -304,6 +305,11 @@ export function ThreadDetailPage() {
 
   async function handlePrompt(input: SendThreadPromptRequestInput) {
     if (activeView === 'shell') {
+      if (detail?.thread.isLoaded === false) {
+        await handleThreadConnectionToggle({ attachShell: true });
+        return;
+      }
+
       const sent = shellPanelRef.current?.sendCommand(input.prompt) ?? false;
       if (!sent) {
         setError('Connect the shell before sending commands.');
@@ -369,6 +375,52 @@ export function ThreadDetailPage() {
     }
   }
 
+  async function handleThreadConnectionToggle(options?: { attachShell?: boolean }) {
+    if (!detail) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    clearBufferedLiveOutput();
+    setLiveOutput('');
+
+    try {
+      if (detail.thread.isLoaded) {
+        const disconnected = await disconnectThread(id);
+        setDetail(disconnected);
+        setShellControlState(null);
+        setThreads((current) =>
+          current.map((entry) =>
+            entry.id === disconnected.thread.id ? disconnected.thread : entry,
+          ),
+        );
+        setPendingShellConnectionToggle(false);
+        return;
+      }
+
+      const resumed = await resumeThread(
+        id,
+        detail.thread.model ? { model: detail.thread.model } : {},
+      );
+      setDetail(resumed);
+      setThreads((current) =>
+        current.map((entry) =>
+          entry.id === resumed.thread.id ? resumed.thread : entry,
+        ),
+      );
+      if (options?.attachShell && activeView === 'shell') {
+        setPendingShellConnectionToggle(true);
+      }
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : 'Unable to change connection state.',
+      );
+    } finally {
+        setBusy(false);
+    }
+  }
+
   async function handleInterrupt() {
     if (activeView === 'shell') {
       const sent = shellPanelRef.current?.sendControl('ctrl_c') ?? false;
@@ -403,29 +455,7 @@ export function ThreadDetailPage() {
   }
 
   async function handleResume() {
-    setBusy(true);
-    setError(null);
-    clearBufferedLiveOutput();
-    setLiveOutput('');
-
-    try {
-      const resumed = await resumeThread(
-        id,
-        detail?.thread.model ? { model: detail.thread.model } : {},
-      );
-      setDetail(resumed);
-      setThreads((current) =>
-        current.map((entry) =>
-          entry.id === resumed.thread.id ? resumed.thread : entry,
-        ),
-      );
-    } catch (caught) {
-      setError(
-        caught instanceof Error ? caught.message : 'Unable to resume thread.',
-      );
-    } finally {
-      setBusy(false);
-    }
+    await handleThreadConnectionToggle({ attachShell: activeView === 'shell' });
   }
 
   async function handleUpdateThreadSettings(input: {
@@ -551,7 +581,9 @@ export function ThreadDetailPage() {
   function handleToggleView() {
     setActiveView((current) => {
       if (current === 'chat') {
-        setPendingShellConnectionToggle(true);
+        if (detail?.thread.isLoaded) {
+          setPendingShellConnectionToggle(true);
+        }
         return 'shell';
       }
 
@@ -587,28 +619,26 @@ export function ThreadDetailPage() {
       !pendingShellConnectionToggle ||
       activeView !== 'shell' ||
       !shellPanelRef.current ||
-      detail?.thread.isLoaded === false
+      detail?.thread.isLoaded === false ||
+      shellControlState?.loading !== false
     ) {
+      return;
+    }
+
+    if (shellControlState?.status === 'attached') {
+      setPendingShellConnectionToggle(false);
       return;
     }
 
     setPendingShellConnectionToggle(false);
     void shellPanelRef.current.toggleConnection();
-  }, [activeView, detail?.thread.isLoaded, pendingShellConnectionToggle]);
-
-  useEffect(() => {
-    if (
-      activeView !== 'shell' ||
-      detail?.thread.isLoaded !== false ||
-      shellControlState?.status !== 'attached' ||
-      !shellPanelRef.current
-    ) {
-      return;
-    }
-
-    setPendingShellConnectionToggle(true);
-    void shellPanelRef.current.toggleConnection();
-  }, [activeView, detail?.thread.isLoaded, shellControlState?.status]);
+  }, [
+    activeView,
+    detail?.thread.isLoaded,
+    pendingShellConnectionToggle,
+    shellControlState?.loading,
+    shellControlState?.status,
+  ]);
 
   const promptDisabledReason = detail
     ? detail.workspacePathStatus === 'missing'
@@ -674,22 +704,25 @@ export function ThreadDetailPage() {
     </dl>
   ) : null;
 
+  const sessionConnectionButtonClassName =
+    busy && !detail?.thread.isLoaded
+      ? 'thread-connection-pending border border-emerald-300/28 bg-stone-700/92 text-emerald-50 shadow-lg shadow-stone-950/20'
+      : detail?.thread.isLoaded
+        ? 'border border-emerald-300/55 bg-emerald-400 text-emerald-950 shadow-lg shadow-emerald-950/25 hover:bg-emerald-300'
+        : 'border border-stone-600 bg-stone-800/92 text-stone-200 hover:border-stone-500 hover:bg-stone-700/95';
+
   const mobileSessionConnectionButton = (
     <button
       type="button"
-      aria-label={`Resume Thread (${detail ? threadStatusLabel(detail.thread.status) : 'Loading'})`}
+      aria-label={`${detail?.thread.isLoaded ? 'Disconnect' : 'Connect'} Thread (${detail ? threadStatusLabel(detail.thread.status) : 'Loading'})`}
       title={
         detail
-          ? threadStatusLabel(detail.thread.status)
-          : 'Resume Thread'
+          ? `${detail.thread.isLoaded ? 'Disconnect' : 'Connect'} thread`
+          : 'Connect Thread'
       }
       onClick={() => void handleResume()}
       disabled={busy}
-      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center transition ${
-        detail?.thread.isLoaded
-          ? 'text-emerald-100 hover:text-emerald-200'
-          : 'text-stone-300 hover:text-stone-100'
-      } disabled:cursor-not-allowed disabled:opacity-60`}
+      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-60 ${sessionConnectionButtonClassName}`}
     >
       <svg
         aria-hidden="true"
@@ -746,19 +779,15 @@ export function ThreadDetailPage() {
             </div>
             <button
               type="button"
-              aria-label={`Resume Thread (${detail ? threadStatusLabel(detail.thread.status) : 'Loading'})`}
+              aria-label={`${detail?.thread.isLoaded ? 'Disconnect' : 'Connect'} Thread (${detail ? threadStatusLabel(detail.thread.status) : 'Loading'})`}
               title={
                 detail
-                  ? threadStatusLabel(detail.thread.status)
-                  : 'Resume Thread'
+                  ? `${detail.thread.isLoaded ? 'Disconnect' : 'Connect'} thread`
+                  : 'Connect Thread'
               }
               onClick={() => void handleResume()}
               disabled={busy}
-              className={`hidden h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-lg shadow-stone-950/25 transition sm:inline-flex ${
-                detail?.thread.isLoaded
-                  ? 'border-emerald-300/45 bg-emerald-300/18 text-emerald-50 ring-1 ring-emerald-300/20 hover:bg-emerald-300/24'
-                  : 'border-stone-600 bg-stone-800/85 text-stone-300 hover:border-stone-500 hover:bg-stone-800'
-              } disabled:cursor-not-allowed disabled:opacity-60`}
+              className={`hidden h-10 w-10 shrink-0 items-center justify-center rounded-full transition sm:inline-flex disabled:cursor-not-allowed disabled:opacity-60 ${sessionConnectionButtonClassName}`}
             >
               <svg
                 aria-hidden="true"
@@ -848,6 +877,7 @@ export function ThreadDetailPage() {
                       collaborationMode={detail.thread.collaborationMode}
                       modelOptions={modelOptions}
                       followTail={followTail}
+                      threadConnected={detail.thread.isLoaded}
                       disabled={Boolean(promptDisabledReason)}
                       disabledPlaceholder={promptDisabledReason ?? undefined}
                       shellControlState={shellControlState}
@@ -876,6 +906,7 @@ export function ThreadDetailPage() {
                       collaborationMode={detail.thread.collaborationMode}
                       modelOptions={modelOptions}
                       followTail={followTail}
+                      threadConnected={detail.thread.isLoaded}
                       disabled={Boolean(promptDisabledReason)}
                       disabledPlaceholder={promptDisabledReason ?? undefined}
                       shellControlState={shellControlState}
@@ -896,21 +927,35 @@ export function ThreadDetailPage() {
               </>
             ) : (
               <>
-                <ThreadShellPanel
-                  ref={shellPanelRef}
-                  threadId={detail.thread.id}
-                  showHeader={false}
-                  showFloatingToolbox={false}
-                  onStateChange={setShellControlState}
-                />
+                {detail.thread.isLoaded ? (
+                  <ThreadShellPanel
+                    ref={shellPanelRef}
+                    threadId={detail.thread.id}
+                    showHeader={false}
+                    showFloatingToolbox={false}
+                    onStateChange={setShellControlState}
+                  />
+                ) : (
+                  <div className="flex min-h-0 flex-1 items-center justify-center p-4 sm:p-6">
+                    <div className="max-w-md rounded-[1.6rem] border border-stone-800 bg-stone-950/55 px-6 py-8 text-center">
+                      <p className="text-base font-medium text-stone-100">
+                        Thread disconnected
+                      </p>
+                      <p className="mt-3 text-sm leading-6 text-stone-400">
+                        Reconnect this thread before creating or attaching a shell.
+                      </p>
+                    </div>
+                  </div>
+                )}
                 <ThreadComposer
                   activeView={activeView}
-                  busy={false}
+                  busy={busy}
                   settingsBusy={false}
-                  error={shellControlState?.error ?? null}
+                  error={detail.thread.isLoaded ? shellControlState?.error ?? null : null}
                   followTail={false}
+                  threadConnected={detail.thread.isLoaded}
                   shellControlState={shellControlState}
-                  canInterrupt={Boolean(shellControlState?.isCommandRunning)}
+                  canInterrupt={Boolean(detail.thread.isLoaded && shellControlState?.isCommandRunning)}
                   onSubmit={handlePrompt}
                   onInterrupt={handleInterrupt}
                   onToggleView={handleToggleView}

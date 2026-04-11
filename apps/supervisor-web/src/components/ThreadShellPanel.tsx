@@ -371,6 +371,7 @@ export const ThreadShellPanel = forwardRef<
   const viewerIdRef = useRef<string | null>(null);
   const shellIdRef = useRef<string | null>(null);
   const shellStateRef = useRef<ThreadShellStateDto | null>(null);
+  const lastHandledReconnectKeyRef = useRef(0);
   const shellSnapshotRef = useRef('');
   const pendingCommandRef = useRef<{
     command: string;
@@ -683,6 +684,12 @@ export const ThreadShellPanel = forwardRef<
     if (!terminal || !terminalReady) {
       return;
     }
+
+    if (reconnectKey === lastHandledReconnectKeyRef.current) {
+      return;
+    }
+
+    lastHandledReconnectKeyRef.current = reconnectKey;
 
     terminal.reset();
     setConnectionError(null);

@@ -7,6 +7,7 @@ import {
   createViewerSessionRecord,
   deleteViewerSessionRecord,
   deleteViewerSessionsByShellId,
+  deleteViewerSessionsByThreadId,
   getShellSessionRecordById,
   getShellSessionRecordByThreadId,
   getThreadRecordById,
@@ -372,6 +373,7 @@ export class ShellServiceError extends Error {
   constructor(
     public readonly code:
       | 'thread_not_found'
+      | 'thread_not_connected'
       | 'shell_not_found'
       | 'workspace_missing'
       | 'shell_exists'
@@ -475,6 +477,13 @@ export class ShellSessionService {
       throw new ShellServiceError('thread_not_found', 'Workspace not found.');
     }
 
+    if (thread.isConnected === false) {
+      throw new ShellServiceError(
+        'thread_not_connected',
+        'Reconnect this thread before attaching or creating a shell.',
+      );
+    }
+
     if (!(await pathExists(workspace.absPath))) {
       throw new ShellServiceError(
         'workspace_missing',
@@ -563,6 +572,35 @@ export class ShellSessionService {
     });
 
     return this.getThreadShellState(threadId);
+  }
+
+  async detachThreadViewers(threadId: string) {
+    const shell = getShellSessionRecordByThreadId(this.db, threadId);
+    if (!shell) {
+      return;
+    }
+
+    const attachment = this.attachments.get(shell.id);
+    if (!attachment) {
+      deleteViewerSessionsByThreadId(this.db, threadId);
+      return;
+    }
+
+    clearInterval(attachment.pollHandle);
+    deleteViewerSessionRecord(this.db, attachment.viewerId);
+    deleteViewerSessionsByThreadId(this.db, threadId);
+    this.attachments.delete(shell.id);
+
+    updateShellSessionRecord(this.db, shell.id, {
+      status: 'running',
+      lastActivityAt: nowIso(),
+    });
+
+    this.emitShellEvent(shell.id, 'shell.detached', {
+      threadId: shellThreadId(shell),
+      state: 'detached',
+      viewerId: attachment.viewerId,
+    });
   }
 
   async attachShell(

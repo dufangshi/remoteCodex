@@ -145,6 +145,12 @@ export function resumeThread(id: string, input: ResumeThreadInput = {}) {
   });
 }
 
+export function disconnectThread(id: string) {
+  return request<ThreadDetailDto>(`/api/threads/${id}/disconnect`, {
+    method: 'POST'
+  });
+}
+
 export function sendThreadPrompt(id: string, input: SendThreadPromptRequestInput) {
   const attachments = input.attachments ?? [];
 

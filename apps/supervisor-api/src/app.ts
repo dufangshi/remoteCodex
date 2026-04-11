@@ -327,6 +327,7 @@ export function buildApp(
         error.code === 'thread_not_found' || error.code === 'shell_not_found'
           ? 404
           : error.code === 'viewer_conflict' ||
+              error.code === 'thread_not_connected' ||
               error.code === 'shell_exists' ||
               error.code === 'workspace_missing' ||
               error.code === 'shell_not_running' ||

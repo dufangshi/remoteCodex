@@ -863,6 +863,131 @@ describe('ThreadDetailPage', () => {
     });
   });
 
+  it('does not auto-connect the shell after switching views while the thread is disconnected', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.includes('/api/codex/status')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              state: 'ready',
+              transport: 'stdio',
+              lastStartedAt: new Date().toISOString(),
+              lastError: null,
+              restartCount: 0,
+            }),
+          });
+        }
+
+        if (url.includes('/api/codex/models')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => modelOptionsResponse,
+          });
+        }
+
+        if (url.endsWith('/api/threads/thread-1')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              thread: {
+                id: 'thread-1',
+                workspaceId: 'workspace-1',
+                codexThreadId: 'codex-1',
+                source: 'supervisor',
+                title: 'Demo Thread',
+                model: 'gpt-5',
+                reasoningEffort: 'medium',
+                collaborationMode: 'default',
+                approvalMode: 'yolo',
+                status: 'idle',
+                summaryText: 'Preview',
+                lastError: null,
+                activeTurnId: null,
+                isLoaded: false,
+                isPinned: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                lastTurnStartedAt: null,
+                lastTurnCompletedAt: null,
+              },
+              workspace: {
+                id: 'workspace-1',
+                hostId: 'host-1',
+                label: 'Demo Workspace',
+                absPath: '/tmp/demo',
+                isFavorite: false,
+                createdAt: new Date().toISOString(),
+                lastOpenedAt: null,
+              },
+              workspacePathStatus: 'present',
+              pendingRequests: [],
+              turns: [],
+            }),
+          });
+        }
+
+        if (url.endsWith('/api/threads')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => [
+              {
+                id: 'thread-1',
+                workspaceId: 'workspace-1',
+                codexThreadId: 'codex-1',
+                source: 'supervisor',
+                title: 'Demo Thread',
+                model: 'gpt-5',
+                reasoningEffort: 'medium',
+                collaborationMode: 'default',
+                approvalMode: 'yolo',
+                status: 'idle',
+                summaryText: 'Preview',
+                lastError: null,
+                activeTurnId: null,
+                isLoaded: false,
+                isPinned: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                lastTurnStartedAt: null,
+                lastTurnCompletedAt: null,
+              },
+            ],
+          });
+        }
+
+        throw new Error(`Unhandled fetch request: ${url}`);
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('heading', { level: 2, name: 'Demo Thread' }),
+      ).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to shell' }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('Reconnect this thread before creating or attaching a shell.'),
+      ).toBeInTheDocument();
+    });
+
+    expect(shellPanelMock.toggleConnection).not.toHaveBeenCalled();
+  });
+
   it('hides the imported-session resume warning after the thread is connected', async () => {
     vi.stubGlobal(
       'fetch',

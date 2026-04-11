@@ -376,6 +376,13 @@ export async function registerThreadRoutes(app: FastifyInstance) {
     return app.services.threadService.resumeThread(params.id, input);
   });
 
+  app.post('/api/threads/:id/disconnect', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const detail = await app.services.threadService.disconnectThread(params.id);
+    await app.services.shellService.detachThreadViewers(params.id);
+    return detail;
+  });
+
   app.post('/api/threads/:id/prompt', async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const parsed = request.isMultipart()

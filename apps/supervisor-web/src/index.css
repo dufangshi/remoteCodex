@@ -219,6 +219,24 @@ input {
   pointer-events: none;
 }
 
+@keyframes thread-connection-pending {
+  0%,
+  100% {
+    background-color: rgb(68 64 60 / 0.94);
+    border-color: rgb(87 83 78 / 0.96);
+    color: rgb(229 231 235);
+  }
+  50% {
+    background-color: rgb(16 185 129 / 0.88);
+    border-color: rgb(110 231 183 / 0.92);
+    color: rgb(2 44 34);
+  }
+}
+
+.thread-connection-pending {
+  animation: thread-connection-pending 1.15s ease-in-out infinite;
+}
+
 .thread-scroll-container {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;

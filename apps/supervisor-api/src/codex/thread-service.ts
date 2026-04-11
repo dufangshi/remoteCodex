@@ -610,7 +610,8 @@ export class ThreadService {
       approvalMode: input.approvalMode,
       codexThreadId: response.thread.id,
       summaryText: response.thread.preview,
-      source: 'supervisor'
+      source: 'supervisor',
+      isConnected: true,
     });
 
     updateThreadRecord(this.db, created.id, {
@@ -674,7 +675,8 @@ export class ThreadService {
           .flatMap((turn) => turn.items)
           .find((item) => item.kind === 'userMessage')
           ?.text ?? null,
-      source: 'local_codex_import'
+      source: 'local_codex_import',
+      isConnected: false,
     });
 
     return this.getThreadDetail(created.id);
@@ -849,8 +851,28 @@ export class ThreadService {
         response.thread,
         input.model ?? record.model ?? response.model,
         response.reasoningEffort ?? record.reasoningEffort
-      )
+      ),
     );
+
+    updateThreadRecord(this.db, record.id, {
+      isConnected: true,
+    });
+
+    return this.getThreadDetail(localThreadId);
+  }
+
+  async disconnectThread(localThreadId: string): Promise<ThreadDetailDto> {
+    const record = getThreadRecordById(this.db, localThreadId);
+    if (!record || !record.codexThreadId) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Thread was not found.'
+      });
+    }
+
+    updateThreadRecord(this.db, record.id, {
+      isConnected: false,
+    });
 
     return this.getThreadDetail(localThreadId);
   }
@@ -879,6 +901,13 @@ export class ThreadService {
           message: 'Resume / Connect this imported session before sending a new prompt.'
         });
       }
+    }
+
+    if (record.isConnected === false) {
+      throw new HttpError(409, {
+        code: 'conflict',
+        message: 'Connect this thread before sending a new prompt.'
+      });
     }
 
     const prompt = input.prompt.trim();
@@ -1399,7 +1428,9 @@ export class ThreadService {
       summaryText: record.summaryText ?? null,
       lastError: record.lastError ?? null,
       activeTurnId: record.codexTurnId ?? null,
-      isLoaded: record.codexThreadId ? loadedIds.has(record.codexThreadId) : false,
+      isLoaded:
+        record.isConnected !== false &&
+        (record.codexThreadId ? loadedIds.has(record.codexThreadId) : false),
       isPinned: record.isPinned,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,

@@ -27,6 +27,7 @@ export interface CreateThreadRecordInput {
   codexThreadId?: string | null;
   summaryText?: string | null;
   source?: 'supervisor' | 'local_codex_import';
+  isConnected?: boolean;
 }
 
 export interface UpdateThreadRecordInput {
@@ -42,6 +43,7 @@ export interface UpdateThreadRecordInput {
   lastError?: string | null;
   lastTurnStartedAt?: string | null;
   lastTurnCompletedAt?: string | null;
+  isConnected?: boolean;
   updatedAt?: string;
 }
 
@@ -166,7 +168,8 @@ export function createThreadRecord(db: DatabaseClient, input: CreateThreadRecord
     lastTurnStartedAt: null as string | null,
     lastTurnCompletedAt: null as string | null,
     lastViewedAt: null as string | null,
-    isPinned: false
+    isPinned: false,
+    isConnected: input.isConnected ?? true
   };
 
   db.insert(threads).values(record).run();
