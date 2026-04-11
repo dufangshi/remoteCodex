@@ -54,8 +54,7 @@ export interface ThreadShellPanelHandle {
   sendControl: (
     action: 'ctrl_c' | 'ctrl_d' | 'esc' | 'tab' | 'up' | 'down' | 'clear',
   ) => boolean;
-  pasteFromClipboard: () => Promise<boolean>;
-  copySelection: () => Promise<boolean>;
+  copyLastCommandOutput: () => Promise<boolean>;
   terminate: () => Promise<void>;
   focus: () => void;
 }
@@ -133,6 +132,97 @@ function getVisibleTerminalText(hostNode: HTMLDivElement | null) {
     .filter((line, index, items) => line.length > 0 || index < items.length - 1);
 
   return rows.join('\n').trimEnd();
+}
+
+function normalizeShellSnapshot(snapshot: string) {
+  return snapshot.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
+function splitShellSnapshotLines(snapshot: string) {
+  const normalized = normalizeShellSnapshot(snapshot);
+  const lines = normalized.split('\n');
+  if (normalized.endsWith('\n') && lines.at(-1) === '') {
+    lines.pop();
+  }
+  return lines;
+}
+
+function looksLikePromptLine(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  return /(?:[$%#>])\s*$/.test(trimmed);
+}
+
+function stripEchoedCommandLine(lines: string[], command: string) {
+  const commandText = command.trim();
+  if (!commandText || lines.length === 0) {
+    return lines;
+  }
+
+  const [firstLine, ...rest] = lines;
+  if (firstLine === undefined) {
+    return lines;
+  }
+  const normalizedFirstLine = firstLine.trim();
+  if (
+    normalizedFirstLine === commandText ||
+    normalizedFirstLine.endsWith(` ${commandText}`) ||
+    normalizedFirstLine.endsWith(`$ ${commandText}`) ||
+    normalizedFirstLine.endsWith(`% ${commandText}`) ||
+    normalizedFirstLine.endsWith(`# ${commandText}`) ||
+    normalizedFirstLine.endsWith(`> ${commandText}`)
+  ) {
+    return rest;
+  }
+
+  return lines;
+}
+
+function extractCommandOutput(
+  beforeSnapshot: string,
+  afterSnapshot: string,
+  command: string,
+) {
+  const beforeLines = splitShellSnapshotLines(beforeSnapshot);
+  const afterLines = splitShellSnapshotLines(afterSnapshot);
+
+  let prefix = 0;
+  while (
+    prefix < beforeLines.length &&
+    prefix < afterLines.length &&
+    beforeLines[prefix] === afterLines[prefix]
+  ) {
+    prefix += 1;
+  }
+
+  let suffix = 0;
+  while (
+    suffix < beforeLines.length - prefix &&
+    suffix < afterLines.length - prefix &&
+    beforeLines[beforeLines.length - 1 - suffix] ===
+      afterLines[afterLines.length - 1 - suffix]
+  ) {
+    suffix += 1;
+  }
+
+  let addedLines = afterLines.slice(prefix, afterLines.length - suffix);
+  addedLines = stripEchoedCommandLine(addedLines, command);
+
+  while (addedLines.length > 0 && addedLines[0]?.trim() === '') {
+    addedLines.shift();
+  }
+
+  while (
+    addedLines.length > 0 &&
+    (addedLines.at(-1)?.trim() === '' || looksLikePromptLine(addedLines.at(-1) ?? ''))
+  ) {
+    addedLines.pop();
+  }
+
+  return addedLines.join('\n').trimEnd();
 }
 
 function basenameFromPath(filePath: string | null | undefined) {
@@ -281,7 +371,14 @@ export const ThreadShellPanel = forwardRef<
   const viewerIdRef = useRef<string | null>(null);
   const shellIdRef = useRef<string | null>(null);
   const shellStateRef = useRef<ThreadShellStateDto | null>(null);
+  const shellSnapshotRef = useRef('');
+  const pendingCommandRef = useRef<{
+    command: string;
+    beforeSnapshot: string;
+  } | null>(null);
+  const lastCommandOutputRef = useRef('');
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const isCommandRunningRef = useRef(false);
   const feedbackTimerRef = useRef<number | null>(null);
   const [terminalHostNode, setTerminalHostNode] = useState<HTMLDivElement | null>(null);
   const [shellState, setShellState] = useState<ThreadShellStateDto | null>(null);
@@ -327,9 +424,11 @@ export const ThreadShellPanel = forwardRef<
       viewerId,
       data,
     });
-    terminalRef.current?.focus();
+    if (!isMobileShell) {
+      terminalRef.current?.focus();
+    }
     return true;
-  }, []);
+  }, [isMobileShell]);
 
   const sendShellClear = useCallback(() => {
     const socket = socketRef.current;
@@ -344,9 +443,11 @@ export const ThreadShellPanel = forwardRef<
       shellId,
       viewerId,
     });
-    terminalRef.current?.focus();
+    if (!isMobileShell) {
+      terminalRef.current?.focus();
+    }
     return true;
-  }, []);
+  }, [isMobileShell]);
 
   const status = shellState?.state ?? 'not_created';
   const shellMeta = useMemo(() => shellState?.shell ?? null, [shellState?.shell]);
@@ -642,11 +743,27 @@ export const ThreadShellPanel = forwardRef<
             cwdBaseName ?? basenameFromPath(shellMeta?.cwd),
             envPrefix,
           );
+          const nextIsCommandRunning = event.payload.isCommandRunning === true;
+
           setRuntimePromptLabel(nextPromptLabel);
-          setIsCommandRunning(event.payload.isCommandRunning === true);
+          setIsCommandRunning(nextIsCommandRunning);
+          isCommandRunningRef.current = nextIsCommandRunning;
           if (data) {
             if (replace) {
+              const nextSnapshot = normalizeShellSnapshot(data);
+              shellSnapshotRef.current = nextSnapshot;
               renderShellSnapshot(terminal, data, cursorX, cursorY, paneHeight);
+              if (
+                !nextIsCommandRunning &&
+                pendingCommandRef.current
+              ) {
+                lastCommandOutputRef.current = extractCommandOutput(
+                  pendingCommandRef.current.beforeSnapshot,
+                  nextSnapshot,
+                  pendingCommandRef.current.command,
+                );
+                pendingCommandRef.current = null;
+              }
             } else {
               terminal.write(data);
             }
@@ -698,6 +815,7 @@ export const ThreadShellPanel = forwardRef<
               setConnectionError(null);
             }
             setIsCommandRunning(false);
+            isCommandRunningRef.current = false;
             shellSocket.socket.close();
           }
           return;
@@ -706,6 +824,7 @@ export const ThreadShellPanel = forwardRef<
         if (event.type === 'shell.exited') {
           viewerIdRef.current = null;
           setIsCommandRunning(false);
+          isCommandRunningRef.current = false;
           const nextState =
             event.payload.state === 'exited' ? 'exited' : 'not_found';
           setShellState((current) =>
@@ -731,6 +850,7 @@ export const ThreadShellPanel = forwardRef<
           if (nextState !== 'attached') {
             viewerIdRef.current = null;
             setIsCommandRunning(false);
+            isCommandRunningRef.current = false;
           }
           setShellState((current) =>
             current
@@ -896,33 +1016,7 @@ export const ThreadShellPanel = forwardRef<
     status,
   ]);
 
-  const handlePasteFromClipboard = useCallback(async () => {
-    if (!navigator.clipboard?.readText) {
-      setTransientToolboxFeedback('failed', 'Paste is unavailable here');
-      return false;
-    }
-
-    try {
-      const clipboardText = await navigator.clipboard.readText();
-      if (!clipboardText) {
-        setTransientToolboxFeedback('failed', 'Clipboard is empty');
-        return false;
-      }
-
-      if (!sendShellInput(clipboardText)) {
-        setTransientToolboxFeedback('failed', 'Connect the shell first');
-        return false;
-      }
-
-      setTransientToolboxFeedback('done', 'Pasted');
-      return true;
-    } catch {
-      setTransientToolboxFeedback('failed', 'Paste was blocked');
-      return false;
-    }
-  }, [sendShellInput, setTransientToolboxFeedback]);
-
-  const handleCopySelection = useCallback(async () => {
+  const handleCopyVisibleShellText = useCallback(async () => {
     try {
       const selectedText =
         terminalRef.current?.getSelection()?.trim() ||
@@ -991,11 +1085,24 @@ export const ThreadShellPanel = forwardRef<
         return sendShellInput(data);
       },
       sendCommand(command: string) {
+        const pendingCommand = {
+          command,
+          beforeSnapshot: shellSnapshotRef.current,
+        };
+        pendingCommandRef.current = pendingCommand;
         if (command.trim() === 'clear') {
-          return sendShellClear();
+          const sent = sendShellClear();
+          if (!sent && pendingCommandRef.current === pendingCommand) {
+            pendingCommandRef.current = null;
+          }
+          return sent;
         }
         const normalized = command.endsWith('\n') ? command : `${command}\n`;
-        return sendShellInput(normalized);
+        const sent = sendShellInput(normalized);
+        if (!sent && pendingCommandRef.current === pendingCommand) {
+          pendingCommandRef.current = null;
+        }
+        return sent;
       },
       sendControl(action) {
         if (action === 'clear') {
@@ -1003,11 +1110,22 @@ export const ThreadShellPanel = forwardRef<
         }
         return sendShellInput(shellControlSequence(action));
       },
-      async pasteFromClipboard() {
-        return await handlePasteFromClipboard();
-      },
-      async copySelection() {
-        return await handleCopySelection();
+      async copyLastCommandOutput() {
+        const output =
+          lastCommandOutputRef.current.trim() || getVisibleTerminalText(terminalHostNode);
+        if (!output) {
+          setTransientToolboxFeedback('failed', 'Nothing to copy');
+          return false;
+        }
+
+        try {
+          await navigator.clipboard.writeText(output);
+          setTransientToolboxFeedback('done', 'Copied');
+          return true;
+        } catch {
+          setTransientToolboxFeedback('failed', 'Copy failed');
+          return false;
+        }
       },
       async terminate() {
         await handleTerminateShell();
@@ -1018,11 +1136,11 @@ export const ThreadShellPanel = forwardRef<
     }),
     [
       handleConnectionToggle,
-      handleCopySelection,
-      handlePasteFromClipboard,
       handleTerminateShell,
       sendShellClear,
       sendShellInput,
+      setTransientToolboxFeedback,
+      terminalHostNode,
     ],
   );
 
@@ -1127,7 +1245,12 @@ export const ThreadShellPanel = forwardRef<
                       <div className="grid grid-cols-2 gap-2">
                         <button
                           type="button"
-                          onClick={() => void handlePasteFromClipboard()}
+                          onClick={() => {
+                            setTransientToolboxFeedback(
+                              'idle',
+                              'Use the prompt box tools to paste',
+                            );
+                          }}
                           className="inline-flex items-center justify-center rounded-full border border-sky-300/35 bg-sky-300/12 px-2.5 py-2 text-sky-50"
                         >
                           <span className="inline-flex items-center gap-1.5">
@@ -1139,7 +1262,7 @@ export const ThreadShellPanel = forwardRef<
                         </button>
                         <button
                           type="button"
-                          onClick={() => void handleCopySelection()}
+                          onClick={() => void handleCopyVisibleShellText()}
                           className="inline-flex items-center justify-center rounded-full border border-stone-700/90 bg-stone-900/80 px-2.5 py-2 text-stone-100"
                         >
                           <span className="inline-flex items-center gap-1.5">

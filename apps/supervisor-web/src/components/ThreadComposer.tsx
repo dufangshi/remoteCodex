@@ -34,7 +34,6 @@ interface ThreadComposerProps {
   onUpdateSettings?: (input: UpdateThreadSettingsInput) => Promise<void> | void;
   onToggleView?: () => void;
   onToggleShellConnection?: () => Promise<void> | void;
-  onShellPaste?: () => Promise<void> | void;
   onShellCopy?: () => Promise<void> | void;
   onShellControl?: (
     action: 'ctrl_c' | 'ctrl_d' | 'esc' | 'tab' | 'up' | 'down' | 'clear',
@@ -194,7 +193,6 @@ export function ThreadComposer({
   onUpdateSettings,
   onToggleView,
   onToggleShellConnection,
-  onShellPaste,
   onShellCopy,
   onShellControl,
   canInterrupt = false,
@@ -202,6 +200,7 @@ export function ThreadComposer({
   const [prompt, setPrompt] = useState('');
   const [openMenu, setOpenMenu] = useState<SettingsMenu>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const isShellView = activeView === 'shell';
   const isMobileShell = Boolean(isShellView && shellControlState?.isMobileShell);
   const shellPromptLabel = shellControlState?.promptLabel ?? null;
@@ -213,19 +212,49 @@ export function ThreadComposer({
   const supportedEfforts = currentModel?.supportedReasoningEfforts ?? [];
 
   useEffect(() => {
-    function handlePointerDown(event: MouseEvent) {
+    function handleWindowClick(event: MouseEvent) {
       if (!menuRef.current?.contains(event.target as Node)) {
         setOpenMenu(null);
       }
     }
 
     if (openMenu) {
-      window.addEventListener('mousedown', handlePointerDown);
+      window.addEventListener('click', handleWindowClick);
       return () => {
-        window.removeEventListener('mousedown', handlePointerDown);
+        window.removeEventListener('click', handleWindowClick);
       };
     }
   }, [openMenu]);
+
+  function dismissPromptFocus() {
+    promptRef.current?.blur();
+    if (
+      document.activeElement instanceof HTMLElement &&
+      document.activeElement !== document.body
+    ) {
+      document.activeElement.blur();
+    }
+  }
+
+  async function pasteClipboardIntoPrompt() {
+    dismissPromptFocus();
+    setOpenMenu(null);
+
+    if (!navigator.clipboard?.readText) {
+      return;
+    }
+
+    try {
+      const clipboardText = await navigator.clipboard.readText();
+      if (!clipboardText) {
+        return;
+      }
+
+      setPrompt((current) => `${current}${clipboardText}`);
+    } catch {
+      return;
+    }
+  }
 
   async function submitPrompt() {
     if (!isShellView && !prompt.trim()) {
@@ -277,7 +306,7 @@ export function ThreadComposer({
   const interruptLabel = isShellView ? 'Send Ctrl-C' : 'Stop Current Turn';
 
   return (
-    <div className="relative shrink-0">
+    <div className="relative z-20 shrink-0">
       {activeView === 'chat' && (
         <button
           type="button"
@@ -312,10 +341,11 @@ export function ThreadComposer({
 
       <form
         onSubmit={handleSubmit}
-        className="shrink-0 border-t border-stone-800 bg-stone-950/95 p-3 backdrop-blur sm:p-4"
+        className="relative z-20 shrink-0 border-t border-stone-800 bg-stone-950/95 p-3 backdrop-blur sm:p-4"
       >
         <div className="relative">
           <textarea
+            ref={promptRef}
             aria-label="Prompt"
             disabled={activeView === 'chat' ? disabled : false}
             value={prompt}
@@ -353,7 +383,7 @@ export function ThreadComposer({
 
           <div
             ref={menuRef}
-            className="absolute bottom-2.5 left-3 z-[2] flex max-w-[calc(100%-7rem)] items-center gap-1.5 text-xs"
+            className="absolute bottom-2.5 left-3 z-30 flex max-w-[calc(100%-7rem)] items-center gap-1.5 text-xs"
           >
             <button
               type="button"
@@ -500,19 +530,31 @@ export function ThreadComposer({
                   aria-haspopup="menu"
                   aria-expanded={openMenu === 'shellTools'}
                   title={openMenu === 'shellTools' ? 'Close shell tools' : 'Open shell tools'}
-                  onClick={() =>
+                  onClick={() => {
+                    dismissPromptFocus();
                     setOpenMenu((current) => (current === 'shellTools' ? null : 'shellTools'))
-                  }
+                  }}
                   className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-stone-700 bg-stone-900/92 text-stone-200 transition hover:bg-stone-800"
                 >
                   <WrenchScrewdriverIcon />
                 </button>
                 {openMenu === 'shellTools' && (
-                  <div className="absolute bottom-full right-0 mb-2 w-[11.5rem] max-w-[calc(100vw-1.5rem)] rounded-[1rem] border border-stone-700/90 bg-stone-950/96 p-2 shadow-2xl shadow-stone-950/40 sm:w-48">
+                  <div
+                    className="absolute bottom-full right-0 z-40 mb-2 w-[11.5rem] max-w-[calc(100vw-1.5rem)] rounded-[1rem] border border-stone-700/90 bg-stone-950/96 p-2 shadow-2xl shadow-stone-950/40 sm:w-48"
+                    onMouseDown={(event) => {
+                      event.stopPropagation();
+                    }}
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                    }}
+                    onTouchStart={(event) => {
+                      event.stopPropagation();
+                    }}
+                  >
                     <div className="grid grid-cols-2 gap-2">
                       <button
                         type="button"
-                        onClick={() => void onShellPaste?.()}
+                        onClick={() => void pasteClipboardIntoPrompt()}
                         className="inline-flex items-center justify-center rounded-full border border-sky-300/35 bg-sky-300/12 px-2 py-2 text-sky-50"
                       >
                         <span className="inline-flex items-center gap-1.5">
@@ -524,7 +566,11 @@ export function ThreadComposer({
                       </button>
                       <button
                         type="button"
-                        onClick={() => void onShellCopy?.()}
+                        onClick={() => {
+                          dismissPromptFocus();
+                          setOpenMenu(null);
+                          void onShellCopy?.();
+                        }}
                         className="inline-flex items-center justify-center rounded-full border border-stone-700/90 bg-stone-900/80 px-2 py-2 text-stone-100"
                       >
                         <span className="inline-flex items-center gap-1.5">
@@ -536,8 +582,12 @@ export function ThreadComposer({
                       </button>
                       <button
                         type="button"
-                        disabled={!shellControlState?.shellInputEnabled}
-                        onClick={() => void onShellControl?.('clear')}
+                        disabled={busy}
+                        onClick={() => {
+                          dismissPromptFocus();
+                          setOpenMenu(null);
+                          void onSubmit('clear');
+                        }}
                         className="disabled:cursor-not-allowed disabled:opacity-45"
                       >
                         <ToolPill label="CLEAR" tone="sky" />
@@ -548,7 +598,11 @@ export function ThreadComposer({
                           !shellControlState?.shellInputEnabled ||
                           !shellControlState?.isCommandRunning
                         }
-                        onClick={() => void onShellControl?.('ctrl_c')}
+                        onClick={() => {
+                          dismissPromptFocus();
+                          setOpenMenu(null);
+                          void onShellControl?.('ctrl_c');
+                        }}
                         className="disabled:cursor-not-allowed disabled:opacity-45"
                       >
                         <ToolPill label="CTRL-C" tone="rose" />
@@ -556,7 +610,11 @@ export function ThreadComposer({
                       <button
                         type="button"
                         disabled={!shellControlState?.shellInputEnabled}
-                        onClick={() => void onShellControl?.('ctrl_d')}
+                        onClick={() => {
+                          dismissPromptFocus();
+                          setOpenMenu(null);
+                          void onShellControl?.('ctrl_d');
+                        }}
                         className="disabled:cursor-not-allowed disabled:opacity-45"
                       >
                         <ToolPill label="CTRL-D" />
@@ -564,7 +622,11 @@ export function ThreadComposer({
                       <button
                         type="button"
                         disabled={!shellControlState?.shellInputEnabled}
-                        onClick={() => void onShellControl?.('esc')}
+                        onClick={() => {
+                          dismissPromptFocus();
+                          setOpenMenu(null);
+                          void onShellControl?.('esc');
+                        }}
                         className="disabled:cursor-not-allowed disabled:opacity-45"
                       >
                         <ToolPill label="ESC" />
@@ -572,7 +634,11 @@ export function ThreadComposer({
                       <button
                         type="button"
                         disabled={!shellControlState?.shellInputEnabled}
-                        onClick={() => void onShellControl?.('tab')}
+                        onClick={() => {
+                          dismissPromptFocus();
+                          setOpenMenu(null);
+                          void onShellControl?.('tab');
+                        }}
                         className="disabled:cursor-not-allowed disabled:opacity-45"
                       >
                         <ToolPill label="TAB" />
@@ -580,7 +646,11 @@ export function ThreadComposer({
                       <button
                         type="button"
                         disabled={!shellControlState?.shellInputEnabled}
-                        onClick={() => void onShellControl?.('up')}
+                        onClick={() => {
+                          dismissPromptFocus();
+                          setOpenMenu(null);
+                          void onShellControl?.('up');
+                        }}
                         className="disabled:cursor-not-allowed disabled:opacity-45"
                       >
                         <ToolPill label="UP" />
@@ -588,7 +658,11 @@ export function ThreadComposer({
                       <button
                         type="button"
                         disabled={!shellControlState?.shellInputEnabled}
-                        onClick={() => void onShellControl?.('down')}
+                        onClick={() => {
+                          dismissPromptFocus();
+                          setOpenMenu(null);
+                          void onShellControl?.('down');
+                        }}
                         className="disabled:cursor-not-allowed disabled:opacity-45"
                       >
                         <ToolPill label="DOWN" />

@@ -234,4 +234,112 @@ describe('ThreadComposer', () => {
       expect(onSubmit).toHaveBeenCalledWith('');
     });
   });
+
+  it('routes mobile shell CLEAR through the same submit path as typing clear and sending', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <ThreadComposer
+        activeView="shell"
+        shellControlState={{
+          status: 'attached',
+          connectionButtonDisabled: false,
+          connectionButtonLabel: 'Disconnect shell',
+          shellInputEnabled: true,
+          isCommandRunning: false,
+          promptLabel: '(base) trading-lab',
+          isMobileShell: true,
+          hasShell: true,
+          busy: false,
+          loading: false,
+          error: null,
+        }}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open shell tools' }));
+    fireEvent.click(screen.getByRole('button', { name: /clear/i }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith('clear');
+    });
+  });
+
+  it('pastes clipboard text into the shell prompt instead of sending it to the terminal', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const readText = vi.fn().mockResolvedValue('echo from clipboard');
+    vi.stubGlobal('navigator', {
+      ...navigator,
+      clipboard: {
+        readText,
+      },
+    });
+
+    render(
+      <ThreadComposer
+        activeView="shell"
+        shellControlState={{
+          status: 'attached',
+          connectionButtonDisabled: false,
+          connectionButtonLabel: 'Disconnect shell',
+          shellInputEnabled: true,
+          isCommandRunning: false,
+          promptLabel: '(base) trading-lab',
+          isMobileShell: true,
+          hasShell: true,
+          busy: false,
+          loading: false,
+          error: null,
+        }}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open shell tools' }));
+    fireEvent.click(screen.getByRole('button', { name: /paste/i }));
+
+    await waitFor(() => {
+      expect(readText).toHaveBeenCalled();
+      expect(screen.getByLabelText('Prompt')).toHaveValue('echo from clipboard');
+    });
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('copies the last shell command output and blurs the prompt when using toolbox actions', async () => {
+    const onShellCopy = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <ThreadComposer
+        activeView="shell"
+        shellControlState={{
+          status: 'attached',
+          connectionButtonDisabled: false,
+          connectionButtonLabel: 'Disconnect shell',
+          shellInputEnabled: true,
+          isCommandRunning: false,
+          promptLabel: '(base) trading-lab',
+          isMobileShell: true,
+          hasShell: true,
+          busy: false,
+          loading: false,
+          error: null,
+        }}
+        onSubmit={() => undefined}
+        onShellCopy={onShellCopy}
+      />,
+    );
+
+    const textarea = screen.getByLabelText('Prompt');
+    textarea.focus();
+    expect(document.activeElement).toBe(textarea);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open shell tools' }));
+    fireEvent.click(screen.getByRole('button', { name: /copy/i }));
+
+    await waitFor(() => {
+      expect(onShellCopy).toHaveBeenCalled();
+    });
+    expect(document.activeElement).not.toBe(textarea);
+  });
 });

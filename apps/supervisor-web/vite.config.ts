@@ -8,6 +8,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     host: '0.0.0.0',
+    allowedHosts: ['fonshs-macbook-pro.tailaf4fa.ts.net'],
     fs: {
       allow: [path.resolve(__dirname, '../..')]
     },

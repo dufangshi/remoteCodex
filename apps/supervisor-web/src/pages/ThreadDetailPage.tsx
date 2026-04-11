@@ -515,19 +515,10 @@ export function ThreadDetailPage() {
     await shellPanelRef.current.toggleConnection();
   }
 
-  async function handleShellPaste() {
-    const pasted = await shellPanelRef.current?.pasteFromClipboard();
-    if (!pasted) {
-      setError('Unable to paste into the shell.');
-    } else {
-      setError(null);
-    }
-  }
-
   async function handleShellCopy() {
-    const copied = await shellPanelRef.current?.copySelection();
+    const copied = await shellPanelRef.current?.copyLastCommandOutput();
     if (!copied) {
-      setError('Unable to copy shell text.');
+      setError('Unable to copy the last shell command output.');
     } else {
       setError(null);
     }
@@ -536,7 +527,10 @@ export function ThreadDetailPage() {
   function handleShellControl(
     action: 'ctrl_c' | 'ctrl_d' | 'esc' | 'tab' | 'up' | 'down' | 'clear',
   ) {
-    const sent = shellPanelRef.current?.sendControl(action) ?? false;
+    const sent =
+      action === 'clear'
+        ? (shellPanelRef.current?.sendCommand('clear') ?? false)
+        : (shellPanelRef.current?.sendControl(action) ?? false);
     if (!sent) {
       setError('Connect the shell before sending control input.');
     } else {
@@ -755,7 +749,6 @@ export function ThreadDetailPage() {
                       onUpdateSettings={handleUpdateThreadSettings}
                       onToggleView={handleToggleView}
                       onToggleShellConnection={handleToggleShellConnection}
-                      onShellPaste={handleShellPaste}
                       onShellCopy={handleShellCopy}
                       onShellControl={handleShellControl}
                     />
@@ -782,7 +775,6 @@ export function ThreadDetailPage() {
                       onUpdateSettings={handleUpdateThreadSettings}
                       onToggleView={handleToggleView}
                       onToggleShellConnection={handleToggleShellConnection}
-                      onShellPaste={handleShellPaste}
                       onShellCopy={handleShellCopy}
                       onShellControl={handleShellControl}
                     />
@@ -810,7 +802,6 @@ export function ThreadDetailPage() {
                   onInterrupt={handleInterrupt}
                   onToggleView={handleToggleView}
                   onToggleShellConnection={handleToggleShellConnection}
-                  onShellPaste={handleShellPaste}
                   onShellCopy={handleShellCopy}
                   onShellControl={handleShellControl}
                 />
