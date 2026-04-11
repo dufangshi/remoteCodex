@@ -40,6 +40,7 @@ export function ThreadDetailPage() {
   const liveOutputFrameRef = useRef<number | null>(null);
   const shellPanelRef = useRef<ThreadShellPanelHandle | null>(null);
   const composerHostRef = useRef<HTMLDivElement | null>(null);
+  const loadRequestIdRef = useRef(0);
   const [detail, setDetail] = useState<ThreadDetailDto | null>(null);
   const [threads, setThreads] = useState<ThreadDto[]>([]);
   const [modelOptions, setModelOptions] = useState<ModelOptionDto[]>([]);
@@ -190,6 +191,8 @@ export function ThreadDetailPage() {
 
   useEffect(() => {
     async function loadThreadDetail(showLoading = true) {
+      const requestId = loadRequestIdRef.current + 1;
+      loadRequestIdRef.current = requestId;
       if (showLoading) {
         setLoading(true);
       }
@@ -202,18 +205,26 @@ export function ThreadDetailPage() {
             fetchCodexStatus(),
             fetchCodexModels(),
           ]);
+        if (loadRequestIdRef.current !== requestId) {
+          return;
+        }
         setDetail(detailResponse);
         setThreads(threadResponse);
         setStatus(statusResponse);
         setModelOptions(modelResponse);
       } catch (caught) {
+        if (loadRequestIdRef.current !== requestId) {
+          return;
+        }
         setError(
           caught instanceof Error
             ? caught.message
             : 'Unable to load thread detail.',
         );
       } finally {
-        setLoading(false);
+        if (loadRequestIdRef.current === requestId) {
+          setLoading(false);
+        }
       }
     }
 
@@ -731,6 +742,7 @@ export function ThreadDetailPage() {
                   >
                     <ThreadComposer
                       activeView={activeView}
+                      edgeToEdgeMobile
                       busy={activeView === 'chat' ? busy : false}
                       settingsBusy={settingsBusy}
                       error={null}

@@ -20,6 +20,13 @@ class FakeWebSocket {
   close() {}
 }
 
+function emitSocketMessage(socket: FakeWebSocket, payload: unknown) {
+  const message = { data: JSON.stringify(payload) } as MessageEvent;
+  for (const listener of socket.listeners.get('message') ?? []) {
+    listener(message);
+  }
+}
+
 const modelOptionsResponse = [
   {
     id: 'model-option-1',
@@ -59,6 +66,7 @@ const modelOptionsResponse = [
 
 describe('ThreadDetailPage', () => {
   beforeEach(() => {
+    FakeWebSocket.instances = [];
     vi.stubGlobal('WebSocket', FakeWebSocket as any);
     vi.stubGlobal(
       'fetch',
@@ -478,5 +486,217 @@ describe('ThreadDetailPage', () => {
     expect(
       screen.queryByText(/History is available immediately\. Click Resume \/ Connect before sending a new prompt\./i),
     ).not.toBeInTheDocument();
+  });
+
+  it('keeps the latest pending request card when older detail fetches resolve later', async () => {
+    let detailCallCount = 0;
+    type DeferredResponse = {
+      ok: true;
+      json: () => Promise<unknown>;
+    };
+    let resolveFirstDetail: ((value: DeferredResponse) => void) | null = null;
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.includes('/api/codex/status')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              state: 'ready',
+              transport: 'stdio',
+              lastStartedAt: new Date().toISOString(),
+              lastError: null,
+              restartCount: 0,
+            }),
+          });
+        }
+
+        if (url.includes('/api/codex/models')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => modelOptionsResponse,
+          });
+        }
+
+        if (url.endsWith('/api/threads')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => [
+              {
+                id: 'thread-1',
+                workspaceId: 'workspace-1',
+                codexThreadId: 'codex-1',
+                source: 'supervisor',
+                title: 'Demo Thread',
+                model: 'gpt-5',
+                reasoningEffort: 'medium',
+                collaborationMode: 'plan',
+                approvalMode: 'yolo',
+                status: 'running',
+                summaryText: null,
+                lastError: null,
+                activeTurnId: 'turn-1',
+                isLoaded: true,
+                isPinned: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                lastTurnStartedAt: new Date().toISOString(),
+                lastTurnCompletedAt: null,
+              },
+            ],
+          });
+        }
+
+        if (url.endsWith('/api/threads/thread-1')) {
+          detailCallCount += 1;
+
+          if (detailCallCount === 1) {
+            return new Promise((resolve) => {
+              resolveFirstDetail = resolve;
+            });
+          }
+
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              thread: {
+                id: 'thread-1',
+                workspaceId: 'workspace-1',
+                codexThreadId: 'codex-1',
+                source: 'supervisor',
+                title: 'Demo Thread',
+                model: 'gpt-5',
+                reasoningEffort: 'medium',
+                collaborationMode: 'plan',
+                approvalMode: 'yolo',
+                status: 'running',
+                summaryText: 'Preview',
+                lastError: null,
+                activeTurnId: 'turn-1',
+                isLoaded: true,
+                isPinned: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                lastTurnStartedAt: new Date().toISOString(),
+                lastTurnCompletedAt: null,
+              },
+              workspace: {
+                id: 'workspace-1',
+                hostId: 'host-1',
+                label: 'Demo Workspace',
+                absPath: '/tmp/demo',
+                isFavorite: false,
+                createdAt: new Date().toISOString(),
+                lastOpenedAt: null,
+              },
+              workspacePathStatus: 'present',
+              pendingRequests: [
+                {
+                  id: 'request-2',
+                  kind: 'requestUserInput',
+                  title: 'Need another choice',
+                  description: 'Second round question',
+                  turnId: 'turn-1',
+                  itemId: 'item-2',
+                  createdAt: new Date().toISOString(),
+                  questions: [
+                    {
+                      id: 'question-2',
+                      header: 'Follow-up',
+                      question: 'Choose the next step',
+                      isOther: true,
+                      isSecret: false,
+                      options: [
+                        { label: 'Option A', description: 'A' },
+                        { label: 'Option B', description: 'B' },
+                      ],
+                    },
+                  ],
+                },
+              ],
+              turns: [],
+            }),
+          });
+        }
+
+        return Promise.reject(new Error(`Unexpected request: ${url}`));
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(FakeWebSocket.instances[0]).toBeDefined();
+    emitSocketMessage(FakeWebSocket.instances[0]!, {
+      type: 'thread.request.created',
+      threadId: 'thread-1',
+      timestamp: new Date().toISOString(),
+      payload: {
+        request: {
+          id: 'request-2',
+        },
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Need another choice')).toBeInTheDocument();
+      expect(screen.getByText('Choose the next step')).toBeInTheDocument();
+    });
+
+    const firstDetailResolver = resolveFirstDetail as
+      | ((value: DeferredResponse) => void)
+      | null;
+    if (firstDetailResolver) {
+      firstDetailResolver({
+        ok: true,
+        json: async () => ({
+          thread: {
+            id: 'thread-1',
+            workspaceId: 'workspace-1',
+            codexThreadId: 'codex-1',
+            source: 'supervisor',
+            title: 'Demo Thread',
+            model: 'gpt-5',
+            reasoningEffort: 'medium',
+            collaborationMode: 'plan',
+            approvalMode: 'yolo',
+            status: 'running',
+            summaryText: 'Preview',
+            lastError: null,
+            activeTurnId: 'turn-1',
+            isLoaded: true,
+            isPinned: false,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            lastTurnStartedAt: new Date().toISOString(),
+            lastTurnCompletedAt: null,
+          },
+          workspace: {
+            id: 'workspace-1',
+            hostId: 'host-1',
+            label: 'Demo Workspace',
+            absPath: '/tmp/demo',
+            isFavorite: false,
+            createdAt: new Date().toISOString(),
+            lastOpenedAt: null,
+          },
+          workspacePathStatus: 'present',
+          pendingRequests: [],
+          turns: [],
+        }),
+      });
+    }
+
+    await waitFor(() => {
+      expect(screen.getByText('Need another choice')).toBeInTheDocument();
+    });
   });
 });

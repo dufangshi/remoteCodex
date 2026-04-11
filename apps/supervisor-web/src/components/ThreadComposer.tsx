@@ -17,6 +17,7 @@ import type { ThreadShellControlState } from './ThreadShellPanel';
 
 interface ThreadComposerProps {
   activeView: 'chat' | 'shell';
+  edgeToEdgeMobile?: boolean;
   busy?: boolean;
   settingsBusy?: boolean;
   error?: string | null;
@@ -176,6 +177,7 @@ function ToolPill({
 
 export function ThreadComposer({
   activeView,
+  edgeToEdgeMobile = false,
   busy = false,
   settingsBusy = false,
   error,
@@ -304,6 +306,9 @@ export function ThreadComposer({
       ? 'Send shell input to the attached terminal...'
       : 'Ask Codex to inspect, modify, or explain code...');
   const interruptLabel = isShellView ? 'Send Ctrl-C' : 'Stop Current Turn';
+  const formClassName = edgeToEdgeMobile || isMobileShell
+    ? 'relative z-20 shrink-0 bg-transparent px-3 pb-0 pt-3 sm:p-4'
+    : 'relative z-20 shrink-0 border-t border-stone-800 bg-stone-950/95 p-3 backdrop-blur sm:p-4';
 
   return (
     <div className="relative z-20 shrink-0">
@@ -341,7 +346,7 @@ export function ThreadComposer({
 
       <form
         onSubmit={handleSubmit}
-        className="relative z-20 shrink-0 border-t border-stone-800 bg-stone-950/95 p-3 backdrop-blur sm:p-4"
+        className={formClassName}
       >
         <div className="relative">
           <textarea
