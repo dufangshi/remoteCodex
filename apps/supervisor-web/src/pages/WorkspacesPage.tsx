@@ -3,9 +3,15 @@ import { Link, useNavigate } from 'react-router-dom';
 
 import type { WorkspaceDto } from '../../../../packages/shared/src/index';
 import { useAppShellNav } from '../components/AppShellNavContext';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { LongTextDialog } from '../components/LongTextDialog';
 import { RenameDialog } from '../components/RenameDialog';
-import { fetchWorkspaces, updateWorkspace, updateWorkspaceFavorite } from '../lib/api';
+import {
+  deleteWorkspace,
+  fetchWorkspaces,
+  updateWorkspace,
+  updateWorkspaceFavorite,
+} from '../lib/api';
 
 function workspaceSortTimestamp(workspace: WorkspaceDto) {
   return Date.parse(workspace.lastOpenedAt ?? workspace.createdAt);
@@ -59,6 +65,18 @@ function MenuIcon() {
   );
 }
 
+function TrashIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 fill-current"
+    >
+      <path d="M6.1 1.75h3.8c.75 0 1.4.52 1.57 1.25h2.03c.35 0 .63.28.63.63 0 .34-.28.62-.63.62h-.66l-.62 8.03c-.08 1.09-.99 1.97-2.08 1.97H5.86c-1.09 0-2-.88-2.08-1.97l-.62-8.03H2.5a.62.62 0 1 1 0-1.25h2.03c.17-.73.82-1.25 1.57-1.25Zm0 1.25c-.07 0-.14.03-.19.08A.26.26 0 0 0 5.84 3h4.32a.26.26 0 0 0-.07-.17.26.26 0 0 0-.19-.08H6.1Zm-1.07 1.25.61 7.93c.03.44.4.79.84.79h3.04c.44 0 .81-.35.84-.79l.61-7.93H5.03Zm1.53 1.32c.35 0 .62.28.62.62v4.19a.62.62 0 1 1-1.24 0V6.19c0-.34.28-.62.62-.62Zm2.82 0c.34 0 .62.28.62.62v4.19a.62.62 0 1 1-1.24 0V6.19c0-.34.28-.62.62-.62Z" />
+    </svg>
+  );
+}
+
 export function WorkspacesPage() {
   const navigate = useNavigate();
   const shellNav = useAppShellNav();
@@ -69,6 +87,8 @@ export function WorkspacesPage() {
   const [draftLabel, setDraftLabel] = useState('');
   const [savingWorkspaceId, setSavingWorkspaceId] = useState<string | null>(null);
   const [expandedPath, setExpandedPath] = useState<string | null>(null);
+  const [deletingWorkspace, setDeletingWorkspace] = useState<WorkspaceDto | null>(null);
+  const [deletingWorkspaceBusy, setDeletingWorkspaceBusy] = useState(false);
 
   async function loadWorkspaces() {
     setLoading(true);
@@ -151,6 +171,25 @@ export function WorkspacesPage() {
     navigate(`/threads?workspaceId=${encodeURIComponent(workspaceId)}`);
   }
 
+  async function handleDeleteWorkspace() {
+    if (!deletingWorkspace) {
+      return;
+    }
+
+    setDeletingWorkspaceBusy(true);
+    try {
+      await deleteWorkspace(deletingWorkspace.id);
+      setWorkspaces((current) =>
+        current.filter((workspace) => workspace.id !== deletingWorkspace.id),
+      );
+      setDeletingWorkspace(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to delete workspace.');
+    } finally {
+      setDeletingWorkspaceBusy(false);
+    }
+  }
+
   function handleWorkspaceKeyDown(event: KeyboardEvent<HTMLElement>, workspaceId: string) {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
@@ -228,27 +267,41 @@ export function WorkspacesPage() {
               onKeyDown={(event) => handleWorkspaceKeyDown(event, workspace.id)}
               className="relative overflow-hidden rounded-[1.35rem] border border-stone-800 bg-stone-900/88 px-4 py-3 shadow-lg shadow-stone-950/10 transition hover:border-stone-700 hover:bg-stone-900"
             >
-              <button
-                type="button"
-                aria-label={
-                  workspace.isFavorite
-                    ? `Unpin workspace ${workspace.label}`
-                    : `Pin workspace ${workspace.label}`
-                }
-                title={workspace.isFavorite ? 'Unpin workspace' : 'Pin workspace'}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void handleFavorite(workspace);
-                }}
-                className={`absolute right-2.5 top-2.5 inline-flex h-7 w-7 items-center justify-center rounded-full border transition ${
-                  workspace.isFavorite
-                    ? 'border-amber-300/40 bg-amber-300/15 text-amber-200'
-                    : 'border-stone-700 bg-stone-900/72 text-stone-500 hover:text-stone-200'
-                }`}
-              >
-                <PinIcon active={workspace.isFavorite} />
-              </button>
-              <div className="flex min-w-0 items-start gap-3 pr-10">
+              <div className="absolute right-2.5 top-2.5 flex items-center gap-1.5">
+                <button
+                  type="button"
+                  aria-label={`Delete workspace ${workspace.label}`}
+                  title="Delete workspace"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setDeletingWorkspace(workspace);
+                  }}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-rose-400/20 bg-rose-400/10 text-rose-200 transition hover:bg-rose-400/18"
+                >
+                  <TrashIcon />
+                </button>
+                <button
+                  type="button"
+                  aria-label={
+                    workspace.isFavorite
+                      ? `Unpin workspace ${workspace.label}`
+                      : `Pin workspace ${workspace.label}`
+                  }
+                  title={workspace.isFavorite ? 'Unpin workspace' : 'Pin workspace'}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void handleFavorite(workspace);
+                  }}
+                  className={`inline-flex h-7 w-7 items-center justify-center rounded-full border transition ${
+                    workspace.isFavorite
+                      ? 'border-amber-300/40 bg-amber-300/15 text-amber-200'
+                      : 'border-stone-700 bg-stone-900/72 text-stone-500 hover:text-stone-200'
+                  }`}
+                >
+                  <PinIcon active={workspace.isFavorite} />
+                </button>
+              </div>
+              <div className="flex min-w-0 items-start gap-3 pr-[4.6rem]">
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-1">
                     <p
@@ -309,6 +362,23 @@ export function WorkspacesPage() {
         title="Workspace Path"
         text={expandedPath ?? ''}
         onClose={() => setExpandedPath(null)}
+      />
+      <ConfirmDialog
+        open={deletingWorkspace !== null}
+        title="Delete Workspace"
+        description={
+          deletingWorkspace
+            ? `Delete ${deletingWorkspace.label} from supervisor. This also removes its threads and local supervisor metadata.`
+            : ''
+        }
+        confirmLabel="Delete Workspace"
+        busy={deletingWorkspaceBusy}
+        onCancel={() => {
+          if (!deletingWorkspaceBusy) {
+            setDeletingWorkspace(null);
+          }
+        }}
+        onConfirm={() => void handleDeleteWorkspace()}
       />
     </div>
   );

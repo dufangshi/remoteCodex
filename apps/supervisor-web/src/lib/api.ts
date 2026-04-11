@@ -142,6 +142,12 @@ export function updateThread(id: string, input: UpdateThreadInput) {
   });
 }
 
+export function deleteThread(id: string) {
+  return request<{ id: string }>(`/api/threads/${id}`, {
+    method: 'DELETE'
+  });
+}
+
 export function updateThreadSettings(id: string, input: UpdateThreadSettingsInput) {
   return request<ThreadDto>(`/api/threads/${id}/settings`, {
     method: 'PATCH',
@@ -171,6 +177,12 @@ export function updateWorkspace(id: string, input: UpdateWorkspaceInput) {
   return request<WorkspaceDto>(`/api/workspaces/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(input)
+  });
+}
+
+export function deleteWorkspace(id: string) {
+  return request<{ id: string }>(`/api/workspaces/${id}`, {
+    method: 'DELETE'
   });
 }
 

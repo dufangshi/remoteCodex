@@ -60,6 +60,18 @@ describe('WorkspacesPage', () => {
         }
 
         if (
+          url.endsWith('/api/workspaces/workspace-1') &&
+          init?.method === 'DELETE'
+        ) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              id: 'workspace-1',
+            }),
+          });
+        }
+
+        if (
           url.endsWith('/api/workspaces/workspace-1/favorite') &&
           init?.method === 'POST'
         ) {
@@ -205,5 +217,36 @@ describe('WorkspacesPage', () => {
         within(dialog).getByText('/Users/test/projects/demo-workspace'),
       ).toBeInTheDocument();
     });
+  });
+
+  it('deletes a workspace only after confirmation', async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Demo Workspace')).toBeInTheDocument();
+    });
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Delete workspace Demo Workspace' }),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('dialog', { name: 'Delete Workspace' }),
+      ).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Workspace' }));
+
+    await waitFor(() => {
+      expect(screen.queryByText('Demo Workspace')).not.toBeInTheDocument();
+    });
+
+    const deleteCall = vi.mocked(fetch).mock.calls.find(
+      ([input, init]) =>
+        String(input).endsWith('/api/workspaces/workspace-1') &&
+        init?.method === 'DELETE',
+    );
+    expect(deleteCall).toBeTruthy();
   });
 });

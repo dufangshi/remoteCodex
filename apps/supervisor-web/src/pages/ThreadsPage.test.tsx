@@ -22,7 +22,14 @@ class FakeWebSocket {
 
 describe('ThreadsPage', () => {
   beforeEach(() => {
+    FakeWebSocket.instances = [];
     vi.stubGlobal('WebSocket', FakeWebSocket as any);
+    Object.defineProperty(navigator, 'clipboard', {
+      value: {
+        writeText: vi.fn(() => Promise.resolve()),
+      },
+      configurable: true,
+    });
     vi.stubGlobal(
       'fetch',
       vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -91,6 +98,15 @@ describe('ThreadsPage', () => {
           });
         }
 
+        if (url.endsWith('/api/threads/thread-1') && init?.method === 'DELETE') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              id: 'thread-1',
+            }),
+          });
+        }
+
         if (url.includes('/api/threads')) {
           return Promise.resolve({
             ok: true,
@@ -152,10 +168,12 @@ describe('ThreadsPage', () => {
     await waitFor(() => {
       expect(screen.getAllByText('Demo Thread')).toHaveLength(2);
     });
-    expect(screen.getByText(/Codex control plane/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/Open a thread from the sidebar/i),
+      screen.getByRole('heading', { name: /^All Threads$/i }),
     ).toBeInTheDocument();
+    expect(screen.getByText(/^Recent Threads$/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Codex control plane/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Open a thread from the sidebar/i)).not.toBeInTheDocument();
   });
 
   it('scopes by workspace query param and renames a thread only after save', async () => {
@@ -166,7 +184,9 @@ describe('ThreadsPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('Demo Workspace threads')).toBeInTheDocument();
+      expect(
+        screen.getByRole('heading', { name: 'Demo Workspace' }),
+      ).toBeInTheDocument();
     });
 
     expect(screen.queryByText('Other Thread')).not.toBeInTheDocument();
@@ -175,9 +195,17 @@ describe('ThreadsPage', () => {
     newThreadLinks.forEach((link) => {
       expect(link).toHaveAttribute('href', '/threads/new?workspaceId=workspace-1');
     });
+    expect(screen.queryByText(/This view is scoped to a single workspace/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Thread Count$/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Next Step$/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/^Recent Threads$/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open Menu' })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Expand thread navigation' }),
+    ).not.toBeInTheDocument();
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'Rename thread Demo Thread' }),
+      screen.getAllByRole('button', { name: 'Rename thread Demo Thread' })[0]!,
     );
     expect(
       screen.getByRole('dialog', { name: 'Rename Thread' }),
@@ -200,5 +228,40 @@ describe('ThreadsPage', () => {
       ([input, init]) => String(input).endsWith('/api/threads/thread-1') && init?.method === 'PATCH',
     );
     expect(patchCall?.[1]?.body).toBe(JSON.stringify({ title: 'Renamed Thread' }));
+  });
+
+  it('copies the codex session id and deletes a recent thread after confirmation', async () => {
+    render(
+      <MemoryRouter initialEntries={['/threads?workspaceId=workspace-1']}>
+        <ThreadsPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Demo Workspace' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy Codex session ID' }));
+
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith('codex-1');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete thread Demo Thread' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: 'Delete Thread' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Thread' }));
+
+    await waitFor(() => {
+      expect(screen.queryByText('Demo Thread')).not.toBeInTheDocument();
+    });
+
+    const deleteCall = vi.mocked(fetch).mock.calls.find(
+      ([input, init]) => String(input).endsWith('/api/threads/thread-1') && init?.method === 'DELETE',
+    );
+    expect(deleteCall).toBeTruthy();
   });
 });

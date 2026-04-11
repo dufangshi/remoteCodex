@@ -23,9 +23,12 @@ function AppShell() {
   const [navOpen, setNavOpen] = useState(false);
   const location = useLocation();
   const isThreadDetailRoute = /^\/threads\/[^/]+$/.test(location.pathname);
+  const isThreadsRoute = location.pathname === '/threads';
+  const isViewportLockedRoute = isThreadDetailRoute || isThreadsRoute;
   const isThreadWorkspaceRoute =
-    location.pathname === '/threads' || isThreadDetailRoute;
+    isThreadsRoute || isThreadDetailRoute;
   const isWorkspacesRoute = location.pathname === '/workspaces';
+  const usesInlineTopbar = isWorkspacesRoute || isThreadsRoute;
 
   const navLinkClassName = ({ isActive }: { isActive: boolean }) =>
     `rounded-full px-3 py-2 transition ${
@@ -43,12 +46,12 @@ function AppShell() {
     >
       <div
         className={`bg-stone-950 text-stone-100 ${
-          isThreadDetailRoute
+          isViewportLockedRoute
             ? 'fixed inset-0 overflow-hidden overscroll-none'
             : 'min-h-screen'
         }`}
       >
-        {!isWorkspacesRoute && (
+        {!usesInlineTopbar && (
           <div
             className={`fixed left-4 top-4 z-50 ${
               isThreadDetailRoute ? 'hidden sm:block' : ''
@@ -119,23 +122,25 @@ function AppShell() {
 
         <main
           className={`mx-auto w-full max-w-[1600px] ${
-            isThreadDetailRoute ? 'absolute inset-0 pb-0 sm:pb-4' : 'pb-4'
+            isViewportLockedRoute ? 'absolute inset-0 pb-0 sm:pb-4' : 'pb-4'
           } ${
             isThreadWorkspaceRoute
               ? isThreadDetailRoute
                 ? 'pt-[env(safe-area-inset-top)] sm:pt-4'
-                : 'pt-[calc(env(safe-area-inset-top)+4rem)] sm:pt-4'
+                : isThreadsRoute
+                  ? 'pt-[env(safe-area-inset-top)] sm:pt-4'
+                  : 'pt-[calc(env(safe-area-inset-top)+4rem)] sm:pt-4'
               : isWorkspacesRoute
                 ? 'pt-[env(safe-area-inset-top)] sm:pt-4'
                 : 'pt-4'
           } ${
-            isThreadDetailRoute
+            isViewportLockedRoute
               ? 'overflow-hidden overscroll-none px-0 sm:px-6'
               : 'px-4 sm:px-6'
           }`}
         >
           <section
-            className={`min-w-0 ${isThreadDetailRoute ? 'h-full overflow-hidden overscroll-none' : ''}`}
+            className={`min-w-0 ${isViewportLockedRoute ? 'h-full overflow-hidden overscroll-none' : ''}`}
           >
             <Outlet />
           </section>

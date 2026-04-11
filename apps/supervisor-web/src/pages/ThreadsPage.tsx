@@ -1,19 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import {
   CodexStatusDto,
   ThreadDto,
   WorkspaceDto,
 } from '../../../../packages/shared/src/index';
-import { ThreadWorkspaceLayout } from '../components/ThreadWorkspaceLayout';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import {
-  threadStatusClassName,
-  threadStatusLabel,
-} from '../components/threadPresentation';
+  ThreadCards,
+  ThreadWorkspaceLayout,
+} from '../components/ThreadWorkspaceLayout';
+import { RenameDialog } from '../components/RenameDialog';
 import {
   connectSupervisorEvents,
+  deleteThread,
   fetchCodexStatus,
   fetchThreads,
   fetchWorkspaces,
@@ -22,11 +24,17 @@ import {
 
 export function ThreadsPage() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [threads, setThreads] = useState<ThreadDto[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceDto[]>([]);
   const [status, setStatus] = useState<CodexStatusDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [editingRecentThreadId, setEditingRecentThreadId] = useState<string | null>(null);
+  const [recentDraftTitle, setRecentDraftTitle] = useState('');
+  const [savingRecentThreadId, setSavingRecentThreadId] = useState<string | null>(null);
+  const [deletingThread, setDeletingThread] = useState<ThreadDto | null>(null);
+  const [deletingThreadBusy, setDeletingThreadBusy] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -102,6 +110,20 @@ export function ThreadsPage() {
     ? `/threads/new?workspaceId=${encodeURIComponent(selectedWorkspaceId)}`
     : '/threads/new';
 
+  function supervisorDotClassName() {
+    switch (status?.state) {
+      case 'ready':
+        return 'bg-emerald-400 shadow-[0_0_0_3px_rgba(52,211,153,0.14)]';
+      case 'starting':
+        return 'bg-amber-300 shadow-[0_0_0_3px_rgba(252,211,77,0.12)]';
+      case 'degraded':
+      case 'failed':
+        return 'bg-rose-400 shadow-[0_0_0_3px_rgba(251,113,133,0.14)]';
+      default:
+        return 'bg-stone-500 shadow-[0_0_0_3px_rgba(120,113,108,0.14)]';
+    }
+  }
+
   async function handleRenameThread(threadId: string, title: string) {
     try {
       const updated = await updateThread(threadId, { title });
@@ -118,6 +140,45 @@ export function ThreadsPage() {
     }
   }
 
+  async function handleSaveRecentThreadRename() {
+    if (!editingRecentThreadId) {
+      return;
+    }
+
+    const normalizedTitle = recentDraftTitle.trim();
+    if (!normalizedTitle) {
+      return;
+    }
+
+    setSavingRecentThreadId(editingRecentThreadId);
+    try {
+      await handleRenameThread(editingRecentThreadId, normalizedTitle);
+      setEditingRecentThreadId(null);
+      setRecentDraftTitle('');
+    } finally {
+      setSavingRecentThreadId(null);
+    }
+  }
+
+  async function handleDeleteThread() {
+    if (!deletingThread) {
+      return;
+    }
+
+    setDeletingThreadBusy(true);
+    try {
+      await deleteThread(deletingThread.id);
+      setThreads((current) =>
+        current.filter((thread) => thread.id !== deletingThread.id),
+      );
+      setDeletingThread(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to delete thread.');
+    } finally {
+      setDeletingThreadBusy(false);
+    }
+  }
+
   return (
     <ThreadWorkspaceLayout
       threads={threads}
@@ -125,122 +186,123 @@ export function ThreadsPage() {
       status={status}
       loading={loading}
       error={error}
+      viewportConstrained={selectedWorkspaceId !== null}
+      showMobileAppMenu
+      showMobileThreadNavToggle={selectedWorkspaceId === null}
+      showMobileNewThreadShortcut={selectedWorkspaceId === null}
       currentWorkspaceId={selectedWorkspaceId}
       currentWorkspaceLabel={selectedWorkspace?.label ?? null}
       onRenameThread={handleRenameThread}
     >
-      <div className="overflow-hidden rounded-[2rem] border border-stone-800 bg-stone-900/85 shadow-2xl shadow-stone-950/20">
-        <div className="border-b border-stone-800 px-5 py-5 sm:px-6">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="min-w-0 flex-1">
-              <p className="text-xs uppercase tracking-[0.28em] text-stone-500">
-                Threads
-              </p>
+      <>
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[2rem] border border-stone-800 bg-stone-900/85 shadow-2xl shadow-stone-950/20">
+          <div className="border-b border-stone-800 px-4 py-3 sm:px-6 sm:py-4">
+            <div className="flex items-center justify-between gap-3">
               <h2
-                className="mt-2 truncate text-3xl font-semibold text-stone-100"
-                title={selectedWorkspace ? `${selectedWorkspace.label} threads` : 'Codex control plane'}
+                className="min-w-0 truncate text-base font-semibold text-stone-100 sm:text-lg"
+                title={selectedWorkspace ? `${selectedWorkspace.label} threads` : 'All threads'}
               >
-                {selectedWorkspace ? `${selectedWorkspace.label} threads` : 'Codex control plane'}
+                {selectedWorkspace ? selectedWorkspace.label : 'All Threads'}
               </h2>
-              <p className="mt-3 max-w-3xl text-sm leading-6 text-stone-400">
-                {selectedWorkspace
-                  ? 'This view is scoped to a single workspace. Use the left rail to open or rename a thread, or create a new one for this workspace.'
-                  : 'Select a thread from the left rail to continue chatting, or create a new thread for another workspace. Prompt entry and history now live in a single conversation view.'}
-              </p>
+              <Link
+                to={newThreadHref}
+                className="inline-flex h-9 shrink-0 items-center rounded-full bg-amber-300 px-3.5 text-xs font-medium uppercase tracking-[0.18em] text-stone-950 transition hover:bg-amber-200"
+              >
+                New Thread
+              </Link>
             </div>
-            <Link
-              to={newThreadHref}
-              className="rounded-full bg-amber-300 px-5 py-3 font-medium text-stone-950 transition hover:bg-amber-200"
-            >
-              New Thread
-            </Link>
           </div>
-        </div>
 
-        <div className="grid gap-4 px-5 py-5 sm:px-6 xl:grid-cols-3">
-          <article className="rounded-[1.6rem] border border-stone-800 bg-stone-950/70 p-4">
-            <p className="text-xs uppercase tracking-[0.28em] text-stone-500">
-              Supervisor
-            </p>
-            <div className="mt-3 flex items-start justify-between gap-3">
-              <div>
-                <p className="text-lg font-semibold text-stone-100">
-                  {status?.state ?? 'Loading'}
+          <div className="px-4 py-3 sm:px-6 sm:py-4">
+            <article className="inline-flex min-w-[12rem] max-w-full items-center gap-3 rounded-[1.25rem] border border-stone-800 bg-stone-950/70 px-3.5 py-2.5">
+              <span
+                aria-hidden="true"
+                className={`h-2.5 w-2.5 shrink-0 rounded-full ${supervisorDotClassName()}`}
+              />
+              <div className="min-w-0">
+                <p className="truncate text-[11px] uppercase tracking-[0.22em] text-stone-500">
+                  Supervisor
                 </p>
-                <p className="mt-1 text-sm text-stone-400">
-                  {status?.lastError ?? 'codex app-server over stdio'}
+                <p className="truncate text-sm text-stone-200">
+                  {status?.lastError ?? (status?.state === 'ready' ? 'Ready' : status?.state ?? 'Checking')}
                 </p>
               </div>
-              {status && (
-                <span className="rounded-full border border-stone-700 px-2.5 py-1 text-[11px] uppercase tracking-[0.2em] text-stone-300">
-                  {status.transport}
+            </article>
+          </div>
+
+          {!loading && !error && visibleThreads.length > 0 && (
+            <div className="flex min-h-0 flex-1 flex-col border-t border-stone-800 px-4 py-4 sm:px-6 sm:py-5">
+              <div className="flex items-center gap-2">
+                <p className="text-xs uppercase tracking-[0.28em] text-stone-500">
+                  Recent Threads
+                </p>
+                <span className="rounded-full border border-amber-300/30 bg-amber-300/10 px-2 py-0.5 text-[11px] font-medium uppercase tracking-[0.18em] text-amber-200">
+                  {visibleThreads.length} total
                 </span>
-              )}
+                {runningThreads > 0 && (
+                  <span className="text-xs text-stone-500">
+                    · {runningThreads} running
+                  </span>
+                )}
+              </div>
+              <div className="mt-3 min-h-0 flex-1">
+                <ThreadCards
+                  threads={visibleThreads}
+                  currentWorkspaceId={selectedWorkspaceId}
+                  workspaceLabels={workspaceLabels}
+                  onOpenThread={(threadId) => navigate(`/threads/${threadId}`)}
+                  onBeginRenameThread={(thread) => {
+                    setEditingRecentThreadId(thread.id);
+                    setRecentDraftTitle(thread.title);
+                  }}
+                  onDeleteThread={(thread) => setDeletingThread(thread)}
+                  scrollable
+                  maxHeightClassName="max-h-full"
+                  showDeleteButton
+                  showSessionCopyButton
+                />
+              </div>
             </div>
-          </article>
+          )}
 
-          <article className="rounded-[1.6rem] border border-stone-800 bg-stone-950/70 p-4">
-            <p className="text-xs uppercase tracking-[0.28em] text-stone-500">
-              Thread Count
-            </p>
-            <p className="mt-3 text-3xl font-semibold text-stone-100">
-              {visibleThreads.length}
-            </p>
-            <p className="mt-2 text-sm text-stone-400">
-              {runningThreads} active, {visibleThreads.length - runningThreads} waiting
-              or finished.
-            </p>
-          </article>
-
-          <article className="rounded-[1.6rem] border border-stone-800 bg-stone-950/70 p-4">
-            <p className="text-xs uppercase tracking-[0.28em] text-stone-500">
-              Next Step
-            </p>
-            <p className="mt-3 text-lg font-semibold text-stone-100">
-              {visibleThreads.length > 0
-                ? 'Open a thread from the sidebar.'
-                : 'Create the first thread.'}
-            </p>
-            <p className="mt-2 text-sm text-stone-400">
-              The right side becomes a full chat workspace once a thread is
-              selected.
-            </p>
-          </article>
+          {!loading && !error && visibleThreads.length === 0 && (
+            <div className="border-t border-stone-800 px-4 py-6 text-sm text-stone-500 sm:px-6">
+              No threads available in this workspace.
+            </div>
+          )}
         </div>
 
-        {!loading && !error && visibleThreads.length > 0 && (
-          <div className="border-t border-stone-800 px-5 py-5 sm:px-6">
-            <p className="text-xs uppercase tracking-[0.28em] text-stone-500">
-              Recent Threads
-            </p>
-            <div className="mt-4 space-y-2">
-              {visibleThreads.slice(0, 5).map((thread) => (
-                <Link
-                  key={thread.id}
-                  to={`/threads/${thread.id}`}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-[1.3rem] border border-stone-800 bg-stone-950/60 px-4 py-3 transition hover:border-stone-700 hover:bg-stone-950"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-stone-100">
-                      {thread.title}
-                    </p>
-                    <p className="mt-1 text-sm text-stone-500">
-                      {workspaceLabels[thread.workspaceId] ??
-                        'Unknown workspace'}{' '}
-                      · {thread.model ?? 'No model'}
-                    </p>
-                  </div>
-                  <span
-                    className={`rounded-full border px-2.5 py-1 text-[11px] uppercase tracking-[0.2em] ${threadStatusClassName(thread.status)}`}
-                  >
-                    {threadStatusLabel(thread.status)}
-                  </span>
-                </Link>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
+        <RenameDialog
+          open={editingRecentThreadId !== null}
+          title="Rename Thread"
+          label="Thread Title"
+          value={recentDraftTitle}
+          busy={savingRecentThreadId !== null}
+          onChange={setRecentDraftTitle}
+          onCancel={() => {
+            setEditingRecentThreadId(null);
+            setRecentDraftTitle('');
+          }}
+          onSubmit={() => void handleSaveRecentThreadRename()}
+        />
+        <ConfirmDialog
+          open={deletingThread !== null}
+          title="Delete Thread"
+          description={
+            deletingThread
+              ? `Delete ${deletingThread.title} from supervisor. The Codex session id will no longer appear in this workspace list.`
+              : ''
+          }
+          confirmLabel="Delete Thread"
+          busy={deletingThreadBusy}
+          onCancel={() => {
+            if (!deletingThreadBusy) {
+              setDeletingThread(null);
+            }
+          }}
+          onConfirm={() => void handleDeleteThread()}
+        />
+      </>
     </ThreadWorkspaceLayout>
   );
 }

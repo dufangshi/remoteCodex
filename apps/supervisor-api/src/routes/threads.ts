@@ -2,6 +2,11 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
 import {
+  deleteShellSessionRecord,
+  deleteViewerSessionsByShellId,
+  getShellSessionRecordByThreadId,
+} from '../../../../packages/db/src/index';
+import {
   ImportThreadInput,
   ReasoningEffortDto,
   RespondThreadActionRequestInput,
@@ -92,6 +97,21 @@ export async function registerThreadRoutes(app: FastifyInstance) {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const body = updateThreadSchema.parse(request.body) satisfies UpdateThreadInput;
     return app.services.threadService.updateThreadTitle(params.id, body.title);
+  });
+
+  app.delete('/api/threads/:id', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const shell = getShellSessionRecordByThreadId(app.services.database.db, params.id);
+
+    if (shell) {
+      if (shell.status !== 'exited' && shell.status !== 'not_found') {
+        await app.services.shellService.terminateShell(shell.id);
+      }
+      deleteViewerSessionsByShellId(app.services.database.db, shell.id);
+      deleteShellSessionRecord(app.services.database.db, shell.id);
+    }
+
+    return app.services.threadService.deleteThread(params.id);
   });
 
   app.patch('/api/threads/:id/settings', async (request) => {

@@ -17,9 +17,9 @@ export function ThreadNewPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestedWorkspaceId = searchParams.get('workspaceId');
 
   useEffect(() => {
-    const requestedWorkspaceId = searchParams.get('workspaceId');
     Promise.all([fetchWorkspaces(), fetchCodexModels()])
       .then(([workspaceRecords, modelRecords]) => {
         setWorkspaces(workspaceRecords);
@@ -38,6 +38,20 @@ export function ThreadNewPage() {
         setLoading(false);
       });
   }, [searchParams]);
+
+  function handleCancel() {
+    if (window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+
+    if (requestedWorkspaceId) {
+      navigate(`/threads?workspaceId=${encodeURIComponent(requestedWorkspaceId)}`);
+      return;
+    }
+
+    navigate('/threads');
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -152,13 +166,23 @@ export function ThreadNewPage() {
               {error}
             </div>
           )}
-          <button
-            type="submit"
-            disabled={busy || !workspaceId || !model}
-            className="rounded-full bg-amber-300 px-5 py-3 font-medium text-stone-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:bg-stone-700 disabled:text-stone-300"
-          >
-            {busy ? 'Creating...' : 'Create Thread'}
-          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="submit"
+              disabled={busy || !workspaceId || !model}
+              className="rounded-full bg-amber-300 px-5 py-3 font-medium text-stone-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:bg-stone-700 disabled:text-stone-300"
+            >
+              {busy ? 'Creating...' : 'Create Thread'}
+            </button>
+            <button
+              type="button"
+              onClick={handleCancel}
+              disabled={busy}
+              className="rounded-full border border-stone-700 px-5 py-3 font-medium text-stone-200 transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:border-stone-800 disabled:text-stone-500"
+            >
+              Cancel
+            </button>
+          </div>
         </form>
       )}
     </div>

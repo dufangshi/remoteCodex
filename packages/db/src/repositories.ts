@@ -4,7 +4,13 @@ import { desc, eq, inArray } from 'drizzle-orm';
 
 import { DatabaseClient } from './client';
 import { getDefaultHostRecord } from './client';
-import { shellSessions, threads, viewerSessions, workspaces } from './schema';
+import {
+  notifications,
+  shellSessions,
+  threads,
+  viewerSessions,
+  workspaces,
+} from './schema';
 
 export interface CreateWorkspaceRecordInput {
   absPath: string;
@@ -119,6 +125,10 @@ export function listThreadRecords(db: DatabaseClient) {
   return db.select().from(threads).orderBy(desc(threads.createdAt)).all();
 }
 
+export function listThreadRecordsByWorkspaceId(db: DatabaseClient, workspaceId: string) {
+  return db.select().from(threads).where(eq(threads.workspaceId, workspaceId)).orderBy(desc(threads.createdAt)).all();
+}
+
 export function listThreadRecordsByIds(db: DatabaseClient, ids: string[]) {
   if (ids.length === 0) {
     return [];
@@ -172,8 +182,25 @@ export function updateThreadRecord(db: DatabaseClient, id: string, input: Update
   db.update(threads).set(updates).where(eq(threads.id, id)).run();
 }
 
+export function deleteThreadRecord(db: DatabaseClient, id: string) {
+  db.delete(threads).where(eq(threads.id, id)).run();
+}
+
+export function deleteThreadsByWorkspaceId(db: DatabaseClient, workspaceId: string) {
+  db.delete(threads).where(eq(threads.workspaceId, workspaceId)).run();
+}
+
 export function listShellSessionRecords(db: DatabaseClient) {
   return db.select().from(shellSessions).orderBy(desc(shellSessions.updatedAt)).all();
+}
+
+export function listShellSessionRecordsByWorkspaceId(db: DatabaseClient, workspaceId: string) {
+  return db
+    .select()
+    .from(shellSessions)
+    .where(eq(shellSessions.workspaceId, workspaceId))
+    .orderBy(desc(shellSessions.updatedAt))
+    .all();
 }
 
 export function getShellSessionRecordById(db: DatabaseClient, id: string) {
@@ -216,6 +243,18 @@ export function updateShellSessionRecord(
   };
 
   db.update(shellSessions).set(updates).where(eq(shellSessions.id, id)).run();
+}
+
+export function deleteShellSessionRecord(db: DatabaseClient, id: string) {
+  db.delete(shellSessions).where(eq(shellSessions.id, id)).run();
+}
+
+export function deleteShellSessionsByThreadId(db: DatabaseClient, threadId: string) {
+  db.delete(shellSessions).where(eq(shellSessions.threadId, threadId)).run();
+}
+
+export function deleteShellSessionsByWorkspaceId(db: DatabaseClient, workspaceId: string) {
+  db.delete(shellSessions).where(eq(shellSessions.workspaceId, workspaceId)).run();
 }
 
 export function createViewerSessionRecord(
@@ -280,4 +319,12 @@ export function deleteViewerSessionsByThreadId(db: DatabaseClient, threadId: str
 
 export function deleteAllViewerSessionRecords(db: DatabaseClient) {
   db.delete(viewerSessions).run();
+}
+
+export function deleteNotificationsByThreadId(db: DatabaseClient, threadId: string) {
+  db.delete(notifications).where(eq(notifications.threadId, threadId)).run();
+}
+
+export function deleteWorkspaceRecord(db: DatabaseClient, id: string) {
+  db.delete(workspaces).where(eq(workspaces.id, id)).run();
 }

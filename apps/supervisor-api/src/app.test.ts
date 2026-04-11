@@ -395,6 +395,95 @@ describe('supervisor api', () => {
     });
   });
 
+  it('deletes a thread and removes it from the supervisor registry', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Delete Me'
+      }
+    });
+
+    const createdThread = createResponse.json();
+    const deleteResponse = await app.inject({
+      method: 'DELETE',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(deleteResponse.statusCode).toBe(200);
+    expect(deleteResponse.json()).toMatchObject({
+      id: createdThread.id
+    });
+
+    const listResponse = await app.inject({
+      method: 'GET',
+      url: '/api/threads'
+    });
+
+    expect(listResponse.statusCode).toBe(200);
+    expect(listResponse.json()).toHaveLength(0);
+  });
+
+  it('deletes a workspace and removes its threads from the supervisor registry', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Workspace Thread'
+      }
+    });
+
+    expect(createResponse.statusCode).toBe(200);
+
+    const deleteResponse = await app.inject({
+      method: 'DELETE',
+      url: `/api/workspaces/${workspace.id}`
+    });
+
+    expect(deleteResponse.statusCode).toBe(200);
+    expect(deleteResponse.json()).toMatchObject({
+      id: workspace.id
+    });
+
+    const listWorkspacesResponse = await app.inject({
+      method: 'GET',
+      url: '/api/workspaces'
+    });
+    const listThreadsResponse = await app.inject({
+      method: 'GET',
+      url: '/api/threads'
+    });
+
+    expect(listWorkspacesResponse.statusCode).toBe(200);
+    expect(listWorkspacesResponse.json()).toHaveLength(0);
+    expect(listThreadsResponse.statusCode).toBe(200);
+    expect(listThreadsResponse.json()).toHaveLength(0);
+  });
+
   it('keeps the originally selected model after resume', async () => {
     fakeCodexManager.resumeModel = 'gpt-5.4';
 

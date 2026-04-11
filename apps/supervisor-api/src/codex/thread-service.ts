@@ -14,6 +14,9 @@ import {
   createThreadRecord,
   createWorkspaceRecord,
   DatabaseClient,
+  deleteNotificationsByThreadId,
+  deleteThreadRecord,
+  deleteViewerSessionsByThreadId,
   getThreadRecordByCodexThreadId,
   getThreadRecordById,
   getWorkspaceRecordByPath,
@@ -912,6 +915,23 @@ export class ThreadService {
 
     const updated = getThreadRecordById(this.db, localThreadId)!;
     return this.toThreadDto(updated, new Set());
+  }
+
+  async deleteThread(localThreadId: string): Promise<{ id: string }> {
+    const record = getThreadRecordById(this.db, localThreadId);
+    if (!record) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Thread was not found.'
+      });
+    }
+
+    this.pendingRequests.delete(localThreadId);
+    deleteViewerSessionsByThreadId(this.db, localThreadId);
+    deleteNotificationsByThreadId(this.db, localThreadId);
+    deleteThreadRecord(this.db, localThreadId);
+
+    return { id: localThreadId };
   }
 
   async respondToRequest(

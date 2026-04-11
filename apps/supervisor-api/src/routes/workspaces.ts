@@ -5,9 +5,14 @@ import { z } from 'zod';
 
 import {
   createWorkspaceRecord,
+  deleteShellSessionRecord,
+  deleteViewerSessionsByShellId,
+  deleteWorkspaceRecord,
   getWorkspaceRecordById,
   getWorkspaceRecordByPath,
+  listShellSessionRecordsByWorkspaceId,
   listWorkspaceRecords,
+  listThreadRecordsByWorkspaceId,
   touchWorkspaceOpenedAt,
   updateWorkspaceLabel,
   updateWorkspaceFavorite
@@ -147,6 +152,35 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     const updated = getWorkspaceRecordById(app.services.database.db, params.id);
 
     return toWorkspaceDto(updated!);
+  });
+
+  app.delete('/api/workspaces/:id', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const record = getWorkspaceRecordById(app.services.database.db, params.id);
+
+    if (!record) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Workspace was not found.'
+      });
+    }
+
+    const shells = listShellSessionRecordsByWorkspaceId(app.services.database.db, params.id);
+    for (const shell of shells) {
+      if (shell.status !== 'exited' && shell.status !== 'not_found') {
+        await app.services.shellService.terminateShell(shell.id);
+      }
+      deleteViewerSessionsByShellId(app.services.database.db, shell.id);
+      deleteShellSessionRecord(app.services.database.db, shell.id);
+    }
+
+    const threadRecords = listThreadRecordsByWorkspaceId(app.services.database.db, params.id);
+    for (const thread of threadRecords) {
+      await app.services.threadService.deleteThread(thread.id);
+    }
+
+    deleteWorkspaceRecord(app.services.database.db, params.id);
+    return { id: params.id };
   });
 
   app.post('/api/workspaces/:id/favorite', async (request) => {

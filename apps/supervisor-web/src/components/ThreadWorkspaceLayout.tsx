@@ -1,4 +1,4 @@
-import { KeyboardEvent, ReactNode, useMemo, useState } from 'react';
+import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import type {
@@ -18,6 +18,9 @@ interface ThreadWorkspaceLayoutProps {
   loading?: boolean;
   error?: string | null;
   viewportConstrained?: boolean;
+  showMobileAppMenu?: boolean;
+  showMobileThreadNavToggle?: boolean;
+  showMobileNewThreadShortcut?: boolean;
   currentThreadId?: string | undefined;
   currentWorkspaceId?: string | null | undefined;
   currentWorkspaceLabel?: string | null | undefined;
@@ -31,6 +34,58 @@ interface SidebarSectionProps {
   title: string;
   defaultOpen?: boolean;
   children: ReactNode;
+}
+
+interface ThreadCardsProps {
+  threads: ThreadDto[];
+  currentThreadId?: string | undefined;
+  currentWorkspaceId?: string | null | undefined;
+  workspaceLabels?: Record<string, string>;
+  onOpenThread: (threadId: string) => void;
+  onBeginRenameThread: (thread: ThreadDto) => void;
+  onDeleteThread?: (thread: ThreadDto) => void;
+  scrollable?: boolean;
+  maxHeightClassName?: string;
+  showDeleteButton?: boolean;
+  showSessionCopyButton?: boolean;
+}
+
+function NewThreadIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 fill-none stroke-current"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+    >
+      <path d="M8 3.25v9.5M3.25 8h9.5" />
+    </svg>
+  );
+}
+
+function CopyIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 fill-current"
+    >
+      <path d="M5.75 1.75c-.97 0-1.75.78-1.75 1.75v.25H3.5c-.97 0-1.75.78-1.75 1.75v6c0 .97.78 1.75 1.75 1.75h4.75c.97 0 1.75-.78 1.75-1.75v-.25h.5c.97 0 1.75-.78 1.75-1.75v-6c0-.97-.78-1.75-1.75-1.75h-4.75Zm-.5 2V3.5c0-.28.22-.5.5-.5h4.75c.28 0 .5.22.5.5v6a.5.5 0 0 1-.5.5H10v-4.5c0-.97-.78-1.75-1.75-1.75h-3Zm-1.75 1.25h4.75c.28 0 .5.22.5.5v6a.5.5 0 0 1-.5.5H3.5a.5.5 0 0 1-.5-.5v-6c0-.28.22-.5.5-.5Z" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3 w-3 fill-current"
+    >
+      <path d="M6.1 1.75h3.8c.75 0 1.4.52 1.57 1.25h2.03c.35 0 .63.28.63.63 0 .34-.28.62-.63.62h-.66l-.62 8.03c-.08 1.09-.99 1.97-2.08 1.97H5.86c-1.09 0-2-.88-2.08-1.97l-.62-8.03H2.5a.62.62 0 1 1 0-1.25h2.03c.17-.73.82-1.25 1.57-1.25Zm0 1.25c-.07 0-.14.03-.19.08A.26.26 0 0 0 5.84 3h4.32a.26.26 0 0 0-.07-.17.26.26 0 0 0-.19-.08H6.1Zm-1.07 1.25.61 7.93c.03.44.4.79.84.79h3.04c.44 0 .81-.35.84-.79l.61-7.93H5.03Z" />
+    </svg>
+  );
 }
 
 function SidebarSection({
@@ -77,12 +132,214 @@ function supervisorSummary(status: CodexStatusDto | null) {
   }
 }
 
+function ThreadCard({
+  thread,
+  currentThreadId,
+  currentWorkspaceId,
+  workspaceLabels = {},
+  onOpenThread,
+  onBeginRenameThread,
+  onDeleteThread,
+  showDeleteButton = false,
+  showSessionCopyButton = false,
+}: {
+  thread: ThreadDto;
+  currentThreadId?: string | undefined;
+  currentWorkspaceId?: string | null | undefined;
+  workspaceLabels?: Record<string, string>;
+  onOpenThread: (threadId: string) => void;
+  onBeginRenameThread: (thread: ThreadDto) => void;
+  onDeleteThread?: (thread: ThreadDto) => void;
+  showDeleteButton?: boolean;
+  showSessionCopyButton?: boolean;
+}) {
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const resetTimerRef = useRef<number | null>(null);
+  const workspaceLabel = workspaceLabels[thread.workspaceId];
+  const isCurrentThread = currentThreadId === thread.id;
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current !== null) {
+        window.clearTimeout(resetTimerRef.current);
+      }
+    };
+  }, []);
+
+  async function handleCopySessionId() {
+    if (!thread.codexThreadId) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(thread.codexThreadId);
+      setCopyState('copied');
+      if (resetTimerRef.current !== null) {
+        window.clearTimeout(resetTimerRef.current);
+      }
+      resetTimerRef.current = window.setTimeout(() => setCopyState('idle'), 1200);
+    } catch {
+      setCopyState('failed');
+      if (resetTimerRef.current !== null) {
+        window.clearTimeout(resetTimerRef.current);
+      }
+      resetTimerRef.current = window.setTimeout(() => setCopyState('idle'), 1600);
+    }
+  }
+
+  return (
+    <div
+      role="link"
+      tabIndex={0}
+      onClick={() => onOpenThread(thread.id)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onOpenThread(thread.id);
+        }
+      }}
+      className={`relative block rounded-[1.35rem] border px-4 py-3 transition ${
+        isCurrentThread
+          ? 'border-amber-300/40 bg-amber-300/10 shadow-lg shadow-stone-950/20'
+          : 'border-stone-800 bg-stone-900/75 hover:border-stone-700 hover:bg-stone-900'
+      } ${showSessionCopyButton && thread.codexThreadId ? 'pb-4' : ''}`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1">
+            <p
+              className="min-w-0 w-fit max-w-[calc(100%-2rem)] truncate text-sm font-medium text-stone-100"
+              title={thread.title}
+            >
+              {thread.title}
+            </p>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onBeginRenameThread(thread);
+              }}
+              aria-label={`Rename thread ${thread.title}`}
+              className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-stone-500 transition hover:text-stone-100"
+            >
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                className="h-3 w-3 fill-current"
+              >
+                <path d="m11.9 1.6 2.5 2.5-8.2 8.2-3.3.7.7-3.3 8.3-8.1Zm-7.3 8.7-.3 1.3 1.3-.3 6.9-6.9-1-1-6.9 6.9Zm8.8-7.8-1-1-1 1 1 1 1-1Z" />
+              </svg>
+            </button>
+            {showDeleteButton && onDeleteThread && (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDeleteThread(thread);
+                }}
+                aria-label={`Delete thread ${thread.title}`}
+                className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-rose-300/90 transition hover:text-rose-200"
+              >
+                <TrashIcon />
+              </button>
+            )}
+          </div>
+          {workspaceLabel && !currentWorkspaceId && (
+            <p className="mt-1 truncate text-xs text-stone-500">
+              {workspaceLabel}
+            </p>
+          )}
+        </div>
+        <span
+          className={`rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.2em] ${threadStatusClassName(thread.status)}`}
+        >
+          {threadStatusLabel(thread.status)}
+        </span>
+      </div>
+      <div className={`mt-3 flex items-center justify-between gap-3 text-xs text-stone-500 ${showSessionCopyButton && thread.codexThreadId ? 'pr-9' : ''}`}>
+        <time dateTime={thread.lastTurnStartedAt ?? thread.updatedAt}>
+          {formatShortTimestamp(thread.lastTurnStartedAt ?? thread.updatedAt)}
+        </time>
+        <span>{thread.model ?? 'No model'}</span>
+      </div>
+      {showSessionCopyButton && thread.codexThreadId && (
+        <button
+          type="button"
+          aria-label="Copy Codex session ID"
+          title={
+            copyState === 'copied'
+              ? 'Copied'
+              : copyState === 'failed'
+                ? 'Copy failed'
+                : 'Copy Codex session ID'
+          }
+          onClick={(event) => {
+            event.stopPropagation();
+            void handleCopySessionId();
+          }}
+          className={`absolute bottom-2.5 right-2.5 inline-flex h-7 w-7 items-center justify-center rounded-full border shadow-sm shadow-stone-950/25 backdrop-blur transition ${
+            copyState === 'copied'
+              ? 'border-sky-300/40 bg-sky-300/16 text-sky-100'
+              : copyState === 'failed'
+                ? 'border-rose-300/35 bg-rose-300/12 text-rose-100'
+                : 'border-stone-700/90 bg-stone-900/60 text-stone-300 hover:bg-stone-800/92'
+          }`}
+        >
+          <CopyIcon />
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function ThreadCards({
+  threads,
+  currentThreadId,
+  currentWorkspaceId,
+  workspaceLabels = {},
+  onOpenThread,
+  onBeginRenameThread,
+  onDeleteThread,
+  scrollable = false,
+  maxHeightClassName = 'max-h-full',
+  showDeleteButton = false,
+  showSessionCopyButton = false,
+}: ThreadCardsProps) {
+  const containerClassName = scrollable
+    ? `min-h-0 overflow-y-auto overscroll-contain pr-1 ${maxHeightClassName}`
+    : '';
+
+  return (
+    <div className={containerClassName}>
+      <div className="space-y-2">
+        {threads.map((thread) => (
+          <ThreadCard
+            key={thread.id}
+            thread={thread}
+            currentThreadId={currentThreadId}
+            currentWorkspaceId={currentWorkspaceId}
+            workspaceLabels={workspaceLabels}
+            onOpenThread={onOpenThread}
+            onBeginRenameThread={onBeginRenameThread}
+            showDeleteButton={showDeleteButton}
+            showSessionCopyButton={showSessionCopyButton}
+            {...(onDeleteThread ? { onDeleteThread } : {})}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function ThreadWorkspaceLayout({
   threads,
   status,
   loading = false,
   error,
   viewportConstrained = false,
+  showMobileAppMenu = true,
+  showMobileThreadNavToggle = true,
+  showMobileNewThreadShortcut = true,
   currentThreadId,
   currentWorkspaceId = null,
   currentWorkspaceLabel = null,
@@ -165,13 +422,6 @@ export function ThreadWorkspaceLayout({
     setMobileAppMenuOpen(false);
   }
 
-  function handleCardKeyDown(event: KeyboardEvent<HTMLDivElement>, threadId: string) {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      openThread(threadId);
-    }
-  }
-
   function renderSidebarContent() {
     return (
       <div className="space-y-4">
@@ -230,73 +480,14 @@ export function ThreadWorkspaceLayout({
           )}
 
           {visibleThreads.length > 0 && (
-            <div className="space-y-2">
-              {visibleThreads.map((thread) => {
-                const workspaceLabel = workspaceLabels[thread.workspaceId];
-                const isCurrentThread = currentThreadId === thread.id;
-
-                return (
-                  <div
-                    key={thread.id}
-                    role="link"
-                    tabIndex={0}
-                    onClick={() => openThread(thread.id)}
-                    onKeyDown={(event) => handleCardKeyDown(event, thread.id)}
-                    className={`block rounded-[1.35rem] border px-4 py-3 transition ${
-                      isCurrentThread
-                        ? 'border-amber-300/40 bg-amber-300/10 shadow-lg shadow-stone-950/20'
-                        : 'border-stone-800 bg-stone-900/75 hover:border-stone-700 hover:bg-stone-900'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1">
-                          <p
-                            className="min-w-0 w-fit max-w-[calc(100%-1.1rem)] truncate text-sm font-medium text-stone-100"
-                            title={thread.title}
-                          >
-                            {thread.title}
-                          </p>
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              beginRenameThread(thread);
-                            }}
-                            aria-label={`Rename thread ${thread.title}`}
-                            className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-stone-500 transition hover:text-stone-100"
-                          >
-                            <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3 w-3 fill-current">
-                              <path d="m11.9 1.6 2.5 2.5-8.2 8.2-3.3.7.7-3.3 8.3-8.1Zm-7.3 8.7-.3 1.3 1.3-.3 6.9-6.9-1-1-6.9 6.9Zm8.8-7.8-1-1-1 1 1 1 1-1Z" />
-                            </svg>
-                          </button>
-                        </div>
-                        {workspaceLabel && !currentWorkspaceId && (
-                          <p className="mt-1 truncate text-xs text-stone-500">
-                            {workspaceLabel}
-                          </p>
-                        )}
-                      </div>
-                      <span
-                        className={`rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.2em] ${threadStatusClassName(thread.status)}`}
-                      >
-                        {threadStatusLabel(thread.status)}
-                      </span>
-                    </div>
-                    <div className="mt-3 flex items-center justify-between gap-3 text-xs text-stone-500">
-                      <time
-                        dateTime={thread.lastTurnStartedAt ?? thread.updatedAt}
-                      >
-                        {formatShortTimestamp(
-                          thread.lastTurnStartedAt ?? thread.updatedAt,
-                        )}
-                      </time>
-                      <span>{thread.model ?? 'No model'}</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            <ThreadCards
+              threads={visibleThreads}
+              currentThreadId={currentThreadId}
+              currentWorkspaceId={currentWorkspaceId}
+              workspaceLabels={workspaceLabels}
+              onOpenThread={openThread}
+              onBeginRenameThread={beginRenameThread}
+            />
           )}
         </section>
 
@@ -329,57 +520,90 @@ export function ThreadWorkspaceLayout({
       >
         <div className="lg:hidden">
           <div className="relative">
-            <div className="grid h-10 grid-cols-[2rem_minmax(0,1fr)_2rem] items-center gap-1.5 border-b border-stone-800 bg-stone-950/96 px-2.5 backdrop-blur">
-              <button
-                type="button"
-                aria-label={mobileAppMenuOpen ? 'Close Menu' : 'Open Menu'}
-                aria-expanded={mobileAppMenuOpen}
-                onClick={() => setMobileAppMenuOpen((current) => !current)}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-stone-300 transition hover:bg-stone-800 hover:text-stone-100"
-              >
-                <svg
-                  aria-hidden="true"
-                  viewBox="0 0 16 16"
-                  className="h-4 w-4 fill-current"
-                >
-                  <path d="M2 3.25h12v1.5H2Zm0 4h12v1.5H2Zm0 4h12v1.5H2Z" />
-                </svg>
-              </button>
-
-              <p
-                className="min-w-0 truncate px-1 text-center text-sm font-medium text-stone-100"
-                title={threadScopeLabel}
-              >
-                {threadScopeLabel}
-              </p>
-
-              <button
-                type="button"
-                onClick={() => setMobileSidebarOpen((current) => !current)}
-                aria-expanded={mobileSidebarOpen}
-                aria-label={mobileSidebarOpen ? 'Collapse thread navigation' : 'Expand thread navigation'}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center justify-self-end rounded-full text-stone-400 transition hover:bg-stone-800 hover:text-stone-200"
-              >
-                <span
-                  aria-hidden="true"
-                  className={`inline-flex h-4 w-4 items-center justify-center transition ${
-                    mobileSidebarOpen ? 'rotate-180' : ''
-                  }`}
+            <div
+              className={`grid h-10 items-center gap-1.5 border-b border-stone-800 bg-stone-950/96 px-2.5 backdrop-blur ${
+                showMobileAppMenu && showMobileNewThreadShortcut
+                  ? 'grid-cols-[2rem_minmax(0,1fr)_2rem]'
+                  : showMobileAppMenu
+                    ? 'grid-cols-[2rem_minmax(0,1fr)]'
+                  : 'grid-cols-[minmax(0,1fr)]'
+              }`}
+            >
+              {showMobileAppMenu && (
+                <button
+                  type="button"
+                  aria-label={mobileAppMenuOpen ? 'Close Menu' : 'Open Menu'}
+                  aria-expanded={mobileAppMenuOpen}
+                  onClick={() => setMobileAppMenuOpen((current) => !current)}
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-stone-300 transition hover:bg-stone-800 hover:text-stone-100"
                 >
                   <svg
+                    aria-hidden="true"
                     viewBox="0 0 16 16"
-                    className="h-3.5 w-3.5 fill-none stroke-current"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
+                    className="h-4 w-4 fill-current"
                   >
-                    <path d="m4.5 6.25 3.5 3.5 3.5-3.5" />
+                    <path d="M2 3.25h12v1.5H2Zm0 4h12v1.5H2Zm0 4h12v1.5H2Z" />
                   </svg>
-                </span>
-              </button>
+                </button>
+              )}
+
+              {showMobileThreadNavToggle ? (
+                <button
+                  type="button"
+                  onClick={() => setMobileSidebarOpen((current) => !current)}
+                  aria-expanded={mobileSidebarOpen}
+                  aria-label={
+                    mobileSidebarOpen
+                      ? 'Collapse thread navigation'
+                      : 'Expand thread navigation'
+                  }
+                  className="inline-flex min-w-0 items-center justify-center gap-1 px-1 text-center text-sm font-medium text-stone-100"
+                  title={threadScopeLabel}
+                >
+                  <span className="min-w-0 truncate">{threadScopeLabel}</span>
+                  <span
+                    aria-hidden="true"
+                    className={`inline-flex h-4 w-4 shrink-0 items-center justify-center text-stone-500 transition ${
+                      mobileSidebarOpen ? 'rotate-180' : ''
+                    }`}
+                  >
+                    <svg
+                      viewBox="0 0 16 16"
+                      className="h-3.5 w-3.5 fill-none stroke-current"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="m4.5 6.25 3.5 3.5 3.5-3.5" />
+                    </svg>
+                  </span>
+                </button>
+              ) : (
+                <p
+                  className="min-w-0 truncate px-1 text-center text-sm font-medium text-stone-100"
+                  title={threadScopeLabel}
+                >
+                  {threadScopeLabel}
+                </p>
+              )}
+
+              {showMobileAppMenu && showMobileNewThreadShortcut && (
+                <Link
+                  to={newThreadHref}
+                  onClick={() => {
+                    setMobileAppMenuOpen(false);
+                    setMobileSidebarOpen(false);
+                  }}
+                  aria-label="New Thread"
+                  className="inline-flex h-8 min-w-0 shrink-0 items-center justify-center gap-1 rounded-full bg-amber-300 px-2 text-[10px] font-medium uppercase tracking-[0.16em] text-stone-950 transition hover:bg-amber-200"
+                >
+                  <NewThreadIcon />
+                  <span className="hidden sm:inline">New</span>
+                </Link>
+              )}
             </div>
 
-            {mobileAppMenuOpen && (
+            {showMobileAppMenu && mobileAppMenuOpen && (
               <div className="absolute left-2 top-[calc(100%+0.45rem)] z-20 w-[min(18rem,calc(100vw-1rem))] rounded-[1.25rem] border border-stone-800 bg-stone-900/96 p-2.5 shadow-2xl shadow-stone-950/35 backdrop-blur">
                 <nav className="flex flex-col gap-1.5 text-sm">
                   <Link
@@ -410,7 +634,7 @@ export function ThreadWorkspaceLayout({
               </div>
             )}
 
-            {mobileSidebarOpen && (
+            {showMobileThreadNavToggle && mobileSidebarOpen && (
               <aside className="absolute inset-x-2 top-[calc(100%+0.35rem)] z-10 max-h-[40dvh] overflow-y-auto rounded-[1.35rem] border border-stone-800 bg-stone-900/96 p-4 shadow-2xl shadow-stone-950/30 backdrop-blur">
                 {renderSidebarContent()}
               </aside>
