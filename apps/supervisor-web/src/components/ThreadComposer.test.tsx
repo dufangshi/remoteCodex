@@ -389,6 +389,9 @@ describe('ThreadComposer', () => {
 
     expect(screen.getByText('(base) trading-lab')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Send Ctrl-C' })).toBeDisabled();
+    expect(
+      screen.queryByRole('button', { name: 'Disconnect shell' }),
+    ).not.toBeInTheDocument();
   });
 
   it('submits an empty shell prompt so Send can act like Enter', async () => {

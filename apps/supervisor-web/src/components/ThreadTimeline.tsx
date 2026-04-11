@@ -4,6 +4,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type RefCallback,
   type RefObject,
 } from 'react';
 import { code } from '@streamdown/code';
@@ -42,10 +43,10 @@ interface ThreadTimelineProps {
     input: RespondThreadActionRequestInput,
   ) => Promise<void> | void;
   liveOutput: string;
-  followTail?: boolean;
   scrollRequestKey?: number;
   bottomSpacer?: number;
   className?: string;
+  onTailVisibilityChange?: (isVisible: boolean) => void;
 }
 
 interface ExpandedTextState {
@@ -146,6 +147,15 @@ function isNearBottom(container: HTMLDivElement) {
   const distanceFromBottom =
     container.scrollHeight - container.scrollTop - container.clientHeight;
   return distanceFromBottom <= FOLLOW_TAIL_THRESHOLD_PX;
+}
+
+function isElementVisible(container: HTMLDivElement, element: HTMLElement) {
+  const containerRect = container.getBoundingClientRect();
+  const elementRect = element.getBoundingClientRect();
+  const visibleTop = Math.max(containerRect.top, elementRect.top);
+  const visibleBottom = Math.min(containerRect.bottom, elementRect.bottom);
+  const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+  return visibleHeight > 0;
 }
 
 function CompactMessageIcon({
@@ -962,6 +972,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
   onToggleCollapse,
   onOpenExpandedText,
   scrollRootRef,
+  articleRef,
 }: {
   threadId: string | undefined;
   turn: ThreadTurnDto;
@@ -971,9 +982,10 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
   onToggleCollapse: (turnId: string) => void;
   onOpenExpandedText: (title: string, text: string) => void;
   scrollRootRef: RefObject<HTMLDivElement | null>;
+  articleRef?: RefCallback<HTMLElement> | undefined;
 }) {
   return (
-    <article className="px-2 py-2 sm:px-6 sm:py-2.5">
+    <article ref={articleRef} className="px-2 py-2 sm:px-6 sm:py-2.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0 flex flex-wrap items-center gap-2">
           <div className="flex flex-wrap items-center gap-2">
@@ -1056,22 +1068,22 @@ export function ThreadTimeline({
   respondingRequestId = null,
   onRespondToRequest,
   liveOutput,
-  followTail = false,
   scrollRequestKey = 0,
   bottomSpacer = 0,
   className = '',
+  onTailVisibilityChange,
 }: ThreadTimelineProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const lastHandledScrollRequestKeyRef = useRef(scrollRequestKey);
-  const previousFollowTailRef = useRef(followTail);
   const previousBottomSpacerRef = useRef(bottomSpacer);
+  const lastTurnElementRef = useRef<HTMLElement | null>(null);
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_TURNS);
   const [loadMoreClicks, setLoadMoreClicks] = useState(0);
   const [expandedText, setExpandedText] = useState<ExpandedTextState | null>(null);
   const [collapsedTurns, setCollapsedTurns] = useState<Record<string, boolean>>(
     {},
   );
-  const [isPinnedToBottom, setIsPinnedToBottom] = useState(true);
+  const [isTailVisible, setIsTailVisible] = useState(true);
 
   const handleToggleCollapse = useCallback((turnId: string) => {
     setCollapsedTurns((current) => ({
@@ -1084,14 +1096,23 @@ export function ThreadTimeline({
     setExpandedText({ title, text });
   }, []);
 
-  const handleScroll = useCallback(() => {
+  const recomputeTailVisibility = useCallback(() => {
     const container = scrollContainerRef.current;
+    const lastTurnElement = lastTurnElementRef.current;
     if (!container) {
       return;
     }
 
-    setIsPinnedToBottom(isNearBottom(container));
+    setIsTailVisible(
+      lastTurnElement
+        ? isElementVisible(container, lastTurnElement)
+        : isNearBottom(container),
+    );
   }, []);
+
+  const handleScroll = useCallback(() => {
+    recomputeTailVisibility();
+  }, [recomputeTailVisibility]);
 
   useEffect(() => {
     setVisibleCount((current) => {
@@ -1104,22 +1125,15 @@ export function ThreadTimeline({
   }, [turns.length]);
 
   useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container) {
-      return;
-    }
-
-    setIsPinnedToBottom(isNearBottom(container));
-  }, [turns.length, visibleCount]);
+    recomputeTailVisibility();
+  }, [recomputeTailVisibility, turns.length, visibleCount]);
 
   useEffect(() => {
     const shouldForceScroll =
-      scrollRequestKey !== lastHandledScrollRequestKeyRef.current ||
-      (followTail && !previousFollowTailRef.current);
-    const shouldAutoScroll = followTail && (isPinnedToBottom || shouldForceScroll);
+      scrollRequestKey !== lastHandledScrollRequestKeyRef.current;
+    const shouldAutoScroll = isTailVisible || shouldForceScroll;
 
     if (!shouldAutoScroll) {
-      previousFollowTailRef.current = followTail;
       return;
     }
 
@@ -1130,21 +1144,19 @@ export function ThreadTimeline({
       }
 
       container.scrollTop = container.scrollHeight;
-      setIsPinnedToBottom(true);
+      setIsTailVisible(true);
     });
 
     if (scrollRequestKey !== lastHandledScrollRequestKeyRef.current) {
       lastHandledScrollRequestKeyRef.current = scrollRequestKey;
     }
-    previousFollowTailRef.current = followTail;
 
     return () => {
       window.cancelAnimationFrame(frame);
     };
   }, [
     bottomSpacer,
-    followTail,
-    isPinnedToBottom,
+    isTailVisible,
     liveOutput,
     livePlan,
     pendingRequests,
@@ -1153,7 +1165,7 @@ export function ThreadTimeline({
   ]);
 
   useEffect(() => {
-    if (!followTail) {
+    if (!isTailVisible) {
       previousBottomSpacerRef.current = bottomSpacer;
       return;
     }
@@ -1170,13 +1182,17 @@ export function ThreadTimeline({
       }
 
       container.scrollTop = container.scrollHeight;
-      setIsPinnedToBottom(true);
+      setIsTailVisible(true);
     });
 
     return () => {
       window.cancelAnimationFrame(frame);
     };
-  }, [bottomSpacer, followTail]);
+  }, [bottomSpacer, isTailVisible]);
+
+  useEffect(() => {
+    onTailVisibilityChange?.(isTailVisible);
+  }, [isTailVisible, onTailVisibilityChange]);
 
   const startIndex = Math.max(0, turns.length - visibleCount);
   const visibleTurns = turns.slice(startIndex);
@@ -1241,16 +1257,23 @@ export function ThreadTimeline({
           {visibleTurns.length > 0 && (
             <div className="divide-y divide-stone-800/80">
               {visibleTurns.map((turn, visibleIndex) => (
-            <ThreadTurnRow
-              key={turn.id}
-              threadId={threadId}
-              turn={turn}
+                <ThreadTurnRow
+                  key={turn.id}
+                  threadId={threadId}
+                  turn={turn}
                   absoluteIndex={startIndex + visibleIndex + 1}
                   isCollapsed={collapsedTurns[turn.id] ?? false}
                   liveOutput={visibleIndex === liveOutputTurnIndex ? liveOutput : ''}
                   onToggleCollapse={handleToggleCollapse}
                   onOpenExpandedText={handleOpenExpandedText}
                   scrollRootRef={scrollContainerRef}
+                  articleRef={
+                    visibleIndex === visibleTurns.length - 1
+                      ? (node) => {
+                          lastTurnElementRef.current = node;
+                        }
+                      : undefined
+                  }
                 />
               ))}
             </div>

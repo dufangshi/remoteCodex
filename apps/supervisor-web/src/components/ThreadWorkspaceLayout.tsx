@@ -5,6 +5,11 @@ import type {
   CodexStatusDto,
   ThreadDto,
 } from '../../../../packages/shared/src/index';
+import { useAppShellNav } from './AppShellNavContext';
+import {
+  AppShellMenuButton,
+  AppShellNavigationMenu,
+} from './AppShellNavigation';
 import {
   formatShortTimestamp,
   threadStatusClassName,
@@ -21,6 +26,7 @@ interface ThreadWorkspaceLayoutProps {
   showMobileAppMenu?: boolean;
   showMobileThreadNavToggle?: boolean;
   showMobileNewThreadShortcut?: boolean;
+  mobileHeaderAction?: ReactNode;
   currentThreadId?: string | undefined;
   currentWorkspaceId?: string | null | undefined;
   currentWorkspaceLabel?: string | null | undefined;
@@ -340,6 +346,7 @@ export function ThreadWorkspaceLayout({
   showMobileAppMenu = true,
   showMobileThreadNavToggle = true,
   showMobileNewThreadShortcut = true,
+  mobileHeaderAction,
   currentThreadId,
   currentWorkspaceId = null,
   currentWorkspaceLabel = null,
@@ -349,11 +356,11 @@ export function ThreadWorkspaceLayout({
   children,
 }: ThreadWorkspaceLayoutProps) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [mobileAppMenuOpen, setMobileAppMenuOpen] = useState(false);
   const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
   const [renamingThreadId, setRenamingThreadId] = useState<string | null>(null);
   const navigate = useNavigate();
+  const shellNav = useAppShellNav();
 
   const visibleThreads = useMemo(() => {
     const scopedThreads = currentWorkspaceId
@@ -419,7 +426,7 @@ export function ThreadWorkspaceLayout({
   function openThread(threadId: string) {
     navigate(`/threads/${threadId}`);
     setMobileSidebarOpen(false);
-    setMobileAppMenuOpen(false);
+    shellNav?.closeNav();
   }
 
   function renderSidebarContent() {
@@ -449,7 +456,10 @@ export function ThreadWorkspaceLayout({
             </span>
             <Link
               to={newThreadHref}
-              onClick={() => setMobileSidebarOpen(false)}
+              onClick={() => {
+                setMobileSidebarOpen(false);
+                shellNav?.closeNav();
+              }}
               className="rounded-full bg-amber-300 px-3 py-2 font-medium text-stone-950 transition hover:bg-amber-200"
             >
               New Thread
@@ -522,29 +532,15 @@ export function ThreadWorkspaceLayout({
           <div className="relative">
             <div
               className={`grid h-10 items-center gap-1.5 border-b border-stone-800 bg-stone-950/96 px-2.5 backdrop-blur ${
-                showMobileAppMenu && showMobileNewThreadShortcut
-                  ? 'grid-cols-[2rem_minmax(0,1fr)_2rem]'
+                showMobileAppMenu && (showMobileNewThreadShortcut || mobileHeaderAction)
+                  ? 'grid-cols-[2.5rem_minmax(0,1fr)_auto]'
                   : showMobileAppMenu
-                    ? 'grid-cols-[2rem_minmax(0,1fr)]'
+                    ? 'grid-cols-[2.5rem_minmax(0,1fr)]'
                   : 'grid-cols-[minmax(0,1fr)]'
               }`}
             >
               {showMobileAppMenu && (
-                <button
-                  type="button"
-                  aria-label={mobileAppMenuOpen ? 'Close Menu' : 'Open Menu'}
-                  aria-expanded={mobileAppMenuOpen}
-                  onClick={() => setMobileAppMenuOpen((current) => !current)}
-                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-stone-300 transition hover:bg-stone-800 hover:text-stone-100"
-                >
-                  <svg
-                    aria-hidden="true"
-                    viewBox="0 0 16 16"
-                    className="h-4 w-4 fill-current"
-                  >
-                    <path d="M2 3.25h12v1.5H2Zm0 4h12v1.5H2Zm0 4h12v1.5H2Z" />
-                  </svg>
-                </button>
+                <AppShellMenuButton />
               )}
 
               {showMobileThreadNavToggle ? (
@@ -587,51 +583,27 @@ export function ThreadWorkspaceLayout({
                 </p>
               )}
 
-              {showMobileAppMenu && showMobileNewThreadShortcut && (
-                <Link
-                  to={newThreadHref}
-                  onClick={() => {
-                    setMobileAppMenuOpen(false);
-                    setMobileSidebarOpen(false);
-                  }}
-                  aria-label="New Thread"
-                  className="inline-flex h-8 min-w-0 shrink-0 items-center justify-center gap-1 rounded-full bg-amber-300 px-2 text-[10px] font-medium uppercase tracking-[0.16em] text-stone-950 transition hover:bg-amber-200"
-                >
-                  <NewThreadIcon />
-                  <span className="hidden sm:inline">New</span>
-                </Link>
-              )}
-            </div>
-
-            {showMobileAppMenu && mobileAppMenuOpen && (
-              <div className="absolute left-2 top-[calc(100%+0.45rem)] z-20 w-[min(18rem,calc(100vw-1rem))] rounded-[1.25rem] border border-stone-800 bg-stone-900/96 p-2.5 shadow-2xl shadow-stone-950/35 backdrop-blur">
-                <nav className="flex flex-col gap-1.5 text-sm">
-                  <Link
-                    to="/workspaces"
-                    onClick={() => setMobileAppMenuOpen(false)}
-                    className="rounded-[0.95rem] px-3 py-2 text-stone-200 transition hover:bg-stone-800"
-                  >
-                    Workspaces
-                  </Link>
-                  <Link
-                    to="/threads"
-                    onClick={() => setMobileAppMenuOpen(false)}
-                    className="rounded-[0.95rem] px-3 py-2 text-stone-200 transition hover:bg-stone-800"
-                  >
-                    Threads
-                  </Link>
+              {showMobileAppMenu &&
+                (mobileHeaderAction ? (
+                  mobileHeaderAction
+                ) : showMobileNewThreadShortcut ? (
                   <Link
                     to={newThreadHref}
                     onClick={() => {
-                      setMobileAppMenuOpen(false);
+                      shellNav?.closeNav();
                       setMobileSidebarOpen(false);
                     }}
-                    className="rounded-[0.95rem] bg-amber-300 px-3 py-2 font-medium text-stone-950 transition hover:bg-amber-200"
+                    aria-label="New Thread"
+                    className="inline-flex h-8 min-w-0 shrink-0 items-center justify-center gap-1 rounded-full bg-amber-300 px-2 text-[10px] font-medium uppercase tracking-[0.16em] text-stone-950 transition hover:bg-amber-200"
                   >
-                    New Thread
+                    <NewThreadIcon />
+                    <span className="hidden sm:inline">New</span>
                   </Link>
-                </nav>
-              </div>
+                ) : null)}
+            </div>
+
+            {showMobileAppMenu && (
+              <AppShellNavigationMenu className="absolute left-2 top-[calc(100%+0.45rem)] z-20 w-[min(18rem,calc(100vw-1rem))]" />
             )}
 
             {showMobileThreadNavToggle && mobileSidebarOpen && (

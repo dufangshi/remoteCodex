@@ -50,7 +50,6 @@ interface ThreadComposerProps {
   onToggleFollow?: () => void;
   onUpdateSettings?: (input: UpdateThreadSettingsInput) => Promise<void> | void;
   onToggleView?: () => void;
-  onToggleShellConnection?: () => Promise<void> | void;
   onShellCopy?: () => Promise<void> | void;
   onShellControl?: (
     action: 'ctrl_c' | 'ctrl_d' | 'esc' | 'tab' | 'up' | 'down' | 'clear',
@@ -217,36 +216,6 @@ function ChatIcon() {
   );
 }
 
-function ConnectionIcon({ connected }: { connected: boolean }) {
-  if (!connected) {
-    return (
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 24 24"
-        className="h-3.5 w-3.5 fill-none stroke-current"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M13.181 8.68a4.503 4.503 0 0 1 1.903 6.405m-9.768-2.782L3.56 14.06a4.5 4.5 0 0 0 6.364 6.365l3.129-3.129m5.614-5.615 1.757-1.757a4.5 4.5 0 0 0-6.364-6.365l-4.5 4.5c-.258.26-.479.541-.661.84m1.903 6.405a4.495 4.495 0 0 1-1.242-.88 4.483 4.483 0 0 1-1.062-1.683m6.587 2.345 5.907 5.907m-5.907-5.907L8.898 8.898M2.991 2.99 8.898 8.9" />
-      </svg>
-    );
-  }
-
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      className="h-3.5 w-3.5 fill-none stroke-current"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
-    </svg>
-  );
-}
-
 function WrenchScrewdriverIcon() {
   return (
     <svg
@@ -326,7 +295,6 @@ export function ThreadComposer({
   onToggleFollow,
   onUpdateSettings,
   onToggleView,
-  onToggleShellConnection,
   onShellCopy,
   onShellControl,
   canInterrupt = false,
@@ -796,11 +764,6 @@ export function ThreadComposer({
     setOpenMenu(null);
   }
 
-  const connectionEnabled = shellControlState?.connectionButtonDisabled !== true;
-  const connectionActive = shellControlState?.status === 'attached';
-  const connectionButtonClassName = connectionActive
-    ? 'border-emerald-300/45 bg-emerald-300/18 text-emerald-50 ring-1 ring-emerald-300/20 hover:bg-emerald-300/24'
-    : 'border-stone-600 bg-stone-800/90 text-stone-100 hover:border-stone-500 hover:bg-stone-800';
   const promptPlaceholder =
     disabledPlaceholder ??
     (isShellView
@@ -811,7 +774,7 @@ export function ThreadComposer({
     ? 'relative z-20 shrink-0 bg-transparent px-3 pb-0 pt-3 sm:p-4'
     : 'relative z-20 shrink-0 border-t border-stone-800 bg-stone-950/95 p-3 backdrop-blur sm:p-4';
   const promptInputClassName =
-    'min-h-12 w-full rounded-[1.25rem] border border-stone-700 bg-stone-900 px-4 pr-14 pt-2.5 text-stone-100 outline-none transition focus-within:border-amber-300';
+    'min-h-[9.75rem] w-full rounded-[1.25rem] border border-stone-700 bg-stone-900 px-4 pr-14 pt-2.5 text-stone-100 outline-none transition focus-within:border-amber-300 sm:min-h-[8.25rem]';
 
   return (
     <div className="relative z-20 shrink-0">
@@ -842,32 +805,29 @@ export function ThreadComposer({
       {activeView === 'chat' && (
         <button
           type="button"
-          aria-label={followTail ? 'Disable auto follow' : 'Enable auto follow'}
-          title={followTail ? 'Disable auto follow' : 'Enable auto follow'}
+          aria-label="Jump to latest"
+          title={followTail ? 'Latest turn is in view' : 'Jump to the latest messages'}
           onClick={() => onToggleFollow?.()}
-          className={`absolute left-4 top-0 z-[2] -translate-y-1/2 inline-flex h-8 w-8 items-center justify-center rounded-full border shadow-lg shadow-stone-950/30 backdrop-blur transition ${
-            followTail
-              ? 'border-sky-300/40 bg-sky-300/16 text-sky-100'
-              : 'border-stone-700 bg-stone-900/92 text-stone-300 hover:bg-stone-800'
-          }`}
+          className="absolute left-1/2 top-0 z-30 inline-flex h-8 min-w-[5.5rem] -translate-x-1/2 -translate-y-[30%] items-start justify-center bg-transparent pt-1.5 touch-manipulation"
         >
-          <svg
-            aria-hidden="true"
-            viewBox="0 0 16 16"
-            className="h-4 w-4 fill-none stroke-current"
-            strokeWidth="1.35"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+          <span
+            className={`pointer-events-none inline-flex h-4 min-w-[3.75rem] items-center justify-center rounded-[0.7rem] border shadow-lg shadow-stone-950/20 backdrop-blur transition ${
+              followTail
+                ? 'border-sky-300/22 bg-sky-300/8 text-sky-100/90'
+                : 'border-stone-700/80 bg-stone-900/68 text-stone-300/85'
+            }`}
           >
-            <circle cx="8" cy="8" r="4.5" />
-            <path d="M8 1.75v2M8 12.25v2M1.75 8h2M12.25 8h2" />
-            <circle
-              cx="8"
-              cy="8"
-              r="1.2"
-              className={followTail ? 'fill-current stroke-none' : ''}
-            />
-          </svg>
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 16 16"
+              className="h-3.5 w-3.5 fill-none stroke-current"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="m4 6 4 4 4-4" />
+            </svg>
+          </span>
         </button>
       )}
 
@@ -916,7 +876,7 @@ export function ThreadComposer({
                 onBlur={() => {
                   selectionSnapshotRef.current = snapshotSelection();
                 }}
-                className={`relative z-[1] min-h-[3.25rem] whitespace-pre-wrap break-words pb-10 outline-none ${
+                className={`relative z-[1] min-h-[7.75rem] whitespace-pre-wrap break-words pb-10 outline-none sm:min-h-[6.5rem] ${
                   disabled ? 'cursor-not-allowed text-stone-500' : ''
                 }`}
               />
@@ -1005,17 +965,6 @@ export function ThreadComposer({
               className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-stone-700 bg-stone-900/92 text-stone-200 transition hover:bg-stone-800"
             >
               {isShellView ? <ChatIcon /> : <TerminalIcon />}
-            </button>
-
-            <button
-              type="button"
-              aria-label={shellControlState?.connectionButtonLabel ?? 'Toggle shell connection'}
-              title={shellControlState?.connectionButtonLabel ?? 'Toggle shell connection'}
-              disabled={!connectionEnabled}
-              onClick={() => void onToggleShellConnection?.()}
-              className={`inline-flex h-7 w-7 items-center justify-center rounded-full border transition disabled:cursor-not-allowed disabled:opacity-50 ${connectionButtonClassName}`}
-            >
-              <ConnectionIcon connected={connectionActive} />
             </button>
 
             {isShellView && shellPromptLabel && (

@@ -549,17 +549,14 @@ export function ThreadDetailPage() {
   }
 
   function handleToggleView() {
-    setActiveView((current) => (current === 'chat' ? 'shell' : 'chat'));
-  }
+    setActiveView((current) => {
+      if (current === 'chat') {
+        setPendingShellConnectionToggle(true);
+        return 'shell';
+      }
 
-  async function handleToggleShellConnection() {
-    if (!shellPanelRef.current) {
-      setActiveView('shell');
-      setPendingShellConnectionToggle(true);
-      return;
-    }
-
-    await shellPanelRef.current.toggleConnection();
+      return 'chat';
+    });
   }
 
   async function handleShellCopy() {
@@ -586,13 +583,32 @@ export function ThreadDetailPage() {
   }
 
   useEffect(() => {
-    if (!pendingShellConnectionToggle || activeView !== 'shell' || !shellPanelRef.current) {
+    if (
+      !pendingShellConnectionToggle ||
+      activeView !== 'shell' ||
+      !shellPanelRef.current ||
+      detail?.thread.isLoaded === false
+    ) {
       return;
     }
 
     setPendingShellConnectionToggle(false);
     void shellPanelRef.current.toggleConnection();
-  }, [activeView, pendingShellConnectionToggle]);
+  }, [activeView, detail?.thread.isLoaded, pendingShellConnectionToggle]);
+
+  useEffect(() => {
+    if (
+      activeView !== 'shell' ||
+      detail?.thread.isLoaded !== false ||
+      shellControlState?.status !== 'attached' ||
+      !shellPanelRef.current
+    ) {
+      return;
+    }
+
+    setPendingShellConnectionToggle(true);
+    void shellPanelRef.current.toggleConnection();
+  }, [activeView, detail?.thread.isLoaded, shellControlState?.status]);
 
   const promptDisabledReason = detail
     ? detail.workspacePathStatus === 'missing'
@@ -658,6 +674,50 @@ export function ThreadDetailPage() {
     </dl>
   ) : null;
 
+  const mobileSessionConnectionButton = (
+    <button
+      type="button"
+      aria-label={`Resume Thread (${detail ? threadStatusLabel(detail.thread.status) : 'Loading'})`}
+      title={
+        detail
+          ? threadStatusLabel(detail.thread.status)
+          : 'Resume Thread'
+      }
+      onClick={() => void handleResume()}
+      disabled={busy}
+      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center transition ${
+        detail?.thread.isLoaded
+          ? 'text-emerald-100 hover:text-emerald-200'
+          : 'text-stone-300 hover:text-stone-100'
+      } disabled:cursor-not-allowed disabled:opacity-60`}
+    >
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 16 16"
+        className="h-4.5 w-4.5 fill-none stroke-current"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        {detail?.thread.isLoaded ? (
+          <>
+            <path d="M2.5 6.75A8.22 8.22 0 0 1 8 4.5c2.14 0 4.1.8 5.5 2.25" />
+            <path d="M4.75 9a4.95 4.95 0 0 1 6.5 0" />
+            <path d="M6.9 11.3a1.9 1.9 0 0 1 2.2 0" />
+            <path d="m6.7 13.2.9.9 1.7-2" />
+          </>
+        ) : (
+          <>
+            <path d="M2.5 6.75A8.22 8.22 0 0 1 8 4.5c2.14 0 4.1.8 5.5 2.25" />
+            <path d="M4.75 9a4.95 4.95 0 0 1 6.5 0" />
+            <path d="M6.9 11.3a1.9 1.9 0 0 1 2.2 0" />
+            <path d="M3 3l10 10" />
+          </>
+        )}
+      </svg>
+    </button>
+  );
+
   return (
     <ThreadWorkspaceLayout
       threads={threads}
@@ -669,6 +729,8 @@ export function ThreadDetailPage() {
       currentWorkspaceId={detail?.thread.workspaceId}
       currentWorkspaceLabel={detail?.workspace.label}
       metaContent={metaContent}
+      showMobileNewThreadShortcut={false}
+      mobileHeaderAction={mobileSessionConnectionButton}
       onRenameThread={handleRenameThread}
     >
       <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-none border-y border-stone-800 bg-stone-900/85 shadow-2xl shadow-stone-950/20 sm:flex-none sm:rounded-[2rem] sm:border">
@@ -692,7 +754,7 @@ export function ThreadDetailPage() {
               }
               onClick={() => void handleResume()}
               disabled={busy}
-              className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-lg shadow-stone-950/25 transition ${
+              className={`hidden h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-lg shadow-stone-950/25 transition sm:inline-flex ${
                 detail?.thread.isLoaded
                   ? 'border-emerald-300/45 bg-emerald-300/18 text-emerald-50 ring-1 ring-emerald-300/20 hover:bg-emerald-300/24'
                   : 'border-stone-600 bg-stone-800/85 text-stone-300 hover:border-stone-500 hover:bg-stone-800'
@@ -764,10 +826,10 @@ export function ThreadDetailPage() {
                   respondingRequestId={respondingRequestId}
                   onRespondToRequest={handleRespondToRequest}
                   liveOutput={liveOutput}
-                  followTail={followTail}
                   scrollRequestKey={scrollRequestKey}
                   bottomSpacer={timelineBottomSpacer}
                   className="min-h-0 flex-1 bg-stone-900/30"
+                  onTailVisibilityChange={setFollowTail}
                 />
                 {useFloatingMobileComposer ? (
                   <div
@@ -795,10 +857,9 @@ export function ThreadDetailPage() {
                       canInterrupt={Boolean(detail.thread.activeTurnId)}
                       onSubmit={handlePrompt}
                       onInterrupt={handleInterrupt}
-                      onToggleFollow={() => setFollowTail((current) => !current)}
+                      onToggleFollow={() => setScrollRequestKey((current) => current + 1)}
                       onUpdateSettings={handleUpdateThreadSettings}
                       onToggleView={handleToggleView}
-                      onToggleShellConnection={handleToggleShellConnection}
                       onShellCopy={handleShellCopy}
                       onShellControl={handleShellControl}
                     />
@@ -824,10 +885,9 @@ export function ThreadDetailPage() {
                       canInterrupt={Boolean(detail.thread.activeTurnId)}
                       onSubmit={handlePrompt}
                       onInterrupt={handleInterrupt}
-                      onToggleFollow={() => setFollowTail((current) => !current)}
+                      onToggleFollow={() => setScrollRequestKey((current) => current + 1)}
                       onUpdateSettings={handleUpdateThreadSettings}
                       onToggleView={handleToggleView}
-                      onToggleShellConnection={handleToggleShellConnection}
                       onShellCopy={handleShellCopy}
                       onShellControl={handleShellControl}
                     />
@@ -854,7 +914,6 @@ export function ThreadDetailPage() {
                   onSubmit={handlePrompt}
                   onInterrupt={handleInterrupt}
                   onToggleView={handleToggleView}
-                  onToggleShellConnection={handleToggleShellConnection}
                   onShellCopy={handleShellCopy}
                   onShellControl={handleShellControl}
                 />

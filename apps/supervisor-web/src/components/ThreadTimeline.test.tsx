@@ -76,6 +76,30 @@ function makeTurn(index: number) {
   };
 }
 
+function mockRect({
+  top,
+  height,
+  width = 640,
+}: {
+  top: number;
+  height: number;
+  width?: number;
+}) {
+  return {
+    x: 0,
+    y: top,
+    top,
+    left: 0,
+    width,
+    height,
+    right: width,
+    bottom: top + height,
+    toJSON() {
+      return {};
+    },
+  } as DOMRect;
+}
+
 describe('ThreadTimeline', () => {
   beforeEach(() => {
     FakeIntersectionObserver.reset();
@@ -431,11 +455,11 @@ describe('ThreadTimeline', () => {
       },
     ];
 
-    const { rerender } = render(
-      <ThreadTimeline turns={turns} liveOutput="" followTail />,
-    );
+    const { rerender } = render(<ThreadTimeline turns={turns} liveOutput="" />);
 
     const scrollContainer = screen.getByTestId('thread-scroll-container');
+    const lastTurn = screen.getByText('Turn 1').closest('article');
+    expect(lastTurn).toBeTruthy();
     let scrollTop = 560;
     Object.defineProperty(scrollContainer, 'scrollHeight', {
       configurable: true,
@@ -452,19 +476,87 @@ describe('ThreadTimeline', () => {
         scrollTop = value;
       },
     });
+    Object.defineProperty(scrollContainer, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => mockRect({ top: 0, height: 400 }),
+    });
+    Object.defineProperty(lastTurn!, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => mockRect({ top: 260, height: 120 }),
+    });
 
     fireEvent.scroll(scrollContainer);
 
-    rerender(<ThreadTimeline turns={turns} liveOutput="next token" followTail />);
+    rerender(<ThreadTimeline turns={turns} liveOutput="next token" />);
 
     expect(scrollTop).toBe(1000);
 
     scrollTop = 100;
+    Object.defineProperty(lastTurn!, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => mockRect({ top: 460, height: 120 }),
+    });
     fireEvent.scroll(scrollContainer);
 
-    rerender(<ThreadTimeline turns={turns} liveOutput="next token + more" followTail />);
+    rerender(<ThreadTimeline turns={turns} liveOutput="next token + more" />);
 
     expect(scrollTop).toBe(100);
+  });
+
+  it('honors one-shot jump requests even when the latest turn is offscreen', () => {
+    const turns = [
+      {
+        id: 'turn-1',
+        startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+        status: 'inProgress' as const,
+        error: null,
+        items: [
+          {
+            id: 'user-1',
+            kind: 'userMessage' as const,
+            text: 'Keep streaming.',
+          },
+        ],
+      },
+    ];
+
+    const { rerender } = render(
+      <ThreadTimeline turns={turns} liveOutput="" scrollRequestKey={0} />,
+    );
+
+    const scrollContainer = screen.getByTestId('thread-scroll-container');
+    const lastTurn = screen.getByText('Turn 1').closest('article');
+    expect(lastTurn).toBeTruthy();
+    let scrollTop = 100;
+    Object.defineProperty(scrollContainer, 'scrollHeight', {
+      configurable: true,
+      value: 1000,
+    });
+    Object.defineProperty(scrollContainer, 'clientHeight', {
+      configurable: true,
+      value: 400,
+    });
+    Object.defineProperty(scrollContainer, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value) => {
+        scrollTop = value;
+      },
+    });
+    Object.defineProperty(scrollContainer, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => mockRect({ top: 0, height: 400 }),
+    });
+    Object.defineProperty(lastTurn!, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => mockRect({ top: 470, height: 120 }),
+    });
+
+    fireEvent.scroll(scrollContainer);
+
+    rerender(<ThreadTimeline turns={turns} liveOutput="next token" scrollRequestKey={1} />);
+
+    expect(scrollTop).toBe(1000);
   });
 
   it('can collapse and expand an entire turn', () => {

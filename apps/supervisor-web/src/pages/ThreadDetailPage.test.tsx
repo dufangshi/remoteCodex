@@ -2,6 +2,72 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const shellPanelMock = vi.hoisted(() => ({
+  toggleConnection: vi.fn(async () => undefined),
+  sendInput: vi.fn(() => true),
+  sendCommand: vi.fn(() => true),
+  sendControl: vi.fn(() => true),
+  copyLastCommandOutput: vi.fn(async () => true),
+  terminate: vi.fn(async () => undefined),
+  focus: vi.fn(() => undefined),
+  status: 'detached' as const,
+}));
+
+vi.mock('../components/ThreadShellPanel', async () => {
+  const React = await import('react');
+
+  const ThreadShellPanel = React.forwardRef(function MockThreadShellPanel(
+    props: {
+      onStateChange?: (state: {
+        status: 'detached' | 'attached';
+        connectionButtonDisabled: boolean;
+        connectionButtonLabel: string;
+        shellInputEnabled: boolean;
+        isCommandRunning: boolean;
+        promptLabel: string | null;
+        isMobileShell: boolean;
+        hasShell: boolean;
+        busy: boolean;
+        loading: boolean;
+        error: string | null;
+      }) => void;
+    },
+    ref: React.ForwardedRef<unknown>,
+  ) {
+    React.useImperativeHandle(ref, () => ({
+      toggleConnection: shellPanelMock.toggleConnection,
+      sendInput: shellPanelMock.sendInput,
+      sendCommand: shellPanelMock.sendCommand,
+      sendControl: shellPanelMock.sendControl,
+      copyLastCommandOutput: shellPanelMock.copyLastCommandOutput,
+      terminate: shellPanelMock.terminate,
+      focus: shellPanelMock.focus,
+    }));
+
+    React.useEffect(() => {
+      props.onStateChange?.({
+        status: shellPanelMock.status,
+        connectionButtonDisabled: false,
+        connectionButtonLabel: 'Connect shell',
+        shellInputEnabled: true,
+        isCommandRunning: false,
+        promptLabel: '(base) trading-lab',
+        isMobileShell: false,
+        hasShell: true,
+        busy: false,
+        loading: false,
+        error: null,
+      });
+    }, [props.onStateChange]);
+
+    return <div data-testid="mock-thread-shell-panel" />;
+  });
+
+  return {
+    ThreadShellPanel,
+  };
+});
+
 import { ThreadDetailPage } from './ThreadDetailPage';
 
 class FakeWebSocket {
@@ -79,6 +145,14 @@ const modelOptionsResponse = [
 describe('ThreadDetailPage', () => {
   beforeEach(() => {
     FakeWebSocket.instances = [];
+    shellPanelMock.toggleConnection.mockClear();
+    shellPanelMock.sendInput.mockClear();
+    shellPanelMock.sendCommand.mockClear();
+    shellPanelMock.sendControl.mockClear();
+    shellPanelMock.copyLastCommandOutput.mockClear();
+    shellPanelMock.terminate.mockClear();
+    shellPanelMock.focus.mockClear();
+    shellPanelMock.status = 'detached';
     vi.stubGlobal('WebSocket', FakeWebSocket as any);
     vi.stubGlobal(
       'fetch',
@@ -763,6 +837,29 @@ describe('ThreadDetailPage', () => {
       expect(
         screen.getAllByText('Each attachment must be 25 MB or smaller.').length,
       ).toBeGreaterThan(0);
+    });
+  });
+
+  it('automatically connects the shell after switching from chat to shell', async () => {
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('heading', { level: 2, name: 'Demo Thread' }),
+      ).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to shell' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-thread-shell-panel')).toBeInTheDocument();
+      expect(shellPanelMock.toggleConnection).toHaveBeenCalledTimes(1);
     });
   });
 

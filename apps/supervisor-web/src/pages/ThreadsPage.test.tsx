@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { AppShellNavContext } from '../components/AppShellNavContext';
 import { ThreadsPage } from './ThreadsPage';
 
 class FakeWebSocket {
@@ -158,30 +159,40 @@ describe('ThreadsPage', () => {
     );
   });
 
-  it('renders the threads registry', async () => {
+  function renderPage(initialEntry: string) {
     render(
-      <MemoryRouter>
-        <ThreadsPage />
-      </MemoryRouter>,
+      <AppShellNavContext.Provider
+        value={{
+          navOpen: false,
+          openNav: vi.fn(),
+          toggleNav: vi.fn(),
+          closeNav: vi.fn(),
+          settingsOpen: false,
+          openSettings: vi.fn(),
+          closeSettings: vi.fn(),
+        }}
+      >
+        <MemoryRouter initialEntries={[initialEntry]}>
+          <Routes>
+            <Route path="/threads" element={<ThreadsPage />} />
+            <Route path="/threads/:id" element={<div>Thread Detail Route</div>} />
+            <Route path="/workspaces" element={<div>Workspaces Landing</div>} />
+          </Routes>
+        </MemoryRouter>
+      </AppShellNavContext.Provider>,
     );
+  }
+
+  it('redirects the standalone threads route back to workspaces', async () => {
+    renderPage('/threads');
 
     await waitFor(() => {
-      expect(screen.getAllByText('Demo Thread')).toHaveLength(2);
+      expect(screen.getByText('Workspaces Landing')).toBeInTheDocument();
     });
-    expect(
-      screen.getByRole('heading', { name: /^All Threads$/i }),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/^Recent Threads$/i)).toBeInTheDocument();
-    expect(screen.queryByText(/Codex control plane/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Open a thread from the sidebar/i)).not.toBeInTheDocument();
   });
 
   it('scopes by workspace query param and renames a thread only after save', async () => {
-    render(
-      <MemoryRouter initialEntries={['/threads?workspaceId=workspace-1']}>
-        <ThreadsPage />
-      </MemoryRouter>,
-    );
+    renderPage('/threads?workspaceId=workspace-1');
 
     await waitFor(() => {
       expect(
@@ -199,7 +210,7 @@ describe('ThreadsPage', () => {
     expect(screen.queryByText(/^Thread Count$/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/^Next Step$/i)).not.toBeInTheDocument();
     expect(screen.getByText(/^Recent Threads$/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open Menu' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open Navigation' })).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Expand thread navigation' }),
     ).not.toBeInTheDocument();
@@ -231,11 +242,7 @@ describe('ThreadsPage', () => {
   });
 
   it('copies the codex session id and deletes a recent thread after confirmation', async () => {
-    render(
-      <MemoryRouter initialEntries={['/threads?workspaceId=workspace-1']}>
-        <ThreadsPage />
-      </MemoryRouter>,
-    );
+    renderPage('/threads?workspaceId=workspace-1');
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Demo Workspace' })).toBeInTheDocument();
@@ -263,5 +270,19 @@ describe('ThreadsPage', () => {
       ([input, init]) => String(input).endsWith('/api/threads/thread-1') && init?.method === 'DELETE',
     );
     expect(deleteCall).toBeTruthy();
+  });
+
+  it('opens a workspace thread directly into the thread detail route', async () => {
+    renderPage('/threads?workspaceId=workspace-1');
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Demo Workspace' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getAllByText('Demo Thread')[0]!);
+
+    await waitFor(() => {
+      expect(screen.getByText('Thread Detail Route')).toBeInTheDocument();
+    });
   });
 });
