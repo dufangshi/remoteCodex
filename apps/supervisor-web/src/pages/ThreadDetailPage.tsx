@@ -535,7 +535,7 @@ export function ThreadDetailPage() {
       metaContent={metaContent}
       onRenameThread={handleRenameThread}
     >
-      <div className="flex h-[calc(100dvh-1rem)] max-h-[calc(100dvh-1rem)] min-h-0 flex-col overflow-hidden rounded-none border-y border-stone-800 bg-stone-900/85 shadow-2xl shadow-stone-950/20 sm:h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-2rem)] sm:rounded-[2rem] sm:border">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-none border-y border-stone-800 bg-stone-900/85 shadow-2xl shadow-stone-950/20 sm:h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-2rem)] sm:flex-none sm:rounded-[2rem] sm:border">
         <header className="shrink-0 border-b border-stone-800 bg-stone-900/95 px-3 py-3 backdrop-blur sm:px-5">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0 flex-1">

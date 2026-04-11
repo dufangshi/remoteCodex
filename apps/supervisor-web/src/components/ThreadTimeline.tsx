@@ -1057,18 +1057,10 @@ export function ThreadTimeline({
           onScroll={handleScroll}
           className="min-h-0 flex-1 overflow-y-auto"
         >
-          <div className="sticky top-0 z-10 border-b border-stone-800/80 bg-stone-900/95 px-2.5 py-2.5 backdrop-blur sm:px-6 sm:py-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-sm text-stone-400">
-                {turns.length === 0
-                  ? 'No historical turns yet.'
-                  : `Showing ${visibleTurns.length} of ${turns.length} turns.`}
-              </p>
-              {hiddenCount > 0 && (
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs uppercase tracking-[0.2em] text-stone-500">
-                    {hiddenCount} earlier hidden
-                  </span>
+          {turns.length > 0 && (
+            <div className="px-2.5 pb-1 pt-2 sm:px-6 sm:pb-1.5 sm:pt-3">
+              <div className="flex flex-wrap items-center gap-2.5 text-xs sm:text-sm">
+                {hiddenCount > 0 && (
                   <button
                     type="button"
                     onClick={() => {
@@ -1077,23 +1069,27 @@ export function ThreadTimeline({
                       );
                       setLoadMoreClicks((current) => current + 1);
                     }}
-                    className="rounded-full border border-stone-700 px-3 py-2 text-sm text-stone-300 transition hover:bg-stone-800"
+                    className="rounded-full border border-stone-700 px-2.5 py-1.5 text-stone-300 transition hover:bg-stone-800"
                   >
                     Load 10 earlier
                   </button>
-                  {showLoadAll && (
-                    <button
-                      type="button"
-                      onClick={() => setVisibleCount(turns.length)}
-                      className="rounded-full border border-amber-300/40 px-3 py-2 text-sm text-amber-200 transition hover:bg-amber-300/10"
-                    >
-                      Load full history
-                    </button>
-                  )}
-                </div>
-              )}
+                )}
+                {showLoadAll && (
+                  <button
+                    type="button"
+                    onClick={() => setVisibleCount(turns.length)}
+                    className="rounded-full border border-amber-300/40 px-2.5 py-1.5 text-amber-200 transition hover:bg-amber-300/10"
+                  >
+                    Load full history
+                  </button>
+                )}
+                <p className="text-stone-500">
+                  Showing {visibleTurns.length} of {turns.length} turns
+                  {hiddenCount > 0 ? ` · ${hiddenCount} earlier hidden` : ''}
+                </p>
+              </div>
             </div>
-          </div>
+          )}
 
           {turns.length === 0 && !liveOutput && (
             <div className="px-2.5 py-8 text-sm text-stone-500 sm:px-6">
