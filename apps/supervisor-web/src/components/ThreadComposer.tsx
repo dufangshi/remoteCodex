@@ -61,6 +61,24 @@ type SettingsMenu = 'attachments' | 'model' | 'effort' | 'shellTools' | null;
 
 interface ComposerAttachmentDraft extends PromptAttachmentUpload {}
 
+function composePromptWithAttachmentPlaceholders(
+  prompt: string,
+  attachments: Array<{ placeholder: string }>,
+) {
+  const normalizedPrompt = prompt.trim();
+  const placeholderText = attachments.map((entry) => entry.placeholder).join(' ');
+
+  if (!normalizedPrompt) {
+    return placeholderText;
+  }
+
+  if (!placeholderText) {
+    return normalizedPrompt;
+  }
+
+  return `${normalizedPrompt} ${placeholderText}`;
+}
+
 function formatReasoningEffortLabel(value: ReasoningEffortDto | null | undefined) {
   if (!value) {
     return 'Auto';
@@ -373,11 +391,6 @@ export function ThreadComposer({
     });
 
     setAttachments((current) => [...current, ...nextAttachments]);
-    setPrompt((current) => {
-      const suffix = nextAttachments.map((entry) => entry.placeholder).join(' ');
-      const normalized = current.trimEnd();
-      return normalized ? `${normalized} ${suffix}` : suffix;
-    });
     setOpenMenu(null);
   }
 
@@ -427,14 +440,16 @@ export function ThreadComposer({
   }
 
   async function submitPrompt() {
-    if (!isShellView && !prompt.trim()) {
+    if (!isShellView && !prompt.trim() && attachments.length === 0) {
       return;
     }
 
-    const normalizedPrompt = isShellView ? prompt : prompt.trim();
+    const normalizedPrompt = isShellView
+      ? prompt
+      : composePromptWithAttachmentPlaceholders(prompt, attachments);
     const activeAttachments = isShellView
       ? []
-      : attachments.filter((attachment) => normalizedPrompt.includes(attachment.placeholder));
+      : attachments;
 
     await onSubmit(
       activeAttachments.length > 0
@@ -451,6 +466,19 @@ export function ThreadComposer({
   }
 
   function handlePromptKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (
+      !isShellView &&
+      event.key === 'Backspace' &&
+      prompt.length === 0 &&
+      attachments.length > 0 &&
+      event.currentTarget.selectionStart === 0 &&
+      event.currentTarget.selectionEnd === 0
+    ) {
+      event.preventDefault();
+      setAttachments((current) => current.slice(0, -1));
+      return;
+    }
+
     if (event.key !== 'Enter') {
       return;
     }
@@ -487,6 +515,9 @@ export function ThreadComposer({
   const formClassName = edgeToEdgeMobile || isMobileShell
     ? 'relative z-20 shrink-0 bg-transparent px-3 pb-0 pt-3 sm:p-4'
     : 'relative z-20 shrink-0 border-t border-stone-800 bg-stone-950/95 p-3 backdrop-blur sm:p-4';
+  const promptInputClassName = `min-h-12 w-full resize-y rounded-[1.25rem] border border-stone-700 bg-stone-900 px-4 pr-14 pt-2.5 text-stone-100 outline-none transition focus:border-amber-300 disabled:cursor-not-allowed disabled:border-stone-800 disabled:bg-stone-950 disabled:text-stone-500 ${
+    !isShellView && attachments.length > 0 ? 'pb-16' : 'pb-10'
+  }`;
 
   return (
     <div className="relative z-20 shrink-0">
@@ -560,8 +591,42 @@ export function ThreadComposer({
             onKeyDown={handlePromptKeyDown}
             rows={2}
             placeholder={promptPlaceholder}
-            className="min-h-12 w-full resize-y rounded-[1.25rem] border border-stone-700 bg-stone-900 px-4 pb-10 pr-14 pt-2.5 text-stone-100 outline-none transition focus:border-amber-300 disabled:cursor-not-allowed disabled:border-stone-800 disabled:bg-stone-950 disabled:text-stone-500"
+            className={promptInputClassName}
           />
+          {!isShellView && attachments.length > 0 && (
+            <div className="pointer-events-none absolute inset-x-3 bottom-11 flex flex-wrap gap-1.5">
+              {attachments.map((attachment) => {
+                const toneClassName =
+                  attachment.kind === 'photo'
+                    ? 'border-sky-300/35 bg-sky-300/14 text-sky-50'
+                    : 'border-emerald-300/35 bg-emerald-300/14 text-emerald-50';
+
+                return (
+                  <span
+                    key={attachment.clientId}
+                    className={`pointer-events-auto inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-medium tracking-[0.08em] shadow-sm shadow-stone-950/20 ${toneClassName}`}
+                  >
+                    <span className="truncate" title={attachment.placeholder}>
+                      {attachment.placeholder}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label={`Remove attachment ${attachment.originalName}`}
+                      title="Remove attachment"
+                      onClick={() =>
+                        setAttachments((current) =>
+                          current.filter((entry) => entry.clientId !== attachment.clientId),
+                        )
+                      }
+                      className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-current/20 bg-black/10 text-[11px] leading-none transition hover:bg-black/20"
+                    >
+                      ×
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
           <button
             type="button"
             aria-label={interruptLabel}

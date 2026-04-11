@@ -320,14 +320,29 @@ export function ThreadDetailPage() {
     setScrollRequestKey((current) => current + 1);
 
     try {
+      let currentDetail = detail;
+      if (currentDetail && !currentDetail.thread.isLoaded) {
+        const resumed = await resumeThread(
+          id,
+          currentDetail.thread.model ? { model: currentDetail.thread.model } : {},
+        );
+        currentDetail = resumed;
+        setDetail(resumed);
+        setThreads((current) =>
+          current.map((entry) =>
+            entry.id === resumed.thread.id ? resumed.thread : entry,
+          ),
+        );
+      }
+
       const promptInput = {
         prompt: input.prompt,
-        ...(detail?.thread.model ? { model: detail.thread.model } : {}),
-        ...(detail?.thread.reasoningEffort
-          ? { reasoningEffort: detail.thread.reasoningEffort }
+        ...(currentDetail?.thread.model ? { model: currentDetail.thread.model } : {}),
+        ...(currentDetail?.thread.reasoningEffort
+          ? { reasoningEffort: currentDetail.thread.reasoningEffort }
           : {}),
-        ...(detail?.thread.collaborationMode
-          ? { collaborationMode: detail.thread.collaborationMode }
+        ...(currentDetail?.thread.collaborationMode
+          ? { collaborationMode: currentDetail.thread.collaborationMode }
           : {}),
         ...(input.attachments?.length ? { attachments: input.attachments } : {}),
       };
@@ -582,9 +597,7 @@ export function ThreadDetailPage() {
   const promptDisabledReason = detail
     ? detail.workspacePathStatus === 'missing'
       ? 'Restore this workspace path on the current machine before continuing.'
-      : detail.thread.source === 'local_codex_import' && !detail.thread.isLoaded
-        ? 'Resume / Connect this imported session before sending a new prompt.'
-        : null
+      : null
     : null;
   const useFloatingMobileComposer = isMobileViewport && activeView === 'chat';
   const effectiveMobileComposerHeight = Math.max(mobileComposerHeight, 144);

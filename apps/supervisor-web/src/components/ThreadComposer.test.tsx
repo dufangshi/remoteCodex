@@ -185,7 +185,7 @@ describe('ThreadComposer', () => {
     });
   });
 
-  it('appends attachment placeholders and only submits attachments still present in the prompt', async () => {
+  it('shows attachment chips and appends their placeholders only when submitting', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
 
     const { container } = render(
@@ -211,22 +211,28 @@ describe('ThreadComposer', () => {
       },
     });
 
-    const textarea = screen.getByLabelText('Prompt');
-    expect(textarea).toHaveValue('[FILE notes.txt] [FILE notes.txt (2)]');
+    expect(screen.getByText('[FILE notes.txt]')).toBeInTheDocument();
+    expect(screen.getByText('[FILE notes.txt (2)]')).toBeInTheDocument();
 
+    const textarea = screen.getByLabelText('Prompt');
     fireEvent.change(textarea, {
-      target: { value: 'Please inspect [FILE notes.txt]' },
+      target: { value: 'Please inspect' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
 
     await waitFor(() => {
       expect(onSubmit).toHaveBeenCalledWith({
-        prompt: 'Please inspect [FILE notes.txt]',
+        prompt: 'Please inspect [FILE notes.txt] [FILE notes.txt (2)]',
         attachments: [
           expect.objectContaining({
             kind: 'file',
             originalName: 'notes.txt',
             placeholder: '[FILE notes.txt]',
+          }),
+          expect.objectContaining({
+            kind: 'file',
+            originalName: 'notes.txt',
+            placeholder: '[FILE notes.txt (2)]',
           }),
         ],
       });
@@ -260,9 +266,7 @@ describe('ThreadComposer', () => {
       },
     });
 
-    expect(screen.getByLabelText('Prompt')).toHaveValue(
-      '[PHOTO photo-1712800000000.heic]',
-    );
+    expect(screen.getByText('[PHOTO photo-1712800000000.heic]')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
 
@@ -322,11 +326,46 @@ describe('ThreadComposer', () => {
       },
     });
 
-    expect(screen.getByLabelText('Prompt')).toHaveValue('[FILE notes.txt]');
+    expect(screen.getByText('[FILE notes.txt]')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Remount' }));
 
-    expect(screen.getByLabelText('Prompt')).toHaveValue('[FILE notes.txt]');
+    expect(screen.getByText('[FILE notes.txt]')).toBeInTheDocument();
+  });
+
+  it('removes the last attachment chip with backspace when the prompt is empty', async () => {
+    const { container } = render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={() => undefined}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add attachment' }));
+    const fileInput = container.querySelector(
+      'input[type="file"]:not([accept])',
+    ) as HTMLInputElement | null;
+    expect(fileInput).toBeTruthy();
+    fireEvent.change(fileInput!, {
+      target: {
+        files: [new File(['alpha'], 'notes.txt', { type: 'text/plain' })],
+      },
+    });
+
+    const textarea = screen.getByLabelText('Prompt') as HTMLTextAreaElement;
+    textarea.setSelectionRange(0, 0);
+    fireEvent.keyDown(textarea, {
+      key: 'Backspace',
+      code: 'Backspace',
+      bubbles: true,
+      cancelable: true,
+    });
+
+    expect(screen.queryByText('[FILE notes.txt]')).not.toBeInTheDocument();
   });
 
   it('shows the shell prompt label and enables Ctrl-C only while a command is running', () => {
