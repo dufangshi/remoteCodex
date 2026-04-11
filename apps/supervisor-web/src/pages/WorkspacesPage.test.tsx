@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { AppShellNavContext } from '../components/AppShellNavContext';
 import { WorkspacesPage } from './WorkspacesPage';
 
 describe('WorkspacesPage', () => {
@@ -11,7 +12,10 @@ describe('WorkspacesPage', () => {
       vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
 
-        if (url.endsWith('/api/workspaces') && (!init?.method || init.method === 'GET')) {
+        if (
+          url.endsWith('/api/workspaces') &&
+          (!init?.method || init.method === 'GET')
+        ) {
           return Promise.resolve({
             ok: true,
             json: async () => [
@@ -19,25 +23,55 @@ describe('WorkspacesPage', () => {
                 id: 'workspace-1',
                 hostId: 'host-1',
                 label: 'Demo Workspace',
-                absPath: '/tmp/demo',
+                absPath: '/Users/test/projects/demo-workspace',
                 isFavorite: false,
-                createdAt: new Date().toISOString(),
+                createdAt: new Date('2026-04-10T12:00:00.000Z').toISOString(),
                 lastOpenedAt: null,
+              },
+              {
+                id: 'workspace-2',
+                hostId: 'host-1',
+                label: 'Recent Workspace',
+                absPath: '/Users/test/projects/recent-workspace',
+                isFavorite: false,
+                createdAt: new Date('2026-04-09T12:00:00.000Z').toISOString(),
+                lastOpenedAt: new Date('2026-04-11T08:00:00.000Z').toISOString(),
               },
             ],
           });
         }
 
-        if (url.endsWith('/api/workspaces/workspace-1') && init?.method === 'PATCH') {
+        if (
+          url.endsWith('/api/workspaces/workspace-1') &&
+          init?.method === 'PATCH'
+        ) {
           return Promise.resolve({
             ok: true,
             json: async () => ({
               id: 'workspace-1',
               hostId: 'host-1',
               label: 'Renamed Workspace',
-              absPath: '/tmp/demo',
+              absPath: '/Users/test/projects/demo-workspace',
               isFavorite: false,
-              createdAt: new Date().toISOString(),
+              createdAt: new Date('2026-04-10T12:00:00.000Z').toISOString(),
+              lastOpenedAt: null,
+            }),
+          });
+        }
+
+        if (
+          url.endsWith('/api/workspaces/workspace-1/favorite') &&
+          init?.method === 'POST'
+        ) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              id: 'workspace-1',
+              hostId: 'host-1',
+              label: 'Demo Workspace',
+              absPath: '/Users/test/projects/demo-workspace',
+              isFavorite: true,
+              createdAt: new Date('2026-04-10T12:00:00.000Z').toISOString(),
               lastOpenedAt: null,
             }),
           });
@@ -48,28 +82,45 @@ describe('WorkspacesPage', () => {
     );
   });
 
-  it('shows import and add-workspace entry points together', async () => {
+  function renderPage() {
+    const toggleNav = vi.fn();
+
     render(
-      <MemoryRouter initialEntries={['/workspaces']}>
-        <Routes>
-          <Route path="/workspaces" element={<WorkspacesPage />} />
-          <Route path="/threads" element={<div>Workspace Threads</div>} />
-        </Routes>
-      </MemoryRouter>,
+      <AppShellNavContext.Provider
+        value={{ toggleNav, closeNav: vi.fn() }}
+      >
+        <MemoryRouter initialEntries={['/workspaces']}>
+          <Routes>
+            <Route path="/workspaces" element={<WorkspacesPage />} />
+            <Route path="/threads" element={<div>Workspace Threads</div>} />
+          </Routes>
+        </MemoryRouter>
+      </AppShellNavContext.Provider>,
     );
+
+    return { toggleNav };
+  }
+
+  it('shows the compact topbar actions and opens workspace threads from the row body', async () => {
+    const { toggleNav } = renderPage();
 
     await waitFor(() => {
       expect(screen.getByText('Demo Workspace')).toBeInTheDocument();
+      expect(screen.getByText('Recent Workspace')).toBeInTheDocument();
     });
 
-    expect(screen.getByRole('link', { name: /Import Session/i })).toHaveAttribute(
+    fireEvent.click(screen.getByRole('button', { name: /open navigation/i }));
+    expect(toggleNav).toHaveBeenCalled();
+
+    expect(screen.getByRole('link', { name: /^Import$/i })).toHaveAttribute(
       'href',
       '/threads/import',
     );
-    expect(screen.getByRole('link', { name: /Add Workspace/i })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /^Create$/i })).toHaveAttribute(
       'href',
       '/workspaces/new',
     );
+    expect(screen.queryByRole('link', { name: /Open tree/i })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Demo Workspace'));
 
@@ -79,11 +130,7 @@ describe('WorkspacesPage', () => {
   });
 
   it('renames a workspace only after save is clicked', async () => {
-    render(
-      <MemoryRouter>
-        <WorkspacesPage />
-      </MemoryRouter>,
-    );
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText('Demo Workspace')).toBeInTheDocument();
@@ -108,8 +155,55 @@ describe('WorkspacesPage', () => {
     });
 
     const patchCall = vi.mocked(fetch).mock.calls.find(
-      ([input, init]) => String(input).endsWith('/api/workspaces/workspace-1') && init?.method === 'PATCH',
+      ([input, init]) =>
+        String(input).endsWith('/api/workspaces/workspace-1') &&
+        init?.method === 'PATCH',
     );
-    expect(patchCall?.[1]?.body).toBe(JSON.stringify({ label: 'Renamed Workspace' }));
+    expect(patchCall?.[1]?.body).toBe(
+      JSON.stringify({ label: 'Renamed Workspace' }),
+    );
+  });
+
+  it('pins a workspace to the top immediately and shows the full path dialog', async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Recent Workspace')).toBeInTheDocument();
+      expect(screen.getByText('Demo Workspace')).toBeInTheDocument();
+    });
+
+    const rowsBefore = screen
+      .getAllByRole('link')
+      .filter((node) => node.getAttribute('href') === null);
+    expect(rowsBefore[0]).toHaveTextContent('Recent Workspace');
+    expect(rowsBefore[1]).toHaveTextContent('Demo Workspace');
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Pin workspace Demo Workspace' }),
+    );
+
+    await waitFor(() => {
+      const rowsAfter = screen
+        .getAllByRole('link')
+        .filter((node) => node.getAttribute('href') === null);
+      expect(rowsAfter[0]).toHaveTextContent('Demo Workspace');
+      expect(
+        screen.getByRole('button', { name: 'Unpin workspace Demo Workspace' }),
+      ).toBeInTheDocument();
+    });
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: '/Users/test/projects/demo-workspace',
+      }),
+    );
+
+    await waitFor(() => {
+      const dialog = screen.getByRole('dialog', { name: 'Workspace Path' });
+      expect(dialog).toBeInTheDocument();
+      expect(
+        within(dialog).getByText('/Users/test/projects/demo-workspace'),
+      ).toBeInTheDocument();
+    });
   });
 });
