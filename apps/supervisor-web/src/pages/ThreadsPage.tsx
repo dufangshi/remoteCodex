@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 
 import {
   CodexStatusDto,
@@ -25,6 +24,7 @@ import {
 export function ThreadsPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const selectedWorkspaceId = searchParams.get('workspaceId');
   const [threads, setThreads] = useState<ThreadDto[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceDto[]>([]);
   const [status, setStatus] = useState<CodexStatusDto | null>(null);
@@ -60,6 +60,10 @@ export function ThreadsPage() {
   }
 
   useEffect(() => {
+    if (selectedWorkspaceId === null) {
+      return;
+    }
+
     void load();
 
     const socket = connectSupervisorEvents((event) => {
@@ -89,18 +93,17 @@ export function ThreadsPage() {
     return () => {
       socket.close();
     };
-  }, []);
+  }, [selectedWorkspaceId]);
 
   const workspaceLabels = Object.fromEntries(
     workspaces.map((workspace) => [workspace.id, workspace.label]),
   );
-  const selectedWorkspaceId = searchParams.get('workspaceId');
   const selectedWorkspace = workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ?? null;
   const visibleThreads = useMemo(
     () =>
       selectedWorkspaceId
         ? threads.filter((thread) => thread.workspaceId === selectedWorkspaceId)
-        : threads,
+        : [],
     [selectedWorkspaceId, threads],
   );
   const runningThreads = visibleThreads.filter(
@@ -109,6 +112,10 @@ export function ThreadsPage() {
   const newThreadHref = selectedWorkspaceId
     ? `/threads/new?workspaceId=${encodeURIComponent(selectedWorkspaceId)}`
     : '/threads/new';
+
+  if (selectedWorkspaceId === null) {
+    return <Navigate to="/workspaces" replace />;
+  }
 
   function supervisorDotClassName() {
     switch (status?.state) {
@@ -188,8 +195,8 @@ export function ThreadsPage() {
       error={error}
       viewportConstrained={selectedWorkspaceId !== null}
       showMobileAppMenu
-      showMobileThreadNavToggle={selectedWorkspaceId === null}
-      showMobileNewThreadShortcut={selectedWorkspaceId === null}
+      showMobileThreadNavToggle={false}
+      showMobileNewThreadShortcut={false}
       currentWorkspaceId={selectedWorkspaceId}
       currentWorkspaceLabel={selectedWorkspace?.label ?? null}
       onRenameThread={handleRenameThread}

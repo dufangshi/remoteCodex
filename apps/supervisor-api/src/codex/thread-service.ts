@@ -522,6 +522,36 @@ function turnToDto(turn: CodexTurnRecord): ThreadTurnDto {
   };
 }
 
+function sliceTurnsForDetail<T extends { id: string }>(
+  turns: T[],
+  options: { limit?: number; beforeTurnId?: string } = {},
+) {
+  const totalTurnCount = turns.length;
+  const limit = options.limit ?? 10;
+
+  if (turns.length === 0) {
+    return {
+      turns,
+      totalTurnCount,
+    };
+  }
+
+  if (options.beforeTurnId) {
+    const beforeIndex = turns.findIndex((turn) => turn.id === options.beforeTurnId);
+    const exclusiveEnd = beforeIndex >= 0 ? beforeIndex : turns.length;
+    const start = Math.max(0, exclusiveEnd - limit);
+    return {
+      turns: turns.slice(start, exclusiveEnd),
+      totalTurnCount,
+    };
+  }
+
+  return {
+    turns: turns.slice(Math.max(0, turns.length - limit)),
+    totalTurnCount,
+  };
+}
+
 export class ThreadService {
   private readonly pendingRequests = new Map<string, Map<string, PendingThreadRequestRecord>>();
 
@@ -682,7 +712,10 @@ export class ThreadService {
     return this.getThreadDetail(created.id);
   }
 
-  async getThreadDetail(localThreadId: string): Promise<ThreadDetailDto> {
+  async getThreadDetail(
+    localThreadId: string,
+    options: { limit?: number; beforeTurnId?: string } = {},
+  ): Promise<ThreadDetailDto> {
     const record = getThreadRecordById(this.db, localThreadId);
     if (!record) {
       throw new HttpError(404, {
@@ -720,11 +753,13 @@ export class ThreadService {
     if (!remoteThread) {
       const updated = getThreadRecordById(this.db, record.id)!;
       const localSession = await this.localSessionStore.findSession(record.codexThreadId);
+      const pagedTurns = sliceTurnsForDetail(localSession?.turns ?? [], options);
       return {
         thread: this.toThreadDto(updated, loadedIds),
         workspace: toWorkspaceDto(workspace),
         workspacePathStatus,
-        turns: localSession?.turns ?? [],
+        turns: pagedTurns.turns,
+        totalTurnCount: pagedTurns.totalTurnCount,
         pendingRequests: this.listPendingRequests(updated.id)
       };
     }
@@ -752,11 +787,13 @@ export class ThreadService {
       updated.collaborationMode,
       remoteThread
     );
+    const pagedTurns = sliceTurnsForDetail(remoteThread.turns, options);
     return {
       thread: this.toThreadDto(updated, loadedIds),
       workspace: toWorkspaceDto(workspace),
       workspacePathStatus,
-      turns: remoteThread.turns.map(turnToDto),
+      turns: pagedTurns.turns.map(turnToDto),
+      totalTurnCount: pagedTurns.totalTurnCount,
       pendingRequests: this.listPendingRequests(updated.id)
     };
   }

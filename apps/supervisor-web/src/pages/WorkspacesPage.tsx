@@ -2,7 +2,10 @@ import { KeyboardEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import type { WorkspaceDto } from '../../../../packages/shared/src/index';
-import { useAppShellNav } from '../components/AppShellNavContext';
+import {
+  AppShellMenuButton,
+  AppShellNavigationMenu,
+} from '../components/AppShellNavigation';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { LongTextDialog } from '../components/LongTextDialog';
 import { RenameDialog } from '../components/RenameDialog';
@@ -33,7 +36,7 @@ function formatRecentLabel(timestamp: string | null) {
   return new Date(timestamp).toLocaleString();
 }
 
-function truncatePathFromFront(absPath: string, maxLength = 42) {
+function truncatePathFromFront(absPath: string, maxLength = 28) {
   if (absPath.length <= maxLength) {
     return absPath;
   }
@@ -53,18 +56,6 @@ function PinIcon({ active }: { active: boolean }) {
   );
 }
 
-function MenuIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-4 w-4 fill-current"
-    >
-      <path d="M2 3.25h12v1.5H2Zm0 4h12v1.5H2Zm0 4h12v1.5H2Z" />
-    </svg>
-  );
-}
-
 function TrashIcon() {
   return (
     <svg
@@ -79,7 +70,6 @@ function TrashIcon() {
 
 export function WorkspacesPage() {
   const navigate = useNavigate();
-  const shellNav = useAppShellNav();
   const [workspaces, setWorkspaces] = useState<WorkspaceDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -205,32 +195,28 @@ export function WorkspacesPage() {
   return (
     <div className="space-y-4">
       <div className="sticky top-[env(safe-area-inset-top)] z-20 -mx-4 border-b border-stone-800/90 bg-stone-950/96 px-2.5 py-2 backdrop-blur sm:mx-0 sm:rounded-[1.4rem] sm:border sm:px-4">
-        <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
-          <button
-            type="button"
-            aria-label="Open Navigation"
-            onClick={() => shellNav?.toggleNav()}
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-stone-700 bg-stone-900/92 text-stone-200 transition hover:bg-stone-800"
-          >
-            <MenuIcon />
-          </button>
-          <Link
-            to="/threads/import"
-            className="inline-flex h-8 shrink-0 items-center rounded-full border border-sky-400/30 bg-sky-400/10 px-2.5 text-[11px] font-medium uppercase tracking-[0.14em] text-sky-100 transition hover:border-sky-300/45 hover:bg-sky-400/16 sm:px-3 sm:text-xs sm:tracking-[0.18em]"
-          >
-            Import
-          </Link>
-          <Link
-            to="/workspaces/new"
-            className="inline-flex h-8 shrink-0 items-center rounded-full bg-amber-300 px-2.5 text-[11px] font-medium uppercase tracking-[0.14em] text-stone-950 transition hover:bg-amber-200 sm:px-3 sm:text-xs sm:tracking-[0.18em]"
-          >
-            Create
-          </Link>
-          <div className="min-w-0 flex-1 text-right">
-            <p className="truncate text-[11px] uppercase tracking-[0.24em] text-stone-500">
-              Workspaces
-            </p>
+        <div className="relative">
+          <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
+            <AppShellMenuButton />
+            <Link
+              to="/threads/import"
+              className="inline-flex h-8 shrink-0 items-center rounded-full border border-sky-400/30 bg-sky-400/10 px-2.5 text-[11px] font-medium uppercase tracking-[0.14em] text-sky-100 transition hover:border-sky-300/45 hover:bg-sky-400/16 sm:px-3 sm:text-xs sm:tracking-[0.18em]"
+            >
+              Import
+            </Link>
+            <Link
+              to="/workspaces/new"
+              className="inline-flex h-8 shrink-0 items-center rounded-full bg-amber-300 px-2.5 text-[11px] font-medium uppercase tracking-[0.14em] text-stone-950 transition hover:bg-amber-200 sm:px-3 sm:text-xs sm:tracking-[0.18em]"
+            >
+              Create
+            </Link>
+            <div className="min-w-0 flex-1 text-right">
+              <p className="truncate text-[11px] uppercase tracking-[0.24em] text-stone-500">
+                Workspaces
+              </p>
+            </div>
           </div>
+          <AppShellNavigationMenu className="absolute left-0 top-[calc(100%+0.5rem)] z-30 w-[min(22rem,calc(100vw-1rem))]" />
         </div>
       </div>
 
@@ -305,7 +291,7 @@ export function WorkspacesPage() {
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-1">
                     <p
-                      className="min-w-0 max-w-full truncate text-sm font-semibold text-stone-100 sm:text-base"
+                      className="min-w-0 max-w-full truncate text-base font-semibold text-stone-100 sm:text-lg"
                       title={workspace.label}
                     >
                       {workspace.label}
@@ -326,12 +312,13 @@ export function WorkspacesPage() {
                   </div>
                   <button
                     type="button"
+                    aria-label={workspace.absPath}
                     title={workspace.absPath}
                     onClick={(event) => {
                       event.stopPropagation();
                       setExpandedPath(workspace.absPath);
                     }}
-                    className="mt-1.5 block max-w-full truncate text-left text-sm text-stone-500 transition hover:text-stone-300"
+                    className="mt-1 inline-block max-w-full overflow-hidden whitespace-nowrap text-left text-[9px] leading-4 text-stone-500 transition hover:text-stone-300"
                   >
                     {truncatePathFromFront(workspace.absPath)}
                   </button>

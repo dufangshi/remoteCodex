@@ -37,6 +37,24 @@ import {
   updateThreadSettings,
 } from '../lib/api';
 
+const DETAIL_TURN_PAGE_SIZE = 10;
+
+function prependTurns(
+  existing: ThreadDetailDto['turns'],
+  older: ThreadDetailDto['turns'],
+) {
+  const olderIds = new Set(older.map((turn) => turn.id));
+  return [...older, ...existing.filter((turn) => !olderIds.has(turn.id))];
+}
+
+function appendLatestTurns(
+  existing: ThreadDetailDto['turns'],
+  latest: ThreadDetailDto['turns'],
+) {
+  const latestIds = new Set(latest.map((turn) => turn.id));
+  return [...existing.filter((turn) => !latestIds.has(turn.id)), ...latest];
+}
+
 export function ThreadDetailPage() {
   const { id = '' } = useParams();
   const liveOutputBufferRef = useRef('');
@@ -57,6 +75,7 @@ export function ThreadDetailPage() {
   const [followTail, setFollowTail] = useState(true);
   const [scrollRequestKey, setScrollRequestKey] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [busy, setBusy] = useState(false);
   const [activeView, setActiveView] = useState<'chat' | 'shell'>('chat');
   const [chatDraft, setChatDraft] = useState<{
@@ -111,10 +130,12 @@ export function ThreadDetailPage() {
   }, []);
 
   useEffect(() => {
+    setDetail(null);
     setChatDraft({
       prompt: '',
       attachments: [],
     });
+    setLoadingEarlier(false);
   }, [id]);
 
   useEffect(() => {
@@ -217,7 +238,7 @@ export function ThreadDetailPage() {
       try {
         const [detailResponse, threadResponse, statusResponse, modelResponse] =
           await Promise.all([
-            fetchThreadDetail(id),
+            fetchThreadDetail(id, { limit: DETAIL_TURN_PAGE_SIZE }),
             fetchThreads(),
             fetchCodexStatus(),
             fetchCodexModels(),
@@ -225,7 +246,14 @@ export function ThreadDetailPage() {
         if (loadRequestIdRef.current !== requestId) {
           return;
         }
-        setDetail(detailResponse);
+        setDetail((current) =>
+          current
+            ? {
+                ...detailResponse,
+                turns: appendLatestTurns(current.turns, detailResponse.turns),
+              }
+            : detailResponse,
+        );
         setThreads(threadResponse);
         setStatus(statusResponse);
         setModelOptions(modelResponse);
@@ -303,6 +331,44 @@ export function ThreadDetailPage() {
     };
   }, [clearBufferedLiveOutput, id, queueLiveOutputDelta]);
 
+  async function handleLoadEarlierTurns() {
+    if (!detail || detail.turns.length === 0 || loadingEarlier) {
+      return;
+    }
+
+    setLoadingEarlier(true);
+    setError(null);
+
+    try {
+      const earliestLoadedTurnId = detail.turns[0]?.id;
+      const earlier = await fetchThreadDetail(id, {
+        limit: DETAIL_TURN_PAGE_SIZE,
+        ...(earliestLoadedTurnId ? { beforeTurnId: earliestLoadedTurnId } : {}),
+      });
+      setDetail((current) =>
+        current
+          ? {
+              ...earlier,
+              turns: prependTurns(current.turns, earlier.turns),
+            }
+          : earlier,
+      );
+      setThreads((current) =>
+        current.map((entry) =>
+          entry.id === earlier.thread.id ? earlier.thread : entry,
+        ),
+      );
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : 'Unable to load earlier turns.',
+      );
+    } finally {
+      setLoadingEarlier(false);
+    }
+  }
+
   async function handlePrompt(input: SendThreadPromptRequestInput) {
     if (activeView === 'shell') {
       if (detail?.thread.isLoaded === false) {
@@ -333,7 +399,14 @@ export function ThreadDetailPage() {
           currentDetail.thread.model ? { model: currentDetail.thread.model } : {},
         );
         currentDetail = resumed;
-        setDetail(resumed);
+        setDetail((current) =>
+          current
+            ? {
+                ...resumed,
+                turns: appendLatestTurns(current.turns, resumed.turns),
+              }
+            : resumed,
+        );
         setThreads((current) =>
           current.map((entry) =>
             entry.id === resumed.thread.id ? resumed.thread : entry,
@@ -388,7 +461,14 @@ export function ThreadDetailPage() {
     try {
       if (detail.thread.isLoaded) {
         const disconnected = await disconnectThread(id);
-        setDetail(disconnected);
+        setDetail((current) =>
+          current
+            ? {
+                ...disconnected,
+                turns: appendLatestTurns(current.turns, disconnected.turns),
+              }
+            : disconnected,
+        );
         setShellControlState(null);
         setThreads((current) =>
           current.map((entry) =>
@@ -403,7 +483,14 @@ export function ThreadDetailPage() {
         id,
         detail.thread.model ? { model: detail.thread.model } : {},
       );
-      setDetail(resumed);
+      setDetail((current) =>
+        current
+          ? {
+              ...resumed,
+              turns: appendLatestTurns(current.turns, resumed.turns),
+            }
+          : resumed,
+      );
       setThreads((current) =>
         current.map((entry) =>
           entry.id === resumed.thread.id ? resumed.thread : entry,
@@ -533,7 +620,14 @@ export function ThreadDetailPage() {
 
     try {
       const updated = await respondToThreadRequest(id, requestId, input);
-      setDetail(updated);
+      setDetail((current) =>
+        current
+          ? {
+              ...updated,
+              turns: appendLatestTurns(current.turns, updated.turns),
+            }
+          : updated,
+      );
       setLivePlan(null);
     } catch (caught) {
       setError(
@@ -759,6 +853,7 @@ export function ThreadDetailPage() {
       error={loading ? null : error}
       viewportConstrained
       currentThreadId={detail?.thread.id}
+      currentThreadLabel={detail?.thread.title}
       currentWorkspaceId={detail?.thread.workspaceId}
       currentWorkspaceLabel={detail?.workspace.label}
       metaContent={metaContent}
@@ -767,56 +862,6 @@ export function ThreadDetailPage() {
       onRenameThread={handleRenameThread}
     >
       <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-none border-y border-stone-800 bg-stone-900/85 shadow-2xl shadow-stone-950/20 sm:flex-none sm:rounded-[2rem] sm:border">
-        <header className="shrink-0 border-b border-stone-800 bg-stone-900/95 px-3 py-3 backdrop-blur sm:px-5">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <h2 className="truncate text-base font-medium text-stone-100 sm:text-xl">
-                {detail?.thread.title ?? 'Loading thread'}
-              </h2>
-              <p className="mt-1 truncate text-xs text-stone-500">
-                {detail?.workspace.label ?? 'Resolving workspace'}
-              </p>
-            </div>
-            <button
-              type="button"
-              aria-label={`${detail?.thread.isLoaded ? 'Disconnect' : 'Connect'} Thread (${detail ? threadStatusLabel(detail.thread.status) : 'Loading'})`}
-              title={
-                detail
-                  ? `${detail.thread.isLoaded ? 'Disconnect' : 'Connect'} thread`
-                  : 'Connect Thread'
-              }
-              onClick={() => void handleResume()}
-              disabled={busy}
-              className={`hidden h-10 w-10 shrink-0 items-center justify-center rounded-full transition sm:inline-flex disabled:cursor-not-allowed disabled:opacity-60 ${sessionConnectionButtonClassName}`}
-            >
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 16 16"
-                className="h-4.5 w-4.5 fill-none stroke-current"
-                strokeWidth="1.4"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                {detail?.thread.isLoaded ? (
-                  <>
-                    <path d="M2.5 6.75A8.22 8.22 0 0 1 8 4.5c2.14 0 4.1.8 5.5 2.25" />
-                    <path d="M4.75 9a4.95 4.95 0 0 1 6.5 0" />
-                    <path d="M6.9 11.3a1.9 1.9 0 0 1 2.2 0" />
-                    <path d="m6.7 13.2.9.9 1.7-2" />
-                  </>
-                ) : (
-                  <>
-                    <path d="M2.5 6.75A8.22 8.22 0 0 1 8 4.5c2.14 0 4.1.8 5.5 2.25" />
-                    <path d="M4.75 9a4.95 4.95 0 0 1 6.5 0" />
-                    <path d="M6.9 11.3a1.9 1.9 0 0 1 2.2 0" />
-                    <path d="M3 3l10 10" />
-                  </>
-                )}
-              </svg>
-            </button>
-          </div>
-        </header>
-
         {error && !loading && (
           <div className="shrink-0 border-b border-rose-500/20 bg-rose-500/10 px-5 py-4 text-sm text-rose-100 sm:px-6">
             {error}
@@ -829,14 +874,6 @@ export function ThreadDetailPage() {
           </div>
         ) : detail ? (
           <>
-            {detail.thread.source === 'local_codex_import' && !detail.thread.isLoaded && (
-              <div className="shrink-0 border-b border-amber-500/20 bg-amber-500/10 px-5 py-4 text-sm text-amber-100 sm:px-6">
-                <p className="font-medium text-amber-50">Imported local Codex session</p>
-                <p className="mt-1 text-amber-100/90">
-                  History is available immediately. Click Resume / Connect before sending a new prompt.
-                </p>
-              </div>
-            )}
             {detail.workspacePathStatus === 'missing' && (
               <div className="shrink-0 border-b border-rose-500/20 bg-rose-500/10 px-5 py-4 text-sm text-rose-100 sm:px-6">
                 <p className="font-medium text-rose-50">Workspace path missing</p>
@@ -850,6 +887,7 @@ export function ThreadDetailPage() {
                 <ThreadTimeline
                   threadId={detail.thread.id}
                   turns={detail.turns}
+                  totalTurnCount={detail.totalTurnCount ?? detail.turns.length}
                   pendingRequests={detail.pendingRequests}
                   livePlan={livePlan}
                   respondingRequestId={respondingRequestId}
@@ -859,6 +897,8 @@ export function ThreadDetailPage() {
                   bottomSpacer={timelineBottomSpacer}
                   className="min-h-0 flex-1 bg-stone-900/30"
                   onTailVisibilityChange={setFollowTail}
+                  loadingEarlier={loadingEarlier}
+                  onLoadEarlier={handleLoadEarlierTurns}
                 />
                 {useFloatingMobileComposer ? (
                   <div

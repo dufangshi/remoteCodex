@@ -329,8 +329,74 @@ describe('supervisor api', () => {
         id: createdThread.id,
         title: 'Bootstrap Thread'
       },
+      totalTurnCount: 0,
       turns: []
     });
+  });
+
+  it('returns only the latest turn page by default and can page earlier turns', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Paged Thread'
+      }
+    });
+
+    const createdThread = createResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(createdThread.codexThreadId);
+    expect(remoteThread).toBeTruthy();
+    remoteThread!.status = { type: 'idle' };
+    remoteThread!.turns = Array.from({ length: 15 }, (_, index) => ({
+      id: `turn-${index + 1}`,
+      status: 'completed',
+      error: null,
+      items: [
+        {
+          id: `item-${index + 1}`,
+          type: 'userMessage',
+          content: [{ type: 'text', text: `Prompt ${index + 1}` }]
+        }
+      ]
+    })) as any;
+
+    const latestDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(latestDetailResponse.statusCode).toBe(200);
+    expect(latestDetailResponse.json()).toMatchObject({
+      totalTurnCount: 15,
+    });
+    expect(latestDetailResponse.json().turns).toHaveLength(10);
+    expect(latestDetailResponse.json().turns[0].id).toBe('turn-6');
+    expect(latestDetailResponse.json().turns.at(-1).id).toBe('turn-15');
+
+    const earlierDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}?limit=10&beforeTurnId=turn-6`
+    });
+
+    expect(earlierDetailResponse.statusCode).toBe(200);
+    expect(earlierDetailResponse.json()).toMatchObject({
+      totalTurnCount: 15,
+    });
+    expect(earlierDetailResponse.json().turns).toHaveLength(5);
+    expect(earlierDetailResponse.json().turns[0].id).toBe('turn-1');
+    expect(earlierDetailResponse.json().turns.at(-1).id).toBe('turn-5');
   });
 
   it('treats an empty rollout read error as a bootstrap transient after the first prompt', async () => {

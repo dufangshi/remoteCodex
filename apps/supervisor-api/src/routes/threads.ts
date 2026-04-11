@@ -73,6 +73,11 @@ const respondThreadRequestSchema = z.object({
   }))
 });
 
+const threadDetailQuerySchema = z.object({
+  limit: z.coerce.number().int().positive().max(100).optional(),
+  beforeTurnId: z.string().min(1).optional(),
+});
+
 const threadImageQuerySchema = z.object({
   path: z.string().min(1),
 });
@@ -261,7 +266,8 @@ export async function registerThreadRoutes(app: FastifyInstance) {
 
   app.get('/api/threads/:id', async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
-    return app.services.threadService.getThreadDetail(params.id);
+    const query = threadDetailQuerySchema.parse(request.query);
+    return app.services.threadService.getThreadDetail(params.id, query);
   });
 
   app.get('/api/threads/:id/assets/image', async (request, reply) => {

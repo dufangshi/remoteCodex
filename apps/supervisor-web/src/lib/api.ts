@@ -103,8 +103,21 @@ export function fetchThreads() {
   return request<ThreadDto[]>('/api/threads');
 }
 
-export function fetchThreadDetail(id: string) {
-  return request<ThreadDetailDto>(`/api/threads/${id}`);
+export function fetchThreadDetail(
+  id: string,
+  options: { limit?: number; beforeTurnId?: string } = {},
+) {
+  const params = new URLSearchParams();
+  if (options.limit !== undefined) {
+    params.set('limit', String(options.limit));
+  }
+  if (options.beforeTurnId) {
+    params.set('beforeTurnId', options.beforeTurnId);
+  }
+
+  return request<ThreadDetailDto>(
+    `/api/threads/${id}${params.size > 0 ? `?${params.toString()}` : ''}`,
+  );
 }
 
 export function fetchThreadShellState(id: string) {

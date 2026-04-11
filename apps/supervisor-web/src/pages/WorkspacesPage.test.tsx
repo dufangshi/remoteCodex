@@ -94,12 +94,20 @@ describe('WorkspacesPage', () => {
     );
   });
 
-  function renderPage() {
+  function renderPage({ navOpen = false }: { navOpen?: boolean } = {}) {
     const toggleNav = vi.fn();
 
     render(
       <AppShellNavContext.Provider
-        value={{ toggleNav, closeNav: vi.fn() }}
+        value={{
+          navOpen,
+          openNav: vi.fn(),
+          toggleNav,
+          closeNav: vi.fn(),
+          settingsOpen: false,
+          openSettings: vi.fn(),
+          closeSettings: vi.fn(),
+        }}
       >
         <MemoryRouter initialEntries={['/workspaces']}>
           <Routes>
@@ -139,6 +147,27 @@ describe('WorkspacesPage', () => {
     await waitFor(() => {
       expect(screen.getByText('Workspace Threads')).toBeInTheDocument();
     });
+  });
+
+  it('renders the unified menu with workspaces disabled on the workspaces page', async () => {
+    renderPage({ navOpen: true });
+
+    await waitFor(() => {
+      expect(screen.getByText('Demo Workspace')).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByRole('button', { name: /^Workspaces$/i }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: /^Settings$/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /^Threads$/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /^New Thread$/i }),
+    ).not.toBeInTheDocument();
   });
 
   it('renames a workspace only after save is clicked', async () => {

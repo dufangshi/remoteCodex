@@ -186,6 +186,7 @@ export interface ThreadDetailDto {
   workspace: WorkspaceDto;
   workspacePathStatus: 'present' | 'missing';
   turns: ThreadTurnDto[];
+  totalTurnCount?: number;
   pendingRequests: ThreadActionRequestDto[];
 }
 

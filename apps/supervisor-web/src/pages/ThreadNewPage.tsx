@@ -50,7 +50,7 @@ export function ThreadNewPage() {
       return;
     }
 
-    navigate('/threads');
+    navigate('/workspaces');
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {

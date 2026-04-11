@@ -151,6 +151,31 @@ describe('ThreadTimeline', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('requests earlier turns from the server when history is paged remotely', () => {
+    const onLoadEarlier = vi.fn();
+    const turns = Array.from({ length: 10 }, (_, index) => makeTurn(index + 26));
+
+    render(
+      <ThreadTimeline
+        turns={turns}
+        totalTurnCount={35}
+        liveOutput=""
+        onLoadEarlier={onLoadEarlier}
+      />,
+    );
+
+    expect(screen.getByText(/Showing 10 of 35 turns/)).toBeInTheDocument();
+    expect(screen.queryByText('Turn 25')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load 10 earlier' }));
+
+    expect(onLoadEarlier).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/Showing 10 of 35 turns/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Load full history' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('renders user and agent messages without separate title rows', async () => {
     render(
       <ThreadTimeline

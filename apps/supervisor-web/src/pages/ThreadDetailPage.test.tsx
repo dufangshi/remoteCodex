@@ -206,7 +206,7 @@ describe('ThreadDetailPage', () => {
           });
         }
 
-        if (url.endsWith('/api/threads/thread-1')) {
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({
@@ -348,8 +348,8 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByRole('heading', { level: 2, name: 'Demo Thread' }),
-      ).toBeInTheDocument();
+        screen.getAllByText('Demo Workspace / Demo Thread').length,
+      ).toBeGreaterThan(0);
     });
 
     expect(screen.getByText('Sibling Thread')).toBeInTheDocument();
@@ -361,6 +361,160 @@ describe('ThreadDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Thread Meta/i }));
 
     expect(screen.getByText('/tmp/demo')).toBeInTheDocument();
+  });
+
+  it('loads only the latest turn page first and fetches earlier turns on demand', async () => {
+    const allTurns = Array.from({ length: 15 }, (_, index) => ({
+      id: `turn-${index + 1}`,
+      startedAt: new Date(Date.UTC(2026, 3, 10, 0, index, 0)).toISOString(),
+      status: 'completed' as const,
+      error: null,
+      items: [
+        {
+          id: `item-${index + 1}`,
+          kind: 'userMessage' as const,
+          text: `Prompt ${index + 1}`,
+        },
+      ],
+    }));
+
+    const detailUrls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+
+        if (url.includes('/api/codex/status')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              state: 'ready',
+              transport: 'stdio',
+              lastStartedAt: new Date().toISOString(),
+              lastError: null,
+              restartCount: 0,
+            }),
+          });
+        }
+
+        if (url.includes('/api/codex/models')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => modelOptionsResponse,
+          });
+        }
+
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
+          detailUrls.push(url);
+          const requestUrl = new URL(url, 'http://localhost');
+          const beforeTurnId = requestUrl.searchParams.get('beforeTurnId');
+          const limit = Number(requestUrl.searchParams.get('limit') ?? '10');
+          const endExclusive = beforeTurnId
+            ? allTurns.findIndex((turn) => turn.id === beforeTurnId)
+            : allTurns.length;
+          const start = Math.max(0, endExclusive - limit);
+
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              thread: {
+                id: 'thread-1',
+                workspaceId: 'workspace-1',
+                codexThreadId: 'codex-1',
+                source: 'supervisor',
+                title: 'Demo Thread',
+                model: 'gpt-5',
+                reasoningEffort: 'medium',
+                collaborationMode: 'default',
+                approvalMode: 'yolo',
+                status: 'idle',
+                summaryText: 'Preview',
+                lastError: null,
+                activeTurnId: null,
+                isLoaded: true,
+                isPinned: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                lastTurnStartedAt: null,
+                lastTurnCompletedAt: null,
+              },
+              workspace: {
+                id: 'workspace-1',
+                hostId: 'host-1',
+                label: 'Demo Workspace',
+                absPath: '/tmp/demo',
+                isFavorite: false,
+                createdAt: new Date().toISOString(),
+                lastOpenedAt: null,
+              },
+              workspacePathStatus: 'present',
+              pendingRequests: [],
+              totalTurnCount: allTurns.length,
+              turns: allTurns.slice(start, endExclusive),
+            }),
+          });
+        }
+
+        if (url.endsWith('/api/threads')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => [
+              {
+                id: 'thread-1',
+                workspaceId: 'workspace-1',
+                codexThreadId: 'codex-1',
+                source: 'supervisor',
+                title: 'Demo Thread',
+                model: 'gpt-5',
+                reasoningEffort: 'medium',
+                collaborationMode: 'default',
+                approvalMode: 'yolo',
+                status: 'idle',
+                summaryText: 'Preview',
+                lastError: null,
+                activeTurnId: null,
+                isLoaded: true,
+                isPinned: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                lastTurnStartedAt: null,
+                lastTurnCompletedAt: null,
+              },
+            ],
+          });
+        }
+
+        if (init?.method === 'POST' || init?.method === 'PATCH' || init?.method === 'DELETE') {
+          return Promise.reject(new Error(`Unexpected request: ${url}`));
+        }
+
+        return Promise.reject(new Error(`Unexpected request: ${url}`));
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Showing 10 of 15 turns/)).toBeInTheDocument();
+    });
+
+    expect(detailUrls[0]).toContain('/api/threads/thread-1?limit=10');
+    expect(screen.queryByText('Prompt 5')).not.toBeInTheDocument();
+    expect(screen.getByText('Prompt 15')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load 10 earlier' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Prompt 5')).toBeInTheDocument();
+    });
+
+    expect(detailUrls.at(-1)).toContain('beforeTurnId=turn-6');
   });
 
   it('surfaces imported thread warnings before resume', async () => {
@@ -389,7 +543,7 @@ describe('ThreadDetailPage', () => {
           });
         }
 
-        if (url.endsWith('/api/threads/imported-thread')) {
+        if (url.startsWith('/api/threads/imported-thread?') || url.endsWith('/api/threads/imported-thread')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({
@@ -473,11 +627,10 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByRole('heading', { level: 2, name: 'Imported Thread' }),
+        screen.getByText('Imported Thread'),
       ).toBeInTheDocument();
     });
 
-    expect(screen.getByText(/Imported local Codex session/i)).toBeInTheDocument();
     expect(screen.getByText(/Workspace path missing/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Send Prompt/i })).toBeDisabled();
   });
@@ -493,8 +646,8 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByRole('heading', { level: 2, name: 'Demo Thread' }),
-      ).toBeInTheDocument();
+        screen.getAllByText('Demo Workspace / Demo Thread').length,
+      ).toBeGreaterThan(0);
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Add attachment' }));
@@ -614,7 +767,7 @@ describe('ThreadDetailPage', () => {
           });
         }
 
-        if (url.endsWith('/api/threads/thread-1')) {
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({
@@ -698,8 +851,8 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByRole('heading', { level: 2, name: 'Demo Thread' }),
-      ).toBeInTheDocument();
+        screen.getAllByText('Demo Workspace / Demo Thread').length,
+      ).toBeGreaterThan(0);
     });
 
     setPromptValue(screen.getByLabelText('Prompt'), 'hello after auto connect');
@@ -754,7 +907,7 @@ describe('ThreadDetailPage', () => {
           });
         }
 
-        if (url.endsWith('/api/threads/thread-1')) {
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({
@@ -816,8 +969,8 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByRole('heading', { level: 2, name: 'Demo Thread' }),
-      ).toBeInTheDocument();
+        screen.getAllByText('Demo Workspace / Demo Thread').length,
+      ).toBeGreaterThan(0);
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Add attachment' }));
@@ -851,7 +1004,7 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByRole('heading', { level: 2, name: 'Demo Thread' }),
+        screen.getByText('Demo Thread'),
       ).toBeInTheDocument();
     });
 
@@ -889,7 +1042,7 @@ describe('ThreadDetailPage', () => {
           });
         }
 
-        if (url.endsWith('/api/threads/thread-1')) {
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({
@@ -973,7 +1126,7 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByRole('heading', { level: 2, name: 'Demo Thread' }),
+        screen.getByText('Demo Thread'),
       ).toBeInTheDocument();
     });
 
@@ -988,7 +1141,7 @@ describe('ThreadDetailPage', () => {
     expect(shellPanelMock.toggleConnection).not.toHaveBeenCalled();
   });
 
-  it('hides the imported-session resume warning after the thread is connected', async () => {
+  it('does not render the imported-session warning card after connection', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((input: RequestInfo | URL) => {
@@ -1014,7 +1167,10 @@ describe('ThreadDetailPage', () => {
           });
         }
 
-        if (url.endsWith('/api/threads/connected-imported-thread')) {
+        if (
+          url.startsWith('/api/threads/connected-imported-thread?') ||
+          url.endsWith('/api/threads/connected-imported-thread')
+        ) {
           return Promise.resolve({
             ok: true,
             json: async () => ({
@@ -1098,10 +1254,11 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByRole('heading', { level: 2, name: 'Connected Imported Thread' }),
+        screen.getByText('Connected Imported Thread'),
       ).toBeInTheDocument();
     });
 
+    expect(screen.queryByText(/Imported local Codex session/i)).not.toBeInTheDocument();
     expect(
       screen.queryByText(/History is available immediately\. Click Resume \/ Connect before sending a new prompt\./i),
     ).not.toBeInTheDocument();
@@ -1169,7 +1326,7 @@ describe('ThreadDetailPage', () => {
           });
         }
 
-        if (url.endsWith('/api/threads/thread-1')) {
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
           detailCallCount += 1;
 
           if (detailCallCount === 1) {

@@ -28,6 +28,7 @@ interface ThreadWorkspaceLayoutProps {
   showMobileNewThreadShortcut?: boolean;
   mobileHeaderAction?: ReactNode;
   currentThreadId?: string | undefined;
+  currentThreadLabel?: string | null | undefined;
   currentWorkspaceId?: string | null | undefined;
   currentWorkspaceLabel?: string | null | undefined;
   workspaceLabels?: Record<string, string>;
@@ -348,6 +349,7 @@ export function ThreadWorkspaceLayout({
   showMobileNewThreadShortcut = true,
   mobileHeaderAction,
   currentThreadId,
+  currentThreadLabel = null,
   currentWorkspaceId = null,
   currentWorkspaceLabel = null,
   workspaceLabels = {},
@@ -386,9 +388,13 @@ export function ThreadWorkspaceLayout({
     });
   }, [currentThreadId, currentWorkspaceId, threads]);
 
-  const threadScopeLabel =
+  const baseThreadScopeLabel =
     currentWorkspaceLabel ??
     (currentWorkspaceId ? 'Current workspace' : 'All threads');
+  const threadScopeLabel =
+    currentThreadLabel && currentThreadLabel.trim()
+      ? `${baseThreadScopeLabel} / ${currentThreadLabel.trim()}`
+      : baseThreadScopeLabel;
   const newThreadHref = currentWorkspaceId
     ? `/threads/new?workspaceId=${encodeURIComponent(currentWorkspaceId)}`
     : '/threads/new';

@@ -31,6 +31,7 @@ import {
 interface ThreadTimelineProps {
   threadId?: string;
   turns: ThreadTurnDto[];
+  totalTurnCount?: number;
   pendingRequests?: ThreadActionRequestDto[];
   livePlan?: {
     turnId: string;
@@ -47,6 +48,8 @@ interface ThreadTimelineProps {
   bottomSpacer?: number;
   className?: string;
   onTailVisibilityChange?: (isVisible: boolean) => void;
+  loadingEarlier?: boolean;
+  onLoadEarlier?: () => void;
 }
 
 interface ExpandedTextState {
@@ -1063,6 +1066,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
 export function ThreadTimeline({
   threadId,
   turns,
+  totalTurnCount,
   pendingRequests = [],
   livePlan = null,
   respondingRequestId = null,
@@ -1072,6 +1076,8 @@ export function ThreadTimeline({
   bottomSpacer = 0,
   className = '',
   onTailVisibilityChange,
+  loadingEarlier = false,
+  onLoadEarlier,
 }: ThreadTimelineProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const lastHandledScrollRequestKeyRef = useRef(scrollRequestKey);
@@ -1084,6 +1090,9 @@ export function ThreadTimeline({
     {},
   );
   const [isTailVisible, setIsTailVisible] = useState(true);
+  const serverManagedHistory =
+    typeof onLoadEarlier === 'function' ||
+    totalTurnCount !== undefined;
 
   const handleToggleCollapse = useCallback((turnId: string) => {
     setCollapsedTurns((current) => ({
@@ -1194,10 +1203,13 @@ export function ThreadTimeline({
     onTailVisibilityChange?.(isTailVisible);
   }, [isTailVisible, onTailVisibilityChange]);
 
+  const effectiveTotalTurnCount = totalTurnCount ?? turns.length;
   const startIndex = Math.max(0, turns.length - visibleCount);
-  const visibleTurns = turns.slice(startIndex);
-  const hiddenCount = turns.length - visibleTurns.length;
-  const showLoadAll = hiddenCount > 0 && loadMoreClicks >= 2;
+  const visibleTurns = serverManagedHistory ? turns : turns.slice(startIndex);
+  const hiddenCount = serverManagedHistory
+    ? Math.max(0, effectiveTotalTurnCount - turns.length)
+    : turns.length - visibleTurns.length;
+  const showLoadAll = !serverManagedHistory && hiddenCount > 0 && loadMoreClicks >= 2;
   const liveOutputTurnIndex =
     liveOutput && visibleTurns.length > 0
       ? visibleTurns.findLastIndex((turn) => isRunningHistoryStatus(turn.status))
@@ -1221,14 +1233,20 @@ export function ThreadTimeline({
                   <button
                     type="button"
                     onClick={() => {
+                      if (serverManagedHistory) {
+                        onLoadEarlier?.();
+                        return;
+                      }
+
                       setVisibleCount((current) =>
                         Math.min(turns.length, current + LOAD_STEP),
                       );
                       setLoadMoreClicks((current) => current + 1);
                     }}
+                    disabled={loadingEarlier}
                     className="rounded-full border border-stone-700 px-2.5 py-1.5 text-stone-300 transition hover:bg-stone-800"
                   >
-                    Load 10 earlier
+                    {loadingEarlier ? 'Loading earlier...' : 'Load 10 earlier'}
                   </button>
                 )}
                 {showLoadAll && (
@@ -1241,7 +1259,7 @@ export function ThreadTimeline({
                   </button>
                 )}
                 <p className="text-stone-500">
-                  Showing {visibleTurns.length} of {turns.length} turns
+                  Showing {visibleTurns.length} of {effectiveTotalTurnCount} turns
                   {hiddenCount > 0 ? ` · ${hiddenCount} earlier hidden` : ''}
                 </p>
               </div>
