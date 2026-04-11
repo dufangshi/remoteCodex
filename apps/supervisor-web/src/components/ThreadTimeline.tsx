@@ -1488,6 +1488,9 @@ export function ThreadTimeline({
   const effectiveTotalTurnCount = totalTurnCount ?? turns.length;
   const startIndex = Math.max(0, turns.length - visibleCount);
   const visibleTurns = serverManagedHistory ? turns : turns.slice(startIndex);
+  const visibleTurnAbsoluteOffset = serverManagedHistory
+    ? Math.max(0, effectiveTotalTurnCount - turns.length)
+    : startIndex;
   const optimisticAbsoluteIndex = effectiveTotalTurnCount + 1;
   const hiddenCount = serverManagedHistory
     ? Math.max(0, effectiveTotalTurnCount - turns.length)
@@ -1568,7 +1571,7 @@ export function ThreadTimeline({
                   key={turn.id}
                   threadId={threadId}
                   turn={turn}
-                  absoluteIndex={startIndex + visibleIndex + 1}
+                  absoluteIndex={visibleTurnAbsoluteOffset + visibleIndex + 1}
                   isCollapsed={collapsedTurns[turn.id] ?? false}
                   liveOutput={visibleIndex === liveOutputTurnIndex ? liveOutput : ''}
                   onToggleCollapse={handleToggleCollapse}

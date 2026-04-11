@@ -153,11 +153,11 @@ describe('ThreadTimeline', () => {
 
   it('requests earlier turns from the server when history is paged remotely', () => {
     const onLoadEarlier = vi.fn();
-    const turns = Array.from({ length: 10 }, (_, index) => makeTurn(index + 26));
-
-    render(
+    const latestTurns = Array.from({ length: 10 }, (_, index) => makeTurn(index + 26));
+    const earlierTurns = Array.from({ length: 10 }, (_, index) => makeTurn(index + 16));
+    const { rerender } = render(
       <ThreadTimeline
-        turns={turns}
+        turns={latestTurns}
         totalTurnCount={35}
         liveOutput=""
         onLoadEarlier={onLoadEarlier}
@@ -165,6 +165,8 @@ describe('ThreadTimeline', () => {
     );
 
     expect(screen.getByText(/Showing 10 of 35 turns/)).toBeInTheDocument();
+    expect(screen.getByText('Turn 26')).toBeInTheDocument();
+    expect(screen.getByText('Turn 35')).toBeInTheDocument();
     expect(screen.queryByText('Turn 25')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Load 10 earlier' }));
@@ -174,6 +176,20 @@ describe('ThreadTimeline', () => {
     expect(
       screen.queryByRole('button', { name: 'Load full history' }),
     ).not.toBeInTheDocument();
+
+    rerender(
+      <ThreadTimeline
+        turns={[...earlierTurns, ...latestTurns]}
+        totalTurnCount={35}
+        liveOutput=""
+        onLoadEarlier={onLoadEarlier}
+      />,
+    );
+
+    expect(screen.getByText(/Showing 20 of 35 turns/)).toBeInTheDocument();
+    expect(screen.getByText('Turn 16')).toBeInTheDocument();
+    expect(screen.getByText('Turn 35')).toBeInTheDocument();
+    expect(screen.queryByText('Turn 15')).not.toBeInTheDocument();
   });
 
   it('renders user and agent messages without separate title rows', async () => {
