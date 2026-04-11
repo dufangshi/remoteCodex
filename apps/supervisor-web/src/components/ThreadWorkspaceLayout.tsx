@@ -17,6 +17,7 @@ interface ThreadWorkspaceLayoutProps {
   status: CodexStatusDto | null;
   loading?: boolean;
   error?: string | null;
+  viewportConstrained?: boolean;
   currentThreadId?: string | undefined;
   currentWorkspaceId?: string | null | undefined;
   currentWorkspaceLabel?: string | null | undefined;
@@ -81,6 +82,7 @@ export function ThreadWorkspaceLayout({
   status,
   loading = false,
   error,
+  viewportConstrained = false,
   currentThreadId,
   currentWorkspaceId = null,
   currentWorkspaceLabel = null,
@@ -316,8 +318,14 @@ export function ThreadWorkspaceLayout({
 
   return (
     <>
-      <div className="flex h-[calc(100dvh-2rem)] max-h-[calc(100dvh-2rem)] min-h-0 flex-col gap-4 overflow-hidden lg:grid lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]">
-        <div className="lg:hidden">
+      <div
+        className={
+          viewportConstrained
+            ? 'flex h-[calc(100dvh-2rem)] max-h-[calc(100dvh-2rem)] min-h-0 flex-col gap-4 overflow-hidden lg:grid lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]'
+            : 'flex min-h-[calc(100dvh-2rem)] flex-col gap-4 lg:grid lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]'
+        }
+      >
+        <div className="pt-12 lg:hidden">
           <button
             type="button"
             onClick={() => setMobileSidebarOpen((current) => !current)}
@@ -345,12 +353,26 @@ export function ThreadWorkspaceLayout({
         </div>
 
         <aside className="hidden min-h-0 lg:block">
-          <div className="sticky top-4 max-h-[calc(100dvh-4rem)] overflow-y-auto rounded-[2rem] border border-stone-800 bg-stone-900/85 p-4 shadow-2xl shadow-stone-950/15 backdrop-blur">
+          <div
+            className={`sticky top-4 rounded-[2rem] border border-stone-800 bg-stone-900/85 p-4 shadow-2xl shadow-stone-950/15 backdrop-blur ${
+              viewportConstrained
+                ? 'max-h-[calc(100dvh-4rem)] overflow-y-auto'
+                : ''
+            }`}
+          >
             {renderSidebarContent()}
           </div>
         </aside>
 
-        <section className="min-h-0 min-w-0 overflow-hidden">{children}</section>
+        <section
+          className={
+            viewportConstrained
+              ? 'min-h-0 min-w-0 overflow-hidden'
+              : 'min-w-0'
+          }
+        >
+          {children}
+        </section>
       </div>
 
       <RenameDialog
