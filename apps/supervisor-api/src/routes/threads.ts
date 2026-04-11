@@ -267,7 +267,12 @@ export async function registerThreadRoutes(app: FastifyInstance) {
   app.get('/api/threads/:id', async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const query = threadDetailQuerySchema.parse(request.query);
-    return app.services.threadService.getThreadDetail(params.id, query);
+    return app.services.threadService.getThreadDetail(params.id, {
+      ...(query.limit !== undefined ? { limit: query.limit } : {}),
+      ...(query.beforeTurnId !== undefined
+        ? { beforeTurnId: query.beforeTurnId }
+        : {}),
+    });
   });
 
   app.get('/api/threads/:id/assets/image', async (request, reply) => {

@@ -21,6 +21,16 @@ import {
   updateThread,
 } from '../lib/api';
 
+function truncateDialogThreadTitle(title: string) {
+  const normalized = title.replace(/\s+/g, ' ').trim();
+  const characters = Array.from(normalized);
+  if (characters.length <= 15) {
+    return normalized;
+  }
+
+  return `${characters.slice(0, 15).join('')}...`;
+}
+
 export function ThreadsPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -297,7 +307,7 @@ export function ThreadsPage() {
           title="Delete Thread"
           description={
             deletingThread
-              ? `Delete ${deletingThread.title} from supervisor. The Codex session id will no longer appear in this workspace list.`
+              ? `Delete ${truncateDialogThreadTitle(deletingThread.title)} from supervisor. The Codex session id will no longer appear in this workspace list.`
               : ''
           }
           confirmLabel="Delete Thread"

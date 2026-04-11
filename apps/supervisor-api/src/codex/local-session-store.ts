@@ -8,6 +8,7 @@ import {
   ThreadHistoryItemDto,
   ThreadTurnDto,
 } from '../../../../packages/shared/src/index';
+import { truncateAutoThreadTitle } from './thread-title';
 
 interface LocalStateThreadRow {
   id: string;
@@ -54,7 +55,7 @@ function summarizeTitleFromTurns(turns: ThreadTurnDto[]) {
     return null;
   }
 
-  return firstUserMessage.text.trim().slice(0, 80);
+  return truncateAutoThreadTitle(firstUserMessage.text);
 }
 
 function createHistoryItemId(turnId: string, prefix: string, index: number) {

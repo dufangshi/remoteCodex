@@ -46,9 +46,10 @@ describe('supervisor api', () => {
   async function createLocalCodexFixture(options: {
     sessionId: string;
     cwd: string;
-    title?: string;
+    title?: string | null;
     model?: string;
     includeStateRow?: boolean;
+    prompt?: string;
   }) {
     const sessionsDir = path.join(codexHome, 'sessions', '2026', '04', '10');
     await fs.mkdir(sessionsDir, { recursive: true });
@@ -81,7 +82,7 @@ describe('supervisor api', () => {
           type: 'event_msg',
           payload: {
             type: 'user_message',
-            message: 'imported prompt'
+            message: options.prompt ?? 'imported prompt'
           }
         }),
         JSON.stringify({
@@ -126,7 +127,7 @@ describe('supervisor api', () => {
         .run(
           options.sessionId,
           options.cwd,
-          options.title ?? 'Imported local session',
+          options.title === undefined ? 'Imported local session' : options.title,
           transcriptPath,
           options.model ?? 'gpt-5.4'
         );
@@ -1037,7 +1038,7 @@ describe('supervisor api', () => {
       thread: {
         codexThreadId: '019d6fb7-7033-7a30-a2c7-74d0919e87d4',
         source: 'local_codex_import',
-        title: 'Imported writer session',
+        title: 'Imported writer...',
         isLoaded: false
       },
       workspace: {
@@ -1061,6 +1062,32 @@ describe('supervisor api', () => {
           ]
         }
       ]
+    });
+  });
+
+  it('truncates imported auto-derived thread titles to the first fifteen characters', async () => {
+    const importedWorkspace = path.join(tempDir, 'imported-project');
+    await fs.mkdir(importedWorkspace);
+    await createLocalCodexFixture({
+      sessionId: '019d6fb7-7033-7a30-a2c7-74d0919e87d5',
+      cwd: importedWorkspace,
+      includeStateRow: false,
+      prompt: '12345678901234567890 imported prompt'
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/threads/import',
+      payload: {
+        sessionId: '019d6fb7-7033-7a30-a2c7-74d0919e87d5'
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      thread: {
+        title: '123456789012345...'
+      }
     });
   });
 
@@ -1127,6 +1154,42 @@ describe('supervisor api', () => {
     expect(promptResponse.statusCode).toBe(409);
     expect(promptResponse.json()).toMatchObject({
       code: 'conflict'
+    });
+  });
+
+  it('truncates automatic thread titles from the first prompt to the first fifteen characters', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5.4',
+        approvalMode: 'yolo'
+      }
+    });
+
+    const createdThread = createResponse.json();
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: '12345678901234567890 please keep this short'
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    expect(promptResponse.json()).toMatchObject({
+      id: createdThread.id,
+      title: '123456789012345...'
     });
   });
 
