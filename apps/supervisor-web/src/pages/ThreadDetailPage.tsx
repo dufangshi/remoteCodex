@@ -30,6 +30,7 @@ import {
   respondToThreadRequest,
   resumeThread,
   sendThreadPrompt,
+  type SendThreadPromptRequestInput,
   updateThread,
   updateThreadSettings,
 } from '../lib/api';
@@ -286,9 +287,9 @@ export function ThreadDetailPage() {
     };
   }, [clearBufferedLiveOutput, id, queueLiveOutputDelta]);
 
-  async function handlePrompt(prompt: string) {
+  async function handlePrompt(input: SendThreadPromptRequestInput) {
     if (activeView === 'shell') {
-      const sent = shellPanelRef.current?.sendCommand(prompt) ?? false;
+      const sent = shellPanelRef.current?.sendCommand(input.prompt) ?? false;
       if (!sent) {
         setError('Connect the shell before sending commands.');
       } else {
@@ -305,7 +306,7 @@ export function ThreadDetailPage() {
 
     try {
       const promptInput = {
-        prompt,
+        prompt: input.prompt,
         ...(detail?.thread.model ? { model: detail.thread.model } : {}),
         ...(detail?.thread.reasoningEffort
           ? { reasoningEffort: detail.thread.reasoningEffort }
@@ -313,6 +314,7 @@ export function ThreadDetailPage() {
         ...(detail?.thread.collaborationMode
           ? { collaborationMode: detail.thread.collaborationMode }
           : {}),
+        ...(input.attachments?.length ? { attachments: input.attachments } : {}),
       };
       const thread = await sendThreadPrompt(id, promptInput);
       setDetail((current) => (current ? { ...current, thread } : current));

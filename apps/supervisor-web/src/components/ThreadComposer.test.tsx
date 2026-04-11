@@ -156,7 +156,7 @@ describe('ThreadComposer', () => {
     expect(ctrlEnter.defaultPrevented).toBe(true);
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith('Ship the fix');
+      expect(onSubmit).toHaveBeenCalledWith({ prompt: 'Ship the fix' });
     });
 
     fireEvent.change(textarea, {
@@ -175,7 +175,55 @@ describe('ThreadComposer', () => {
     expect(metaEnter.defaultPrevented).toBe(true);
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith('Ship the mac fix');
+      expect(onSubmit).toHaveBeenCalledWith({ prompt: 'Ship the mac fix' });
+    });
+  });
+
+  it('appends attachment placeholders and only submits attachments still present in the prompt', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    const { container } = render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add attachment' }));
+    const fileInput = container.querySelector('input[type="file"]:not([accept])') as HTMLInputElement | null;
+    expect(fileInput).toBeTruthy();
+    fireEvent.change(fileInput!, {
+      target: {
+        files: [
+          new File(['alpha'], 'notes.txt', { type: 'text/plain' }),
+          new File(['beta'], 'notes.txt', { type: 'text/plain' }),
+        ],
+      },
+    });
+
+    const textarea = screen.getByLabelText('Prompt');
+    expect(textarea).toHaveValue('[FILE notes.txt] [FILE notes.txt (2)]');
+
+    fireEvent.change(textarea, {
+      target: { value: 'Please inspect [FILE notes.txt]' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({
+        prompt: 'Please inspect [FILE notes.txt]',
+        attachments: [
+          expect.objectContaining({
+            kind: 'file',
+            originalName: 'notes.txt',
+            placeholder: '[FILE notes.txt]',
+          }),
+        ],
+      });
     });
   });
 
@@ -231,7 +279,7 @@ describe('ThreadComposer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send Shell Input' }));
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith('');
+      expect(onSubmit).toHaveBeenCalledWith({ prompt: '' });
     });
   });
 
@@ -262,7 +310,7 @@ describe('ThreadComposer', () => {
     fireEvent.click(screen.getByRole('button', { name: /clear/i }));
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith('clear');
+      expect(onSubmit).toHaveBeenCalledWith({ prompt: 'clear' });
     });
   });
 

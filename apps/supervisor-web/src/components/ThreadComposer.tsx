@@ -10,10 +10,12 @@ import {
 import type {
   CollaborationModeDto,
   ModelOptionDto,
+  PromptAttachmentKindDto,
   ReasoningEffortDto,
   UpdateThreadSettingsInput,
 } from '../../../../packages/shared/src/index';
 import type { ThreadShellControlState } from './ThreadShellPanel';
+import type { PromptAttachmentUpload } from '../lib/api';
 
 interface ThreadComposerProps {
   activeView: 'chat' | 'shell';
@@ -29,7 +31,10 @@ interface ThreadComposerProps {
   disabled?: boolean;
   disabledPlaceholder?: string | undefined;
   shellControlState?: ThreadShellControlState | null;
-  onSubmit: (prompt: string) => Promise<void> | void;
+  onSubmit: (input: {
+    prompt: string;
+    attachments?: PromptAttachmentUpload[];
+  }) => Promise<void> | void;
   onInterrupt?: () => Promise<void> | void;
   onToggleFollow?: () => void;
   onUpdateSettings?: (input: UpdateThreadSettingsInput) => Promise<void> | void;
@@ -42,7 +47,9 @@ interface ThreadComposerProps {
   canInterrupt?: boolean;
 }
 
-type SettingsMenu = 'model' | 'effort' | 'shellTools' | null;
+type SettingsMenu = 'attachments' | 'model' | 'effort' | 'shellTools' | null;
+
+interface ComposerAttachmentDraft extends PromptAttachmentUpload {}
 
 function formatReasoningEffortLabel(value: ReasoningEffortDto | null | undefined) {
   if (!value) {
@@ -69,6 +76,20 @@ function TerminalIcon() {
     >
       <path d="m4 5 2 2-2 2" />
       <path d="M7.75 9.5h4.25" />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 fill-none stroke-current"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+    >
+      <path d="M8 3.25v9.5M3.25 8h9.5" />
     </svg>
   );
 }
@@ -200,9 +221,12 @@ export function ThreadComposer({
   canInterrupt = false,
 }: ThreadComposerProps) {
   const [prompt, setPrompt] = useState('');
+  const [attachments, setAttachments] = useState<ComposerAttachmentDraft[]>([]);
   const [openMenu, setOpenMenu] = useState<SettingsMenu>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const isShellView = activeView === 'shell';
   const isMobileShell = Boolean(isShellView && shellControlState?.isMobileShell);
   const shellPromptLabel = shellControlState?.promptLabel ?? null;
@@ -212,6 +236,63 @@ export function ThreadComposer({
     [model, modelOptions],
   );
   const supportedEfforts = currentModel?.supportedReasoningEfforts ?? [];
+
+  function buildAttachmentPlaceholder(
+    kind: PromptAttachmentKindDto,
+    name: string,
+    usedPlaceholders: Set<string>,
+  ) {
+    const token = kind === 'photo' ? 'PHOTO' : 'FILE';
+    let suffix = 0;
+
+    while (true) {
+      const label = suffix === 0 ? name : `${name} (${suffix + 1})`;
+      const placeholder = `[${token} ${label}]`;
+      if (!usedPlaceholders.has(placeholder)) {
+        return placeholder;
+      }
+      suffix += 1;
+    }
+  }
+
+  function buildClientId() {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+
+    return `attachment-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  function appendAttachments(
+    files: FileList | null,
+    kind: PromptAttachmentKindDto,
+  ) {
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    const nextFiles = Array.from(files);
+    const usedPlaceholders = new Set<string>(attachments.map((entry) => entry.placeholder));
+    const nextAttachments: ComposerAttachmentDraft[] = nextFiles.map((file) => {
+      const placeholder = buildAttachmentPlaceholder(kind, file.name, usedPlaceholders);
+      usedPlaceholders.add(placeholder);
+      return {
+        clientId: buildClientId(),
+        kind,
+        originalName: file.name,
+        placeholder,
+        file
+      };
+    });
+
+    setAttachments((current) => [...current, ...nextAttachments]);
+    setPrompt((current) => {
+      const suffix = nextAttachments.map((entry) => entry.placeholder).join(' ');
+      const normalized = current.trimEnd();
+      return normalized ? `${normalized} ${suffix}` : suffix;
+    });
+    setOpenMenu(null);
+  }
 
   useEffect(() => {
     function handleWindowClick(event: MouseEvent) {
@@ -263,8 +344,18 @@ export function ThreadComposer({
       return;
     }
 
-    await onSubmit(isShellView ? prompt : prompt.trim());
+    const normalizedPrompt = isShellView ? prompt : prompt.trim();
+    const activeAttachments = isShellView
+      ? []
+      : attachments.filter((attachment) => normalizedPrompt.includes(attachment.placeholder));
+
+    await onSubmit(
+      activeAttachments.length > 0
+        ? { prompt: normalizedPrompt, attachments: activeAttachments }
+        : { prompt: normalizedPrompt }
+    );
     setPrompt('');
+    setAttachments([]);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -348,6 +439,29 @@ export function ThreadComposer({
         onSubmit={handleSubmit}
         className={formClassName}
       >
+        <input
+          ref={photoInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          tabIndex={-1}
+          className="sr-only"
+          onChange={(event) => {
+            appendAttachments(event.target.files, 'photo');
+            event.target.value = '';
+          }}
+        />
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          tabIndex={-1}
+          className="sr-only"
+          onChange={(event) => {
+            appendAttachments(event.target.files, 'file');
+            event.target.value = '';
+          }}
+        />
         <div className="relative">
           <textarea
             ref={promptRef}
@@ -390,6 +504,45 @@ export function ThreadComposer({
             ref={menuRef}
             className="absolute bottom-2.5 left-3 z-30 flex max-w-[calc(100%-7rem)] items-center gap-1.5 text-xs"
           >
+            {!isShellView && (
+              <>
+                <button
+                  type="button"
+                  aria-label="Add attachment"
+                  title="Add attachment"
+                  onClick={() =>
+                    setOpenMenu((current) =>
+                      current === 'attachments' ? null : 'attachments',
+                    )
+                  }
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-stone-700 bg-stone-900/92 text-stone-200 transition hover:bg-stone-800"
+                >
+                  <PlusIcon />
+                </button>
+
+                {openMenu === 'attachments' && (
+                  <div className="absolute bottom-full left-0 mb-2 w-32 overflow-hidden rounded-2xl border border-stone-700 bg-stone-900 shadow-2xl shadow-stone-950/40">
+                    <div className="p-2">
+                      <button
+                        type="button"
+                        onClick={() => photoInputRef.current?.click()}
+                        className="block w-full rounded-xl px-3 py-2 text-left text-sm text-stone-200 transition hover:bg-stone-800"
+                      >
+                        Photo
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm text-stone-200 transition hover:bg-stone-800"
+                      >
+                        File
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
             <button
               type="button"
               aria-label={isShellView ? 'Switch to chat' : 'Switch to shell'}
@@ -591,7 +744,7 @@ export function ThreadComposer({
                         onClick={() => {
                           dismissPromptFocus();
                           setOpenMenu(null);
-                          void onSubmit('clear');
+                          void onSubmit({ prompt: 'clear' });
                         }}
                         className="disabled:cursor-not-allowed disabled:opacity-45"
                       >

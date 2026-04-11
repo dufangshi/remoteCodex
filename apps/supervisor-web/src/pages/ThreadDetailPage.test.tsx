@@ -70,7 +70,7 @@ describe('ThreadDetailPage', () => {
     vi.stubGlobal('WebSocket', FakeWebSocket as any);
     vi.stubGlobal(
       'fetch',
-      vi.fn((input: RequestInfo | URL) => {
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
 
         if (url.includes('/api/codex/status')) {
@@ -90,6 +90,33 @@ describe('ThreadDetailPage', () => {
           return Promise.resolve({
             ok: true,
             json: async () => modelOptionsResponse,
+          });
+        }
+
+        if (url.endsWith('/api/threads/thread-1/prompt') && init?.method === 'POST') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              id: 'thread-1',
+              workspaceId: 'workspace-1',
+              codexThreadId: 'codex-1',
+              source: 'supervisor',
+              title: 'Demo Thread',
+              model: 'gpt-5',
+              reasoningEffort: 'medium',
+              collaborationMode: 'default',
+              approvalMode: 'yolo',
+              status: 'running',
+              summaryText: 'Please inspect [FILE ./.temp/threads/thread-1/notes.txt]',
+              lastError: null,
+              activeTurnId: 'turn-2',
+              isLoaded: true,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: new Date().toISOString(),
+              lastTurnCompletedAt: null,
+            }),
           });
         }
 
@@ -367,6 +394,46 @@ describe('ThreadDetailPage', () => {
     expect(screen.getByText(/Imported local Codex session/i)).toBeInTheDocument();
     expect(screen.getByText(/Workspace path missing/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Send Prompt/i })).toBeDisabled();
+  });
+
+  it('sends attachments as multipart form data from the chat composer', async () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('heading', { level: 2, name: 'Demo Thread' }),
+      ).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add attachment' }));
+    const fileInput = container.querySelector('input[type="file"]:not([accept])') as HTMLInputElement | null;
+    expect(fileInput).toBeTruthy();
+    fireEvent.change(fileInput!, {
+      target: {
+        files: [new File(['hello'], 'notes.txt', { type: 'text/plain' })],
+      },
+    });
+
+    const textarea = screen.getByLabelText('Prompt');
+    fireEvent.change(textarea, {
+      target: { value: 'Please inspect [FILE notes.txt]' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
+
+    await waitFor(() => {
+      const postCall = vi.mocked(fetch).mock.calls.find(
+        ([requestUrl, requestInit]) =>
+          String(requestUrl).endsWith('/api/threads/thread-1/prompt') &&
+          requestInit?.method === 'POST',
+      );
+      expect(postCall?.[1]?.body).toBeInstanceOf(FormData);
+    });
   });
 
   it('hides the imported-session resume warning after the thread is connected', async () => {

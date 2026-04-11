@@ -1,4 +1,4 @@
-import { FastifyInstance } from 'fastify';
+import { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 
 import {
@@ -8,6 +8,7 @@ import {
 } from '../../../../packages/db/src/index';
 import {
   ImportThreadInput,
+  PromptAttachmentManifestEntryDto,
   ReasoningEffortDto,
   RespondThreadActionRequestInput,
   ResumeThreadInput,
@@ -15,6 +16,7 @@ import {
   UpdateThreadSettingsInput,
   UpdateThreadInput,
 } from '../../../../packages/shared/src/index';
+import { HttpError } from '../app';
 
 const createThreadSchema = z.object({
   workspaceId: z.string().uuid(),
@@ -28,6 +30,13 @@ const promptSchema = z.object({
   model: z.string().min(1).optional(),
   reasoningEffort: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as [ReasoningEffortDto, ...ReasoningEffortDto[]]).nullable().optional(),
   collaborationMode: z.enum(['default', 'plan']).optional()
+});
+
+const promptAttachmentManifestEntrySchema = z.object({
+  clientId: z.string().min(1),
+  kind: z.enum(['photo', 'file']),
+  originalName: z.string().min(1),
+  placeholder: z.string().min(1),
 });
 
 const updateThreadSchema = z.object({
@@ -59,6 +68,141 @@ const respondThreadRequestSchema = z.object({
     answers: z.array(z.string())
   }))
 });
+
+const MAX_PROMPT_ATTACHMENTS = 10;
+const MAX_PROMPT_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
+interface UploadedPromptAttachment {
+  manifest: PromptAttachmentManifestEntryDto;
+  buffer: Buffer;
+}
+
+function toSendThreadPromptInput(body: {
+  prompt: string;
+  model: string | undefined;
+  reasoningEffort: ReasoningEffortDto | null | undefined;
+  collaborationMode: 'default' | 'plan' | undefined;
+}): SendThreadPromptInput {
+  return {
+    prompt: body.prompt,
+    ...(body.model !== undefined ? { model: body.model } : {}),
+    ...(body.reasoningEffort !== undefined
+      ? { reasoningEffort: body.reasoningEffort }
+      : {}),
+    ...(body.collaborationMode !== undefined
+      ? { collaborationMode: body.collaborationMode }
+      : {}),
+  };
+}
+
+async function parseMultipartPromptRequest(
+  request: FastifyRequest,
+) {
+  const fields = new Map<string, string>();
+  const uploadedFiles: Buffer[] = [];
+
+  for await (const part of request.parts()) {
+    if (part.type === 'file') {
+      if (part.fieldname !== 'attachments') {
+        throw new HttpError(400, {
+          code: 'bad_request',
+          message: `Unexpected multipart file field: ${part.fieldname}.`
+        });
+      }
+
+      const buffer = await part.toBuffer();
+      if (buffer.byteLength > MAX_PROMPT_ATTACHMENT_BYTES) {
+        throw new HttpError(400, {
+          code: 'bad_request',
+          message: `Each attachment must be ${MAX_PROMPT_ATTACHMENT_BYTES / (1024 * 1024)} MB or smaller.`
+        });
+      }
+
+      uploadedFiles.push(buffer);
+      continue;
+    }
+
+    fields.set(part.fieldname, String(part.value ?? ''));
+  }
+
+  const body = toSendThreadPromptInput(
+    (() => {
+      const parsed = promptSchema.parse({
+        prompt: fields.get('prompt'),
+        ...(fields.has('model') ? { model: fields.get('model') } : {}),
+        ...(fields.has('reasoningEffort')
+          ? { reasoningEffort: fields.get('reasoningEffort') }
+          : {}),
+        ...(fields.has('collaborationMode')
+          ? { collaborationMode: fields.get('collaborationMode') }
+          : {}),
+      });
+      return {
+        prompt: parsed.prompt,
+        model: parsed.model,
+        reasoningEffort: parsed.reasoningEffort,
+        collaborationMode: parsed.collaborationMode,
+      };
+    })(),
+  );
+
+  if (uploadedFiles.length === 0) {
+    return {
+      input: body,
+      attachments: [] as UploadedPromptAttachment[],
+    };
+  }
+
+  if (uploadedFiles.length > MAX_PROMPT_ATTACHMENTS) {
+    throw new HttpError(400, {
+      code: 'bad_request',
+      message: `A prompt can include at most ${MAX_PROMPT_ATTACHMENTS} attachments.`
+    });
+  }
+
+  const manifestRaw = fields.get('attachmentManifest');
+  if (!manifestRaw) {
+    throw new HttpError(400, {
+      code: 'bad_request',
+      message: 'attachmentManifest is required when files are uploaded.'
+    });
+  }
+
+  let manifestParsed: unknown;
+  try {
+    manifestParsed = JSON.parse(manifestRaw);
+  } catch {
+    throw new HttpError(400, {
+      code: 'bad_request',
+      message: 'attachmentManifest must be valid JSON.'
+    });
+  }
+
+  const manifest = z
+    .array(promptAttachmentManifestEntrySchema)
+    .max(MAX_PROMPT_ATTACHMENTS)
+    .parse(manifestParsed);
+
+  if (manifest.length !== uploadedFiles.length) {
+    throw new HttpError(400, {
+      code: 'bad_request',
+      message: 'attachmentManifest must describe every uploaded attachment.'
+    });
+  }
+
+  const attachments: UploadedPromptAttachment[] = [];
+  for (const [index, buffer] of uploadedFiles.entries()) {
+    attachments.push({
+      manifest: manifest[index]!,
+      buffer,
+    });
+  }
+
+  return {
+    input: body,
+    attachments,
+  };
+}
 
 export async function registerThreadRoutes(app: FastifyInstance) {
   app.get('/api/threads', async () => {
@@ -136,13 +280,28 @@ export async function registerThreadRoutes(app: FastifyInstance) {
 
   app.post('/api/threads/:id/prompt', async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
-    const body = promptSchema.parse(request.body);
-    const input: SendThreadPromptInput = {
-      prompt: body.prompt,
-      ...(body.model !== undefined ? { model: body.model } : {}),
-      ...(body.reasoningEffort !== undefined ? { reasoningEffort: body.reasoningEffort } : {}),
-      ...(body.collaborationMode !== undefined ? { collaborationMode: body.collaborationMode } : {})
-    };
+    const parsed = request.isMultipart()
+      ? await parseMultipartPromptRequest(request)
+      : {
+          input: (() => {
+            const parsedBody = promptSchema.parse(request.body);
+            return toSendThreadPromptInput({
+              prompt: parsedBody.prompt,
+              model: parsedBody.model,
+              reasoningEffort: parsedBody.reasoningEffort,
+              collaborationMode: parsedBody.collaborationMode,
+            });
+          })(),
+          attachments: [] as UploadedPromptAttachment[],
+        };
+    const input =
+      parsed.attachments.length > 0
+        ? await app.services.threadService.preparePromptAttachments(
+            params.id,
+            parsed.input,
+            parsed.attachments,
+          )
+        : parsed.input;
     return app.services.threadService.sendPrompt(params.id, input);
   });
 

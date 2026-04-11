@@ -271,6 +271,15 @@ export interface SendThreadPromptInput {
   collaborationMode?: CollaborationModeDto;
 }
 
+export type PromptAttachmentKindDto = 'photo' | 'file';
+
+export interface PromptAttachmentManifestEntryDto {
+  clientId: string;
+  kind: PromptAttachmentKindDto;
+  originalName: string;
+  placeholder: string;
+}
+
 export interface InterruptTurnInput {
   turnId?: string;
 }

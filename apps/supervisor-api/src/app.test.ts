@@ -134,6 +134,39 @@ describe('supervisor api', () => {
     }
   }
 
+  function buildMultipartPayload(options: {
+    fields: Record<string, string>;
+    files?: Array<{ fieldName: string; fileName: string; contentType: string; content: Buffer }>;
+  }) {
+    const boundary = `----remote-codex-${Date.now()}`;
+    const chunks: Buffer[] = [];
+
+    for (const [fieldName, value] of Object.entries(options.fields)) {
+      chunks.push(
+        Buffer.from(
+          `--${boundary}\r\nContent-Disposition: form-data; name="${fieldName}"\r\n\r\n${value}\r\n`
+        )
+      );
+    }
+
+    for (const file of options.files ?? []) {
+      chunks.push(
+        Buffer.from(
+          `--${boundary}\r\nContent-Disposition: form-data; name="${file.fieldName}"; filename="${file.fileName}"\r\nContent-Type: ${file.contentType}\r\n\r\n`
+        )
+      );
+      chunks.push(file.content);
+      chunks.push(Buffer.from('\r\n'));
+    }
+
+    chunks.push(Buffer.from(`--${boundary}--\r\n`));
+
+    return {
+      payload: Buffer.concat(chunks),
+      boundary
+    };
+  }
+
   it('returns health status', async () => {
     const response = await app.inject({
       method: 'GET',
@@ -358,6 +391,75 @@ describe('supervisor api', () => {
     });
   });
 
+  it('stores prompt attachments in the workspace temp directory and rewrites the prompt path', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Attachment Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const manifest = [
+      {
+        clientId: 'attachment-1',
+        kind: 'file',
+        originalName: 'notes.txt',
+        placeholder: '[FILE notes.txt]'
+      }
+    ];
+    const multipart = buildMultipartPayload({
+      fields: {
+        prompt: 'Please inspect [FILE notes.txt]',
+        attachmentManifest: JSON.stringify(manifest)
+      },
+      files: [
+        {
+          fieldName: 'attachments',
+          fileName: 'notes.txt',
+          contentType: 'text/plain',
+          content: Buffer.from('hello from attachment')
+        }
+      ]
+    });
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: multipart.payload,
+      headers: {
+        'content-type': `multipart/form-data; boundary=${multipart.boundary}`
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+
+    const remoteThread = fakeCodexManager.threads.get(createdThread.codexThreadId);
+    const latestPrompt =
+      (remoteThread?.turns.at(-1) as any)?.items?.[0]?.content?.[0]?.text ?? '';
+    expect(latestPrompt).toContain('[FILE ./.temp/threads/');
+    expect(latestPrompt).toContain('/notes-');
+    expect(latestPrompt).toContain('.txt]');
+
+    const attachmentDir = path.join(tempDir, 'workspace', '.temp', 'threads', createdThread.id);
+    const savedFiles = await fs.readdir(attachmentDir);
+    expect(savedFiles).toHaveLength(1);
+    expect(savedFiles[0]).toMatch(/^notes-[a-z0-9]{8}\.txt$/);
+  });
+
   it('updates a thread title', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',
@@ -436,6 +538,41 @@ describe('supervisor api', () => {
     expect(listResponse.json()).toHaveLength(0);
   });
 
+  it('deletes a thread temp directory together with supervisor metadata', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Delete Attachment Thread'
+      }
+    });
+
+    const createdThread = createResponse.json();
+    const attachmentDir = path.join(tempDir, 'workspace', '.temp', 'threads', createdThread.id);
+    await fs.mkdir(attachmentDir, { recursive: true });
+    await fs.writeFile(path.join(attachmentDir, 'notes.txt'), 'hello');
+
+    const deleteResponse = await app.inject({
+      method: 'DELETE',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(deleteResponse.statusCode).toBe(200);
+    expect(await fs.stat(attachmentDir).catch(() => null)).toBeNull();
+  });
+
   it('deletes a workspace and removes its threads from the supervisor registry', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',
@@ -482,6 +619,41 @@ describe('supervisor api', () => {
     expect(listWorkspacesResponse.json()).toHaveLength(0);
     expect(listThreadsResponse.statusCode).toBe(200);
     expect(listThreadsResponse.json()).toHaveLength(0);
+  });
+
+  it('deletes workspace-scoped temp attachment directories when removing a workspace', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Workspace Attachment Thread'
+      }
+    });
+
+    const createdThread = createResponse.json();
+    const attachmentDir = path.join(tempDir, 'workspace', '.temp', 'threads', createdThread.id);
+    await fs.mkdir(attachmentDir, { recursive: true });
+    await fs.writeFile(path.join(attachmentDir, 'notes.txt'), 'hello');
+
+    const deleteResponse = await app.inject({
+      method: 'DELETE',
+      url: `/api/workspaces/${workspace.id}`
+    });
+
+    expect(deleteResponse.statusCode).toBe(200);
+    expect(await fs.stat(attachmentDir).catch(() => null)).toBeNull();
   });
 
   it('keeps the originally selected model after resume', async () => {

@@ -6,6 +6,7 @@ import {
   importThread,
   markWorkspaceOpened,
   resumeThread,
+  sendThreadPrompt,
   terminateShell,
 } from './api';
 
@@ -58,5 +59,29 @@ describe('api request helper', () => {
     expect(calls[0]?.[1]?.body).toBe(JSON.stringify({ cols: 120, rows: 40 }));
     expect(calls[1]?.[0]).toBe('/api/shells/shell-1/terminate');
     expect(calls[1]?.[1]?.method).toBe('POST');
+  });
+
+  it('uses multipart form data when prompt attachments are present', async () => {
+    const file = new File(['hello'], 'notes.txt', { type: 'text/plain' });
+
+    await sendThreadPrompt('thread-1', {
+      prompt: 'Review this [FILE notes.txt]',
+      attachments: [
+        {
+          clientId: 'attachment-1',
+          kind: 'file',
+          originalName: 'notes.txt',
+          placeholder: '[FILE notes.txt]',
+          file,
+        },
+      ],
+    });
+
+    const call = vi.mocked(fetch).mock.calls.at(-1);
+    expect(call?.[0]).toBe('/api/threads/thread-1/prompt');
+    expect(call?.[1]?.method).toBe('POST');
+    expect(call?.[1]?.body).toBeInstanceOf(FormData);
+    const headers = new Headers(call?.[1]?.headers);
+    expect(headers.has('Content-Type')).toBe(false);
   });
 });

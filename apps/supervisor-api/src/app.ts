@@ -1,4 +1,5 @@
 import Fastify, { FastifyInstance } from 'fastify';
+import multipart from '@fastify/multipart';
 import websocket from '@fastify/websocket';
 import { ZodError } from 'zod';
 
@@ -91,6 +92,8 @@ export function buildApp(
   const app = Fastify({
     logger: config.nodeEnv !== 'test'
   });
+
+  app.register(multipart);
 
   app.decorate('services', {
     config,

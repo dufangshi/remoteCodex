@@ -4,6 +4,7 @@ import type {
   CreateThreadInput,
   CreateWorkspaceInput,
   ImportThreadInput,
+  PromptAttachmentManifestEntryDto,
   InterruptTurnInput,
   ModelOptionDto,
   RespondThreadActionRequestInput,
@@ -53,6 +54,15 @@ async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   }
 
   return (await response.json()) as T;
+}
+
+export interface PromptAttachmentUpload
+  extends PromptAttachmentManifestEntryDto {
+  file: File;
+}
+
+export interface SendThreadPromptRequestInput extends SendThreadPromptInput {
+  attachments?: PromptAttachmentUpload[];
 }
 
 export function fetchRuntimeConfig() {
@@ -121,10 +131,44 @@ export function resumeThread(id: string, input: ResumeThreadInput = {}) {
   });
 }
 
-export function sendThreadPrompt(id: string, input: SendThreadPromptInput) {
+export function sendThreadPrompt(id: string, input: SendThreadPromptRequestInput) {
+  const attachments = input.attachments ?? [];
+
+  if (attachments.length === 0) {
+    return request<ThreadDto>(`/api/threads/${id}/prompt`, {
+      method: 'POST',
+      body: JSON.stringify(input)
+    });
+  }
+
+  const formData = new FormData();
+  formData.append('prompt', input.prompt);
+  if (input.model !== undefined) {
+    formData.append('model', input.model);
+  }
+  if (input.reasoningEffort !== undefined && input.reasoningEffort !== null) {
+    formData.append('reasoningEffort', input.reasoningEffort);
+  }
+  if (input.collaborationMode !== undefined) {
+    formData.append('collaborationMode', input.collaborationMode);
+  }
+
+  const manifest: PromptAttachmentManifestEntryDto[] = attachments.map(
+    ({ clientId, kind, originalName, placeholder }) => ({
+      clientId,
+      kind,
+      originalName,
+      placeholder
+    }),
+  );
+  formData.append('attachmentManifest', JSON.stringify(manifest));
+  for (const attachment of attachments) {
+    formData.append('attachments', attachment.file, attachment.originalName);
+  }
+
   return request<ThreadDto>(`/api/threads/${id}/prompt`, {
     method: 'POST',
-    body: JSON.stringify(input)
+    body: formData
   });
 }
 
