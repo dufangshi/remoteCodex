@@ -554,8 +554,8 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText('Each attachment must be 25 MB or smaller.'),
-      ).toBeInTheDocument();
+        screen.getAllByText('Each attachment must be 25 MB or smaller.').length,
+      ).toBeGreaterThan(0);
     });
   });
 

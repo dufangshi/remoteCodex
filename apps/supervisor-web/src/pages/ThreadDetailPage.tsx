@@ -30,6 +30,7 @@ import {
   respondToThreadRequest,
   resumeThread,
   sendThreadPrompt,
+  type PromptAttachmentUpload,
   type SendThreadPromptRequestInput,
   updateThread,
   updateThreadSettings,
@@ -57,6 +58,13 @@ export function ThreadDetailPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [activeView, setActiveView] = useState<'chat' | 'shell'>('chat');
+  const [chatDraft, setChatDraft] = useState<{
+    prompt: string;
+    attachments: PromptAttachmentUpload[];
+  }>({
+    prompt: '',
+    attachments: [],
+  });
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [mobileComposerHeight, setMobileComposerHeight] = useState(0);
   const [shellControlState, setShellControlState] =
@@ -100,6 +108,13 @@ export function ThreadDetailPage() {
       liveOutputFrameRef.current = null;
     }
   }, []);
+
+  useEffect(() => {
+    setChatDraft({
+      prompt: '',
+      attachments: [],
+    });
+  }, [id]);
 
   useEffect(() => {
     if (typeof document === 'undefined') {
@@ -322,6 +337,10 @@ export function ThreadDetailPage() {
         current.map((entry) => (entry.id === thread.id ? thread : entry)),
       );
       setLivePlan(null);
+      setChatDraft({
+        prompt: '',
+        attachments: [],
+      });
     } catch (caught) {
       if (caught instanceof ApiError) {
         setError(caught.payload.message);
@@ -757,6 +776,9 @@ export function ThreadDetailPage() {
                       disabled={Boolean(promptDisabledReason)}
                       disabledPlaceholder={promptDisabledReason ?? undefined}
                       shellControlState={shellControlState}
+                      draftPrompt={chatDraft.prompt}
+                      draftAttachments={chatDraft.attachments}
+                      onDraftChange={setChatDraft}
                       canInterrupt={Boolean(detail.thread.activeTurnId)}
                       onSubmit={handlePrompt}
                       onInterrupt={handleInterrupt}
@@ -783,6 +805,9 @@ export function ThreadDetailPage() {
                       disabled={Boolean(promptDisabledReason)}
                       disabledPlaceholder={promptDisabledReason ?? undefined}
                       shellControlState={shellControlState}
+                      draftPrompt={chatDraft.prompt}
+                      draftAttachments={chatDraft.attachments}
+                      onDraftChange={setChatDraft}
                       canInterrupt={Boolean(detail.thread.activeTurnId)}
                       onSubmit={handlePrompt}
                       onInterrupt={handleInterrupt}

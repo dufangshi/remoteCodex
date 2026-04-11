@@ -1,6 +1,8 @@
 import {
+  type Dispatch,
   FormEvent,
   KeyboardEvent,
+  type SetStateAction,
   useEffect,
   useMemo,
   useRef,
@@ -31,6 +33,14 @@ interface ThreadComposerProps {
   disabled?: boolean;
   disabledPlaceholder?: string | undefined;
   shellControlState?: ThreadShellControlState | null;
+  draftPrompt?: string | undefined;
+  draftAttachments?: PromptAttachmentUpload[] | undefined;
+  onDraftChange?: Dispatch<
+    SetStateAction<{
+      prompt: string;
+      attachments: PromptAttachmentUpload[];
+    }>
+  > | undefined;
   onSubmit: (input: {
     prompt: string;
     attachments?: PromptAttachmentUpload[];
@@ -236,6 +246,9 @@ export function ThreadComposer({
   disabled = false,
   disabledPlaceholder,
   shellControlState = null,
+  draftPrompt,
+  draftAttachments,
+  onDraftChange,
   onSubmit,
   onInterrupt,
   onToggleFollow,
@@ -246,8 +259,8 @@ export function ThreadComposer({
   onShellControl,
   canInterrupt = false,
 }: ThreadComposerProps) {
-  const [prompt, setPrompt] = useState('');
-  const [attachments, setAttachments] = useState<ComposerAttachmentDraft[]>([]);
+  const [internalPrompt, setInternalPrompt] = useState('');
+  const [internalAttachments, setInternalAttachments] = useState<ComposerAttachmentDraft[]>([]);
   const [openMenu, setOpenMenu] = useState<SettingsMenu>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
@@ -256,6 +269,49 @@ export function ThreadComposer({
   const isShellView = activeView === 'shell';
   const isMobileShell = Boolean(isShellView && shellControlState?.isMobileShell);
   const shellPromptLabel = shellControlState?.promptLabel ?? null;
+  const isDraftControlled =
+    !isShellView &&
+    draftPrompt !== undefined &&
+    draftAttachments !== undefined &&
+    typeof onDraftChange === 'function';
+  const prompt = isDraftControlled ? draftPrompt : internalPrompt;
+  const attachments = (isDraftControlled
+    ? draftAttachments
+    : internalAttachments) as ComposerAttachmentDraft[];
+
+  function setPrompt(next: string | ((current: string) => string)) {
+    const resolved =
+      typeof next === 'function' ? next(prompt) : next;
+
+    if (isDraftControlled) {
+      onDraftChange?.((current) => ({
+        ...current,
+        prompt: resolved,
+      }));
+      return;
+    }
+
+    setInternalPrompt(resolved);
+  }
+
+  function setAttachments(
+    next:
+      | ComposerAttachmentDraft[]
+      | ((current: ComposerAttachmentDraft[]) => ComposerAttachmentDraft[]),
+  ) {
+    const resolved =
+      typeof next === 'function' ? next(attachments) : next;
+
+    if (isDraftControlled) {
+      onDraftChange?.((current) => ({
+        ...current,
+        attachments: resolved,
+      }));
+      return;
+    }
+
+    setInternalAttachments(resolved);
+  }
 
   const currentModel = useMemo(
     () => modelOptions.find((entry) => entry.model === model) ?? null,
@@ -434,6 +490,30 @@ export function ThreadComposer({
 
   return (
     <div className="relative z-20 shrink-0">
+      <input
+        ref={photoInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        tabIndex={-1}
+        className="sr-only"
+        onChange={(event) => {
+          appendAttachments(event.target.files, 'photo');
+          event.target.value = '';
+        }}
+      />
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        tabIndex={-1}
+        className="sr-only"
+        onChange={(event) => {
+          appendAttachments(event.target.files, 'file');
+          event.target.value = '';
+        }}
+      />
+
       {activeView === 'chat' && (
         <button
           type="button"
@@ -470,29 +550,6 @@ export function ThreadComposer({
         onSubmit={handleSubmit}
         className={formClassName}
       >
-        <input
-          ref={photoInputRef}
-          type="file"
-          accept="image/*"
-          multiple
-          tabIndex={-1}
-          className="sr-only"
-          onChange={(event) => {
-            appendAttachments(event.target.files, 'photo');
-            event.target.value = '';
-          }}
-        />
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          tabIndex={-1}
-          className="sr-only"
-          onChange={(event) => {
-            appendAttachments(event.target.files, 'file');
-            event.target.value = '';
-          }}
-        />
         <div className="relative">
           <textarea
             ref={promptRef}
@@ -556,14 +613,20 @@ export function ThreadComposer({
                     <div className="p-2">
                       <button
                         type="button"
-                        onClick={() => photoInputRef.current?.click()}
+                        onClick={() => {
+                          dismissPromptFocus();
+                          photoInputRef.current?.click();
+                        }}
                         className="block w-full rounded-xl px-3 py-2 text-left text-sm text-stone-200 transition hover:bg-stone-800"
                       >
                         Photo
                       </button>
                       <button
                         type="button"
-                        onClick={() => fileInputRef.current?.click()}
+                        onClick={() => {
+                          dismissPromptFocus();
+                          fileInputRef.current?.click();
+                        }}
                         className="mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm text-stone-200 transition hover:bg-stone-800"
                       >
                         File

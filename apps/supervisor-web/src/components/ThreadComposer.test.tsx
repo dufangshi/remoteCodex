@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ThreadComposer } from './ThreadComposer';
+import type { PromptAttachmentUpload } from '../lib/api';
 
 const modelOptions = [
   {
@@ -276,6 +278,55 @@ describe('ThreadComposer', () => {
         ],
       });
     });
+  });
+
+  it('preserves controlled attachment draft state across composer remounts', async () => {
+    function Harness() {
+      const [draft, setDraft] = useState({
+        prompt: '',
+        attachments: [] as PromptAttachmentUpload[],
+      });
+      const [version, setVersion] = useState(0);
+
+      return (
+        <>
+          <button type="button" onClick={() => setVersion((current) => current + 1)}>
+            Remount
+          </button>
+          <ThreadComposer
+            key={version}
+            activeView="chat"
+            model="gpt-5.4"
+            reasoningEffort="medium"
+            collaborationMode="default"
+            modelOptions={modelOptions}
+            draftPrompt={draft.prompt}
+            draftAttachments={draft.attachments}
+            onDraftChange={setDraft}
+            onSubmit={() => undefined}
+          />
+        </>
+      );
+    }
+
+    const { container } = render(<Harness />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add attachment' }));
+    const fileInput = container.querySelector(
+      'input[type="file"]:not([accept])',
+    ) as HTMLInputElement | null;
+    expect(fileInput).toBeTruthy();
+    fireEvent.change(fileInput!, {
+      target: {
+        files: [new File(['alpha'], 'notes.txt', { type: 'text/plain' })],
+      },
+    });
+
+    expect(screen.getByLabelText('Prompt')).toHaveValue('[FILE notes.txt]');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remount' }));
+
+    expect(screen.getByLabelText('Prompt')).toHaveValue('[FILE notes.txt]');
   });
 
   it('shows the shell prompt label and enables Ctrl-C only while a command is running', () => {
