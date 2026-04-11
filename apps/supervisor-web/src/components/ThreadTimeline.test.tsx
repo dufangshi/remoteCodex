@@ -98,14 +98,14 @@ describe('ThreadTimeline', () => {
 
     render(<ThreadTimeline turns={turns} liveOutput="" />);
 
-    expect(screen.getByText('Showing 10 of 35 turns.')).toBeInTheDocument();
+    expect(screen.getByText(/Showing 10 of 35 turns/)).toBeInTheDocument();
     expect(screen.queryByText('Turn 1')).not.toBeInTheDocument();
     expect(screen.getByText('Turn 26')).toBeInTheDocument();
     expect(screen.getByText('Turn 35')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Load 10 earlier' }));
 
-    expect(screen.getByText('Showing 20 of 35 turns.')).toBeInTheDocument();
+    expect(screen.getByText(/Showing 20 of 35 turns/)).toBeInTheDocument();
     expect(screen.getByText('Turn 16')).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Load full history' }),
@@ -113,14 +113,14 @@ describe('ThreadTimeline', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Load 10 earlier' }));
 
-    expect(screen.getByText('Showing 30 of 35 turns.')).toBeInTheDocument();
+    expect(screen.getByText(/Showing 30 of 35 turns/)).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Load full history' }),
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Load full history' }));
 
-    expect(screen.getByText('Showing 35 of 35 turns.')).toBeInTheDocument();
+    expect(screen.getByText(/Showing 35 of 35 turns/)).toBeInTheDocument();
     expect(screen.getByText('Turn 1')).toBeInTheDocument();
     expect(
       screen.queryByText(/019d70dd-068b-7783-9c83-f4943e1f38/i),

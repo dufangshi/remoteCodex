@@ -178,4 +178,30 @@ describe('ThreadComposer', () => {
       expect(onSubmit).toHaveBeenCalledWith('Ship the mac fix');
     });
   });
+
+  it('shows the shell prompt label and enables Ctrl-C only while a command is running', () => {
+    render(
+      <ThreadComposer
+        activeView="shell"
+        shellControlState={{
+          status: 'attached',
+          connectionButtonDisabled: false,
+          connectionButtonLabel: 'Disconnect shell',
+          shellInputEnabled: true,
+          isCommandRunning: false,
+          promptLabel: '(base) trading-lab',
+          isMobileShell: false,
+          hasShell: true,
+          busy: false,
+          loading: false,
+          error: null,
+        }}
+        onSubmit={() => undefined}
+        onInterrupt={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText('(base) trading-lab')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send Ctrl-C' })).toBeDisabled();
+  });
 });

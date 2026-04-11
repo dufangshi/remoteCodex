@@ -175,6 +175,15 @@ export function buildApp(
                       ...(options?.paneHeight !== undefined
                         ? { paneHeight: options.paneHeight }
                         : {}),
+                      ...(options?.cwdBaseName !== undefined
+                        ? { cwdBaseName: options.cwdBaseName }
+                        : {}),
+                      ...(options?.envPrefix !== undefined
+                        ? { envPrefix: options.envPrefix }
+                        : {}),
+                      ...(options?.isCommandRunning !== undefined
+                        ? { isCommandRunning: options.isCommandRunning }
+                        : {}),
                     }
                   });
                 },

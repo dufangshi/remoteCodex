@@ -38,6 +38,8 @@ export interface ThreadShellControlState {
   connectionButtonDisabled: boolean;
   connectionButtonLabel: string;
   shellInputEnabled: boolean;
+  isCommandRunning: boolean;
+  promptLabel: string | null;
   isMobileShell: boolean;
   hasShell: boolean;
   busy: boolean;
@@ -126,6 +128,28 @@ function getVisibleTerminalText(hostNode: HTMLDivElement | null) {
     .filter((line, index, items) => line.length > 0 || index < items.length - 1);
 
   return rows.join('\n').trimEnd();
+}
+
+function basenameFromPath(filePath: string | null | undefined) {
+  if (!filePath) {
+    return '';
+  }
+
+  const normalized = filePath.replace(/[\\/]+$/, '');
+  if (!normalized) {
+    return '';
+  }
+
+  const segments = normalized.split(/[\\/]/).filter(Boolean);
+  return segments.at(-1) ?? normalized;
+}
+
+function buildPromptLabel(
+  cwdBaseName: string | null | undefined,
+  envPrefix: string | null | undefined,
+) {
+  const parts = [envPrefix?.trim(), cwdBaseName?.trim()].filter(Boolean);
+  return parts.length > 0 ? parts.join(' ') : null;
 }
 
 function WrenchIcon() {
@@ -261,6 +285,8 @@ export const ThreadShellPanel = forwardRef<
   const [terminalReady, setTerminalReady] = useState(false);
   const [isMobileShell, setIsMobileShell] = useState(false);
   const [toolboxOpen, setToolboxOpen] = useState(false);
+  const [runtimePromptLabel, setRuntimePromptLabel] = useState<string | null>(null);
+  const [isCommandRunning, setIsCommandRunning] = useState(false);
   const [toolboxFeedback, setToolboxFeedback] = useState<{
     tone: ToolboxFeedbackState;
     text: string;
@@ -301,6 +327,11 @@ export const ThreadShellPanel = forwardRef<
   const status = shellState?.state ?? 'not_created';
   const shellMeta = useMemo(() => shellState?.shell ?? null, [shellState?.shell]);
   const shellInputEnabled = Boolean(viewerIdRef.current && shellMeta);
+  const fallbackPromptLabel = useMemo(
+    () => buildPromptLabel(basenameFromPath(shellMeta?.cwd), null),
+    [shellMeta?.cwd],
+  );
+  const promptLabel = runtimePromptLabel ?? fallbackPromptLabel;
   const connectionButtonDisabled =
     busy || loading || status === 'creating' || status === 'workspace_missing';
   const connectionButtonClassName =
@@ -562,6 +593,20 @@ export const ThreadShellPanel = forwardRef<
             typeof event.payload.paneHeight === 'number'
               ? event.payload.paneHeight
               : undefined;
+          const cwdBaseName =
+            typeof event.payload.cwdBaseName === 'string'
+              ? event.payload.cwdBaseName
+              : null;
+          const envPrefix =
+            typeof event.payload.envPrefix === 'string'
+              ? event.payload.envPrefix
+              : null;
+          const nextPromptLabel = buildPromptLabel(
+            cwdBaseName ?? basenameFromPath(shellMeta?.cwd),
+            envPrefix,
+          );
+          setRuntimePromptLabel(nextPromptLabel);
+          setIsCommandRunning(event.payload.isCommandRunning === true);
           if (data) {
             if (replace) {
               renderShellSnapshot(terminal, data, cursorX, cursorY, paneHeight);
@@ -615,6 +660,7 @@ export const ThreadShellPanel = forwardRef<
             } else {
               setConnectionError(null);
             }
+            setIsCommandRunning(false);
             shellSocket.socket.close();
           }
           return;
@@ -622,6 +668,7 @@ export const ThreadShellPanel = forwardRef<
 
         if (event.type === 'shell.exited') {
           viewerIdRef.current = null;
+          setIsCommandRunning(false);
           const nextState =
             event.payload.state === 'exited' ? 'exited' : 'not_found';
           setShellState((current) =>
@@ -646,6 +693,7 @@ export const ThreadShellPanel = forwardRef<
         if (nextState) {
           if (nextState !== 'attached') {
             viewerIdRef.current = null;
+            setIsCommandRunning(false);
           }
           setShellState((current) =>
             current
@@ -693,7 +741,7 @@ export const ThreadShellPanel = forwardRef<
         socketRef.current = null;
       }
     };
-  }, [reconnectKey, shellState?.shell?.id, terminalReady]);
+  }, [reconnectKey, shellMeta?.cwd, shellState?.shell?.id, terminalReady]);
 
   const handleCreateShell = useCallback(async () => {
     setBusy(true);
@@ -859,11 +907,22 @@ export const ThreadShellPanel = forwardRef<
   }, [terminalHostNode, setTransientToolboxFeedback]);
 
   useEffect(() => {
+    if (!shellMeta?.cwd) {
+      setRuntimePromptLabel(null);
+      return;
+    }
+
+    setRuntimePromptLabel((current) => current ?? buildPromptLabel(basenameFromPath(shellMeta.cwd), null));
+  }, [shellMeta?.cwd]);
+
+  useEffect(() => {
     onStateChange?.({
       status,
       connectionButtonDisabled,
       connectionButtonLabel,
       shellInputEnabled,
+      isCommandRunning,
+      promptLabel,
       isMobileShell,
       hasShell: Boolean(shellMeta),
       busy,
@@ -876,8 +935,10 @@ export const ThreadShellPanel = forwardRef<
     connectionButtonLabel,
     connectionError,
     isMobileShell,
+    isCommandRunning,
     loading,
     onStateChange,
+    promptLabel,
     shellMeta,
     shellInputEnabled,
     status,
@@ -929,7 +990,7 @@ export const ThreadShellPanel = forwardRef<
             <div className="min-w-0">
               <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Shell</p>
               <p className="mt-1 truncate text-sm text-stone-300">
-                {shellMeta?.cwd ?? 'Create a durable shell for this thread.'}
+                {promptLabel ?? shellMeta?.cwd ?? 'Create a durable shell for this thread.'}
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -1046,7 +1107,7 @@ export const ThreadShellPanel = forwardRef<
                         </button>
                         <button
                           type="button"
-                          disabled={!shellInputEnabled}
+                          disabled={!shellInputEnabled || !isCommandRunning}
                           onClick={() => {
                             if (sendShellInput('\u0003')) {
                               setTransientToolboxFeedback('done', 'Sent Ctrl-C');

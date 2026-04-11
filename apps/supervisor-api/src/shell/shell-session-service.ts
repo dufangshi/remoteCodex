@@ -1,4 +1,6 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 import {
   createShellSessionRecord,
@@ -26,15 +28,7 @@ import { TmuxManager } from './tmux-manager';
 
 interface ShellAttachment {
   viewerId: string;
-  onData: (
-    data: string,
-    options?: {
-      replace?: boolean;
-      cursorX?: number;
-      cursorY?: number;
-      paneHeight?: number;
-    },
-  ) => void;
+  onData: (data: string, options?: ShellOutputOptions) => void;
   pollHandle: NodeJS.Timeout;
   lastSnapshot: string;
   polling: boolean;
@@ -45,6 +39,9 @@ type ShellOutputOptions = {
   cursorX?: number;
   cursorY?: number;
   paneHeight?: number;
+  cwdBaseName?: string;
+  envPrefix?: string;
+  isCommandRunning?: boolean;
 };
 
 async function pathExists(filePath: string) {
@@ -58,6 +55,235 @@ async function pathExists(filePath: string) {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function waitForShellTick(milliseconds: number) {
+  if (process.env.VITEST) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+}
+
+function basenameFromPath(filePath: string | null | undefined) {
+  if (!filePath) {
+    return '';
+  }
+
+  const normalized = filePath.replace(/[\\/]+$/, '');
+  if (!normalized) {
+    return '';
+  }
+
+  return path.basename(normalized) || normalized;
+}
+
+function isInteractiveShellCommand(command: string | null | undefined) {
+  const normalized = (command ?? '').trim().toLowerCase();
+  return new Set([
+    'zsh',
+    'bash',
+    'sh',
+    'dash',
+    'ksh',
+    'fish',
+    'tcsh',
+    'csh',
+    'login',
+  ]).has(normalized);
+}
+
+function extractEnvironmentValue(environmentText: string, key: string) {
+  const marker = `${key}=`;
+  const start = environmentText.indexOf(marker);
+  if (start === -1) {
+    return null;
+  }
+
+  const valueStart = start + marker.length;
+  const remainder = environmentText.slice(valueStart);
+  const nextVariableMatch = remainder.match(/\s+[A-Z_][A-Z0-9_]*=/);
+  const value = nextVariableMatch
+    ? remainder.slice(0, nextVariableMatch.index)
+    : remainder;
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function resolveEnvironmentPrefix(environmentText: string) {
+  const condaPromptModifier = extractEnvironmentValue(
+    environmentText,
+    'CONDA_PROMPT_MODIFIER',
+  );
+  if (condaPromptModifier) {
+    return condaPromptModifier.trim();
+  }
+
+  const condaDefaultEnv = extractEnvironmentValue(
+    environmentText,
+    'CONDA_DEFAULT_ENV',
+  );
+  if (condaDefaultEnv) {
+    return `(${condaDefaultEnv})`;
+  }
+
+  const virtualEnvPrompt = extractEnvironmentValue(
+    environmentText,
+    'VIRTUAL_ENV_PROMPT',
+  );
+  if (virtualEnvPrompt) {
+    return virtualEnvPrompt.trim();
+  }
+
+  const virtualEnvPath = extractEnvironmentValue(environmentText, 'VIRTUAL_ENV');
+  if (virtualEnvPath) {
+    const name = basenameFromPath(virtualEnvPath);
+    if (name) {
+      return `(${name})`;
+    }
+  }
+
+  return null;
+}
+
+function shellSingleQuote(value: string) {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+async function resolvePaneEnvironmentPrefix(
+  tmuxManager: TmuxManager,
+  sessionName: string,
+  panePid: number,
+) {
+  const sessionPrefix = await tmuxManager.getSessionEnvironmentVariable(
+    sessionName,
+    'REMOTE_CODEX_ENV_PREFIX',
+  );
+  if (sessionPrefix) {
+    return sessionPrefix;
+  }
+
+  try {
+    const environment = await tmuxManager.readProcessEnvironment(panePid);
+    return resolveEnvironmentPrefix(environment);
+  } catch {
+    return null;
+  }
+}
+
+function buildShellPromptInitScriptContents(command: string) {
+  const normalized = command.trim().toLowerCase();
+
+  if (normalized === 'zsh') {
+    return (
+      [
+        'export CONDA_CHANGEPS1=no VIRTUAL_ENV_DISABLE_PROMPT=1',
+        'typeset -ga precmd_functions',
+        '__remote_codex_env_prefix() {',
+        '  if [[ -n "${CONDA_PROMPT_MODIFIER:-}" ]]; then',
+        '    print -r -- "${CONDA_PROMPT_MODIFIER% }"',
+        '  elif [[ -n "${CONDA_DEFAULT_ENV:-}" ]]; then',
+        '    print -r -- "(${CONDA_DEFAULT_ENV})"',
+        '  elif [[ -n "${VIRTUAL_ENV_PROMPT:-}" ]]; then',
+        '    print -r -- "${VIRTUAL_ENV_PROMPT% }"',
+        '  elif [[ -n "${VIRTUAL_ENV:-}" ]]; then',
+        '    print -r -- "(${VIRTUAL_ENV:t})"',
+        '  fi',
+        '}',
+        '__remote_codex_sync_tmux_env_prefix() {',
+        '  local prefix="$(__remote_codex_env_prefix)"',
+        '  local session_name=""',
+        '  if [[ -n "${TMUX:-}" ]]; then',
+        `    session_name="$(tmux display-message -p '#S' 2>/dev/null || true)"`,
+        '    if [[ -n "$session_name" ]]; then',
+        '      if [[ -n "$prefix" ]]; then',
+        '        tmux set-environment -t "$session_name" REMOTE_CODEX_ENV_PREFIX "$prefix" >/dev/null 2>&1 || true',
+        '      else',
+        '        tmux set-environment -u -t "$session_name" REMOTE_CODEX_ENV_PREFIX >/dev/null 2>&1 || true',
+        '      fi',
+        '    fi',
+        '  fi',
+        '}',
+        '__remote_codex_prompt_precmd() {',
+        '  __remote_codex_sync_tmux_env_prefix',
+        '  PROMPT="$ "',
+        '  RPROMPT=""',
+        '}',
+        'if (( ${precmd_functions[(Ie)__remote_codex_prompt_precmd]} == 0 )); then precmd_functions+=(__remote_codex_prompt_precmd); fi',
+        '__remote_codex_prompt_precmd',
+        '',
+      ].join('\n')
+    );
+  }
+
+  return (
+    [
+      'export CONDA_CHANGEPS1=no VIRTUAL_ENV_DISABLE_PROMPT=1',
+      '__remote_codex_env_prefix() {',
+      '  if [ -n "${CONDA_PROMPT_MODIFIER:-}" ]; then',
+      '    printf "%s" "${CONDA_PROMPT_MODIFIER% }"',
+      '  elif [ -n "${CONDA_DEFAULT_ENV:-}" ]; then',
+      '    printf "(%s)" "${CONDA_DEFAULT_ENV}"',
+      '  elif [ -n "${VIRTUAL_ENV_PROMPT:-}" ]; then',
+      '    printf "%s" "${VIRTUAL_ENV_PROMPT% }"',
+      '  elif [ -n "${VIRTUAL_ENV:-}" ]; then',
+      '    printf "(%s)" "${VIRTUAL_ENV##*/}"',
+      '  fi',
+      '}',
+      '__remote_codex_sync_tmux_env_prefix() {',
+      '  prefix="$(__remote_codex_env_prefix)"',
+      '  session_name=""',
+      '  if [ -n "${TMUX:-}" ]; then',
+      `    session_name="$(tmux display-message -p '#S' 2>/dev/null || true)"`,
+      '    if [ -n "$session_name" ]; then',
+      '      if [ -n "$prefix" ]; then',
+      '        tmux set-environment -t "$session_name" REMOTE_CODEX_ENV_PREFIX "$prefix" >/dev/null 2>&1 || true',
+      '      else',
+      '        tmux set-environment -u -t "$session_name" REMOTE_CODEX_ENV_PREFIX >/dev/null 2>&1 || true',
+      '      fi',
+      '    fi',
+      '  fi',
+      '}',
+      '__remote_codex_prompt_precmd() {',
+      '  __remote_codex_sync_tmux_env_prefix',
+      '  PS1="$ "',
+      '}',
+      'case ";$PROMPT_COMMAND;" in',
+      '  *";__remote_codex_prompt_precmd;"*) ;;',
+      '  *) PROMPT_COMMAND="__remote_codex_prompt_precmd${PROMPT_COMMAND:+;$PROMPT_COMMAND}" ;;',
+      'esac',
+      '__remote_codex_prompt_precmd',
+      '',
+    ].join('\n')
+  );
+}
+
+async function ensureShellPromptInitScript(command: string) {
+  const normalized = command.trim().toLowerCase();
+  const extension = normalized === 'zsh' ? 'zsh' : 'sh';
+  const filePath = path.join(
+    os.tmpdir(),
+    `remote-codex-shell-prompt.${extension}`,
+  );
+  await fs.writeFile(filePath, buildShellPromptInitScriptContents(command), 'utf8');
+  return filePath;
+}
+
+async function buildShellPromptInitCommand(
+  command: string,
+  options: { clearScreen?: boolean } = {},
+) {
+  const scriptPath = await ensureShellPromptInitScript(command);
+  const normalized = command.trim().toLowerCase();
+  const sourceCommand =
+    normalized === 'zsh'
+      ? `source ${shellSingleQuote(scriptPath)} >/dev/null 2>&1`
+      : `. ${shellSingleQuote(scriptPath)} >/dev/null 2>&1`;
+
+  return options.clearScreen ? `${sourceCommand}\nclear\n` : `${sourceCommand}\n`;
 }
 
 function shellThreadId(shell: {
@@ -113,6 +339,9 @@ function shellOutputOptions(input: {
   cursorX?: number | undefined;
   cursorY?: number | undefined;
   paneHeight?: number | undefined;
+  cwdBaseName?: string | undefined;
+  envPrefix?: string | undefined;
+  isCommandRunning?: boolean | undefined;
 }): ShellOutputOptions {
   const output: ShellOutputOptions = {};
   if (input.replace) {
@@ -126,6 +355,15 @@ function shellOutputOptions(input: {
   }
   if (input.paneHeight !== undefined) {
     output.paneHeight = input.paneHeight;
+  }
+  if (input.cwdBaseName !== undefined) {
+    output.cwdBaseName = input.cwdBaseName;
+  }
+  if (input.envPrefix !== undefined) {
+    output.envPrefix = input.envPrefix;
+  }
+  if (input.isCommandRunning !== undefined) {
+    output.isCommandRunning = input.isCommandRunning;
   }
   return output;
 }
@@ -289,6 +527,21 @@ export class ShellSessionService {
           ...(options.cols !== undefined ? { cols: options.cols } : {}),
           ...(options.rows !== undefined ? { rows: options.rows } : {}),
         });
+        try {
+          const runtime = await this.tmuxManager.getPaneRuntimeInfo(tmuxSessionName);
+          if (isInteractiveShellCommand(runtime.currentCommand)) {
+            await this.tmuxManager.sendInput(
+              tmuxSessionName,
+              await buildShellPromptInitCommand(runtime.currentCommand, {
+                clearScreen: true,
+              }),
+            );
+            await waitForShellTick(120);
+          }
+        } catch {
+          // The shell can lag a moment behind the tmux session coming up.
+          // Failing prompt initialization must not fail shell creation.
+        }
       }
       updateShellSessionRecord(this.db, record.id, {
         status: 'running',
@@ -317,15 +570,7 @@ export class ShellSessionService {
     options: {
       cols: number;
       rows: number;
-      onData: (
-        data: string,
-        options?: {
-          replace?: boolean;
-          cursorX?: number;
-          cursorY?: number;
-          paneHeight?: number;
-        },
-      ) => void;
+      onData: (data: string, options?: ShellOutputOptions) => void;
     },
   ) {
     const shell = getShellSessionRecordById(this.db, shellId);
@@ -377,8 +622,39 @@ export class ShellSessionService {
       options.rows,
     );
 
-    const initialSnapshot = await this.tmuxManager.capturePane(shellSessionName(shell));
-    const initialCursor = await this.tmuxManager.getPaneCursor(shellSessionName(shell));
+    let initialSnapshot = await this.tmuxManager.capturePane(shellSessionName(shell));
+    let initialRuntime = await this.tmuxManager.getPaneRuntimeInfo(
+      shellSessionName(shell),
+    );
+    const shouldNormalizePromptOnAttach = isInteractiveShellCommand(
+      initialRuntime.currentCommand,
+    );
+
+    if (shouldNormalizePromptOnAttach) {
+      try {
+        await this.tmuxManager.sendInput(
+          shellSessionName(shell),
+          await buildShellPromptInitCommand(initialRuntime.currentCommand, {
+            clearScreen: true,
+          }),
+        );
+        await waitForShellTick(120);
+        await this.tmuxManager.clearHistory(shellSessionName(shell));
+        await waitForShellTick(80);
+        initialSnapshot = await this.tmuxManager.capturePane(shellSessionName(shell));
+        initialRuntime = await this.tmuxManager.getPaneRuntimeInfo(
+          shellSessionName(shell),
+        );
+      } catch {
+        // Keep the existing pane snapshot if prompt normalization fails.
+      }
+    }
+    const initialCwdBaseName = basenameFromPath(initialRuntime.currentPath || shell.cwd);
+    const initialEnvPrefix = await resolvePaneEnvironmentPrefix(
+      this.tmuxManager,
+      shellSessionName(shell),
+      initialRuntime.panePid,
+    );
     const attachment: ShellAttachment = {
       viewerId: viewer.id,
       onData: options.onData,
@@ -395,9 +671,14 @@ export class ShellSessionService {
         initialSnapshot,
         shellOutputOptions({
           replace: true,
-          cursorX: initialCursor.cursorX,
-          cursorY: initialCursor.cursorY,
-          paneHeight: initialCursor.paneHeight,
+          cursorX: initialRuntime.cursorX,
+          cursorY: initialRuntime.cursorY,
+          paneHeight: initialRuntime.paneHeight,
+          cwdBaseName: initialCwdBaseName,
+          envPrefix: initialEnvPrefix ?? undefined,
+          isCommandRunning: !isInteractiveShellCommand(
+            initialRuntime.currentCommand,
+          ),
         }),
       );
     }
@@ -614,7 +895,9 @@ export class ShellSessionService {
       }
 
       const snapshot = await this.tmuxManager.capturePane(shellSessionName(shell));
-      const cursor = await this.tmuxManager.getPaneCursor(shellSessionName(shell));
+      const runtime = await this.tmuxManager.getPaneRuntimeInfo(
+        shellSessionName(shell),
+      );
       if (snapshot === attachment.lastSnapshot) {
         return;
       }
@@ -631,9 +914,18 @@ export class ShellSessionService {
         snapshot,
         shellOutputOptions({
           replace: true,
-          cursorX: cursor.cursorX,
-          cursorY: cursor.cursorY,
-          paneHeight: cursor.paneHeight,
+          cursorX: runtime.cursorX,
+          cursorY: runtime.cursorY,
+          paneHeight: runtime.paneHeight,
+          cwdBaseName: basenameFromPath(runtime.currentPath || shell.cwd),
+          envPrefix:
+            (await resolvePaneEnvironmentPrefix(
+              this.tmuxManager,
+              shellSessionName(shell),
+              runtime.panePid,
+            )) ??
+            undefined,
+          isCommandRunning: !isInteractiveShellCommand(runtime.currentCommand),
         }),
       );
     } finally {

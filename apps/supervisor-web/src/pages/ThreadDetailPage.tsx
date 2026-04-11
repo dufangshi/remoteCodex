@@ -805,7 +805,7 @@ export function ThreadDetailPage() {
                   error={shellControlState?.error ?? null}
                   followTail={false}
                   shellControlState={shellControlState}
-                  canInterrupt={Boolean(shellControlState?.shellInputEnabled)}
+                  canInterrupt={Boolean(shellControlState?.isCommandRunning)}
                   onSubmit={handlePrompt}
                   onInterrupt={handleInterrupt}
                   onToggleView={handleToggleView}

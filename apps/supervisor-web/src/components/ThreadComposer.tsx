@@ -202,6 +202,7 @@ export function ThreadComposer({
   const menuRef = useRef<HTMLDivElement | null>(null);
   const isShellView = activeView === 'shell';
   const isMobileShell = Boolean(isShellView && shellControlState?.isMobileShell);
+  const shellPromptLabel = shellControlState?.promptLabel ?? null;
 
   const currentModel = useMemo(
     () => modelOptions.find((entry) => entry.model === model) ?? null,
@@ -373,6 +374,15 @@ export function ThreadComposer({
               <ConnectionIcon connected={connectionActive} />
             </button>
 
+            {isShellView && shellPromptLabel && (
+              <span
+                className="min-w-0 max-w-[11rem] truncate rounded-full px-1.5 py-1 text-stone-400"
+                title={shellPromptLabel}
+              >
+                {shellPromptLabel}
+              </span>
+            )}
+
             {!isShellView && (
               <>
                 <div className="relative">
@@ -520,22 +530,55 @@ export function ThreadComposer({
                           </span>
                         </span>
                       </button>
-                      <button type="button" onClick={() => void onShellControl?.('ctrl_c')}>
+                      <button
+                        type="button"
+                        disabled={
+                          !shellControlState?.shellInputEnabled ||
+                          !shellControlState?.isCommandRunning
+                        }
+                        onClick={() => void onShellControl?.('ctrl_c')}
+                        className="disabled:cursor-not-allowed disabled:opacity-45"
+                      >
                         <ToolPill label="CTRL-C" tone="rose" />
                       </button>
-                      <button type="button" onClick={() => void onShellControl?.('ctrl_d')}>
+                      <button
+                        type="button"
+                        disabled={!shellControlState?.shellInputEnabled}
+                        onClick={() => void onShellControl?.('ctrl_d')}
+                        className="disabled:cursor-not-allowed disabled:opacity-45"
+                      >
                         <ToolPill label="CTRL-D" />
                       </button>
-                      <button type="button" onClick={() => void onShellControl?.('esc')}>
+                      <button
+                        type="button"
+                        disabled={!shellControlState?.shellInputEnabled}
+                        onClick={() => void onShellControl?.('esc')}
+                        className="disabled:cursor-not-allowed disabled:opacity-45"
+                      >
                         <ToolPill label="ESC" />
                       </button>
-                      <button type="button" onClick={() => void onShellControl?.('tab')}>
+                      <button
+                        type="button"
+                        disabled={!shellControlState?.shellInputEnabled}
+                        onClick={() => void onShellControl?.('tab')}
+                        className="disabled:cursor-not-allowed disabled:opacity-45"
+                      >
                         <ToolPill label="TAB" />
                       </button>
-                      <button type="button" onClick={() => void onShellControl?.('up')}>
+                      <button
+                        type="button"
+                        disabled={!shellControlState?.shellInputEnabled}
+                        onClick={() => void onShellControl?.('up')}
+                        className="disabled:cursor-not-allowed disabled:opacity-45"
+                      >
                         <ToolPill label="UP" />
                       </button>
-                      <button type="button" onClick={() => void onShellControl?.('down')}>
+                      <button
+                        type="button"
+                        disabled={!shellControlState?.shellInputEnabled}
+                        onClick={() => void onShellControl?.('down')}
+                        className="disabled:cursor-not-allowed disabled:opacity-45"
+                      >
                         <ToolPill label="DOWN" />
                       </button>
                     </div>

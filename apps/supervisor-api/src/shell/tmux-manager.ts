@@ -11,6 +11,16 @@ export interface TmuxManagerOptions {
   ) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
 }
 
+export interface TmuxPaneRuntimeInfo {
+  cursorX: number;
+  cursorY: number;
+  paneWidth: number;
+  paneHeight: number;
+  panePid: number;
+  currentCommand: string;
+  currentPath: string;
+}
+
 async function defaultExecCommand(command: string, args: string[]) {
   return await new Promise<{
     stdout: string;
@@ -212,6 +222,68 @@ export class TmuxManager {
     };
   }
 
+  async getPaneRuntimeInfo(sessionName: string): Promise<TmuxPaneRuntimeInfo> {
+    const result = await this.execCommand(this.command, [
+      'display-message',
+      '-p',
+      '-t',
+      sessionName,
+      '#{cursor_x}\t#{cursor_y}\t#{pane_width}\t#{pane_height}\t#{pane_pid}\t#{pane_current_command}\t#{pane_current_path}',
+    ]);
+
+    if (result.exitCode !== 0) {
+      throw new Error(result.stderr.trim() || 'Unable to inspect tmux pane runtime.');
+    }
+
+    const [
+      rawCursorX,
+      rawCursorY,
+      rawPaneWidth,
+      rawPaneHeight,
+      rawPanePid,
+      rawCurrentCommand,
+      ...restCurrentPath
+    ] = result.stdout.trimEnd().split('\t');
+
+    const currentPath = restCurrentPath.join('\t');
+
+    const cursorX = Number.parseInt(rawCursorX ?? '', 10);
+    const cursorY = Number.parseInt(rawCursorY ?? '', 10);
+    const paneWidth = Number.parseInt(rawPaneWidth ?? '', 10);
+    const paneHeight = Number.parseInt(rawPaneHeight ?? '', 10);
+    const panePid = Number.parseInt(rawPanePid ?? '', 10);
+
+    return {
+      cursorX: Number.isFinite(cursorX) ? cursorX : 0,
+      cursorY: Number.isFinite(cursorY) ? cursorY : 0,
+      paneWidth: Number.isFinite(paneWidth) ? paneWidth : 0,
+      paneHeight: Number.isFinite(paneHeight) ? paneHeight : 0,
+      panePid: Number.isFinite(panePid) ? panePid : 0,
+      currentCommand: (rawCurrentCommand ?? '').trim(),
+      currentPath: currentPath.trim(),
+    };
+  }
+
+  async readProcessEnvironment(processId: number) {
+    if (!Number.isFinite(processId) || processId <= 0) {
+      return '';
+    }
+
+    const result = await this.execCommand('ps', [
+      'eww',
+      '-p',
+      String(processId),
+      '-o',
+      'command=',
+    ]);
+
+    if (result.exitCode !== 0) {
+      throw new Error(result.stderr.trim() || 'Unable to inspect process environment.');
+    }
+
+    return result.stdout.trim();
+  }
+
   async killSession(sessionName: string) {
     const result = await this.execCommand(this.command, [
       'kill-session',
@@ -222,6 +294,43 @@ export class TmuxManager {
     if (result.exitCode !== 0 && !result.stderr.includes('can\'t find session')) {
       throw new Error(result.stderr.trim() || 'Unable to kill tmux session.');
     }
+  }
+
+  async clearHistory(sessionName: string) {
+    const result = await this.execCommand(this.command, [
+      'clear-history',
+      '-t',
+      sessionName,
+    ]);
+
+    if (result.exitCode !== 0) {
+      throw new Error(result.stderr.trim() || 'Unable to clear tmux history.');
+    }
+  }
+
+  async getSessionEnvironmentVariable(sessionName: string, name: string) {
+    const result = await this.execCommand(this.command, [
+      'show-environment',
+      '-t',
+      sessionName,
+      name,
+    ]);
+
+    if (result.exitCode !== 0) {
+      return null;
+    }
+
+    const line = result.stdout.trim();
+    if (!line || line.startsWith('-')) {
+      return null;
+    }
+
+    const prefix = `${name}=`;
+    if (!line.startsWith(prefix)) {
+      return null;
+    }
+
+    return line.slice(prefix.length).trim();
   }
 }
 

@@ -74,18 +74,30 @@ describe('ShellSessionService', () => {
           sentInputs.push(data);
         },
         async capturePane() {
-          return '(base) shell test % ';
+          return '$ ';
         },
-        async getPaneCursor() {
+        async getPaneRuntimeInfo() {
           return {
-            cursorX: 20,
+            cursorX: 2,
             cursorY: 0,
+            panePid: 42,
+            currentCommand: 'zsh',
+            currentPath: workspacePath,
             paneWidth: 120,
             paneHeight: 36,
           };
         },
+        async getSessionEnvironmentVariable() {
+          return '(base)';
+        },
+        async readProcessEnvironment() {
+          return 'CONDA_PROMPT_MODIFIER=(base)  CONDA_DEFAULT_ENV=base';
+        },
         async killSession(sessionName: string) {
           sessionNames.delete(sessionName);
+        },
+        async clearHistory() {
+          return;
         },
       } as any,
     );
@@ -111,6 +123,8 @@ describe('ShellSessionService', () => {
       status: 'detached',
     });
     expect(sessionNames.size).toBe(1);
+    expect(sentInputs.join('\n')).toContain('remote-codex-shell-prompt.zsh');
+    expect(sentInputs.join('\n')).toContain('clear');
   });
 
   it('lets a new viewer take over the shell attachment and keeps the shell alive after detach', async () => {
@@ -169,5 +183,29 @@ describe('ShellSessionService', () => {
     expect(revived.shell?.id).toBe(shellId);
     expect(revived.state).toBe('detached');
     expect(sessionNames.size).toBe(1);
+  });
+
+  it('includes cwd, env prefix, and running-state metadata in shell output', async () => {
+    const outputSpy = vi.fn();
+    const created = await service.createShellForThread(threadId);
+
+    await service.attachShell(created.shell!.id, {
+      cols: 120,
+      rows: 36,
+      onData: outputSpy,
+    });
+
+    expect(outputSpy).toHaveBeenCalledWith(
+      '$ ',
+      expect.objectContaining({
+        replace: true,
+        cursorX: 2,
+        cursorY: 0,
+        paneHeight: 36,
+        cwdBaseName: path.basename(workspacePath),
+        envPrefix: '(base)',
+        isCommandRunning: false,
+      }),
+    );
   });
 });
