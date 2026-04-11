@@ -508,7 +508,7 @@ export function ThreadComposer({
                   <WrenchScrewdriverIcon />
                 </button>
                 {openMenu === 'shellTools' && (
-                  <div className="absolute bottom-full right-0 mb-2 w-48 max-w-[calc(100vw-1rem)] rounded-[1rem] border border-stone-700/90 bg-stone-950/96 p-2 shadow-2xl shadow-stone-950/40">
+                  <div className="absolute bottom-full right-0 mb-2 w-[11.5rem] max-w-[calc(100vw-1.5rem)] rounded-[1rem] border border-stone-700/90 bg-stone-950/96 p-2 shadow-2xl shadow-stone-950/40 sm:w-48">
                     <div className="grid grid-cols-2 gap-2">
                       <button
                         type="button"

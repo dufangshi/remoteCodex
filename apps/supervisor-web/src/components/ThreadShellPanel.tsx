@@ -60,15 +60,6 @@ export interface ThreadShellPanelHandle {
   focus: () => void;
 }
 
-interface TouchMomentumState {
-  rafId: number | null;
-  startY: number;
-  lastY: number;
-  lastTime: number;
-  velocity: number;
-  dragging: boolean;
-}
-
 function statusLabel(status: ShellStatusDto) {
   switch (status) {
     case 'not_created':
@@ -291,14 +282,6 @@ export const ThreadShellPanel = forwardRef<
   const shellIdRef = useRef<string | null>(null);
   const shellStateRef = useRef<ThreadShellStateDto | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
-  const touchMomentumRef = useRef<TouchMomentumState>({
-    rafId: null,
-    startY: 0,
-    lastY: 0,
-    lastTime: 0,
-    velocity: 0,
-    dragging: false,
-  });
   const feedbackTimerRef = useRef<number | null>(null);
   const [terminalHostNode, setTerminalHostNode] = useState<HTMLDivElement | null>(null);
   const [shellState, setShellState] = useState<ThreadShellStateDto | null>(null);
@@ -567,111 +550,6 @@ export const ThreadShellPanel = forwardRef<
       fitAddonRef.current = null;
     };
   }, [isMobileShell, sendShellInput, terminalHostNode]);
-
-  useEffect(() => {
-    if (!terminalHostNode || !isMobileShell) {
-      return;
-    }
-
-    const viewport = terminalHostNode.querySelector<HTMLDivElement>('.xterm-viewport');
-    if (!viewport) {
-      return;
-    }
-
-    const momentum = touchMomentumRef.current;
-
-    const stopMomentum = () => {
-      if (momentum.rafId !== null) {
-        window.cancelAnimationFrame(momentum.rafId);
-        momentum.rafId = null;
-      }
-      momentum.velocity = 0;
-    };
-
-    const stepMomentum = () => {
-      momentum.velocity *= 0.94;
-      if (Math.abs(momentum.velocity) < 0.02) {
-        momentum.rafId = null;
-        return;
-      }
-
-      viewport.scrollTop -= momentum.velocity * 16;
-      momentum.rafId = window.requestAnimationFrame(stepMomentum);
-    };
-
-    const handleTouchStart = (event: TouchEvent) => {
-      if (event.touches.length !== 1) {
-        return;
-      }
-
-      stopMomentum();
-      const touchY = event.touches[0]?.clientY ?? 0;
-      const now = performance.now();
-      momentum.startY = touchY;
-      momentum.lastY = touchY;
-      momentum.lastTime = now;
-      momentum.dragging = false;
-    };
-
-    const handleTouchMove = (event: TouchEvent) => {
-      if (event.touches.length !== 1) {
-        return;
-      }
-
-      const touchY = event.touches[0]?.clientY ?? 0;
-      const now = performance.now();
-      const deltaY = touchY - momentum.lastY;
-      const deltaTime = Math.max(1, now - momentum.lastTime);
-
-      if (
-        !momentum.dragging &&
-        Math.abs(touchY - momentum.startY) < 4
-      ) {
-        momentum.lastY = touchY;
-        momentum.lastTime = now;
-        return;
-      }
-
-      momentum.dragging = true;
-      momentum.velocity = deltaY / deltaTime;
-      viewport.scrollTop -= deltaY;
-      momentum.lastY = touchY;
-      momentum.lastTime = now;
-      event.preventDefault();
-    };
-
-    const handleTouchEnd = () => {
-      if (!momentum.dragging) {
-        return;
-      }
-
-      momentum.dragging = false;
-      if (Math.abs(momentum.velocity) >= 0.02) {
-        momentum.rafId = window.requestAnimationFrame(stepMomentum);
-      }
-    };
-
-    terminalHostNode.addEventListener('touchstart', handleTouchStart, {
-      passive: true,
-    });
-    terminalHostNode.addEventListener('touchmove', handleTouchMove, {
-      passive: false,
-    });
-    terminalHostNode.addEventListener('touchend', handleTouchEnd, {
-      passive: true,
-    });
-    terminalHostNode.addEventListener('touchcancel', handleTouchEnd, {
-      passive: true,
-    });
-
-    return () => {
-      stopMomentum();
-      terminalHostNode.removeEventListener('touchstart', handleTouchStart);
-      terminalHostNode.removeEventListener('touchmove', handleTouchMove);
-      terminalHostNode.removeEventListener('touchend', handleTouchEnd);
-      terminalHostNode.removeEventListener('touchcancel', handleTouchEnd);
-    };
-  }, [isMobileShell, terminalHostNode]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
@@ -1113,6 +991,9 @@ export const ThreadShellPanel = forwardRef<
         return sendShellInput(data);
       },
       sendCommand(command: string) {
+        if (command.trim() === 'clear') {
+          return sendShellClear();
+        }
         const normalized = command.endsWith('\n') ? command : `${command}\n`;
         return sendShellInput(normalized);
       },

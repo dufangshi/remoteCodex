@@ -206,6 +206,7 @@ input {
 .mobile-shell-selectable .xterm-viewport {
   z-index: 3;
   background: transparent !important;
+  pointer-events: auto;
 }
 
 .mobile-shell-selectable .xterm-screen,
