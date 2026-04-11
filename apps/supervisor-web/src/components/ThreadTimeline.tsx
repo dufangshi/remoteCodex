@@ -213,6 +213,18 @@ function SearchIcon() {
   );
 }
 
+function ExpandIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 20 20"
+      className="h-3.5 w-3.5 fill-current"
+    >
+      <path d="m13.28 7.78 3.22-3.22v2.69a.75.75 0 0 0 1.5 0v-4.5a.75.75 0 0 0-.75-.75h-4.5a.75.75 0 0 0 0 1.5h2.69l-3.22 3.22a.75.75 0 0 0 1.06 1.06ZM2 17.25v-4.5a.75.75 0 0 1 1.5 0v2.69l3.22-3.22a.75.75 0 0 1 1.06 1.06L4.56 16.5h2.69a.75.75 0 0 1 0 1.5h-4.5a.747.747 0 0 1-.75-.75ZM12.22 13.28l3.22 3.22h-2.69a.75.75 0 0 0 0 1.5h4.5a.747.747 0 0 0 .75-.75v-4.5a.75.75 0 0 0-1.5 0v2.69l-3.22-3.22a.75.75 0 1 0-1.06 1.06ZM3.5 4.56l3.22 3.22a.75.75 0 0 0 1.06-1.06L4.56 3.5h2.69a.75.75 0 0 0 0-1.5h-4.5a.75.75 0 0 0-.75.75v4.5a.75.75 0 0 0 1.5 0V4.56Z" />
+    </svg>
+  );
+}
+
 function CopyIcon() {
   return (
     <svg
@@ -488,23 +500,7 @@ const CommandItem = memo(function CommandItem({
             className={`absolute right-0 top-0 inline-flex h-5 w-5 items-center justify-center rounded-bl-[0.7rem] rounded-tr-[0.9rem] border shadow-sm shadow-stone-950/25 transition sm:right-2 sm:top-2 sm:h-7 sm:w-7 sm:rounded-full ${overlayBadgeClassName('action')} hover:bg-stone-800`}
           >
             <span className="scale-[0.72] sm:scale-100">
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 16 16"
-                className="h-3.5 w-3.5 fill-none stroke-current"
-                strokeWidth="1.45"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M6.25 2.75H2.75v3.5" />
-                <path d="M9.75 13.25h3.5v-3.5" />
-                <path d="m2.75 6.25 3.5-3.5" />
-                <path d="m9.75 9.75 3.5 3.5" />
-                <path d="M9.75 2.75h3.5v3.5" />
-                <path d="M6.25 13.25h-3.5v-3.5" />
-                <path d="m13.25 6.25-3.5-3.5" />
-                <path d="m6.25 9.75-3.5 3.5" />
-              </svg>
+              <ExpandIcon />
             </span>
           </button>
           {item.status && (
@@ -562,23 +558,7 @@ const WebSearchItem = memo(function WebSearchItem({
             className={`absolute right-0 top-0 inline-flex h-5 w-5 items-center justify-center rounded-bl-[0.7rem] rounded-tr-[0.9rem] border shadow-sm shadow-stone-950/25 transition sm:right-2 sm:top-2 sm:h-7 sm:w-7 sm:rounded-full ${overlayBadgeClassName('action')} hover:bg-stone-800`}
           >
             <span className="scale-[0.72] sm:scale-100">
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 16 16"
-                className="h-3.5 w-3.5 fill-none stroke-current"
-                strokeWidth="1.45"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M6.25 2.75H2.75v3.5" />
-                <path d="M9.75 13.25h3.5v-3.5" />
-                <path d="m2.75 6.25 3.5-3.5" />
-                <path d="m9.75 9.75 3.5 3.5" />
-                <path d="M9.75 2.75h3.5v3.5" />
-                <path d="M6.25 13.25h-3.5v-3.5" />
-                <path d="m13.25 6.25-3.5-3.5" />
-                <path d="m6.25 9.75-3.5 3.5" />
-              </svg>
+              <ExpandIcon />
             </span>
           </button>
           {item.status && (

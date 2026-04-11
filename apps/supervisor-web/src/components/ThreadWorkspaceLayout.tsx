@@ -316,7 +316,7 @@ export function ThreadWorkspaceLayout({
 
   return (
     <>
-      <div className="flex min-h-[calc(100dvh-2rem)] flex-col gap-4 lg:grid lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]">
+      <div className="flex h-[calc(100dvh-2rem)] max-h-[calc(100dvh-2rem)] min-h-0 flex-col gap-4 overflow-hidden lg:grid lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]">
         <div className="lg:hidden">
           <button
             type="button"
@@ -338,19 +338,19 @@ export function ThreadWorkspaceLayout({
           </button>
 
           {mobileSidebarOpen && (
-            <aside className="mt-3 rounded-[1.8rem] border border-stone-800 bg-stone-900/95 p-4 shadow-2xl shadow-stone-950/20">
+            <aside className="mt-3 max-h-[40dvh] overflow-y-auto rounded-[1.8rem] border border-stone-800 bg-stone-900/95 p-4 shadow-2xl shadow-stone-950/20">
               {renderSidebarContent()}
             </aside>
           )}
         </div>
 
-        <aside className="hidden lg:block">
-          <div className="sticky top-4 rounded-[2rem] border border-stone-800 bg-stone-900/85 p-4 shadow-2xl shadow-stone-950/15 backdrop-blur">
+        <aside className="hidden min-h-0 lg:block">
+          <div className="sticky top-4 max-h-[calc(100dvh-4rem)] overflow-y-auto rounded-[2rem] border border-stone-800 bg-stone-900/85 p-4 shadow-2xl shadow-stone-950/15 backdrop-blur">
             {renderSidebarContent()}
           </div>
         </aside>
 
-        <section className="min-w-0">{children}</section>
+        <section className="min-h-0 min-w-0 overflow-hidden">{children}</section>
       </div>
 
       <RenameDialog

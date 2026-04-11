@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import 'xterm/css/xterm.css';
 import type { FitAddon } from '@xterm/addon-fit';
 import type { Terminal } from 'xterm';
@@ -18,9 +26,37 @@ import {
 
 interface ThreadShellPanelProps {
   threadId: string;
+  showHeader?: boolean;
+  showFloatingToolbox?: boolean;
+  onStateChange?: (state: ThreadShellControlState) => void;
 }
 
 type ToolboxFeedbackState = 'idle' | 'done' | 'failed';
+
+export interface ThreadShellControlState {
+  status: ShellStatusDto;
+  connectionButtonDisabled: boolean;
+  connectionButtonLabel: string;
+  shellInputEnabled: boolean;
+  isMobileShell: boolean;
+  hasShell: boolean;
+  busy: boolean;
+  loading: boolean;
+  error: string | null;
+}
+
+export interface ThreadShellPanelHandle {
+  toggleConnection: () => Promise<void>;
+  sendInput: (data: string) => boolean;
+  sendCommand: (command: string) => boolean;
+  sendControl: (
+    action: 'ctrl_c' | 'ctrl_d' | 'esc' | 'tab' | 'up' | 'down',
+  ) => boolean;
+  pasteFromClipboard: () => Promise<boolean>;
+  copySelection: () => Promise<boolean>;
+  terminate: () => Promise<void>;
+  focus: () => void;
+}
 
 function statusLabel(status: ShellStatusDto) {
   switch (status) {
@@ -109,19 +145,31 @@ function WrenchIcon() {
 }
 
 function ConnectionIcon({ connected }: { connected: boolean }) {
+  if (!connected) {
+    return (
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 24 24"
+        className="h-4.5 w-4.5 fill-none stroke-current"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M13.181 8.68a4.503 4.503 0 0 1 1.903 6.405m-9.768-2.782L3.56 14.06a4.5 4.5 0 0 0 6.364 6.365l3.129-3.129m5.614-5.615 1.757-1.757a4.5 4.5 0 0 0-6.364-6.365l-4.5 4.5c-.258.26-.479.541-.661.84m1.903 6.405a4.495 4.495 0 0 1-1.242-.88 4.483 4.483 0 0 1-1.062-1.683m6.587 2.345 5.907 5.907m-5.907-5.907L8.898 8.898M2.991 2.99 8.898 8.9" />
+      </svg>
+    );
+  }
+
   return (
     <svg
       aria-hidden="true"
-      viewBox="0 0 16 16"
+      viewBox="0 0 24 24"
       className="h-4.5 w-4.5 fill-none stroke-current"
-      strokeWidth="1.35"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      <path d="m6.15 6.2 3.65 3.6" />
-      <path d="M5.05 8.1 3.2 9.95a1.6 1.6 0 0 1-2.25-2.25L2.8 5.85A1.6 1.6 0 0 1 5.05 8.1Z" />
-      <path d="m10.95 7.9 1.85-1.85a1.6 1.6 0 1 0-2.25-2.25L8.7 5.65A1.6 1.6 0 0 0 10.95 7.9Z" />
-      {!connected && <path d="M2.25 13.75 13.75 2.25" />}
+      <path d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
     </svg>
   );
 }
@@ -165,7 +213,37 @@ function ControlIcon({
   );
 }
 
-export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
+function shellControlSequence(
+  action: 'ctrl_c' | 'ctrl_d' | 'esc' | 'tab' | 'up' | 'down',
+) {
+  switch (action) {
+    case 'ctrl_c':
+      return '\u0003';
+    case 'ctrl_d':
+      return '\u0004';
+    case 'esc':
+      return '\u001b';
+    case 'tab':
+      return '\t';
+    case 'up':
+      return '\u001b[A';
+    case 'down':
+      return '\u001b[B';
+  }
+}
+
+export const ThreadShellPanel = forwardRef<
+  ThreadShellPanelHandle,
+  ThreadShellPanelProps
+>(function ThreadShellPanel(
+  {
+    threadId,
+    showHeader = true,
+    showFloatingToolbox = true,
+    onStateChange,
+  }: ThreadShellPanelProps,
+  ref,
+) {
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<ReturnType<typeof connectShellSocket> | null>(null);
@@ -219,6 +297,34 @@ export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
     terminalRef.current?.focus();
     return true;
   }, []);
+
+  const status = shellState?.state ?? 'not_created';
+  const shellMeta = useMemo(() => shellState?.shell ?? null, [shellState?.shell]);
+  const shellInputEnabled = Boolean(viewerIdRef.current && shellMeta);
+  const connectionButtonDisabled =
+    busy || loading || status === 'creating' || status === 'workspace_missing';
+  const connectionButtonClassName =
+    status === 'attached'
+      ? 'border-emerald-300/45 bg-emerald-300/18 text-emerald-50 ring-1 ring-emerald-300/20 hover:bg-emerald-300/24'
+      : status === 'exited' || status === 'not_found'
+        ? 'border-stone-600 bg-stone-800/90 text-stone-100 hover:border-stone-500 hover:bg-stone-800'
+        : status === 'workspace_missing'
+          ? 'border-rose-300/35 bg-rose-300/12 text-rose-100'
+          : 'border-stone-600 bg-stone-800/90 text-stone-100 hover:border-stone-500 hover:bg-stone-800';
+  const connectionButtonLabel =
+    status === 'attached'
+      ? 'Disconnect shell'
+      : status === 'exited' || status === 'not_found'
+        ? 'Restart shell'
+        : shellMeta
+          ? 'Connect shell'
+          : 'Create shell';
+  const toolboxFeedbackToneClassName =
+    toolboxFeedback?.tone === 'done'
+      ? 'border-emerald-300/35 bg-emerald-300/12 text-emerald-50'
+      : toolboxFeedback?.tone === 'failed'
+        ? 'border-rose-300/35 bg-rose-300/12 text-rose-50'
+        : 'border-stone-700/90 bg-stone-900/90 text-stone-200';
 
   const loadShellState = useCallback(async () => {
     setLoading(true);
@@ -589,7 +695,7 @@ export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
     };
   }, [reconnectKey, shellState?.shell?.id, terminalReady]);
 
-  async function handleCreateShell() {
+  const handleCreateShell = useCallback(async () => {
     setBusy(true);
     try {
       const terminal = terminalRef.current;
@@ -607,9 +713,9 @@ export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
     } finally {
       setBusy(false);
     }
-  }
+  }, [threadId]);
 
-  async function handleReconnectShell() {
+  const handleReconnectShell = useCallback(async () => {
     if (status === 'exited' || status === 'not_found') {
       await handleCreateShell();
       return;
@@ -617,9 +723,9 @@ export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
 
     setConnectionError(null);
     setReconnectKey((current) => current + 1);
-  }
+  }, [handleCreateShell, status]);
 
-  async function handleTerminateShell() {
+  const handleTerminateShell = useCallback(async () => {
     if (!shellState?.shell) {
       return;
     }
@@ -636,9 +742,9 @@ export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
     } finally {
       setBusy(false);
     }
-  }
+  }, [loadShellState, shellState?.shell]);
 
-  function handleDisconnectShell() {
+  const handleDisconnectShell = useCallback(() => {
     const socket = socketRef.current;
     const shellId = shellIdRef.current;
     const viewerId = viewerIdRef.current;
@@ -677,9 +783,9 @@ export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
           }
         : current,
     );
-  }
+  }, []);
 
-  async function handleConnectionToggle() {
+  const handleConnectionToggle = useCallback(async () => {
     if (busy || loading || status === 'creating' || status === 'workspace_missing') {
       return;
     }
@@ -695,33 +801,43 @@ export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
     }
 
     await handleReconnectShell();
-  }
+  }, [
+    busy,
+    handleCreateShell,
+    handleDisconnectShell,
+    handleReconnectShell,
+    loading,
+    shellMeta,
+    status,
+  ]);
 
-  async function handlePasteFromClipboard() {
+  const handlePasteFromClipboard = useCallback(async () => {
     if (!navigator.clipboard?.readText) {
       setTransientToolboxFeedback('failed', 'Paste is unavailable here');
-      return;
+      return false;
     }
 
     try {
       const clipboardText = await navigator.clipboard.readText();
       if (!clipboardText) {
         setTransientToolboxFeedback('failed', 'Clipboard is empty');
-        return;
+        return false;
       }
 
       if (!sendShellInput(clipboardText)) {
         setTransientToolboxFeedback('failed', 'Connect the shell first');
-        return;
+        return false;
       }
 
       setTransientToolboxFeedback('done', 'Pasted');
+      return true;
     } catch {
       setTransientToolboxFeedback('failed', 'Paste was blocked');
+      return false;
     }
-  }
+  }, [sendShellInput, setTransientToolboxFeedback]);
 
-  async function handleCopySelection() {
+  const handleCopySelection = useCallback(async () => {
     try {
       const selectedText =
         terminalRef.current?.getSelection()?.trim() ||
@@ -730,67 +846,104 @@ export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
 
       if (!selectedText) {
         setTransientToolboxFeedback('failed', 'Nothing to copy');
-        return;
+        return false;
       }
 
       await navigator.clipboard.writeText(selectedText);
       setTransientToolboxFeedback('done', 'Copied');
+      return true;
     } catch {
       setTransientToolboxFeedback('failed', 'Copy failed');
+      return false;
     }
-  }
+  }, [terminalHostNode, setTransientToolboxFeedback]);
 
-  const status = shellState?.state ?? 'not_created';
-  const shellMeta = useMemo(() => shellState?.shell ?? null, [shellState?.shell]);
-  const shellInputEnabled = Boolean(viewerIdRef.current && shellMeta);
-  const connectionButtonDisabled =
-    busy || loading || status === 'creating' || status === 'workspace_missing';
-  const connectionButtonClassName =
-    status === 'attached'
-      ? 'border-emerald-300/45 bg-emerald-300/18 text-emerald-50 ring-1 ring-emerald-300/20 hover:bg-emerald-300/24'
-      : status === 'exited' || status === 'not_found'
-        ? 'border-amber-300/35 bg-amber-300/12 text-amber-50 hover:bg-amber-300/18'
-        : status === 'workspace_missing'
-          ? 'border-rose-300/35 bg-rose-300/12 text-rose-100'
-          : 'border-sky-300/35 bg-sky-300/12 text-sky-100 hover:bg-sky-300/18';
-  const connectionButtonLabel =
-    status === 'attached'
-      ? 'Disconnect shell'
-      : status === 'exited' || status === 'not_found'
-        ? 'Restart shell'
-        : shellMeta
-          ? 'Connect shell'
-          : 'Create shell';
-  const toolboxFeedbackToneClassName =
-    toolboxFeedback?.tone === 'done'
-      ? 'border-emerald-300/35 bg-emerald-300/12 text-emerald-50'
-      : toolboxFeedback?.tone === 'failed'
-        ? 'border-rose-300/35 bg-rose-300/12 text-rose-50'
-        : 'border-stone-700/90 bg-stone-900/90 text-stone-200';
+  useEffect(() => {
+    onStateChange?.({
+      status,
+      connectionButtonDisabled,
+      connectionButtonLabel,
+      shellInputEnabled,
+      isMobileShell,
+      hasShell: Boolean(shellMeta),
+      busy,
+      loading,
+      error: connectionError,
+    });
+  }, [
+    busy,
+    connectionButtonDisabled,
+    connectionButtonLabel,
+    connectionError,
+    isMobileShell,
+    loading,
+    onStateChange,
+    shellMeta,
+    shellInputEnabled,
+    status,
+  ]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      async toggleConnection() {
+        await handleConnectionToggle();
+      },
+      sendInput(data: string) {
+        return sendShellInput(data);
+      },
+      sendCommand(command: string) {
+        const normalized = command.endsWith('\n') ? command : `${command}\n`;
+        return sendShellInput(normalized);
+      },
+      sendControl(action) {
+        return sendShellInput(shellControlSequence(action));
+      },
+      async pasteFromClipboard() {
+        return await handlePasteFromClipboard();
+      },
+      async copySelection() {
+        return await handleCopySelection();
+      },
+      async terminate() {
+        await handleTerminateShell();
+      },
+      focus() {
+        terminalRef.current?.focus();
+      },
+    }),
+    [
+      handleConnectionToggle,
+      handleCopySelection,
+      handlePasteFromClipboard,
+      handleTerminateShell,
+      sendShellInput,
+    ],
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-stone-900/30">
-      <div className="shrink-0 border-b border-stone-800/80 bg-stone-900/90 px-3 py-3 sm:px-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Shell</p>
-            <p className="mt-1 truncate text-sm text-stone-300">
-              {shellMeta?.cwd ?? 'Create a durable shell for this thread.'}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              aria-label={connectionButtonLabel}
-              title={`${connectionButtonLabel} (${statusLabel(status)})`}
-              disabled={connectionButtonDisabled}
-              onClick={() => void handleConnectionToggle()}
-              className={`inline-flex h-10 w-10 items-center justify-center rounded-full border shadow-lg shadow-stone-950/25 transition disabled:cursor-not-allowed disabled:opacity-60 ${connectionButtonClassName}`}
-            >
-              <ConnectionIcon connected={status === 'attached'} />
-            </button>
-            {shellMeta && (
-              <>
+      {showHeader && (
+        <div className="shrink-0 border-b border-stone-800/80 bg-stone-900/90 px-3 py-3 sm:px-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Shell</p>
+              <p className="mt-1 truncate text-sm text-stone-300">
+                {shellMeta?.cwd ?? 'Create a durable shell for this thread.'}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                aria-label={connectionButtonLabel}
+                title={`${connectionButtonLabel} (${statusLabel(status)})`}
+                disabled={connectionButtonDisabled}
+                onClick={() => void handleConnectionToggle()}
+                className={`inline-flex h-10 w-10 items-center justify-center rounded-full border shadow-lg shadow-stone-950/25 transition disabled:cursor-not-allowed disabled:opacity-60 ${connectionButtonClassName}`}
+              >
+                <ConnectionIcon connected={status === 'attached'} />
+              </button>
+              {shellMeta && (
                 <button
                   type="button"
                   disabled={busy}
@@ -799,24 +952,24 @@ export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
                 >
                   Terminate
                 </button>
-              </>
-            )}
+              )}
+            </div>
           </div>
+          {(connectionError || loading || shellState?.workspacePathStatus === 'missing') && (
+            <div className="mt-3 rounded-2xl border border-stone-800/80 bg-stone-950/55 px-3 py-3 text-sm">
+              {loading && <p className="text-stone-400">Loading shell state...</p>}
+              {!loading && shellState?.workspacePathStatus === 'missing' && (
+                <p className="text-rose-100">
+                  Workspace path is missing on this machine. Restore the path before creating a shell.
+                </p>
+              )}
+              {!loading && connectionError && (
+                <p className="text-amber-100">{connectionError}</p>
+              )}
+            </div>
+          )}
         </div>
-        {(connectionError || loading || shellState?.workspacePathStatus === 'missing') && (
-          <div className="mt-3 rounded-2xl border border-stone-800/80 bg-stone-950/55 px-3 py-3 text-sm">
-            {loading && <p className="text-stone-400">Loading shell state...</p>}
-            {!loading && shellState?.workspacePathStatus === 'missing' && (
-              <p className="text-rose-100">
-                Workspace path is missing on this machine. Restore the path before creating a shell.
-              </p>
-            )}
-            {!loading && connectionError && (
-              <p className="text-amber-100">{connectionError}</p>
-            )}
-          </div>
-        )}
-      </div>
+      )}
 
       <div className="min-h-0 flex-1">
         {status === 'not_created' || status === 'workspace_missing' ? (
@@ -832,6 +985,22 @@ export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
         ) : (
           <div className="h-full min-h-0 p-2 sm:p-3">
             <div className="relative h-full rounded-[1.4rem] border border-stone-800 bg-[#0c1117] shadow-inner shadow-black/25">
+              {!showHeader &&
+                (connectionError ||
+                  loading ||
+                  shellState?.workspacePathStatus === 'missing') && (
+                  <div className="absolute left-2 right-2 top-2 z-10 rounded-2xl border border-stone-800/80 bg-stone-950/88 px-3 py-3 text-sm backdrop-blur sm:left-3 sm:right-3 sm:top-3">
+                    {loading && <p className="text-stone-400">Loading shell state...</p>}
+                    {!loading && shellState?.workspacePathStatus === 'missing' && (
+                      <p className="text-rose-100">
+                        Workspace path is missing on this machine. Restore the path before creating a shell.
+                      </p>
+                    )}
+                    {!loading && connectionError && (
+                      <p className="text-amber-100">{connectionError}</p>
+                    )}
+                  </div>
+                )}
               <div
                 ref={setTerminalHostNode}
                 className={`h-full w-full px-2 py-2 sm:px-3 sm:py-3 ${isMobileShell ? 'mobile-shell-selectable' : ''}`}
@@ -839,7 +1008,7 @@ export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
                   terminalRef.current?.focus();
                 }}
               />
-              {isMobileShell && (
+              {showFloatingToolbox && isMobileShell && (
                 <div className="pointer-events-none absolute bottom-3 right-3 z-20 flex flex-col items-end gap-2">
                   {toolboxFeedback && (
                     <div
@@ -979,4 +1148,4 @@ export function ThreadShellPanel({ threadId }: ThreadShellPanelProps) {
       </div>
     </div>
   );
-}
+});

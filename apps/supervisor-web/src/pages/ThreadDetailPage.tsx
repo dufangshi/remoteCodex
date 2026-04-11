@@ -8,7 +8,11 @@ import {
   ThreadDto,
 } from '../../../../packages/shared/src/index';
 import { ThreadComposer } from '../components/ThreadComposer';
-import { ThreadShellPanel } from '../components/ThreadShellPanel';
+import {
+  ThreadShellPanel,
+  type ThreadShellControlState,
+  type ThreadShellPanelHandle,
+} from '../components/ThreadShellPanel';
 import { ThreadTimeline } from '../components/ThreadTimeline';
 import { ThreadWorkspaceLayout } from '../components/ThreadWorkspaceLayout';
 import {
@@ -34,6 +38,7 @@ export function ThreadDetailPage() {
   const { id = '' } = useParams();
   const liveOutputBufferRef = useRef('');
   const liveOutputFrameRef = useRef<number | null>(null);
+  const shellPanelRef = useRef<ThreadShellPanelHandle | null>(null);
   const [detail, setDetail] = useState<ThreadDetailDto | null>(null);
   const [threads, setThreads] = useState<ThreadDto[]>([]);
   const [modelOptions, setModelOptions] = useState<ModelOptionDto[]>([]);
@@ -49,6 +54,10 @@ export function ThreadDetailPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [activeView, setActiveView] = useState<'chat' | 'shell'>('chat');
+  const [shellControlState, setShellControlState] =
+    useState<ThreadShellControlState | null>(null);
+  const [pendingShellConnectionToggle, setPendingShellConnectionToggle] =
+    useState(false);
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [respondingRequestId, setRespondingRequestId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -175,6 +184,16 @@ export function ThreadDetailPage() {
   }, [clearBufferedLiveOutput, id, queueLiveOutputDelta]);
 
   async function handlePrompt(prompt: string) {
+    if (activeView === 'shell') {
+      const sent = shellPanelRef.current?.sendCommand(prompt) ?? false;
+      if (!sent) {
+        setError('Connect the shell before sending commands.');
+      } else {
+        setError(null);
+      }
+      return;
+    }
+
     setBusy(true);
     setError(null);
     clearBufferedLiveOutput();
@@ -212,6 +231,16 @@ export function ThreadDetailPage() {
   }
 
   async function handleInterrupt() {
+    if (activeView === 'shell') {
+      const sent = shellPanelRef.current?.sendControl('ctrl_c') ?? false;
+      if (!sent) {
+        setError('Connect the shell before sending Ctrl-C.');
+      } else {
+        setError(null);
+      }
+      return;
+    }
+
     setBusy(true);
     setError(null);
 
@@ -380,6 +409,58 @@ export function ThreadDetailPage() {
     }
   }
 
+  function handleToggleView() {
+    setActiveView((current) => (current === 'chat' ? 'shell' : 'chat'));
+  }
+
+  async function handleToggleShellConnection() {
+    if (!shellPanelRef.current) {
+      setActiveView('shell');
+      setPendingShellConnectionToggle(true);
+      return;
+    }
+
+    await shellPanelRef.current.toggleConnection();
+  }
+
+  async function handleShellPaste() {
+    const pasted = await shellPanelRef.current?.pasteFromClipboard();
+    if (!pasted) {
+      setError('Unable to paste into the shell.');
+    } else {
+      setError(null);
+    }
+  }
+
+  async function handleShellCopy() {
+    const copied = await shellPanelRef.current?.copySelection();
+    if (!copied) {
+      setError('Unable to copy shell text.');
+    } else {
+      setError(null);
+    }
+  }
+
+  function handleShellControl(
+    action: 'ctrl_c' | 'ctrl_d' | 'esc' | 'tab' | 'up' | 'down',
+  ) {
+    const sent = shellPanelRef.current?.sendControl(action) ?? false;
+    if (!sent) {
+      setError('Connect the shell before sending control input.');
+    } else {
+      setError(null);
+    }
+  }
+
+  useEffect(() => {
+    if (!pendingShellConnectionToggle || activeView !== 'shell' || !shellPanelRef.current) {
+      return;
+    }
+
+    setPendingShellConnectionToggle(false);
+    void shellPanelRef.current.toggleConnection();
+  }, [activeView, pendingShellConnectionToggle]);
+
   const promptDisabledReason = detail
     ? detail.workspacePathStatus === 'missing'
       ? 'Restore this workspace path on the current machine before continuing.'
@@ -453,31 +534,13 @@ export function ThreadDetailPage() {
       metaContent={metaContent}
       onRenameThread={handleRenameThread}
     >
-      <div className="-mx-4 flex h-[calc(100dvh-1rem)] max-h-[calc(100dvh-1rem)] flex-col overflow-hidden rounded-none border-y border-stone-800 bg-stone-900/85 shadow-2xl shadow-stone-950/20 sm:mx-0 sm:h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-2rem)] sm:rounded-[2rem] sm:border">
+      <div className="-mx-4 flex h-[calc(100dvh-1rem)] max-h-[calc(100dvh-1rem)] min-h-0 flex-col overflow-hidden rounded-none border-y border-stone-800 bg-stone-900/85 shadow-2xl shadow-stone-950/20 sm:mx-0 sm:h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-2rem)] sm:rounded-[2rem] sm:border">
         <header className="shrink-0 border-b border-stone-800 bg-stone-900/95 px-3 py-3 backdrop-blur sm:px-5">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <h2 className="truncate text-base font-medium text-stone-100 sm:text-xl">
-                  {detail?.thread.title ?? 'Loading thread'}
-                </h2>
-                <div className="inline-flex rounded-full border border-stone-700 bg-stone-950/70 p-0.5">
-                  {(['chat', 'shell'] as const).map((view) => (
-                    <button
-                      key={view}
-                      type="button"
-                      onClick={() => setActiveView(view)}
-                      className={`rounded-full px-3 py-1.5 text-xs font-medium uppercase tracking-[0.18em] transition ${
-                        activeView === view
-                          ? 'bg-stone-100 text-stone-950'
-                          : 'text-stone-400 hover:text-stone-100'
-                      }`}
-                    >
-                      {view}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <h2 className="truncate text-base font-medium text-stone-100 sm:text-xl">
+                {detail?.thread.title ?? 'Loading thread'}
+              </h2>
               <p className="mt-1 truncate text-xs text-stone-500">
                 {detail?.workspace.label ?? 'Resolving workspace'}
               </p>
@@ -568,7 +631,8 @@ export function ThreadDetailPage() {
                   className="min-h-0 flex-1 bg-stone-900/30"
                 />
                 <ThreadComposer
-                  busy={busy}
+                  activeView={activeView}
+                  busy={activeView === 'chat' ? busy : false}
                   settingsBusy={settingsBusy}
                   error={null}
                   model={detail.thread.model}
@@ -578,15 +642,45 @@ export function ThreadDetailPage() {
                   followTail={followTail}
                   disabled={Boolean(promptDisabledReason)}
                   disabledPlaceholder={promptDisabledReason ?? undefined}
+                  shellControlState={shellControlState}
                   canInterrupt={Boolean(detail.thread.activeTurnId)}
                   onSubmit={handlePrompt}
                   onInterrupt={handleInterrupt}
                   onToggleFollow={() => setFollowTail((current) => !current)}
                   onUpdateSettings={handleUpdateThreadSettings}
+                  onToggleView={handleToggleView}
+                  onToggleShellConnection={handleToggleShellConnection}
+                  onShellPaste={handleShellPaste}
+                  onShellCopy={handleShellCopy}
+                  onShellControl={handleShellControl}
                 />
               </>
             ) : (
-              <ThreadShellPanel threadId={detail.thread.id} />
+              <>
+                <ThreadShellPanel
+                  ref={shellPanelRef}
+                  threadId={detail.thread.id}
+                  showHeader={false}
+                  showFloatingToolbox={false}
+                  onStateChange={setShellControlState}
+                />
+                <ThreadComposer
+                  activeView={activeView}
+                  busy={false}
+                  settingsBusy={false}
+                  error={shellControlState?.error ?? null}
+                  followTail={false}
+                  shellControlState={shellControlState}
+                  canInterrupt={Boolean(shellControlState?.shellInputEnabled)}
+                  onSubmit={handlePrompt}
+                  onInterrupt={handleInterrupt}
+                  onToggleView={handleToggleView}
+                  onToggleShellConnection={handleToggleShellConnection}
+                  onShellPaste={handleShellPaste}
+                  onShellCopy={handleShellCopy}
+                  onShellControl={handleShellControl}
+                />
+              </>
             )}
           </>
         ) : (

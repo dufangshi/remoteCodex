@@ -50,6 +50,7 @@ describe('ThreadComposer', () => {
 
     render(
       <ThreadComposer
+        activeView="chat"
         model="gpt-5.4"
         reasoningEffort="high"
         collaborationMode="default"
@@ -75,6 +76,7 @@ describe('ThreadComposer', () => {
 
     render(
       <ThreadComposer
+        activeView="chat"
         model="gpt-5.4"
         reasoningEffort="medium"
         collaborationMode="default"
@@ -117,6 +119,7 @@ describe('ThreadComposer', () => {
 
     render(
       <ThreadComposer
+        activeView="chat"
         model="gpt-5.4"
         reasoningEffort="medium"
         collaborationMode="default"
