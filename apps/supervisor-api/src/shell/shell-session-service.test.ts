@@ -22,6 +22,8 @@ describe('ShellSessionService', () => {
   let service: ShellSessionService;
   let sessionNames: Set<string>;
   let sentInputs: string[];
+  let clearHistoryCalls: string[];
+  let paneSnapshot = '';
   let resizeCalls: Array<{ sessionName: string; cols: number; rows: number }>;
   let threadId = '';
 
@@ -37,6 +39,8 @@ describe('ShellSessionService', () => {
     seedDefaults(context.db);
     sessionNames = new Set<string>();
     sentInputs = [];
+    clearHistoryCalls = [];
+    paneSnapshot = '$ ';
     resizeCalls = [];
 
     const workspace = createWorkspaceRecord(context.db, {
@@ -72,9 +76,12 @@ describe('ShellSessionService', () => {
         },
         async sendInput(_sessionName: string, data: string) {
           sentInputs.push(data);
+          if (data === '\u000c') {
+            paneSnapshot = '$ ';
+          }
         },
         async capturePane() {
-          return '$ ';
+          return paneSnapshot;
         },
         async getPaneRuntimeInfo() {
           return {
@@ -97,6 +104,7 @@ describe('ShellSessionService', () => {
           sessionNames.delete(sessionName);
         },
         async clearHistory() {
+          clearHistoryCalls.push('clear');
           return;
         },
       } as any,
@@ -220,5 +228,29 @@ describe('ShellSessionService', () => {
     });
 
     expect(sentInputs).toEqual([]);
+  });
+
+  it('clears shell history and redraws the screen for the attached viewer', async () => {
+    const outputSpy = vi.fn();
+    const created = await service.createShellForThread(threadId);
+    sentInputs.length = 0;
+    clearHistoryCalls.length = 0;
+    paneSnapshot = '1\n2\n3\n$ ';
+
+    const attachment = await service.attachShell(created.shell!.id, {
+      cols: 120,
+      rows: 36,
+      onData: outputSpy,
+    });
+
+    outputSpy.mockClear();
+    await service.clearShell(created.shell!.id, attachment.viewerId);
+
+    expect(sentInputs).toContain('\u000c');
+    expect(clearHistoryCalls).toHaveLength(1);
+    expect(outputSpy).toHaveBeenCalledWith(
+      '$ ',
+      expect.objectContaining({ replace: true }),
+    );
   });
 });

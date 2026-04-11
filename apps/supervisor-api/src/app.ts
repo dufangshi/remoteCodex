@@ -230,6 +230,11 @@ export function buildApp(
                 parsed.cols,
                 parsed.rows,
               );
+              return;
+            }
+
+            if (parsed.type === 'shell.clear') {
+              await shellService.clearShell(parsed.shellId, parsed.viewerId);
             }
           } catch (error) {
             send(makeShellErrorEnvelope(parsed.shellId, error));

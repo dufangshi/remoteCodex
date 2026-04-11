@@ -25,4 +25,27 @@ describe('TmuxManager', () => {
       'rcx-019d-abcdefghi',
     );
   });
+
+  it('maps form feed to Ctrl-L when sending tmux input', async () => {
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const manager = new TmuxManager({
+      async execCommand(command, args) {
+        calls.push({ command, args });
+        return {
+          stdout: '',
+          stderr: '',
+          exitCode: 0,
+        };
+      },
+    });
+
+    await manager.sendInput('rcx-test', '\u000c');
+
+    expect(calls).toEqual([
+      {
+        command: expect.stringContaining('tmux'),
+        args: ['send-keys', '-t', 'rcx-test', 'C-l'],
+      },
+    ]);
+  });
 });

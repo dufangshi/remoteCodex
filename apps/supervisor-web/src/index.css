@@ -203,6 +203,21 @@ input {
   will-change: scroll-position;
 }
 
+.mobile-shell-selectable .xterm-viewport {
+  z-index: 3;
+  background: transparent !important;
+}
+
+.mobile-shell-selectable .xterm-screen,
+.mobile-shell-selectable .xterm-rows,
+.mobile-shell-selectable .xterm-rows > div {
+  pointer-events: none;
+}
+
+.mobile-shell-selectable .xterm-screen canvas {
+  pointer-events: none;
+}
+
 .thread-scroll-container {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;

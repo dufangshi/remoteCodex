@@ -715,26 +715,7 @@ export class ShellSessionService {
   }
 
   async sendInput(shellId: string, viewerId: string, data: string) {
-    const shell = getShellSessionRecordById(this.db, shellId);
-    if (!shell) {
-      throw new ShellServiceError('shell_not_found', 'Shell not found.');
-    }
-
-    const attachment = this.attachments.get(shellId);
-    if (!attachment) {
-      throw new ShellServiceError(
-        'viewer_not_attached',
-        'This shell is not currently attached.',
-      );
-    }
-
-    if (attachment.viewerId !== viewerId) {
-      throw new ShellServiceError(
-        'invalid_viewer',
-        'This browser session does not own the shell attachment.',
-      );
-    }
-
+    const { shell } = this.requireOwnedAttachment(shellId, viewerId);
     await this.tmuxManager.sendInput(shellSessionName(shell), data);
     updateShellSessionRecord(this.db, shellId, {
       lastActivityAt: nowIso(),
@@ -743,6 +724,26 @@ export class ShellSessionService {
       lastHeartbeatAt: nowIso(),
       activeTab: 'shell',
     });
+  }
+
+  async clearShell(shellId: string, viewerId: string) {
+    const { shell, attachment } = this.requireOwnedAttachment(shellId, viewerId);
+    const sessionName = shellSessionName(shell);
+
+    await this.tmuxManager.sendInput(sessionName, '\u000c');
+    await waitForShellTick(60);
+    await this.tmuxManager.clearHistory(sessionName);
+    await waitForShellTick(60);
+
+    updateShellSessionRecord(this.db, shellId, {
+      lastActivityAt: nowIso(),
+    });
+    updateViewerSessionRecord(this.db, viewerId, {
+      lastHeartbeatAt: nowIso(),
+      activeTab: 'shell',
+    });
+
+    await this.pushSnapshot(shell, attachment);
   }
 
   async resizeShell(
@@ -870,44 +871,76 @@ export class ShellSessionService {
         await this.handleMissingShell(shell, attachment.viewerId);
         return;
       }
-
-      const snapshot = await this.tmuxManager.capturePane(shellSessionName(shell));
-      const runtime = await this.tmuxManager.getPaneRuntimeInfo(
-        shellSessionName(shell),
-      );
-      if (snapshot === attachment.lastSnapshot) {
-        return;
-      }
-
-      attachment.lastSnapshot = snapshot;
-      updateShellSessionRecord(this.db, shell.id, {
-        lastActivityAt: nowIso(),
-      });
-      updateViewerSessionRecord(this.db, attachment.viewerId, {
-        lastHeartbeatAt: nowIso(),
-        activeTab: 'shell',
-      });
-      attachment.onData(
-        snapshot,
-        shellOutputOptions({
-          replace: true,
-          cursorX: runtime.cursorX,
-          cursorY: runtime.cursorY,
-          paneHeight: runtime.paneHeight,
-          cwdBaseName: basenameFromPath(runtime.currentPath || shell.cwd),
-          envPrefix:
-            (await resolvePaneEnvironmentPrefix(
-              this.tmuxManager,
-              shellSessionName(shell),
-              runtime.panePid,
-            )) ??
-            undefined,
-          isCommandRunning: !isInteractiveShellCommand(runtime.currentCommand),
-        }),
-      );
+      await this.pushSnapshot(shell, attachment);
     } finally {
       attachment.polling = false;
     }
+  }
+
+  private requireOwnedAttachment(shellId: string, viewerId: string) {
+    const shell = getShellSessionRecordById(this.db, shellId);
+    if (!shell) {
+      throw new ShellServiceError('shell_not_found', 'Shell not found.');
+    }
+
+    const attachment = this.attachments.get(shellId);
+    if (!attachment) {
+      throw new ShellServiceError(
+        'viewer_not_attached',
+        'This shell is not currently attached.',
+      );
+    }
+
+    if (attachment.viewerId !== viewerId) {
+      throw new ShellServiceError(
+        'invalid_viewer',
+        'This browser session does not own the shell attachment.',
+      );
+    }
+
+    return { shell, attachment };
+  }
+
+  private async pushSnapshot(
+    shell: {
+      id: string;
+      cwd: string;
+      tmuxSessionName: string | null;
+    },
+    attachment: ShellAttachment,
+  ) {
+    const sessionName = shellSessionName(shell);
+    const snapshot = await this.tmuxManager.capturePane(sessionName);
+    const runtime = await this.tmuxManager.getPaneRuntimeInfo(sessionName);
+    if (snapshot === attachment.lastSnapshot) {
+      return;
+    }
+
+    attachment.lastSnapshot = snapshot;
+    updateShellSessionRecord(this.db, shell.id, {
+      lastActivityAt: nowIso(),
+    });
+    updateViewerSessionRecord(this.db, attachment.viewerId, {
+      lastHeartbeatAt: nowIso(),
+      activeTab: 'shell',
+    });
+    attachment.onData(
+      snapshot,
+      shellOutputOptions({
+        replace: true,
+        cursorX: runtime.cursorX,
+        cursorY: runtime.cursorY,
+        paneHeight: runtime.paneHeight,
+        cwdBaseName: basenameFromPath(runtime.currentPath || shell.cwd),
+        envPrefix:
+          (await resolvePaneEnvironmentPrefix(
+            this.tmuxManager,
+            sessionName,
+            runtime.panePid,
+          )) ?? undefined,
+        isCommandRunning: !isInteractiveShellCommand(runtime.currentCommand),
+      }),
+    );
   }
 
   private async handleMissingShell(

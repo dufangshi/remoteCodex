@@ -52,12 +52,21 @@ export interface ThreadShellPanelHandle {
   sendInput: (data: string) => boolean;
   sendCommand: (command: string) => boolean;
   sendControl: (
-    action: 'ctrl_c' | 'ctrl_d' | 'esc' | 'tab' | 'up' | 'down',
+    action: 'ctrl_c' | 'ctrl_d' | 'esc' | 'tab' | 'up' | 'down' | 'clear',
   ) => boolean;
   pasteFromClipboard: () => Promise<boolean>;
   copySelection: () => Promise<boolean>;
   terminate: () => Promise<void>;
   focus: () => void;
+}
+
+interface TouchMomentumState {
+  rafId: number | null;
+  startY: number;
+  lastY: number;
+  lastTime: number;
+  velocity: number;
+  dragging: boolean;
 }
 
 function statusLabel(status: ShellStatusDto) {
@@ -282,6 +291,14 @@ export const ThreadShellPanel = forwardRef<
   const shellIdRef = useRef<string | null>(null);
   const shellStateRef = useRef<ThreadShellStateDto | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const touchMomentumRef = useRef<TouchMomentumState>({
+    rafId: null,
+    startY: 0,
+    lastY: 0,
+    lastTime: 0,
+    velocity: 0,
+    dragging: false,
+  });
   const feedbackTimerRef = useRef<number | null>(null);
   const [terminalHostNode, setTerminalHostNode] = useState<HTMLDivElement | null>(null);
   const [shellState, setShellState] = useState<ThreadShellStateDto | null>(null);
@@ -326,6 +343,23 @@ export const ThreadShellPanel = forwardRef<
       shellId,
       viewerId,
       data,
+    });
+    terminalRef.current?.focus();
+    return true;
+  }, []);
+
+  const sendShellClear = useCallback(() => {
+    const socket = socketRef.current;
+    const shellId = shellIdRef.current;
+    const viewerId = viewerIdRef.current;
+    if (!socket || !shellId || !viewerId) {
+      return false;
+    }
+
+    socket.send({
+      type: 'shell.clear',
+      shellId,
+      viewerId,
     });
     terminalRef.current?.focus();
     return true;
@@ -533,6 +567,111 @@ export const ThreadShellPanel = forwardRef<
       fitAddonRef.current = null;
     };
   }, [isMobileShell, sendShellInput, terminalHostNode]);
+
+  useEffect(() => {
+    if (!terminalHostNode || !isMobileShell) {
+      return;
+    }
+
+    const viewport = terminalHostNode.querySelector<HTMLDivElement>('.xterm-viewport');
+    if (!viewport) {
+      return;
+    }
+
+    const momentum = touchMomentumRef.current;
+
+    const stopMomentum = () => {
+      if (momentum.rafId !== null) {
+        window.cancelAnimationFrame(momentum.rafId);
+        momentum.rafId = null;
+      }
+      momentum.velocity = 0;
+    };
+
+    const stepMomentum = () => {
+      momentum.velocity *= 0.94;
+      if (Math.abs(momentum.velocity) < 0.02) {
+        momentum.rafId = null;
+        return;
+      }
+
+      viewport.scrollTop -= momentum.velocity * 16;
+      momentum.rafId = window.requestAnimationFrame(stepMomentum);
+    };
+
+    const handleTouchStart = (event: TouchEvent) => {
+      if (event.touches.length !== 1) {
+        return;
+      }
+
+      stopMomentum();
+      const touchY = event.touches[0]?.clientY ?? 0;
+      const now = performance.now();
+      momentum.startY = touchY;
+      momentum.lastY = touchY;
+      momentum.lastTime = now;
+      momentum.dragging = false;
+    };
+
+    const handleTouchMove = (event: TouchEvent) => {
+      if (event.touches.length !== 1) {
+        return;
+      }
+
+      const touchY = event.touches[0]?.clientY ?? 0;
+      const now = performance.now();
+      const deltaY = touchY - momentum.lastY;
+      const deltaTime = Math.max(1, now - momentum.lastTime);
+
+      if (
+        !momentum.dragging &&
+        Math.abs(touchY - momentum.startY) < 4
+      ) {
+        momentum.lastY = touchY;
+        momentum.lastTime = now;
+        return;
+      }
+
+      momentum.dragging = true;
+      momentum.velocity = deltaY / deltaTime;
+      viewport.scrollTop -= deltaY;
+      momentum.lastY = touchY;
+      momentum.lastTime = now;
+      event.preventDefault();
+    };
+
+    const handleTouchEnd = () => {
+      if (!momentum.dragging) {
+        return;
+      }
+
+      momentum.dragging = false;
+      if (Math.abs(momentum.velocity) >= 0.02) {
+        momentum.rafId = window.requestAnimationFrame(stepMomentum);
+      }
+    };
+
+    terminalHostNode.addEventListener('touchstart', handleTouchStart, {
+      passive: true,
+    });
+    terminalHostNode.addEventListener('touchmove', handleTouchMove, {
+      passive: false,
+    });
+    terminalHostNode.addEventListener('touchend', handleTouchEnd, {
+      passive: true,
+    });
+    terminalHostNode.addEventListener('touchcancel', handleTouchEnd, {
+      passive: true,
+    });
+
+    return () => {
+      stopMomentum();
+      terminalHostNode.removeEventListener('touchstart', handleTouchStart);
+      terminalHostNode.removeEventListener('touchmove', handleTouchMove);
+      terminalHostNode.removeEventListener('touchend', handleTouchEnd);
+      terminalHostNode.removeEventListener('touchcancel', handleTouchEnd);
+    };
+  }, [isMobileShell, terminalHostNode]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
@@ -978,6 +1117,9 @@ export const ThreadShellPanel = forwardRef<
         return sendShellInput(normalized);
       },
       sendControl(action) {
+        if (action === 'clear') {
+          return sendShellClear();
+        }
         return sendShellInput(shellControlSequence(action));
       },
       async pasteFromClipboard() {
@@ -998,6 +1140,7 @@ export const ThreadShellPanel = forwardRef<
       handleCopySelection,
       handlePasteFromClipboard,
       handleTerminateShell,
+      sendShellClear,
       sendShellInput,
     ],
   );
@@ -1124,6 +1267,20 @@ export const ThreadShellPanel = forwardRef<
                               Copy
                             </span>
                           </span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!shellInputEnabled}
+                          onClick={() => {
+                            if (sendShellClear()) {
+                              setTransientToolboxFeedback('done', 'Cleared');
+                            } else {
+                              setTransientToolboxFeedback('failed', 'Connect the shell first');
+                            }
+                          }}
+                          className="disabled:opacity-45"
+                        >
+                          <ControlIcon label="CLEAR" tone="sky" />
                         </button>
                         <button
                           type="button"

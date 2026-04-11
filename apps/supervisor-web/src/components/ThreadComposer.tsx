@@ -37,7 +37,7 @@ interface ThreadComposerProps {
   onShellPaste?: () => Promise<void> | void;
   onShellCopy?: () => Promise<void> | void;
   onShellControl?: (
-    action: 'ctrl_c' | 'ctrl_d' | 'esc' | 'tab' | 'up' | 'down',
+    action: 'ctrl_c' | 'ctrl_d' | 'esc' | 'tab' | 'up' | 'down' | 'clear',
   ) => Promise<void> | void;
   canInterrupt?: boolean;
 }
@@ -228,11 +228,11 @@ export function ThreadComposer({
   }, [openMenu]);
 
   async function submitPrompt() {
-    if (!prompt.trim()) {
+    if (!isShellView && !prompt.trim()) {
       return;
     }
 
-    await onSubmit(prompt.trim());
+    await onSubmit(isShellView ? prompt : prompt.trim());
     setPrompt('');
   }
 
@@ -496,8 +496,10 @@ export function ThreadComposer({
               <div className="relative">
                 <button
                   type="button"
+                  aria-label={openMenu === 'shellTools' ? 'Close shell tools' : 'Open shell tools'}
                   aria-haspopup="menu"
                   aria-expanded={openMenu === 'shellTools'}
+                  title={openMenu === 'shellTools' ? 'Close shell tools' : 'Open shell tools'}
                   onClick={() =>
                     setOpenMenu((current) => (current === 'shellTools' ? null : 'shellTools'))
                   }
@@ -506,7 +508,7 @@ export function ThreadComposer({
                   <WrenchScrewdriverIcon />
                 </button>
                 {openMenu === 'shellTools' && (
-                  <div className="absolute bottom-full left-0 mb-2 w-48 rounded-[1rem] border border-stone-700/90 bg-stone-950/96 p-2 shadow-2xl shadow-stone-950/40">
+                  <div className="absolute bottom-full right-0 mb-2 w-48 max-w-[calc(100vw-1rem)] rounded-[1rem] border border-stone-700/90 bg-stone-950/96 p-2 shadow-2xl shadow-stone-950/40">
                     <div className="grid grid-cols-2 gap-2">
                       <button
                         type="button"
@@ -531,6 +533,14 @@ export function ThreadComposer({
                             Copy
                           </span>
                         </span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!shellControlState?.shellInputEnabled}
+                        onClick={() => void onShellControl?.('clear')}
+                        className="disabled:cursor-not-allowed disabled:opacity-45"
+                      >
+                        <ToolPill label="CLEAR" tone="sky" />
                       </button>
                       <button
                         type="button"

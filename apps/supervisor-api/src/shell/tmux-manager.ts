@@ -426,6 +426,12 @@ function tokenizeTmuxInput(data: string) {
       continue;
     }
 
+    if (char === '\u000c') {
+      flushLiteral();
+      tokens.push({ type: 'key', value: 'C-l' });
+      continue;
+    }
+
     if (char === '\u0002') {
       flushLiteral();
       tokens.push({ type: 'key', value: 'C-b' });

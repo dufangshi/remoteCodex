@@ -349,4 +349,9 @@ export type SupervisorSocketClientEnvelope =
       viewerId: string;
       cols: number;
       rows: number;
+    }
+  | {
+      type: 'shell.clear';
+      shellId: string;
+      viewerId: string;
     };

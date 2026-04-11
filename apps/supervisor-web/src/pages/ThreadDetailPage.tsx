@@ -534,7 +534,7 @@ export function ThreadDetailPage() {
   }
 
   function handleShellControl(
-    action: 'ctrl_c' | 'ctrl_d' | 'esc' | 'tab' | 'up' | 'down',
+    action: 'ctrl_c' | 'ctrl_d' | 'esc' | 'tab' | 'up' | 'down' | 'clear',
   ) {
     const sent = shellPanelRef.current?.sendControl(action) ?? false;
     if (!sent) {

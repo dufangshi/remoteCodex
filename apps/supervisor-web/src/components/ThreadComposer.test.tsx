@@ -204,4 +204,34 @@ describe('ThreadComposer', () => {
     expect(screen.getByText('(base) trading-lab')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Send Ctrl-C' })).toBeDisabled();
   });
+
+  it('submits an empty shell prompt so Send can act like Enter', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <ThreadComposer
+        activeView="shell"
+        shellControlState={{
+          status: 'attached',
+          connectionButtonDisabled: false,
+          connectionButtonLabel: 'Disconnect shell',
+          shellInputEnabled: true,
+          isCommandRunning: false,
+          promptLabel: '(base) trading-lab',
+          isMobileShell: true,
+          hasShell: true,
+          busy: false,
+          loading: false,
+          error: null,
+        }}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send Shell Input' }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith('');
+    });
+  });
 });
