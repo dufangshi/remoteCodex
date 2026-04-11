@@ -561,6 +561,7 @@ function sliceTurnsForDetail<T extends { id: string }>(
 
 export class ThreadService {
   private readonly pendingRequests = new Map<string, Map<string, PendingThreadRequestRecord>>();
+  private readonly dismissedPlanDecisionTurns = new Map<string, string>();
 
   constructor(
     private readonly db: DatabaseClient,
@@ -1142,6 +1143,7 @@ export class ThreadService {
     }
 
     this.pendingRequests.delete(localThreadId);
+    this.dismissedPlanDecisionTurns.delete(localThreadId);
     deleteViewerSessionsByThreadId(this.db, localThreadId);
     deleteNotificationsByThreadId(this.db, localThreadId);
     deleteThreadRecord(this.db, localThreadId);
@@ -1186,6 +1188,7 @@ export class ThreadService {
       }
 
       if (selectedAnswer === 'implement') {
+        this.dismissedPlanDecisionTurns.delete(localThreadId);
         if (record.source === 'local_codex_import' && record.codexThreadId) {
           const loadedIds = new Set(await this.codexManager.listLoadedThreads().catch(() => []));
           if (!loadedIds.has(record.codexThreadId)) {
@@ -1201,6 +1204,8 @@ export class ThreadService {
           prompt: IMPLEMENT_APPROVED_PLAN_PROMPT,
           collaborationMode: 'default'
         });
+      } else if (pending.request.turnId) {
+        this.dismissedPlanDecisionTurns.set(localThreadId, pending.request.turnId);
       }
     }
 
@@ -1264,6 +1269,7 @@ export class ThreadService {
         }
 
         this.clearPendingPlanDecisionRequests(record.id, true);
+        this.dismissedPlanDecisionTurns.delete(record.id);
 
         updateThreadRecord(this.db, record.id, {
           codexTurnId: params.turn.id,
@@ -1340,6 +1346,8 @@ export class ThreadService {
           params.turn.items.some((item) => item.type === 'plan')
         ) {
           this.createPendingPlanDecisionRequest(record.id, params.turn.id, true);
+        } else {
+          this.dismissedPlanDecisionTurns.delete(record.id);
         }
 
         this.emitThreadEvent(
@@ -1370,6 +1378,7 @@ export class ThreadService {
           lastError: params.error.message ?? 'Turn failed unexpectedly.'
         });
         this.pendingRequests.delete(record.id);
+        this.dismissedPlanDecisionTurns.delete(record.id);
 
         this.emitThreadEvent('thread.turn.failed', record.id, {
           turnId: params.turnId,
@@ -1512,6 +1521,10 @@ export class ThreadService {
     turnId: string,
     emitEvents: boolean
   ) {
+    if (this.dismissedPlanDecisionTurns.get(localThreadId) === turnId) {
+      return;
+    }
+
     this.clearPendingPlanDecisionRequests(localThreadId, false);
 
     const request: ThreadActionRequestDto = {
@@ -1606,6 +1619,7 @@ export class ThreadService {
 
     if (!shouldHavePlanDecision || !latestTurn) {
       this.clearPendingPlanDecisionRequests(localThreadId, false);
+      this.dismissedPlanDecisionTurns.delete(localThreadId);
       return;
     }
 

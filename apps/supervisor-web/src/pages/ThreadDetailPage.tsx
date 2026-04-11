@@ -107,6 +107,7 @@ export function ThreadDetailPage() {
   const [respondingRequestId, setRespondingRequestId] = useState<string | null>(null);
   const [metaSessionCopyState, setMetaSessionCopyState] =
     useState<'idle' | 'copied' | 'failed'>('idle');
+  const [ephemeralUserNote, setEphemeralUserNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const flushBufferedLiveOutput = useCallback(() => {
@@ -151,6 +152,7 @@ export function ThreadDetailPage() {
     });
     setLoadingEarlier(false);
     setMetaSessionCopyState('idle');
+    setEphemeralUserNote(null);
   }, [id]);
 
   useEffect(() => {
@@ -328,6 +330,7 @@ export function ThreadDetailPage() {
         if (event.type === 'thread.turn.started') {
           clearBufferedLiveOutput();
           setLiveOutput('');
+          setEphemeralUserNote(null);
         }
         if (
           event.type === 'thread.turn.completed' ||
@@ -336,6 +339,10 @@ export function ThreadDetailPage() {
           clearBufferedLiveOutput();
           setLiveOutput('');
           setLivePlan(null);
+          setEphemeralUserNote(null);
+        }
+        if (event.type === 'thread.request.created') {
+          setEphemeralUserNote(null);
         }
       }
 
@@ -418,6 +425,7 @@ export function ThreadDetailPage() {
     setError(null);
     clearBufferedLiveOutput();
     setLiveOutput('');
+    setEphemeralUserNote(null);
     setScrollRequestKey((current) => current + 1);
 
     try {
@@ -662,6 +670,7 @@ export function ThreadDetailPage() {
     setError(null);
 
     try {
+      const selectedAnswer = Object.values(input.answers)[0]?.answers[0]?.trim().toLowerCase();
       const updated = await respondToThreadRequest(id, requestId, input);
       setDetail((current) =>
         current
@@ -672,6 +681,11 @@ export function ThreadDetailPage() {
           : updated,
       );
       setLivePlan(null);
+      setEphemeralUserNote(
+        selectedAnswer === 'stay in plan mode'
+          ? 'User kept plan mode active and will provide further details.'
+          : null,
+      );
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -967,6 +981,7 @@ export function ThreadDetailPage() {
                   onTailVisibilityChange={setFollowTail}
                   loadingEarlier={loadingEarlier}
                   onLoadEarlier={handleLoadEarlierTurns}
+                  ephemeralUserNote={ephemeralUserNote}
                 />
                 {useFloatingMobileComposer ? (
                   <div

@@ -483,8 +483,8 @@ describe('ThreadTimeline', () => {
     const { rerender } = render(<ThreadTimeline turns={turns} liveOutput="" />);
 
     const scrollContainer = screen.getByTestId('thread-scroll-container');
-    const lastTurn = screen.getByText('Turn 1').closest('article');
-    expect(lastTurn).toBeTruthy();
+    const tailSentinel = scrollContainer.lastElementChild as HTMLElement | null;
+    expect(tailSentinel).toBeTruthy();
     let scrollTop = 560;
     Object.defineProperty(scrollContainer, 'scrollHeight', {
       configurable: true,
@@ -505,9 +505,9 @@ describe('ThreadTimeline', () => {
       configurable: true,
       value: () => mockRect({ top: 0, height: 400 }),
     });
-    Object.defineProperty(lastTurn!, 'getBoundingClientRect', {
+    Object.defineProperty(tailSentinel!, 'getBoundingClientRect', {
       configurable: true,
-      value: () => mockRect({ top: 260, height: 120 }),
+      value: () => mockRect({ top: 390, height: 1 }),
     });
 
     fireEvent.scroll(scrollContainer);
@@ -517,9 +517,9 @@ describe('ThreadTimeline', () => {
     expect(scrollTop).toBe(1000);
 
     scrollTop = 100;
-    Object.defineProperty(lastTurn!, 'getBoundingClientRect', {
+    Object.defineProperty(tailSentinel!, 'getBoundingClientRect', {
       configurable: true,
-      value: () => mockRect({ top: 460, height: 120 }),
+      value: () => mockRect({ top: 430, height: 1 }),
     });
     fireEvent.scroll(scrollContainer);
 

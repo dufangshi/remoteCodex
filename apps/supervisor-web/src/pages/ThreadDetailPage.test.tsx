@@ -1266,6 +1266,180 @@ describe('ThreadDetailPage', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('replaces a dismissed plan decision with a compact user note when staying in plan mode', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+
+        if (url.includes('/api/codex/status')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              state: 'ready',
+              transport: 'stdio',
+              lastStartedAt: new Date().toISOString(),
+              lastError: null,
+              restartCount: 0,
+            }),
+          });
+        }
+
+        if (url.includes('/api/codex/models')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => modelOptionsResponse,
+          });
+        }
+
+        if (
+          url.endsWith('/api/threads/thread-1/requests/plan-decision-1/respond') &&
+          init?.method === 'POST'
+        ) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              thread: {
+                id: 'thread-1',
+                workspaceId: 'workspace-1',
+                codexThreadId: 'codex-1',
+                source: 'supervisor',
+                title: 'Demo Thread',
+                model: 'gpt-5',
+                reasoningEffort: 'medium',
+                collaborationMode: 'plan',
+                approvalMode: 'yolo',
+                status: 'idle',
+                summaryText: 'Preview',
+                lastError: null,
+                activeTurnId: null,
+                isLoaded: true,
+                isPinned: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                lastTurnStartedAt: new Date().toISOString(),
+                lastTurnCompletedAt: new Date().toISOString(),
+              },
+              workspace: {
+                id: 'workspace-1',
+                hostId: 'host-1',
+                label: 'Demo Workspace',
+                absPath: '/tmp/demo',
+                isFavorite: false,
+                createdAt: new Date().toISOString(),
+                lastOpenedAt: null,
+              },
+              workspacePathStatus: 'present',
+              pendingRequests: [],
+              turns: [],
+            }),
+          });
+        }
+
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              thread: {
+                id: 'thread-1',
+                workspaceId: 'workspace-1',
+                codexThreadId: 'codex-1',
+                source: 'supervisor',
+                title: 'Demo Thread',
+                model: 'gpt-5',
+                reasoningEffort: 'medium',
+                collaborationMode: 'plan',
+                approvalMode: 'yolo',
+                status: 'idle',
+                summaryText: 'Preview',
+                lastError: null,
+                activeTurnId: null,
+                isLoaded: true,
+                isPinned: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                lastTurnStartedAt: new Date().toISOString(),
+                lastTurnCompletedAt: new Date().toISOString(),
+              },
+              workspace: {
+                id: 'workspace-1',
+                hostId: 'host-1',
+                label: 'Demo Workspace',
+                absPath: '/tmp/demo',
+                isFavorite: false,
+                createdAt: new Date().toISOString(),
+                lastOpenedAt: null,
+              },
+              workspacePathStatus: 'present',
+              pendingRequests: [
+                {
+                  id: 'plan-decision-1',
+                  kind: 'planDecision',
+                  title: 'Plan ready',
+                  description: 'Review the plan and choose the next step.',
+                  turnId: 'turn-1',
+                  itemId: null,
+                  createdAt: new Date().toISOString(),
+                  questions: [
+                    {
+                      id: 'plan-decision',
+                      header: 'Next step',
+                      question: 'Choose whether to implement the plan now.',
+                      isOther: false,
+                      isSecret: false,
+                      options: [
+                        {
+                          label: 'Implement',
+                          description: 'Exit plan mode and continue immediately.',
+                        },
+                        {
+                          label: 'Stay in plan mode',
+                          description: 'Keep refining the plan.',
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+              turns: [],
+            }),
+          });
+        }
+
+        if (url.endsWith('/api/threads')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => [],
+          });
+        }
+
+        throw new Error(`Unhandled fetch request: ${url}`);
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Plan ready')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stay in plan mode' }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('User kept plan mode active and will provide further details.'),
+      ).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText('Plan ready')).not.toBeInTheDocument();
+  });
+
   it('keeps the latest pending request card when older detail fetches resolve later', async () => {
     let detailCallCount = 0;
     type DeferredResponse = {

@@ -50,6 +50,7 @@ interface ThreadTimelineProps {
   onTailVisibilityChange?: (isVisible: boolean) => void;
   loadingEarlier?: boolean;
   onLoadEarlier?: () => void;
+  ephemeralUserNote?: string | null;
 }
 
 interface ExpandedTextState {
@@ -793,6 +794,7 @@ function PendingRequestCard({
 }) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [customAnswers, setCustomAnswers] = useState<Record<string, string>>({});
+  const [selectedPlanDecision, setSelectedPlanDecision] = useState<string | null>(null);
   const primaryQuestion = request.questions[0] ?? null;
   const OTHER_SENTINEL = '__other__';
 
@@ -801,6 +803,7 @@ function PendingRequestCard({
       return;
     }
 
+    setSelectedPlanDecision(answer);
     void onRespond?.(request.id, {
       answers: {
         [primaryQuestion.id]: {
@@ -857,7 +860,11 @@ function PendingRequestCard({
                     } disabled:cursor-not-allowed disabled:opacity-60`}
                     title={option.description}
                   >
-                    {busy && index === 0 ? 'Starting...' : option.label}
+                    {busy && selectedPlanDecision === option.label
+                      ? option.label === 'Implement'
+                        ? 'Starting...'
+                        : 'Saving...'
+                      : option.label}
                   </button>
                 ))}
               </div>
@@ -1078,11 +1085,12 @@ export function ThreadTimeline({
   onTailVisibilityChange,
   loadingEarlier = false,
   onLoadEarlier,
+  ephemeralUserNote = null,
 }: ThreadTimelineProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const lastHandledScrollRequestKeyRef = useRef(scrollRequestKey);
   const previousBottomSpacerRef = useRef(bottomSpacer);
-  const lastTurnElementRef = useRef<HTMLElement | null>(null);
+  const tailSentinelRef = useRef<HTMLDivElement | null>(null);
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_TURNS);
   const [loadMoreClicks, setLoadMoreClicks] = useState(0);
   const [expandedText, setExpandedText] = useState<ExpandedTextState | null>(null);
@@ -1107,14 +1115,14 @@ export function ThreadTimeline({
 
   const recomputeTailVisibility = useCallback(() => {
     const container = scrollContainerRef.current;
-    const lastTurnElement = lastTurnElementRef.current;
+    const tailSentinel = tailSentinelRef.current;
     if (!container) {
       return;
     }
 
     setIsTailVisible(
-      lastTurnElement
-        ? isElementVisible(container, lastTurnElement)
+      tailSentinel
+        ? isElementVisible(container, tailSentinel)
         : isNearBottom(container),
     );
   }, []);
@@ -1135,7 +1143,16 @@ export function ThreadTimeline({
 
   useEffect(() => {
     recomputeTailVisibility();
-  }, [recomputeTailVisibility, turns.length, visibleCount]);
+  }, [
+    bottomSpacer,
+    ephemeralUserNote,
+    liveOutput,
+    livePlan,
+    pendingRequests.length,
+    recomputeTailVisibility,
+    turns.length,
+    visibleCount,
+  ]);
 
   useEffect(() => {
     const shouldForceScroll =
@@ -1285,13 +1302,7 @@ export function ThreadTimeline({
                   onToggleCollapse={handleToggleCollapse}
                   onOpenExpandedText={handleOpenExpandedText}
                   scrollRootRef={scrollContainerRef}
-                  articleRef={
-                    visibleIndex === visibleTurns.length - 1
-                      ? (node) => {
-                          lastTurnElementRef.current = node;
-                        }
-                      : undefined
-                  }
+                  articleRef={undefined}
                 />
               ))}
             </div>
@@ -1337,6 +1348,19 @@ export function ThreadTimeline({
             </div>
           )}
 
+          {ephemeralUserNote && (
+            <div className="border-t border-stone-800/80 px-2.5 py-2.5 sm:px-6">
+              <CompactMessageItem
+                item={{
+                  id: 'ephemeral-plan-decision-note',
+                  kind: 'userMessage',
+                  text: ephemeralUserNote,
+                }}
+                scrollRootRef={scrollContainerRef}
+              />
+            </div>
+          )}
+
           {liveOutput && !liveOutputAttachedToTurn && (
             <div className="border-t border-stone-800/80 px-2.5 py-2.5 sm:px-6">
               <CompactMessageItem
@@ -1350,6 +1374,12 @@ export function ThreadTimeline({
               />
             </div>
           )}
+
+          <div
+            ref={tailSentinelRef}
+            aria-hidden="true"
+            className="h-px w-full"
+          />
         </div>
       </section>
 
