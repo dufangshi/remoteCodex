@@ -193,6 +193,16 @@ input {
   touch-action: pan-y !important;
 }
 
+.mobile-shell-selectable .xterm-viewport,
+.xterm .xterm-viewport {
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  will-change: scroll-position;
+}
+
 .thread-scroll-container {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;

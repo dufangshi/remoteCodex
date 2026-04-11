@@ -622,33 +622,10 @@ export class ShellSessionService {
       options.rows,
     );
 
-    let initialSnapshot = await this.tmuxManager.capturePane(shellSessionName(shell));
-    let initialRuntime = await this.tmuxManager.getPaneRuntimeInfo(
+    const initialSnapshot = await this.tmuxManager.capturePane(shellSessionName(shell));
+    const initialRuntime = await this.tmuxManager.getPaneRuntimeInfo(
       shellSessionName(shell),
     );
-    const shouldNormalizePromptOnAttach = isInteractiveShellCommand(
-      initialRuntime.currentCommand,
-    );
-
-    if (shouldNormalizePromptOnAttach) {
-      try {
-        await this.tmuxManager.sendInput(
-          shellSessionName(shell),
-          await buildShellPromptInitCommand(initialRuntime.currentCommand, {
-            clearScreen: true,
-          }),
-        );
-        await waitForShellTick(120);
-        await this.tmuxManager.clearHistory(shellSessionName(shell));
-        await waitForShellTick(80);
-        initialSnapshot = await this.tmuxManager.capturePane(shellSessionName(shell));
-        initialRuntime = await this.tmuxManager.getPaneRuntimeInfo(
-          shellSessionName(shell),
-        );
-      } catch {
-        // Keep the existing pane snapshot if prompt normalization fails.
-      }
-    }
     const initialCwdBaseName = basenameFromPath(initialRuntime.currentPath || shell.cwd);
     const initialEnvPrefix = await resolvePaneEnvironmentPrefix(
       this.tmuxManager,

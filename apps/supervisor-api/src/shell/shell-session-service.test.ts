@@ -208,4 +208,17 @@ describe('ShellSessionService', () => {
       }),
     );
   });
+
+  it('does not clear shell history when a viewer reattaches', async () => {
+    const created = await service.createShellForThread(threadId);
+    sentInputs.length = 0;
+
+    await service.attachShell(created.shell!.id, {
+      cols: 120,
+      rows: 36,
+      onData: () => {},
+    });
+
+    expect(sentInputs).toEqual([]);
+  });
 });
