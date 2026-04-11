@@ -43,6 +43,7 @@ interface ThreadTimelineProps {
   liveOutput: string;
   followTail?: boolean;
   scrollRequestKey?: number;
+  bottomSpacer?: number;
   className?: string;
 }
 
@@ -947,11 +948,13 @@ export function ThreadTimeline({
   liveOutput,
   followTail = false,
   scrollRequestKey = 0,
+  bottomSpacer = 0,
   className = '',
 }: ThreadTimelineProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const lastHandledScrollRequestKeyRef = useRef(scrollRequestKey);
   const previousFollowTailRef = useRef(followTail);
+  const previousBottomSpacerRef = useRef(bottomSpacer);
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_TURNS);
   const [loadMoreClicks, setLoadMoreClicks] = useState(0);
   const [expandedText, setExpandedText] = useState<ExpandedTextState | null>(null);
@@ -1029,6 +1032,7 @@ export function ThreadTimeline({
       window.cancelAnimationFrame(frame);
     };
   }, [
+    bottomSpacer,
     followTail,
     isPinnedToBottom,
     liveOutput,
@@ -1037,6 +1041,32 @@ export function ThreadTimeline({
     scrollRequestKey,
     turns,
   ]);
+
+  useEffect(() => {
+    if (!followTail) {
+      previousBottomSpacerRef.current = bottomSpacer;
+      return;
+    }
+
+    if (bottomSpacer === previousBottomSpacerRef.current) {
+      return;
+    }
+
+    previousBottomSpacerRef.current = bottomSpacer;
+    const frame = window.requestAnimationFrame(() => {
+      const container = scrollContainerRef.current;
+      if (!container) {
+        return;
+      }
+
+      container.scrollTop = container.scrollHeight;
+      setIsPinnedToBottom(true);
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [bottomSpacer, followTail]);
 
   const startIndex = Math.max(0, turns.length - visibleCount);
   const visibleTurns = turns.slice(startIndex);
@@ -1055,7 +1085,8 @@ export function ThreadTimeline({
           ref={scrollContainerRef}
           data-testid="thread-scroll-container"
           onScroll={handleScroll}
-          className="min-h-0 flex-1 overflow-y-auto"
+          className="thread-scroll-container min-h-0 flex-1 overflow-y-auto overscroll-contain"
+          style={bottomSpacer > 0 ? { paddingBottom: bottomSpacer } : undefined}
         >
           {turns.length > 0 && (
             <div className="px-2.5 pb-1 pt-2 sm:px-6 sm:pb-1.5 sm:pt-3">

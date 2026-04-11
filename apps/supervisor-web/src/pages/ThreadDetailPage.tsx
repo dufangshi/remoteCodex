@@ -39,6 +39,7 @@ export function ThreadDetailPage() {
   const liveOutputBufferRef = useRef('');
   const liveOutputFrameRef = useRef<number | null>(null);
   const shellPanelRef = useRef<ThreadShellPanelHandle | null>(null);
+  const composerHostRef = useRef<HTMLDivElement | null>(null);
   const [detail, setDetail] = useState<ThreadDetailDto | null>(null);
   const [threads, setThreads] = useState<ThreadDto[]>([]);
   const [modelOptions, setModelOptions] = useState<ModelOptionDto[]>([]);
@@ -54,6 +55,8 @@ export function ThreadDetailPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [activeView, setActiveView] = useState<'chat' | 'shell'>('chat');
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [mobileComposerHeight, setMobileComposerHeight] = useState(0);
   const [shellControlState, setShellControlState] =
     useState<ThreadShellControlState | null>(null);
   const [pendingShellConnectionToggle, setPendingShellConnectionToggle] =
@@ -95,6 +98,95 @@ export function ThreadDetailPage() {
       liveOutputFrameRef.current = null;
     }
   }, []);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return;
+    }
+
+    const { documentElement, body } = document;
+    documentElement.classList.add('thread-detail-scroll-locked');
+    body.classList.add('thread-detail-scroll-locked');
+
+    return () => {
+      documentElement.classList.remove('thread-detail-scroll-locked');
+      body.classList.remove('thread-detail-scroll-locked');
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia('(max-width: 639px)');
+    const update = () => setIsMobileViewport(mediaQuery.matches);
+    update();
+    mediaQuery.addEventListener('change', update);
+    return () => {
+      mediaQuery.removeEventListener('change', update);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const updateKeyboardInset = () => {
+      const viewport = window.visualViewport;
+      const keyboardInset = viewport
+        ? Math.max(
+            0,
+            Math.round(window.innerHeight - viewport.height - viewport.offsetTop),
+          )
+        : 0;
+      document.documentElement.style.setProperty(
+        '--thread-detail-keyboard-inset',
+        `${keyboardInset}px`,
+      );
+    };
+
+    updateKeyboardInset();
+    window.visualViewport?.addEventListener('resize', updateKeyboardInset);
+    window.visualViewport?.addEventListener('scroll', updateKeyboardInset);
+    window.addEventListener('resize', updateKeyboardInset);
+
+    return () => {
+      window.visualViewport?.removeEventListener('resize', updateKeyboardInset);
+      window.visualViewport?.removeEventListener('scroll', updateKeyboardInset);
+      window.removeEventListener('resize', updateKeyboardInset);
+      document.documentElement.style.removeProperty('--thread-detail-keyboard-inset');
+    };
+  }, []);
+
+  useEffect(() => {
+    const node = composerHostRef.current;
+    if (!node || typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const measuredNode =
+      (node.querySelector('form') as HTMLFormElement | null) ?? node;
+
+    const updateHeight = () => {
+      setMobileComposerHeight(
+        Math.max(
+          node.getBoundingClientRect().height,
+          measuredNode.getBoundingClientRect().height,
+        ),
+      );
+    };
+
+    updateHeight();
+    const observer = new ResizeObserver(() => {
+      updateHeight();
+    });
+    observer.observe(measuredNode);
+    return () => {
+      observer.disconnect();
+    };
+  }, [activeView, isMobileViewport]);
 
   useEffect(() => {
     async function loadThreadDetail(showLoading = true) {
@@ -468,6 +560,11 @@ export function ThreadDetailPage() {
         ? 'Resume / Connect this imported session before sending a new prompt.'
         : null
     : null;
+  const useFloatingMobileComposer = isMobileViewport && activeView === 'chat';
+  const effectiveMobileComposerHeight = Math.max(mobileComposerHeight, 144);
+  const timelineBottomSpacer = useFloatingMobileComposer
+    ? effectiveMobileComposerHeight + 12
+    : 0;
 
   const metaContent = detail ? (
     <dl className="space-y-4 text-sm">
@@ -535,7 +632,7 @@ export function ThreadDetailPage() {
       metaContent={metaContent}
       onRenameThread={handleRenameThread}
     >
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-none border-y border-stone-800 bg-stone-900/85 shadow-2xl shadow-stone-950/20 sm:h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-2rem)] sm:flex-none sm:rounded-[2rem] sm:border">
+      <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-none border-y border-stone-800 bg-stone-900/85 shadow-2xl shadow-stone-950/20 sm:flex-none sm:rounded-[2rem] sm:border">
         <header className="shrink-0 border-b border-stone-800 bg-stone-900/95 px-3 py-3 backdrop-blur sm:px-5">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0 flex-1">
@@ -629,32 +726,68 @@ export function ThreadDetailPage() {
                   liveOutput={liveOutput}
                   followTail={followTail}
                   scrollRequestKey={scrollRequestKey}
+                  bottomSpacer={timelineBottomSpacer}
                   className="min-h-0 flex-1 bg-stone-900/30"
                 />
-                <ThreadComposer
-                  activeView={activeView}
-                  busy={activeView === 'chat' ? busy : false}
-                  settingsBusy={settingsBusy}
-                  error={null}
-                  model={detail.thread.model}
-                  reasoningEffort={detail.thread.reasoningEffort}
-                  collaborationMode={detail.thread.collaborationMode}
-                  modelOptions={modelOptions}
-                  followTail={followTail}
-                  disabled={Boolean(promptDisabledReason)}
-                  disabledPlaceholder={promptDisabledReason ?? undefined}
-                  shellControlState={shellControlState}
-                  canInterrupt={Boolean(detail.thread.activeTurnId)}
-                  onSubmit={handlePrompt}
-                  onInterrupt={handleInterrupt}
-                  onToggleFollow={() => setFollowTail((current) => !current)}
-                  onUpdateSettings={handleUpdateThreadSettings}
-                  onToggleView={handleToggleView}
-                  onToggleShellConnection={handleToggleShellConnection}
-                  onShellPaste={handleShellPaste}
-                  onShellCopy={handleShellCopy}
-                  onShellControl={handleShellControl}
-                />
+                {useFloatingMobileComposer ? (
+                  <div
+                    ref={composerHostRef}
+                    className="fixed inset-x-0 bottom-[var(--thread-detail-keyboard-inset,0px)] z-30 sm:hidden"
+                    style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+                  >
+                    <ThreadComposer
+                      activeView={activeView}
+                      busy={activeView === 'chat' ? busy : false}
+                      settingsBusy={settingsBusy}
+                      error={null}
+                      model={detail.thread.model}
+                      reasoningEffort={detail.thread.reasoningEffort}
+                      collaborationMode={detail.thread.collaborationMode}
+                      modelOptions={modelOptions}
+                      followTail={followTail}
+                      disabled={Boolean(promptDisabledReason)}
+                      disabledPlaceholder={promptDisabledReason ?? undefined}
+                      shellControlState={shellControlState}
+                      canInterrupt={Boolean(detail.thread.activeTurnId)}
+                      onSubmit={handlePrompt}
+                      onInterrupt={handleInterrupt}
+                      onToggleFollow={() => setFollowTail((current) => !current)}
+                      onUpdateSettings={handleUpdateThreadSettings}
+                      onToggleView={handleToggleView}
+                      onToggleShellConnection={handleToggleShellConnection}
+                      onShellPaste={handleShellPaste}
+                      onShellCopy={handleShellCopy}
+                      onShellControl={handleShellControl}
+                    />
+                  </div>
+                ) : (
+                  <div ref={composerHostRef}>
+                    <ThreadComposer
+                      activeView={activeView}
+                      busy={activeView === 'chat' ? busy : false}
+                      settingsBusy={settingsBusy}
+                      error={null}
+                      model={detail.thread.model}
+                      reasoningEffort={detail.thread.reasoningEffort}
+                      collaborationMode={detail.thread.collaborationMode}
+                      modelOptions={modelOptions}
+                      followTail={followTail}
+                      disabled={Boolean(promptDisabledReason)}
+                      disabledPlaceholder={promptDisabledReason ?? undefined}
+                      shellControlState={shellControlState}
+                      canInterrupt={Boolean(detail.thread.activeTurnId)}
+                      onSubmit={handlePrompt}
+                      onInterrupt={handleInterrupt}
+                      onToggleFollow={() => setFollowTail((current) => !current)}
+                      onUpdateSettings={handleUpdateThreadSettings}
+                      onToggleView={handleToggleView}
+                      onToggleShellConnection={handleToggleShellConnection}
+                      onShellPaste={handleShellPaste}
+                      onShellCopy={handleShellCopy}
+                      onShellControl={handleShellControl}
+                    />
+                  </div>
+                )}
               </>
             ) : (
               <>

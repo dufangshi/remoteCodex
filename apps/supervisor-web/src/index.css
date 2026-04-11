@@ -30,6 +30,20 @@ body {
   min-height: 100vh;
 }
 
+html.thread-detail-scroll-locked,
+body.thread-detail-scroll-locked {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
+}
+
+body.thread-detail-scroll-locked {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -177,4 +191,10 @@ input {
   -webkit-user-select: text !important;
   user-select: text !important;
   touch-action: pan-y !important;
+}
+
+.thread-scroll-container {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
 }

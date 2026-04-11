@@ -92,6 +92,7 @@ export function ThreadWorkspaceLayout({
   children,
 }: ThreadWorkspaceLayoutProps) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [mobileAppMenuOpen, setMobileAppMenuOpen] = useState(false);
   const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
   const [renamingThreadId, setRenamingThreadId] = useState<string | null>(null);
@@ -161,6 +162,7 @@ export function ThreadWorkspaceLayout({
   function openThread(threadId: string) {
     navigate(`/threads/${threadId}`);
     setMobileSidebarOpen(false);
+    setMobileAppMenuOpen(false);
   }
 
   function handleCardKeyDown(event: KeyboardEvent<HTMLDivElement>, threadId: string) {
@@ -321,53 +323,106 @@ export function ThreadWorkspaceLayout({
       <div
         className={
           viewportConstrained
-            ? 'flex h-[calc(100dvh-4rem)] max-h-[calc(100dvh-4rem)] min-h-0 flex-col gap-4 overflow-hidden sm:h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-2rem)] lg:grid lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]'
+            ? 'flex h-full max-h-full min-h-0 flex-col gap-2 overflow-hidden overscroll-none sm:gap-4 lg:grid lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]'
             : 'flex min-h-[calc(100dvh-2rem)] flex-col gap-4 lg:grid lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]'
         }
       >
         <div className="lg:hidden">
-          <button
-            type="button"
-            onClick={() => setMobileSidebarOpen((current) => !current)}
-            aria-expanded={mobileSidebarOpen}
-            className="flex w-full flex-col items-center rounded-[1.2rem] border border-stone-800 bg-stone-900/80 px-4 py-2.5 text-center"
-          >
-            <p
-              className="max-w-full truncate text-sm font-medium text-stone-100"
-              title={threadScopeLabel}
-            >
-              {threadScopeLabel}
-            </p>
-            <span
-              aria-hidden="true"
-              className={`mt-1 inline-flex h-4 w-4 items-center justify-center text-stone-400 transition ${
-                mobileSidebarOpen ? 'rotate-180' : ''
-              }`}
-            >
-              <svg
-                viewBox="0 0 16 16"
-                className="h-3.5 w-3.5 fill-none stroke-current"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+          <div className="relative">
+            <div className="grid h-10 grid-cols-[2rem_minmax(0,1fr)_2rem] items-center gap-1.5 border-b border-stone-800 bg-stone-950/96 px-2.5 backdrop-blur">
+              <button
+                type="button"
+                aria-label={mobileAppMenuOpen ? 'Close Menu' : 'Open Menu'}
+                aria-expanded={mobileAppMenuOpen}
+                onClick={() => setMobileAppMenuOpen((current) => !current)}
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-stone-300 transition hover:bg-stone-800 hover:text-stone-100"
               >
-                <path d="m4.5 6.25 3.5 3.5 3.5-3.5" />
-              </svg>
-            </span>
-          </button>
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 16 16"
+                  className="h-4 w-4 fill-current"
+                >
+                  <path d="M2 3.25h12v1.5H2Zm0 4h12v1.5H2Zm0 4h12v1.5H2Z" />
+                </svg>
+              </button>
 
-          {mobileSidebarOpen && (
-            <aside className="mt-2 max-h-[40dvh] overflow-y-auto rounded-[1.6rem] border border-stone-800 bg-stone-900/95 p-4 shadow-2xl shadow-stone-950/20">
-              {renderSidebarContent()}
-            </aside>
-          )}
+              <p
+                className="min-w-0 truncate px-1 text-center text-sm font-medium text-stone-100"
+                title={threadScopeLabel}
+              >
+                {threadScopeLabel}
+              </p>
+
+              <button
+                type="button"
+                onClick={() => setMobileSidebarOpen((current) => !current)}
+                aria-expanded={mobileSidebarOpen}
+                aria-label={mobileSidebarOpen ? 'Collapse thread navigation' : 'Expand thread navigation'}
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center justify-self-end rounded-full text-stone-400 transition hover:bg-stone-800 hover:text-stone-200"
+              >
+                <span
+                  aria-hidden="true"
+                  className={`inline-flex h-4 w-4 items-center justify-center transition ${
+                    mobileSidebarOpen ? 'rotate-180' : ''
+                  }`}
+                >
+                  <svg
+                    viewBox="0 0 16 16"
+                    className="h-3.5 w-3.5 fill-none stroke-current"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="m4.5 6.25 3.5 3.5 3.5-3.5" />
+                  </svg>
+                </span>
+              </button>
+            </div>
+
+            {mobileAppMenuOpen && (
+              <div className="absolute left-2 top-[calc(100%+0.45rem)] z-20 w-[min(18rem,calc(100vw-1rem))] rounded-[1.25rem] border border-stone-800 bg-stone-900/96 p-2.5 shadow-2xl shadow-stone-950/35 backdrop-blur">
+                <nav className="flex flex-col gap-1.5 text-sm">
+                  <Link
+                    to="/workspaces"
+                    onClick={() => setMobileAppMenuOpen(false)}
+                    className="rounded-[0.95rem] px-3 py-2 text-stone-200 transition hover:bg-stone-800"
+                  >
+                    Workspaces
+                  </Link>
+                  <Link
+                    to="/threads"
+                    onClick={() => setMobileAppMenuOpen(false)}
+                    className="rounded-[0.95rem] px-3 py-2 text-stone-200 transition hover:bg-stone-800"
+                  >
+                    Threads
+                  </Link>
+                  <Link
+                    to={newThreadHref}
+                    onClick={() => {
+                      setMobileAppMenuOpen(false);
+                      setMobileSidebarOpen(false);
+                    }}
+                    className="rounded-[0.95rem] bg-amber-300 px-3 py-2 font-medium text-stone-950 transition hover:bg-amber-200"
+                  >
+                    New Thread
+                  </Link>
+                </nav>
+              </div>
+            )}
+
+            {mobileSidebarOpen && (
+              <aside className="absolute inset-x-2 top-[calc(100%+0.35rem)] z-10 max-h-[40dvh] overflow-y-auto rounded-[1.35rem] border border-stone-800 bg-stone-900/96 p-4 shadow-2xl shadow-stone-950/30 backdrop-blur">
+                {renderSidebarContent()}
+              </aside>
+            )}
+          </div>
         </div>
 
         <aside className="hidden min-h-0 lg:block">
           <div
             className={`sticky top-4 rounded-[2rem] border border-stone-800 bg-stone-900/85 p-4 shadow-2xl shadow-stone-950/15 backdrop-blur ${
               viewportConstrained
-                ? 'max-h-[calc(100dvh-4rem)] overflow-y-auto'
+                ? 'h-full max-h-full overflow-y-auto'
                 : ''
             }`}
           >

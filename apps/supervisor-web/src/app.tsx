@@ -33,8 +33,18 @@ function AppShell() {
     }`;
 
   return (
-    <div className="min-h-screen bg-stone-950 text-stone-100">
-      <div className="fixed left-4 top-4 z-50">
+    <div
+      className={`bg-stone-950 text-stone-100 ${
+        isThreadDetailRoute
+          ? 'fixed inset-0 overflow-hidden overscroll-none'
+          : 'min-h-screen'
+      }`}
+    >
+      <div
+        className={`fixed left-4 top-4 z-50 ${
+          isThreadDetailRoute ? 'hidden sm:block' : ''
+        }`}
+      >
         <button
           type="button"
           aria-label={navOpen ? 'Close Navigation' : 'Open Navigation'}
@@ -99,12 +109,22 @@ function AppShell() {
 
       <main
         className={`mx-auto w-full max-w-[1600px] ${
-          isThreadDetailRoute ? 'pb-0 sm:pb-4' : 'pb-4'
+          isThreadDetailRoute ? 'absolute inset-0 pb-0 sm:pb-4' : 'pb-4'
         } ${
-          isThreadWorkspaceRoute ? 'pt-16 sm:pt-4' : 'pt-4'
-        } ${isThreadDetailRoute ? 'px-0 sm:px-6' : 'px-4 sm:px-6'}`}
+          isThreadWorkspaceRoute
+            ? isThreadDetailRoute
+              ? 'pt-[env(safe-area-inset-top)] sm:pt-4'
+              : 'pt-[calc(env(safe-area-inset-top)+4rem)] sm:pt-4'
+            : 'pt-4'
+        } ${
+          isThreadDetailRoute
+            ? 'overflow-hidden overscroll-none px-0 sm:px-6'
+            : 'px-4 sm:px-6'
+        }`}
       >
-        <section className="min-w-0">
+        <section
+          className={`min-w-0 ${isThreadDetailRoute ? 'h-full overflow-hidden overscroll-none' : ''}`}
+        >
           <Outlet />
         </section>
       </main>
