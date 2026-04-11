@@ -79,7 +79,7 @@ describe('ThreadComposer', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'gpt-5.4' }));
-    fireEvent.click(screen.getByRole('button', { name: /GPT-5 Mini/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'gpt-5-mini' }));
 
     await waitFor(() => {
       expect(onUpdateSettings).toHaveBeenCalledWith({
@@ -106,16 +106,10 @@ describe('ThreadComposer', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'medium' }));
 
-    expect(
-      screen.getByRole('button', { name: /high deeper reasoning/i }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: /low fastest/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'high' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'low' })).not.toBeInTheDocument();
 
-    fireEvent.click(
-      screen.getByRole('button', { name: /high deeper reasoning/i }),
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'high' }));
 
     await waitFor(() => {
       expect(onUpdateSettings).toHaveBeenCalledWith({

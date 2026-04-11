@@ -359,10 +359,10 @@ describe('ThreadTimeline', () => {
     ).toHaveTextContent('pnpm test');
     expect(
       screen.getByRole('button', { name: 'Open full command' }),
-    ).toHaveTextContent('final status: success');
+    ).toHaveTextContent('...');
     expect(
       screen.getByRole('button', { name: 'Open full command' }),
-    ).toHaveTextContent('...');
+    ).not.toHaveTextContent('final status: success');
     expect(screen.queryByText('middle output line')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open full command' }));
@@ -379,6 +379,47 @@ describe('ThreadTimeline', () => {
     expect(
       screen.queryByRole('dialog', { name: 'Command Output' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('renders plan history items as markdown once they enter the viewport', async () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'plan-1',
+                kind: 'plan',
+                text: ['## Execution plan', '', '- wire the API', '- verify the UI'].join(
+                  '\n',
+                ),
+                status: 'completed',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.queryByRole('heading', { name: 'Execution plan' })).not.toBeInTheDocument();
+    expect(screen.getByText(/## Execution plan/)).toBeInTheDocument();
+
+    FakeIntersectionObserver.triggerAll();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('heading', { name: 'Execution plan' }),
+      ).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole('list')).toBeInTheDocument();
+    expect(screen.getByText('wire the API')).toBeInTheDocument();
+    expect(screen.getByText('verify the UI')).toBeInTheDocument();
   });
 
   it('renders web search items with a query preview and expandable details', () => {
@@ -461,6 +502,33 @@ describe('ThreadTimeline', () => {
       ).toBeInTheDocument();
     });
     expect(screen.queryByText('Streaming output')).not.toBeInTheDocument();
+  });
+
+  it('renders an optimistic sending turn before the server materializes it', () => {
+    render(
+      <ThreadTimeline
+        turns={[]}
+        liveOutput="streaming draft"
+        optimisticTurn={{
+          id: 'optimistic-turn-1',
+          startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+          status: 'sending',
+          error: null,
+          items: [
+            {
+              id: 'optimistic-turn-1-user',
+              kind: 'userMessage',
+              text: 'Ship this optimistic turn.',
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Turn 1')).toBeInTheDocument();
+    expect(screen.getByText('Sending')).toBeInTheDocument();
+    expect(screen.getByText('Ship this optimistic turn.')).toBeInTheDocument();
+    expect(screen.getByText('streaming draft')).toBeInTheDocument();
   });
 
   it('auto-scrolls only while pinned near the bottom', async () => {
@@ -667,6 +735,11 @@ describe('ThreadTimeline', () => {
     expect(
       screen.queryByRole('button', { name: 'Submit' }),
     ).not.toBeInTheDocument();
+    expect(screen.getByText('Plan', { selector: 'p' })).toBeInTheDocument();
+    expect(screen.queryByText('Action')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Review the plan and choose the next step.'),
+    ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Implement' }));
 
@@ -677,6 +750,27 @@ describe('ThreadTimeline', () => {
         },
       },
     });
+  });
+
+  it('renders compact local answered request notes without treating them as thread messages', () => {
+    render(
+      <ThreadTimeline
+        turns={[]}
+        liveOutput=""
+        answeredRequestNotes={[
+          {
+            id: 'request-1',
+            title: 'Planning Preferences',
+            summaryLines: ['Plan object: foundation', 'Detail level: medium'],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('Planning Preferences')).toBeInTheDocument();
+    expect(screen.getByText('You selected Plan object: foundation')).toBeInTheDocument();
+    expect(screen.getByText('You selected Detail level: medium')).toBeInTheDocument();
+    expect(screen.queryByText('User')).not.toBeInTheDocument();
   });
 
   it('supports requestUserInput custom answers through Not from above', () => {

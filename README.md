@@ -42,17 +42,39 @@ This starts:
 - API: `http://127.0.0.1:8787`
 - Web: `http://127.0.0.1:5173`
 
-The current supported run mode is the development stack above. A dedicated long-running service mode with
-`start` / `stop` / `status` commands is not implemented yet.
+## Service Mode
+
+Build first, then use the service manager:
+
+```bash
+pnpm build
+pnpm service:start
+pnpm service:status
+pnpm service:stop
+```
+
+This starts a quieter long-running stack:
+
+- API: `http://127.0.0.1:8787`
+- Web: `http://127.0.0.1:4173`
+
+Logs are written to `.local/service/`.
 
 ## Remote Access via Tailscale
 
-If you want to open the supervisor from another device on your tailnet, start the local dev stack first and
-then publish the Vite web server through Tailscale:
+If you want to open the supervisor from another device on your tailnet:
 
 ```bash
 pnpm dev
 tailscale serve --bg 5173
+```
+
+Or, if you are using service mode:
+
+```bash
+pnpm build
+pnpm service:start
+tailscale serve --bg 4173
 ```
 
 Useful Tailscale commands:
@@ -65,10 +87,11 @@ tailscale serve reset
 Notes:
 
 - `tailscale serve --bg 5173` is required for the current remote-access workflow and was previously undocumented.
-- In the current dev setup, the web server proxies `/api`, `/healthz`, and `/ws` to the API on `127.0.0.1:8787`,
-  so you do not need a separate `tailscale serve` rule for the API port.
+- In both dev mode and service mode, the web entrypoint proxies `/api`, `/healthz`, and `/ws` to the API on
+  `127.0.0.1:8787`, so you do not need a separate `tailscale serve` rule for the API port.
 - If the Tailscale hostname for the target machine changes, update `allowedHosts` in
   `apps/supervisor-web/vite.config.ts` before using remote access.
+
 
 ## Common Commands
 

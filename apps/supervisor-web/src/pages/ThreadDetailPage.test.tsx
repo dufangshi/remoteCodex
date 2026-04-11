@@ -996,6 +996,122 @@ describe('ThreadDetailPage', () => {
     });
   });
 
+  it('shows an optimistic sending turn immediately and marks it failed when prompt submission fails', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+
+        if (url.includes('/api/codex/status')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              state: 'ready',
+              transport: 'stdio',
+              lastStartedAt: new Date().toISOString(),
+              lastError: null,
+              restartCount: 0,
+            }),
+          });
+        }
+
+        if (url.includes('/api/codex/models')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => modelOptionsResponse,
+          });
+        }
+
+        if (url.endsWith('/api/threads/thread-1/prompt') && init?.method === 'POST') {
+          return Promise.resolve({
+            ok: false,
+            status: 500,
+            json: async () => ({
+              code: 'internal_error',
+              message: 'Prompt delivery failed.',
+            }),
+          });
+        }
+
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              thread: {
+                id: 'thread-1',
+                workspaceId: 'workspace-1',
+                codexThreadId: 'codex-1',
+                source: 'supervisor',
+                title: 'Demo Thread',
+                model: 'gpt-5',
+                reasoningEffort: 'medium',
+                collaborationMode: 'default',
+                approvalMode: 'yolo',
+                status: 'idle',
+                summaryText: 'Preview',
+                lastError: null,
+                activeTurnId: null,
+                isLoaded: true,
+                isPinned: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                lastTurnStartedAt: null,
+                lastTurnCompletedAt: null,
+              },
+              workspace: {
+                id: 'workspace-1',
+                hostId: 'host-1',
+                label: 'Demo Workspace',
+                absPath: '/tmp/demo',
+                isFavorite: false,
+                createdAt: new Date().toISOString(),
+                lastOpenedAt: null,
+              },
+              workspacePathStatus: 'present',
+              pendingRequests: [],
+              turns: [],
+            }),
+          });
+        }
+
+        if (url.endsWith('/api/threads')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => [],
+          });
+        }
+
+        throw new Error(`Unhandled fetch request: ${url}`);
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByText('Demo Workspace / Demo Thread').length,
+      ).toBeGreaterThan(0);
+    });
+
+    const editor = screen.getByLabelText('Prompt');
+    setPromptValue(editor, 'Ship this optimistic prompt.');
+    fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
+
+    expect(screen.getAllByText('Ship this optimistic prompt.').length).toBeGreaterThan(0);
+    expect(screen.getByText('Sending')).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByText('Failed')).toBeInTheDocument();
+      expect(screen.getAllByText('Prompt delivery failed.').length).toBeGreaterThan(0);
+    });
+  });
+
   it('automatically connects the shell after switching from chat to shell', async () => {
     render(
       <MemoryRouter initialEntries={['/threads/thread-1']}>
@@ -1426,7 +1542,7 @@ describe('ThreadDetailPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('Plan ready')).toBeInTheDocument();
+      expect(screen.getByText('Plan', { selector: 'p' })).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Stay in plan mode' }));
@@ -1437,7 +1553,180 @@ describe('ThreadDetailPage', () => {
       ).toBeInTheDocument();
     });
 
-    expect(screen.queryByText('Plan ready')).not.toBeInTheDocument();
+    expect(screen.queryByText('Plan', { selector: 'p' })).not.toBeInTheDocument();
+  });
+
+  it('keeps a compact local note after answering requestUserInput questions', async () => {
+    vi.spyOn(global, 'fetch').mockImplementation((input, init) => {
+      const url = String(input);
+
+      if (url.endsWith('/api/codex/models')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => modelOptionsResponse,
+        } as Response);
+      }
+
+      if (url.endsWith('/api/codex/status')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            connected: true,
+            version: 'test',
+            cwd: '/tmp/demo',
+          }),
+        } as Response);
+      }
+
+      if (
+        url.includes('/api/threads/thread-1') &&
+        (!init?.method || init.method === 'GET')
+      ) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            totalTurnCount: 0,
+            thread: {
+              id: 'thread-1',
+              workspaceId: 'workspace-1',
+              codexThreadId: 'codex-1',
+              source: 'supervisor',
+              title: 'Demo Thread',
+              model: 'gpt-5',
+              reasoningEffort: 'medium',
+              collaborationMode: 'plan',
+              approvalMode: 'yolo',
+              status: 'idle',
+              summaryText: 'Preview',
+              lastError: null,
+              activeTurnId: null,
+              isLoaded: true,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: new Date().toISOString(),
+              lastTurnCompletedAt: new Date().toISOString(),
+            },
+            workspace: {
+              id: 'workspace-1',
+              hostId: 'host-1',
+              label: 'Demo Workspace',
+              absPath: '/tmp/demo',
+              isFavorite: false,
+              createdAt: new Date().toISOString(),
+              lastOpenedAt: null,
+            },
+            workspacePathStatus: 'present',
+            pendingRequests: [
+              {
+                id: 'user-input-1',
+                kind: 'requestUserInput',
+                title: 'Planning Preferences',
+                description: 'Pick how the plan should be structured.',
+                turnId: 'turn-1',
+                itemId: 'item-1',
+                createdAt: new Date().toISOString(),
+                questions: [
+                  {
+                    id: 'plan-object',
+                    header: 'Plan object',
+                    question: 'What should this plan focus on?',
+                    isOther: false,
+                    isSecret: false,
+                    options: [
+                      {
+                        label: 'foundation',
+                        description: 'Focus on setup work.',
+                      },
+                      {
+                        label: 'delivery',
+                        description: 'Focus on feature delivery.',
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+            turns: [],
+          }),
+        } as Response);
+      }
+
+      if (url.endsWith('/api/threads/thread-1/requests/user-input-1/respond')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            totalTurnCount: 0,
+            thread: {
+              id: 'thread-1',
+              workspaceId: 'workspace-1',
+              codexThreadId: 'codex-1',
+              source: 'supervisor',
+              title: 'Demo Thread',
+              model: 'gpt-5',
+              reasoningEffort: 'medium',
+              collaborationMode: 'plan',
+              approvalMode: 'yolo',
+              status: 'idle',
+              summaryText: 'Preview',
+              lastError: null,
+              activeTurnId: null,
+              isLoaded: true,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: new Date().toISOString(),
+              lastTurnCompletedAt: new Date().toISOString(),
+            },
+            workspace: {
+              id: 'workspace-1',
+              hostId: 'host-1',
+              label: 'Demo Workspace',
+              absPath: '/tmp/demo',
+              isFavorite: false,
+              createdAt: new Date().toISOString(),
+              lastOpenedAt: null,
+            },
+            workspacePathStatus: 'present',
+            pendingRequests: [],
+            turns: [],
+          }),
+        } as Response);
+      }
+
+      if (url.endsWith('/api/threads')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [],
+        } as Response);
+      }
+
+      throw new Error(`Unhandled fetch request: ${url}`);
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Answer Required', { selector: 'p' })).toBeInTheDocument();
+      expect(screen.getByText('What should this plan focus on?')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'foundation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('You selected Plan object: foundation'),
+      ).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText('What should this plan focus on?')).not.toBeInTheDocument();
   });
 
   it('keeps the latest pending request card when older detail fetches resolve later', async () => {
@@ -1599,7 +1888,7 @@ describe('ThreadDetailPage', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('Need another choice')).toBeInTheDocument();
+      expect(screen.getByText('Answer Required', { selector: 'p' })).toBeInTheDocument();
       expect(screen.getByText('Choose the next step')).toBeInTheDocument();
     });
 
@@ -1648,7 +1937,8 @@ describe('ThreadDetailPage', () => {
     }
 
     await waitFor(() => {
-      expect(screen.getByText('Need another choice')).toBeInTheDocument();
+      expect(screen.getByText('Answer Required', { selector: 'p' })).toBeInTheDocument();
+      expect(screen.getByText('Choose the next step')).toBeInTheDocument();
     });
   });
 });

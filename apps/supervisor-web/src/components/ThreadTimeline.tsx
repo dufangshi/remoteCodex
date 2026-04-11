@@ -51,12 +51,22 @@ interface ThreadTimelineProps {
   loadingEarlier?: boolean;
   onLoadEarlier?: () => void;
   ephemeralUserNote?: string | null;
+  answeredRequestNotes?: Array<{
+    id: string;
+    title: string;
+    summaryLines: string[];
+  }>;
+  optimisticTurn?: TimelineTurn | null;
 }
 
 interface ExpandedTextState {
   title: string;
   text: string;
 }
+
+type TimelineTurn = Omit<ThreadTurnDto, 'status'> & {
+  status: ThreadTurnDto['status'] | 'sending';
+};
 
 const INITIAL_VISIBLE_TURNS = 10;
 const LOAD_STEP = 10;
@@ -117,15 +127,17 @@ function normalizeLines(text: string) {
 function summarizeCommandText(text: string) {
   const lines = normalizeLines(text);
 
-  if (lines.length <= 2) {
+  if (lines.length === 1) {
     return {
-      previewText: lines.join('\n'),
+      firstLine: lines[0] ?? '',
+      showGap: false,
       isTruncated: false,
     };
   }
 
   return {
-    previewText: `${lines[0]}\n...\n${lines.at(-1)}`,
+    firstLine: lines[0] ?? '',
+    showGap: true,
     isTruncated: true,
   };
 }
@@ -297,28 +309,40 @@ function RunningDots({
   );
 }
 
-function AgentMarkdown({ text }: { text: string }) {
+function MarkdownContent({
+  text,
+  className = 'agent-markdown',
+}: {
+  text: string;
+  className?: string;
+}) {
   return (
     <Streamdown
       mode="static"
       plugins={{ code }}
       controls={false}
       lineNumbers={false}
-      className="agent-markdown"
+      className={className}
     >
       {text}
     </Streamdown>
   );
 }
 
-function AgentMessageBody({
+function MarkdownAwareBody({
   text,
   scrollRootRef,
   streaming = false,
+  containerClassName = '',
+  plainTextClassName = 'whitespace-pre-wrap break-words text-[15px] leading-6 text-stone-100',
+  markdownClassName = 'agent-markdown',
 }: {
   text: string;
   scrollRootRef: RefObject<HTMLDivElement | null>;
   streaming?: boolean;
+  containerClassName?: string;
+  plainTextClassName?: string;
+  markdownClassName?: string;
 }) {
   const messageRef = useRef<HTMLDivElement | null>(null);
   const shouldRenderMarkdown = hasLikelyMarkdownSyntax(text);
@@ -359,15 +383,32 @@ function AgentMessageBody({
   }, [isActivated, scrollRootRef, streaming]);
 
   return (
-    <div ref={messageRef} className="pb-7">
+    <div ref={messageRef} className={containerClassName}>
       {isActivated && shouldRenderMarkdown ? (
-        <AgentMarkdown text={text} />
+        <MarkdownContent text={text} className={markdownClassName} />
       ) : (
-        <p className="whitespace-pre-wrap break-words text-[15px] leading-6 text-stone-100">
-          {text}
-        </p>
+        <p className={plainTextClassName}>{text}</p>
       )}
     </div>
+  );
+}
+
+function AgentMessageBody({
+  text,
+  scrollRootRef,
+  streaming = false,
+}: {
+  text: string;
+  scrollRootRef: RefObject<HTMLDivElement | null>;
+  streaming?: boolean;
+}) {
+  return (
+    <MarkdownAwareBody
+      text={text}
+      scrollRootRef={scrollRootRef}
+      streaming={streaming}
+      containerClassName="pb-7"
+    />
   );
 }
 
@@ -526,7 +567,7 @@ const CommandItem = memo(function CommandItem({
           </span>
           {isRunningHistoryStatus(item.status) && <RunningDots />}
         </div>
-        <div className="relative min-w-0 w-full flex-1 rounded-[0.9rem] border border-stone-800/80 bg-stone-950/45 px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2 sm:pt-2">
+        <div className="relative min-w-0 w-full flex-1 rounded-[0.9rem] border border-stone-800/80 bg-stone-950/45 px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2">
           <button
             type="button"
             aria-label="Expand command"
@@ -538,20 +579,60 @@ const CommandItem = memo(function CommandItem({
               <ExpandIcon />
             </span>
           </button>
-          {item.status && (
-            <p className="pr-8 text-xs text-stone-500 sm:pr-10">{item.status}</p>
-          )}
+          {item.status ? (
+            <p className="absolute left-2.5 right-8 top-0 flex h-5 items-center truncate text-xs text-stone-500 sm:left-3 sm:right-10 sm:top-2 sm:h-7">
+              {item.status}
+            </p>
+          ) : null}
           <button
             type="button"
             aria-label="Open full command"
             onClick={() => onOpen('Command Output', item.text)}
-            className="mt-1 block w-full text-left"
+            className="block w-full text-left"
           >
-            <pre className="pr-8 whitespace-pre-wrap break-words text-sm leading-6 text-stone-200 sm:pr-10">
-              {summary.previewText}
-            </pre>
+            <div className="flex min-w-0 items-center gap-2 text-sm leading-6">
+              <p className="min-w-0 flex-1 truncate whitespace-nowrap text-stone-200">
+                {summary.firstLine}
+              </p>
+              {summary.showGap ? (
+                <span className="shrink-0 text-[11px] font-medium tracking-[0.28em] text-stone-500/90">
+                  ...
+                </span>
+              ) : null}
+            </div>
           </button>
         </div>
+      </div>
+    </div>
+  );
+});
+
+const PlanHistoryItem = memo(function PlanHistoryItem({
+  item,
+  scrollRootRef,
+}: {
+  item: ThreadHistoryItemDto & { kind: 'plan' };
+  scrollRootRef: RefObject<HTMLDivElement | null>;
+}) {
+  return (
+    <div
+      className={`min-w-0 w-full rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-[11px] uppercase tracking-[0.2em] text-stone-500">
+          {historyItemLabel(item.kind)}
+        </span>
+        {item.status && (
+          <span className="text-xs text-stone-500">{item.status}</span>
+        )}
+      </div>
+      <div className="mt-1.5">
+        <MarkdownAwareBody
+          text={item.text}
+          scrollRootRef={scrollRootRef}
+          plainTextClassName="whitespace-pre-wrap break-words text-sm leading-6 text-stone-300"
+          markdownClassName="agent-markdown text-sm"
+        />
       </div>
     </div>
   );
@@ -777,6 +858,19 @@ const HistoryItemRow = memo(function HistoryItemRow({
     );
   }
 
+  if (item.kind === 'plan') {
+    return (
+      <PlanHistoryItem
+        item={
+          item as ThreadHistoryItemDto & {
+            kind: 'plan';
+          }
+        }
+        scrollRootRef={scrollRootRef}
+      />
+    );
+  }
+
   return <GenericHistoryItem item={item} />;
 });
 
@@ -797,6 +891,21 @@ function PendingRequestCard({
   const [selectedPlanDecision, setSelectedPlanDecision] = useState<string | null>(null);
   const primaryQuestion = request.questions[0] ?? null;
   const OTHER_SENTINEL = '__other__';
+  const cardTitle =
+    request.kind === 'planDecision'
+      ? 'Plan'
+      : request.kind === 'requestUserInput'
+        ? 'Answer Required'
+        : request.title;
+
+  function getOptionPresentation(label: string) {
+    const recommended = /\s*\(recommended\)\s*$/i.test(label);
+    return {
+      rawLabel: label,
+      displayLabel: label.replace(/\s*\(recommended\)\s*$/i, '').trim(),
+      recommended,
+    };
+  }
 
   function respondWithSingleAnswer(answer: string) {
     if (!primaryQuestion) {
@@ -826,72 +935,95 @@ function PendingRequestCard({
     <div className="w-full rounded-[1rem] border border-sky-300/20 bg-sky-300/[0.06] px-3 py-3 sm:rounded-[1.2rem] sm:px-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-medium text-sky-100">{request.title}</p>
-          {request.description && (
-            <p className="mt-1 text-sm text-stone-300">{request.description}</p>
+          <p className="text-sm font-medium text-sky-100">{cardTitle}</p>
+          {request.kind !== 'planDecision' && request.description && (
+            <p className="mt-1 text-[13px] leading-5 text-stone-300">{request.description}</p>
           )}
         </div>
-        <span className="rounded-full border border-sky-300/30 px-2 py-1 text-[11px] uppercase tracking-[0.2em] text-sky-200">
-          Action
-        </span>
       </div>
       <div className="mt-3 space-y-3">
         {request.questions.map((question) => (
           <div
             key={question.id}
-            className="rounded-xl border border-stone-800/80 bg-stone-950/45 p-3"
+            className="rounded-xl border border-stone-800/80 bg-stone-950/45 p-2.5 sm:p-3"
           >
             <p className="text-xs uppercase tracking-[0.2em] text-stone-500">
               {question.header}
             </p>
-            <p className="mt-1 text-sm text-stone-100">{question.question}</p>
+            <p className="mt-1 text-[13px] leading-5 text-stone-100 sm:text-sm">
+              {question.question}
+            </p>
             {request.kind === 'planDecision' && question.options && question.options.length > 0 ? (
               <div className="mt-3 flex flex-wrap gap-2">
-                {question.options.map((option, index) => (
-                  <button
-                    key={option.label}
-                    type="button"
-                    disabled={busy}
-                    onClick={() => respondWithSingleAnswer(option.label)}
-                    className={`rounded-full border px-3 py-2 text-sm transition ${
-                      index === 0
-                        ? 'border-sky-300/45 bg-sky-300/90 text-slate-950 hover:bg-sky-200'
-                        : 'border-stone-700 text-stone-200 hover:bg-stone-800'
-                    } disabled:cursor-not-allowed disabled:opacity-60`}
-                    title={option.description}
-                  >
-                    {busy && selectedPlanDecision === option.label
-                      ? option.label === 'Implement'
-                        ? 'Starting...'
-                        : 'Saving...'
-                      : option.label}
-                  </button>
-                ))}
-              </div>
-            ) : question.options && question.options.length > 0 ? (
-              <>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {question.options.map((option) => (
+                {question.options.map((option, index) => {
+                  const presentation = getOptionPresentation(option.label);
+                  const isImplement =
+                    presentation.displayLabel.toLowerCase() === 'implement';
+                  return (
                     <button
                       key={option.label}
                       type="button"
                       disabled={busy}
-                      onClick={() =>
-                        setAnswers((current) => ({
-                          ...current,
-                          [question.id]: option.label,
-                        }))
-                      }
-                      className={`rounded-full border px-3 py-2 text-sm transition ${
-                        answers[question.id] === option.label
-                          ? 'border-amber-300/50 bg-amber-300/12 text-amber-100'
-                          : 'border-stone-700 text-stone-300 hover:bg-stone-800'
+                      onClick={() => respondWithSingleAnswer(option.label)}
+                      className={`relative rounded-2xl border px-2.5 py-1.5 pr-6 text-[12px] leading-4 transition sm:text-[13px] ${
+                        index === 0
+                          ? 'border-sky-300/45 bg-sky-300/90 text-slate-950 hover:bg-sky-200'
+                          : 'border-stone-700 text-stone-200 hover:bg-stone-800'
                       } disabled:cursor-not-allowed disabled:opacity-60`}
                       title={option.description}
                     >
-                      {option.label}
+                      {presentation.recommended ? (
+                        <span
+                          aria-hidden="true"
+                          className="absolute right-1.5 top-1 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-white/18 text-[10px] leading-none text-current"
+                        >
+                          ✦
+                        </span>
+                      ) : null}
+                      {busy && selectedPlanDecision === option.label
+                        ? isImplement
+                          ? 'Starting...'
+                          : 'Saving...'
+                        : presentation.displayLabel}
                     </button>
-                  ))}
+                  );
+                })}
+              </div>
+            ) : question.options && question.options.length > 0 ? (
+              <>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {question.options.map((option) => {
+                    const presentation = getOptionPresentation(option.label);
+                    return (
+                      <button
+                        key={option.label}
+                        type="button"
+                        disabled={busy}
+                        onClick={() =>
+                          setAnswers((current) => ({
+                            ...current,
+                            [question.id]: option.label,
+                          }))
+                        }
+                        className={`relative rounded-2xl border px-3 py-1.5 pr-6 text-[12px] leading-4 transition sm:text-[13px] ${
+                          answers[question.id] === option.label
+                            ? 'border-amber-300/50 bg-amber-300/12 text-amber-100'
+                            : 'border-stone-700 text-stone-300 hover:bg-stone-800'
+                        } disabled:cursor-not-allowed disabled:opacity-60`}
+                        title={option.description}
+                      >
+                        {presentation.recommended ? (
+                          <span
+                            aria-hidden="true"
+                            className="absolute right-1.5 top-1 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-white/10 text-[10px] leading-none text-amber-100/90"
+                          >
+                            ✦
+                          </span>
+                        ) : null}
+                        {presentation.displayLabel}
+                      </button>
+                    );
+                  })}
                   {question.isOther && (
                     <button
                       type="button"
@@ -902,7 +1034,7 @@ function PendingRequestCard({
                           [question.id]: OTHER_SENTINEL,
                         }))
                       }
-                      className={`rounded-full border px-3 py-2 text-sm transition ${
+                      className={`rounded-2xl border px-3 py-1.5 text-[12px] leading-4 transition sm:text-[13px] ${
                         answers[question.id] === OTHER_SENTINEL
                           ? 'border-sky-300/50 bg-sky-300/12 text-sky-100'
                           : 'border-stone-700 text-stone-300 hover:bg-stone-800'
@@ -973,6 +1105,34 @@ function PendingRequestCard({
   );
 }
 
+function AnsweredRequestNote({
+  note,
+}: {
+  note: {
+    id: string;
+    title: string;
+    summaryLines: string[];
+  };
+}) {
+  return (
+    <div className="w-full rounded-2xl border border-cyan-400/18 bg-cyan-400/[0.05] px-3 py-2.5">
+      <p className="text-[11px] uppercase tracking-[0.2em] text-cyan-200/80">
+        {note.title}
+      </p>
+      <div className="mt-1 space-y-1">
+        {note.summaryLines.map((line, index) => (
+          <p
+            key={`${note.id}-${index}`}
+            className="text-[13px] leading-5 text-stone-200"
+          >
+            You selected {line}
+          </p>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const ThreadTurnRow = memo(function ThreadTurnRow({
   threadId,
   turn,
@@ -985,7 +1145,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
   articleRef,
 }: {
   threadId: string | undefined;
-  turn: ThreadTurnDto;
+  turn: TimelineTurn;
   absoluteIndex: number;
   isCollapsed: boolean;
   liveOutput: string;
@@ -1086,6 +1246,8 @@ export function ThreadTimeline({
   loadingEarlier = false,
   onLoadEarlier,
   ephemeralUserNote = null,
+  answeredRequestNotes = [],
+  optimisticTurn = null,
 }: ThreadTimelineProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const lastHandledScrollRequestKeyRef = useRef(scrollRequestKey);
@@ -1223,6 +1385,7 @@ export function ThreadTimeline({
   const effectiveTotalTurnCount = totalTurnCount ?? turns.length;
   const startIndex = Math.max(0, turns.length - visibleCount);
   const visibleTurns = serverManagedHistory ? turns : turns.slice(startIndex);
+  const optimisticAbsoluteIndex = effectiveTotalTurnCount + 1;
   const hiddenCount = serverManagedHistory
     ? Math.max(0, effectiveTotalTurnCount - turns.length)
     : turns.length - visibleTurns.length;
@@ -1231,7 +1394,13 @@ export function ThreadTimeline({
     liveOutput && visibleTurns.length > 0
       ? visibleTurns.findLastIndex((turn) => isRunningHistoryStatus(turn.status))
       : -1;
-  const liveOutputAttachedToTurn = liveOutputTurnIndex >= 0;
+  const liveOutputAttachedToOptimisticTurn =
+    liveOutputTurnIndex < 0 &&
+    !!liveOutput &&
+    !!optimisticTurn &&
+    optimisticTurn.status !== 'failed';
+  const liveOutputAttachedToTurn =
+    liveOutputTurnIndex >= 0 || liveOutputAttachedToOptimisticTurn;
 
   return (
     <>
@@ -1283,13 +1452,13 @@ export function ThreadTimeline({
             </div>
           )}
 
-          {turns.length === 0 && !liveOutput && (
+          {turns.length === 0 && !liveOutput && !optimisticTurn && (
             <div className="px-2.5 py-8 text-sm text-stone-500 sm:px-6">
               Send the first prompt to start the thread.
             </div>
           )}
 
-          {visibleTurns.length > 0 && (
+          {(visibleTurns.length > 0 || optimisticTurn) && (
             <div className="divide-y divide-stone-800/80">
               {visibleTurns.map((turn, visibleIndex) => (
                 <ThreadTurnRow
@@ -1305,6 +1474,18 @@ export function ThreadTimeline({
                   articleRef={undefined}
                 />
               ))}
+              {optimisticTurn && (
+                <ThreadTurnRow
+                  threadId={threadId}
+                  turn={optimisticTurn}
+                  absoluteIndex={optimisticAbsoluteIndex}
+                  isCollapsed={collapsedTurns[optimisticTurn.id] ?? false}
+                  liveOutput={liveOutputAttachedToOptimisticTurn ? liveOutput : ''}
+                  onToggleCollapse={handleToggleCollapse}
+                  onOpenExpandedText={handleOpenExpandedText}
+                  scrollRootRef={scrollContainerRef}
+                />
+              )}
             </div>
           )}
 
@@ -1335,8 +1516,11 @@ export function ThreadTimeline({
             </div>
           )}
 
-          {pendingRequests.length > 0 && (
+          {(pendingRequests.length > 0 || answeredRequestNotes.length > 0) && (
             <div className="space-y-3 border-t border-stone-800/80 px-2.5 py-4 sm:px-6">
+              {answeredRequestNotes.map((note) => (
+                <AnsweredRequestNote key={note.id} note={note} />
+              ))}
               {pendingRequests.map((request) => (
                 <PendingRequestCard
                   key={request.id}

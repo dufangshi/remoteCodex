@@ -4,6 +4,7 @@ import { useParams } from 'react-router-dom';
 import {
   CodexStatusDto,
   ModelOptionDto,
+  ThreadActionRequestDto,
   ThreadDetailDto,
   ThreadDto,
 } from '../../../../packages/shared/src/index';
@@ -55,6 +56,51 @@ function appendLatestTurns(
   return [...existing.filter((turn) => !latestIds.has(turn.id)), ...latest];
 }
 
+interface OptimisticTurnState {
+  id: string;
+  serverTurnId: string | null;
+  startedAt: string;
+  status: 'sending' | 'inProgress' | 'failed';
+  error: string | null;
+  prompt: string;
+}
+
+interface LocalAnsweredRequestNote {
+  id: string;
+  title: string;
+  summaryLines: string[];
+}
+
+function buildAnsweredRequestNote(
+  request: ThreadActionRequestDto | undefined,
+  input: { answers: Record<string, { answers: string[] }> },
+): LocalAnsweredRequestNote | null {
+  if (!request || request.kind === 'planDecision') {
+    return null;
+  }
+
+  const summaryLines = request.questions
+    .map((question) => {
+      const answer = input.answers[question.id]?.answers[0]?.trim();
+      if (!answer) {
+        return null;
+      }
+
+      return `${question.header}: ${answer}`;
+    })
+    .filter((line): line is string => Boolean(line));
+
+  if (summaryLines.length === 0) {
+    return null;
+  }
+
+  return {
+    id: request.id,
+    title: request.title,
+    summaryLines,
+  };
+}
+
 function CopyIcon() {
   return (
     <svg
@@ -74,6 +120,7 @@ export function ThreadDetailPage() {
   const shellPanelRef = useRef<ThreadShellPanelHandle | null>(null);
   const composerHostRef = useRef<HTMLDivElement | null>(null);
   const loadRequestIdRef = useRef(0);
+  const terminalTurnPendingRef = useRef<string | null>(null);
   const [detail, setDetail] = useState<ThreadDetailDto | null>(null);
   const [threads, setThreads] = useState<ThreadDto[]>([]);
   const [modelOptions, setModelOptions] = useState<ModelOptionDto[]>([]);
@@ -99,6 +146,8 @@ export function ThreadDetailPage() {
   });
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [mobileComposerHeight, setMobileComposerHeight] = useState(0);
+  const [mobileKeyboardInset, setMobileKeyboardInset] = useState(0);
+  const [mobilePromptFocused, setMobilePromptFocused] = useState(false);
   const [shellControlState, setShellControlState] =
     useState<ThreadShellControlState | null>(null);
   const [pendingShellConnectionToggle, setPendingShellConnectionToggle] =
@@ -108,6 +157,10 @@ export function ThreadDetailPage() {
   const [metaSessionCopyState, setMetaSessionCopyState] =
     useState<'idle' | 'copied' | 'failed'>('idle');
   const [ephemeralUserNote, setEphemeralUserNote] = useState<string | null>(null);
+  const [answeredRequestNotes, setAnsweredRequestNotes] = useState<
+    LocalAnsweredRequestNote[]
+  >([]);
+  const [optimisticTurn, setOptimisticTurn] = useState<OptimisticTurnState | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const flushBufferedLiveOutput = useCallback(() => {
@@ -153,6 +206,9 @@ export function ThreadDetailPage() {
     setLoadingEarlier(false);
     setMetaSessionCopyState('idle');
     setEphemeralUserNote(null);
+    setAnsweredRequestNotes([]);
+    setOptimisticTurn(null);
+    terminalTurnPendingRef.current = null;
   }, [id]);
 
   useEffect(() => {
@@ -211,6 +267,7 @@ export function ThreadDetailPage() {
             Math.round(window.innerHeight - viewport.height - viewport.offsetTop),
           )
         : 0;
+      setMobileKeyboardInset(keyboardInset);
       document.documentElement.style.setProperty(
         '--thread-detail-keyboard-inset',
         `${keyboardInset}px`,
@@ -229,6 +286,35 @@ export function ThreadDetailPage() {
       document.documentElement.style.removeProperty('--thread-detail-keyboard-inset');
     };
   }, []);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return;
+    }
+
+    const updatePromptFocus = () => {
+      const activeElement = document.activeElement;
+      const host = composerHostRef.current;
+      const promptElement = host?.querySelector('[aria-label="Prompt"]');
+
+      setMobilePromptFocused(
+        Boolean(
+          activeElement &&
+            promptElement &&
+            (activeElement === promptElement || promptElement.contains(activeElement)),
+        ),
+      );
+    };
+
+    updatePromptFocus();
+    document.addEventListener('focusin', updatePromptFocus);
+    document.addEventListener('focusout', updatePromptFocus);
+
+    return () => {
+      document.removeEventListener('focusin', updatePromptFocus);
+      document.removeEventListener('focusout', updatePromptFocus);
+    };
+  }, [activeView, isMobileViewport]);
 
   useEffect(() => {
     const node = composerHostRef.current;
@@ -288,6 +374,29 @@ export function ThreadDetailPage() {
         setThreads(threadResponse);
         setStatus(statusResponse);
         setModelOptions(modelResponse);
+        setOptimisticTurn((current) => {
+          if (!current) {
+            return current;
+          }
+
+          const resolvedTurnId = current.serverTurnId ?? current.id;
+          const hasMaterializedTurn = detailResponse.turns.some(
+            (turn) => turn.id === resolvedTurnId,
+          );
+          return hasMaterializedTurn ? null : current;
+        });
+        if (
+          terminalTurnPendingRef.current &&
+          (detailResponse.turns.some(
+            (turn) => turn.id === terminalTurnPendingRef.current,
+          ) ||
+            detailResponse.thread.activeTurnId === null)
+        ) {
+          terminalTurnPendingRef.current = null;
+          clearBufferedLiveOutput();
+          setLiveOutput('');
+          setLivePlan(null);
+        }
       } catch (caught) {
         if (loadRequestIdRef.current !== requestId) {
           return;
@@ -315,7 +424,22 @@ export function ThreadDetailPage() {
         event.type === 'thread.output.delta' &&
         typeof event.payload.delta === 'string'
       ) {
+        const eventTurnId =
+          typeof event.payload.turnId === 'string' ? event.payload.turnId : null;
         queueLiveOutputDelta(event.payload.delta);
+        if (eventTurnId) {
+          setOptimisticTurn((current) =>
+            current &&
+            (current.serverTurnId === null || current.serverTurnId === eventTurnId)
+              ? {
+                  ...current,
+                  serverTurnId: eventTurnId,
+                  id: eventTurnId,
+                  status: current.status === 'failed' ? current.status : 'inProgress',
+                }
+              : current,
+          );
+        }
       }
 
       if (
@@ -331,15 +455,49 @@ export function ThreadDetailPage() {
           clearBufferedLiveOutput();
           setLiveOutput('');
           setEphemeralUserNote(null);
+          terminalTurnPendingRef.current = null;
+          const eventTurnId =
+            typeof event.payload.turnId === 'string' ? event.payload.turnId : null;
+          if (eventTurnId) {
+            setOptimisticTurn((current) =>
+              current
+                ? {
+                    ...current,
+                    serverTurnId: eventTurnId,
+                    id: eventTurnId,
+                    status: current.status === 'failed' ? current.status : 'inProgress',
+                    error: null,
+                  }
+                : current,
+            );
+          }
         }
         if (
           event.type === 'thread.turn.completed' ||
           event.type === 'thread.turn.failed'
         ) {
-          clearBufferedLiveOutput();
-          setLiveOutput('');
-          setLivePlan(null);
           setEphemeralUserNote(null);
+          const eventTurnId =
+            typeof event.payload.turnId === 'string' ? event.payload.turnId : null;
+          if (eventTurnId) {
+            terminalTurnPendingRef.current = eventTurnId;
+            if (event.type === 'thread.turn.failed') {
+              setOptimisticTurn((current) =>
+                current &&
+                (current.serverTurnId === eventTurnId ||
+                  current.id === eventTurnId)
+                  ? {
+                      ...current,
+                      status: 'failed',
+                      error:
+                        typeof event.payload.error === 'string'
+                          ? event.payload.error
+                          : 'Unable to complete the turn.',
+                    }
+                  : current,
+              );
+            }
+          }
         }
         if (event.type === 'thread.request.created') {
           setEphemeralUserNote(null);
@@ -427,6 +585,16 @@ export function ThreadDetailPage() {
     setLiveOutput('');
     setEphemeralUserNote(null);
     setScrollRequestKey((current) => current + 1);
+    const optimisticTurnId = `optimistic-${Date.now()}`;
+    const optimisticStartedAt = new Date().toISOString();
+    setOptimisticTurn({
+      id: optimisticTurnId,
+      serverTurnId: null,
+      startedAt: optimisticStartedAt,
+      status: 'sending',
+      error: null,
+      prompt: input.prompt,
+    });
 
     try {
       let currentDetail = detail;
@@ -467,19 +635,43 @@ export function ThreadDetailPage() {
       setThreads((current) =>
         current.map((entry) => (entry.id === thread.id ? thread : entry)),
       );
+      setOptimisticTurn((current) =>
+        current && current.id === optimisticTurnId
+          ? {
+              ...current,
+              id: thread.activeTurnId ?? current.id,
+              serverTurnId: thread.activeTurnId ?? current.serverTurnId,
+              status: 'inProgress',
+              error: null,
+            }
+          : current,
+      );
       setLivePlan(null);
       setChatDraft({
         prompt: '',
         attachments: [],
       });
     } catch (caught) {
+      const message =
+        caught instanceof ApiError
+          ? caught.payload.message
+          : caught instanceof Error
+            ? caught.message
+            : 'Unable to send prompt.';
       if (caught instanceof ApiError) {
         setError(caught.payload.message);
       } else {
-        setError(
-          caught instanceof Error ? caught.message : 'Unable to send prompt.',
-        );
+        setError(message);
       }
+      setOptimisticTurn((current) =>
+        current && current.id === optimisticTurnId
+          ? {
+              ...current,
+              status: 'failed',
+              error: message,
+            }
+          : current,
+      );
     } finally {
       setBusy(false);
     }
@@ -666,6 +858,8 @@ export function ThreadDetailPage() {
     requestId: string,
     input: { answers: Record<string, { answers: string[] }> },
   ) {
+    const request = detail?.pendingRequests.find((entry) => entry.id === requestId);
+    const answeredRequestNote = buildAnsweredRequestNote(request, input);
     setRespondingRequestId(requestId);
     setError(null);
 
@@ -686,6 +880,15 @@ export function ThreadDetailPage() {
           ? 'User kept plan mode active and will provide further details.'
           : null,
       );
+      if (answeredRequestNote) {
+        setAnsweredRequestNotes((current) => {
+          const next = [
+            ...current.filter((entry) => entry.id !== answeredRequestNote.id),
+            answeredRequestNote,
+          ];
+          return next.slice(-4);
+        });
+      }
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -797,6 +1000,8 @@ export function ThreadDetailPage() {
       : null
     : null;
   const useFloatingMobileComposer = isMobileViewport && activeView === 'chat';
+  const floatingMobileComposerBottomOffset =
+    useFloatingMobileComposer && mobilePromptFocused ? mobileKeyboardInset : 0;
   const effectiveMobileComposerHeight = Math.max(mobileComposerHeight, 144);
   const timelineBottomSpacer = useFloatingMobileComposer
     ? effectiveMobileComposerHeight + 12
@@ -879,6 +1084,26 @@ export function ThreadDetailPage() {
       )}
     </dl>
   ) : null;
+
+  const timelineOptimisticTurn =
+    optimisticTurn &&
+    !detail?.turns.some(
+      (turn) => turn.id === (optimisticTurn.serverTurnId ?? optimisticTurn.id),
+    )
+      ? {
+          id: optimisticTurn.id,
+          startedAt: optimisticTurn.startedAt,
+          status: optimisticTurn.status,
+          error: optimisticTurn.error,
+          items: [
+            {
+              id: `${optimisticTurn.id}-user-message`,
+              kind: 'userMessage' as const,
+              text: optimisticTurn.prompt,
+            },
+          ],
+        }
+      : null;
 
   const sessionConnectionButtonClassName =
     busy && !detail?.thread.isLoaded
@@ -982,12 +1207,17 @@ export function ThreadDetailPage() {
                   loadingEarlier={loadingEarlier}
                   onLoadEarlier={handleLoadEarlierTurns}
                   ephemeralUserNote={ephemeralUserNote}
+                  answeredRequestNotes={answeredRequestNotes}
+                  optimisticTurn={timelineOptimisticTurn}
                 />
                 {useFloatingMobileComposer ? (
                   <div
                     ref={composerHostRef}
-                    className="fixed inset-x-0 bottom-[var(--thread-detail-keyboard-inset,0px)] z-30 sm:hidden"
-                    style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+                    className="fixed inset-x-0 bottom-0 z-30 sm:hidden"
+                    style={{
+                      bottom: `${floatingMobileComposerBottomOffset}px`,
+                      paddingBottom: 'env(safe-area-inset-bottom)',
+                    }}
                   >
                     <ThreadComposer
                       activeView={activeView}

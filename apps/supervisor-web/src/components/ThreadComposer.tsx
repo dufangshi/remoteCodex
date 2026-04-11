@@ -785,7 +785,7 @@ export function ThreadComposer({
     : 'bg-amber-300/95 text-stone-950 hover:bg-amber-200';
   const formClassName = edgeToEdgeMobile || isMobileShell
     ? 'relative z-20 shrink-0 bg-transparent px-3 pb-0 pt-3 sm:p-4'
-    : 'relative z-20 shrink-0 border-t border-stone-800 bg-stone-950/95 p-3 backdrop-blur sm:p-4';
+    : 'relative z-20 shrink-0 bg-transparent px-3 pb-3 pt-0 sm:px-4 sm:pb-4 sm:pt-0';
   const promptInputClassName =
     'min-h-[9.75rem] w-full rounded-[1.25rem] border border-stone-700 bg-stone-900 px-4 pr-14 pt-2.5 text-stone-100 outline-none transition focus-within:border-amber-300 sm:min-h-[8.25rem]';
 
@@ -821,13 +821,13 @@ export function ThreadComposer({
           aria-label="Jump to latest"
           title={followTail ? 'Latest turn is in view' : 'Jump to the latest messages'}
           onClick={() => onToggleFollow?.()}
-          className="absolute left-1/2 top-0 z-30 inline-flex h-8 min-w-[5.5rem] -translate-x-1/2 -translate-y-[30%] items-start justify-center bg-transparent pt-1.5 touch-manipulation"
+          className="absolute left-1/2 top-0 z-20 inline-flex h-9 min-w-[5.75rem] -translate-x-1/2 -translate-y-[38%] items-start justify-center bg-transparent pt-1 touch-manipulation"
         >
           <span
-            className={`pointer-events-none inline-flex h-4 min-w-[3.75rem] items-center justify-center rounded-[0.7rem] border shadow-lg shadow-stone-950/20 backdrop-blur transition ${
+            className={`pointer-events-none inline-flex h-4 min-w-[3.75rem] items-center justify-center rounded-[0.7rem] border shadow-sm transition ${
               followTail
-                ? 'border-sky-300/22 bg-sky-300/8 text-sky-100/90'
-                : 'border-stone-700/80 bg-stone-900/68 text-stone-300/85'
+                ? 'border-sky-300/20 bg-transparent text-sky-100/70'
+                : 'border-stone-600/55 bg-transparent text-stone-300/70'
             }`}
           >
             <svg
@@ -901,10 +901,10 @@ export function ThreadComposer({
             title={interruptLabel}
             onClick={() => void onInterrupt?.()}
             disabled={!canInterrupt}
-            className={`absolute right-2.5 top-2.5 inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur transition ${
+            className={`absolute right-2.5 top-2.5 inline-flex h-8 w-8 items-center justify-center rounded-full border transition ${
               canInterrupt
-                ? 'border-rose-300/35 bg-rose-300/12 text-rose-100 hover:bg-rose-300/18'
-                : 'cursor-not-allowed border-stone-600/35 bg-stone-500/6 text-stone-500 opacity-55'
+                ? 'border-rose-300/20 bg-rose-300/[0.04] text-rose-100/82 hover:bg-rose-300/[0.08]'
+                : 'cursor-not-allowed border-stone-600/20 bg-stone-400/[0.03] text-stone-500/70 opacity-55'
             }`}
           >
             <span
@@ -915,6 +915,15 @@ export function ThreadComposer({
           <button
             type="submit"
             aria-label={isShellView ? 'Send Shell Input' : 'Send Prompt'}
+            onMouseDown={(event) => {
+              event.preventDefault();
+            }}
+            onPointerDown={(event) => {
+              event.preventDefault();
+            }}
+            onTouchStart={(event) => {
+              event.preventDefault();
+            }}
             disabled={busy || (activeView === 'chat' ? disabled : false)}
             className={`absolute bottom-2.5 right-2.5 rounded-full px-3.5 py-1.5 text-sm font-medium shadow-lg shadow-stone-950/30 transition disabled:cursor-not-allowed disabled:bg-stone-700 disabled:text-stone-300 ${sendButtonClassName}`}
           >
@@ -1005,7 +1014,7 @@ export function ThreadComposer({
                     {model ?? 'Select model'}
                   </button>
                   {openMenu === 'model' && (
-                    <div className="absolute bottom-full left-0 mb-2 w-72 overflow-hidden rounded-2xl border border-stone-700 bg-stone-900 shadow-2xl shadow-stone-950/40">
+                    <div className="absolute bottom-full left-0 mb-2 w-max min-w-[9rem] max-w-[14rem] overflow-hidden rounded-2xl border border-stone-700 bg-stone-900 shadow-2xl shadow-stone-950/40">
                       <div className="max-h-72 overflow-auto p-2">
                         {modelOptions.map((entry) => (
                           <button
@@ -1023,9 +1032,7 @@ export function ThreadComposer({
                                 : 'text-stone-300 hover:bg-stone-800'
                             }`}
                           >
-                            <p className="text-sm font-medium">{entry.displayName}</p>
-                            <p className="mt-1 text-xs text-stone-500">{entry.model}</p>
-                            <p className="mt-1 text-xs text-stone-400">{entry.description}</p>
+                            <p className="text-sm font-medium">{entry.model}</p>
                           </button>
                         ))}
                       </div>
@@ -1047,7 +1054,7 @@ export function ThreadComposer({
                     {formatReasoningEffortLabel(reasoningEffort)}
                   </button>
                   {openMenu === 'effort' && (
-                    <div className="absolute bottom-full left-0 mb-2 w-64 overflow-hidden rounded-2xl border border-stone-700 bg-stone-900 shadow-2xl shadow-stone-950/40">
+                    <div className="absolute bottom-full left-0 mb-2 w-max min-w-[8rem] max-w-[12rem] overflow-hidden rounded-2xl border border-stone-700 bg-stone-900 shadow-2xl shadow-stone-950/40">
                       <div className="max-h-72 overflow-auto p-2">
                         {supportedEfforts.map((entry) => (
                           <button
@@ -1067,7 +1074,6 @@ export function ThreadComposer({
                             <p className="text-sm font-medium">
                               {formatReasoningEffortLabel(entry.reasoningEffort)}
                             </p>
-                            <p className="mt-1 text-xs text-stone-400">{entry.description}</p>
                           </button>
                         ))}
                       </div>

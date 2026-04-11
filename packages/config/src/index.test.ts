@@ -11,6 +11,8 @@ describe('loadRuntimeConfig', () => {
     expect(config.nodeEnv).toBe('development');
     expect(config.host).toBe('127.0.0.1');
     expect(config.port).toBe(8787);
+    expect(config.logLevel).toBe('info');
+    expect(config.disableRequestLogging).toBe(false);
     expect(config.workspaceRoot).toBe(os.homedir());
     expect(config.databaseUrl).toBe(path.resolve('.local', 'supervisor-dev.sqlite'));
     expect(config.codexHome).toBe(path.join(os.homedir(), '.codex'));
@@ -24,11 +26,22 @@ describe('loadRuntimeConfig', () => {
     );
   });
 
+  it('uses quieter defaults for production', () => {
+    const config = loadRuntimeConfig({
+      NODE_ENV: 'production',
+    });
+
+    expect(config.logLevel).toBe('warn');
+    expect(config.disableRequestLogging).toBe(true);
+  });
+
   it('honors explicit overrides', () => {
     const config = loadRuntimeConfig({
       NODE_ENV: 'test',
       HOST: '0.0.0.0',
       PORT: '9999',
+      LOG_LEVEL: 'error',
+      DISABLE_REQUEST_LOGGING: 'true',
       WORKSPACE_ROOT: '/tmp/workspaces',
       DATABASE_URL: '/tmp/db.sqlite',
       CODEX_HOME: '/tmp/codex-home',
@@ -39,6 +52,8 @@ describe('loadRuntimeConfig', () => {
     expect(config.nodeEnv).toBe('test');
     expect(config.host).toBe('0.0.0.0');
     expect(config.port).toBe(9999);
+    expect(config.logLevel).toBe('error');
+    expect(config.disableRequestLogging).toBe(true);
     expect(config.workspaceRoot).toBe('/tmp/workspaces');
     expect(config.databaseUrl).toBe('/tmp/db.sqlite');
     expect(config.codexHome).toBe('/tmp/codex-home');

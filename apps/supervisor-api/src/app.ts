@@ -93,7 +93,13 @@ export function buildApp(
     new ShellSessionService(database.db, eventBus, new TmuxManager());
 
   const app = Fastify({
-    logger: config.nodeEnv !== 'test'
+    logger:
+      config.nodeEnv === 'test'
+        ? false
+        : {
+            level: config.logLevel
+          },
+    disableRequestLogging: config.disableRequestLogging
   });
 
   app.register(multipart, {
