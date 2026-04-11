@@ -337,7 +337,7 @@ describe('ThreadDetailPage', () => {
     );
   });
 
-  it('keeps meta collapsed by default and only lists threads from the current workspace', async () => {
+  it('keeps meta open by default and only lists threads from the current workspace', async () => {
     render(
       <MemoryRouter initialEntries={['/threads/thread-1']}>
         <Routes>
@@ -356,11 +356,14 @@ describe('ThreadDetailPage', () => {
     expect(
       screen.queryByText('Other Workspace Thread'),
     ).not.toBeInTheDocument();
-    expect(screen.queryByText('/tmp/demo')).not.toBeInTheDocument();
+    expect(screen.getByText('/tmp/demo')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Copy Codex session ID' }),
+    ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Thread Meta/i }));
 
-    expect(screen.getByText('/tmp/demo')).toBeInTheDocument();
+    expect(screen.queryByText('/tmp/demo')).not.toBeInTheDocument();
   });
 
   it('loads only the latest turn page first and fetches earlier turns on demand', async () => {
@@ -1258,7 +1261,6 @@ describe('ThreadDetailPage', () => {
       ).toBeInTheDocument();
     });
 
-    expect(screen.queryByText(/Imported local Codex session/i)).not.toBeInTheDocument();
     expect(
       screen.queryByText(/History is available immediately\. Click Resume \/ Connect before sending a new prompt\./i),
     ).not.toBeInTheDocument();

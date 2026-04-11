@@ -205,7 +205,7 @@ function ThreadCard({
           onOpenThread(thread.id);
         }
       }}
-      className={`relative block rounded-[1.35rem] border px-4 py-3 transition ${
+      className={`relative block rounded-[1.2rem] border px-3 py-2.5 transition ${
         isCurrentThread
           ? 'border-amber-300/40 bg-amber-300/10 shadow-lg shadow-stone-950/20'
           : 'border-stone-800 bg-stone-900/75 hover:border-stone-700 hover:bg-stone-900'
@@ -215,7 +215,7 @@ function ThreadCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1">
             <p
-              className="min-w-0 w-fit max-w-[calc(100%-2rem)] truncate text-sm font-medium text-stone-100"
+              className="min-w-0 w-fit max-w-[calc(100%-2rem)] truncate text-[13px] font-medium leading-5 text-stone-100"
               title={thread.title}
             >
               {thread.title}
@@ -258,12 +258,12 @@ function ThreadCard({
           )}
         </div>
         <span
-          className={`rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.2em] ${threadStatusClassName(thread.status)}`}
+          className={`rounded-full border px-2 py-0.5 text-[9px] uppercase tracking-[0.18em] ${threadStatusClassName(thread.status)}`}
         >
           {threadStatusLabel(thread.status)}
         </span>
       </div>
-      <div className={`mt-3 flex items-center justify-between gap-3 text-xs text-stone-500 ${showSessionCopyButton && thread.codexThreadId ? 'pr-9' : ''}`}>
+      <div className={`mt-2 flex items-center justify-between gap-3 text-[11px] text-stone-500 ${showSessionCopyButton && thread.codexThreadId ? 'pr-9' : ''}`}>
         <time dateTime={thread.lastTurnStartedAt ?? thread.updatedAt}>
           {formatShortTimestamp(thread.lastTurnStartedAt ?? thread.updatedAt)}
         </time>
@@ -318,7 +318,7 @@ export function ThreadCards({
 
   return (
     <div className={containerClassName}>
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         {threads.map((thread) => (
           <ThreadCard
             key={thread.id}
@@ -438,49 +438,26 @@ export function ThreadWorkspaceLayout({
   function renderSidebarContent() {
     return (
       <div className="space-y-4">
-        <div className="rounded-[1.5rem] border border-stone-800 bg-stone-950/70 p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <p className="text-xs uppercase tracking-[0.28em] text-stone-500">
-                Threads
-              </p>
-              <p className="mt-2 truncate text-base font-semibold text-stone-100" title={threadScopeLabel}>
-                {threadScopeLabel}
-              </p>
-              <p className="mt-1 text-sm text-stone-400">
-                {supervisorSummary(status)}
-              </p>
-            </div>
-            <span className="rounded-full border border-stone-700 px-2.5 py-1 text-[11px] uppercase tracking-[0.2em] text-stone-300">
-              {status?.state ?? '...'}
-            </span>
-          </div>
-          <div className="mt-4 flex items-center justify-between gap-3 text-xs text-stone-500">
-            <span>
-              {visibleThreads.length} thread
-              {visibleThreads.length === 1 ? '' : 's'}
-            </span>
-            <Link
-              to={newThreadHref}
-              onClick={() => {
-                setMobileSidebarOpen(false);
-                shellNav?.closeNav();
-              }}
-              className="rounded-full bg-amber-300 px-3 py-2 font-medium text-stone-950 transition hover:bg-amber-200"
-            >
-              New Thread
-            </Link>
-          </div>
-        </div>
-
         <section>
           <div className="mb-3 flex items-center justify-between gap-3">
             <p className="text-xs uppercase tracking-[0.28em] text-stone-500">
               Thread List
             </p>
-            {loading && (
-              <span className="text-xs text-stone-500">Refreshing...</span>
-            )}
+            <div className="flex items-center gap-2">
+              {loading && (
+                <span className="text-xs text-stone-500">Refreshing...</span>
+              )}
+              <Link
+                to={newThreadHref}
+                onClick={() => {
+                  setMobileSidebarOpen(false);
+                  shellNav?.closeNav();
+                }}
+                className="inline-flex h-7 items-center rounded-full bg-amber-300 px-2.5 text-[10px] font-medium uppercase tracking-[0.16em] text-stone-950 transition hover:bg-amber-200"
+              >
+                New Thread
+              </Link>
+            </div>
           </div>
 
           {error && (
@@ -507,7 +484,7 @@ export function ThreadWorkspaceLayout({
           )}
         </section>
 
-        <SidebarSection title="Thread Meta">
+        <SidebarSection title="Thread Meta" defaultOpen>
           {metaContent ?? (
             <p className="text-sm text-stone-500">
               Select a thread to inspect metadata.

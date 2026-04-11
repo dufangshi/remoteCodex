@@ -55,6 +55,18 @@ function appendLatestTurns(
   return [...existing.filter((turn) => !latestIds.has(turn.id)), ...latest];
 }
 
+function CopyIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 fill-current"
+    >
+      <path d="M5.75 1.75c-.97 0-1.75.78-1.75 1.75v.25H3.5c-.97 0-1.75.78-1.75 1.75v6c0 .97.78 1.75 1.75 1.75h4.75c.97 0 1.75-.78 1.75-1.75v-.25h.5c.97 0 1.75-.78 1.75-1.75v-6c0-.97-.78-1.75-1.75-1.75h-4.75Zm-.5 2V3.5c0-.28.22-.5.5-.5h4.75c.28 0 .5.22.5.5v6a.5.5 0 0 1-.5.5H10v-4.5c0-.97-.78-1.75-1.75-1.75h-3Zm-1.75 1.25h4.75c.28 0 .5.22.5.5v6a.5.5 0 0 1-.5.5H3.5a.5.5 0 0 1-.5-.5v-6c0-.28.22-.5.5-.5Z" />
+    </svg>
+  );
+}
+
 export function ThreadDetailPage() {
   const { id = '' } = useParams();
   const liveOutputBufferRef = useRef('');
@@ -93,6 +105,8 @@ export function ThreadDetailPage() {
     useState(false);
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [respondingRequestId, setRespondingRequestId] = useState<string | null>(null);
+  const [metaSessionCopyState, setMetaSessionCopyState] =
+    useState<'idle' | 'copied' | 'failed'>('idle');
   const [error, setError] = useState<string | null>(null);
 
   const flushBufferedLiveOutput = useCallback(() => {
@@ -136,7 +150,22 @@ export function ThreadDetailPage() {
       attachments: [],
     });
     setLoadingEarlier(false);
+    setMetaSessionCopyState('idle');
   }, [id]);
+
+  useEffect(() => {
+    if (metaSessionCopyState === 'idle') {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setMetaSessionCopyState('idle');
+    }, metaSessionCopyState === 'copied' ? 1200 : 1600);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [metaSessionCopyState]);
 
   useEffect(() => {
     if (typeof document === 'undefined') {
@@ -448,6 +477,20 @@ export function ThreadDetailPage() {
     }
   }
 
+  async function handleCopyMetaSessionId() {
+    const sessionId = detail?.thread.codexThreadId;
+    if (!sessionId) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(sessionId);
+      setMetaSessionCopyState('copied');
+    } catch {
+      setMetaSessionCopyState('failed');
+    }
+  }
+
   async function handleThreadConnectionToggle(options?: { attachShell?: boolean }) {
     if (!detail) {
       return;
@@ -747,6 +790,37 @@ export function ThreadDetailPage() {
 
   const metaContent = detail ? (
     <dl className="space-y-4 text-sm">
+      <div className="relative pr-9">
+        <dt className="text-stone-500">Session ID</dt>
+        <dd className="mt-1 break-all text-stone-100">
+          {detail.thread.codexThreadId ?? 'Unavailable'}
+        </dd>
+        {detail.thread.codexThreadId && (
+          <button
+            type="button"
+            aria-label="Copy Codex session ID"
+            title={
+              metaSessionCopyState === 'copied'
+                ? 'Copied'
+                : metaSessionCopyState === 'failed'
+                  ? 'Copy failed'
+                  : 'Copy Codex session ID'
+            }
+            onClick={() => void handleCopyMetaSessionId()}
+            className={`absolute bottom-0 right-0 inline-flex h-5 w-5 items-center justify-center rounded-full border shadow-sm shadow-stone-950/25 backdrop-blur transition ${
+              metaSessionCopyState === 'copied'
+                ? 'border-sky-300/40 bg-sky-300/16 text-sky-100'
+                : metaSessionCopyState === 'failed'
+                  ? 'border-rose-300/35 bg-rose-300/12 text-rose-100'
+                  : 'border-stone-700/90 bg-stone-900/60 text-stone-300 hover:bg-stone-800/92'
+            }`}
+          >
+            <span className="scale-[0.72]">
+              <CopyIcon />
+            </span>
+          </button>
+        )}
+      </div>
       <div>
         <dt className="text-stone-500">Source</dt>
         <dd className="mt-1 text-stone-100">
@@ -775,12 +849,6 @@ export function ThreadDetailPage() {
         <dt className="text-stone-500">Workspace path</dt>
         <dd className="mt-1 text-stone-100">
           {detail.workspacePathStatus === 'present' ? 'Present' : 'Missing on this machine'}
-        </dd>
-      </div>
-      <div>
-        <dt className="text-stone-500">Session ID</dt>
-        <dd className="mt-1 break-all text-stone-100">
-          {detail.thread.codexThreadId ?? 'Unavailable'}
         </dd>
       </div>
       <div>
