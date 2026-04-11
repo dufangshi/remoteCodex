@@ -46,6 +46,18 @@ const modelOptions = [
   },
 ];
 
+function setPromptValue(element: HTMLElement, value: string) {
+  if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
+    fireEvent.change(element, {
+      target: { value },
+    });
+    return;
+  }
+
+  element.textContent = value;
+  fireEvent.input(element);
+}
+
 describe('ThreadComposer', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -134,30 +146,28 @@ describe('ThreadComposer', () => {
       />,
     );
 
-    const textarea = screen.getByLabelText('Prompt');
-    fireEvent.change(textarea, {
-      target: { value: 'Ship the fix' },
-    });
+    const editor = screen.getByLabelText('Prompt');
+    setPromptValue(editor, 'Ship the fix');
 
-    const plainEnter = createEvent.keyDown(textarea, {
+    const plainEnter = createEvent.keyDown(editor, {
       key: 'Enter',
       code: 'Enter',
       bubbles: true,
       cancelable: true,
     });
-    fireEvent(textarea, plainEnter);
+    fireEvent(editor, plainEnter);
 
     expect(plainEnter.defaultPrevented).toBe(false);
     expect(onSubmit).not.toHaveBeenCalled();
 
-    const ctrlEnter = createEvent.keyDown(textarea, {
+    const ctrlEnter = createEvent.keyDown(editor, {
       key: 'Enter',
       code: 'Enter',
       ctrlKey: true,
       bubbles: true,
       cancelable: true,
     });
-    fireEvent(textarea, ctrlEnter);
+    fireEvent(editor, ctrlEnter);
 
     expect(ctrlEnter.defaultPrevented).toBe(true);
 
@@ -165,18 +175,16 @@ describe('ThreadComposer', () => {
       expect(onSubmit).toHaveBeenCalledWith({ prompt: 'Ship the fix' });
     });
 
-    fireEvent.change(textarea, {
-      target: { value: 'Ship the mac fix' },
-    });
+    setPromptValue(editor, 'Ship the mac fix');
 
-    const metaEnter = createEvent.keyDown(textarea, {
+    const metaEnter = createEvent.keyDown(editor, {
       key: 'Enter',
       code: 'Enter',
       metaKey: true,
       bubbles: true,
       cancelable: true,
     });
-    fireEvent(textarea, metaEnter);
+    fireEvent(editor, metaEnter);
 
     expect(metaEnter.defaultPrevented).toBe(true);
 
@@ -214,10 +222,8 @@ describe('ThreadComposer', () => {
     expect(screen.getByText('[FILE notes.txt]')).toBeInTheDocument();
     expect(screen.getByText('[FILE notes.txt (2)]')).toBeInTheDocument();
 
-    const textarea = screen.getByLabelText('Prompt');
-    fireEvent.change(textarea, {
-      target: { value: 'Please inspect' },
-    });
+    const editor = screen.getByLabelText('Prompt');
+    setPromptValue(editor, `Please inspect ${editor.textContent ?? ''}`);
     fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
 
     await waitFor(() => {
@@ -333,7 +339,7 @@ describe('ThreadComposer', () => {
     expect(screen.getByText('[FILE notes.txt]')).toBeInTheDocument();
   });
 
-  it('removes the last attachment chip with backspace when the prompt is empty', async () => {
+  it('renders attachment chips inline inside the prompt editor flow', async () => {
     const { container } = render(
       <ThreadComposer
         activeView="chat"
@@ -356,16 +362,7 @@ describe('ThreadComposer', () => {
       },
     });
 
-    const textarea = screen.getByLabelText('Prompt') as HTMLTextAreaElement;
-    textarea.setSelectionRange(0, 0);
-    fireEvent.keyDown(textarea, {
-      key: 'Backspace',
-      code: 'Backspace',
-      bubbles: true,
-      cancelable: true,
-    });
-
-    expect(screen.queryByText('[FILE notes.txt]')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Prompt')).toHaveTextContent('[FILE notes.txt]');
   });
 
   it('shows the shell prompt label and enables Ctrl-C only while a command is running', () => {
@@ -490,7 +487,7 @@ describe('ThreadComposer', () => {
 
     await waitFor(() => {
       expect(readText).toHaveBeenCalled();
-      expect(screen.getByLabelText('Prompt')).toHaveValue('echo from clipboard');
+      expect(screen.getByLabelText('Prompt')).toHaveTextContent('echo from clipboard');
     });
     expect(onSubmit).not.toHaveBeenCalled();
   });
@@ -519,9 +516,9 @@ describe('ThreadComposer', () => {
       />,
     );
 
-    const textarea = screen.getByLabelText('Prompt');
-    textarea.focus();
-    expect(document.activeElement).toBe(textarea);
+    const editor = screen.getByLabelText('Prompt');
+    editor.focus();
+    expect(document.activeElement).toBe(editor);
 
     fireEvent.click(screen.getByRole('button', { name: 'Open shell tools' }));
     fireEvent.click(screen.getByRole('button', { name: /copy/i }));
@@ -529,6 +526,6 @@ describe('ThreadComposer', () => {
     await waitFor(() => {
       expect(onShellCopy).toHaveBeenCalled();
     });
-    expect(document.activeElement).not.toBe(textarea);
+    expect(document.activeElement).not.toBe(editor);
   });
 });

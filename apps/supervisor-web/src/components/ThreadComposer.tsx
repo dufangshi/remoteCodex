@@ -2,6 +2,7 @@ import {
   type Dispatch,
   FormEvent,
   KeyboardEvent,
+  useLayoutEffect,
   type SetStateAction,
   useEffect,
   useMemo,
@@ -61,22 +62,75 @@ type SettingsMenu = 'attachments' | 'model' | 'effort' | 'shellTools' | null;
 
 interface ComposerAttachmentDraft extends PromptAttachmentUpload {}
 
-function composePromptWithAttachmentPlaceholders(
+interface PromptTextSegment {
+  type: 'text';
+  key: string;
+  text: string;
+}
+
+interface PromptAttachmentSegment {
+  type: 'attachment';
+  key: string;
+  attachment: ComposerAttachmentDraft;
+}
+
+type PromptSegment = PromptTextSegment | PromptAttachmentSegment;
+
+function normalizePromptText(value: string) {
+  return value.replace(/\u00a0/g, ' ');
+}
+
+function tokenizePrompt(
   prompt: string,
-  attachments: Array<{ placeholder: string }>,
-) {
-  const normalizedPrompt = prompt.trim();
-  const placeholderText = attachments.map((entry) => entry.placeholder).join(' ');
-
-  if (!normalizedPrompt) {
-    return placeholderText;
+  attachments: ComposerAttachmentDraft[],
+): PromptSegment[] {
+  if (!prompt) {
+    return [];
   }
 
-  if (!placeholderText) {
-    return normalizedPrompt;
+  const segments: PromptSegment[] = [];
+  const placeholders = [...attachments].sort(
+    (left, right) => right.placeholder.length - left.placeholder.length,
+  );
+  let cursor = 0;
+  let textIndex = 0;
+
+  while (cursor < prompt.length) {
+    const matchingAttachment = placeholders.find((attachment) =>
+      prompt.startsWith(attachment.placeholder, cursor),
+    );
+
+    if (matchingAttachment) {
+      segments.push({
+        type: 'attachment',
+        key: `${matchingAttachment.clientId}-${cursor}`,
+        attachment: matchingAttachment,
+      });
+      cursor += matchingAttachment.placeholder.length;
+      continue;
+    }
+
+    let nextTokenIndex = prompt.length;
+    for (const attachment of placeholders) {
+      const candidateIndex = prompt.indexOf(attachment.placeholder, cursor);
+      if (candidateIndex !== -1 && candidateIndex < nextTokenIndex) {
+        nextTokenIndex = candidateIndex;
+      }
+    }
+
+    const text = prompt.slice(cursor, nextTokenIndex);
+    if (text) {
+      segments.push({
+        type: 'text',
+        key: `text-${textIndex}`,
+        text,
+      });
+      textIndex += 1;
+    }
+    cursor = nextTokenIndex;
   }
 
-  return `${normalizedPrompt} ${placeholderText}`;
+  return segments;
 }
 
 function formatReasoningEffortLabel(value: ReasoningEffortDto | null | undefined) {
@@ -277,13 +331,20 @@ export function ThreadComposer({
   onShellControl,
   canInterrupt = false,
 }: ThreadComposerProps) {
-  const [internalPrompt, setInternalPrompt] = useState('');
-  const [internalAttachments, setInternalAttachments] = useState<ComposerAttachmentDraft[]>([]);
+  const [internalDraft, setInternalDraft] = useState<{
+    prompt: string;
+    attachments: ComposerAttachmentDraft[];
+  }>({
+    prompt: '',
+    attachments: [],
+  });
   const [openMenu, setOpenMenu] = useState<SettingsMenu>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const promptRef = useRef<HTMLTextAreaElement | null>(null);
+  const promptRef = useRef<HTMLDivElement | null>(null);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingSelectionRef = useRef<{ start: number; end: number } | null>(null);
+  const selectionSnapshotRef = useRef<{ start: number; end: number } | null>(null);
   const isShellView = activeView === 'shell';
   const isMobileShell = Boolean(isShellView && shellControlState?.isMobileShell);
   const shellPromptLabel = shellControlState?.promptLabel ?? null;
@@ -292,43 +353,82 @@ export function ThreadComposer({
     draftPrompt !== undefined &&
     draftAttachments !== undefined &&
     typeof onDraftChange === 'function';
-  const prompt = isDraftControlled ? draftPrompt : internalPrompt;
+  const prompt = isDraftControlled ? draftPrompt : internalDraft.prompt;
   const attachments = (isDraftControlled
     ? draftAttachments
-    : internalAttachments) as ComposerAttachmentDraft[];
+    : internalDraft.attachments) as ComposerAttachmentDraft[];
 
-  function setPrompt(next: string | ((current: string) => string)) {
-    const resolved =
-      typeof next === 'function' ? next(prompt) : next;
-
+  function updateDraft(
+    updater: (current: {
+      prompt: string;
+      attachments: ComposerAttachmentDraft[];
+    }) => {
+      prompt: string;
+      attachments: ComposerAttachmentDraft[];
+    },
+  ) {
     if (isDraftControlled) {
-      onDraftChange?.((current) => ({
-        ...current,
-        prompt: resolved,
-      }));
+      onDraftChange?.((current) =>
+        updater({
+          prompt: current.prompt,
+          attachments: current.attachments as ComposerAttachmentDraft[],
+        }),
+      );
       return;
     }
 
-    setInternalPrompt(resolved);
+    setInternalDraft((current) => updater(current));
+  }
+
+  function setPrompt(
+    next:
+      | string
+      | ((
+          current: string,
+          attachments: ComposerAttachmentDraft[],
+        ) => {
+          prompt: string;
+          attachments?: ComposerAttachmentDraft[];
+        }),
+  ) {
+    updateDraft((current) => {
+      if (typeof next === 'function') {
+        const resolved = next(current.prompt, current.attachments);
+        return {
+          prompt: resolved.prompt,
+          attachments: resolved.attachments ?? current.attachments,
+        };
+      }
+
+      return {
+        prompt: next,
+        attachments: current.attachments,
+      };
+    });
   }
 
   function setAttachments(
     next:
       | ComposerAttachmentDraft[]
-      | ((current: ComposerAttachmentDraft[]) => ComposerAttachmentDraft[]),
+      | ((current: ComposerAttachmentDraft[]) => {
+          attachments: ComposerAttachmentDraft[];
+          prompt?: string;
+        }),
   ) {
-    const resolved =
-      typeof next === 'function' ? next(attachments) : next;
+    updateDraft((current) => {
+      if (typeof next === 'function') {
+        const resolved = next(current.attachments);
+        return {
+          prompt: resolved.prompt ?? current.prompt,
+          attachments: resolved.attachments,
+        };
+      }
 
-    if (isDraftControlled) {
-      onDraftChange?.((current) => ({
-        ...current,
-        attachments: resolved,
-      }));
-      return;
-    }
-
-    setInternalAttachments(resolved);
+      return {
+        prompt: current.prompt,
+        attachments: next,
+      };
+    });
   }
 
   const currentModel = useMemo(
@@ -336,6 +436,128 @@ export function ThreadComposer({
     [model, modelOptions],
   );
   const supportedEfforts = currentModel?.supportedReasoningEfforts ?? [];
+  const promptSegments = useMemo(
+    () => tokenizePrompt(prompt, attachments),
+    [attachments, prompt],
+  );
+
+  function snapshotSelection() {
+    const editor = promptRef.current;
+    const selection = window.getSelection();
+    if (!editor || !selection || selection.rangeCount === 0) {
+      return null;
+    }
+
+    const range = selection.getRangeAt(0);
+    if (
+      !editor.contains(range.startContainer) ||
+      !editor.contains(range.endContainer)
+    ) {
+      return null;
+    }
+
+    const startRange = range.cloneRange();
+    startRange.selectNodeContents(editor);
+    startRange.setEnd(range.startContainer, range.startOffset);
+
+    const endRange = range.cloneRange();
+    endRange.selectNodeContents(editor);
+    endRange.setEnd(range.endContainer, range.endOffset);
+
+    return {
+      start: startRange.toString().length,
+      end: endRange.toString().length,
+    };
+  }
+
+  function resolveOffsetToDomPosition(root: HTMLDivElement, targetOffset: number) {
+    let remaining = Math.max(0, targetOffset);
+    const childNodes = Array.from(root.childNodes);
+
+    for (const [index, child] of childNodes.entries()) {
+      const childText = child.textContent ?? '';
+      const childLength = childText.length;
+
+      if (child.nodeType === Node.TEXT_NODE) {
+        if (remaining <= childLength) {
+          return {
+            node: child,
+            offset: remaining,
+          };
+        }
+
+        remaining -= childLength;
+        continue;
+      }
+
+      if (
+        child instanceof HTMLElement &&
+        child.dataset.segmentType === 'attachment'
+      ) {
+        if (remaining === 0) {
+          return {
+            node: root,
+            offset: index,
+          };
+        }
+
+        if (remaining <= childLength) {
+          return {
+            node: root,
+            offset: index + 1,
+          };
+        }
+
+        remaining -= childLength;
+        continue;
+      }
+
+      if (remaining <= childLength) {
+        return {
+          node: root,
+          offset: index + 1,
+        };
+      }
+
+      remaining -= childLength;
+    }
+
+    return {
+      node: root,
+      offset: root.childNodes.length,
+    };
+  }
+
+  function restoreSelection(selection: { start: number; end: number } | null) {
+    const editor = promptRef.current;
+    if (!editor || !selection) {
+      return;
+    }
+
+    const startPosition = resolveOffsetToDomPosition(editor, selection.start);
+    const endPosition = resolveOffsetToDomPosition(editor, selection.end);
+    const range = document.createRange();
+    range.setStart(startPosition.node, startPosition.offset);
+    range.setEnd(endPosition.node, endPosition.offset);
+
+    const currentSelection = window.getSelection();
+    currentSelection?.removeAllRanges();
+    currentSelection?.addRange(range);
+  }
+
+  function serializeEditorPrompt() {
+    const editor = promptRef.current;
+    if (!editor) {
+      return prompt;
+    }
+
+    let nextPrompt = '';
+    for (const child of Array.from(editor.childNodes)) {
+      nextPrompt += child.textContent ?? '';
+    }
+
+    return normalizePromptText(nextPrompt);
+  }
 
   function buildAttachmentPlaceholder(
     kind: PromptAttachmentKindDto,
@@ -390,7 +612,30 @@ export function ThreadComposer({
       };
     });
 
-    setAttachments((current) => [...current, ...nextAttachments]);
+    const insertion = nextAttachments.map((entry) => entry.placeholder).join(' ');
+    const selection = snapshotSelection() ?? selectionSnapshotRef.current;
+    const insertionPoint = selection
+      ? {
+          start: selection.start,
+          end: selection.end,
+        }
+      : {
+          start: prompt.length,
+          end: prompt.length,
+        };
+    const nextPrompt = `${prompt.slice(0, insertionPoint.start)}${insertion}${prompt.slice(
+      insertionPoint.end,
+    )}`;
+
+    updateDraft((current) => ({
+      prompt: nextPrompt,
+      attachments: [...current.attachments, ...nextAttachments],
+    }));
+    const nextCaret = insertionPoint.start + insertion.length;
+    pendingSelectionRef.current = {
+      start: nextCaret,
+      end: nextCaret,
+    };
     setOpenMenu(null);
   }
 
@@ -408,6 +653,44 @@ export function ThreadComposer({
       };
     }
   }, [openMenu]);
+
+  useLayoutEffect(() => {
+    const editor = promptRef.current;
+    if (!editor || isShellView) {
+      return;
+    }
+
+    if (serializeEditorPrompt() !== prompt) {
+      const fragment = document.createDocumentFragment();
+
+      for (const segment of promptSegments) {
+        if (segment.type === 'text') {
+          fragment.append(document.createTextNode(segment.text));
+          continue;
+        }
+
+        const attachment = segment.attachment;
+        const token = document.createElement('span');
+        token.dataset.segmentType = 'attachment';
+        token.dataset.placeholder = attachment.placeholder;
+        token.contentEditable = 'false';
+        token.className =
+          attachment.kind === 'photo'
+            ? 'mx-[0.08rem] inline-flex max-w-full items-center rounded-full border border-sky-300/35 bg-sky-300/14 px-2 py-1 align-baseline text-[10px] font-medium tracking-[0.08em] text-sky-50 shadow-sm shadow-stone-950/20'
+            : 'mx-[0.08rem] inline-flex max-w-full items-center rounded-full border border-emerald-300/35 bg-emerald-300/14 px-2 py-1 align-baseline text-[10px] font-medium tracking-[0.08em] text-emerald-50 shadow-sm shadow-stone-950/20';
+        token.textContent = attachment.placeholder;
+        fragment.append(token);
+      }
+
+      editor.replaceChildren(fragment);
+    }
+
+    if (document.activeElement === editor) {
+      restoreSelection(pendingSelectionRef.current ?? selectionSnapshotRef.current);
+    }
+
+    pendingSelectionRef.current = null;
+  }, [isShellView, promptSegments]);
 
   function dismissPromptFocus() {
     promptRef.current?.blur();
@@ -433,31 +716,43 @@ export function ThreadComposer({
         return;
       }
 
-      setPrompt((current) => `${current}${clipboardText}`);
+      const selection = snapshotSelection() ?? selectionSnapshotRef.current;
+      const start = selection?.start ?? prompt.length;
+      const end = selection?.end ?? start;
+      const nextPrompt = `${prompt.slice(0, start)}${clipboardText}${prompt.slice(end)}`;
+      updateDraft((current) => ({
+        prompt: nextPrompt,
+        attachments: current.attachments,
+      }));
+      const nextCaret = start + clipboardText.length;
+      pendingSelectionRef.current = {
+        start: nextCaret,
+        end: nextCaret,
+      };
     } catch {
       return;
     }
   }
 
   async function submitPrompt() {
-    if (!isShellView && !prompt.trim() && attachments.length === 0) {
+    if (!isShellView && !prompt.trim()) {
       return;
     }
 
-    const normalizedPrompt = isShellView
-      ? prompt
-      : composePromptWithAttachmentPlaceholders(prompt, attachments);
+    const normalizedPrompt = isShellView ? prompt : prompt.trim();
     const activeAttachments = isShellView
       ? []
-      : attachments;
+      : attachments.filter((attachment) => normalizedPrompt.includes(attachment.placeholder));
 
     await onSubmit(
       activeAttachments.length > 0
         ? { prompt: normalizedPrompt, attachments: activeAttachments }
         : { prompt: normalizedPrompt }
     );
-    setPrompt('');
-    setAttachments([]);
+    updateDraft(() => ({
+      prompt: '',
+      attachments: [],
+    }));
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -465,20 +760,20 @@ export function ThreadComposer({
     await submitPrompt();
   }
 
-  function handlePromptKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (
-      !isShellView &&
-      event.key === 'Backspace' &&
-      prompt.length === 0 &&
-      attachments.length > 0 &&
-      event.currentTarget.selectionStart === 0 &&
-      event.currentTarget.selectionEnd === 0
-    ) {
-      event.preventDefault();
-      setAttachments((current) => current.slice(0, -1));
-      return;
-    }
+  function handlePromptInput() {
+    const nextPrompt = serializeEditorPrompt();
+    const nextSelection = snapshotSelection();
+    selectionSnapshotRef.current = nextSelection;
 
+    updateDraft((current) => ({
+      prompt: nextPrompt,
+      attachments: current.attachments.filter((attachment) =>
+        nextPrompt.includes(attachment.placeholder),
+      ),
+    }));
+  }
+
+  function handlePromptKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key !== 'Enter') {
       return;
     }
@@ -515,9 +810,8 @@ export function ThreadComposer({
   const formClassName = edgeToEdgeMobile || isMobileShell
     ? 'relative z-20 shrink-0 bg-transparent px-3 pb-0 pt-3 sm:p-4'
     : 'relative z-20 shrink-0 border-t border-stone-800 bg-stone-950/95 p-3 backdrop-blur sm:p-4';
-  const promptInputClassName = `min-h-12 w-full resize-y rounded-[1.25rem] border border-stone-700 bg-stone-900 px-4 pr-14 pt-2.5 text-stone-100 outline-none transition focus:border-amber-300 disabled:cursor-not-allowed disabled:border-stone-800 disabled:bg-stone-950 disabled:text-stone-500 ${
-    !isShellView && attachments.length > 0 ? 'pb-16' : 'pb-10'
-  }`;
+  const promptInputClassName =
+    'min-h-12 w-full rounded-[1.25rem] border border-stone-700 bg-stone-900 px-4 pr-14 pt-2.5 text-stone-100 outline-none transition focus-within:border-amber-300';
 
   return (
     <div className="relative z-20 shrink-0">
@@ -582,49 +876,50 @@ export function ThreadComposer({
         className={formClassName}
       >
         <div className="relative">
-          <textarea
-            ref={promptRef}
-            aria-label="Prompt"
-            disabled={activeView === 'chat' ? disabled : false}
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-            onKeyDown={handlePromptKeyDown}
-            rows={2}
-            placeholder={promptPlaceholder}
-            className={promptInputClassName}
-          />
-          {!isShellView && attachments.length > 0 && (
-            <div className="pointer-events-none absolute inset-x-3 bottom-11 flex flex-wrap gap-1.5">
-              {attachments.map((attachment) => {
-                const toneClassName =
-                  attachment.kind === 'photo'
-                    ? 'border-sky-300/35 bg-sky-300/14 text-sky-50'
-                    : 'border-emerald-300/35 bg-emerald-300/14 text-emerald-50';
-
-                return (
-                  <span
-                    key={attachment.clientId}
-                    className={`pointer-events-auto inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-medium tracking-[0.08em] shadow-sm shadow-stone-950/20 ${toneClassName}`}
-                  >
-                    <span className="truncate" title={attachment.placeholder}>
-                      {attachment.placeholder}
-                    </span>
-                    <button
-                      type="button"
-                      aria-label={`Remove attachment ${attachment.originalName}`}
-                      title="Remove attachment"
-                      onClick={() =>
-                        setAttachments((current) =>
-                          current.filter((entry) => entry.clientId !== attachment.clientId),
-                        )
-                      }
-                      className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-current/20 bg-black/10 text-[11px] leading-none transition hover:bg-black/20"
-                    >
-                      ×
-                    </button>
-                  </span>
-                );
-              })}
+          {isShellView ? (
+            <textarea
+              aria-label="Prompt"
+              disabled={false}
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              onKeyDown={
+                handlePromptKeyDown as unknown as (
+                  event: KeyboardEvent<HTMLTextAreaElement>,
+                ) => void
+              }
+              rows={2}
+              placeholder={promptPlaceholder}
+              className={`${promptInputClassName} resize-y pb-10`}
+            />
+          ) : (
+            <div className={promptInputClassName}>
+              {prompt.length === 0 && (
+                <span className="pointer-events-none absolute left-4 top-2.5 text-stone-500">
+                  {promptPlaceholder}
+                </span>
+              )}
+              <div
+                ref={promptRef}
+                role="textbox"
+                aria-label="Prompt"
+                aria-multiline="true"
+                contentEditable={!disabled}
+                suppressContentEditableWarning
+                onInput={() => handlePromptInput()}
+                onKeyDown={handlePromptKeyDown}
+                onKeyUp={() => {
+                  selectionSnapshotRef.current = snapshotSelection();
+                }}
+                onMouseUp={() => {
+                  selectionSnapshotRef.current = snapshotSelection();
+                }}
+                onBlur={() => {
+                  selectionSnapshotRef.current = snapshotSelection();
+                }}
+                className={`relative z-[1] min-h-[3.25rem] whitespace-pre-wrap break-words pb-10 outline-none ${
+                  disabled ? 'cursor-not-allowed text-stone-500' : ''
+                }`}
+              />
             </div>
           )}
           <button

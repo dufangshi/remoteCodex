@@ -27,6 +27,18 @@ function emitSocketMessage(socket: FakeWebSocket, payload: unknown) {
   }
 }
 
+function setPromptValue(element: HTMLElement, value: string) {
+  if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
+    fireEvent.change(element, {
+      target: { value },
+    });
+    return;
+  }
+
+  element.textContent = value;
+  fireEvent.input(element);
+}
+
 const modelOptionsResponse = [
   {
     id: 'model-option-1',
@@ -420,10 +432,8 @@ describe('ThreadDetailPage', () => {
       },
     });
 
-    const textarea = screen.getByLabelText('Prompt');
-    fireEvent.change(textarea, {
-      target: { value: 'Please inspect' },
-    });
+    const editor = screen.getByLabelText('Prompt');
+    setPromptValue(editor, `Please inspect ${editor.textContent ?? ''}`);
     fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
 
     await waitFor(() => {
@@ -618,9 +628,7 @@ describe('ThreadDetailPage', () => {
       ).toBeInTheDocument();
     });
 
-    fireEvent.change(screen.getByLabelText('Prompt'), {
-      target: { value: 'hello after auto connect' },
-    });
+    setPromptValue(screen.getByLabelText('Prompt'), 'hello after auto connect');
     fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
 
     await waitFor(() => {
