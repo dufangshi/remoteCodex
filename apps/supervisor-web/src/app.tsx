@@ -98,8 +98,10 @@ function AppShell() {
       </div>
 
       <main
-        className={`mx-auto w-full max-w-[1600px] pb-4 ${
-          isThreadWorkspaceRoute ? 'pt-[4.75rem] sm:pt-4' : 'pt-4'
+        className={`mx-auto w-full max-w-[1600px] ${
+          isThreadDetailRoute ? 'pb-0 sm:pb-4' : 'pb-4'
+        } ${
+          isThreadWorkspaceRoute ? 'pt-16 sm:pt-4' : 'pt-4'
         } ${isThreadDetailRoute ? 'px-0 sm:px-6' : 'px-4 sm:px-6'}`}
       >
         <section className="min-w-0">

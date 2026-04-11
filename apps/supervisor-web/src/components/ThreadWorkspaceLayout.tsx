@@ -321,32 +321,43 @@ export function ThreadWorkspaceLayout({
       <div
         className={
           viewportConstrained
-            ? 'flex h-[calc(100dvh-2rem)] max-h-[calc(100dvh-2rem)] min-h-0 flex-col gap-4 overflow-hidden lg:grid lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]'
+            ? 'flex h-[calc(100dvh-4rem)] max-h-[calc(100dvh-4rem)] min-h-0 flex-col gap-4 overflow-hidden sm:h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-2rem)] lg:grid lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]'
             : 'flex min-h-[calc(100dvh-2rem)] flex-col gap-4 lg:grid lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]'
         }
       >
-        <div className="pt-12 lg:hidden">
+        <div className="lg:hidden">
           <button
             type="button"
             onClick={() => setMobileSidebarOpen((current) => !current)}
             aria-expanded={mobileSidebarOpen}
-            className="flex w-full items-center justify-between rounded-[1.4rem] border border-stone-800 bg-stone-900/80 px-4 py-3 text-left"
+            className="flex w-full flex-col items-center rounded-[1.2rem] border border-stone-800 bg-stone-900/80 px-4 py-2.5 text-center"
           >
-            <div>
-              <p className="text-xs uppercase tracking-[0.28em] text-stone-500">
-                Navigation
-              </p>
-              <p className="mt-1 text-sm font-medium text-stone-100">
-                {threadScopeLabel}
-              </p>
-            </div>
-            <span className="text-sm text-stone-400">
-              {mobileSidebarOpen ? 'Close' : 'Open'}
+            <p
+              className="max-w-full truncate text-sm font-medium text-stone-100"
+              title={threadScopeLabel}
+            >
+              {threadScopeLabel}
+            </p>
+            <span
+              aria-hidden="true"
+              className={`mt-1 inline-flex h-4 w-4 items-center justify-center text-stone-400 transition ${
+                mobileSidebarOpen ? 'rotate-180' : ''
+              }`}
+            >
+              <svg
+                viewBox="0 0 16 16"
+                className="h-3.5 w-3.5 fill-none stroke-current"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="m4.5 6.25 3.5 3.5 3.5-3.5" />
+              </svg>
             </span>
           </button>
 
           {mobileSidebarOpen && (
-            <aside className="mt-3 max-h-[40dvh] overflow-y-auto rounded-[1.8rem] border border-stone-800 bg-stone-900/95 p-4 shadow-2xl shadow-stone-950/20">
+            <aside className="mt-2 max-h-[40dvh] overflow-y-auto rounded-[1.6rem] border border-stone-800 bg-stone-900/95 p-4 shadow-2xl shadow-stone-950/20">
               {renderSidebarContent()}
             </aside>
           )}
