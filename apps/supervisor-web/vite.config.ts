@@ -4,28 +4,37 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
-export default defineConfig({
-  plugins: [react(), tailwindcss()],
-  server: {
-    host: '0.0.0.0',
-    allowedHosts: ['fonshs-macbook-pro.tailaf4fa.ts.net'],
-    fs: {
-      allow: [path.resolve(__dirname, '../..')]
-    },
-    proxy: {
-      '/api': 'http://127.0.0.1:8787',
-      '/healthz': 'http://127.0.0.1:8787',
-      '/ws': {
-        target: 'ws://127.0.0.1:8787',
-        ws: true
-      }
-    }
-  },
-  preview: {
-    host: '0.0.0.0'
-  },
-  test: {
-    environment: 'jsdom',
-    setupFiles: './src/test/setup.ts'
+export default defineConfig(({ mode }) => {
+  if (process.env.VITEST || mode === 'test') {
+    process.env.NODE_ENV = 'test';
   }
+
+  return {
+    plugins: [react(), tailwindcss()],
+    server: {
+      host: '0.0.0.0',
+      allowedHosts: ['fonshs-macbook-pro.tailaf4fa.ts.net'],
+      fs: {
+        allow: [path.resolve(__dirname, '../..')]
+      },
+      proxy: {
+        '/api': 'http://127.0.0.1:8787',
+        '/healthz': 'http://127.0.0.1:8787',
+        '/ws': {
+          target: 'ws://127.0.0.1:8787',
+          ws: true
+        }
+      }
+    },
+    preview: {
+      host: '0.0.0.0'
+    },
+    test: {
+      environment: 'jsdom',
+      setupFiles: './src/test/setup.ts',
+      env: {
+        NODE_ENV: 'test',
+      },
+    }
+  };
 });

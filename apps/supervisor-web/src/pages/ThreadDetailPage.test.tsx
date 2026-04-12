@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -72,18 +72,26 @@ import { ThreadDetailPage } from './ThreadDetailPage';
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
-  listeners = new Map<string, ((event: MessageEvent) => void)[]>();
+  listeners = new Map<string, ((event: Event | MessageEvent) => void)[]>();
+  sentMessages: string[] = [];
+  readyState = 0;
 
   constructor(url: string) {
     void url;
     FakeWebSocket.instances.push(this);
   }
 
-  addEventListener(type: string, listener: (event: MessageEvent) => void) {
+  addEventListener(type: string, listener: (event: Event | MessageEvent) => void) {
     this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
   }
 
-  close() {}
+  send(message: string) {
+    this.sentMessages.push(message);
+  }
+
+  close() {
+    this.readyState = 3;
+  }
 }
 
 function emitSocketMessage(socket: FakeWebSocket, payload: unknown) {
@@ -91,6 +99,45 @@ function emitSocketMessage(socket: FakeWebSocket, payload: unknown) {
   for (const listener of socket.listeners.get('message') ?? []) {
     listener(message);
   }
+}
+
+function emitSocketEvent(socket: FakeWebSocket, type: string) {
+  if (type === 'open') {
+    socket.readyState = 1;
+  } else if (type === 'close') {
+    socket.readyState = 3;
+  }
+  const event = { type } as Event;
+  for (const listener of socket.listeners.get(type) ?? []) {
+    listener(event);
+  }
+}
+
+function okJsonResponse(payload: unknown) {
+  return Promise.resolve({
+    ok: true,
+    json: async () => payload,
+  });
+}
+
+function healthzPayload() {
+  return {
+    status: 'ok' as const,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+function withHealthz(
+  handler: (input: RequestInfo | URL, init?: RequestInit) => Promise<unknown> | unknown,
+) {
+  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith('/healthz')) {
+      return okJsonResponse(healthzPayload());
+    }
+
+    return handler(input, init);
+  });
 }
 
 function setPromptValue(element: HTMLElement, value: string) {
@@ -156,33 +203,50 @@ describe('ThreadDetailPage', () => {
     vi.stubGlobal('WebSocket', FakeWebSocket as any);
     vi.stubGlobal(
       'fetch',
-      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
 
         if (url.includes('/api/codex/status')) {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({
-              state: 'ready',
-              transport: 'stdio',
-              lastStartedAt: new Date().toISOString(),
-              lastError: null,
-              restartCount: 0,
-            }),
+          return okJsonResponse({
+            state: 'ready',
+            transport: 'stdio',
+            lastStartedAt: new Date().toISOString(),
+            lastError: null,
+            restartCount: 0,
           });
         }
 
         if (url.includes('/api/codex/models')) {
-          return Promise.resolve({
-            ok: true,
-            json: async () => modelOptionsResponse,
-          });
+          return okJsonResponse(modelOptionsResponse);
         }
 
         if (url.endsWith('/api/threads/thread-1/prompt') && init?.method === 'POST') {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({
+          return okJsonResponse({
+            id: 'thread-1',
+            workspaceId: 'workspace-1',
+            codexThreadId: 'codex-1',
+            source: 'supervisor',
+            title: 'Demo Thread',
+            model: 'gpt-5',
+            reasoningEffort: 'medium',
+            collaborationMode: 'default',
+            approvalMode: 'yolo',
+            status: 'running',
+            summaryText: 'Please inspect [FILE ./.temp/threads/thread-1/notes.txt]',
+            lastError: null,
+            activeTurnId: 'turn-2',
+            isLoaded: true,
+            isPinned: false,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            lastTurnStartedAt: new Date().toISOString(),
+            lastTurnCompletedAt: null,
+          });
+        }
+
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
+          return okJsonResponse({
+            thread: {
               id: 'thread-1',
               workspaceId: 'workspace-1',
               codexThreadId: 'codex-1',
@@ -192,72 +256,43 @@ describe('ThreadDetailPage', () => {
               reasoningEffort: 'medium',
               collaborationMode: 'default',
               approvalMode: 'yolo',
-              status: 'running',
-              summaryText: 'Please inspect [FILE ./.temp/threads/thread-1/notes.txt]',
+              status: 'idle',
+              summaryText: 'Preview',
               lastError: null,
-              activeTurnId: 'turn-2',
+              activeTurnId: null,
               isLoaded: true,
               isPinned: false,
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
-              lastTurnStartedAt: new Date().toISOString(),
+              lastTurnStartedAt: null,
               lastTurnCompletedAt: null,
-            }),
-          });
-        }
-
-        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({
-              thread: {
-                id: 'thread-1',
-                workspaceId: 'workspace-1',
-                codexThreadId: 'codex-1',
-                source: 'supervisor',
-                title: 'Demo Thread',
-                model: 'gpt-5',
-                reasoningEffort: 'medium',
-                collaborationMode: 'default',
-                approvalMode: 'yolo',
-                status: 'idle',
-                summaryText: 'Preview',
-                lastError: null,
-                activeTurnId: null,
-                isLoaded: true,
-                isPinned: false,
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-                lastTurnStartedAt: null,
-                lastTurnCompletedAt: null,
+            },
+            workspace: {
+              id: 'workspace-1',
+              hostId: 'host-1',
+              label: 'Demo Workspace',
+              absPath: '/tmp/demo',
+              isFavorite: false,
+              createdAt: new Date().toISOString(),
+              lastOpenedAt: null,
+            },
+            workspacePathStatus: 'present',
+            pendingRequests: [],
+            turns: [
+              {
+                id: 'turn-1',
+                startedAt: new Date().toISOString(),
+                status: 'completed',
+                error: null,
+                items: [
+                  {
+                    id: 'item-1',
+                    kind: 'userMessage',
+                    text: 'hello',
+                  },
+                ],
               },
-              workspace: {
-                id: 'workspace-1',
-                hostId: 'host-1',
-                label: 'Demo Workspace',
-                absPath: '/tmp/demo',
-                isFavorite: false,
-                createdAt: new Date().toISOString(),
-                lastOpenedAt: null,
-              },
-              workspacePathStatus: 'present',
-              pendingRequests: [],
-              turns: [
-                {
-                  id: 'turn-1',
-                  startedAt: new Date().toISOString(),
-                  status: 'completed',
-                  error: null,
-                  items: [
-                    {
-                      id: 'item-1',
-                      kind: 'userMessage',
-                      text: 'hello',
-                    },
-                  ],
-                },
-              ],
-            }),
+            ],
           });
         }
 
@@ -366,6 +401,93 @@ describe('ThreadDetailPage', () => {
     expect(screen.queryByText('/tmp/demo')).not.toBeInTheDocument();
   });
 
+  it('renders thread detail without waiting for background thread list and model context', async () => {
+    vi.stubGlobal(
+      'fetch',
+      withHealthz((input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (
+          url.endsWith('/api/threads') ||
+          url.includes('/api/codex/status') ||
+          url.includes('/api/codex/models')
+        ) {
+          return new Promise(() => undefined);
+        }
+
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
+          return okJsonResponse({
+            thread: {
+              id: 'thread-1',
+              workspaceId: 'workspace-1',
+              codexThreadId: 'codex-1',
+              source: 'supervisor',
+              title: 'Demo Thread',
+              model: 'gpt-5',
+              reasoningEffort: 'medium',
+              collaborationMode: 'default',
+              approvalMode: 'yolo',
+              status: 'idle',
+              summaryText: 'Preview',
+              lastError: null,
+              activeTurnId: null,
+              isLoaded: true,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: null,
+              lastTurnCompletedAt: null,
+            },
+            workspace: {
+              id: 'workspace-1',
+              hostId: 'host-1',
+              label: 'Demo Workspace',
+              absPath: '/tmp/demo',
+              isFavorite: false,
+              createdAt: new Date().toISOString(),
+              lastOpenedAt: null,
+            },
+            workspacePathStatus: 'present',
+            pendingRequests: [],
+            turns: [
+              {
+                id: 'turn-1',
+                startedAt: new Date().toISOString(),
+                status: 'completed',
+                error: null,
+                items: [
+                  {
+                    id: 'item-1',
+                    kind: 'userMessage',
+                    text: 'hello',
+                  },
+                ],
+              },
+            ],
+          });
+        }
+
+        return Promise.reject(new Error(`Unexpected request: ${url}`));
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('hello')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText('Loading thread detail...')).not.toBeInTheDocument();
+    expect(screen.getByTitle('Demo Thread')).toBeInTheDocument();
+    expect(screen.queryByText('No threads available in this view.')).not.toBeInTheDocument();
+  });
+
   it('loads only the latest turn page first and fetches earlier turns on demand', async () => {
     const allTurns = Array.from({ length: 15 }, (_, index) => ({
       id: `turn-${index + 1}`,
@@ -384,7 +506,7 @@ describe('ThreadDetailPage', () => {
     const detailUrls: string[] = [];
     vi.stubGlobal(
       'fetch',
-      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
 
         if (url.includes('/api/codex/status')) {
@@ -523,7 +645,7 @@ describe('ThreadDetailPage', () => {
   it('surfaces imported thread warnings before resume', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn((input: RequestInfo | URL) => {
+      withHealthz((input: RequestInfo | URL) => {
         const url = String(input);
 
         if (url.includes('/api/codex/status')) {
@@ -679,7 +801,7 @@ describe('ThreadDetailPage', () => {
   it('auto-connects an unloaded thread before sending the first prompt', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
 
         if (url.includes('/api/codex/status')) {
@@ -876,7 +998,7 @@ describe('ThreadDetailPage', () => {
   it('shows the specific server error message when attachment upload is rejected', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
 
         if (url.includes('/api/codex/status')) {
@@ -999,7 +1121,7 @@ describe('ThreadDetailPage', () => {
   it('shows an optimistic sending turn immediately and marks it failed when prompt submission fails', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
 
         if (url.includes('/api/codex/status')) {
@@ -1104,7 +1226,7 @@ describe('ThreadDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
 
     expect(screen.getAllByText('Ship this optimistic prompt.').length).toBeGreaterThan(0);
-    expect(screen.getByLabelText('Sending')).toBeInTheDocument();
+    expect(screen.getAllByLabelText('Sending').length).toBeGreaterThan(0);
 
     await waitFor(() => {
       expect(screen.getByLabelText('Failed')).toBeInTheDocument();
@@ -1138,7 +1260,7 @@ describe('ThreadDetailPage', () => {
   it('does not auto-connect the shell after switching views while the thread is disconnected', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn((input: RequestInfo | URL) => {
+      withHealthz((input: RequestInfo | URL) => {
         const url = String(input);
 
         if (url.includes('/api/codex/status')) {
@@ -1263,7 +1385,7 @@ describe('ThreadDetailPage', () => {
   it('does not render the imported-session warning card after connection', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn((input: RequestInfo | URL) => {
+      withHealthz((input: RequestInfo | URL) => {
         const url = String(input);
 
         if (url.includes('/api/codex/status')) {
@@ -1385,7 +1507,7 @@ describe('ThreadDetailPage', () => {
   it('replaces a dismissed plan decision with a compact user note when staying in plan mode', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
 
         if (url.includes('/api/codex/status')) {
@@ -1739,7 +1861,7 @@ describe('ThreadDetailPage', () => {
 
     vi.stubGlobal(
       'fetch',
-      vi.fn((input: RequestInfo | URL) => {
+      withHealthz((input: RequestInfo | URL) => {
         const url = String(input);
 
         if (url.includes('/api/codex/status')) {
@@ -1940,5 +2062,591 @@ describe('ThreadDetailPage', () => {
       expect(screen.getByText('Answer Required', { selector: 'p' })).toBeInTheDocument();
       expect(screen.getByText('Choose the next step')).toBeInTheDocument();
     });
+  });
+
+  it('polls active thread detail so completed replies appear even without websocket events', async () => {
+    let detailCallCount = 0;
+    const intervalCallbacks = new Map<number, TimerHandler>();
+    let nextIntervalId = 1;
+
+    vi.spyOn(window, 'setInterval').mockImplementation(
+      ((callback: TimerHandler) => {
+        const id = nextIntervalId;
+        nextIntervalId += 1;
+        intervalCallbacks.set(id, callback);
+        return id as unknown as number;
+      }) as typeof window.setInterval,
+    );
+    vi.spyOn(window, 'clearInterval').mockImplementation(
+      ((id: number) => {
+        intervalCallbacks.delete(Number(id));
+      }) as typeof window.clearInterval,
+    );
+
+    vi.stubGlobal(
+      'fetch',
+      withHealthz(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.endsWith('/api/threads')) {
+          return {
+            ok: true,
+            json: async () => [
+              {
+                id: 'thread-1',
+                workspaceId: 'workspace-1',
+                codexThreadId: 'codex-1',
+                source: 'supervisor',
+                title: 'Demo Thread',
+                model: 'gpt-5',
+                reasoningEffort: 'medium',
+                collaborationMode: 'default',
+                approvalMode: 'yolo',
+                status: 'running',
+                summaryText: 'Explain the failure',
+                lastError: null,
+                activeTurnId: 'turn-1',
+                isLoaded: true,
+                isPinned: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                lastTurnStartedAt: new Date().toISOString(),
+                lastTurnCompletedAt: null,
+              },
+            ],
+          };
+        }
+
+        if (url.endsWith('/api/codex/status')) {
+          return {
+            ok: true,
+            json: async () => ({
+              command: 'codex',
+              args: [],
+              cwd: '/tmp/project',
+              transport: 'stdio',
+            }),
+          };
+        }
+
+        if (url.endsWith('/api/codex/models')) {
+          return {
+            ok: true,
+            json: async () => modelOptionsResponse,
+          };
+        }
+
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
+          detailCallCount += 1;
+          const completed = detailCallCount >= 2;
+
+          return {
+            ok: true,
+            json: async () => ({
+              thread: {
+                id: 'thread-1',
+                workspaceId: 'workspace-1',
+                codexThreadId: 'codex-1',
+                source: 'supervisor',
+                title: 'Demo Thread',
+                model: 'gpt-5',
+                reasoningEffort: 'medium',
+                collaborationMode: 'default',
+                approvalMode: 'yolo',
+                status: completed ? 'idle' : 'running',
+                summaryText: 'Explain the failure',
+                lastError: null,
+                activeTurnId: completed ? null : 'turn-1',
+                isLoaded: true,
+                isPinned: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                lastTurnStartedAt: new Date().toISOString(),
+                lastTurnCompletedAt: completed ? new Date().toISOString() : null,
+              },
+              workspace: {
+                id: 'workspace-1',
+                hostId: 'host-1',
+                label: 'Demo Workspace',
+                absPath: '/tmp/project',
+                isFavorite: false,
+                createdAt: new Date().toISOString(),
+                lastOpenedAt: new Date().toISOString(),
+              },
+              workspacePathStatus: 'present',
+              pendingRequests: [],
+              totalTurnCount: 1,
+              turns: [
+                {
+                  id: 'turn-1',
+                  startedAt: new Date().toISOString(),
+                  status: completed ? 'completed' : 'inProgress',
+                  error: null,
+                  items: completed
+                    ? [
+                        {
+                          id: 'user-1',
+                          kind: 'userMessage',
+                          text: 'Explain the failure',
+                        },
+                        {
+                          id: 'agent-1',
+                          kind: 'agentMessage',
+                          text: 'The build failed because the API never restarted after the socket dropped.',
+                        },
+                      ]
+                    : [
+                        {
+                          id: 'user-1',
+                          kind: 'userMessage',
+                          text: 'Explain the failure',
+                        },
+                      ],
+                },
+              ],
+            }),
+          };
+        }
+
+        return Promise.reject(new Error(`Unexpected request: ${url}`));
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Explain the failure')).toBeInTheDocument();
+    });
+
+    expect(
+      screen.queryByText(
+        'The build failed because the API never restarted after the socket dropped.',
+      ),
+    ).not.toBeInTheDocument();
+    expect(intervalCallbacks.size).toBeGreaterThan(0);
+
+    await act(async () => {
+      const callback = Array.from(intervalCallbacks.values()).at(-1);
+      expect(callback).toBeTypeOf('function');
+      if (typeof callback === 'function') {
+        callback();
+      }
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          'The build failed because the API never restarted after the socket dropped.',
+        ),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it('surfaces realtime connection status transitions in the mobile header', async () => {
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Realtime updates reconnecting')).toBeInTheDocument();
+    });
+
+    expect(FakeWebSocket.instances).toHaveLength(1);
+
+    await act(async () => {
+      emitSocketEvent(FakeWebSocket.instances[0]!, 'open');
+      emitSocketMessage(FakeWebSocket.instances[0]!, {
+        type: 'supervisor.pong',
+        timestamp: new Date().toISOString(),
+        payload: {
+          requestTimestamp: new Date().toISOString(),
+        },
+      });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Realtime updates connected')).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      emitSocketEvent(FakeWebSocket.instances[0]!, 'close');
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Realtime updates reconnecting')).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new Event('offline'));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Browser offline')).toBeInTheDocument();
+    });
+  });
+
+  it('shows a gray connect button in the mobile header for detached threads and reconnects on click', async () => {
+    vi.stubGlobal(
+      'fetch',
+      withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+
+        if (url.includes('/api/codex/status')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              state: 'ready',
+              transport: 'stdio',
+              lastStartedAt: new Date().toISOString(),
+              lastError: null,
+              restartCount: 0,
+            }),
+          });
+        }
+
+        if (url.includes('/api/codex/models')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => modelOptionsResponse,
+          });
+        }
+
+        if (url.endsWith('/api/threads/thread-1/resume') && init?.method === 'POST') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              thread: {
+                id: 'thread-1',
+                workspaceId: 'workspace-1',
+                codexThreadId: 'codex-1',
+                source: 'supervisor',
+                title: 'Demo Thread',
+                model: 'gpt-5',
+                reasoningEffort: 'medium',
+                collaborationMode: 'default',
+                approvalMode: 'yolo',
+                status: 'idle',
+                summaryText: 'Preview',
+                lastError: null,
+                activeTurnId: null,
+                isLoaded: true,
+                isPinned: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                lastTurnStartedAt: null,
+                lastTurnCompletedAt: null,
+              },
+              workspace: {
+                id: 'workspace-1',
+                hostId: 'host-1',
+                label: 'Demo Workspace',
+                absPath: '/tmp/demo',
+                isFavorite: false,
+                createdAt: new Date().toISOString(),
+                lastOpenedAt: null,
+              },
+              workspacePathStatus: 'present',
+              pendingRequests: [],
+              turns: [],
+            }),
+          });
+        }
+
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              thread: {
+                id: 'thread-1',
+                workspaceId: 'workspace-1',
+                codexThreadId: 'codex-1',
+                source: 'supervisor',
+                title: 'Demo Thread',
+                model: 'gpt-5',
+                reasoningEffort: 'medium',
+                collaborationMode: 'default',
+                approvalMode: 'yolo',
+                status: 'idle',
+                summaryText: 'Preview',
+                lastError: null,
+                activeTurnId: null,
+                isLoaded: false,
+                isPinned: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                lastTurnStartedAt: null,
+                lastTurnCompletedAt: null,
+              },
+              workspace: {
+                id: 'workspace-1',
+                hostId: 'host-1',
+                label: 'Demo Workspace',
+                absPath: '/tmp/demo',
+                isFavorite: false,
+                createdAt: new Date().toISOString(),
+                lastOpenedAt: null,
+              },
+              workspacePathStatus: 'present',
+              pendingRequests: [],
+              turns: [],
+            }),
+          });
+        }
+
+        if (url.endsWith('/api/threads')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => [
+              {
+                id: 'thread-1',
+                workspaceId: 'workspace-1',
+                codexThreadId: 'codex-1',
+                source: 'supervisor',
+                title: 'Demo Thread',
+                model: 'gpt-5',
+                reasoningEffort: 'medium',
+                collaborationMode: 'default',
+                approvalMode: 'yolo',
+                status: 'idle',
+                summaryText: 'Preview',
+                lastError: null,
+                activeTurnId: null,
+                isLoaded: false,
+                isPinned: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                lastTurnStartedAt: null,
+                lastTurnCompletedAt: null,
+              },
+            ],
+          });
+        }
+
+        throw new Error(`Unhandled fetch request: ${url}`);
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Connect thread' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Connect thread' }));
+
+    await waitFor(() => {
+      const calls = vi.mocked(fetch).mock.calls.map(([requestUrl]) => String(requestUrl));
+      expect(calls).toContain('/api/threads/thread-1/resume');
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Connect thread' })).not.toBeInTheDocument();
+    });
+  });
+
+  it('reloads thread detail after the supervisor socket reconnects', async () => {
+    let detailCallCount = 0;
+    const timeoutCallbacks = new Map<number, TimerHandler>();
+    let nextTimeoutId = 1;
+
+    vi.stubGlobal(
+      'fetch',
+      withHealthz(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.endsWith('/api/threads')) {
+          return {
+            ok: true,
+            json: async () => [
+              {
+                id: 'thread-1',
+                workspaceId: 'workspace-1',
+                codexThreadId: 'codex-1',
+                source: 'supervisor',
+                title: 'Demo Thread',
+                model: 'gpt-5',
+                reasoningEffort: 'medium',
+                collaborationMode: 'default',
+                approvalMode: 'yolo',
+                status: 'running',
+                summaryText: 'Explain the failure',
+                lastError: null,
+                activeTurnId: 'turn-1',
+                isLoaded: true,
+                isPinned: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                lastTurnStartedAt: new Date().toISOString(),
+                lastTurnCompletedAt: null,
+              },
+            ],
+          };
+        }
+
+        if (url.endsWith('/api/codex/status')) {
+          return {
+            ok: true,
+            json: async () => ({
+              command: 'codex',
+              args: [],
+              cwd: '/tmp/project',
+              transport: 'stdio',
+            }),
+          };
+        }
+
+        if (url.endsWith('/api/codex/models')) {
+          return {
+            ok: true,
+            json: async () => modelOptionsResponse,
+          };
+        }
+
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
+          detailCallCount += 1;
+          const completed = detailCallCount >= 2;
+
+          return {
+            ok: true,
+            json: async () => ({
+              thread: {
+                id: 'thread-1',
+                workspaceId: 'workspace-1',
+                codexThreadId: 'codex-1',
+                source: 'supervisor',
+                title: 'Demo Thread',
+                model: 'gpt-5',
+                reasoningEffort: 'medium',
+                collaborationMode: 'default',
+                approvalMode: 'yolo',
+                status: completed ? 'idle' : 'running',
+                summaryText: 'Explain the failure',
+                lastError: null,
+                activeTurnId: completed ? null : 'turn-1',
+                isLoaded: true,
+                isPinned: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                lastTurnStartedAt: new Date().toISOString(),
+                lastTurnCompletedAt: completed ? new Date().toISOString() : null,
+              },
+              workspace: {
+                id: 'workspace-1',
+                hostId: 'host-1',
+                label: 'Demo Workspace',
+                absPath: '/tmp/project',
+                isFavorite: false,
+                createdAt: new Date().toISOString(),
+                lastOpenedAt: new Date().toISOString(),
+              },
+              workspacePathStatus: 'present',
+              pendingRequests: [],
+              totalTurnCount: 1,
+              turns: [
+                {
+                  id: 'turn-1',
+                  startedAt: new Date().toISOString(),
+                  status: completed ? 'completed' : 'inProgress',
+                  error: null,
+                  items: completed
+                    ? [
+                        {
+                          id: 'user-1',
+                          kind: 'userMessage',
+                          text: 'Explain the failure',
+                        },
+                        {
+                          id: 'agent-1',
+                          kind: 'agentMessage',
+                          text: 'Recovered after reconnect.',
+                        },
+                      ]
+                    : [
+                        {
+                          id: 'user-1',
+                          kind: 'userMessage',
+                          text: 'Explain the failure',
+                        },
+                      ],
+                },
+              ],
+            }),
+          };
+        }
+
+        return Promise.reject(new Error(`Unexpected request: ${url}`));
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Explain the failure')).toBeInTheDocument();
+    });
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(screen.queryByText('Recovered after reconnect.')).not.toBeInTheDocument();
+
+    vi.spyOn(window, 'setTimeout').mockImplementation(
+      ((callback: TimerHandler) => {
+        const id = nextTimeoutId;
+        nextTimeoutId += 1;
+        timeoutCallbacks.set(id, callback);
+        return id as unknown as number;
+      }) as typeof window.setTimeout,
+    );
+    vi.spyOn(window, 'clearTimeout').mockImplementation(
+      ((id: number) => {
+        timeoutCallbacks.delete(Number(id));
+      }) as typeof window.clearTimeout,
+    );
+
+    emitSocketEvent(FakeWebSocket.instances[0]!, 'close');
+    expect(timeoutCallbacks.size).toBeGreaterThan(0);
+
+    await act(async () => {
+      const reconnectCallback = Array.from(timeoutCallbacks.values()).at(-1);
+      expect(reconnectCallback).toBeTypeOf('function');
+      if (typeof reconnectCallback === 'function') {
+        reconnectCallback();
+      }
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(FakeWebSocket.instances).toHaveLength(2);
+
+    await act(async () => {
+      emitSocketEvent(FakeWebSocket.instances[1]!, 'open');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(detailCallCount).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText('Recovered after reconnect.')).toBeInTheDocument();
   });
 });

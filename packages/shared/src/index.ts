@@ -144,8 +144,19 @@ export interface ThreadHistoryItemDto {
   text: string;
   previewText?: string;
   detailText?: string | null;
+  hasDeferredDetail?: boolean | null;
   status?: string | null;
   assetPath?: string | null;
+  changedFiles?: number | null;
+  addedLines?: number | null;
+  removedLines?: number | null;
+}
+
+export interface ThreadHistoryItemDetailDto {
+  id: string;
+  kind: ThreadHistoryItemDto['kind'];
+  title: string;
+  text: string;
 }
 
 export interface ThreadTurnDto {
@@ -335,12 +346,25 @@ export interface SupervisorConnectedEnvelope {
   timestamp: string;
 }
 
+export interface SupervisorPongEnvelope {
+  type: 'supervisor.pong';
+  timestamp: string;
+  payload: {
+    requestTimestamp: string | null;
+  };
+}
+
 export type SupervisorSocketServerEnvelope =
   | SupervisorConnectedEnvelope
+  | SupervisorPongEnvelope
   | ThreadEventEnvelope
   | ShellEventEnvelope;
 
 export type SupervisorSocketClientEnvelope =
+  | {
+      type: 'supervisor.ping';
+      timestamp: string;
+    }
   | {
       type: 'shell.attach';
       shellId: string;

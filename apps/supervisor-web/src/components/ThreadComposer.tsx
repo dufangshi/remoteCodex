@@ -630,7 +630,10 @@ export function ThreadComposer({
       return;
     }
 
-    if (serializeEditorPrompt() !== prompt) {
+    const pendingSelection = pendingSelectionRef.current;
+    const shouldSyncDom = serializeEditorPrompt() !== prompt;
+
+    if (shouldSyncDom) {
       const fragment = document.createDocumentFragment();
 
       for (const segment of promptSegments) {
@@ -655,8 +658,8 @@ export function ThreadComposer({
       editor.replaceChildren(fragment);
     }
 
-    if (document.activeElement === editor) {
-      restoreSelection(pendingSelectionRef.current ?? selectionSnapshotRef.current);
+    if (document.activeElement === editor && (pendingSelection !== null || shouldSyncDom)) {
+      restoreSelection(pendingSelection ?? selectionSnapshotRef.current);
     }
 
     pendingSelectionRef.current = null;

@@ -2,6 +2,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type RefCallback,
@@ -13,6 +14,7 @@ import { Streamdown } from 'streamdown';
 import type {
   RespondThreadActionRequestInput,
   ThreadActionRequestDto,
+  ThreadHistoryItemDetailDto,
   ThreadHistoryItemDto,
   ThreadTurnDto,
 } from '../../../../packages/shared/src/index';
@@ -56,12 +58,40 @@ interface ThreadTimelineProps {
     summaryLines: string[];
   }>;
   optimisticTurn?: TimelineTurn | null;
+  onLoadHistoryItemDetail?: (
+    itemId: string,
+  ) => Promise<ThreadHistoryItemDetailDto> | ThreadHistoryItemDetailDto;
 }
 
 interface ExpandedTextState {
   title: string;
   text: string;
 }
+
+interface CommandHistoryItem extends ThreadHistoryItemDto {
+  kind: 'commandExecution';
+}
+
+interface FileChangeHistoryItem extends ThreadHistoryItemDto {
+  kind: 'fileChange';
+}
+
+type TimelineHistoryEntry =
+  | {
+      kind: 'item';
+      key: string;
+      item: ThreadHistoryItemDto;
+    }
+  | {
+      kind: 'commandGroup';
+      key: string;
+      items: CommandHistoryItem[];
+    }
+  | {
+      kind: 'fileChangeGroup';
+      key: string;
+      items: FileChangeHistoryItem[];
+    };
 
 type TimelineTurn = Omit<ThreadTurnDto, 'status'> & {
   status: ThreadTurnDto['status'] | 'sending';
@@ -141,8 +171,118 @@ function summarizeCommandText(text: string) {
   };
 }
 
+function formatTrailingPathLabel(label: string, maxLength = 42) {
+  const normalized = label.trim();
+  if (!normalized) {
+    return '';
+  }
+
+  const suffixMatch = normalized.match(/(, \+\d+ more.*)$/);
+  const suffix = suffixMatch?.[1] ?? '';
+  const base = suffix ? normalized.slice(0, -suffix.length) : normalized;
+  if (base.length <= maxLength) {
+    return `${base}${suffix}`;
+  }
+
+  const normalizedSeparators = base.replace(/\\/g, '/');
+  const segments = normalizedSeparators.split('/').filter(Boolean);
+  if (segments.length > 1) {
+    const keptSegments: string[] = [];
+    let currentLength = suffix.length + 4;
+
+    for (let index = segments.length - 1; index >= 0; index -= 1) {
+      const candidate = segments[index]!;
+      const nextLength = currentLength + candidate.length + (keptSegments.length > 0 ? 1 : 0);
+      if (keptSegments.length > 0 && nextLength > maxLength) {
+        break;
+      }
+      keptSegments.unshift(candidate);
+      currentLength = nextLength;
+    }
+
+    if (keptSegments.length > 0) {
+      return `.../${keptSegments.join('/')}${suffix}`;
+    }
+  }
+
+  return `...${base.slice(-(maxLength - suffix.length - 3))}${suffix}`;
+}
+
+function fileChangeSummarySegments(item: ThreadHistoryItemDto & { kind: 'fileChange' }) {
+  const segments: string[] = [];
+
+  if (typeof item.changedFiles === 'number' && item.changedFiles > 0) {
+    segments.push(`${item.changedFiles} ${item.changedFiles === 1 ? 'file' : 'files'}`);
+  }
+  if (typeof item.addedLines === 'number' && item.addedLines > 0) {
+    segments.push(`+${item.addedLines}`);
+  }
+  if (typeof item.removedLines === 'number' && item.removedLines > 0) {
+    segments.push(`-${item.removedLines}`);
+  }
+
+  if (segments.length > 0) {
+    return segments;
+  }
+
+  const fallback = item.previewText?.trim();
+  if (!fallback) {
+    return [];
+  }
+
+  return fallback
+    .replace(/\bfiles changed\b/gi, 'files')
+    .replace(/\bfile changed\b/gi, 'file')
+    .split('·')
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+}
+
 function isCompactChatItem(kind: ThreadHistoryItemDto['kind']) {
   return kind === 'userMessage' || kind === 'agentMessage';
+}
+
+function getLiveOutputTailForTurn(
+  liveOutput: string,
+  items: ThreadHistoryItemDto[],
+) {
+  if (!liveOutput) {
+    return '';
+  }
+
+  const materializedAgentText = items
+    .filter(
+      (
+        item,
+      ): item is ThreadHistoryItemDto & {
+        kind: 'agentMessage';
+      } => item.kind === 'agentMessage',
+    )
+    .map((item) => item.text)
+    .join('');
+
+  if (!materializedAgentText) {
+    return liveOutput;
+  }
+
+  const sharedPrefixLength = Math.min(
+    liveOutput.length,
+    materializedAgentText.length,
+  );
+  let consumedLength = 0;
+  while (
+    consumedLength < sharedPrefixLength &&
+    liveOutput[consumedLength] === materializedAgentText[consumedLength]
+  ) {
+    consumedLength += 1;
+  }
+
+  if (consumedLength === 0) {
+    return liveOutput;
+  }
+
+  const remainingOutput = liveOutput.slice(consumedLength);
+  return remainingOutput.trim() ? remainingOutput : '';
 }
 
 function isRunningHistoryStatus(status?: string | null) {
@@ -158,6 +298,10 @@ function isRunningHistoryStatus(status?: string | null) {
   );
 }
 
+function isActiveTurnStatus(status: TimelineTurn['status']) {
+  return status === 'inProgress' || status === 'sending';
+}
+
 function isNearBottom(container: HTMLDivElement) {
   const distanceFromBottom =
     container.scrollHeight - container.scrollTop - container.clientHeight;
@@ -171,6 +315,60 @@ function isElementVisible(container: HTMLDivElement, element: HTMLElement) {
   const visibleBottom = Math.min(containerRect.bottom, elementRect.bottom);
   const visibleHeight = Math.max(0, visibleBottom - visibleTop);
   return visibleHeight > 0;
+}
+
+function groupTimelineHistoryItems(items: ThreadHistoryItemDto[]) {
+  const entries: TimelineHistoryEntry[] = [];
+  let index = 0;
+
+  while (index < items.length) {
+    const current = items[index];
+    if (!current) {
+      break;
+    }
+
+    if (current.kind !== 'commandExecution' && current.kind !== 'fileChange') {
+      entries.push({
+        kind: 'item',
+        key: current.id,
+        item: current,
+      });
+      index += 1;
+      continue;
+    }
+
+    const groupedItems: ThreadHistoryItemDto[] = [];
+    while (index < items.length && items[index]?.kind === current.kind) {
+      groupedItems.push(items[index]!);
+      index += 1;
+    }
+
+    if (groupedItems.length === 1) {
+      entries.push({
+        kind: 'item',
+        key: groupedItems[0]!.id,
+        item: groupedItems[0]!,
+      });
+      continue;
+    }
+
+    if (current.kind === 'commandExecution') {
+      entries.push({
+        kind: 'commandGroup',
+        key: groupedItems.map((item) => item.id).join(':'),
+        items: groupedItems as CommandHistoryItem[],
+      });
+      continue;
+    }
+
+    entries.push({
+      kind: 'fileChangeGroup',
+      key: groupedItems.map((item) => item.id).join(':'),
+      items: groupedItems as FileChangeHistoryItem[],
+    });
+  }
+
+  return entries;
 }
 
 function CompactMessageIcon({
@@ -226,6 +424,27 @@ function CommandIcon() {
   );
 }
 
+function CommandBatchIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 fill-none stroke-current"
+      strokeWidth="1.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="2.75" y="3" width="8.5" height="3" rx="1.1" />
+      <rect x="4.25" y="6.5" width="8.5" height="3" rx="1.1" />
+      <rect x="5.75" y="10" width="7.5" height="3" rx="1.1" />
+      <path d="m6.25 4.5 1 1-1 1" />
+      <path d="M7.9 5.5h1.7" />
+      <path d="m7.75 8 1 1-1 1" />
+      <path d="M9.4 9h1.7" />
+    </svg>
+  );
+}
+
 function SearchIcon() {
   return (
     <svg
@@ -255,6 +474,24 @@ function ImageIcon() {
       <rect x="2.75" y="3" width="10.5" height="9.5" rx="1.5" />
       <circle cx="6.1" cy="6.1" r="1.1" />
       <path d="m4.5 10 2.2-2.2 1.9 1.9 1.1-1.1 1.8 1.8" />
+    </svg>
+  );
+}
+
+function FileChangeIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 fill-none stroke-current"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M5 2.75h4l2 2v6.5a1.5 1.5 0 0 1-1.5 1.5h-4A1.5 1.5 0 0 1 4 11.25v-7A1.5 1.5 0 0 1 5.5 2.75Z" />
+      <path d="M9 2.75v2h2" />
+      <path d="M6.2 8h3.6" />
+      <path d="M6.2 10h1.7" />
     </svg>
   );
 }
@@ -385,6 +622,60 @@ function TurnStatusIndicator({
       className="inline-flex min-w-[1.25rem] items-center justify-center text-sky-200"
     >
       <RunningDots tone="emerald" />
+    </span>
+  );
+}
+
+function TurnStatusBar({
+  turn,
+  variant = 'header',
+}: {
+  turn: TimelineTurn;
+  variant?: 'header' | 'footer';
+}) {
+  const label = turnStatusLabel(turn.status);
+  const runtimeSummary = formatTurnRuntimeSummary(turn);
+  const active = isActiveTurnStatus(turn.status);
+  const toneClassName =
+    turn.status === 'failed'
+      ? 'border-rose-300/20 bg-rose-300/[0.06] text-rose-100'
+      : active
+        ? 'border-sky-300/22 bg-sky-300/[0.08] text-sky-100'
+        : 'border-stone-700/90 bg-stone-900/70 text-stone-200';
+
+  if (variant === 'footer') {
+    return (
+      <div
+        className={`flex w-full items-center justify-between gap-3 rounded-[0.95rem] border px-3 py-2 text-xs ${toneClassName}`}
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          <TurnStatusIndicator status={turn.status} />
+          <span className="shrink-0 font-medium">{label}</span>
+          <span className="text-stone-500">•</span>
+          <span className="min-w-0 truncate text-stone-300">{runtimeSummary}</span>
+        </div>
+        {turn.startedAt && (
+          <time
+            dateTime={turn.startedAt}
+            title={formatLongTimestamp(turn.startedAt)}
+            className="shrink-0 text-[11px] text-stone-400"
+          >
+            {formatShortTimestamp(turn.startedAt)}
+          </time>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <span
+      className={`inline-flex min-w-0 items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] sm:text-[11px] ${toneClassName}`}
+      title={`${label} · ${runtimeSummary}`}
+    >
+      <TurnStatusIndicator status={turn.status} />
+      <span className="shrink-0 font-medium">{label}</span>
+      <span className="text-stone-500">•</span>
+      <span className="min-w-0 truncate text-stone-400">{runtimeSummary}</span>
     </span>
   );
 }
@@ -634,7 +925,10 @@ const CommandItem = memo(function CommandItem({
   onOpen,
 }: {
   item: ThreadHistoryItemDto & { kind: 'commandExecution' };
-  onOpen: (title: string, text: string) => void;
+  onOpen: (
+    item: ThreadHistoryItemDto & { kind: 'commandExecution' },
+    title: string,
+  ) => void;
 }) {
   const summary = summarizeCommandText(item.text);
 
@@ -666,7 +960,7 @@ const CommandItem = memo(function CommandItem({
             type="button"
             aria-label="Expand command"
             title="Expand command"
-            onClick={() => onOpen('Command Output', item.text)}
+            onClick={() => onOpen(item, 'Command Output')}
             className={`absolute right-0 top-0 inline-flex h-5 w-5 items-center justify-center rounded-bl-[0.7rem] rounded-tr-[0.9rem] border shadow-sm shadow-stone-950/25 transition sm:right-2 sm:top-2 sm:h-7 sm:w-7 sm:rounded-full ${overlayBadgeClassName('action')} hover:bg-stone-800`}
           >
             <span className="scale-[0.72] sm:scale-100">
@@ -681,20 +975,135 @@ const CommandItem = memo(function CommandItem({
           <button
             type="button"
             aria-label="Open full command"
-            onClick={() => onOpen('Command Output', item.text)}
+            onClick={() => onOpen(item, 'Command Output')}
             className="block w-full text-left"
           >
             <div className="flex min-w-0 items-center gap-2 text-sm leading-6">
-              <p className="min-w-0 flex-1 truncate whitespace-nowrap text-stone-200">
+              <p className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip text-stone-200">
                 {summary.firstLine}
               </p>
               {summary.showGap ? (
-                <span className="shrink-0 text-[11px] font-medium tracking-[0.28em] text-stone-500/90">
+                <span className="shrink-0 text-[11px] font-medium tracking-[0.28em] text-stone-400">
                   ...
                 </span>
               ) : null}
             </div>
           </button>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+const CommandGroupItem = memo(function CommandGroupItem({
+  items,
+  expanded,
+  onToggleExpanded,
+  onOpen,
+}: {
+  items: CommandHistoryItem[];
+  expanded: boolean;
+  onToggleExpanded: () => void;
+  onOpen: (item: CommandHistoryItem, title: string) => void;
+}) {
+  const runningCount = items.filter((item) => isRunningHistoryStatus(item.status)).length;
+  const countLabel = items.length === 1 ? '1 command' : `${items.length} commands`;
+
+  return (
+    <div className="relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 border-l-2 border-l-amber-200/35 bg-[linear-gradient(135deg,rgba(251,191,36,0.12),rgba(245,158,11,0.03)_46%,rgba(28,25,23,0.18)_100%)] px-2.5 py-2.5 shadow-[inset_0_1px_0_rgba(251,191,36,0.06)] sm:rounded-[1.2rem] sm:px-3">
+      <span
+        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('command')}`}
+      >
+        <span className="scale-[0.78]">
+          <CommandBatchIcon />
+        </span>
+      </span>
+      <div className="flex items-start gap-2.5">
+        <div className="mt-0.5 hidden shrink-0 items-center sm:flex">
+          <span className="relative inline-flex h-8 w-8 items-center justify-center rounded-[0.9rem] border border-amber-300/30 bg-amber-300/[0.14] text-amber-100 shadow-sm shadow-stone-950/20">
+            <CommandBatchIcon />
+            <span className="absolute -right-1 -top-1 inline-flex min-w-[1.1rem] items-center justify-center rounded-full border border-amber-200/35 bg-stone-950/90 px-1 text-[9px] font-semibold leading-4 text-amber-100">
+              {items.length}
+            </span>
+          </span>
+          {runningCount > 0 && <RunningDots />}
+        </div>
+        <div className="min-w-0 flex-1 rounded-[0.9rem] border border-amber-300/14 bg-stone-950/55 px-2 py-1.5 sm:rounded-xl sm:px-3 sm:py-2">
+          <button
+            type="button"
+            aria-expanded={expanded}
+            aria-label={`${expanded ? 'Collapse' : 'Expand'} ${items.length} command entries`}
+            onClick={onToggleExpanded}
+            className="flex w-full min-w-0 items-center justify-between gap-3 text-left"
+          >
+            <div className="min-w-0 flex flex-1 flex-wrap items-center gap-2 pr-1">
+              <span className="rounded-full border border-amber-300/28 bg-amber-300/12 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.24em] text-amber-100">
+                Batch
+              </span>
+              <span className="rounded-full border border-stone-700/90 bg-stone-900/80 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-stone-300">
+                {countLabel}
+              </span>
+              {runningCount > 0 && (
+                <span className="inline-flex items-center text-xs text-amber-100/90">
+                  <RunningDots />
+                </span>
+              )}
+            </div>
+            <span className="inline-flex shrink-0 items-center rounded-full border border-amber-300/18 bg-stone-900/85 p-1 text-[11px] font-medium text-stone-200">
+              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-stone-700/90 bg-stone-950/80 text-stone-300">
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 16 16"
+                  className="h-3.5 w-3.5 fill-none stroke-current"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  {expanded ? (
+                    <path d="m4.5 10 3.5-3.5L11.5 10" />
+                  ) : (
+                    <path d="m4.5 6 3.5 3.5L11.5 6" />
+                  )}
+                </svg>
+              </span>
+            </span>
+          </button>
+
+          {expanded && (
+            <div className="mt-3 space-y-2 border-t border-amber-300/12 pt-3">
+              {items.map((item, index) => {
+                const summary = summarizeCommandText(item.text);
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    aria-label={`Open grouped command ${index + 1}`}
+                    onClick={() => onOpen(item, `Command Output ${index + 1}`)}
+                    className="block w-full rounded-xl border border-stone-800/80 bg-stone-950/55 px-3 py-2 text-left transition hover:bg-stone-900"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full border border-amber-300/18 bg-amber-300/[0.07] px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-amber-100">
+                        Step {index + 1}
+                      </span>
+                      {item.status && (
+                        <span className="text-xs text-stone-500">{item.status}</span>
+                      )}
+                    </div>
+                    <div className="mt-1 flex min-w-0 items-center gap-2 text-sm leading-6">
+                      <p className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip text-stone-200">
+                        {summary.firstLine}
+                      </p>
+                      {summary.showGap ? (
+                        <span className="shrink-0 text-[11px] font-medium tracking-[0.28em] text-stone-400">
+                          ...
+                        </span>
+                      ) : null}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -860,6 +1269,231 @@ const ImageItem = memo(function ImageItem({
   );
 });
 
+const FileChangeItem = memo(function FileChangeItem({
+  item,
+  onOpen,
+}: {
+  item: ThreadHistoryItemDto & { kind: 'fileChange' };
+  onOpen: (title: string, text: string) => void;
+}) {
+  const pathSummary =
+    item.previewText?.trim() && item.text.trim() !== item.previewText.trim()
+      ? item.text.trim()
+      : null;
+  const detailText = item.detailText?.trim() || null;
+  const displayedPath = formatTrailingPathLabel(
+    pathSummary ?? item.previewText?.trim() ?? item.text,
+    48,
+  );
+  const summarySegments = fileChangeSummarySegments(item);
+  const ContainerTag = detailText ? 'button' : 'div';
+
+  return (
+    <div
+      className={`relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
+    >
+      <span
+        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('action')}`}
+      >
+        <span className="scale-[0.78]">
+          <FileChangeIcon />
+        </span>
+      </span>
+      <div className="flex items-start gap-2.5">
+        <div className="mt-0.5 hidden shrink-0 items-center sm:flex">
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-lime-300/25 bg-lime-300/10 text-lime-100">
+            <FileChangeIcon />
+          </span>
+        </div>
+        <ContainerTag
+          {...(detailText
+            ? {
+                type: 'button' as const,
+                'aria-label': 'Open file change details',
+                onClick: () => onOpen('File Change Details', detailText),
+              }
+            : {})}
+          className={`min-w-0 flex-1 rounded-[0.9rem] border border-stone-800/80 bg-stone-950/45 px-2.5 py-2 text-left sm:rounded-xl sm:px-3 ${
+            detailText ? 'transition hover:bg-stone-950/60 hover:text-stone-100' : ''
+          }`}
+        >
+          <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-2 gap-y-1">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] uppercase tracking-[0.2em] text-stone-500">
+                  {historyItemLabel(item.kind)}
+                </span>
+                {item.status && (
+                  <span className="text-xs text-stone-500">{item.status}</span>
+                )}
+              </div>
+            </div>
+            {summarySegments.length > 0 && (
+              <div className="ml-auto inline-flex max-w-full flex-wrap items-center justify-end gap-1.5 text-xs">
+                {summarySegments.map((segment) => (
+                  <span
+                    key={segment}
+                    className={`whitespace-nowrap ${
+                      segment.startsWith('+')
+                        ? 'text-emerald-300'
+                        : segment.startsWith('-')
+                          ? 'text-rose-300'
+                          : 'text-stone-300'
+                    }`}
+                  >
+                    {segment}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="mt-1 flex w-full min-w-0 items-center gap-2 text-left">
+            <span
+              className="min-w-0 flex-[2] text-xs text-stone-500"
+              title={pathSummary ?? undefined}
+            >
+              {displayedPath}
+            </span>
+          </div>
+        </ContainerTag>
+      </div>
+    </div>
+  );
+});
+
+const FileChangeGroupItem = memo(function FileChangeGroupItem({
+  items,
+  expanded,
+  onToggleExpanded,
+  onOpen,
+}: {
+  items: FileChangeHistoryItem[];
+  expanded: boolean;
+  onToggleExpanded: () => void;
+  onOpen: (title: string, text: string) => void;
+}) {
+  const changedFiles = items.reduce(
+    (sum, item) => sum + (item.changedFiles ?? 0),
+    0,
+  );
+  const addedLines = items.reduce((sum, item) => sum + (item.addedLines ?? 0), 0);
+  const removedLines = items.reduce((sum, item) => sum + (item.removedLines ?? 0), 0);
+  const batchLabel =
+    items.length === 1 ? '1 file change' : `${items.length} file changes`;
+
+  return (
+    <div className="relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 border-l-2 border-l-lime-300/35 bg-[linear-gradient(135deg,rgba(163,230,53,0.12),rgba(132,204,22,0.03)_46%,rgba(28,25,23,0.18)_100%)] px-2.5 py-2.5 shadow-[inset_0_1px_0_rgba(163,230,53,0.06)] sm:rounded-[1.2rem] sm:px-3">
+      <span
+        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('action')}`}
+      >
+        <span className="scale-[0.78]">
+          <FileChangeIcon />
+        </span>
+      </span>
+      <div className="flex items-start gap-2.5">
+        <div className="mt-0.5 hidden shrink-0 items-center sm:flex">
+          <span className="relative inline-flex h-8 w-8 items-center justify-center rounded-[0.9rem] border border-lime-300/30 bg-lime-300/[0.14] text-lime-100 shadow-sm shadow-stone-950/20">
+            <FileChangeIcon />
+            <span className="absolute -right-1 -top-1 inline-flex min-w-[1.1rem] items-center justify-center rounded-full border border-lime-200/35 bg-stone-950/90 px-1 text-[9px] font-semibold leading-4 text-lime-100">
+              {items.length}
+            </span>
+          </span>
+        </div>
+        <div className="min-w-0 flex-1 rounded-[0.9rem] border border-lime-300/14 bg-stone-950/55 px-2 py-1.5 sm:rounded-xl sm:px-3 sm:py-2">
+          <button
+            type="button"
+            aria-expanded={expanded}
+            aria-label={`${expanded ? 'Collapse' : 'Expand'} ${items.length} file change entries`}
+            onClick={onToggleExpanded}
+            className="flex w-full min-w-0 items-center justify-between gap-3 text-left"
+          >
+            <div className="min-w-0 flex flex-1 flex-wrap items-center gap-2 pr-1">
+              <span className="rounded-full border border-lime-300/28 bg-lime-300/12 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.24em] text-lime-100">
+                Batch
+              </span>
+              <span className="rounded-full border border-stone-700/90 bg-stone-900/80 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-stone-300">
+                {batchLabel}
+              </span>
+              {changedFiles > 0 && (
+                <span className="text-xs text-stone-400">{changedFiles} files</span>
+              )}
+            </div>
+            <span className="inline-flex shrink-0 items-center gap-1.5">
+              {addedLines > 0 && (
+                <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-200">
+                  +{addedLines}
+                </span>
+              )}
+              {removedLines > 0 && (
+                <span className="rounded-full border border-rose-400/20 bg-rose-400/10 px-1.5 py-0.5 text-[11px] font-medium text-rose-200">
+                  -{removedLines}
+                </span>
+              )}
+              <span className="inline-flex items-center rounded-full border border-lime-300/18 bg-stone-900/85 p-1 text-[11px] font-medium text-stone-200">
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-stone-700/90 bg-stone-950/80 text-stone-300">
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 16 16"
+                    className="h-3.5 w-3.5 fill-none stroke-current"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    {expanded ? (
+                      <path d="m4.5 10 3.5-3.5L11.5 10" />
+                    ) : (
+                      <path d="m4.5 6 3.5 3.5L11.5 6" />
+                    )}
+                  </svg>
+                </span>
+              </span>
+            </span>
+          </button>
+
+          {expanded && (
+            <div className="mt-3 space-y-2 border-t border-lime-300/12 pt-3">
+              {items.map((item, index) => {
+                const detailText = item.detailText?.trim() || item.previewText?.trim() || item.text;
+                const pathSummary =
+                  item.previewText?.trim() && item.text.trim() !== item.previewText.trim()
+                    ? item.text.trim()
+                    : item.previewText?.trim() || item.text;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    aria-label={`Open grouped file change ${index + 1}`}
+                    onClick={() => onOpen(`File Change ${index + 1}`, detailText)}
+                    className="block w-full rounded-xl border border-stone-800/80 bg-stone-950/55 px-3 py-2 text-left transition hover:bg-stone-900"
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="min-w-0 flex-1 text-sm leading-6 text-stone-200" title={pathSummary}>
+                        {formatTrailingPathLabel(pathSummary, 34)}
+                      </span>
+                      <span className="inline-flex shrink-0 items-center gap-1.5">
+                        {(item.addedLines ?? 0) > 0 && (
+                          <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-200">
+                            +{item.addedLines}
+                          </span>
+                        )}
+                        {(item.removedLines ?? 0) > 0 && (
+                          <span className="rounded-full border border-rose-400/20 bg-rose-400/10 px-1.5 py-0.5 text-[11px] font-medium text-rose-200">
+                            -{item.removedLines}
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+});
+
 const GenericHistoryItem = memo(function GenericHistoryItem({
   item,
 }: {
@@ -893,11 +1527,16 @@ const HistoryItemRow = memo(function HistoryItemRow({
   item,
   scrollRootRef,
   onOpenExpandedText,
+  onOpenCommandDetail,
 }: {
   threadId: string | undefined;
   item: ThreadHistoryItemDto;
   scrollRootRef: RefObject<HTMLDivElement | null>;
   onOpenExpandedText: (title: string, text: string) => void;
+  onOpenCommandDetail: (
+    item: ThreadHistoryItemDto & { kind: 'commandExecution' },
+    title: string,
+  ) => void;
 }) {
   if (isCompactChatItem(item.kind)) {
     return (
@@ -920,7 +1559,7 @@ const HistoryItemRow = memo(function HistoryItemRow({
             kind: 'commandExecution';
           }
         }
-        onOpen={onOpenExpandedText}
+        onOpen={onOpenCommandDetail}
       />
     );
   }
@@ -961,6 +1600,19 @@ const HistoryItemRow = memo(function HistoryItemRow({
           }
         }
         scrollRootRef={scrollRootRef}
+      />
+    );
+  }
+
+  if (item.kind === 'fileChange') {
+    return (
+      <FileChangeItem
+        item={
+          item as ThreadHistoryItemDto & {
+            kind: 'fileChange';
+          }
+        }
+        onOpen={onOpenExpandedText}
       />
     );
   }
@@ -1235,6 +1887,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
   liveOutput,
   onToggleCollapse,
   onOpenExpandedText,
+  onOpenCommandDetail,
   scrollRootRef,
   articleRef,
 }: {
@@ -1245,10 +1898,28 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
   liveOutput: string;
   onToggleCollapse: (turnId: string) => void;
   onOpenExpandedText: (title: string, text: string) => void;
+  onOpenCommandDetail: (
+    item: ThreadHistoryItemDto & { kind: 'commandExecution' },
+    title: string,
+  ) => void;
   scrollRootRef: RefObject<HTMLDivElement | null>;
   articleRef?: RefCallback<HTMLElement> | undefined;
 }) {
-  const runtimeSummary = formatTurnRuntimeSummary(turn);
+  const groupedItems = useMemo(() => groupTimelineHistoryItems(turn.items), [turn.items]);
+  const visibleLiveOutput = useMemo(
+    () => getLiveOutputTailForTurn(liveOutput, turn.items),
+    [liveOutput, turn.items],
+  );
+  const [expandedCommandGroups, setExpandedCommandGroups] = useState<Record<string, boolean>>(
+    {},
+  );
+
+  const toggleCommandGroup = useCallback((groupKey: string) => {
+    setExpandedCommandGroups((current) => ({
+      ...current,
+      [groupKey]: !current[groupKey],
+    }));
+  }, []);
 
   return (
     <article ref={articleRef} className="px-2 py-1.5 sm:px-6 sm:py-2">
@@ -1264,13 +1935,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
           >
             {formatShortTimestamp(turn.startedAt)}
           </time>
-          <TurnStatusIndicator status={turn.status} />
-          <span
-            title={runtimeSummary}
-            className="min-w-0 truncate text-[10px] text-stone-500 sm:text-[11px]"
-          >
-            {runtimeSummary}
-          </span>
+          <TurnStatusBar turn={turn} />
           {turn.error && (
             <p className="hidden truncate text-[11px] text-rose-200 sm:block">
               {turn.error}
@@ -1307,25 +1972,47 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
 
       {!isCollapsed && (
         <div className="mt-1.5 space-y-1.5">
-          {turn.items.map((item) => (
-            <HistoryItemRow
-              key={item.id}
-              threadId={threadId}
-              item={item}
-              scrollRootRef={scrollRootRef}
-              onOpenExpandedText={onOpenExpandedText}
-            />
-          ))}
-          {liveOutput && (
+          {groupedItems.map((entry) =>
+            entry.kind === 'commandGroup' ? (
+              <CommandGroupItem
+                key={entry.key}
+                items={entry.items}
+                expanded={expandedCommandGroups[entry.key] ?? false}
+                onToggleExpanded={() => toggleCommandGroup(entry.key)}
+                onOpen={onOpenCommandDetail}
+              />
+            ) : entry.kind === 'fileChangeGroup' ? (
+              <FileChangeGroupItem
+                key={entry.key}
+                items={entry.items}
+                expanded={expandedCommandGroups[entry.key] ?? false}
+                onToggleExpanded={() => toggleCommandGroup(entry.key)}
+                onOpen={onOpenExpandedText}
+              />
+            ) : (
+              <HistoryItemRow
+                key={entry.key}
+                threadId={threadId}
+                item={entry.item}
+                scrollRootRef={scrollRootRef}
+                onOpenExpandedText={onOpenExpandedText}
+                onOpenCommandDetail={onOpenCommandDetail}
+              />
+            ),
+          )}
+          {visibleLiveOutput && (
             <CompactMessageItem
               item={{
                 id: 'live-agent-message',
                 kind: 'agentMessage',
-                text: liveOutput,
+                text: visibleLiveOutput,
               }}
               scrollRootRef={scrollRootRef}
               streaming
             />
+          )}
+          {isActiveTurnStatus(turn.status) && (
+            <TurnStatusBar turn={turn} variant="footer" />
           )}
         </div>
       )}
@@ -1351,11 +2038,16 @@ export function ThreadTimeline({
   ephemeralUserNote = null,
   answeredRequestNotes = [],
   optimisticTurn = null,
+  onLoadHistoryItemDetail,
 }: ThreadTimelineProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const lastHandledScrollRequestKeyRef = useRef(scrollRequestKey);
   const previousBottomSpacerRef = useRef(bottomSpacer);
   const tailSentinelRef = useRef<HTMLDivElement | null>(null);
+  const expandedTextRequestIdRef = useRef(0);
+  const deferredDetailCacheRef = useRef<Map<string, ThreadHistoryItemDetailDto>>(
+    new Map(),
+  );
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_TURNS);
   const [loadMoreClicks, setLoadMoreClicks] = useState(0);
   const [expandedText, setExpandedText] = useState<ExpandedTextState | null>(null);
@@ -1377,6 +2069,50 @@ export function ThreadTimeline({
   const handleOpenExpandedText = useCallback((title: string, text: string) => {
     setExpandedText({ title, text });
   }, []);
+
+  const handleOpenCommandDetail = useCallback(
+    async (
+      item: ThreadHistoryItemDto & { kind: 'commandExecution' },
+      fallbackTitle: string,
+    ) => {
+      const inlineText = item.detailText?.trim() || item.text || 'Command output';
+      if (!item.hasDeferredDetail || !onLoadHistoryItemDetail) {
+        setExpandedText({ title: fallbackTitle, text: inlineText });
+        return;
+      }
+
+      const cached = deferredDetailCacheRef.current.get(item.id);
+      if (cached) {
+        setExpandedText({ title: cached.title, text: cached.text });
+        return;
+      }
+
+      const requestId = expandedTextRequestIdRef.current + 1;
+      expandedTextRequestIdRef.current = requestId;
+      setExpandedText({ title: fallbackTitle, text: 'Loading full command output...' });
+
+      try {
+        const detail = await onLoadHistoryItemDetail(item.id);
+        deferredDetailCacheRef.current.set(item.id, detail);
+        if (expandedTextRequestIdRef.current !== requestId) {
+          return;
+        }
+        setExpandedText({ title: detail.title, text: detail.text });
+      } catch (caught) {
+        if (expandedTextRequestIdRef.current !== requestId) {
+          return;
+        }
+        setExpandedText({
+          title: fallbackTitle,
+          text:
+            caught instanceof Error
+              ? caught.message
+              : 'Unable to load full command output.',
+        });
+      }
+    },
+    [onLoadHistoryItemDetail],
+  );
 
   const recomputeTailVisibility = useCallback(() => {
     const container = scrollContainerRef.current;
@@ -1576,6 +2312,7 @@ export function ThreadTimeline({
                   liveOutput={visibleIndex === liveOutputTurnIndex ? liveOutput : ''}
                   onToggleCollapse={handleToggleCollapse}
                   onOpenExpandedText={handleOpenExpandedText}
+                  onOpenCommandDetail={handleOpenCommandDetail}
                   scrollRootRef={scrollContainerRef}
                   articleRef={undefined}
                 />
@@ -1589,6 +2326,7 @@ export function ThreadTimeline({
                   liveOutput={liveOutputAttachedToOptimisticTurn ? liveOutput : ''}
                   onToggleCollapse={handleToggleCollapse}
                   onOpenExpandedText={handleOpenExpandedText}
+                  onOpenCommandDetail={handleOpenCommandDetail}
                   scrollRootRef={scrollContainerRef}
                 />
               )}
@@ -1677,7 +2415,10 @@ export function ThreadTimeline({
         open={expandedText !== null}
         title={expandedText?.title ?? 'Full text'}
         text={expandedText?.text ?? ''}
-        onClose={() => setExpandedText(null)}
+        onClose={() => {
+          expandedTextRequestIdRef.current += 1;
+          setExpandedText(null);
+        }}
       />
     </>
   );

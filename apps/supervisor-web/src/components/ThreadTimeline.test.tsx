@@ -397,6 +397,219 @@ describe('ThreadTimeline', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('loads deferred command details on demand before opening the dialog', async () => {
+    const loadDetail = vi.fn(async () => ({
+      id: 'command-1',
+      kind: 'commandExecution' as const,
+      title: 'Command Output',
+      text: 'pnpm test\nmiddle output line\nfinal status: success',
+    }));
+
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        onLoadHistoryItemDetail={loadDetail}
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'command-1',
+                kind: 'commandExecution',
+                text: 'pnpm test',
+                detailText: null,
+                hasDeferredDetail: true,
+                status: 'completed',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open full command' }));
+
+    expect(loadDetail).toHaveBeenCalledWith('command-1');
+    expect(
+      screen.getByRole('dialog', { name: 'Command Output' }),
+    ).toHaveTextContent('Loading full command output...');
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('dialog', { name: 'Command Output' }),
+      ).toHaveTextContent('middle output line');
+    });
+  });
+
+  it('groups consecutive command outputs into a single collapsible bubble', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'command-1',
+                kind: 'commandExecution',
+                text: 'pnpm test\nok',
+                status: 'completed',
+              },
+              {
+                id: 'command-2',
+                kind: 'commandExecution',
+                text: 'pnpm lint\nok',
+                status: 'completed',
+              },
+              {
+                id: 'command-3',
+                kind: 'commandExecution',
+                text: 'pnpm typecheck\nok',
+                status: 'completed',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('Batch')).toBeInTheDocument();
+    expect(screen.getByText('3 commands')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Expand 3 command entries' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Collapsed execution block')).not.toBeInTheDocument();
+    expect(screen.queryByText('Show steps')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Open full command' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand 3 command entries' }));
+
+    expect(
+      screen.getByRole('button', { name: 'Collapse 3 command entries' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open grouped command 1' })).toHaveTextContent(
+      'pnpm test',
+    );
+    expect(screen.getByText('Step 1')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open grouped command 2' })).toHaveTextContent(
+      'pnpm lint',
+    );
+    expect(screen.getByRole('button', { name: 'Open grouped command 3' })).toHaveTextContent(
+      'pnpm typecheck',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse 3 command entries' }));
+
+    expect(
+      screen.queryByRole('button', { name: 'Open grouped command 1' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('renders file change items with compact stats and expandable details', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'file-change-1',
+                kind: 'fileChange',
+                text: 'workspace/project/src/features/release/important/app.ts, +2 more',
+                previewText: '3 files changed · +19 · -4',
+                detailText: [
+                  '- src/app.ts (+12 -1)',
+                  '- src/routes.ts (+4 -3)',
+                  '- src/ui.tsx (+3)',
+                ].join('\n'),
+                changedFiles: 3,
+                addedLines: 19,
+                removedLines: 4,
+                status: 'completed',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('3 files')).toBeInTheDocument();
+    expect(screen.getByText(/\.\.\.\/features\/release\/important\/app\.ts, \+2 more/)).toBeInTheDocument();
+    expect(screen.getByText('+19')).toBeInTheDocument();
+    expect(screen.getByText('-4')).toBeInTheDocument();
+    expect(screen.getByText('+19')).toHaveClass('text-emerald-300');
+    expect(screen.getByText('-4')).toHaveClass('text-rose-300');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open file change details' }));
+
+    expect(
+      screen.getByRole('dialog', { name: 'File Change Details' }),
+    ).toHaveTextContent('src/ui.tsx (+3)');
+  });
+
+  it('groups consecutive file change items into a collapsible batch', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'file-change-1',
+                kind: 'fileChange',
+                text: 'src/app.ts',
+                previewText: '1 file changed · +12 · -1',
+                detailText: '- src/app.ts (+12 -1)',
+                changedFiles: 1,
+                addedLines: 12,
+                removedLines: 1,
+                status: 'completed',
+              },
+              {
+                id: 'file-change-2',
+                kind: 'fileChange',
+                text: 'src/routes.ts',
+                previewText: '1 file changed · +4 · -3',
+                detailText: '- src/routes.ts (+4 -3)',
+                changedFiles: 1,
+                addedLines: 4,
+                removedLines: 3,
+                status: 'completed',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('2 file changes')).toBeInTheDocument();
+    expect(screen.getByText('2 files')).toBeInTheDocument();
+    expect(screen.getByText('+16')).toBeInTheDocument();
+    expect(screen.getByText('-4')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand 2 file change entries' }));
+
+    expect(screen.getByRole('button', { name: 'Open grouped file change 1' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open grouped file change 2' })).toBeInTheDocument();
+    expect(screen.getByText('src/routes.ts')).toBeInTheDocument();
+  });
+
   it('renders plan history items as markdown once they enter the viewport', async () => {
     render(
       <ThreadTimeline
@@ -517,7 +730,82 @@ describe('ThreadTimeline', () => {
         screen.getByRole('heading', { name: 'Streaming reply in progress' }),
       ).toBeInTheDocument();
     });
+    expect(screen.getAllByText('Running')).toHaveLength(2);
     expect(screen.queryByText('Streaming output')).not.toBeInTheDocument();
+  });
+
+  it('shows only the unmaterialized tail of streaming output', () => {
+    render(
+      <ThreadTimeline
+        liveOutput="Alpha is done.Beta is still streaming."
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'inProgress',
+            error: null,
+            items: [
+              {
+                id: 'agent-1',
+                kind: 'agentMessage',
+                text: 'Alpha is done.',
+              },
+              {
+                id: 'command-1',
+                kind: 'commandExecution',
+                text: 'pnpm test\nok',
+                status: 'completed',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('Alpha is done.')).toBeInTheDocument();
+    expect(screen.getByText('Beta is still streaming.')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Alpha is done.Beta is still streaming.'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('hides the streaming bubble when all streamed output is already materialized', () => {
+    render(
+      <ThreadTimeline
+        liveOutput="Alpha is done.Beta is done."
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'inProgress',
+            error: null,
+            items: [
+              {
+                id: 'agent-1',
+                kind: 'agentMessage',
+                text: 'Alpha is done.',
+              },
+              {
+                id: 'command-1',
+                kind: 'commandExecution',
+                text: 'pnpm test\nok',
+                status: 'completed',
+              },
+              {
+                id: 'agent-2',
+                kind: 'agentMessage',
+                text: 'Beta is done.',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getAllByLabelText('Copy agent reply')).toHaveLength(2);
+    expect(
+      screen.queryByText('Alpha is done.Beta is done.'),
+    ).not.toBeInTheDocument();
   });
 
   it('renders an optimistic sending turn before the server materializes it', () => {
@@ -542,7 +830,7 @@ describe('ThreadTimeline', () => {
     );
 
     expect(screen.getByText('Turn 1')).toBeInTheDocument();
-    expect(screen.getByLabelText('Sending')).toBeInTheDocument();
+    expect(screen.getAllByLabelText('Sending')).toHaveLength(2);
     expect(screen.getByText('Ship this optimistic turn.')).toBeInTheDocument();
     expect(screen.getByText('streaming draft')).toBeInTheDocument();
   });

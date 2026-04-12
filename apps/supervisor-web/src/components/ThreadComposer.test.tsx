@@ -58,6 +58,25 @@ function setPromptValue(element: HTMLElement, value: string) {
   fireEvent.input(element);
 }
 
+function setEditorSelection(
+  element: HTMLElement,
+  start: number,
+  end = start,
+) {
+  const textNode = element.firstChild;
+  if (!textNode) {
+    throw new Error('Expected prompt editor to have a text node.');
+  }
+
+  const range = document.createRange();
+  range.setStart(textNode, start);
+  range.setEnd(textNode, end);
+
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
 describe('ThreadComposer', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -357,6 +376,49 @@ describe('ThreadComposer', () => {
     });
 
     expect(screen.getByLabelText('Prompt')).toHaveTextContent('[FILE notes.txt]');
+  });
+
+  it('keeps the caret in place when editing in the middle of chat prompt text', async () => {
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={() => undefined}
+      />,
+    );
+
+    const editor = screen.getByLabelText('Prompt');
+    setPromptValue(editor, 'hello world');
+
+    await waitFor(() => {
+      expect(editor).toHaveTextContent('hello world');
+    });
+
+    setEditorSelection(editor, 5);
+    const insertSelection = window.getSelection();
+    expect(insertSelection).toBeTruthy();
+    expect(insertSelection?.anchorOffset).toBe(5);
+
+    editor.textContent = 'helloX world';
+    setEditorSelection(editor, 6);
+    fireEvent.input(editor);
+
+    await waitFor(() => {
+      expect(editor).toHaveTextContent('helloX world');
+      expect(window.getSelection()?.anchorOffset).toBe(6);
+    });
+
+    editor.textContent = 'hello world';
+    setEditorSelection(editor, 5);
+    fireEvent.input(editor);
+
+    await waitFor(() => {
+      expect(editor).toHaveTextContent('hello world');
+      expect(window.getSelection()?.anchorOffset).toBe(5);
+    });
   });
 
   it('shows the shell prompt label and enables Ctrl-C only while a command is running', () => {

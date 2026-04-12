@@ -400,6 +400,168 @@ describe('supervisor api', () => {
     expect(earlierDetailResponse.json().turns.at(-1).id).toBe('turn-5');
   });
 
+  it('reuses cached thread detail slices and invalidates the cache when turn history changes', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Cached Detail Thread'
+      }
+    });
+
+    const createdThread = createResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(createdThread.codexThreadId);
+    expect(remoteThread).toBeTruthy();
+    remoteThread!.status = { type: 'idle' };
+    remoteThread!.turns = Array.from({ length: 12 }, (_, index) => ({
+      id: `turn-${index + 1}`,
+      status: 'completed',
+      error: null,
+      items: [
+        {
+          id: `item-${index + 1}`,
+          type: 'userMessage',
+          content: [{ type: 'text', text: `Prompt ${index + 1}` }]
+        }
+      ]
+    })) as any;
+
+    const latestDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+    const earlierDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}?limit=10&beforeTurnId=turn-3`
+    });
+
+    expect(latestDetailResponse.statusCode).toBe(200);
+    expect(earlierDetailResponse.statusCode).toBe(200);
+    expect(fakeCodexManager.readThreadCallCount.get(createdThread.codexThreadId)).toBe(1);
+
+    remoteThread!.status = { type: 'active', activeFlags: [] };
+    remoteThread!.turns = [
+      ...remoteThread!.turns,
+      {
+        id: 'turn-13',
+        status: 'inProgress',
+        error: null,
+        items: [
+          {
+            id: 'item-13',
+            type: 'userMessage',
+            content: [{ type: 'text', text: 'Prompt 13' }]
+          }
+        ]
+      } as any,
+    ];
+    fakeCodexManager.emit('notification', {
+      method: 'turn/started',
+      params: {
+        threadId: createdThread.codexThreadId,
+        turn: remoteThread!.turns.at(-1),
+      }
+    });
+
+    const refreshedDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(refreshedDetailResponse.statusCode).toBe(200);
+    expect(fakeCodexManager.readThreadCallCount.get(createdThread.codexThreadId)).toBe(2);
+    expect(refreshedDetailResponse.json().turns.at(-1).id).toBe('turn-13');
+  });
+
+  it('returns deferred command details separately from the thread detail payload', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Deferred Command Thread'
+      }
+    });
+
+    const createdThread = createResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(createdThread.codexThreadId);
+    expect(remoteThread).toBeTruthy();
+    remoteThread!.status = { type: 'idle' };
+    remoteThread!.turns = [
+      {
+        id: 'turn-1',
+        status: 'completed',
+        error: null,
+        items: [
+          {
+            id: 'command-1',
+            type: 'commandExecution',
+            command: 'pnpm test',
+            aggregatedOutput: 'middle output line\nfinal status: success',
+            status: 'completed',
+          },
+        ],
+      } as any,
+    ];
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    const commandItem = detailResponse
+      .json()
+      .turns.at(-1)
+      .items.find((item: any) => item.kind === 'commandExecution');
+
+    expect(commandItem).toMatchObject({
+      id: 'command-1',
+      kind: 'commandExecution',
+      text: 'pnpm test',
+      detailText: null,
+      hasDeferredDetail: true,
+      status: 'completed',
+    });
+
+    const commandDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}/items/command-1/detail`
+    });
+
+    expect(commandDetailResponse.statusCode).toBe(200);
+    expect(commandDetailResponse.json()).toMatchObject({
+      id: 'command-1',
+      kind: 'commandExecution',
+      title: 'Command Output',
+    });
+    expect(commandDetailResponse.json().text).toContain('middle output line');
+    expect(commandDetailResponse.json().text).toContain('final status: success');
+  });
+
   it('treats an empty rollout read error as a bootstrap transient after the first prompt', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',
@@ -1592,5 +1754,102 @@ describe('supervisor api', () => {
         .turns.at(-1)
         .items.find((item: any) => item.kind === 'webSearch').detailText
     ).toContain('https://example.com/releases');
+  });
+
+  it('maps file change turn items into compact stats and detail lines', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'File Change Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Apply the requested patch.'
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+
+    const startedThread = promptResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const activeTurn = remoteThread?.turns.at(-1);
+    expect(activeTurn).toBeTruthy();
+
+    const completedTurn = {
+      ...activeTurn!,
+      status: 'completed' as const,
+      items: [
+        ...activeTurn!.items,
+        {
+          id: 'file-change-1',
+          type: 'fileChange',
+          status: 'completed',
+          changes: [
+            {
+              diff: ['--- a/src/app.ts', '+++ b/src/app.ts', '@@', '-old', '+new', '+more'].join(
+                '\n',
+              )
+            },
+            {
+              diff: ['--- a/src/routes.ts', '+++ b/src/routes.ts', '@@', '-a', '-b', '-c', '+d', '+e', '+f', '+g'].join(
+                '\n',
+              )
+            },
+            {
+              diff: ['--- a/src/ui.tsx', '+++ b/src/ui.tsx', '@@', '+alpha', '+beta', '+gamma'].join(
+                '\n',
+              )
+            }
+          ]
+        }
+      ]
+    };
+
+    fakeCodexManager.threads.set(startedThread.codexThreadId, {
+      ...remoteThread!,
+      status: { type: 'idle' },
+      turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    const fileChangeItem = detailResponse
+      .json()
+      .turns.at(-1)
+      .items.find((item: any) => item.kind === 'fileChange');
+
+    expect(fileChangeItem).toMatchObject({
+      kind: 'fileChange',
+      previewText: '3 files changed · +9 · -4',
+      text: 'src/app.ts, +2 more',
+      status: 'completed',
+      changedFiles: 3,
+      addedLines: 9,
+      removedLines: 4
+    });
+    expect(fileChangeItem.detailText).toContain('src/app.ts (+2 -1)');
+    expect(fileChangeItem.detailText).toContain('src/ui.tsx (+3)');
   });
 });

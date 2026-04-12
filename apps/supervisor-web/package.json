@@ -8,7 +8,7 @@
     "build": "vite build",
     "lint": "eslint src --ext .ts,.tsx",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "NODE_ENV=test vitest run"
   },
   "dependencies": {
     "@streamdown/code": "^1.1.1",

@@ -22,7 +22,7 @@
     "build": "pnpm -r --if-present build",
     "lint": "pnpm -r --if-present lint",
     "typecheck": "pnpm -r --if-present typecheck",
-    "test": "pnpm -r --if-present test",
+    "test": "NODE_ENV=test pnpm -r --if-present test",
     "test:e2e": "playwright test",
     "db:migrate": "pnpm --filter @remote-codex/db db:migrate"
   },

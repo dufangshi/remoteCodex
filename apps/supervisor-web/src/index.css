@@ -237,6 +237,26 @@ input {
   animation: thread-connection-pending 1.15s ease-in-out infinite;
 }
 
+@keyframes thread-live-connection-reconnecting {
+  0%,
+  100% {
+    background-color: rgb(16 185 129 / 0.18);
+    border-color: rgb(110 231 183 / 0.34);
+    color: rgb(236 253 245);
+    box-shadow: 0 0 0 0 rgb(16 185 129 / 0.04);
+  }
+  50% {
+    background-color: rgb(16 185 129 / 0.88);
+    border-color: rgb(167 243 208 / 0.94);
+    color: rgb(2 44 34);
+    box-shadow: 0 0 0 0.18rem rgb(16 185 129 / 0.12);
+  }
+}
+
+.thread-live-connection-reconnecting {
+  animation: thread-live-connection-reconnecting 1.05s ease-in-out infinite;
+}
+
 .thread-scroll-container {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;

@@ -275,6 +275,17 @@ export async function registerThreadRoutes(app: FastifyInstance) {
     });
   });
 
+  app.get('/api/threads/:id/items/:itemId/detail', async (request) => {
+    const params = z.object({
+      id: z.string().uuid(),
+      itemId: z.string().min(1),
+    }).parse(request.params);
+    return app.services.threadService.getThreadHistoryItemDetail(
+      params.id,
+      params.itemId,
+    );
+  });
+
   app.get('/api/threads/:id/assets/image', async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const query = threadImageQuerySchema.parse(request.query);

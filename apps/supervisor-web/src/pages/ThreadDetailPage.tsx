@@ -4,9 +4,11 @@ import { useParams } from 'react-router-dom';
 import {
   CodexStatusDto,
   ModelOptionDto,
+  SupervisorSocketServerEnvelope,
   ThreadActionRequestDto,
   ThreadDetailDto,
   ThreadDto,
+  ThreadEventEnvelope,
 } from '../../../../packages/shared/src/index';
 import { ThreadComposer } from '../components/ThreadComposer';
 import {
@@ -26,6 +28,8 @@ import {
   disconnectThread,
   fetchCodexModels,
   fetchCodexStatus,
+  fetchThreadHistoryItemDetail,
+  fetchSupervisorHealth,
   fetchThreads,
   fetchThreadDetail,
   interruptThread,
@@ -39,6 +43,29 @@ import {
 } from '../lib/api';
 
 const DETAIL_TURN_PAGE_SIZE = 10;
+const SUPERVISOR_SOCKET_RECONNECT_DELAY_MS = 1_000;
+const SUPERVISOR_HEALTHCHECK_INTERVAL_MS = 2_000;
+const SUPERVISOR_CONNECTION_STALE_MS = 5_500;
+const ACTIVE_THREAD_REFRESH_INTERVAL_MS = 3_000;
+const SOCKET_CONNECTING = 0;
+const SOCKET_OPEN = 1;
+const SOCKET_CLOSED = 3;
+
+type RealtimeConnectionStatus =
+  | 'checking'
+  | 'connected'
+  | 'reconnecting'
+  | 'offline';
+
+type RealtimeIndicatorStatus = RealtimeConnectionStatus | 'detached';
+
+interface RealtimeConnectionSnapshot {
+  status: RealtimeConnectionStatus;
+  browserOnline: boolean;
+  healthOk: boolean;
+  socketOpen: boolean;
+  lastHealthyAt: string | null;
+}
 
 function prependTurns(
   existing: ThreadDetailDto['turns'],
@@ -54,6 +81,11 @@ function appendLatestTurns(
 ) {
   const latestIds = new Set(latest.map((turn) => turn.id));
   return [...existing.filter((turn) => !latestIds.has(turn.id)), ...latest];
+}
+
+function mergeThreadIntoList(existing: ThreadDto[], thread: ThreadDto) {
+  const remaining = existing.filter((entry) => entry.id !== thread.id);
+  return [thread, ...remaining];
 }
 
 interface OptimisticTurnState {
@@ -132,13 +164,71 @@ function CopyIcon() {
   );
 }
 
+function RealtimeConnectionIcon({
+  status,
+}: {
+  status: RealtimeIndicatorStatus;
+}) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-4.5 w-4.5 fill-none stroke-current"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M2.5 6.75A8.22 8.22 0 0 1 8 4.5c2.14 0 4.1.8 5.5 2.25" />
+      <path d="M4.75 9a4.95 4.95 0 0 1 6.5 0" />
+      <path d="M6.9 11.3a1.9 1.9 0 0 1 2.2 0" />
+      {status === 'connected' ? (
+        <path d="m6.7 13.2.9.9 1.7-2" />
+      ) : status === 'offline' ? (
+        <path d="M3 3l10 10" />
+      ) : status === 'detached' ? null : (
+        <>
+          <path d="M11.8 11.1a2.2 2.2 0 0 1-1.8 2.7" />
+          <path d="m10.7 11.35 1.3-.55-.55-1.3" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+function threadConnectionSummary(isLoaded: boolean, connection: RealtimeConnectionSnapshot) {
+  if (!isLoaded) {
+    return 'Thread disconnected';
+  }
+
+  switch (connection.status) {
+    case 'connected':
+      return 'Realtime updates connected';
+    case 'reconnecting':
+      return 'Realtime updates reconnecting';
+    case 'offline':
+      return 'Browser offline';
+    case 'checking':
+      return 'Checking realtime connection';
+  }
+}
+
 export function ThreadDetailPage() {
   const { id = '' } = useParams();
   const liveOutputBufferRef = useRef('');
   const liveOutputFrameRef = useRef<number | null>(null);
+  const supervisorSocketRef = useRef<WebSocket | null>(null);
+  const supervisorReconnectTimerRef = useRef<number | null>(null);
+  const supervisorHealthInFlightRef = useRef(false);
+  const supervisorHealthOkAtRef = useRef<string | null>(null);
+  const supervisorPongAtRef = useRef<number | null>(null);
+  const supervisorBrowserOnlineRef = useRef(
+    typeof navigator === 'undefined' ? true : navigator.onLine,
+  );
+  const supervisorRecoveryPendingRef = useRef(false);
   const shellPanelRef = useRef<ThreadShellPanelHandle | null>(null);
   const composerHostRef = useRef<HTMLDivElement | null>(null);
   const loadRequestIdRef = useRef(0);
+  const pageContextRequestIdRef = useRef(0);
   const terminalTurnPendingRef = useRef<string | null>(null);
   const [detail, setDetail] = useState<ThreadDetailDto | null>(null);
   const [threads, setThreads] = useState<ThreadDto[]>([]);
@@ -175,6 +265,14 @@ export function ThreadDetailPage() {
   const [respondingRequestId, setRespondingRequestId] = useState<string | null>(null);
   const [metaSessionCopyState, setMetaSessionCopyState] =
     useState<'idle' | 'copied' | 'failed'>('idle');
+  const [realtimeConnection, setRealtimeConnection] =
+    useState<RealtimeConnectionSnapshot>({
+      status: supervisorBrowserOnlineRef.current ? 'checking' : 'offline',
+      browserOnline: supervisorBrowserOnlineRef.current,
+      healthOk: false,
+      socketOpen: false,
+      lastHealthyAt: null,
+    });
   const [ephemeralUserNote, setEphemeralUserNote] = useState<string | null>(null);
   const [answeredRequestNotes, setAnsweredRequestNotes] = useState<
     LocalAnsweredRequestNote[]
@@ -216,7 +314,185 @@ export function ThreadDetailPage() {
     }
   }, []);
 
+  const applyDetailResponse = useCallback(
+    (detailResponse: ThreadDetailDto) => {
+      const threadHasEnded =
+        detailResponse.thread.activeTurnId === null &&
+        detailResponse.thread.status !== 'running';
+
+      setDetail((current) =>
+        current
+          ? {
+              ...detailResponse,
+              turns: appendLatestTurns(current.turns, detailResponse.turns),
+            }
+          : detailResponse,
+      );
+      setThreads((current) =>
+        mergeThreadIntoList(current, detailResponse.thread),
+      );
+      setOptimisticTurn((current) => {
+        if (!current) {
+          return current;
+        }
+
+        const resolvedTurnId = current.serverTurnId ?? current.id;
+        const hasMaterializedTurn = detailResponse.turns.some(
+          (turn) => turn.id === resolvedTurnId,
+        );
+        return hasMaterializedTurn ? null : current;
+      });
+      if (
+        threadHasEnded ||
+        (terminalTurnPendingRef.current &&
+          detailResponse.turns.some(
+            (turn) => turn.id === terminalTurnPendingRef.current,
+          ))
+      ) {
+        terminalTurnPendingRef.current = null;
+        clearBufferedLiveOutput();
+        setLiveOutput('');
+        setLivePlan(null);
+      }
+    },
+    [clearBufferedLiveOutput],
+  );
+
+  const loadPageContext = useCallback(
+    async ({ seedThread }: { seedThread?: ThreadDto | null } = {}) => {
+      const requestId = pageContextRequestIdRef.current + 1;
+      pageContextRequestIdRef.current = requestId;
+
+      const [threadResult, statusResult, modelResult] = await Promise.allSettled([
+        fetchThreads(),
+        fetchCodexStatus(),
+        fetchCodexModels(),
+      ]);
+
+      if (pageContextRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      if (threadResult.status === 'fulfilled') {
+        setThreads(
+          seedThread
+            ? mergeThreadIntoList(threadResult.value, seedThread)
+            : threadResult.value,
+        );
+      } else if (seedThread) {
+        setThreads((current) => mergeThreadIntoList(current, seedThread));
+      }
+
+      if (statusResult.status === 'fulfilled') {
+        setStatus(statusResult.value);
+      }
+
+      if (modelResult.status === 'fulfilled') {
+        setModelOptions(modelResult.value);
+      }
+    },
+    [],
+  );
+
+  const loadThreadDetail = useCallback(
+    async ({
+      showLoading = true,
+      clearError = true,
+      reportError = true,
+    }: {
+      showLoading?: boolean;
+      clearError?: boolean;
+      reportError?: boolean;
+    } = {}) => {
+      const requestId = loadRequestIdRef.current + 1;
+      loadRequestIdRef.current = requestId;
+      if (showLoading) {
+        setLoading(true);
+      }
+      if (clearError) {
+        setError(null);
+      }
+
+      try {
+        const detailResponse = await fetchThreadDetail(id, {
+          limit: DETAIL_TURN_PAGE_SIZE,
+        });
+        if (loadRequestIdRef.current !== requestId) {
+          return;
+        }
+
+        applyDetailResponse(detailResponse);
+      } catch (caught) {
+        if (loadRequestIdRef.current !== requestId || !reportError) {
+          return;
+        }
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : 'Unable to load thread detail.',
+        );
+      } finally {
+        if (loadRequestIdRef.current === requestId) {
+          setLoading(false);
+        }
+      }
+    },
+    [applyDetailResponse, id, loadPageContext],
+  );
+
+  const syncRealtimeConnectionState = useCallback(() => {
+    const socketState = supervisorSocketRef.current?.readyState ?? SOCKET_CLOSED;
+    const socketOpen = socketState === SOCKET_OPEN;
+    const browserOnline = supervisorBrowserOnlineRef.current;
+    const now = Date.now();
+    const hasRecentHealth =
+      supervisorHealthOkAtRef.current !== null &&
+      now - Date.parse(supervisorHealthOkAtRef.current) <= SUPERVISOR_CONNECTION_STALE_MS;
+    const hasRecentPong =
+      supervisorPongAtRef.current !== null &&
+      now - supervisorPongAtRef.current <= SUPERVISOR_CONNECTION_STALE_MS;
+
+    let status: RealtimeConnectionStatus;
+    if (!browserOnline) {
+      status = 'offline';
+    } else if (socketOpen && hasRecentHealth && hasRecentPong) {
+      status = 'connected';
+    } else if (
+      socketState === SOCKET_CONNECTING ||
+      supervisorReconnectTimerRef.current !== null ||
+      hasRecentHealth ||
+      hasRecentPong ||
+      supervisorHealthInFlightRef.current
+    ) {
+      status = 'reconnecting';
+    } else {
+      status = 'checking';
+    }
+
+    setRealtimeConnection((current) => {
+      if (
+        current.status === status &&
+        current.browserOnline === browserOnline &&
+        current.healthOk === hasRecentHealth &&
+        current.socketOpen === socketOpen &&
+        current.lastHealthyAt === supervisorHealthOkAtRef.current
+      ) {
+        return current;
+      }
+
+      return {
+        status,
+        browserOnline,
+        healthOk: hasRecentHealth,
+        socketOpen,
+        lastHealthyAt: supervisorHealthOkAtRef.current,
+      };
+    });
+  }, []);
+
   useEffect(() => {
+    loadRequestIdRef.current += 1;
+    pageContextRequestIdRef.current += 1;
     setDetail(null);
     setChatDraft({
       prompt: '',
@@ -228,6 +504,18 @@ export function ThreadDetailPage() {
     setAnsweredRequestNotes([]);
     setOptimisticTurn(null);
     terminalTurnPendingRef.current = null;
+    supervisorHealthOkAtRef.current = null;
+    supervisorPongAtRef.current = null;
+    supervisorRecoveryPendingRef.current = false;
+    supervisorBrowserOnlineRef.current =
+      typeof navigator === 'undefined' ? true : navigator.onLine;
+    setRealtimeConnection({
+      status: supervisorBrowserOnlineRef.current ? 'checking' : 'offline',
+      browserOnline: supervisorBrowserOnlineRef.current,
+      healthOk: false,
+      socketOpen: false,
+      lastHealthyAt: null,
+    });
   }, [id]);
 
   useEffect(() => {
@@ -364,77 +652,62 @@ export function ThreadDetailPage() {
   }, [activeView, isMobileViewport]);
 
   useEffect(() => {
-    async function loadThreadDetail(showLoading = true) {
-      const requestId = loadRequestIdRef.current + 1;
-      loadRequestIdRef.current = requestId;
-      if (showLoading) {
-        setLoading(true);
+    void loadThreadDetail({ showLoading: true });
+    void loadPageContext();
+  }, [loadPageContext, loadThreadDetail]);
+
+  useEffect(() => {
+    let isDisposed = false;
+    let heartbeatIntervalId: number | null = null;
+
+    const refreshThreadDetailSilently = () => {
+      void loadThreadDetail({
+        showLoading: false,
+        clearError: false,
+        reportError: false,
+      });
+    };
+
+    const clearReconnectTimer = () => {
+      if (supervisorReconnectTimerRef.current !== null) {
+        window.clearTimeout(supervisorReconnectTimerRef.current);
+        supervisorReconnectTimerRef.current = null;
       }
-      setError(null);
-      try {
-        const [detailResponse, threadResponse, statusResponse, modelResponse] =
-          await Promise.all([
-            fetchThreadDetail(id, { limit: DETAIL_TURN_PAGE_SIZE }),
-            fetchThreads(),
-            fetchCodexStatus(),
-            fetchCodexModels(),
-          ]);
-        if (loadRequestIdRef.current !== requestId) {
+    };
+
+    const scheduleReconnect = () => {
+      if (
+        isDisposed ||
+        !supervisorBrowserOnlineRef.current ||
+        supervisorReconnectTimerRef.current !== null
+      ) {
+        return;
+      }
+
+      supervisorReconnectTimerRef.current = window.setTimeout(() => {
+        supervisorReconnectTimerRef.current = null;
+        if (isDisposed) {
           return;
         }
-        setDetail((current) =>
-          current
-            ? {
-                ...detailResponse,
-                turns: appendLatestTurns(current.turns, detailResponse.turns),
-              }
-            : detailResponse,
-        );
-        setThreads(threadResponse);
-        setStatus(statusResponse);
-        setModelOptions(modelResponse);
-        setOptimisticTurn((current) => {
-          if (!current) {
-            return current;
-          }
 
-          const resolvedTurnId = current.serverTurnId ?? current.id;
-          const hasMaterializedTurn = detailResponse.turns.some(
-            (turn) => turn.id === resolvedTurnId,
-          );
-          return hasMaterializedTurn ? null : current;
-        });
-        if (
-          terminalTurnPendingRef.current &&
-          (detailResponse.turns.some(
-            (turn) => turn.id === terminalTurnPendingRef.current,
-          ) ||
-            detailResponse.thread.activeTurnId === null)
-        ) {
-          terminalTurnPendingRef.current = null;
-          clearBufferedLiveOutput();
-          setLiveOutput('');
-          setLivePlan(null);
-        }
-      } catch (caught) {
-        if (loadRequestIdRef.current !== requestId) {
-          return;
-        }
-        setError(
-          caught instanceof Error
-            ? caught.message
-            : 'Unable to load thread detail.',
-        );
-      } finally {
-        if (loadRequestIdRef.current === requestId) {
-          setLoading(false);
+        connectSocket();
+      }, SUPERVISOR_SOCKET_RECONNECT_DELAY_MS);
+      syncRealtimeConnectionState();
+    };
+
+    const closeSupervisorSocket = () => {
+      const activeSocket = supervisorSocketRef.current;
+      supervisorSocketRef.current = null;
+      if (activeSocket) {
+        try {
+          activeSocket.close();
+        } catch {
+          // Ignore socket close errors during reconnect cleanup.
         }
       }
-    }
+    };
 
-    void loadThreadDetail();
-
-    const socket = connectSupervisorEvents((event) => {
+    const handleSocketEvent = (event: ThreadEventEnvelope) => {
       if (event.threadId !== id) {
         return;
       }
@@ -469,7 +742,7 @@ export function ThreadDetailPage() {
         event.type === 'thread.request.created' ||
         event.type === 'thread.request.resolved'
       ) {
-        void loadThreadDetail(false);
+        refreshThreadDetailSilently();
         if (event.type === 'thread.turn.started') {
           clearBufferedLiveOutput();
           setLiveOutput('');
@@ -536,13 +809,236 @@ export function ThreadDetailPage() {
           plan: event.payload.plan as Array<{ step: string; status: string }>,
         });
       }
-    });
+    };
+
+    const sendSupervisorPing = () => {
+      const activeSocket = supervisorSocketRef.current;
+      if (!activeSocket || activeSocket.readyState !== SOCKET_OPEN) {
+        return;
+      }
+
+      try {
+        activeSocket.send(
+          JSON.stringify({
+            type: 'supervisor.ping',
+            timestamp: new Date().toISOString(),
+          }),
+        );
+      } catch {
+        supervisorRecoveryPendingRef.current = true;
+        closeSupervisorSocket();
+        scheduleReconnect();
+        syncRealtimeConnectionState();
+      }
+    };
+
+    const connectSocket = () => {
+      if (isDisposed || !supervisorBrowserOnlineRef.current) {
+        syncRealtimeConnectionState();
+        return;
+      }
+
+      const socketState = supervisorSocketRef.current?.readyState ?? SOCKET_CLOSED;
+      if (socketState === SOCKET_CONNECTING || socketState === SOCKET_OPEN) {
+        syncRealtimeConnectionState();
+        return;
+      }
+
+      const nextSocket = connectSupervisorEvents(handleSocketEvent);
+      supervisorSocketRef.current = nextSocket;
+      syncRealtimeConnectionState();
+
+      nextSocket.addEventListener('message', (message) => {
+        if (supervisorSocketRef.current !== nextSocket) {
+          return;
+        }
+
+        try {
+          const parsed = JSON.parse(
+            message.data as string,
+          ) as SupervisorSocketServerEnvelope;
+          if (
+            parsed.type === 'supervisor.connected' ||
+            parsed.type === 'supervisor.pong'
+          ) {
+            supervisorPongAtRef.current = Date.now();
+            syncRealtimeConnectionState();
+          }
+        } catch {
+          // Ignore malformed socket payloads.
+        }
+      });
+
+      nextSocket.addEventListener('open', () => {
+        if (supervisorSocketRef.current !== nextSocket) {
+          return;
+        }
+
+        supervisorRecoveryPendingRef.current = true;
+        refreshThreadDetailSilently();
+        sendSupervisorPing();
+        syncRealtimeConnectionState();
+      });
+
+      nextSocket.addEventListener('close', () => {
+        if (supervisorSocketRef.current === nextSocket) {
+          supervisorSocketRef.current = null;
+        }
+        supervisorRecoveryPendingRef.current = true;
+        scheduleReconnect();
+        syncRealtimeConnectionState();
+      });
+
+      nextSocket.addEventListener('error', () => {
+        if (supervisorSocketRef.current === nextSocket) {
+          supervisorSocketRef.current = null;
+        }
+        supervisorRecoveryPendingRef.current = true;
+        scheduleReconnect();
+        syncRealtimeConnectionState();
+      });
+    };
+
+    const runHealthCheck = async () => {
+      if (
+        isDisposed ||
+        !supervisorBrowserOnlineRef.current ||
+        supervisorHealthInFlightRef.current
+      ) {
+        return;
+      }
+
+      supervisorHealthInFlightRef.current = true;
+      syncRealtimeConnectionState();
+
+      try {
+        await fetchSupervisorHealth();
+        const shouldRefreshFromRecovery = supervisorRecoveryPendingRef.current;
+        supervisorHealthOkAtRef.current = new Date().toISOString();
+        if (shouldRefreshFromRecovery) {
+          supervisorRecoveryPendingRef.current = false;
+          refreshThreadDetailSilently();
+        }
+        if ((supervisorSocketRef.current?.readyState ?? SOCKET_CLOSED) !== SOCKET_OPEN) {
+          connectSocket();
+        }
+      } catch {
+        supervisorHealthOkAtRef.current = null;
+        supervisorRecoveryPendingRef.current = true;
+        scheduleReconnect();
+      } finally {
+        supervisorHealthInFlightRef.current = false;
+        syncRealtimeConnectionState();
+      }
+    };
+
+    const handleBrowserOnline = () => {
+      supervisorBrowserOnlineRef.current = true;
+      supervisorRecoveryPendingRef.current = true;
+      syncRealtimeConnectionState();
+      connectSocket();
+      void runHealthCheck();
+    };
+
+    const handleBrowserOffline = () => {
+      supervisorBrowserOnlineRef.current = false;
+      supervisorHealthOkAtRef.current = null;
+      supervisorPongAtRef.current = null;
+      supervisorRecoveryPendingRef.current = true;
+      clearReconnectTimer();
+      closeSupervisorSocket();
+      syncRealtimeConnectionState();
+    };
+
+    const runHeartbeat = () => {
+      if (isDisposed || !supervisorBrowserOnlineRef.current) {
+        syncRealtimeConnectionState();
+        return;
+      }
+
+      const socketState = supervisorSocketRef.current?.readyState ?? SOCKET_CLOSED;
+      const lastPongAge =
+        supervisorPongAtRef.current === null
+          ? null
+          : Date.now() - supervisorPongAtRef.current;
+
+      if (
+        socketState === SOCKET_OPEN &&
+        lastPongAge !== null &&
+        lastPongAge > SUPERVISOR_CONNECTION_STALE_MS
+      ) {
+        supervisorRecoveryPendingRef.current = true;
+        closeSupervisorSocket();
+        scheduleReconnect();
+      } else if (socketState === SOCKET_OPEN) {
+        sendSupervisorPing();
+      } else if (socketState !== SOCKET_CONNECTING) {
+        connectSocket();
+      }
+
+      void runHealthCheck();
+      syncRealtimeConnectionState();
+    };
+
+    window.addEventListener('online', handleBrowserOnline);
+    window.addEventListener('offline', handleBrowserOffline);
+    connectSocket();
+    void runHealthCheck();
+    heartbeatIntervalId = window.setInterval(
+      runHeartbeat,
+      SUPERVISOR_HEALTHCHECK_INTERVAL_MS,
+    );
 
     return () => {
+      isDisposed = true;
+      window.removeEventListener('online', handleBrowserOnline);
+      window.removeEventListener('offline', handleBrowserOffline);
+      clearReconnectTimer();
+      if (heartbeatIntervalId !== null) {
+        window.clearInterval(heartbeatIntervalId);
+      }
       clearBufferedLiveOutput();
-      socket.close();
+      closeSupervisorSocket();
     };
-  }, [clearBufferedLiveOutput, id, queueLiveOutputDelta]);
+  }, [
+    clearBufferedLiveOutput,
+    id,
+    loadThreadDetail,
+    queueLiveOutputDelta,
+    syncRealtimeConnectionState,
+  ]);
+
+  useEffect(() => {
+    const shouldPollForTurnUpdates =
+      detail?.thread.activeTurnId !== null ||
+      detail?.thread.status === 'running' ||
+      optimisticTurn !== null ||
+      liveOutput.length > 0 ||
+      livePlan !== null;
+
+    if (!shouldPollForTurnUpdates) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void loadThreadDetail({
+        showLoading: false,
+        clearError: false,
+        reportError: false,
+      });
+    }, ACTIVE_THREAD_REFRESH_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [
+    detail?.thread.activeTurnId,
+    detail?.thread.status,
+    liveOutput.length,
+    livePlan,
+    loadThreadDetail,
+    optimisticTurn,
+  ]);
 
   async function handleLoadEarlierTurns() {
     if (!detail || detail.turns.length === 0 || loadingEarlier) {
@@ -809,10 +1305,6 @@ export function ThreadDetailPage() {
     } finally {
       setBusy(false);
     }
-  }
-
-  async function handleResume() {
-    await handleThreadConnectionToggle({ attachShell: activeView === 'shell' });
   }
 
   async function handleUpdateThreadSettings(input: {
@@ -1135,51 +1627,52 @@ export function ThreadDetailPage() {
         }
       : null;
 
-  const sessionConnectionButtonClassName =
-    busy && !detail?.thread.isLoaded
-      ? 'thread-connection-pending border border-emerald-300/28 bg-stone-700/92 text-emerald-50 shadow-lg shadow-stone-950/20'
-      : detail?.thread.isLoaded
-        ? 'border border-emerald-300/55 bg-emerald-400 text-emerald-950 shadow-lg shadow-emerald-950/25 hover:bg-emerald-300'
-        : 'border border-stone-600 bg-stone-800/92 text-stone-200 hover:border-stone-500 hover:bg-stone-700/95';
+  const threadLoaded = detail?.thread.isLoaded ?? false;
+  const realtimeConnectionIndicatorClassName =
+    !threadLoaded
+      ? 'border border-stone-700/90 bg-stone-900/85 text-stone-400 shadow-lg shadow-stone-950/20'
+      : realtimeConnection.status === 'connected'
+      ? 'border border-emerald-300/55 bg-emerald-400 text-emerald-950 shadow-lg shadow-emerald-950/25'
+      : realtimeConnection.status === 'reconnecting'
+        ? 'thread-live-connection-reconnecting border border-emerald-300/34 bg-emerald-300/18 text-emerald-50 shadow-lg shadow-stone-950/20'
+        : realtimeConnection.status === 'offline'
+          ? 'border border-rose-300/35 bg-rose-300/12 text-rose-100 shadow-lg shadow-stone-950/20'
+          : 'border border-amber-300/28 bg-amber-300/14 text-amber-50 shadow-lg shadow-stone-950/20';
+  const realtimeConnectionLabel = threadConnectionSummary(
+    threadLoaded,
+    realtimeConnection,
+  );
+  const realtimeConnectionTitle = [
+    realtimeConnectionLabel,
+    !threadLoaded ? 'Tap to connect this thread' : null,
+    realtimeConnection.lastHealthyAt
+      ? `Last healthy ${formatLongTimestamp(realtimeConnection.lastHealthyAt)}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
-  const mobileSessionConnectionButton = (
+  const mobileSessionConnectionButton = !threadLoaded ? (
     <button
       type="button"
-      aria-label={`${detail?.thread.isLoaded ? 'Disconnect' : 'Connect'} Thread (${detail ? threadStatusLabel(detail.thread.status) : 'Loading'})`}
-      title={
-        detail
-          ? `${detail.thread.isLoaded ? 'Disconnect' : 'Connect'} thread`
-          : 'Connect Thread'
-      }
-      onClick={() => void handleResume()}
-      disabled={busy}
-      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-60 ${sessionConnectionButtonClassName}`}
+      onClick={() => void handleThreadConnectionToggle()}
+      disabled={busy || !detail}
+      aria-label={busy ? 'Connecting thread' : 'Connect thread'}
+      title={busy ? 'Connecting thread' : realtimeConnectionTitle}
+      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition ${realtimeConnectionIndicatorClassName}`}
     >
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 16 16"
-        className="h-4.5 w-4.5 fill-none stroke-current"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        {detail?.thread.isLoaded ? (
-          <>
-            <path d="M2.5 6.75A8.22 8.22 0 0 1 8 4.5c2.14 0 4.1.8 5.5 2.25" />
-            <path d="M4.75 9a4.95 4.95 0 0 1 6.5 0" />
-            <path d="M6.9 11.3a1.9 1.9 0 0 1 2.2 0" />
-            <path d="m6.7 13.2.9.9 1.7-2" />
-          </>
-        ) : (
-          <>
-            <path d="M2.5 6.75A8.22 8.22 0 0 1 8 4.5c2.14 0 4.1.8 5.5 2.25" />
-            <path d="M4.75 9a4.95 4.95 0 0 1 6.5 0" />
-            <path d="M6.9 11.3a1.9 1.9 0 0 1 2.2 0" />
-            <path d="M3 3l10 10" />
-          </>
-        )}
-      </svg>
+      <RealtimeConnectionIcon status="detached" />
     </button>
+  ) : (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label={realtimeConnectionLabel}
+      title={realtimeConnectionTitle}
+      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition ${realtimeConnectionIndicatorClassName}`}
+    >
+      <RealtimeConnectionIcon status={realtimeConnection.status} />
+    </div>
   );
 
   return (
@@ -1236,6 +1729,9 @@ export function ThreadDetailPage() {
                   onTailVisibilityChange={setFollowTail}
                   loadingEarlier={loadingEarlier}
                   onLoadEarlier={handleLoadEarlierTurns}
+                  onLoadHistoryItemDetail={(itemId) =>
+                    fetchThreadHistoryItemDetail(detail.thread.id, itemId)
+                  }
                   ephemeralUserNote={ephemeralUserNote}
                   answeredRequestNotes={answeredRequestNotes}
                   optimisticTurn={timelineOptimisticTurn}

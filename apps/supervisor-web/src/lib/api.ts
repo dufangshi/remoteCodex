@@ -3,6 +3,7 @@ import type {
   CodexStatusDto,
   CreateThreadInput,
   CreateWorkspaceInput,
+  HealthDto,
   ImportThreadInput,
   PromptAttachmentManifestEntryDto,
   InterruptTurnInput,
@@ -17,6 +18,7 @@ import type {
   SupervisorSocketClientEnvelope,
   SupervisorSocketServerEnvelope,
   ThreadDetailDto,
+  ThreadHistoryItemDetailDto,
   ThreadDto,
   ThreadEventEnvelope,
   ThreadShellStateDto,
@@ -91,6 +93,12 @@ export function fetchCodexModels() {
   return request<ModelOptionDto[]>('/api/codex/models');
 }
 
+export function fetchSupervisorHealth() {
+  return request<HealthDto>('/healthz', {
+    cache: 'no-store'
+  });
+}
+
 export function fetchWorkspaces() {
   return request<WorkspaceDto[]>('/api/workspaces');
 }
@@ -117,6 +125,12 @@ export function fetchThreadDetail(
 
   return request<ThreadDetailDto>(
     `/api/threads/${id}${params.size > 0 ? `?${params.toString()}` : ''}`,
+  );
+}
+
+export function fetchThreadHistoryItemDetail(id: string, itemId: string) {
+  return request<ThreadHistoryItemDetailDto>(
+    `/api/threads/${id}/items/${encodeURIComponent(itemId)}/detail`,
   );
 }
 

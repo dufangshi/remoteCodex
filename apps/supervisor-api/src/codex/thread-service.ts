@@ -44,6 +44,7 @@ import {
   ThreadDetailDto,
   ThreadDto,
   ThreadEventEnvelope,
+  ThreadHistoryItemDetailDto,
   ThreadHistoryItemDto,
   ThreadSourceDto,
   ThreadTurnDto,
@@ -60,6 +61,8 @@ const DEFAULT_THREAD_TITLE = 'Untitled thread';
 const GENERIC_REMOTE_THREAD_TITLE = 'Thread';
 const LOCAL_PLAN_DECISION_PREFIX = 'plan-decision:';
 const IMPLEMENT_APPROVED_PLAN_PROMPT = 'Implement the approved plan.';
+const THREAD_DETAIL_CACHE_TTL_MS = 5_000;
+const DEFERRED_COMMAND_DETAIL_TITLE = 'Command Output';
 
 type PendingThreadRequestRecord =
   | {
@@ -71,6 +74,13 @@ type PendingThreadRequestRecord =
       source: 'planDecision';
       request: ThreadActionRequestDto;
     };
+
+interface ThreadDetailCacheEntry {
+  cachedAt: number;
+  turns: ThreadTurnDto[];
+  totalTurnCount: number;
+  deferredDetails: Map<string, ThreadHistoryItemDetailDto>;
+}
 
 function approvalModeToPolicy(approvalMode: ApprovalMode): 'never' | 'on-request' {
   return approvalMode === 'guarded' ? 'on-request' : 'never';
@@ -230,6 +240,24 @@ function stringOrNull(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+function numberOrNull(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim();
+    if (!normalized) {
+      return null;
+    }
+
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
 function stringArray(value: unknown) {
   if (!Array.isArray(value)) {
     return [];
@@ -242,6 +270,58 @@ function stringArray(value: unknown) {
 
 function uniqueStrings(values: Array<string | null | undefined>) {
   return [...new Set(values.filter((value): value is string => Boolean(value?.trim())))];
+}
+
+function normalizeTextLines(text: string) {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+
+  while (lines.length > 1 && lines.at(-1)?.trim() === '') {
+    lines.pop();
+  }
+
+  return lines;
+}
+
+function summarizeCommandText(text: string) {
+  const lines = normalizeTextLines(text);
+  return lines.find((line) => line.trim().length > 0) ?? lines[0] ?? 'Command output';
+}
+
+function deferCommandHistoryItem(
+  item: ThreadHistoryItemDto & { kind: 'commandExecution' },
+  deferredDetails: Map<string, ThreadHistoryItemDetailDto>,
+): ThreadHistoryItemDto {
+  const fullText = item.detailText?.trim() || item.text || 'Command output';
+  deferredDetails.set(item.id, {
+    id: item.id,
+    kind: item.kind,
+    title: DEFERRED_COMMAND_DETAIL_TITLE,
+    text: fullText,
+  });
+
+  return {
+    ...item,
+    text: summarizeCommandText(fullText),
+    detailText: null,
+    hasDeferredDetail: true,
+  };
+}
+
+function deferLargeHistoryItemDetails(
+  turn: ThreadTurnDto,
+  deferredDetails: Map<string, ThreadHistoryItemDetailDto>,
+): ThreadTurnDto {
+  return {
+    ...turn,
+    items: turn.items.map((item) =>
+      item.kind === 'commandExecution'
+        ? deferCommandHistoryItem(
+            item as ThreadHistoryItemDto & { kind: 'commandExecution' },
+            deferredDetails,
+          )
+        : item,
+    ),
+  };
 }
 
 interface UploadedPromptAttachment {
@@ -450,7 +530,257 @@ function formatWebSearchHistoryItem(item: CodexTurnItem): ThreadHistoryItemDto {
   };
 }
 
-function itemToHistoryItem(item: CodexTurnItem): ThreadHistoryItemDto {
+function countUnifiedDiffStats(diffText: string) {
+  let additions = 0;
+  let deletions = 0;
+
+  for (const line of diffText.replace(/\r\n/g, '\n').split('\n')) {
+    if (line.startsWith('+++') || line.startsWith('---')) {
+      continue;
+    }
+    if (line.startsWith('+')) {
+      additions += 1;
+      continue;
+    }
+    if (line.startsWith('-')) {
+      deletions += 1;
+    }
+  }
+
+  return { additions, deletions };
+}
+
+function extractPathFromDiffText(diffText: string) {
+  for (const line of diffText.replace(/\r\n/g, '\n').split('\n')) {
+    if (!line.startsWith('+++ ')) {
+      continue;
+    }
+
+    const candidate = line.slice(4).trim();
+    if (!candidate || candidate === '/dev/null') {
+      continue;
+    }
+
+    return candidate.replace(/^b\//, '');
+  }
+
+  return null;
+}
+
+function extractFileChangeEntries(item: CodexTurnItem) {
+  const candidateArrays: unknown[] = [
+    item.changes,
+    item.files,
+    isRecord(item.result) ? item.result.changes : null,
+    isRecord(item.result) ? item.result.files : null,
+    isRecord(item.action) ? item.action.changes : null,
+    isRecord(item.action) ? item.action.files : null,
+  ];
+
+  const normalizedEntries = new Map<
+    string,
+    { path: string | null; additions: number; deletions: number }
+  >();
+
+  function valueFromRecords(
+    records: Array<Record<string, unknown>>,
+    keys: string[],
+  ) {
+    for (const record of records) {
+      for (const key of keys) {
+        const value = record[key];
+        if (value !== undefined && value !== null) {
+          return value;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  function normalizeEntry(entry: unknown) {
+    if (typeof entry === 'string') {
+      return {
+        path: entry.trim() || null,
+        additions: 0,
+        deletions: 0,
+      };
+    }
+
+    if (!isRecord(entry)) {
+      return null;
+    }
+
+    const nestedRecords = [
+      entry,
+      isRecord(entry.result) ? entry.result : null,
+      isRecord(entry.action) ? entry.action : null,
+      isRecord(entry.stats) ? entry.stats : null,
+      isRecord(entry.summary) ? entry.summary : null,
+      isRecord(entry.diff) ? entry.diff : null,
+    ].filter((candidate): candidate is Record<string, unknown> => Boolean(candidate));
+
+    const path = uniqueStrings([
+      stringOrNull(valueFromRecords(nestedRecords, ['path', 'filePath', 'targetPath'])),
+      stringOrNull(
+        valueFromRecords(nestedRecords, [
+          'relativePath',
+          'relative_path',
+          'filename',
+          'file',
+          'newPath',
+          'new_path',
+          'oldPath',
+          'old_path',
+        ]),
+      ),
+    ])[0] ?? null;
+
+    const explicitAdditions =
+      numberOrNull(
+        valueFromRecords(nestedRecords, [
+          'additions',
+          'added',
+          'insertions',
+          'linesAdded',
+          'lines_added',
+          'addedLines',
+          'added_lines',
+          'numAdded',
+          'num_added',
+        ]),
+      ) ?? 0;
+    const explicitDeletions =
+      numberOrNull(
+        valueFromRecords(nestedRecords, [
+          'deletions',
+          'removed',
+          'deleted',
+          'linesRemoved',
+          'lines_removed',
+          'removedLines',
+          'removed_lines',
+          'numRemoved',
+          'num_removed',
+        ]),
+      ) ?? 0;
+    const diffText = stringOrNull(
+      valueFromRecords(nestedRecords, ['diff', 'patch', 'unifiedDiff', 'unified_diff']),
+    );
+    const diffStats =
+      explicitAdditions === 0 && explicitDeletions === 0 && diffText
+        ? countUnifiedDiffStats(diffText)
+        : null;
+    const additions = explicitAdditions || diffStats?.additions || 0;
+    const deletions = explicitDeletions || diffStats?.deletions || 0;
+    const normalizedPath = path ?? (diffText ? extractPathFromDiffText(diffText) : null);
+
+    if (!normalizedPath && additions === 0 && deletions === 0) {
+      return null;
+    }
+
+    return {
+      path: normalizedPath,
+      additions,
+      deletions,
+    };
+  }
+
+  for (const candidateArray of candidateArrays) {
+    if (!Array.isArray(candidateArray)) {
+      continue;
+    }
+
+    for (const entry of candidateArray) {
+      const normalized = normalizeEntry(entry);
+      if (!normalized) {
+        continue;
+      }
+
+      const key = normalized.path ?? `unknown:${normalizedEntries.size}`;
+      const current = normalizedEntries.get(key);
+      if (current) {
+        current.additions += normalized.additions;
+        current.deletions += normalized.deletions;
+        continue;
+      }
+
+      normalizedEntries.set(key, normalized);
+    }
+  }
+
+  return [...normalizedEntries.values()];
+}
+
+function formatFileChangeHistoryItem(item: CodexTurnItem): ThreadHistoryItemDto {
+  const entries = extractFileChangeEntries(item);
+  const fallbackText = stringOrNull(item.text) ?? 'File changes applied.';
+
+  if (entries.length === 0) {
+    return {
+      id: item.id,
+      kind: 'fileChange',
+      text: fallbackText,
+      previewText: fallbackText,
+      status: item.status ?? null,
+    };
+  }
+
+  const additions = entries.reduce((sum, entry) => sum + entry.additions, 0);
+  const deletions = entries.reduce((sum, entry) => sum + entry.deletions, 0);
+  const summaryParts = [
+    `${entries.length} ${entries.length === 1 ? 'file' : 'files'} changed`,
+  ];
+  if (additions > 0) {
+    summaryParts.push(`+${additions}`);
+  }
+  if (deletions > 0) {
+    summaryParts.push(`-${deletions}`);
+  }
+
+  const previewText = summaryParts.join(' · ');
+  const fileNames = entries
+    .map((entry) => entry.path)
+    .filter((entry): entry is string => Boolean(entry));
+  const primaryFileName = fileNames[0] ?? previewText;
+  const compactPathText =
+    fileNames.length === 0
+      ? previewText
+      : fileNames.length === 1
+        ? primaryFileName
+        : `${primaryFileName}, +${fileNames.length - 1} more`;
+  const detailLines = entries.map((entry) => {
+    const counts: string[] = [];
+    if (entry.additions > 0) {
+      counts.push(`+${entry.additions}`);
+    }
+    if (entry.deletions > 0) {
+      counts.push(`-${entry.deletions}`);
+    }
+    return `- ${entry.path ?? 'Unknown file'}${counts.length > 0 ? ` (${counts.join(' ')})` : ''}`;
+  });
+
+  if (fallbackText !== 'File changes applied.' && fallbackText !== previewText) {
+    detailLines.push('', fallbackText);
+  }
+
+  return {
+    id: item.id,
+    kind: 'fileChange',
+    text: compactPathText,
+    previewText,
+    detailText: detailLines.join('\n'),
+    status: item.status ?? null,
+    changedFiles: entries.length,
+    addedLines: additions,
+    removedLines: deletions,
+  };
+}
+
+function itemToHistoryItem(
+  item: CodexTurnItem,
+  deferredDetails?: Map<string, ThreadHistoryItemDetailDto>,
+): ThreadHistoryItemDto {
   switch (item.type) {
     case 'userMessage':
       return {
@@ -481,7 +811,19 @@ function itemToHistoryItem(item: CodexTurnItem): ThreadHistoryItemDto {
         text: [item.summary?.join('\n') ?? '', item.text ?? ''].filter(Boolean).join('\n\n')
       };
     case 'commandExecution':
-      return {
+      return deferredDetails
+        ? deferCommandHistoryItem(
+            {
+              id: item.id,
+              kind: 'commandExecution',
+              text: [item.command ?? '', item.aggregatedOutput ?? '']
+                .filter(Boolean)
+                .join('\n\n'),
+              status: item.status ?? null,
+            },
+            deferredDetails,
+          )
+        : {
         id: item.id,
         kind: 'commandExecution',
         text: [item.command ?? '', item.aggregatedOutput ?? ''].filter(Boolean).join('\n\n'),
@@ -498,12 +840,7 @@ function itemToHistoryItem(item: CodexTurnItem): ThreadHistoryItemDto {
     case 'view_image':
       return formatImageHistoryItem(item);
     case 'fileChange':
-      return {
-        id: item.id,
-        kind: 'fileChange',
-        text: item.text ?? 'File changes applied.',
-        status: item.status ?? null
-      };
+      return formatFileChangeHistoryItem(item);
     case 'mcpToolCall':
     case 'dynamicToolCall':
     case 'collabAgentToolCall':
@@ -522,13 +859,16 @@ function itemToHistoryItem(item: CodexTurnItem): ThreadHistoryItemDto {
   }
 }
 
-function turnToDto(turn: CodexTurnRecord): ThreadTurnDto {
+function turnToDto(
+  turn: CodexTurnRecord,
+  deferredDetails?: Map<string, ThreadHistoryItemDetailDto>,
+): ThreadTurnDto {
   return {
     id: turn.id,
     startedAt: parseUuidV7Timestamp(turn.id),
     status: turn.status,
     error: turn.error?.message ?? null,
-    items: turn.items.map(itemToHistoryItem)
+    items: turn.items.map((item) => itemToHistoryItem(item, deferredDetails))
   };
 }
 
@@ -583,6 +923,7 @@ function sliceTurnsForDetail<T extends { id: string }>(
 export class ThreadService {
   private readonly pendingRequests = new Map<string, Map<string, PendingThreadRequestRecord>>();
   private readonly dismissedPlanDecisionTurns = new Map<string, string>();
+  private readonly threadDetailCache = new Map<string, ThreadDetailCacheEntry>();
 
   constructor(
     private readonly db: DatabaseClient,
@@ -597,6 +938,112 @@ export class ThreadService {
     this.codexManager.on('request', (request) => {
       void this.handleServerRequest(request as CodexServerRequest);
     });
+  }
+
+  private getThreadDetailCache(localThreadId: string): ThreadDetailCacheEntry | null {
+    const cached = this.threadDetailCache.get(localThreadId);
+    if (!cached) {
+      return null;
+    }
+
+    if (Date.now() - cached.cachedAt > THREAD_DETAIL_CACHE_TTL_MS) {
+      this.threadDetailCache.delete(localThreadId);
+      return null;
+    }
+
+    return cached;
+  }
+
+  private setThreadDetailCache(localThreadId: string, entry: Omit<ThreadDetailCacheEntry, 'cachedAt'>) {
+    this.threadDetailCache.set(localThreadId, {
+      ...entry,
+      cachedAt: Date.now(),
+    });
+  }
+
+  private invalidateThreadDetailCache(localThreadId: string) {
+    this.threadDetailCache.delete(localThreadId);
+  }
+
+  private async buildThreadDetailCacheEntry(
+    localThreadId: string,
+    record: { id: string; codexThreadId: string | null; collaborationMode: string | null; model: string | null; reasoningEffort: string | null; },
+    turnMetadataById: Map<
+      string,
+      {
+        model: string | null;
+        reasoningEffort: string | null;
+        reasoningEffortAvailable: boolean | null;
+      }
+    >,
+  ): Promise<ThreadDetailCacheEntry> {
+    const cached = this.getThreadDetailCache(localThreadId);
+    if (cached) {
+      return cached;
+    }
+
+    let remoteThread: CodexThreadRecord | null = null;
+    try {
+      remoteThread = await this.codexManager.readThread(record.codexThreadId!);
+    } catch (error) {
+      if (!isRemoteThreadBootstrapError(error)) {
+        throw error;
+      }
+    }
+
+    if (!remoteThread) {
+      const localSession = await this.localSessionStore.findSession(record.codexThreadId!);
+      const deferredDetails = new Map<string, ThreadHistoryItemDetailDto>();
+      const turns = (localSession?.turns ?? []).map((turn) =>
+        buildTurnDto(
+          deferLargeHistoryItemDetails(turn, deferredDetails),
+          turnMetadataById.get(turn.id),
+        ),
+      );
+      const entry = {
+        turns,
+        totalTurnCount: turns.length,
+        deferredDetails,
+      };
+      this.setThreadDetailCache(localThreadId, entry);
+      return this.threadDetailCache.get(localThreadId)!;
+    }
+
+    if (
+      remoteThread.turns.length > 0 &&
+      remoteThread.turns.every((turn) => turn.items.length === 0)
+    ) {
+      remoteThread = (
+        await this.codexManager.resumeThread({
+          threadId: record.codexThreadId!,
+        })
+      ).thread;
+    }
+
+    updateThreadRecord(
+      this.db,
+      record.id,
+      this.buildThreadPatch(remoteThread, record.model, record.reasoningEffort),
+    );
+
+    const updated = getThreadRecordById(this.db, record.id)!;
+    this.syncPendingPlanDecisionRequest(
+      updated.id,
+      updated.collaborationMode,
+      remoteThread,
+    );
+
+    const deferredDetails = new Map<string, ThreadHistoryItemDetailDto>();
+    const turns = remoteThread.turns.map((turn) =>
+      buildTurnDto(turnToDto(turn, deferredDetails), turnMetadataById.get(turn.id)),
+    );
+    const entry = {
+      turns,
+      totalTurnCount: turns.length,
+      deferredDetails,
+    };
+    this.setThreadDetailCache(localThreadId, entry);
+    return this.threadDetailCache.get(localThreadId)!;
   }
 
   async listModels(): Promise<ModelOptionDto[]> {
@@ -783,65 +1230,62 @@ export class ThreadService {
         entry,
       ]),
     );
-    let remoteThread: CodexThreadRecord | null = null;
-    try {
-      remoteThread = await this.codexManager.readThread(record.codexThreadId);
-    } catch (error) {
-      if (!isRemoteThreadBootstrapError(error)) {
-        throw error;
-      }
-    }
-
-    if (!remoteThread) {
-      const updated = getThreadRecordById(this.db, record.id)!;
-      const localSession = await this.localSessionStore.findSession(record.codexThreadId);
-      const pagedTurns = sliceTurnsForDetail(localSession?.turns ?? [], options);
-      return {
-        thread: this.toThreadDto(updated, loadedIds),
-        workspace: toWorkspaceDto(workspace),
-        workspacePathStatus,
-        turns: pagedTurns.turns.map((turn) =>
-          buildTurnDto(turn, turnMetadataById.get(turn.id)),
-        ),
-        totalTurnCount: pagedTurns.totalTurnCount,
-        pendingRequests: this.listPendingRequests(updated.id)
-      };
-    }
-
-    if (
-      remoteThread.turns.length > 0 &&
-      remoteThread.turns.every((turn) => turn.items.length === 0)
-    ) {
-      remoteThread = (
-        await this.codexManager.resumeThread({
-          threadId: record.codexThreadId
-        })
-      ).thread;
-      loadedIds.add(record.codexThreadId);
-    }
-    updateThreadRecord(
-      this.db,
-      record.id,
-      this.buildThreadPatch(remoteThread, record.model, record.reasoningEffort)
+    const cachedDetail = await this.buildThreadDetailCacheEntry(
+      localThreadId,
+      record,
+      turnMetadataById,
     );
-
     const updated = getThreadRecordById(this.db, record.id)!;
-    this.syncPendingPlanDecisionRequest(
-      updated.id,
-      updated.collaborationMode,
-      remoteThread
-    );
-    const pagedTurns = sliceTurnsForDetail(remoteThread.turns, options);
+    const pagedTurns = sliceTurnsForDetail(cachedDetail.turns, options);
     return {
       thread: this.toThreadDto(updated, loadedIds),
       workspace: toWorkspaceDto(workspace),
       workspacePathStatus,
-      turns: pagedTurns.turns.map((turn) =>
-        buildTurnDto(turnToDto(turn), turnMetadataById.get(turn.id)),
-      ),
+      turns: pagedTurns.turns,
       totalTurnCount: pagedTurns.totalTurnCount,
       pendingRequests: this.listPendingRequests(updated.id)
     };
+  }
+
+  async getThreadHistoryItemDetail(
+    localThreadId: string,
+    itemId: string,
+  ): Promise<ThreadHistoryItemDetailDto> {
+    const record = getThreadRecordById(this.db, localThreadId);
+    if (!record) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Thread was not found.',
+      });
+    }
+
+    if (!record.codexThreadId) {
+      throw new HttpError(503, {
+        code: 'service_unavailable',
+        message: 'Thread is missing its Codex session identifier.',
+      });
+    }
+
+    const turnMetadataById = new Map(
+      listThreadTurnMetadataByThreadId(this.db, localThreadId).map((entry) => [
+        entry.turnId,
+        entry,
+      ]),
+    );
+    const cachedDetail = await this.buildThreadDetailCacheEntry(
+      localThreadId,
+      record,
+      turnMetadataById,
+    );
+    const detail = cachedDetail.deferredDetails.get(itemId);
+    if (!detail) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Detailed history item was not found for this thread.',
+      });
+    }
+
+    return detail;
   }
 
   async preparePromptAttachments(
@@ -940,6 +1384,7 @@ export class ThreadService {
     updateThreadRecord(this.db, record.id, {
       isConnected: true,
     });
+    this.invalidateThreadDetailCache(localThreadId);
 
     return this.getThreadDetail(localThreadId);
   }
@@ -956,6 +1401,7 @@ export class ThreadService {
     updateThreadRecord(this.db, record.id, {
       isConnected: false,
     });
+    this.invalidateThreadDetailCache(localThreadId);
 
     return this.getThreadDetail(localThreadId);
   }
@@ -1052,6 +1498,7 @@ export class ThreadService {
     }
 
     updateThreadRecord(this.db, localThreadId, patch);
+    this.invalidateThreadDetailCache(localThreadId);
     const updated = getThreadRecordById(this.db, localThreadId)!;
 
     return this.toThreadDto(updated, new Set([record.codexThreadId]));
@@ -1163,6 +1610,7 @@ export class ThreadService {
       lastError: interruptedTurn?.error?.message ?? null,
       lastTurnCompletedAt: new Date().toISOString()
     });
+    this.invalidateThreadDetailCache(localThreadId);
 
     const updated = getThreadRecordById(this.db, localThreadId)!;
     return this.toThreadDto(updated, new Set());
@@ -1185,6 +1633,7 @@ export class ThreadService {
 
     this.pendingRequests.delete(localThreadId);
     this.dismissedPlanDecisionTurns.delete(localThreadId);
+    this.invalidateThreadDetailCache(localThreadId);
     deleteViewerSessionsByThreadId(this.db, localThreadId);
     deleteNotificationsByThreadId(this.db, localThreadId);
     deleteThreadTurnMetadataByThreadId(this.db, localThreadId);
@@ -1319,6 +1768,7 @@ export class ThreadService {
           lastError: null,
           lastTurnStartedAt: new Date().toISOString()
         });
+        this.invalidateThreadDetailCache(record.id);
 
         this.emitThreadEvent('thread.turn.started', record.id, {
           turnId: params.turn.id
@@ -1391,6 +1841,7 @@ export class ThreadService {
         } else {
           this.dismissedPlanDecisionTurns.delete(record.id);
         }
+        this.invalidateThreadDetailCache(record.id);
 
         this.emitThreadEvent(
           params.turn.status === 'failed' ? 'thread.turn.failed' : 'thread.turn.completed',
@@ -1421,6 +1872,7 @@ export class ThreadService {
         });
         this.pendingRequests.delete(record.id);
         this.dismissedPlanDecisionTurns.delete(record.id);
+        this.invalidateThreadDetailCache(record.id);
 
         this.emitThreadEvent('thread.turn.failed', record.id, {
           turnId: params.turnId,

@@ -220,6 +220,18 @@ export function buildApp(
               return;
             }
 
+            if (parsed.type === 'supervisor.ping') {
+              send({
+                type: 'supervisor.pong',
+                timestamp: new Date().toISOString(),
+                payload: {
+                  requestTimestamp:
+                    typeof parsed.timestamp === 'string' ? parsed.timestamp : null,
+                },
+              });
+              return;
+            }
+
             if (parsed.type === 'shell.detach') {
               await shellService.detachShell(parsed.shellId, parsed.viewerId);
               if (
@@ -254,7 +266,9 @@ export function buildApp(
               await shellService.clearShell(parsed.shellId, parsed.viewerId);
             }
           } catch (error) {
-            send(makeShellErrorEnvelope(parsed.shellId, error));
+            if ('shellId' in parsed) {
+              send(makeShellErrorEnvelope(parsed.shellId, error));
+            }
           }
         });
 
