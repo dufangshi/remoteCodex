@@ -219,6 +219,9 @@ export function sendThreadPrompt(id: string, input: SendThreadPromptRequestInput
   if (input.collaborationMode !== undefined) {
     formData.append('collaborationMode', input.collaborationMode);
   }
+  if (input.sandboxMode !== undefined && input.sandboxMode !== null) {
+    formData.append('sandboxMode', input.sandboxMode);
+  }
 
   const manifest: PromptAttachmentManifestEntryDto[] = attachments.map(
     (attachment, index) => ({

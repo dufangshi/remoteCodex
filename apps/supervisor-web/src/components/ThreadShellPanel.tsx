@@ -26,6 +26,7 @@ import {
 
 interface ThreadShellPanelProps {
   threadId: string;
+  isVisible?: boolean;
   showHeader?: boolean;
   showFloatingToolbox?: boolean;
   onStateChange?: (state: ThreadShellControlState) => void;
@@ -57,6 +58,7 @@ export interface ThreadShellPanelHandle {
   copyLastCommandOutput: () => Promise<boolean>;
   terminate: () => Promise<void>;
   focus: () => void;
+  refreshLayout: (options?: { focus?: boolean }) => void;
 }
 
 function statusLabel(status: ShellStatusDto) {
@@ -359,6 +361,7 @@ export const ThreadShellPanel = forwardRef<
 >(function ThreadShellPanel(
   {
     threadId,
+    isVisible = true,
     showHeader = true,
     showFloatingToolbox = true,
     onStateChange,
@@ -379,6 +382,15 @@ export const ThreadShellPanel = forwardRef<
   } | null>(null);
   const lastCommandOutputRef = useRef('');
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const snapshotCursorRef = useRef<{
+    cursorX: number | undefined;
+    cursorY: number | undefined;
+    paneHeight: number | undefined;
+  }>({
+    cursorX: undefined,
+    cursorY: undefined,
+    paneHeight: undefined,
+  });
   const isCommandRunningRef = useRef(false);
   const feedbackTimerRef = useRef<number | null>(null);
   const [terminalHostNode, setTerminalHostNode] = useState<HTMLDivElement | null>(null);
@@ -449,6 +461,34 @@ export const ThreadShellPanel = forwardRef<
     }
     return true;
   }, [isMobileShell]);
+
+  const refreshTerminalLayout = useCallback(
+    (options?: { focus?: boolean }) => {
+      const terminal = terminalRef.current;
+      const fitAddon = fitAddonRef.current;
+      if (!terminal || !fitAddon) {
+        return;
+      }
+
+      fitAddon.fit();
+      if (shellSnapshotRef.current && !getVisibleTerminalText(terminalHostNode)) {
+        renderShellSnapshot(
+          terminal,
+          shellSnapshotRef.current,
+          snapshotCursorRef.current.cursorX,
+          snapshotCursorRef.current.cursorY,
+          snapshotCursorRef.current.paneHeight,
+        );
+      } else {
+        terminal.scrollToBottom();
+      }
+
+      if (options?.focus && !isMobileShell) {
+        terminal.focus();
+      }
+    },
+    [isMobileShell, terminalHostNode],
+  );
 
   const status = shellState?.state ?? 'not_created';
   const shellMeta = useMemo(() => shellState?.shell ?? null, [shellState?.shell]);
@@ -620,7 +660,7 @@ export const ThreadShellPanel = forwardRef<
       setTerminalReady(true);
 
       resizeObserverRef.current = new ResizeObserver(() => {
-        fitAddon.fit();
+        refreshTerminalLayout();
         if (socketRef.current && shellIdRef.current && viewerIdRef.current) {
           socketRef.current.send({
             type: 'shell.resize',
@@ -651,7 +691,21 @@ export const ThreadShellPanel = forwardRef<
       terminalRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [isMobileShell, sendShellInput, terminalHostNode]);
+  }, [isMobileShell, refreshTerminalLayout, sendShellInput, terminalHostNode]);
+
+  useEffect(() => {
+    if (!isVisible || !terminalReady) {
+      return;
+    }
+
+    let frame = window.requestAnimationFrame(() => {
+      refreshTerminalLayout({ focus: true });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [isVisible, refreshTerminalLayout, terminalReady]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
@@ -751,6 +805,12 @@ export const ThreadShellPanel = forwardRef<
             envPrefix,
           );
           const nextIsCommandRunning = event.payload.isCommandRunning === true;
+
+          snapshotCursorRef.current = {
+            cursorX,
+            cursorY,
+            paneHeight,
+          };
 
           setRuntimePromptLabel(nextPromptLabel);
           setIsCommandRunning(nextIsCommandRunning);
@@ -1140,10 +1200,14 @@ export const ThreadShellPanel = forwardRef<
       focus() {
         terminalRef.current?.focus();
       },
+      refreshLayout(options) {
+        refreshTerminalLayout(options);
+      },
     }),
     [
       handleConnectionToggle,
       handleTerminateShell,
+      refreshTerminalLayout,
       sendShellClear,
       sendShellInput,
       setTransientToolboxFeedback,

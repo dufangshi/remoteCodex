@@ -68,7 +68,7 @@ export class FakeCodexManager extends EventEmitter {
     return [...this.loadedThreadIds];
   }
 
-  async startThread(input: { cwd: string; model: string }) {
+  async startThread(input: { cwd: string; model: string; sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access' | null }) {
     const thread = makeThread({
       id: `codex-${this.threads.size + 1}`,
       cwd: input.cwd,
@@ -80,7 +80,8 @@ export class FakeCodexManager extends EventEmitter {
     return {
       thread,
       model: input.model,
-      reasoningEffort: 'medium' as ReasoningEffort
+      reasoningEffort: 'medium' as ReasoningEffort,
+      sandbox: input.sandbox ?? 'danger-full-access',
     };
   }
 
@@ -106,7 +107,7 @@ export class FakeCodexManager extends EventEmitter {
     return thread;
   }
 
-  async resumeThread(input: { threadId: string; model?: string | null }) {
+  async resumeThread(input: { threadId: string; model?: string | null; sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access' | null }) {
     const thread = this.threads.get(input.threadId) ?? makeThread({ id: input.threadId });
     if (thread.turns.length === 0) {
       throw new JsonRpcClientError(`no rollout found for thread id ${input.threadId}`, 'remote_error', {
@@ -119,7 +120,8 @@ export class FakeCodexManager extends EventEmitter {
     return {
       thread,
       model: input.model ?? this.resumeModel,
-      reasoningEffort: this.resumeReasoningEffort
+      reasoningEffort: this.resumeReasoningEffort,
+      sandbox: input.sandbox ?? 'danger-full-access',
     };
   }
 
@@ -129,6 +131,7 @@ export class FakeCodexManager extends EventEmitter {
     model?: string | null;
     effort?: ReasoningEffort | null;
     collaborationMode?: 'default' | 'plan' | null;
+    sandboxPolicy?: 'read-only' | 'workspace-write' | 'danger-full-access' | null;
   }) {
     const existing = this.threads.get(input.threadId) ?? makeThread({ id: input.threadId });
     const turn = {

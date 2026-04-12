@@ -172,10 +172,11 @@ export class CodexAppServerManager extends EventEmitter {
 
   async startThread(input: ThreadStartInput) {
     await this.ensureReady();
-    const response = await this.client!.request<{ thread: any; model: string; reasoningEffort?: ReasoningEffort | null }>('thread/start', {
+    const response = await this.client!.request<{ thread: any; model: string; reasoningEffort?: ReasoningEffort | null; sandbox?: string | null }>('thread/start', {
       cwd: input.cwd,
       model: input.model,
       approvalPolicy: input.approvalPolicy,
+      sandbox: input.sandbox ?? null,
       experimentalRawEvents: false,
       persistExtendedHistory: true
     });
@@ -183,7 +184,8 @@ export class CodexAppServerManager extends EventEmitter {
     return {
       thread: mapThread(response.thread),
       model: response.model,
-      reasoningEffort: response.reasoningEffort ?? null
+      reasoningEffort: response.reasoningEffort ?? null,
+      sandbox: response.sandbox ?? null,
     };
   }
 
@@ -198,15 +200,17 @@ export class CodexAppServerManager extends EventEmitter {
 
   async resumeThread(input: ThreadResumeInput) {
     await this.ensureReady();
-    const response = await this.client!.request<{ thread: any; model: string; reasoningEffort?: ReasoningEffort | null }>('thread/resume', {
+    const response = await this.client!.request<{ thread: any; model: string; reasoningEffort?: ReasoningEffort | null; sandbox?: string | null }>('thread/resume', {
       threadId: input.threadId,
       model: input.model ?? null,
+      sandbox: input.sandbox ?? null,
       persistExtendedHistory: true
     });
     return {
       thread: mapThread(response.thread),
       model: response.model,
-      reasoningEffort: response.reasoningEffort ?? null
+      reasoningEffort: response.reasoningEffort ?? null,
+      sandbox: response.sandbox ?? null,
     };
   }
 
@@ -223,6 +227,7 @@ export class CodexAppServerManager extends EventEmitter {
       ],
       model: input.model ?? null,
       effort: input.effort ?? null,
+      sandboxPolicy: input.sandboxPolicy ?? null,
       collaborationMode: input.collaborationMode
         ? {
             mode: input.collaborationMode,

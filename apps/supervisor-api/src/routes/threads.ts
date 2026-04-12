@@ -16,6 +16,7 @@ import {
   ReasoningEffortDto,
   RespondThreadActionRequestInput,
   ResumeThreadInput,
+  SandboxModeDto,
   SendThreadPromptInput,
   UpdateThreadSettingsInput,
   UpdateThreadInput,
@@ -33,7 +34,8 @@ const promptSchema = z.object({
   prompt: z.string().min(1),
   model: z.string().min(1).optional(),
   reasoningEffort: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as [ReasoningEffortDto, ...ReasoningEffortDto[]]).nullable().optional(),
-  collaborationMode: z.enum(['default', 'plan']).optional()
+  collaborationMode: z.enum(['default', 'plan']).optional(),
+  sandboxMode: z.enum(['read-only', 'workspace-write', 'danger-full-access'] as [SandboxModeDto, ...SandboxModeDto[]]).nullable().optional()
 });
 
 const promptAttachmentManifestEntrySchema = z.object({
@@ -50,7 +52,8 @@ const updateThreadSchema = z.object({
 const updateThreadSettingsSchema = z.object({
   model: z.string().min(1).optional(),
   reasoningEffort: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as [ReasoningEffortDto, ...ReasoningEffortDto[]]).nullable().optional(),
-  collaborationMode: z.enum(['default', 'plan']).optional()
+  collaborationMode: z.enum(['default', 'plan']).optional(),
+  sandboxMode: z.enum(['read-only', 'workspace-write', 'danger-full-access'] as [SandboxModeDto, ...SandboxModeDto[]]).nullable().optional()
 }).refine((body) => Object.keys(body).length > 0, {
   message: 'At least one thread setting must be provided.'
 });
@@ -64,7 +67,8 @@ const importThreadSchema = z.object({
 });
 
 const resumeThreadSchema = z.object({
-  model: z.string().min(1).optional()
+  model: z.string().min(1).optional(),
+  sandboxMode: z.enum(['read-only', 'workspace-write', 'danger-full-access'] as [SandboxModeDto, ...SandboxModeDto[]]).nullable().optional()
 });
 
 const respondThreadRequestSchema = z.object({
@@ -102,6 +106,7 @@ function toSendThreadPromptInput(body: {
   model: string | undefined;
   reasoningEffort: ReasoningEffortDto | null | undefined;
   collaborationMode: 'default' | 'plan' | undefined;
+  sandboxMode: SandboxModeDto | null | undefined;
 }): SendThreadPromptInput {
   return {
     prompt: body.prompt,
@@ -111,6 +116,9 @@ function toSendThreadPromptInput(body: {
       : {}),
     ...(body.collaborationMode !== undefined
       ? { collaborationMode: body.collaborationMode }
+      : {}),
+    ...(body.sandboxMode !== undefined
+      ? { sandboxMode: body.sandboxMode }
       : {}),
   };
 }
@@ -159,12 +167,16 @@ async function parseMultipartPromptRequest(
         ...(fields.has('collaborationMode')
           ? { collaborationMode: fields.get('collaborationMode') }
           : {}),
+        ...(fields.has('sandboxMode')
+          ? { sandboxMode: fields.get('sandboxMode') }
+          : {}),
       });
       return {
         prompt: parsed.prompt,
         model: parsed.model,
         reasoningEffort: parsed.reasoningEffort,
         collaborationMode: parsed.collaborationMode,
+        sandboxMode: parsed.sandboxMode,
       };
     })(),
   );
@@ -384,7 +396,8 @@ export async function registerThreadRoutes(app: FastifyInstance) {
     const input: UpdateThreadSettingsInput = {
       ...(body.model !== undefined ? { model: body.model } : {}),
       ...(body.reasoningEffort !== undefined ? { reasoningEffort: body.reasoningEffort } : {}),
-      ...(body.collaborationMode !== undefined ? { collaborationMode: body.collaborationMode } : {})
+      ...(body.collaborationMode !== undefined ? { collaborationMode: body.collaborationMode } : {}),
+      ...(body.sandboxMode !== undefined ? { sandboxMode: body.sandboxMode } : {})
     };
     return app.services.threadService.updateThreadSettings(params.id, input);
   });
@@ -393,7 +406,8 @@ export async function registerThreadRoutes(app: FastifyInstance) {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const body = resumeThreadSchema.parse(request.body ?? {});
     const input: ResumeThreadInput = {
-      ...(body.model !== undefined ? { model: body.model } : {})
+      ...(body.model !== undefined ? { model: body.model } : {}),
+      ...(body.sandboxMode !== undefined ? { sandboxMode: body.sandboxMode } : {})
     };
     return app.services.threadService.resumeThread(params.id, input);
   });
@@ -417,6 +431,7 @@ export async function registerThreadRoutes(app: FastifyInstance) {
               model: parsedBody.model,
               reasoningEffort: parsedBody.reasoningEffort,
               collaborationMode: parsedBody.collaborationMode,
+              sandboxMode: parsedBody.sandboxMode,
             });
           })(),
           attachments: [] as UploadedPromptAttachment[],

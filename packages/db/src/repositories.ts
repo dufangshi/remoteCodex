@@ -25,6 +25,7 @@ export interface CreateThreadRecordInput {
   reasoningEffort?: string | null;
   collaborationMode?: string;
   approvalMode: string;
+  sandboxMode?: string | null;
   codexThreadId?: string | null;
   summaryText?: string | null;
   source?: 'supervisor' | 'local_codex_import';
@@ -39,6 +40,7 @@ export interface UpdateThreadRecordInput {
   reasoningEffort?: string | null;
   collaborationMode?: string;
   approvalMode?: string;
+  sandboxMode?: string | null;
   status?: string;
   summaryText?: string | null;
   lastError?: string | null;
@@ -169,6 +171,7 @@ export function createThreadRecord(db: DatabaseClient, input: CreateThreadRecord
     reasoningEffort: input.reasoningEffort ?? null,
     collaborationMode: input.collaborationMode ?? 'default',
     approvalMode: input.approvalMode,
+    sandboxMode: input.sandboxMode ?? null,
     status: 'idle',
     summaryText: input.summaryText ?? null,
     lastError: null as string | null,

@@ -66,6 +66,7 @@ export type ReasoningEffort =
   | 'xhigh';
 
 export type CollaborationModeKind = 'default' | 'plan';
+export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
 
 export type CodexThreadStatus =
   | { type: 'notLoaded' }
@@ -116,11 +117,13 @@ export interface ThreadStartInput {
   cwd: string;
   model: string;
   approvalPolicy: 'never' | 'on-request';
+  sandbox?: SandboxMode | null;
 }
 
 export interface ThreadResumeInput {
   threadId: string;
   model?: string | null;
+  sandbox?: SandboxMode | null;
 }
 
 export interface TurnStartInput {
@@ -129,6 +132,7 @@ export interface TurnStartInput {
   model?: string | null;
   effort?: ReasoningEffort | null;
   collaborationMode?: CollaborationModeKind | null;
+  sandboxPolicy?: SandboxMode | null;
 }
 
 export interface CodexServerRequest {

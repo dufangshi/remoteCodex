@@ -10,7 +10,10 @@ const shellPanelMock = vi.hoisted(() => ({
   copyLastCommandOutput: vi.fn(async () => true),
   terminate: vi.fn(async () => undefined),
   focus: vi.fn(() => undefined),
+  refreshLayout: vi.fn(() => undefined),
   status: 'detached' as const,
+  mounts: 0,
+  unmounts: 0,
 }));
 
 vi.mock('../components/ThreadShellPanel', async () => {
@@ -38,13 +41,14 @@ vi.mock('../components/ThreadShellPanel', async () => {
       toggleConnection: shellPanelMock.toggleConnection,
       sendInput: shellPanelMock.sendInput,
       sendCommand: shellPanelMock.sendCommand,
-      sendControl: shellPanelMock.sendControl,
-      copyLastCommandOutput: shellPanelMock.copyLastCommandOutput,
-      terminate: shellPanelMock.terminate,
-      focus: shellPanelMock.focus,
-    }));
+        sendControl: shellPanelMock.sendControl,
+        copyLastCommandOutput: shellPanelMock.copyLastCommandOutput,
+        terminate: shellPanelMock.terminate,
+        focus: shellPanelMock.focus,
+        refreshLayout: shellPanelMock.refreshLayout,
+      }));
 
-    React.useEffect(() => {
+      React.useEffect(() => {
       props.onStateChange?.({
         status: shellPanelMock.status,
         connectionButtonDisabled: false,
@@ -57,10 +61,17 @@ vi.mock('../components/ThreadShellPanel', async () => {
         busy: false,
         loading: false,
         error: null,
-      });
-    }, [props.onStateChange]);
+        });
+      }, [props.onStateChange]);
 
-    return <div data-testid="mock-thread-shell-panel" />;
+      React.useEffect(() => {
+        shellPanelMock.mounts += 1;
+        return () => {
+          shellPanelMock.unmounts += 1;
+        };
+      }, []);
+
+      return <div data-testid="mock-thread-shell-panel" />;
   });
 
   return {
@@ -199,7 +210,10 @@ describe('ThreadDetailPage', () => {
     shellPanelMock.copyLastCommandOutput.mockClear();
     shellPanelMock.terminate.mockClear();
     shellPanelMock.focus.mockClear();
+    shellPanelMock.refreshLayout.mockClear();
     shellPanelMock.status = 'detached';
+    shellPanelMock.mounts = 0;
+    shellPanelMock.unmounts = 0;
     vi.stubGlobal('WebSocket', FakeWebSocket as any);
     vi.stubGlobal(
       'fetch',
@@ -399,6 +413,45 @@ describe('ThreadDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Thread Meta/i }));
 
     expect(screen.queryByText('/tmp/demo')).not.toBeInTheDocument();
+  });
+
+  it('keeps the shell panel mounted across chat and shell view switches', async () => {
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByText('Demo Workspace / Demo Thread').length,
+      ).toBeGreaterThan(0);
+    });
+
+    expect(shellPanelMock.mounts).toBe(1);
+    expect(shellPanelMock.unmounts).toBe(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to shell' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-thread-shell-panel')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Switch to chat' })[0]!);
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: 'Switch to shell' }),
+      ).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Switch to shell' })[0]!);
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-thread-shell-panel')).toBeInTheDocument();
+    });
+
+    expect(shellPanelMock.mounts).toBe(1);
+    expect(shellPanelMock.unmounts).toBe(0);
   });
 
   it('renders thread detail without waiting for background thread list and model context', async () => {

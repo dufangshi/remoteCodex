@@ -4,6 +4,7 @@ import { useParams } from 'react-router-dom';
 import {
   CodexStatusDto,
   ModelOptionDto,
+  SandboxModeDto,
   SupervisorSocketServerEnvelope,
   ThreadActionRequestDto,
   ThreadDetailDto,
@@ -50,6 +51,15 @@ const ACTIVE_THREAD_REFRESH_INTERVAL_MS = 3_000;
 const SOCKET_CONNECTING = 0;
 const SOCKET_OPEN = 1;
 const SOCKET_CLOSED = 3;
+const SANDBOX_MODE_OPTIONS: SandboxModeDto[] = [
+  'read-only',
+  'workspace-write',
+  'danger-full-access',
+];
+
+function effectiveSandboxMode(thread: Pick<ThreadDto, 'sandboxMode' | 'approvalMode'>): SandboxModeDto {
+  return thread.sandboxMode ?? (thread.approvalMode === 'guarded' ? 'workspace-write' : 'danger-full-access');
+}
 
 type RealtimeConnectionStatus =
   | 'checking'
@@ -1157,7 +1167,12 @@ export function ThreadDetailPage() {
       if (currentDetail && !currentDetail.thread.isLoaded) {
         const resumed = await resumeThread(
           id,
-          currentDetail.thread.model ? { model: currentDetail.thread.model } : {},
+          {
+            ...(currentDetail.thread.model ? { model: currentDetail.thread.model } : {}),
+            ...(currentDetail.thread.sandboxMode
+              ? { sandboxMode: currentDetail.thread.sandboxMode }
+              : {}),
+          },
         );
         currentDetail = resumed;
         setDetail((current) =>
@@ -1183,6 +1198,9 @@ export function ThreadDetailPage() {
           : {}),
         ...(currentDetail?.thread.collaborationMode
           ? { collaborationMode: currentDetail.thread.collaborationMode }
+          : {}),
+        ...(currentDetail?.thread.sandboxMode
+          ? { sandboxMode: currentDetail.thread.sandboxMode }
           : {}),
         ...(input.attachments?.length ? { attachments: input.attachments } : {}),
       };
@@ -1280,7 +1298,12 @@ export function ThreadDetailPage() {
 
       const resumed = await resumeThread(
         id,
-        detail.thread.model ? { model: detail.thread.model } : {},
+        {
+          ...(detail.thread.model ? { model: detail.thread.model } : {}),
+          ...(detail.thread.sandboxMode
+            ? { sandboxMode: detail.thread.sandboxMode }
+            : {}),
+        },
       );
       setDetail((current) =>
         current
@@ -1344,6 +1367,7 @@ export function ThreadDetailPage() {
     model?: string;
     reasoningEffort?: ThreadDto['reasoningEffort'];
     collaborationMode?: ThreadDto['collaborationMode'];
+    sandboxMode?: ThreadDto['sandboxMode'];
   }) {
     if (!detail) {
       return;
@@ -1358,6 +1382,9 @@ export function ThreadDetailPage() {
         : {}),
       ...(input.collaborationMode !== undefined
         ? { collaborationMode: input.collaborationMode }
+        : {}),
+      ...(input.sandboxMode !== undefined
+        ? { sandboxMode: input.sandboxMode }
         : {}),
     };
 
@@ -1377,7 +1404,18 @@ export function ThreadDetailPage() {
     );
 
     try {
-      const updated = await updateThreadSettings(id, input);
+      const updated = await updateThreadSettings(id, {
+        ...(input.model !== undefined ? { model: input.model } : {}),
+        ...(input.reasoningEffort !== undefined
+          ? { reasoningEffort: input.reasoningEffort }
+          : {}),
+        ...(input.collaborationMode !== undefined
+          ? { collaborationMode: input.collaborationMode }
+          : {}),
+        ...(input.sandboxMode !== undefined
+          ? { sandboxMode: input.sandboxMode }
+          : {}),
+      });
       setDetail((current) =>
         current
           ? {
@@ -1546,6 +1584,20 @@ export function ThreadDetailPage() {
     shellControlState?.status,
   ]);
 
+  useEffect(() => {
+    if (activeView !== 'shell') {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      shellPanelRef.current?.refreshLayout({ focus: true });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [activeView]);
+
   const promptDisabledReason = detail
     ? detail.workspacePathStatus === 'missing'
       ? 'Restore this workspace path on the current machine before continuing.'
@@ -1637,6 +1689,36 @@ export function ThreadDetailPage() {
     </dl>
   ) : null;
 
+  const settingsContent = detail ? (
+    <div className="space-y-3">
+      <div>
+        <p className="text-xs uppercase tracking-[0.2em] text-stone-500">
+          Sandbox Mode
+        </p>
+        <div className="mt-2 space-y-1.5">
+          {SANDBOX_MODE_OPTIONS.map((entry) => {
+            const selected = effectiveSandboxMode(detail.thread) === entry;
+            return (
+              <button
+                key={entry}
+                type="button"
+                disabled={settingsBusy}
+                onClick={() => void handleUpdateThreadSettings({ sandboxMode: entry })}
+                className={`block w-full rounded-xl border px-3 py-2 text-left text-sm transition ${
+                  selected
+                    ? 'border-amber-300/35 bg-amber-300/12 text-stone-100'
+                    : 'border-stone-800 bg-stone-950/40 text-stone-300 hover:bg-stone-800/80'
+                } disabled:cursor-not-allowed disabled:opacity-60`}
+              >
+                {entry}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   const timelineOptimisticTurn =
     optimisticTurn &&
     !detail?.turns.some(
@@ -1720,6 +1802,7 @@ export function ThreadDetailPage() {
       currentWorkspaceId={detail?.thread.workspaceId}
       currentWorkspaceLabel={detail?.workspace.label}
       metaContent={metaContent}
+      settingsContent={settingsContent}
       showMobileNewThreadShortcut={false}
       mobileHeaderAction={mobileSessionConnectionButton}
       onRenameThread={handleRenameThread}
@@ -1745,8 +1828,14 @@ export function ThreadDetailPage() {
                 </p>
               </div>
             )}
-            {activeView === 'chat' ? (
-              <>
+            <>
+              <div
+                className={
+                  activeView === 'chat'
+                    ? 'flex min-h-0 flex-1 flex-col'
+                    : 'hidden'
+                }
+              >
                 <ThreadTimeline
                   threadId={detail.thread.id}
                   turns={detail.turns}
@@ -1838,18 +1927,25 @@ export function ThreadDetailPage() {
                     />
                   </div>
                 )}
-              </>
-            ) : (
-              <>
-                {detail.thread.isLoaded ? (
+              </div>
+              <div
+                className={
+                  activeView === 'shell'
+                    ? 'flex min-h-0 flex-1 flex-col'
+                    : 'hidden'
+                }
+              >
+                {detail.thread.isLoaded && (
                   <ThreadShellPanel
                     ref={shellPanelRef}
                     threadId={detail.thread.id}
+                    isVisible={activeView === 'shell'}
                     showHeader={false}
                     showFloatingToolbox={false}
                     onStateChange={setShellControlState}
                   />
-                ) : (
+                )}
+                {activeView === 'shell' && !detail.thread.isLoaded && (
                   <div className="flex min-h-0 flex-1 items-center justify-center p-4 sm:p-6">
                     <div className="max-w-md rounded-[1.6rem] border border-stone-800 bg-stone-950/55 px-6 py-8 text-center">
                       <p className="text-base font-medium text-stone-100">
@@ -1861,23 +1957,25 @@ export function ThreadDetailPage() {
                     </div>
                   </div>
                 )}
-                <ThreadComposer
-                  activeView={activeView}
-                  busy={busy}
-                  settingsBusy={false}
-                  error={detail.thread.isLoaded ? shellControlState?.error ?? null : null}
-                  followTail={false}
-                  threadConnected={detail.thread.isLoaded}
-                  shellControlState={shellControlState}
-                  canInterrupt={Boolean(detail.thread.isLoaded && shellControlState?.isCommandRunning)}
-                  onSubmit={handlePrompt}
-                  onInterrupt={handleInterrupt}
-                  onToggleView={handleToggleView}
-                  onShellCopy={handleShellCopy}
-                  onShellControl={handleShellControl}
-                />
-              </>
-            )}
+                {activeView === 'shell' && (
+                  <ThreadComposer
+                    activeView={activeView}
+                    busy={busy}
+                    settingsBusy={false}
+                    error={detail.thread.isLoaded ? shellControlState?.error ?? null : null}
+                    followTail={false}
+                    threadConnected={detail.thread.isLoaded}
+                    shellControlState={shellControlState}
+                    canInterrupt={Boolean(detail.thread.isLoaded && shellControlState?.isCommandRunning)}
+                    onSubmit={handlePrompt}
+                    onInterrupt={handleInterrupt}
+                    onToggleView={handleToggleView}
+                    onShellCopy={handleShellCopy}
+                    onShellControl={handleShellControl}
+                  />
+                )}
+              </div>
+            </>
           </>
         ) : (
           <div className="flex flex-1 items-center justify-center px-6 py-12 text-center text-stone-400">

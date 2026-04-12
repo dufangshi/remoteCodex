@@ -30,6 +30,7 @@ export const threads = sqliteTable('threads', {
   reasoningEffort: text('reasoning_effort'),
   collaborationMode: text('collaboration_mode').notNull().default('default'),
   approvalMode: text('approval_mode'),
+  sandboxMode: text('sandbox_mode'),
   status: text('status'),
   summaryText: text('summary_text'),
   lastError: text('last_error'),

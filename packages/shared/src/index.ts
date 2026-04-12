@@ -105,6 +105,7 @@ export interface WorkspaceTreeDto {
 export type ApprovalMode = 'yolo' | 'guarded';
 export type ReasoningEffortDto = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 export type CollaborationModeDto = 'default' | 'plan';
+export type SandboxModeDto = 'read-only' | 'workspace-write' | 'danger-full-access';
 
 export interface ReasoningEffortOptionDto {
   reasoningEffort: ReasoningEffortDto;
@@ -137,6 +138,7 @@ export interface ThreadDto {
   reasoningEffort: ReasoningEffortDto | null;
   collaborationMode: CollaborationModeDto;
   approvalMode: ApprovalMode;
+  sandboxMode?: SandboxModeDto | null;
   status: ThreadStatusDto;
   summaryText: string | null;
   lastError: string | null;
@@ -294,6 +296,7 @@ export interface UpdateThreadSettingsInput {
   model?: string;
   reasoningEffort?: ReasoningEffortDto | null;
   collaborationMode?: CollaborationModeDto;
+  sandboxMode?: SandboxModeDto | null;
 }
 
 export interface UpdateThreadInput {
@@ -309,6 +312,7 @@ export interface SendThreadPromptInput {
   model?: string;
   reasoningEffort?: ReasoningEffortDto | null;
   collaborationMode?: CollaborationModeDto;
+  sandboxMode?: SandboxModeDto | null;
 }
 
 export type PromptAttachmentKindDto = 'photo' | 'file';
@@ -326,6 +330,7 @@ export interface InterruptTurnInput {
 
 export interface ResumeThreadInput {
   model?: string;
+  sandboxMode?: SandboxModeDto | null;
 }
 
 export interface ThreadActionRequestAnswerDto {

@@ -33,6 +33,7 @@ interface ThreadWorkspaceLayoutProps {
   currentWorkspaceLabel?: string | null | undefined;
   workspaceLabels?: Record<string, string>;
   metaContent?: ReactNode;
+  settingsContent?: ReactNode;
   onRenameThread?: ((threadId: string, title: string) => Promise<void> | void) | undefined;
   children: ReactNode;
 }
@@ -354,6 +355,7 @@ export function ThreadWorkspaceLayout({
   currentWorkspaceLabel = null,
   workspaceLabels = {},
   metaContent,
+  settingsContent,
   onRenameThread,
   children,
 }: ThreadWorkspaceLayoutProps) {
@@ -493,10 +495,11 @@ export function ThreadWorkspaceLayout({
         </SidebarSection>
 
         <SidebarSection title="Settings">
-          <p className="text-sm leading-6 text-stone-400">
-            Settings will land in a later phase. This entry is kept here so the
-            sidebar structure matches the long-term layout.
-          </p>
+          {settingsContent ?? (
+            <p className="text-sm text-stone-500">
+              No thread settings available.
+            </p>
+          )}
         </SidebarSection>
       </div>
     );
