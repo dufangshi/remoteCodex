@@ -15,7 +15,7 @@ export function WorkspaceNewPage() {
 
     try {
       const workspace = await createWorkspace(input);
-      navigate(`/workspaces/${workspace.id}`);
+      navigate(`/threads?workspaceId=${encodeURIComponent(workspace.id)}`);
     } catch (caught) {
       if (caught instanceof ApiError) {
         setError(caught.payload.message);

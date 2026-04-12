@@ -27,7 +27,6 @@ import type {
   UpdateWorkspaceInput,
   UpdateWorkspaceFavoriteInput,
   WorkspaceDto,
-  WorkspaceTreeDto
 } from '../../../../packages/shared/src/index';
 
 export class ApiError extends Error {
@@ -101,10 +100,6 @@ export function fetchSupervisorHealth() {
 
 export function fetchWorkspaces() {
   return request<WorkspaceDto[]>('/api/workspaces');
-}
-
-export function fetchWorkspace(id: string) {
-  return request<WorkspaceDto>(`/api/workspaces/${id}`);
 }
 
 export function fetchThreads() {
@@ -286,22 +281,6 @@ export function updateWorkspaceFavorite(id: string, input: UpdateWorkspaceFavori
     method: 'POST',
     body: JSON.stringify(input)
   });
-}
-
-export function markWorkspaceOpened(id: string) {
-  return request<WorkspaceDto>(`/api/workspaces/${id}/open`, {
-    method: 'POST'
-  });
-}
-
-export function fetchWorkspaceTree(path?: string, showHidden = false) {
-  const params = new URLSearchParams();
-  if (path) {
-    params.set('path', path);
-  }
-  params.set('showHidden', String(showHidden));
-
-  return request<WorkspaceTreeDto>(`/api/workspaces/tree?${params.toString()}`);
 }
 
 export function connectSupervisorEvents(onEvent: (event: ThreadEventEnvelope) => void) {

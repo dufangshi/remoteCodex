@@ -18,7 +18,6 @@ import { ThreadDetailPage } from './pages/ThreadDetailPage';
 import { ThreadImportPage } from './pages/ThreadImportPage';
 import { ThreadNewPage } from './pages/ThreadNewPage';
 import { ThreadsPage } from './pages/ThreadsPage';
-import { WorkspaceDetailPage } from './pages/WorkspaceDetailPage';
 import { WorkspaceNewPage } from './pages/WorkspaceNewPage';
 import { WorkspacesPage } from './pages/WorkspacesPage';
 
@@ -110,7 +109,6 @@ export function App() {
         <Route element={<AppShell />}>
           <Route path="/workspaces" element={<WorkspacesPage />} />
           <Route path="/workspaces/new" element={<WorkspaceNewPage />} />
-          <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
           <Route path="/threads" element={<ThreadsPage />} />
           <Route path="/threads/import" element={<ThreadImportPage />} />
           <Route path="/threads/new" element={<ThreadNewPage />} />

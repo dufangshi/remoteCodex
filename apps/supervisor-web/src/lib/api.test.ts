@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createThreadShell,
   createWorkspace,
+  disconnectThread,
   importThread,
-  markWorkspaceOpened,
   resumeThread,
   sendThreadPrompt,
   terminateShell,
@@ -22,8 +22,8 @@ describe('api request helper', () => {
   });
 
   it('does not force a JSON content type for body-less post requests', async () => {
-    await markWorkspaceOpened('workspace-1');
     await resumeThread('thread-1');
+    await disconnectThread('thread-1');
 
     const calls = vi.mocked(fetch).mock.calls;
     expect(calls).toHaveLength(2);
