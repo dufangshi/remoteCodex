@@ -76,6 +76,14 @@ interface FileChangeHistoryItem extends ThreadHistoryItemDto {
   kind: 'fileChange';
 }
 
+interface SearchHistoryItem extends ThreadHistoryItemDto {
+  kind: 'webSearch';
+}
+
+interface ContextCompactionHistoryItem extends ThreadHistoryItemDto {
+  kind: 'contextCompaction';
+}
+
 type TimelineHistoryEntry =
   | {
       kind: 'item';
@@ -91,6 +99,11 @@ type TimelineHistoryEntry =
       kind: 'fileChangeGroup';
       key: string;
       items: FileChangeHistoryItem[];
+    }
+  | {
+      kind: 'searchGroup';
+      key: string;
+      items: SearchHistoryItem[];
     };
 
 type TimelineTurn = Omit<ThreadTurnDto, 'status'> & {
@@ -109,6 +122,8 @@ function itemSurfaceClassName(kind: ThreadHistoryItemDto['kind']) {
       return 'bg-slate-400/[0.11] text-stone-100 shadow-lg shadow-stone-950/10';
     case 'image':
       return 'bg-indigo-400/[0.07] text-stone-100';
+    case 'contextCompaction':
+      return 'bg-teal-400/[0.06] text-stone-100';
     case 'commandExecution':
       return 'bg-amber-500/[0.06] text-stone-200';
     case 'webSearch':
@@ -143,6 +158,23 @@ function overlayBadgeClassName(
   }
 }
 
+function ContextCompactionIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 fill-none stroke-current"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3.5 5.25h9" />
+      <path d="M5 8h6" />
+      <path d="M6.5 10.75h3" />
+    </svg>
+  );
+}
+
 function normalizeLines(text: string) {
   const lines = text.replace(/\r\n/g, '\n').split('\n');
 
@@ -153,7 +185,7 @@ function normalizeLines(text: string) {
   return lines;
 }
 
-function summarizeCommandText(text: string) {
+function summarizeInlinePreviewText(text: string) {
   const lines = normalizeLines(text);
 
   if (lines.length === 1) {
@@ -327,7 +359,11 @@ function groupTimelineHistoryItems(items: ThreadHistoryItemDto[]) {
       break;
     }
 
-    if (current.kind !== 'commandExecution' && current.kind !== 'fileChange') {
+    if (
+      current.kind !== 'commandExecution' &&
+      current.kind !== 'fileChange' &&
+      current.kind !== 'webSearch'
+    ) {
       entries.push({
         kind: 'item',
         key: current.id,
@@ -352,19 +388,30 @@ function groupTimelineHistoryItems(items: ThreadHistoryItemDto[]) {
       continue;
     }
 
+    const groupKey = groupedItems.map((item) => item.id).join(':');
+
     if (current.kind === 'commandExecution') {
       entries.push({
         kind: 'commandGroup',
-        key: groupedItems.map((item) => item.id).join(':'),
+        key: groupKey,
         items: groupedItems as CommandHistoryItem[],
       });
       continue;
     }
 
+    if (current.kind === 'fileChange') {
+      entries.push({
+        kind: 'fileChangeGroup',
+        key: groupKey,
+        items: groupedItems as FileChangeHistoryItem[],
+      });
+      continue;
+    }
+
     entries.push({
-      kind: 'fileChangeGroup',
-      key: groupedItems.map((item) => item.id).join(':'),
-      items: groupedItems as FileChangeHistoryItem[],
+      kind: 'searchGroup',
+      key: groupKey,
+      items: groupedItems as SearchHistoryItem[],
     });
   }
 
@@ -457,6 +504,26 @@ function SearchIcon() {
     >
       <circle cx="7" cy="7" r="3.75" />
       <path d="m10.25 10.25 3 3" />
+    </svg>
+  );
+}
+
+function SearchBatchIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 fill-none stroke-current"
+      strokeWidth="1.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="6" cy="6" r="2.3" />
+      <path d="m8 8 1.6 1.6" />
+      <circle cx="9.3" cy="8.8" r="2" />
+      <path d="m10.75 10.25 1.65 1.65" />
+      <circle cx="11.2" cy="4.75" r="1.8" />
+      <path d="m12.45 6 1.1 1.1" />
     </svg>
   );
 }
@@ -930,7 +997,7 @@ const CommandItem = memo(function CommandItem({
     title: string,
   ) => void;
 }) {
-  const summary = summarizeCommandText(item.text);
+  const summary = summarizeInlinePreviewText(item.text);
 
   return (
     <div
@@ -1072,7 +1139,7 @@ const CommandGroupItem = memo(function CommandGroupItem({
           {expanded && (
             <div className="mt-3 space-y-2 border-t border-amber-300/12 pt-3">
               {items.map((item, index) => {
-                const summary = summarizeCommandText(item.text);
+                const summary = summarizeInlinePreviewText(item.text);
                 return (
                   <button
                     key={item.id}
@@ -1084,6 +1151,117 @@ const CommandGroupItem = memo(function CommandGroupItem({
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="rounded-full border border-amber-300/18 bg-amber-300/[0.07] px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-amber-100">
                         Step {index + 1}
+                      </span>
+                      {item.status && (
+                        <span className="text-xs text-stone-500">{item.status}</span>
+                      )}
+                    </div>
+                    <div className="mt-1 flex min-w-0 items-center gap-2 text-sm leading-6">
+                      <p className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip text-stone-200">
+                        {summary.firstLine}
+                      </p>
+                      {summary.showGap ? (
+                        <span className="shrink-0 text-[11px] font-medium tracking-[0.28em] text-stone-400">
+                          ...
+                        </span>
+                      ) : null}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+});
+
+const SearchGroupItem = memo(function SearchGroupItem({
+  items,
+  expanded,
+  onToggleExpanded,
+  onOpen,
+}: {
+  items: SearchHistoryItem[];
+  expanded: boolean;
+  onToggleExpanded: () => void;
+  onOpen: (title: string, text: string) => void;
+}) {
+  const countLabel = items.length === 1 ? '1 search' : `${items.length} searches`;
+
+  return (
+    <div className="relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 border-l-2 border-l-sky-300/35 bg-[linear-gradient(135deg,rgba(56,189,248,0.12),rgba(14,165,233,0.03)_46%,rgba(28,25,23,0.18)_100%)] px-2.5 py-2.5 shadow-[inset_0_1px_0_rgba(125,211,252,0.06)] sm:rounded-[1.2rem] sm:px-3">
+      <span
+        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('search')}`}
+      >
+        <span className="scale-[0.78]">
+          <SearchBatchIcon />
+        </span>
+      </span>
+      <div className="flex items-start gap-2.5">
+        <div className="mt-0.5 hidden shrink-0 items-center sm:flex">
+          <span className="relative inline-flex h-8 w-8 items-center justify-center rounded-[0.9rem] border border-sky-300/30 bg-sky-300/[0.14] text-sky-100 shadow-sm shadow-stone-950/20">
+            <SearchBatchIcon />
+            <span className="absolute -right-1 -top-1 inline-flex min-w-[1.1rem] items-center justify-center rounded-full border border-sky-200/35 bg-stone-950/90 px-1 text-[9px] font-semibold leading-4 text-sky-100">
+              {items.length}
+            </span>
+          </span>
+        </div>
+        <div className="min-w-0 flex-1 rounded-[0.9rem] border border-sky-300/14 bg-stone-950/55 px-2 py-1.5 sm:rounded-xl sm:px-3 sm:py-2">
+          <button
+            type="button"
+            aria-expanded={expanded}
+            aria-label={`${expanded ? 'Collapse' : 'Expand'} ${items.length} web search entries`}
+            onClick={onToggleExpanded}
+            className="flex w-full min-w-0 items-center justify-between gap-3 text-left"
+          >
+            <div className="min-w-0 flex flex-1 flex-wrap items-center gap-2 pr-1">
+              <span className="rounded-full border border-sky-300/28 bg-sky-300/12 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.24em] text-sky-100">
+                Batch
+              </span>
+              <span className="rounded-full border border-stone-700/90 bg-stone-900/80 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-stone-300">
+                {countLabel}
+              </span>
+            </div>
+            <span className="inline-flex shrink-0 items-center rounded-full border border-sky-300/18 bg-stone-900/85 p-1 text-[11px] font-medium text-stone-200">
+              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-stone-700/90 bg-stone-950/80 text-stone-300">
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 16 16"
+                  className="h-3.5 w-3.5 fill-none stroke-current"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  {expanded ? (
+                    <path d="m4.5 10 3.5-3.5L11.5 10" />
+                  ) : (
+                    <path d="m4.5 6 3.5 3.5L11.5 6" />
+                  )}
+                </svg>
+              </span>
+            </span>
+          </button>
+
+          {expanded && (
+            <div className="mt-3 space-y-2 border-t border-sky-300/12 pt-3">
+              {items.map((item, index) => {
+                const previewText = item.previewText?.trim() || item.text || 'Web search';
+                const summary = summarizeInlinePreviewText(previewText);
+                const detailText = item.detailText?.trim() || item.text || 'Web search';
+
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    aria-label={`Open grouped web search ${index + 1}`}
+                    onClick={() => onOpen(`Web Search ${index + 1}`, detailText)}
+                    className="block w-full rounded-xl border border-stone-800/80 bg-stone-950/55 px-3 py-2 text-left transition hover:bg-stone-900"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full border border-sky-300/18 bg-sky-300/[0.07] px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-sky-100">
+                        Search {index + 1}
                       </span>
                       {item.status && (
                         <span className="text-xs text-stone-500">{item.status}</span>
@@ -1141,6 +1319,54 @@ const PlanHistoryItem = memo(function PlanHistoryItem({
   );
 });
 
+const ContextCompactionItem = memo(function ContextCompactionItem({
+  item,
+}: {
+  item: ContextCompactionHistoryItem;
+}) {
+  const isRunning = isRunningHistoryStatus(item.status) || item.text === 'Compacting context';
+  const primaryText = isRunning ? 'Compacting context' : 'Context compacted';
+  const secondaryText =
+    item.detailText && item.detailText !== primaryText ? item.detailText : null;
+
+  return (
+    <div
+      className={`relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2 sm:rounded-[1.2rem] sm:px-3`}
+    >
+      <span
+        className="absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border border-teal-300/30 bg-teal-300/12 text-[10px] text-teal-100 shadow-sm shadow-stone-950/20 sm:hidden"
+      >
+        <span className="scale-[0.78]">
+          <ContextCompactionIcon />
+        </span>
+      </span>
+      <div className="flex min-w-0 items-center gap-2 pt-2 sm:pt-0">
+        <div className="mt-0.5 hidden shrink-0 sm:flex">
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-teal-300/25 bg-teal-300/10 text-teal-100">
+            <ContextCompactionIcon />
+          </span>
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <p className="truncate text-[13px] font-medium text-stone-200 sm:text-sm">
+              {primaryText}
+            </p>
+            {isRunning ? <RunningDots tone="emerald" /> : null}
+          </div>
+          {secondaryText ? (
+            <p
+              className="mt-0.5 truncate text-[11px] text-stone-500 sm:text-xs"
+              title={secondaryText}
+            >
+              {secondaryText}
+            </p>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+});
+
 const WebSearchItem = memo(function WebSearchItem({
   item,
   onOpen,
@@ -1150,6 +1376,7 @@ const WebSearchItem = memo(function WebSearchItem({
 }) {
   const previewText = item.previewText?.trim() || item.text || 'Web search';
   const detailText = item.detailText?.trim() || item.text || 'Web search';
+  const summary = summarizeInlinePreviewText(previewText);
 
   return (
     <div
@@ -1168,7 +1395,7 @@ const WebSearchItem = memo(function WebSearchItem({
             <SearchIcon />
           </span>
         </div>
-        <div className="relative min-w-0 w-full flex-1 rounded-[0.9rem] border border-stone-800/80 bg-stone-950/45 px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2 sm:pt-2">
+        <div className="relative min-w-0 w-full flex-1 rounded-[0.9rem] border border-stone-800/80 bg-stone-950/45 px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2">
           <button
             type="button"
             aria-label="Expand web search"
@@ -1187,11 +1414,18 @@ const WebSearchItem = memo(function WebSearchItem({
             type="button"
             aria-label="Open full web search"
             onClick={() => onOpen('Web Search Details', detailText)}
-            className="mt-1 block w-full text-left"
+            className="block w-full text-left"
           >
-            <pre className="pr-8 whitespace-pre-wrap break-words text-sm leading-6 text-stone-100 sm:pr-10">
-              {previewText}
-            </pre>
+            <div className="flex min-w-0 items-center gap-2 text-sm leading-6">
+              <p className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip text-stone-200">
+                {summary.firstLine}
+              </p>
+              {summary.showGap ? (
+                <span className="shrink-0 text-[11px] font-medium tracking-[0.28em] text-stone-400">
+                  ...
+                </span>
+              ) : null}
+            </div>
           </button>
         </div>
       </div>
@@ -1617,6 +1851,18 @@ const HistoryItemRow = memo(function HistoryItemRow({
     );
   }
 
+  if (item.kind === 'contextCompaction') {
+    return (
+      <ContextCompactionItem
+        item={
+          item as ThreadHistoryItemDto & {
+            kind: 'contextCompaction';
+          }
+        }
+      />
+    );
+  }
+
   return <GenericHistoryItem item={item} />;
 });
 
@@ -1910,12 +2156,12 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
     () => getLiveOutputTailForTurn(liveOutput, turn.items),
     [liveOutput, turn.items],
   );
-  const [expandedCommandGroups, setExpandedCommandGroups] = useState<Record<string, boolean>>(
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
     {},
   );
 
-  const toggleCommandGroup = useCallback((groupKey: string) => {
-    setExpandedCommandGroups((current) => ({
+  const toggleGroupedItem = useCallback((groupKey: string) => {
+    setExpandedGroups((current) => ({
       ...current,
       [groupKey]: !current[groupKey],
     }));
@@ -1977,16 +2223,24 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
               <CommandGroupItem
                 key={entry.key}
                 items={entry.items}
-                expanded={expandedCommandGroups[entry.key] ?? false}
-                onToggleExpanded={() => toggleCommandGroup(entry.key)}
+                expanded={expandedGroups[entry.key] ?? false}
+                onToggleExpanded={() => toggleGroupedItem(entry.key)}
                 onOpen={onOpenCommandDetail}
               />
             ) : entry.kind === 'fileChangeGroup' ? (
               <FileChangeGroupItem
                 key={entry.key}
                 items={entry.items}
-                expanded={expandedCommandGroups[entry.key] ?? false}
-                onToggleExpanded={() => toggleCommandGroup(entry.key)}
+                expanded={expandedGroups[entry.key] ?? false}
+                onToggleExpanded={() => toggleGroupedItem(entry.key)}
+                onOpen={onOpenExpandedText}
+              />
+            ) : entry.kind === 'searchGroup' ? (
+              <SearchGroupItem
+                key={entry.key}
+                items={entry.items}
+                expanded={expandedGroups[entry.key] ?? false}
+                onToggleExpanded={() => toggleGroupedItem(entry.key)}
                 onOpen={onOpenExpandedText}
               />
             ) : (

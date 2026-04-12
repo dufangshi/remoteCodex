@@ -41,6 +41,7 @@ import {
   SendThreadPromptInput,
   ThreadActionQuestionDto,
   ThreadActionRequestDto,
+  ThreadContextUsageDto,
   ThreadDetailDto,
   ThreadDto,
   ThreadEventEnvelope,
@@ -63,6 +64,7 @@ const LOCAL_PLAN_DECISION_PREFIX = 'plan-decision:';
 const IMPLEMENT_APPROVED_PLAN_PROMPT = 'Implement the approved plan.';
 const THREAD_DETAIL_CACHE_TTL_MS = 5_000;
 const DEFERRED_COMMAND_DETAIL_TITLE = 'Command Output';
+const CONTEXT_BASELINE_TOKENS = 12_000;
 
 type PendingThreadRequestRecord =
   | {
@@ -80,6 +82,13 @@ interface ThreadDetailCacheEntry {
   turns: ThreadTurnDto[];
   totalTurnCount: number;
   deferredDetails: Map<string, ThreadHistoryItemDetailDto>;
+}
+
+interface ThreadContextTokenUsagePayload {
+  total?: Record<string, unknown> | null;
+  last?: Record<string, unknown> | null;
+  modelContextWindow?: unknown;
+  model_context_window?: unknown;
 }
 
 function approvalModeToPolicy(approvalMode: ApprovalMode): 'never' | 'on-request' {
@@ -256,6 +265,69 @@ function numberOrNull(value: unknown) {
   }
 
   return null;
+}
+
+function createUnavailableThreadContextUsage(
+  timestamp: string | null = new Date().toISOString(),
+): ThreadContextUsageDto {
+  return {
+    availability: 'unavailable',
+    remainingPercent: null,
+    tokensInContextWindow: null,
+    modelContextWindow: null,
+    updatedAt: timestamp,
+  };
+}
+
+function clampPercentage(value: number) {
+  return Math.max(0, Math.min(100, value));
+}
+
+function computeContextRemainingPercent(
+  tokensInContextWindow: number,
+  contextWindow: number,
+) {
+  if (contextWindow <= CONTEXT_BASELINE_TOKENS) {
+    return 0;
+  }
+
+  const effectiveWindow = contextWindow - CONTEXT_BASELINE_TOKENS;
+  const used = Math.max(tokensInContextWindow - CONTEXT_BASELINE_TOKENS, 0);
+  const remaining = Math.max(effectiveWindow - used, 0);
+  return clampPercentage(Math.round((remaining / effectiveWindow) * 100));
+}
+
+function buildThreadContextUsageFromPayload(
+  payload: ThreadContextTokenUsagePayload | null | undefined,
+  timestamp = new Date().toISOString(),
+): ThreadContextUsageDto {
+  const tokenUsage = isRecord(payload) ? payload : null;
+  const modelContextWindow = numberOrNull(
+    tokenUsage?.modelContextWindow ?? tokenUsage?.model_context_window,
+  );
+  const lastUsage = isRecord(tokenUsage?.last) ? tokenUsage.last : null;
+  const tokensInContextWindow = numberOrNull(
+    lastUsage?.totalTokens ?? lastUsage?.total_tokens,
+  );
+
+  if (
+    modelContextWindow === null ||
+    tokensInContextWindow === null ||
+    modelContextWindow <= 0
+  ) {
+    return createUnavailableThreadContextUsage(timestamp);
+  }
+
+  return {
+    availability: 'available',
+    remainingPercent: computeContextRemainingPercent(
+      tokensInContextWindow,
+      modelContextWindow,
+    ),
+    tokensInContextWindow,
+    modelContextWindow,
+    updatedAt: timestamp,
+  };
 }
 
 function stringArray(value: unknown) {
@@ -527,6 +599,40 @@ function formatWebSearchHistoryItem(item: CodexTurnItem): ThreadHistoryItemDto {
     previewText,
     detailText: detailLines.join('\n').trim() || null,
     status: item.status ?? null,
+  };
+}
+
+function isRunningItemStatus(status: string | null | undefined) {
+  if (!status) {
+    return false;
+  }
+
+  const normalized = status.toLowerCase();
+  return (
+    normalized.includes('running') ||
+    normalized.includes('inprogress') ||
+    normalized.includes('in_progress') ||
+    normalized.includes('compacting')
+  );
+}
+
+function formatContextCompactionHistoryItem(item: CodexTurnItem): ThreadHistoryItemDto {
+  const rawText =
+    stringOrNull(item.text) ??
+    (Array.isArray(item.summary) ? item.summary.filter(Boolean).join('\n') : null);
+  const status = stringOrNull(item.status) ?? stringOrNull(item.phase) ?? null;
+  const previewText = isRunningItemStatus(status)
+    ? 'Compacting context'
+    : 'Context compacted';
+  const detailText = rawText && rawText !== previewText ? rawText : null;
+
+  return {
+    id: item.id,
+    kind: 'contextCompaction',
+    text: previewText,
+    previewText,
+    detailText,
+    status,
   };
 }
 
@@ -804,6 +910,9 @@ function itemToHistoryItem(
         kind: 'plan',
         text: item.text ?? ''
       };
+    case 'contextCompaction':
+    case 'context_compaction':
+      return formatContextCompactionHistoryItem(item);
     case 'reasoning':
       return {
         id: item.id,
@@ -924,6 +1033,7 @@ export class ThreadService {
   private readonly pendingRequests = new Map<string, Map<string, PendingThreadRequestRecord>>();
   private readonly dismissedPlanDecisionTurns = new Map<string, string>();
   private readonly threadDetailCache = new Map<string, ThreadDetailCacheEntry>();
+  private readonly threadContextUsage = new Map<string, ThreadContextUsageDto>();
 
   constructor(
     private readonly db: DatabaseClient,
@@ -963,6 +1073,36 @@ export class ThreadService {
 
   private invalidateThreadDetailCache(localThreadId: string) {
     this.threadDetailCache.delete(localThreadId);
+  }
+
+  private getThreadContextUsage(localThreadId: string): ThreadContextUsageDto {
+    return (
+      this.threadContextUsage.get(localThreadId) ??
+      createUnavailableThreadContextUsage(null)
+    );
+  }
+
+  private setThreadContextUsage(
+    localThreadId: string,
+    usage: ThreadContextUsageDto,
+    emitEvent = false,
+  ) {
+    this.threadContextUsage.set(localThreadId, usage);
+    if (!emitEvent) {
+      return;
+    }
+
+    this.emitThreadEvent('thread.context.updated', localThreadId, {
+      contextUsage: usage,
+    });
+  }
+
+  private resetThreadContextUsage(localThreadId: string, emitEvent = false) {
+    this.setThreadContextUsage(
+      localThreadId,
+      createUnavailableThreadContextUsage(),
+      emitEvent,
+    );
   }
 
   private async buildThreadDetailCacheEntry(
@@ -1384,6 +1524,9 @@ export class ThreadService {
     updateThreadRecord(this.db, record.id, {
       isConnected: true,
     });
+    if (input.model && input.model !== record.model) {
+      this.resetThreadContextUsage(record.id);
+    }
     this.invalidateThreadDetailCache(localThreadId);
 
     return this.getThreadDetail(localThreadId);
@@ -1498,6 +1641,7 @@ export class ThreadService {
     }
 
     updateThreadRecord(this.db, localThreadId, patch);
+    this.resetThreadContextUsage(localThreadId, true);
     this.invalidateThreadDetailCache(localThreadId);
     const updated = getThreadRecordById(this.db, localThreadId)!;
 
@@ -1542,6 +1686,9 @@ export class ThreadService {
       reasoningEffort: nextReasoning,
       collaborationMode: nextCollaborationMode
     });
+    if (nextModel !== record.model) {
+      this.resetThreadContextUsage(localThreadId);
+    }
 
     const updated = getThreadRecordById(this.db, localThreadId)!;
     const loadedIds = new Set(await this.codexManager.listLoadedThreads().catch(() => []));
@@ -1634,6 +1781,7 @@ export class ThreadService {
     this.pendingRequests.delete(localThreadId);
     this.dismissedPlanDecisionTurns.delete(localThreadId);
     this.invalidateThreadDetailCache(localThreadId);
+    this.threadContextUsage.delete(localThreadId);
     deleteViewerSessionsByThreadId(this.db, localThreadId);
     deleteNotificationsByThreadId(this.db, localThreadId);
     deleteThreadTurnMetadataByThreadId(this.db, localThreadId);
@@ -1752,6 +1900,21 @@ export class ThreadService {
         });
         return;
       }
+      case 'thread/tokenUsage/updated': {
+        const params = event.params as {
+          threadId: string;
+          turnId: string;
+          tokenUsage?: ThreadContextTokenUsagePayload | null;
+        };
+        const record = getThreadRecordByCodexThreadId(this.db, params.threadId);
+        if (!record) {
+          return;
+        }
+
+        const usage = buildThreadContextUsageFromPayload(params.tokenUsage);
+        this.setThreadContextUsage(record.id, usage, true);
+        return;
+      }
       case 'turn/started': {
         const params = event.params as { threadId: string; turn: CodexTurnRecord };
         const record = getThreadRecordByCodexThreadId(this.db, params.threadId);
@@ -1768,6 +1931,7 @@ export class ThreadService {
           lastError: null,
           lastTurnStartedAt: new Date().toISOString()
         });
+        this.resetThreadContextUsage(record.id, true);
         this.invalidateThreadDetailCache(record.id);
 
         this.emitThreadEvent('thread.turn.started', record.id, {
@@ -1989,7 +2153,8 @@ export class ThreadService {
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
       lastTurnStartedAt: record.lastTurnStartedAt ?? null,
-      lastTurnCompletedAt: record.lastTurnCompletedAt ?? null
+      lastTurnCompletedAt: record.lastTurnCompletedAt ?? null,
+      contextUsage: this.getThreadContextUsage(record.id),
     };
   }
 

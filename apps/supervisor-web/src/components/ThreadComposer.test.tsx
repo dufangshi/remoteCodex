@@ -145,6 +145,54 @@ describe('ThreadComposer', () => {
     });
   });
 
+  it('shows context remaining state on the model control title', () => {
+    const { rerender } = render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        contextUsage={{
+          availability: 'available',
+          remainingPercent: 38,
+          tokensInContextWindow: 165200,
+          modelContextWindow: 258400,
+          updatedAt: '2026-04-11T00:00:00.000Z',
+        }}
+        onSubmit={() => undefined}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'gpt-5.4' })).toHaveAttribute(
+      'title',
+      'gpt-5.4 · 38% context left',
+    );
+
+    rerender(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        contextUsage={{
+          availability: 'unavailable',
+          remainingPercent: null,
+          tokensInContextWindow: null,
+          modelContextWindow: null,
+          updatedAt: null,
+        }}
+        onSubmit={() => undefined}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'gpt-5.4' })).toHaveAttribute(
+      'title',
+      'gpt-5.4 · context unavailable',
+    );
+  });
+
   it('submits on ctrl or command enter while plain enter stays as newline behavior', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
 

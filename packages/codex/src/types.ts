@@ -149,6 +149,24 @@ export interface CodexOutputDeltaEvent {
   delta: string;
 }
 
+export interface CodexTokenUsageBreakdown {
+  totalTokens: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+}
+
+export interface CodexThreadTokenUsageEvent {
+  threadId: string;
+  turnId: string;
+  tokenUsage: {
+    total: CodexTokenUsageBreakdown;
+    last: CodexTokenUsageBreakdown;
+    modelContextWindow: number | null;
+  };
+}
+
 export interface CodexErrorEvent {
   threadId: string;
   turnId: string;
@@ -160,6 +178,7 @@ export type CodexServerEvent =
   | { method: 'thread/started'; params: { thread: CodexThreadRecord } }
   | { method: 'thread/status/changed'; params: { threadId: string; status: CodexThreadStatus } }
   | { method: 'thread/name/updated'; params: { threadId: string; threadName?: string } }
+  | { method: 'thread/tokenUsage/updated'; params: CodexThreadTokenUsageEvent }
   | { method: 'turn/started'; params: { threadId: string; turn: CodexTurnRecord } }
   | { method: 'turn/plan/updated'; params: { threadId: string; turnId: string; explanation: string | null; plan: Array<{ step: string; status: string }> } }
   | { method: 'turn/completed'; params: { threadId: string; turn: CodexTurnRecord } }

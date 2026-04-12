@@ -14,6 +14,7 @@ import type {
   CollaborationModeDto,
   ModelOptionDto,
   PromptAttachmentKindDto,
+  ThreadContextUsageDto,
   ReasoningEffortDto,
   UpdateThreadSettingsInput,
 } from '../../../../packages/shared/src/index';
@@ -30,6 +31,7 @@ interface ThreadComposerProps {
   reasoningEffort?: ReasoningEffortDto | null;
   collaborationMode?: CollaborationModeDto;
   modelOptions?: ModelOptionDto[];
+  contextUsage?: ThreadContextUsageDto | null | undefined;
   followTail?: boolean;
   threadConnected?: boolean;
   disabled?: boolean;
@@ -176,6 +178,66 @@ function PlusIcon() {
   );
 }
 
+function clampPercent(value: number | null | undefined) {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function ContextRingFrame({
+  contextUsage,
+}: {
+  contextUsage: ThreadContextUsageDto | null | undefined;
+}) {
+  const availability = contextUsage?.availability ?? 'unavailable';
+  const percent = clampPercent(contextUsage?.remainingPercent);
+  const progressPercent = availability === 'available' ? percent : 100;
+  const progressStroke =
+    availability !== 'available'
+      ? 'rgba(120,113,108,0.55)'
+      : percent <= 20
+        ? 'rgba(251,113,133,0.95)'
+        : percent <= 40
+          ? 'rgba(252,211,77,0.94)'
+          : 'rgba(125,211,252,0.95)';
+
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 100 32"
+      preserveAspectRatio="none"
+      className="pointer-events-none absolute inset-0 h-full w-full"
+    >
+      <rect
+        x="1"
+        y="1"
+        width="98"
+        height="30"
+        rx="15"
+        pathLength="100"
+        fill="none"
+        stroke="rgba(41,37,36,0.92)"
+        strokeWidth="1.5"
+      />
+      <rect
+        x="1"
+        y="1"
+        width="98"
+        height="30"
+        rx="15"
+        pathLength="100"
+        fill="none"
+        stroke={progressStroke}
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeDasharray={`${progressPercent} 100`}
+      />
+    </svg>
+  );
+}
+
 function normalizedAttachmentFileName(file: File, kind: PromptAttachmentKindDto) {
   const trimmed = file.name.trim();
   if (trimmed) {
@@ -284,6 +346,7 @@ export function ThreadComposer({
   reasoningEffort = null,
   collaborationMode = 'default',
   modelOptions = [],
+  contextUsage = null,
   followTail = false,
   threadConnected = true,
   disabled = false,
@@ -405,6 +468,12 @@ export function ThreadComposer({
     () => modelOptions.find((entry) => entry.model === model) ?? null,
     [model, modelOptions],
   );
+  const modelContextTitle =
+    model && contextUsage?.availability === 'available'
+      ? `${model} · ${clampPercent(contextUsage.remainingPercent)}% context left`
+      : model
+        ? `${model} · context unavailable`
+        : 'Select model';
   const supportedEfforts = currentModel?.supportedReasoningEfforts ?? [];
   const promptSegments = useMemo(
     () => tokenizePrompt(prompt, attachments),
@@ -1008,13 +1077,16 @@ export function ThreadComposer({
                     type="button"
                     aria-haspopup="menu"
                     aria-expanded={openMenu === 'model'}
+                    aria-label={model ?? 'Select model'}
                     disabled={settingsBusy || modelOptions.length === 0}
                     onClick={() =>
                       setOpenMenu((current) => (current === 'model' ? null : 'model'))
                     }
-                    className="rounded-full px-2 py-1 text-stone-400 transition hover:bg-stone-800 hover:text-stone-100 disabled:cursor-not-allowed disabled:text-stone-600"
+                    title={modelContextTitle}
+                    className="relative overflow-hidden rounded-full px-2.5 py-1 text-stone-300 transition hover:bg-stone-800/85 hover:text-stone-100 disabled:cursor-not-allowed disabled:text-stone-600"
                   >
-                    {model ?? 'Select model'}
+                    {model ? <ContextRingFrame contextUsage={contextUsage} /> : null}
+                    <span className="relative z-[1]">{model ?? 'Select model'}</span>
                   </button>
                   {openMenu === 'model' && (
                     <div className="absolute bottom-full left-0 mb-2 w-max min-w-[9rem] max-w-[14rem] overflow-hidden rounded-2xl border border-stone-700 bg-stone-900 shadow-2xl shadow-stone-950/40">

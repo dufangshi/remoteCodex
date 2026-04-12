@@ -180,6 +180,69 @@ describe('supervisor api', () => {
     });
   });
 
+  it('restarts the codex app-server on demand', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/codex/restart',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      state: 'ready',
+      transport: 'stdio',
+    });
+  });
+
+  it('reads editable codex host files from CODEX_HOME', async () => {
+    await fs.writeFile(path.join(codexHome, 'config.toml'), 'model = "gpt-5.4"\n', 'utf8');
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/config/codex-files/config.toml',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      name: 'config.toml',
+      exists: true,
+      content: 'model = "gpt-5.4"\n',
+    });
+  });
+
+  it('returns empty content for missing editable codex host files', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/config/codex-files/auth.json',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      name: 'auth.json',
+      exists: false,
+      content: '',
+    });
+  });
+
+  it('writes editable codex host files under CODEX_HOME', async () => {
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/api/config/codex-files/auth.json',
+      payload: {
+        content: '{\n  "token": "secret"\n}\n',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      name: 'auth.json',
+      exists: true,
+      content: '{\n  "token": "secret"\n}\n',
+    });
+    await expect(fs.readFile(path.join(codexHome, 'auth.json'), 'utf8')).resolves.toBe(
+      '{\n  "token": "secret"\n}\n',
+    );
+  });
+
   it('creates and lists workspaces', async () => {
     const createResponse = await app.inject({
       method: 'POST',
@@ -670,6 +733,81 @@ describe('supervisor api', () => {
       model: 'gpt-5',
       reasoningEffort: 'medium',
       reasoningEffortAvailable: true,
+    });
+  });
+
+  it('surfaces CLI-aligned context remaining estimates from token usage notifications', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Context Thread',
+      },
+    });
+
+    const createdThread = createResponse.json();
+
+    const initialDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+
+    expect(initialDetailResponse.statusCode).toBe(200);
+    expect(initialDetailResponse.json().thread.contextUsage).toMatchObject({
+      availability: 'unavailable',
+      remainingPercent: null,
+      tokensInContextWindow: null,
+      modelContextWindow: null,
+    });
+
+    fakeCodexManager.emit('notification', {
+      method: 'thread/tokenUsage/updated',
+      params: {
+        threadId: createdThread.codexThreadId,
+        turnId: 'turn-context-1',
+        tokenUsage: {
+          total: {
+            totalTokens: 165200,
+            inputTokens: 140000,
+            cachedInputTokens: 0,
+            outputTokens: 25200,
+            reasoningOutputTokens: 0,
+          },
+          last: {
+            totalTokens: 165200,
+            inputTokens: 140000,
+            cachedInputTokens: 0,
+            outputTokens: 25200,
+            reasoningOutputTokens: 0,
+          },
+          modelContextWindow: 258400,
+        },
+      },
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json().thread.contextUsage).toMatchObject({
+      availability: 'available',
+      remainingPercent: 38,
+      tokensInContextWindow: 165200,
+      modelContextWindow: 258400,
     });
   });
 
@@ -1851,5 +1989,81 @@ describe('supervisor api', () => {
     });
     expect(fileChangeItem.detailText).toContain('src/app.ts (+2 -1)');
     expect(fileChangeItem.detailText).toContain('src/ui.tsx (+3)');
+  });
+
+  it('maps context compaction turn items into dedicated history entries', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Context Compaction Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Continue working until context compaction occurs.'
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+
+    const startedThread = promptResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const activeTurn = remoteThread?.turns.at(-1);
+    expect(activeTurn).toBeTruthy();
+
+    const completedTurn = {
+      ...activeTurn!,
+      status: 'completed' as const,
+      items: [
+        ...activeTurn!.items,
+        {
+          id: 'context-item-1',
+          type: 'context_compaction',
+          text: 'Compressed older tool results into a shorter summary.',
+          status: 'completed'
+        }
+      ]
+    };
+
+    fakeCodexManager.threads.set(startedThread.codexThreadId, {
+      ...remoteThread!,
+      status: { type: 'idle' },
+      turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json().turns.at(-1)).toMatchObject({
+      status: 'completed',
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'contextCompaction',
+          text: 'Context compacted',
+          detailText: 'Compressed older tool results into a shorter summary.',
+          status: 'completed'
+        })
+      ])
+    });
   });
 });

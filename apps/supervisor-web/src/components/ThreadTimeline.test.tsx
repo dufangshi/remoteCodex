@@ -651,7 +651,7 @@ describe('ThreadTimeline', () => {
     expect(screen.getByText('verify the UI')).toBeInTheDocument();
   });
 
-  it('renders web search items with a query preview and expandable details', () => {
+  it('renders web search items as a compact one-line preview with expandable details', () => {
     render(
       <ThreadTimeline
         liveOutput=""
@@ -665,8 +665,12 @@ describe('ThreadTimeline', () => {
               {
                 id: 'search-1',
                 kind: 'webSearch',
-                text: 'latest remote codex release notes',
-                previewText: 'latest remote codex release notes',
+                text: ['latest remote codex release notes', 'site:example.com', '2026'].join(
+                  '\n',
+                ),
+                previewText: ['latest remote codex release notes', 'site:example.com'].join(
+                  '\n',
+                ),
                 detailText: [
                   'Search query',
                   '',
@@ -685,11 +689,12 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    expect(
-      screen.getByRole('button', { name: 'Open full web search' }),
-    ).toHaveTextContent('latest remote codex release notes');
+    const openButton = screen.getByRole('button', { name: 'Open full web search' });
+    expect(openButton).toHaveTextContent('latest remote codex release notes');
+    expect(openButton).toHaveTextContent('...');
+    expect(openButton).not.toHaveTextContent('site:example.com');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open full web search' }));
+    fireEvent.click(openButton);
 
     expect(
       screen.getByRole('dialog', { name: 'Web Search Details' }),
@@ -700,6 +705,109 @@ describe('ThreadTimeline', () => {
     expect(
       screen.getByRole('dialog', { name: 'Web Search Details' }),
     ).toHaveTextContent('https://example.com/releases');
+  });
+
+  it('groups consecutive web search items into a collapsible batch', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'search-1',
+                kind: 'webSearch',
+                text: 'latest remote codex release notes',
+                previewText: 'latest remote codex release notes',
+                detailText: 'Search query: latest remote codex release notes',
+                status: 'completed',
+              },
+              {
+                id: 'search-2',
+                kind: 'webSearch',
+                text: ['pnpm workspace filters', 'monorepo search tips'].join('\n'),
+                previewText: ['pnpm workspace filters', 'monorepo search tips'].join('\n'),
+                detailText: 'Search query: pnpm workspace filters\nmonorepo search tips',
+                status: 'completed',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('2 searches')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Expand 2 web search entries' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Open full web search' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand 2 web search entries' }));
+
+    expect(screen.getByRole('button', { name: 'Open grouped web search 1' })).toHaveTextContent(
+      'latest remote codex release notes',
+    );
+    expect(screen.getByRole('button', { name: 'Open grouped web search 2' })).toHaveTextContent(
+      'pnpm workspace filters',
+    );
+    expect(screen.getByRole('button', { name: 'Open grouped web search 2' })).toHaveTextContent(
+      '...',
+    );
+    expect(
+      screen.queryByText('monorepo search tips'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('renders context compaction items as compact dedicated cards', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'inProgress',
+            error: null,
+            items: [
+              {
+                id: 'context-1',
+                kind: 'contextCompaction',
+                text: 'Compacting context',
+                detailText: 'Compressed older tool results into a shorter summary.',
+                status: 'running',
+              },
+            ],
+          },
+          {
+            id: 'turn-2',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 2, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'context-2',
+                kind: 'contextCompaction',
+                text: 'Context compacted',
+                status: 'completed',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('Compacting context')).toBeInTheDocument();
+    expect(
+      screen.getByText('Compressed older tool results into a shorter summary.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Context compacted')).toBeInTheDocument();
+    expect(screen.queryByText('Other')).not.toBeInTheDocument();
   });
 
   it('renders streaming agent output inside the same agent message surface', async () => {

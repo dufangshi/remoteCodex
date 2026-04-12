@@ -734,6 +734,39 @@ export function ThreadDetailPage() {
         }
       }
 
+      if (event.type === 'thread.context.updated') {
+        const nextContextUsage =
+          event.payload.contextUsage &&
+          typeof event.payload.contextUsage === 'object'
+            ? event.payload.contextUsage
+            : null;
+        if (nextContextUsage) {
+          const normalizedContextUsage =
+            nextContextUsage as NonNullable<ThreadDto['contextUsage']>;
+          setDetail((current) =>
+            current
+              ? {
+                  ...current,
+                  thread: {
+                    ...current.thread,
+                    contextUsage: normalizedContextUsage,
+                  },
+                }
+              : current,
+          );
+          setThreads((current) =>
+            current.map((entry) =>
+              entry.id === id
+                ? {
+                    ...entry,
+                    contextUsage: normalizedContextUsage,
+                  }
+                : entry,
+            ),
+          );
+        }
+      }
+
       if (
         event.type === 'thread.turn.started' ||
         event.type === 'thread.turn.completed' ||
@@ -1755,6 +1788,7 @@ export function ThreadDetailPage() {
                       reasoningEffort={detail.thread.reasoningEffort}
                       collaborationMode={detail.thread.collaborationMode}
                       modelOptions={modelOptions}
+                      contextUsage={detail.thread.contextUsage}
                       followTail={followTail}
                       threadConnected={detail.thread.isLoaded}
                       disabled={Boolean(promptDisabledReason)}
@@ -1784,6 +1818,7 @@ export function ThreadDetailPage() {
                       reasoningEffort={detail.thread.reasoningEffort}
                       collaborationMode={detail.thread.collaborationMode}
                       modelOptions={modelOptions}
+                      contextUsage={detail.thread.contextUsage}
                       followTail={followTail}
                       threadConnected={detail.thread.isLoaded}
                       disabled={Boolean(promptDisabledReason)}
