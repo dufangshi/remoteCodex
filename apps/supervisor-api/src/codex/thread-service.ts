@@ -6,6 +6,7 @@ import {
   CodexAppServerManager,
   CodexServerRequest,
   CodexServerEvent,
+  SandboxPolicy,
   CodexThreadRecord,
   CodexTurnItem,
   CodexTurnRecord,
@@ -112,6 +113,38 @@ function normalizeSandboxMode(
       return value;
     default:
       return null;
+  }
+}
+
+function buildTurnSandboxPolicy(
+  sandboxMode: SandboxModeDto,
+  writableRoot: string,
+): SandboxPolicy {
+  switch (sandboxMode) {
+    case 'danger-full-access':
+      return {
+        type: 'dangerFullAccess',
+      };
+    case 'read-only':
+      return {
+        type: 'readOnly',
+        access: {
+          type: 'fullAccess',
+        },
+        networkAccess: false,
+      };
+    case 'workspace-write':
+    default:
+      return {
+        type: 'workspaceWrite',
+        writableRoots: [writableRoot],
+        readOnlyAccess: {
+          type: 'fullAccess',
+        },
+        networkAccess: false,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
+      };
   }
 }
 
@@ -1638,6 +1671,13 @@ export class ThreadService {
       effectiveModel,
       effectiveReasoning
     );
+    const workspace = getWorkspaceRecordById(this.db, record.workspaceId);
+    if (!workspace) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Workspace was not found.',
+      });
+    }
     const sandboxMode =
       (input.sandboxMode !== undefined
         ? normalizeSandboxMode(input.sandboxMode)
@@ -1650,7 +1690,7 @@ export class ThreadService {
       model: effectiveModel,
       effort: normalizedReasoning,
       collaborationMode,
-      sandboxPolicy: sandboxMode,
+      sandboxPolicy: buildTurnSandboxPolicy(sandboxMode, workspace.absPath),
     });
     upsertThreadTurnMetadata(this.db, {
       threadId: localThreadId,

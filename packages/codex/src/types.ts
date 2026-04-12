@@ -67,6 +67,37 @@ export type ReasoningEffort =
 
 export type CollaborationModeKind = 'default' | 'plan';
 export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
+export type NetworkAccess = 'restricted' | 'enabled';
+export type ReadOnlyAccess =
+  | {
+      type: 'restricted';
+      includePlatformDefaults: boolean;
+      readableRoots: string[];
+    }
+  | {
+      type: 'fullAccess';
+    };
+export type SandboxPolicy =
+  | {
+      type: 'dangerFullAccess';
+    }
+  | {
+      type: 'readOnly';
+      access: ReadOnlyAccess;
+      networkAccess: boolean;
+    }
+  | {
+      type: 'externalSandbox';
+      networkAccess: NetworkAccess;
+    }
+  | {
+      type: 'workspaceWrite';
+      writableRoots: string[];
+      readOnlyAccess: ReadOnlyAccess;
+      networkAccess: boolean;
+      excludeTmpdirEnvVar: boolean;
+      excludeSlashTmp: boolean;
+    };
 
 export type CodexThreadStatus =
   | { type: 'notLoaded' }
@@ -132,7 +163,7 @@ export interface TurnStartInput {
   model?: string | null;
   effort?: ReasoningEffort | null;
   collaborationMode?: CollaborationModeKind | null;
-  sandboxPolicy?: SandboxMode | null;
+  sandboxPolicy?: SandboxPolicy | null;
 }
 
 export interface CodexServerRequest {
