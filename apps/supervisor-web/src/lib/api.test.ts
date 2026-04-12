@@ -4,10 +4,14 @@ import {
   createThreadShell,
   createWorkspace,
   disconnectThread,
+  fetchCodexHostFile,
+  fetchCodexStatus,
   importThread,
+  restartCodexAppServer,
   resumeThread,
   sendThreadPrompt,
   terminateShell,
+  updateCodexHostFile,
 } from './api';
 
 describe('api request helper', () => {
@@ -83,5 +87,30 @@ describe('api request helper', () => {
     expect(call?.[1]?.body).toBeInstanceOf(FormData);
     const headers = new Headers(call?.[1]?.headers);
     expect(headers.has('Content-Type')).toBe(false);
+  });
+
+  it('uses the expected codex host file endpoints', async () => {
+    await fetchCodexHostFile('config.toml');
+    await updateCodexHostFile('auth.json', {
+      content: '{\n  "token": "abc"\n}\n',
+    });
+
+    const calls = vi.mocked(fetch).mock.calls;
+    expect(calls[0]?.[0]).toBe('/api/config/codex-files/config.toml');
+    expect(calls[1]?.[0]).toBe('/api/config/codex-files/auth.json');
+    expect(calls[1]?.[1]?.method).toBe('PATCH');
+    expect(JSON.parse(String(calls[1]?.[1]?.body))).toEqual({
+      content: '{\n  "token": "abc"\n}\n',
+    });
+  });
+
+  it('uses the expected codex status endpoints', async () => {
+    await fetchCodexStatus();
+    await restartCodexAppServer();
+
+    const calls = vi.mocked(fetch).mock.calls;
+    expect(calls[0]?.[0]).toBe('/api/codex/status');
+    expect(calls[1]?.[0]).toBe('/api/codex/restart');
+    expect(calls[1]?.[1]?.method).toBe('POST');
   });
 });

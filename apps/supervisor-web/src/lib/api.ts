@@ -1,5 +1,7 @@
 import type {
   ApiErrorShape,
+  CodexHostFileDto,
+  CodexHostFileNameDto,
   CodexStatusDto,
   CreateThreadInput,
   CreateWorkspaceInput,
@@ -23,6 +25,7 @@ import type {
   ThreadEventEnvelope,
   ThreadShellStateDto,
   UpdateThreadSettingsInput,
+  UpdateCodexHostFileInput,
   UpdateThreadInput,
   UpdateWorkspaceInput,
   UpdateWorkspaceFavoriteInput,
@@ -84,8 +87,30 @@ export function fetchRuntimeConfig() {
   return request<RuntimeConfigDto>('/api/config/runtime');
 }
 
+export function fetchCodexHostFile(name: CodexHostFileNameDto) {
+  return request<CodexHostFileDto>(`/api/config/codex-files/${encodeURIComponent(name)}`, {
+    cache: 'no-store',
+  });
+}
+
+export function updateCodexHostFile(
+  name: CodexHostFileNameDto,
+  input: UpdateCodexHostFileInput,
+) {
+  return request<CodexHostFileDto>(`/api/config/codex-files/${encodeURIComponent(name)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
 export function fetchCodexStatus() {
   return request<CodexStatusDto>('/api/codex/status');
+}
+
+export function restartCodexAppServer() {
+  return request<CodexStatusDto>('/api/codex/restart', {
+    method: 'POST',
+  });
 }
 
 export function fetchCodexModels() {

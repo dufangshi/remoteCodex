@@ -50,6 +50,19 @@ export interface HealthDto {
   timestamp: string;
 }
 
+export type CodexHostFileNameDto = 'config.toml' | 'auth.json';
+
+export interface CodexHostFileDto {
+  name: CodexHostFileNameDto;
+  path: string;
+  exists: boolean;
+  content: string;
+}
+
+export interface UpdateCodexHostFileInput {
+  content: string;
+}
+
 export interface WorkspaceDto {
   id: string;
   hostId: string;
@@ -106,6 +119,14 @@ export type ThreadStatusDto =
   | 'not_loaded'
   | 'system_error';
 
+export interface ThreadContextUsageDto {
+  availability: 'available' | 'unavailable';
+  remainingPercent: number | null;
+  tokensInContextWindow: number | null;
+  modelContextWindow: number | null;
+  updatedAt: string | null;
+}
+
 export interface ThreadDto {
   id: string;
   workspaceId: string;
@@ -126,6 +147,7 @@ export interface ThreadDto {
   updatedAt: string;
   lastTurnStartedAt: string | null;
   lastTurnCompletedAt: string | null;
+  contextUsage?: ThreadContextUsageDto;
 }
 
 export interface ThreadHistoryItemDto {
@@ -135,6 +157,7 @@ export interface ThreadHistoryItemDto {
     | 'agentMessage'
     | 'image'
     | 'plan'
+    | 'contextCompaction'
     | 'reasoning'
     | 'commandExecution'
     | 'webSearch'
@@ -316,6 +339,7 @@ export interface RespondThreadActionRequestInput {
 export interface ThreadEventEnvelope {
   type:
     | 'thread.updated'
+    | 'thread.context.updated'
     | 'thread.turn.started'
     | 'thread.plan.updated'
     | 'thread.request.created'
