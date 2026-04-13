@@ -450,6 +450,7 @@ export function ThreadComposer({
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pendingSelectionRef = useRef<{ start: number; end: number } | null>(null);
+  const pendingInsertedAttachmentIdsRef = useRef<string[]>([]);
   const selectionSnapshotRef = useRef<{ start: number; end: number } | null>(null);
   const previewUrlCacheRef = useRef<Map<string, string>>(new Map());
   const renderedPreviewSignatureRef = useRef('');
@@ -788,6 +789,43 @@ export function ThreadComposer({
     currentSelection?.addRange(range);
   }
 
+  function restoreSelectionAfterInsertedAttachments(editor: HTMLDivElement) {
+    const insertedClientIds = pendingInsertedAttachmentIdsRef.current;
+    if (insertedClientIds.length === 0) {
+      return false;
+    }
+
+    const lastInsertedClientId = insertedClientIds.at(-1);
+    if (!lastInsertedClientId) {
+      return false;
+    }
+
+    const attachmentNode = Array.from(editor.childNodes).find(
+      (child) =>
+        child instanceof HTMLElement &&
+        child.dataset.segmentType === 'attachment' &&
+        child.dataset.clientId === lastInsertedClientId,
+    );
+
+    if (!(attachmentNode instanceof HTMLElement)) {
+      return false;
+    }
+
+    const range = document.createRange();
+    const trailingNode = attachmentNode.nextSibling;
+    if (trailingNode?.nodeType === Node.TEXT_NODE) {
+      range.setStart(trailingNode, 0);
+    } else {
+      range.setStartAfter(attachmentNode);
+    }
+    range.collapse(true);
+
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    return true;
+  }
+
   function serializeEditorPrompt() {
     const editor = promptRef.current;
     if (!editor) {
@@ -897,6 +935,13 @@ export function ThreadComposer({
       start: nextCaret,
       end: nextCaret,
     };
+    selectionSnapshotRef.current = {
+      start: nextCaret,
+      end: nextCaret,
+    };
+    pendingInsertedAttachmentIdsRef.current = nextAttachments.map(
+      (attachment) => attachment.clientId,
+    );
     setOpenMenu(null);
   }
 
@@ -950,6 +995,10 @@ export function ThreadComposer({
     const trailingSpacerOffset = insertionText.endsWith(' ') ? 1 : 0;
     const nextCaret = insertionPoint.start + insertionText.length - trailingSpacerOffset;
     pendingSelectionRef.current = { start: nextCaret, end: nextCaret };
+    selectionSnapshotRef.current = { start: nextCaret, end: nextCaret };
+    pendingInsertedAttachmentIdsRef.current = nextAttachments.map(
+      (attachment) => attachment.clientId,
+    );
     setOpenMenu(null);
   }
 
@@ -984,13 +1033,16 @@ export function ThreadComposer({
 
       for (const segment of promptSegments) {
         if (segment.type === 'text') {
-          fragment.append(document.createTextNode(segment.text));
+          fragment.append(
+            document.createTextNode(segment.text === ' ' ? '\u00a0' : segment.text),
+          );
           continue;
         }
 
         const attachment = segment.attachment;
         const token = document.createElement('span');
         token.dataset.segmentType = 'attachment';
+        token.dataset.clientId = attachment.clientId;
         token.dataset.placeholder = attachment.placeholder;
         token.contentEditable = 'false';
         token.className = 'mx-[0.12rem] inline-flex max-w-full align-baseline';
@@ -1057,12 +1109,16 @@ export function ThreadComposer({
 
     if (pendingSelection !== null) {
       editor.focus();
-      restoreSelection(pendingSelection);
+      if (!restoreSelectionAfterInsertedAttachments(editor)) {
+        restoreSelection(pendingSelection);
+      }
+      selectionSnapshotRef.current = pendingSelection;
     } else if (document.activeElement === editor && shouldSyncDom) {
       restoreSelection(selectionSnapshotRef.current);
     }
 
     pendingSelectionRef.current = null;
+    pendingInsertedAttachmentIdsRef.current = [];
   }, [attachmentPreviewUrls, isShellView, previewSignature, prompt, promptSegments]);
 
   function dismissPromptFocus() {

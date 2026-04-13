@@ -166,6 +166,12 @@ export interface TurnStartInput {
   sandboxPolicy?: SandboxPolicy | null;
 }
 
+export interface TurnSteerInput {
+  threadId: string;
+  turnId: string;
+  prompt: string;
+}
+
 export interface CodexServerRequest {
   method: string;
   id: number;

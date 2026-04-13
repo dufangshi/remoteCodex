@@ -7,6 +7,7 @@ import { getDefaultHostRecord } from './client';
 import {
   notifications,
   shellSessions,
+  threadPendingSteers,
   threadTurnMetadata,
   threads,
   viewerSessions,
@@ -56,6 +57,14 @@ export interface UpsertThreadTurnMetadataInput {
   model?: string | null;
   reasoningEffort?: string | null;
   reasoningEffortAvailable?: boolean | null;
+}
+
+export interface CreateThreadPendingSteerRecordInput {
+  threadId: string;
+  turnId: string;
+  clientRequestId?: string | null;
+  displayPrompt: string;
+  submittedPrompt: string;
 }
 
 export interface CreateShellSessionRecordInput {
@@ -254,6 +263,49 @@ export function upsertThreadTurnMetadata(
 
 export function deleteThreadTurnMetadataByThreadId(db: DatabaseClient, threadId: string) {
   db.delete(threadTurnMetadata).where(eq(threadTurnMetadata.threadId, threadId)).run();
+}
+
+export function listThreadPendingSteerRecordsByThreadId(
+  db: DatabaseClient,
+  threadId: string,
+) {
+  return db
+    .select()
+    .from(threadPendingSteers)
+    .where(eq(threadPendingSteers.threadId, threadId))
+    .orderBy(threadPendingSteers.createdAt)
+    .all();
+}
+
+export function createThreadPendingSteerRecord(
+  db: DatabaseClient,
+  input: CreateThreadPendingSteerRecordInput,
+) {
+  const now = new Date().toISOString();
+  const record = {
+    id: randomUUID(),
+    threadId: input.threadId,
+    turnId: input.turnId,
+    clientRequestId: input.clientRequestId ?? null,
+    displayPrompt: input.displayPrompt,
+    submittedPrompt: input.submittedPrompt,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  db.insert(threadPendingSteers).values(record).run();
+  return record;
+}
+
+export function deleteThreadPendingSteerRecordById(db: DatabaseClient, id: string) {
+  db.delete(threadPendingSteers).where(eq(threadPendingSteers.id, id)).run();
+}
+
+export function deleteThreadPendingSteerRecordsByThreadId(
+  db: DatabaseClient,
+  threadId: string,
+) {
+  db.delete(threadPendingSteers).where(eq(threadPendingSteers.threadId, threadId)).run();
 }
 
 export function listShellSessionRecords(db: DatabaseClient) {

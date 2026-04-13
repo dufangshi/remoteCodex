@@ -6,7 +6,6 @@ import {
   ModelOptionDto,
   SandboxModeDto,
   SupervisorSocketServerEnvelope,
-  ThreadActionRequestDto,
   ThreadDetailDto,
   ThreadDto,
   ThreadEventEnvelope,
@@ -110,43 +109,21 @@ interface OptimisticTurnState {
   reasoningEffortAvailable: boolean | null;
 }
 
-interface LocalAnsweredRequestNote {
+interface OptimisticSteerState {
   id: string;
-  turnId: string | null;
-  title: string;
-  summaryLines: string[];
+  clientRequestId: string;
+  turnId: string;
+  prompt: string;
+  createdAt: string;
+  status: 'steering' | 'accepted';
 }
 
-function buildAnsweredRequestNote(
-  request: ThreadActionRequestDto | undefined,
-  input: { answers: Record<string, { answers: string[] }> },
-): LocalAnsweredRequestNote | null {
-  if (!request) {
-    return null;
-  }
-
-  const summaryLines = request.questions
-    .map((question) => {
-      const answer = input.answers[question.id]?.answers[0]?.trim();
-      if (!answer) {
-        return null;
-      }
-
-      return `${question.header}: ${answer}`;
-    })
-    .filter((line): line is string => Boolean(line));
-
-  if (summaryLines.length === 0) {
-    return null;
-  }
-
-  return {
-    id: request.id,
-    turnId: request.turnId,
-    title: request.title,
-    summaryLines,
-  };
-}
+type PendingThreadSettings = Partial<
+  Pick<
+    ThreadDto,
+    'model' | 'reasoningEffort' | 'collaborationMode' | 'sandboxMode'
+  >
+>;
 
 function getReasoningEffortAvailability(
   modelOptions: ModelOptionDto[],
@@ -162,6 +139,28 @@ function getReasoningEffortAvailability(
   }
 
   return matchedModel.supportedReasoningEfforts.length > 1;
+}
+
+function createClientRequestId() {
+  if (
+    typeof crypto !== 'undefined' &&
+    typeof crypto.randomUUID === 'function'
+  ) {
+    return crypto.randomUUID();
+  }
+
+  return `client-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function turnHasUserMessage(
+  turn: ThreadDetailDto['turns'][number] | undefined,
+  prompt: string,
+) {
+  return (
+    turn?.items.some(
+      (item) => item.kind === 'userMessage' && item.text.trim() === prompt,
+    ) ?? false
+  );
 }
 
 function CopyIcon() {
@@ -243,6 +242,7 @@ export function ThreadDetailPage() {
   const pageContextRequestIdRef = useRef(0);
   const terminalTurnPendingRef = useRef<string | null>(null);
   const detailRef = useRef<ThreadDetailDto | null>(null);
+  const pendingThreadSettingsRef = useRef<PendingThreadSettings | null>(null);
   const [detail, setDetail] = useState<ThreadDetailDto | null>(null);
   const [threads, setThreads] = useState<ThreadDto[]>([]);
   const [modelOptions, setModelOptions] = useState<ModelOptionDto[]>([]);
@@ -286,11 +286,10 @@ export function ThreadDetailPage() {
       socketOpen: false,
       lastHealthyAt: null,
     });
-  const [ephemeralUserNote, setEphemeralUserNote] = useState<string | null>(null);
-  const [answeredRequestNotes, setAnsweredRequestNotes] = useState<
-    LocalAnsweredRequestNote[]
-  >([]);
   const [optimisticTurn, setOptimisticTurn] = useState<OptimisticTurnState | null>(null);
+  const [optimisticSteers, setOptimisticSteers] = useState<OptimisticSteerState[]>(
+    [],
+  );
   const [error, setError] = useState<string | null>(null);
 
   const flushBufferedLiveOutput = useCallback(() => {
@@ -329,21 +328,66 @@ export function ThreadDetailPage() {
 
   const applyDetailResponse = useCallback(
     (detailResponse: ThreadDetailDto) => {
-      detailRef.current = detailResponse;
+      const pendingThreadSettings = pendingThreadSettingsRef.current;
+      const nextDetail =
+        pendingThreadSettings && Object.keys(pendingThreadSettings).length > 0
+          ? {
+              ...detailResponse,
+              thread: {
+                ...detailResponse.thread,
+                ...pendingThreadSettings,
+              },
+            }
+          : detailResponse;
+      detailRef.current = nextDetail;
+      setLivePlan(nextDetail.livePlan ?? null);
       const threadHasEnded =
-        detailResponse.thread.activeTurnId === null &&
-        detailResponse.thread.status !== 'running';
+        nextDetail.thread.activeTurnId === null &&
+        nextDetail.thread.status !== 'running';
 
       setDetail((current) =>
         current
           ? {
-              ...detailResponse,
-              turns: appendLatestTurns(current.turns, detailResponse.turns),
+              ...nextDetail,
+              turns: appendLatestTurns(current.turns, nextDetail.turns),
             }
-          : detailResponse,
+          : nextDetail,
       );
       setThreads((current) =>
-        mergeThreadIntoList(current, detailResponse.thread),
+        mergeThreadIntoList(current, nextDetail.thread),
+      );
+      const nextTurnsById = new Map(
+        nextDetail.turns.map((turn) => [turn.id, turn] as const),
+      );
+      const pendingSteerRequestIds = new Set(
+        (nextDetail.pendingSteers ?? [])
+          .map((steer) => steer.clientRequestId)
+          .filter((value): value is string => Boolean(value)),
+      );
+      setOptimisticSteers((current) =>
+        current.filter((steer) => {
+          if (pendingSteerRequestIds.has(steer.clientRequestId)) {
+            return false;
+          }
+
+          const targetTurn = nextTurnsById.get(steer.turnId);
+          if (!targetTurn) {
+            return false;
+          }
+
+          if (turnHasUserMessage(targetTurn, steer.prompt)) {
+            return false;
+          }
+
+          if (
+            nextDetail.thread.activeTurnId !== steer.turnId &&
+            targetTurn.status !== 'inProgress'
+          ) {
+            return false;
+          }
+
+          return true;
+        }),
       );
       setOptimisticTurn((current) => {
         if (!current) {
@@ -351,7 +395,7 @@ export function ThreadDetailPage() {
         }
 
         const resolvedTurnId = current.serverTurnId ?? current.id;
-        const hasMaterializedTurn = detailResponse.turns.some(
+        const hasMaterializedTurn = nextDetail.turns.some(
           (turn) => turn.id === resolvedTurnId,
         );
         return hasMaterializedTurn ? null : current;
@@ -359,7 +403,7 @@ export function ThreadDetailPage() {
       if (
         threadHasEnded ||
         (terminalTurnPendingRef.current &&
-          detailResponse.turns.some(
+          nextDetail.turns.some(
             (turn) => turn.id === terminalTurnPendingRef.current,
           ))
       ) {
@@ -518,9 +562,9 @@ export function ThreadDetailPage() {
     });
     setLoadingEarlier(false);
     setMetaSessionCopyState('idle');
-    setEphemeralUserNote(null);
-    setAnsweredRequestNotes([]);
     setOptimisticTurn(null);
+    setOptimisticSteers([]);
+    pendingThreadSettingsRef.current = null;
     terminalTurnPendingRef.current = null;
     supervisorHealthOkAtRef.current = null;
     supervisorPongAtRef.current = null;
@@ -797,7 +841,6 @@ export function ThreadDetailPage() {
         if (event.type === 'thread.turn.started') {
           clearBufferedLiveOutput();
           setLiveOutput('');
-          setEphemeralUserNote(null);
           terminalTurnPendingRef.current = null;
           const eventTurnId =
             typeof event.payload.turnId === 'string' ? event.payload.turnId : null;
@@ -819,7 +862,6 @@ export function ThreadDetailPage() {
           event.type === 'thread.turn.completed' ||
           event.type === 'thread.turn.failed'
         ) {
-          setEphemeralUserNote(null);
           const eventTurnId =
             typeof event.payload.turnId === 'string' ? event.payload.turnId : null;
           if (eventTurnId) {
@@ -841,9 +883,6 @@ export function ThreadDetailPage() {
               );
             }
           }
-        }
-        if (event.type === 'thread.request.created') {
-          setEphemeralUserNote(null);
         }
       }
 
@@ -1064,6 +1103,7 @@ export function ThreadDetailPage() {
       detail?.thread.activeTurnId !== null ||
       detail?.thread.status === 'running' ||
       optimisticTurn !== null ||
+      optimisticSteers.length > 0 ||
       liveOutput.length > 0 ||
       livePlan !== null;
 
@@ -1088,6 +1128,7 @@ export function ThreadDetailPage() {
     liveOutput.length,
     livePlan,
     loadThreadDetail,
+    optimisticSteers.length,
     optimisticTurn,
   ]);
 
@@ -1147,33 +1188,28 @@ export function ThreadDetailPage() {
 
     setBusy(true);
     setError(null);
-    clearBufferedLiveOutput();
-    setLiveOutput('');
-    setEphemeralUserNote(null);
     setScrollRequestKey((current) => current + 1);
-    const optimisticTurnId = `optimistic-${Date.now()}`;
-    const optimisticStartedAt = new Date().toISOString();
     const activeDetail = detailRef.current;
-    const optimisticModel = activeDetail?.thread.model ?? null;
-    const optimisticReasoningEffort = activeDetail?.thread.reasoningEffort ?? null;
-    setOptimisticTurn({
-      id: optimisticTurnId,
-      serverTurnId: null,
-      startedAt: optimisticStartedAt,
-      status: 'sending',
-      error: null,
-      prompt: input.prompt,
-      model: optimisticModel,
-      reasoningEffort: optimisticReasoningEffort,
-      reasoningEffortAvailable: getReasoningEffortAvailability(
-        modelOptions,
-        optimisticModel,
-      ),
-    });
+    const effectiveThread = activeDetail
+      ? {
+          ...activeDetail.thread,
+          ...(pendingThreadSettingsRef.current ?? {}),
+        }
+      : null;
+    const optimisticModel = effectiveThread?.model ?? null;
+    const optimisticReasoningEffort = effectiveThread?.reasoningEffort ?? null;
+    const clientRequestId = createClientRequestId();
+    const optimisticTurnId = `optimistic-${Date.now()}`;
+    const optimisticSteerId = `optimistic-steer-${clientRequestId}`;
+    const optimisticStartedAt = new Date().toISOString();
 
     try {
       let currentDetail = detailRef.current;
       if (currentDetail && !currentDetail.thread.isLoaded) {
+        const resumeSeedThread = {
+          ...currentDetail.thread,
+          ...(pendingThreadSettingsRef.current ?? {}),
+        };
         const resumed = await resumeThread(
           id,
           {
@@ -1183,54 +1219,163 @@ export function ThreadDetailPage() {
               : {}),
           },
         );
-        currentDetail = resumed;
-        detailRef.current = resumed;
+        const resumedDetail = {
+          ...resumed,
+          thread: {
+            ...resumed.thread,
+            model: resumeSeedThread.model ?? resumed.thread.model,
+            reasoningEffort:
+              resumeSeedThread.reasoningEffort ?? resumed.thread.reasoningEffort,
+            collaborationMode:
+              resumeSeedThread.collaborationMode ??
+              resumed.thread.collaborationMode,
+            sandboxMode:
+              resumeSeedThread.sandboxMode ?? resumed.thread.sandboxMode,
+          },
+        };
+        currentDetail = resumedDetail;
+        detailRef.current = resumedDetail;
         setDetail((current) =>
           current
             ? {
-                ...resumed,
-                turns: appendLatestTurns(current.turns, resumed.turns),
+                ...resumedDetail,
+                turns: appendLatestTurns(current.turns, resumedDetail.turns),
               }
-            : resumed,
+            : resumedDetail,
         );
         setThreads((current) =>
           current.map((entry) =>
-            entry.id === resumed.thread.id ? resumed.thread : entry,
+            entry.id === resumedDetail.thread.id ? resumedDetail.thread : entry,
           ),
         );
       }
 
+      const currentEffectiveThread = currentDetail
+        ? {
+            ...currentDetail.thread,
+            ...(pendingThreadSettingsRef.current ?? {}),
+          }
+        : null;
+      const steerTargetTurnId =
+        currentEffectiveThread?.status === 'running'
+          ? currentEffectiveThread.activeTurnId
+          : null;
+      const shouldSteer =
+        activeView === 'chat' && Boolean(steerTargetTurnId);
+
+      if (shouldSteer && steerTargetTurnId) {
+        setOptimisticSteers((current) => [
+          ...current,
+          {
+            id: optimisticSteerId,
+            clientRequestId,
+            turnId: steerTargetTurnId,
+            prompt: input.prompt,
+            createdAt: optimisticStartedAt,
+            status: 'steering',
+          },
+        ]);
+      } else {
+        clearBufferedLiveOutput();
+        setLiveOutput('');
+        setOptimisticTurn({
+          id: optimisticTurnId,
+          serverTurnId: null,
+          startedAt: optimisticStartedAt,
+          status: 'sending',
+          error: null,
+          prompt: input.prompt,
+          model: optimisticModel,
+          reasoningEffort: optimisticReasoningEffort,
+          reasoningEffortAvailable: getReasoningEffortAvailability(
+            modelOptions,
+            optimisticModel,
+          ),
+        });
+      }
+
       const promptInput = {
         prompt: input.prompt,
-        ...(currentDetail?.thread.model ? { model: currentDetail.thread.model } : {}),
-        ...(currentDetail?.thread.reasoningEffort
-          ? { reasoningEffort: currentDetail.thread.reasoningEffort }
+        clientRequestId,
+        ...(currentEffectiveThread?.model ? { model: currentEffectiveThread.model } : {}),
+        ...(currentEffectiveThread?.reasoningEffort
+          ? { reasoningEffort: currentEffectiveThread.reasoningEffort }
           : {}),
-        ...(currentDetail?.thread.collaborationMode
-          ? { collaborationMode: currentDetail.thread.collaborationMode }
+        ...(currentEffectiveThread?.collaborationMode
+          ? { collaborationMode: currentEffectiveThread.collaborationMode }
           : {}),
-        ...(currentDetail?.thread.sandboxMode
-          ? { sandboxMode: currentDetail.thread.sandboxMode }
+        ...(currentEffectiveThread?.sandboxMode
+          ? { sandboxMode: currentEffectiveThread.sandboxMode }
           : {}),
         ...(input.attachments?.length ? { attachments: input.attachments } : {}),
       };
       const thread = await sendThreadPrompt(id, promptInput);
-      setDetail((current) => (current ? { ...current, thread } : current));
-      setThreads((current) =>
-        current.map((entry) => (entry.id === thread.id ? thread : entry)),
-      );
-      setOptimisticTurn((current) =>
-        current && current.id === optimisticTurnId
+      const nextThread =
+        pendingThreadSettingsRef.current &&
+        Object.keys(pendingThreadSettingsRef.current).length > 0
           ? {
-              ...current,
-              id: thread.activeTurnId ?? current.id,
-              serverTurnId: thread.activeTurnId ?? current.serverTurnId,
-              status: 'inProgress',
-              error: null,
+              ...thread,
+              ...pendingThreadSettingsRef.current,
             }
-          : current,
+          : thread;
+      setDetail((current) => (current ? { ...current, thread: nextThread } : current));
+      setThreads((current) =>
+        current.map((entry) => (entry.id === nextThread.id ? nextThread : entry)),
       );
-      setLivePlan(null);
+      if (shouldSteer && steerTargetTurnId) {
+        const fellBackToNewTurn =
+          nextThread.activeTurnId !== null &&
+          nextThread.activeTurnId !== steerTargetTurnId &&
+          nextThread.lastTurnStartedAt !== currentEffectiveThread?.lastTurnStartedAt;
+
+        if (fellBackToNewTurn) {
+          clearBufferedLiveOutput();
+          setLiveOutput('');
+          setLivePlan(null);
+          setOptimisticSteers((current) =>
+            current.filter((steer) => steer.id !== optimisticSteerId),
+          );
+          setOptimisticTurn({
+            id: optimisticTurnId,
+            serverTurnId: nextThread.activeTurnId,
+            startedAt: nextThread.lastTurnStartedAt ?? optimisticStartedAt,
+            status: 'inProgress',
+            error: null,
+            prompt: input.prompt,
+            model: optimisticModel,
+            reasoningEffort: optimisticReasoningEffort,
+            reasoningEffortAvailable: getReasoningEffortAvailability(
+              modelOptions,
+              optimisticModel,
+            ),
+          });
+        } else {
+          setOptimisticSteers((current) =>
+            current.map((steer) =>
+              steer.id === optimisticSteerId
+                ? {
+                    ...steer,
+                    turnId: nextThread.activeTurnId ?? steer.turnId,
+                    status: 'accepted',
+                  }
+                : steer,
+            ),
+          );
+        }
+      } else {
+        setOptimisticTurn((current) =>
+          current && current.id === optimisticTurnId
+            ? {
+                ...current,
+                id: nextThread.activeTurnId ?? current.id,
+                serverTurnId: nextThread.activeTurnId ?? current.serverTurnId,
+                status: 'inProgress',
+                error: null,
+              }
+            : current,
+        );
+        setLivePlan(null);
+      }
       setChatDraft({
         prompt: '',
         attachments: [],
@@ -1247,6 +1392,9 @@ export function ThreadDetailPage() {
       } else {
         setError(message);
       }
+      setOptimisticSteers((current) =>
+        current.filter((steer) => steer.clientRequestId !== clientRequestId),
+      );
       setOptimisticTurn((current) =>
         current && current.id === optimisticTurnId
           ? {
@@ -1384,8 +1532,8 @@ export function ThreadDetailPage() {
     }
 
     const previousDetail = detail;
-    const optimisticThread = {
-      ...detail.thread,
+    const mergedPendingThreadSettings: PendingThreadSettings = {
+      ...(pendingThreadSettingsRef.current ?? {}),
       ...(input.model !== undefined ? { model: input.model } : {}),
       ...(input.reasoningEffort !== undefined
         ? { reasoningEffort: input.reasoningEffort }
@@ -1397,8 +1545,13 @@ export function ThreadDetailPage() {
         ? { sandboxMode: input.sandboxMode }
         : {}),
     };
+    const optimisticThread = {
+      ...detail.thread,
+      ...mergedPendingThreadSettings,
+    };
 
     setSettingsBusy(true);
+    pendingThreadSettingsRef.current = mergedPendingThreadSettings;
     detailRef.current = {
       ...detail,
       thread: optimisticThread,
@@ -1430,6 +1583,7 @@ export function ThreadDetailPage() {
           ? { sandboxMode: input.sandboxMode }
           : {}),
       });
+      pendingThreadSettingsRef.current = null;
       detailRef.current = previousDetail
         ? {
             ...previousDetail,
@@ -1448,6 +1602,7 @@ export function ThreadDetailPage() {
         current.map((entry) => (entry.id === updated.id ? updated : entry)),
       );
     } catch (caught) {
+      pendingThreadSettingsRef.current = null;
       detailRef.current = previousDetail;
       setDetail(previousDetail);
       setThreads((current) =>
@@ -1469,13 +1624,10 @@ export function ThreadDetailPage() {
     requestId: string,
     input: { answers: Record<string, { answers: string[] }> },
   ) {
-    const request = detail?.pendingRequests.find((entry) => entry.id === requestId);
-    const answeredRequestNote = buildAnsweredRequestNote(request, input);
     setRespondingRequestId(requestId);
     setError(null);
 
     try {
-      const selectedAnswer = Object.values(input.answers)[0]?.answers[0]?.trim().toLowerCase();
       const updated = await respondToThreadRequest(id, requestId, input);
       setDetail((current) =>
         current
@@ -1485,21 +1637,7 @@ export function ThreadDetailPage() {
             }
           : updated,
       );
-      setLivePlan(null);
-      setEphemeralUserNote(
-        selectedAnswer === 'stay in plan mode'
-          ? 'User kept plan mode active and will provide further details.'
-          : null,
-      );
-      if (answeredRequestNote) {
-        setAnsweredRequestNotes((current) => {
-          const next = [
-            ...current.filter((entry) => entry.id !== answeredRequestNote.id),
-            answeredRequestNote,
-          ];
-          return next.slice(-4);
-        });
-      }
+      setLivePlan(updated.livePlan ?? null);
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -1898,8 +2036,9 @@ export function ThreadDetailPage() {
                   onLoadHistoryItemDetail={(itemId) =>
                     fetchThreadHistoryItemDetail(detail.thread.id, itemId)
                   }
-                  ephemeralUserNote={ephemeralUserNote}
-                  answeredRequestNotes={answeredRequestNotes}
+                  answeredRequestNotes={detail.answeredRequestNotes ?? []}
+                  pendingSteers={detail.pendingSteers ?? []}
+                  optimisticSteers={optimisticSteers}
                   optimisticTurn={timelineOptimisticTurn}
                 />
                 {useFloatingMobileComposer ? (

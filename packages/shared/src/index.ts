@@ -220,6 +220,29 @@ export interface ThreadActionRequestDto {
   questions: ThreadActionQuestionDto[];
 }
 
+export interface ThreadAnsweredRequestNoteDto {
+  id: string;
+  turnId: string | null;
+  title: string;
+  summaryLines: string[];
+  createdAt: string;
+}
+
+export interface ThreadLivePlanDto {
+  turnId: string;
+  explanation: string | null;
+  plan: Array<{ step: string; status: string }>;
+  updatedAt: string;
+}
+
+export interface ThreadPendingSteerDto {
+  id: string;
+  clientRequestId: string | null;
+  turnId: string;
+  prompt: string;
+  createdAt: string;
+}
+
 export interface ThreadDetailDto {
   thread: ThreadDto;
   workspace: WorkspaceDto;
@@ -227,6 +250,9 @@ export interface ThreadDetailDto {
   turns: ThreadTurnDto[];
   totalTurnCount?: number;
   pendingRequests: ThreadActionRequestDto[];
+  pendingSteers: ThreadPendingSteerDto[];
+  answeredRequestNotes?: ThreadAnsweredRequestNoteDto[];
+  livePlan?: ThreadLivePlanDto | null;
 }
 
 export type ShellStatusDto =
@@ -309,6 +335,7 @@ export interface ImportThreadInput {
 
 export interface SendThreadPromptInput {
   prompt: string;
+  clientRequestId?: string;
   model?: string;
   reasoningEffort?: ReasoningEffortDto | null;
   collaborationMode?: CollaborationModeDto;

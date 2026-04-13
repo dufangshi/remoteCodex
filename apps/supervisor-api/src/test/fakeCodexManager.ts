@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { randomUUID } from 'node:crypto';
 
 import { CodexThreadRecord, JsonRpcClientError, ReasoningEffort } from '../../../../packages/codex/src/index';
 
@@ -47,6 +48,9 @@ export class FakeCodexManager extends EventEmitter {
   loadedThreadIds = new Set<string>();
   readThreadErrors = new Map<string, JsonRpcClientError>();
   readThreadCallCount = new Map<string, number>();
+  steerError: JsonRpcClientError | null = null;
+  materializeSteersImmediately = true;
+  steerTurnCalls: Array<{ threadId: string; turnId: string; prompt: string }> = [];
 
   async start() {}
 
@@ -154,6 +158,46 @@ export class FakeCodexManager extends EventEmitter {
       turns: [...existing.turns, turn]
     });
     return turn;
+  }
+
+  async steerTurn(input: {
+    threadId: string;
+    turnId: string;
+    prompt: string;
+  }) {
+    this.steerTurnCalls.push(input);
+
+    if (this.steerError) {
+      throw this.steerError;
+    }
+
+    const existing = this.threads.get(input.threadId) ?? makeThread({ id: input.threadId });
+    if (!this.materializeSteersImmediately) {
+      return existing.turns.find((turn) => turn.id === input.turnId) ?? null;
+    }
+
+    const turns = existing.turns.map((turn) =>
+      turn.id === input.turnId
+        ? {
+            ...turn,
+            items: [
+              ...turn.items,
+              {
+                id: randomUUID(),
+                type: 'userMessage',
+                content: [{ type: 'text', text: input.prompt }],
+              },
+            ],
+          }
+        : turn,
+    );
+    this.threads.set(input.threadId, {
+      ...existing,
+      updatedAt: Math.floor(Date.now() / 1000),
+      turns,
+    });
+
+    return turns.find((turn) => turn.id === input.turnId) ?? null;
   }
 
   async interruptTurn(_threadId: string, turnId: string) {

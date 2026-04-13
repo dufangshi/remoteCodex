@@ -430,13 +430,13 @@ describe('ThreadDetailPage', () => {
       ).toBeGreaterThan(0);
     });
 
-    expect(shellPanelMock.mounts).toBe(1);
-    expect(shellPanelMock.unmounts).toBe(0);
-
     fireEvent.click(screen.getByRole('button', { name: 'Switch to shell' }));
     await waitFor(() => {
       expect(screen.getByTestId('mock-thread-shell-panel')).toBeInTheDocument();
     });
+
+    expect(shellPanelMock.mounts).toBe(1);
+    expect(shellPanelMock.unmounts).toBe(0);
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Switch to chat' })[0]!);
     await waitFor(() => {
@@ -851,6 +851,417 @@ describe('ThreadDetailPage', () => {
     });
   });
 
+  it('keeps a pending high reasoning selection when a stale detail refresh arrives before send', async () => {
+    const intervalCallbacks = new Map<number, TimerHandler>();
+    let nextIntervalId = 1;
+    const promptBodies: Array<Record<string, unknown>> = [];
+    let resolveSettingsUpdate:
+      | ((value: { ok: true; json: () => Promise<unknown> }) => void)
+      | null = null;
+
+    vi.spyOn(window, 'setInterval').mockImplementation(
+      ((callback: TimerHandler) => {
+        const id = nextIntervalId;
+        nextIntervalId += 1;
+        intervalCallbacks.set(id, callback);
+        return id as unknown as number;
+      }) as typeof window.setInterval,
+    );
+    vi.spyOn(window, 'clearInterval').mockImplementation(
+      ((id: number) => {
+        intervalCallbacks.delete(Number(id));
+      }) as typeof window.clearInterval,
+    );
+
+    vi.stubGlobal(
+      'fetch',
+      withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+
+        if (url.includes('/api/codex/status')) {
+          return okJsonResponse({
+            state: 'ready',
+            transport: 'stdio',
+            lastStartedAt: new Date().toISOString(),
+            lastError: null,
+            restartCount: 0,
+          });
+        }
+
+        if (url.includes('/api/codex/models')) {
+          return okJsonResponse(modelOptionsResponse);
+        }
+
+        if (url.endsWith('/api/threads')) {
+          return okJsonResponse([
+            {
+              id: 'thread-1',
+              workspaceId: 'workspace-1',
+              codexThreadId: 'codex-1',
+              source: 'supervisor',
+              title: 'Demo Thread',
+              model: 'gpt-5.4',
+              reasoningEffort: 'medium',
+              collaborationMode: 'default',
+              approvalMode: 'yolo',
+              status: 'running',
+              summaryText: 'Preview',
+              lastError: null,
+              activeTurnId: 'turn-1',
+              isLoaded: true,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: new Date().toISOString(),
+              lastTurnCompletedAt: null,
+            },
+          ]);
+        }
+
+        if (url.endsWith('/api/threads/thread-1/settings') && init?.method === 'PATCH') {
+          return new Promise((resolve) => {
+            resolveSettingsUpdate = resolve as typeof resolveSettingsUpdate;
+          });
+        }
+
+        if (url.endsWith('/api/threads/thread-1/prompt') && init?.method === 'POST') {
+          promptBodies.push(JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>);
+          return okJsonResponse({
+            id: 'thread-1',
+            workspaceId: 'workspace-1',
+            codexThreadId: 'codex-1',
+            source: 'supervisor',
+            title: 'Demo Thread',
+            model: 'gpt-5.4',
+            reasoningEffort: 'medium',
+            collaborationMode: 'default',
+            approvalMode: 'yolo',
+            status: 'running',
+            summaryText: 'Keep high reasoning.',
+            lastError: null,
+            activeTurnId: 'turn-2',
+            isLoaded: true,
+            isPinned: false,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            lastTurnStartedAt: new Date().toISOString(),
+            lastTurnCompletedAt: null,
+          });
+        }
+
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
+          return okJsonResponse({
+            thread: {
+              id: 'thread-1',
+              workspaceId: 'workspace-1',
+              codexThreadId: 'codex-1',
+              source: 'supervisor',
+              title: 'Demo Thread',
+              model: 'gpt-5.4',
+              reasoningEffort: 'medium',
+              collaborationMode: 'default',
+              approvalMode: 'yolo',
+              status: 'running',
+              summaryText: 'Preview',
+              lastError: null,
+              activeTurnId: 'turn-1',
+              isLoaded: true,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: new Date().toISOString(),
+              lastTurnCompletedAt: null,
+            },
+            workspace: {
+              id: 'workspace-1',
+              hostId: 'host-1',
+              label: 'Demo Workspace',
+              absPath: '/tmp/demo',
+              isFavorite: false,
+              createdAt: new Date().toISOString(),
+              lastOpenedAt: null,
+            },
+            workspacePathStatus: 'present',
+            pendingRequests: [],
+            turns: [],
+          });
+        }
+
+        throw new Error(`Unhandled fetch request: ${url}`);
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Prompt')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'medium' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'medium' }));
+    fireEvent.click(screen.getByRole('button', { name: 'high' }));
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: 'high' }).length).toBeGreaterThan(0);
+    });
+
+    const pollCallback = Array.from(intervalCallbacks.values())[0];
+    expect(pollCallback).toBeTypeOf('function');
+    act(() => {
+      void pollCallback?.();
+    });
+
+    const editor = screen.getByLabelText('Prompt');
+    setPromptValue(editor, 'Keep high reasoning.');
+    fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
+
+    await waitFor(() => {
+      expect(promptBodies).toHaveLength(1);
+    });
+
+    expect(promptBodies[0]?.reasoningEffort).toBe('high');
+    expect(screen.getAllByRole('button', { name: 'high' }).length).toBeGreaterThan(0);
+
+    resolveSettingsUpdate?.({
+      ok: true,
+      json: async () => ({
+        id: 'thread-1',
+        workspaceId: 'workspace-1',
+        codexThreadId: 'codex-1',
+        source: 'supervisor',
+        title: 'Demo Thread',
+        model: 'gpt-5.4',
+        reasoningEffort: 'high',
+        collaborationMode: 'default',
+        approvalMode: 'yolo',
+        status: 'running',
+        summaryText: 'Preview',
+        lastError: null,
+        activeTurnId: 'turn-1',
+        isLoaded: true,
+        isPinned: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lastTurnStartedAt: new Date().toISOString(),
+        lastTurnCompletedAt: null,
+      }),
+    });
+  });
+
+  it('preserves the selected reasoning effort across resume before sending from an unloaded thread', async () => {
+    const promptBodies: Array<Record<string, unknown>> = [];
+
+    vi.stubGlobal(
+      'fetch',
+      withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+
+        if (url.includes('/api/codex/status')) {
+          return okJsonResponse({
+            state: 'ready',
+            transport: 'stdio',
+            lastStartedAt: new Date().toISOString(),
+            lastError: null,
+            restartCount: 0,
+          });
+        }
+
+        if (url.includes('/api/codex/models')) {
+          return okJsonResponse(modelOptionsResponse);
+        }
+
+        if (url.endsWith('/api/threads')) {
+          return okJsonResponse([
+            {
+              id: 'thread-1',
+              workspaceId: 'workspace-1',
+              codexThreadId: 'codex-1',
+              source: 'supervisor',
+              title: 'Demo Thread',
+              model: 'gpt-5.4',
+              reasoningEffort: 'medium',
+              collaborationMode: 'default',
+              approvalMode: 'yolo',
+              status: 'not_loaded',
+              summaryText: 'Preview',
+              lastError: null,
+              activeTurnId: null,
+              isLoaded: false,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: null,
+              lastTurnCompletedAt: null,
+            },
+          ]);
+        }
+
+        if (url.endsWith('/api/threads/thread-1/settings') && init?.method === 'PATCH') {
+          return okJsonResponse({
+            id: 'thread-1',
+            workspaceId: 'workspace-1',
+            codexThreadId: 'codex-1',
+            source: 'supervisor',
+            title: 'Demo Thread',
+            model: 'gpt-5.4',
+            reasoningEffort: 'high',
+            collaborationMode: 'default',
+            approvalMode: 'yolo',
+            status: 'not_loaded',
+            summaryText: 'Preview',
+            lastError: null,
+            activeTurnId: null,
+            isLoaded: false,
+            isPinned: false,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            lastTurnStartedAt: null,
+            lastTurnCompletedAt: null,
+          });
+        }
+
+        if (url.endsWith('/api/threads/thread-1/resume') && init?.method === 'POST') {
+          return okJsonResponse({
+            thread: {
+              id: 'thread-1',
+              workspaceId: 'workspace-1',
+              codexThreadId: 'codex-1',
+              source: 'supervisor',
+              title: 'Demo Thread',
+              model: 'gpt-5.4',
+              reasoningEffort: 'medium',
+              collaborationMode: 'default',
+              approvalMode: 'yolo',
+              status: 'idle',
+              summaryText: 'Preview',
+              lastError: null,
+              activeTurnId: null,
+              isLoaded: true,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: null,
+              lastTurnCompletedAt: null,
+            },
+            workspace: {
+              id: 'workspace-1',
+              hostId: 'host-1',
+              label: 'Demo Workspace',
+              absPath: '/tmp/demo',
+              isFavorite: false,
+              createdAt: new Date().toISOString(),
+              lastOpenedAt: null,
+            },
+            workspacePathStatus: 'present',
+            pendingRequests: [],
+            turns: [],
+          });
+        }
+
+        if (url.endsWith('/api/threads/thread-1/prompt') && init?.method === 'POST') {
+          promptBodies.push(JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>);
+          return okJsonResponse({
+            id: 'thread-1',
+            workspaceId: 'workspace-1',
+            codexThreadId: 'codex-1',
+            source: 'supervisor',
+            title: 'Demo Thread',
+            model: 'gpt-5.4',
+            reasoningEffort: 'high',
+            collaborationMode: 'default',
+            approvalMode: 'yolo',
+            status: 'running',
+            summaryText: 'Send after resume.',
+            lastError: null,
+            activeTurnId: 'turn-2',
+            isLoaded: true,
+            isPinned: false,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            lastTurnStartedAt: new Date().toISOString(),
+            lastTurnCompletedAt: null,
+          });
+        }
+
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
+          return okJsonResponse({
+            thread: {
+              id: 'thread-1',
+              workspaceId: 'workspace-1',
+              codexThreadId: 'codex-1',
+              source: 'supervisor',
+              title: 'Demo Thread',
+              model: 'gpt-5.4',
+              reasoningEffort: 'medium',
+              collaborationMode: 'default',
+              approvalMode: 'yolo',
+              status: 'not_loaded',
+              summaryText: 'Preview',
+              lastError: null,
+              activeTurnId: null,
+              isLoaded: false,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: null,
+              lastTurnCompletedAt: null,
+            },
+            workspace: {
+              id: 'workspace-1',
+              hostId: 'host-1',
+              label: 'Demo Workspace',
+              absPath: '/tmp/demo',
+              isFavorite: false,
+              createdAt: new Date().toISOString(),
+              lastOpenedAt: null,
+            },
+            workspacePathStatus: 'present',
+            pendingRequests: [],
+            turns: [],
+          });
+        }
+
+        throw new Error(`Unhandled fetch request: ${url}`);
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Prompt')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'medium' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'medium' }));
+    fireEvent.click(screen.getByRole('button', { name: 'high' }));
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: 'high' }).length).toBeGreaterThan(0);
+    });
+
+    const editor = screen.getByLabelText('Prompt');
+    setPromptValue(editor, 'Send after resume.');
+    fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
+
+    await waitFor(() => {
+      expect(promptBodies).toHaveLength(1);
+    });
+
+    expect(promptBodies[0]?.reasoningEffort).toBe('high');
+  });
+
   it('auto-connects an unloaded thread before sending the first prompt', async () => {
     vi.stubGlobal(
       'fetch',
@@ -913,6 +1324,15 @@ describe('ThreadDetailPage', () => {
               },
               workspacePathStatus: 'present',
               pendingRequests: [],
+              answeredRequestNotes: [
+                {
+                  id: 'plan-decision-1',
+                  turnId: 'turn-1',
+                  title: 'Plan ready',
+                  summaryLines: ['Next step: Stay in plan mode'],
+                  createdAt: new Date().toISOString(),
+                },
+              ],
               turns: [],
             }),
           });
@@ -981,6 +1401,15 @@ describe('ThreadDetailPage', () => {
               },
               workspacePathStatus: 'present',
               pendingRequests: [],
+              answeredRequestNotes: [
+                {
+                  id: 'plan-decision-1',
+                  turnId: 'turn-1',
+                  title: 'Plan ready',
+                  summaryLines: ['Next step: Stay in plan mode'],
+                  createdAt: new Date().toISOString(),
+                },
+              ],
               turns: [],
             }),
           });
@@ -1285,6 +1714,178 @@ describe('ThreadDetailPage', () => {
       expect(screen.getByLabelText('Failed')).toBeInTheDocument();
       expect(screen.getAllByText('Prompt delivery failed.').length).toBeGreaterThan(0);
     });
+  });
+
+  it('shows a steering bubble for prompts sent while the current turn is running', async () => {
+    const startedAt = new Date(Date.UTC(2026, 3, 10, 0, 0, 0)).toISOString();
+    const promptBodies: Array<Record<string, unknown>> = [];
+    let resolvePromptRequest:
+      | ((value: { ok: true; json: () => Promise<Record<string, unknown>> }) => void)
+      | null = null;
+
+    vi.stubGlobal(
+      'fetch',
+      withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+
+        if (url.includes('/api/codex/status')) {
+          return okJsonResponse({
+            state: 'ready',
+            transport: 'stdio',
+            lastStartedAt: new Date().toISOString(),
+            lastError: null,
+            restartCount: 0,
+          });
+        }
+
+        if (url.includes('/api/codex/models')) {
+          return okJsonResponse(modelOptionsResponse);
+        }
+
+        if (url.endsWith('/api/threads')) {
+          return okJsonResponse([
+            {
+              id: 'thread-1',
+              workspaceId: 'workspace-1',
+              codexThreadId: 'codex-1',
+              source: 'supervisor',
+              title: 'Demo Thread',
+              model: 'gpt-5',
+              reasoningEffort: 'medium',
+              collaborationMode: 'default',
+              approvalMode: 'yolo',
+              status: 'running',
+              summaryText: 'Original running prompt',
+              lastError: null,
+              activeTurnId: 'turn-1',
+              isLoaded: true,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: startedAt,
+              lastTurnCompletedAt: null,
+            },
+          ]);
+        }
+
+        if (url.endsWith('/api/threads/thread-1/prompt') && init?.method === 'POST') {
+          promptBodies.push(JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>);
+          return new Promise((resolve) => {
+            resolvePromptRequest = resolve as typeof resolvePromptRequest;
+          });
+        }
+
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
+          return okJsonResponse({
+            thread: {
+              id: 'thread-1',
+              workspaceId: 'workspace-1',
+              codexThreadId: 'codex-1',
+              source: 'supervisor',
+              title: 'Demo Thread',
+              model: 'gpt-5',
+              reasoningEffort: 'medium',
+              collaborationMode: 'default',
+              approvalMode: 'yolo',
+              status: 'running',
+              summaryText: 'Original running prompt',
+              lastError: null,
+              activeTurnId: 'turn-1',
+              isLoaded: true,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: startedAt,
+              lastTurnCompletedAt: null,
+            },
+            workspace: {
+              id: 'workspace-1',
+              hostId: 'host-1',
+              label: 'Demo Workspace',
+              absPath: '/tmp/demo',
+              isFavorite: false,
+              createdAt: new Date().toISOString(),
+              lastOpenedAt: null,
+            },
+            workspacePathStatus: 'present',
+            pendingRequests: [],
+            pendingSteers: [],
+            turns: [
+              {
+                id: 'turn-1',
+                startedAt,
+                status: 'inProgress',
+                error: null,
+                items: [
+                  {
+                    id: 'user-1',
+                    kind: 'userMessage',
+                    text: 'Original running prompt',
+                  },
+                ],
+              },
+            ],
+          });
+        }
+
+        throw new Error(`Unhandled fetch request: ${url}`);
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByText('Demo Workspace / Demo Thread').length,
+      ).toBeGreaterThan(0);
+    });
+
+    const editor = screen.getByLabelText('Prompt');
+    setPromptValue(editor, 'Steer this running turn.');
+    fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
+
+    expect(screen.getAllByText('Steer this running turn.').length).toBeGreaterThan(0);
+    expect(screen.getByText('Steering')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Sending')).not.toBeInTheDocument();
+
+    resolvePromptRequest?.({
+      ok: true,
+      json: async () => ({
+        id: 'thread-1',
+        workspaceId: 'workspace-1',
+        codexThreadId: 'codex-1',
+        source: 'supervisor',
+        title: 'Demo Thread',
+        model: 'gpt-5',
+        reasoningEffort: 'medium',
+        collaborationMode: 'default',
+        approvalMode: 'yolo',
+        status: 'running',
+        summaryText: 'Original running prompt',
+        lastError: null,
+        activeTurnId: 'turn-1',
+        isLoaded: true,
+        isPinned: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lastTurnStartedAt: startedAt,
+        lastTurnCompletedAt: null,
+      }),
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Steering')).not.toBeInTheDocument();
+    });
+
+    expect(promptBodies).toHaveLength(1);
+    expect(promptBodies[0]?.prompt).toBe('Steer this running turn.');
+    expect(typeof promptBodies[0]?.clientRequestId).toBe('string');
   });
 
   it('automatically connects the shell after switching from chat to shell', async () => {
@@ -1692,6 +2293,7 @@ describe('ThreadDetailPage', () => {
                   ],
                 },
               ],
+              answeredRequestNotes: [],
               turns: [],
             }),
           });
@@ -1723,12 +2325,8 @@ describe('ThreadDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Stay in plan mode' }));
 
     await waitFor(() => {
-      expect(
-        screen.getByText('User kept plan mode active and will provide further details.'),
-      ).toBeInTheDocument();
+      expect(screen.queryByText('Plan', { selector: 'p' })).not.toBeInTheDocument();
     });
-
-    expect(screen.queryByText('Plan', { selector: 'p' })).not.toBeInTheDocument();
   });
 
   it('keeps a compact local note after answering requestUserInput questions', async () => {
@@ -1864,6 +2462,15 @@ describe('ThreadDetailPage', () => {
             },
             workspacePathStatus: 'present',
             pendingRequests: [],
+            answeredRequestNotes: [
+              {
+                id: 'user-input-1',
+                turnId: 'turn-1',
+                title: 'Answer Required',
+                summaryLines: ['Plan object: foundation'],
+                createdAt: new Date().toISOString(),
+              },
+            ],
             turns: [],
           }),
         } as Response);

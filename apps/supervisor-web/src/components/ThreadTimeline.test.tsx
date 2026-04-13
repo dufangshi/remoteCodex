@@ -58,6 +58,53 @@ class FakeIntersectionObserver {
   }
 }
 
+class FakeResizeObserver {
+  static instances: FakeResizeObserver[] = [];
+
+  private readonly observed = new Set<Element>();
+
+  constructor(private readonly callback: ResizeObserverCallback) {
+    FakeResizeObserver.instances.push(this);
+  }
+
+  observe(target: Element) {
+    this.observed.add(target);
+  }
+
+  unobserve(target: Element) {
+    this.observed.delete(target);
+  }
+
+  disconnect() {
+    this.observed.clear();
+  }
+
+  trigger(target?: Element) {
+    const targets = target ? [target] : Array.from(this.observed);
+    if (targets.length === 0) {
+      return;
+    }
+
+    const entries = targets.map((entryTarget) => ({
+      target: entryTarget,
+      contentRect: entryTarget.getBoundingClientRect(),
+      borderBoxSize: [],
+      contentBoxSize: [],
+      devicePixelContentBoxSize: [],
+    })) as ResizeObserverEntry[];
+
+    this.callback(entries, this as unknown as ResizeObserver);
+  }
+
+  static triggerAll(target?: Element) {
+    FakeResizeObserver.instances.forEach((instance) => instance.trigger(target));
+  }
+
+  static reset() {
+    FakeResizeObserver.instances = [];
+  }
+}
+
 function makeTurn(index: number) {
   return {
     id: `019d70dd-068b-7${(index % 10).toString(16)}83-9c83-f4943e1f38${index
@@ -103,7 +150,9 @@ function mockRect({
 describe('ThreadTimeline', () => {
   beforeEach(() => {
     FakeIntersectionObserver.reset();
+    FakeResizeObserver.reset();
     vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver as unknown as typeof IntersectionObserver);
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver as unknown as typeof ResizeObserver);
     vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback: FrameRequestCallback) => {
       callback(0);
       return 1;
@@ -876,6 +925,105 @@ describe('ThreadTimeline', () => {
     expect(screen.queryByText('Streaming output')).not.toBeInTheDocument();
   });
 
+  it('renders queued steer bubbles after the materialized turn content', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        pendingSteers={[
+          {
+            id: 'pending-steer-1',
+            clientRequestId: 'client-steer-1',
+            turnId: 'turn-1',
+            prompt: 'Accepted steer prompt',
+            createdAt: new Date(Date.UTC(2026, 3, 9, 6, 2, 0)).toISOString(),
+          },
+        ]}
+        optimisticSteers={[
+          {
+            id: 'optimistic-steer-1',
+            clientRequestId: 'client-steer-2',
+            turnId: 'turn-1',
+            prompt: 'Still steering prompt',
+            createdAt: new Date(Date.UTC(2026, 3, 9, 6, 2, 5)).toISOString(),
+            status: 'steering',
+          },
+        ]}
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'inProgress',
+            error: null,
+            items: [
+              {
+                id: 'user-1',
+                kind: 'userMessage',
+                text: 'Original running prompt',
+              },
+              {
+                id: 'command-1',
+                kind: 'commandExecution',
+                text: 'sleep 20',
+                status: 'completed',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    const timelineText =
+      screen.getByTestId('thread-scroll-container').textContent ?? '';
+    expect(timelineText.indexOf('sleep 20')).toBeGreaterThanOrEqual(0);
+    expect(screen.getByText('Accepted steer prompt')).toBeInTheDocument();
+    expect(screen.getByText('Still steering prompt')).toBeInTheDocument();
+    expect(screen.getByText('Steering')).toBeInTheDocument();
+    expect(timelineText.indexOf('sleep 20')).toBeLessThan(
+      timelineText.indexOf('Accepted steer prompt'),
+    );
+    expect(timelineText.indexOf('Accepted steer prompt')).toBeLessThan(
+      timelineText.indexOf('Still steering prompt'),
+    );
+  });
+
+  it('renders optimistic steer bubbles under an optimistic running turn', () => {
+    render(
+      <ThreadTimeline
+        turns={[]}
+        liveOutput=""
+        optimisticTurn={{
+          id: 'turn-running-1',
+          startedAt: new Date(Date.UTC(2026, 3, 9, 6, 3, 0)).toISOString(),
+          status: 'inProgress',
+          error: null,
+          model: 'gpt-5',
+          reasoningEffort: 'medium',
+          reasoningEffortAvailable: true,
+          items: [
+            {
+              id: 'optimistic-user-1',
+              kind: 'userMessage',
+              text: 'Original running prompt',
+            },
+          ],
+        }}
+        optimisticSteers={[
+          {
+            id: 'optimistic-steer-1',
+            clientRequestId: 'client-steer-1',
+            turnId: 'turn-running-1',
+            prompt: 'Queued steer prompt',
+            createdAt: new Date(Date.UTC(2026, 3, 9, 6, 3, 5)).toISOString(),
+            status: 'steering',
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('Queued steer prompt')).toBeInTheDocument();
+    expect(screen.getByText('Steering')).toBeInTheDocument();
+  });
+
   it('shows only the unmaterialized tail of streaming output', () => {
     render(
       <ThreadTimeline
@@ -908,6 +1056,53 @@ describe('ThreadTimeline', () => {
     expect(screen.getByText('Beta is still streaming.')).toBeInTheDocument();
     expect(
       screen.queryByText('Alpha is done.Beta is still streaming.'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('drops already materialized earlier agent messages from the streaming tail', () => {
+    render(
+      <ThreadTimeline
+        liveOutput={[
+          'Root cause is clear.',
+          '',
+          'I updated the composer sync logic.',
+          '',
+          'Running the next verification step now.',
+        ].join('\n')}
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'inProgress',
+            error: null,
+            items: [
+              {
+                id: 'agent-1',
+                kind: 'agentMessage',
+                text: 'Root cause is clear.',
+              },
+              {
+                id: 'command-1',
+                kind: 'commandExecution',
+                text: 'apply patch',
+                status: 'completed',
+              },
+              {
+                id: 'agent-2',
+                kind: 'agentMessage',
+                text: 'I updated the composer sync logic.',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('Root cause is clear.')).toBeInTheDocument();
+    expect(screen.getByText('I updated the composer sync logic.')).toBeInTheDocument();
+    expect(screen.getByText('Running the next verification step now.')).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Root cause is clear\..*Running the next verification step now\./s),
     ).not.toBeInTheDocument();
   });
 
@@ -1113,6 +1308,64 @@ describe('ThreadTimeline', () => {
     expect(scrollTop).toBe(100);
   });
 
+  it('keeps following the tail when rendered height grows while pinned', () => {
+    const turns = [makeTurn(1)];
+
+    render(<ThreadTimeline turns={turns} liveOutput="" />);
+
+    const scrollContainer = screen.getByTestId('thread-scroll-container');
+    const content = scrollContainer.firstElementChild as HTMLElement | null;
+    expect(content).toBeTruthy();
+    const tailSentinel = content?.lastElementChild as HTMLElement | null;
+    expect(tailSentinel).toBeTruthy();
+
+    let scrollHeight = 1000;
+    let scrollTop = 600;
+    Object.defineProperty(scrollContainer, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeight,
+    });
+    Object.defineProperty(scrollContainer, 'clientHeight', {
+      configurable: true,
+      value: 400,
+    });
+    Object.defineProperty(scrollContainer, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value) => {
+        scrollTop = value;
+      },
+    });
+    Object.defineProperty(scrollContainer, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => mockRect({ top: 0, height: 400 }),
+    });
+
+    let tailTop = 380;
+    Object.defineProperty(tailSentinel!, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => mockRect({ top: tailTop, height: 1 }),
+    });
+
+    fireEvent.scroll(scrollContainer);
+
+    scrollHeight = 1260;
+    tailTop = 640;
+    FakeResizeObserver.triggerAll(content!);
+
+    expect(scrollTop).toBe(1260);
+
+    scrollTop = 120;
+    tailTop = 720;
+    fireEvent.scroll(scrollContainer);
+
+    scrollHeight = 1480;
+    tailTop = 900;
+    FakeResizeObserver.triggerAll(content!);
+
+    expect(scrollTop).toBe(120);
+  });
+
   it('honors one-shot jump requests even when the latest turn is offscreen', () => {
     const turns = [
       {
@@ -1288,6 +1541,74 @@ describe('ThreadTimeline', () => {
     expect(screen.getByText('You selected Plan object: foundation')).toBeInTheDocument();
     expect(screen.getByText('You selected Detail level: medium')).toBeInTheDocument();
     expect(screen.queryByText('User')).not.toBeInTheDocument();
+  });
+
+  it('renders answered request notes before newer pending requests within the same turn', () => {
+    render(
+      <ThreadTimeline
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'user-1',
+                kind: 'userMessage',
+                text: 'Plan the next step.',
+              },
+            ],
+          },
+        ]}
+        liveOutput=""
+        answeredRequestNotes={[
+          {
+            id: 'request-note-1',
+            turnId: 'turn-1',
+            title: 'Plan choice',
+            summaryLines: ['Mode: Stay in plan mode'],
+            createdAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 5)).toISOString(),
+          },
+        ]}
+        pendingRequests={[
+          {
+            id: 'request-1',
+            kind: 'requestUserInput',
+            title: 'Language',
+            description: 'Pick a language.',
+            turnId: 'turn-1',
+            itemId: 'item-1',
+            createdAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 10)).toISOString(),
+            questions: [
+              {
+                id: 'language',
+                header: 'Language',
+                question: 'Which language do you want?',
+                isOther: false,
+                isSecret: false,
+                options: [
+                  {
+                    label: 'English',
+                    description: 'Use English.',
+                  },
+                ],
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    const turn = screen.getByText('Turn 1').closest('article');
+    expect(turn).not.toBeNull();
+
+    const timelineText = turn?.parentElement?.textContent ?? '';
+    expect(timelineText.indexOf('Plan choice')).toBeGreaterThanOrEqual(0);
+    expect(timelineText.indexOf('Language')).toBeGreaterThanOrEqual(0);
+    expect(timelineText.indexOf('Plan choice')).toBeLessThan(
+      timelineText.indexOf('Language'),
+    );
   });
 
   it('supports requestUserInput custom answers through Not from above', () => {

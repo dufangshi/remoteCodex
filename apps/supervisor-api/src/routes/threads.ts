@@ -32,6 +32,7 @@ const createThreadSchema = z.object({
 
 const promptSchema = z.object({
   prompt: z.string().min(1),
+  clientRequestId: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
   reasoningEffort: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as [ReasoningEffortDto, ...ReasoningEffortDto[]]).nullable().optional(),
   collaborationMode: z.enum(['default', 'plan']).optional(),
@@ -103,6 +104,7 @@ function defaultAttachmentOriginalName(
 
 function toSendThreadPromptInput(body: {
   prompt: string;
+  clientRequestId: string | undefined;
   model: string | undefined;
   reasoningEffort: ReasoningEffortDto | null | undefined;
   collaborationMode: 'default' | 'plan' | undefined;
@@ -110,6 +112,9 @@ function toSendThreadPromptInput(body: {
 }): SendThreadPromptInput {
   return {
     prompt: body.prompt,
+    ...(body.clientRequestId !== undefined
+      ? { clientRequestId: body.clientRequestId }
+      : {}),
     ...(body.model !== undefined ? { model: body.model } : {}),
     ...(body.reasoningEffort !== undefined
       ? { reasoningEffort: body.reasoningEffort }
@@ -160,6 +165,9 @@ async function parseMultipartPromptRequest(
     (() => {
       const parsed = promptSchema.parse({
         prompt: fields.get('prompt'),
+        ...(fields.has('clientRequestId')
+          ? { clientRequestId: fields.get('clientRequestId') }
+          : {}),
         ...(fields.has('model') ? { model: fields.get('model') } : {}),
         ...(fields.has('reasoningEffort')
           ? { reasoningEffort: fields.get('reasoningEffort') }
@@ -173,6 +181,7 @@ async function parseMultipartPromptRequest(
       });
       return {
         prompt: parsed.prompt,
+        clientRequestId: parsed.clientRequestId,
         model: parsed.model,
         reasoningEffort: parsed.reasoningEffort,
         collaborationMode: parsed.collaborationMode,
@@ -428,6 +437,7 @@ export async function registerThreadRoutes(app: FastifyInstance) {
             const parsedBody = promptSchema.parse(request.body);
             return toSendThreadPromptInput({
               prompt: parsedBody.prompt,
+              clientRequestId: parsedBody.clientRequestId,
               model: parsedBody.model,
               reasoningEffort: parsedBody.reasoningEffort,
               collaborationMode: parsedBody.collaborationMode,
@@ -444,7 +454,9 @@ export async function registerThreadRoutes(app: FastifyInstance) {
             parsed.attachments,
           )
         : parsed.input;
-    return app.services.threadService.sendPrompt(params.id, input);
+    return app.services.threadService.sendPrompt(params.id, input, {
+      displayPrompt: parsed.input.prompt,
+    });
   });
 
   app.post('/api/threads/:id/requests/:requestId/respond', async (request) => {

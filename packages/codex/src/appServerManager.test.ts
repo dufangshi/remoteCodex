@@ -78,4 +78,50 @@ describe('CodexAppServerManager', () => {
       state: 'failed'
     });
   });
+
+  it('uses expectedTurnId when steering a running turn', async () => {
+    const script = [
+      "const readline=require('node:readline');",
+      "const rl=readline.createInterface({input:process.stdin,crlfDelay:Infinity});",
+      "rl.on('line',(line)=>{",
+      " const msg=JSON.parse(line);",
+      " if(msg.method==='initialize'){",
+      "  process.stdout.write(JSON.stringify({id:msg.id,result:{userAgent:'fake',codexHome:'/tmp',platformFamily:'unix',platformOs:'linux'}})+'\\n');",
+      " } else if(msg.method==='turn/steer'){",
+      "  if(msg.params?.threadId==='thread-1' && msg.params?.expectedTurnId==='turn-1' && !('turnId' in msg.params)){",
+      "   process.stdout.write(JSON.stringify({id:msg.id,result:{turn:{id:'turn-1',status:'inProgress',items:[]}}})+'\\n');",
+      "  } else {",
+      "   process.stdout.write(JSON.stringify({id:msg.id,error:{code:-32600,message:'bad steer params'}})+'\\n');",
+      "  }",
+      " }",
+      "});"
+    ].join('');
+
+    const manager = new CodexAppServerManager({
+      command: process.execPath,
+      startupTimeoutMs: 1000,
+      clientInfo: {
+        name: 'test',
+        title: 'test',
+        version: '0.1.0'
+      },
+      spawnProcess: (command) => {
+        return spawn(command, ['-e', script], { stdio: 'pipe' });
+      }
+    });
+
+    await manager.start();
+    const turn = await manager.steerTurn({
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      prompt: 'Follow up',
+    });
+
+    expect(turn).toMatchObject({
+      id: 'turn-1',
+      status: 'inProgress',
+    });
+
+    await manager.stop();
+  });
 });

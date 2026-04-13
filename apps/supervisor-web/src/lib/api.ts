@@ -210,6 +210,9 @@ export function sendThreadPrompt(id: string, input: SendThreadPromptRequestInput
 
   const formData = new FormData();
   formData.append('prompt', input.prompt);
+  if (input.clientRequestId !== undefined) {
+    formData.append('clientRequestId', input.clientRequestId);
+  }
   if (input.model !== undefined) {
     formData.append('model', input.model);
   }

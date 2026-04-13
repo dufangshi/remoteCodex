@@ -13,10 +13,13 @@ import {
   JsonRpcClientError
 } from '../../../../packages/codex/src/index';
 import {
+  createThreadPendingSteerRecord,
   createThreadRecord,
   createWorkspaceRecord,
   DatabaseClient,
   deleteNotificationsByThreadId,
+  deleteThreadPendingSteerRecordById,
+  deleteThreadPendingSteerRecordsByThreadId,
   deleteThreadRecord,
   deleteThreadTurnMetadataByThreadId,
   deleteViewerSessionsByThreadId,
@@ -24,6 +27,7 @@ import {
   getThreadRecordById,
   getWorkspaceRecordByPath,
   getWorkspaceRecordById,
+  listThreadPendingSteerRecordsByThreadId,
   listThreadTurnMetadataByThreadId,
   listThreadRecords,
   upsertThreadTurnMetadata,
@@ -41,6 +45,7 @@ import {
   ResumeThreadInput,
   SandboxModeDto,
   SendThreadPromptInput,
+  ThreadAnsweredRequestNoteDto,
   ThreadActionQuestionDto,
   ThreadActionRequestDto,
   ThreadContextUsageDto,
@@ -49,6 +54,8 @@ import {
   ThreadEventEnvelope,
   ThreadHistoryItemDetailDto,
   ThreadHistoryItemDto,
+  ThreadLivePlanDto,
+  ThreadPendingSteerDto,
   ThreadSourceDto,
   ThreadTurnDto,
   ThreadStatusDto,
@@ -84,6 +91,10 @@ interface ThreadDetailCacheEntry {
   turns: ThreadTurnDto[];
   totalTurnCount: number;
   deferredDetails: Map<string, ThreadHistoryItemDetailDto>;
+}
+
+interface SendPromptOptions {
+  displayPrompt?: string | null;
 }
 
 interface ThreadContextTokenUsagePayload {
@@ -187,6 +198,80 @@ function isRemoteThreadBootstrapError(error: unknown) {
     error.message.includes('failed to load rollout') ||
     (error.message.includes('rollout at') && error.message.includes('is empty'))
   );
+}
+
+type TurnSteerRace =
+  | { type: 'missing' }
+  | { type: 'turnIdMismatch'; actualTurnId: string };
+
+function parseTurnSteerRace(error: unknown): TurnSteerRace | null {
+  if (!(error instanceof JsonRpcClientError) || error.code !== 'remote_error') {
+    return null;
+  }
+
+  if (error.message === 'no active turn to steer') {
+    return { type: 'missing' };
+  }
+
+  const mismatchPrefix = 'expected active turn id `';
+  const mismatchSeparator = '` but found `';
+  if (!error.message.startsWith(mismatchPrefix)) {
+    return null;
+  }
+
+  const actualTurnId = error.message
+    .slice(mismatchPrefix.length)
+    .split(mismatchSeparator)[1]
+    ?.replace(/`$/, '');
+
+  if (!actualTurnId) {
+    return null;
+  }
+
+  return {
+    type: 'turnIdMismatch',
+    actualTurnId,
+  };
+}
+
+function extractTurnUserMessages(turn: CodexTurnRecord) {
+  return turn.items
+    .filter((item) => item.type === 'userMessage')
+    .map((item) =>
+      item.content
+        ?.map((entry) => (entry.type === 'text' ? (entry.text ?? '') : `[${entry.type}]`))
+        .join('\n')
+        .trim() ?? '',
+    )
+    .filter((text) => text.length > 0);
+}
+
+function buildAnsweredRequestNote(
+  request: ThreadActionRequestDto,
+  input: RespondThreadActionRequestInput,
+): ThreadAnsweredRequestNoteDto | null {
+  const summaryLines = request.questions
+    .map((question) => {
+      const answer = input.answers[question.id]?.answers[0]?.trim();
+      if (!answer) {
+        return null;
+      }
+
+      return `${question.header}: ${answer}`;
+    })
+    .filter((line): line is string => Boolean(line));
+
+  if (summaryLines.length === 0) {
+    return null;
+  }
+
+  return {
+    id: request.id,
+    turnId: request.turnId ?? null,
+    title: request.title,
+    summaryLines,
+    createdAt: new Date().toISOString(),
+  };
 }
 
 function toIsoFromUnix(seconds: number): string {
@@ -1087,6 +1172,8 @@ export class ThreadService {
   private readonly dismissedPlanDecisionTurns = new Map<string, string>();
   private readonly threadDetailCache = new Map<string, ThreadDetailCacheEntry>();
   private readonly threadContextUsage = new Map<string, ThreadContextUsageDto>();
+  private readonly threadLivePlans = new Map<string, ThreadLivePlanDto>();
+  private readonly answeredRequestNotes = new Map<string, ThreadAnsweredRequestNoteDto[]>();
 
   constructor(
     private readonly db: DatabaseClient,
@@ -1225,6 +1312,7 @@ export class ThreadService {
       updated.collaborationMode,
       remoteThread,
     );
+    this.reconcilePendingSteers(updated.id, remoteThread);
 
     const deferredDetails = new Map<string, ThreadHistoryItemDetailDto>();
     const turns = remoteThread.turns.map((turn) =>
@@ -1440,7 +1528,10 @@ export class ThreadService {
       workspacePathStatus,
       turns: pagedTurns.turns,
       totalTurnCount: pagedTurns.totalTurnCount,
-      pendingRequests: this.listPendingRequests(updated.id)
+      pendingRequests: this.listPendingRequests(updated.id),
+      pendingSteers: this.listPendingSteers(updated.id),
+      answeredRequestNotes: this.listAnsweredRequestNotes(updated.id),
+      livePlan: this.getLivePlan(updated.id),
     };
   }
 
@@ -1573,13 +1664,23 @@ export class ThreadService {
       return this.getThreadDetail(localThreadId);
     }
 
+    const modelRecords = await this.codexManager.listModels().catch(() => []);
+    const effectiveModel =
+      input.model ?? record.model ?? response.model ?? null;
+    const resumedReasoning = this.normalizeReasoningForModel(
+      modelRecords,
+      effectiveModel,
+      normalizeReasoningEffort(record.reasoningEffort) ??
+        normalizeReasoningEffort(response.reasoningEffort)
+    );
+
     updateThreadRecord(
       this.db,
       record.id,
       this.buildThreadPatch(
         response.thread,
-        input.model ?? record.model ?? response.model,
-        response.reasoningEffort ?? record.reasoningEffort
+        effectiveModel,
+        resumedReasoning
       ),
     );
     updateThreadRecord(this.db, record.id, {
@@ -1614,19 +1715,16 @@ export class ThreadService {
     return this.getThreadDetail(localThreadId);
   }
 
-  async sendPrompt(localThreadId: string, input: SendThreadPromptInput): Promise<ThreadDto> {
+  async sendPrompt(
+    localThreadId: string,
+    input: SendThreadPromptInput,
+    options: SendPromptOptions = {},
+  ): Promise<ThreadDto> {
     const record = getThreadRecordById(this.db, localThreadId);
     if (!record || !record.codexThreadId) {
       throw new HttpError(404, {
         code: 'not_found',
         message: 'Thread was not found.'
-      });
-    }
-
-    if (record.codexTurnId && record.status === 'running') {
-      throw new HttpError(409, {
-        code: 'conflict',
-        message: 'The current turn is still running.'
       });
     }
 
@@ -1648,6 +1746,7 @@ export class ThreadService {
     }
 
     const prompt = input.prompt.trim();
+    const displayPrompt = options.displayPrompt?.trim() || prompt;
     if (!prompt) {
       throw new HttpError(400, {
         code: 'bad_request',
@@ -1684,39 +1783,75 @@ export class ThreadService {
         : normalizeSandboxMode(record.sandboxMode)) ??
       defaultSandboxModeForApprovalMode((record.approvalMode ?? 'yolo') as ApprovalMode);
 
+    if (record.codexTurnId && record.status === 'running') {
+      return this.steerOrStartPromptTurn(localThreadId, record, {
+        prompt,
+        displayPrompt,
+        clientRequestId: input.clientRequestId ?? null,
+        effectiveModel,
+        normalizedReasoning,
+        collaborationMode,
+        sandboxMode,
+        workspacePath: workspace.absPath,
+      });
+    }
+
+    return this.startPromptTurn(localThreadId, record, {
+      prompt,
+      effectiveModel,
+      normalizedReasoning,
+      collaborationMode,
+      sandboxMode,
+      workspacePath: workspace.absPath,
+    });
+  }
+
+  private async startPromptTurn(
+    localThreadId: string,
+    record: { id: string; codexThreadId: string; title: string; },
+    input: {
+      prompt: string;
+      effectiveModel: string | null;
+      normalizedReasoning: ReasoningEffortDto | null;
+      collaborationMode: CollaborationModeDto;
+      sandboxMode: SandboxModeDto;
+      workspacePath: string;
+    },
+  ): Promise<ThreadDto> {
+    const modelRecords = await this.codexManager.listModels().catch(() => []);
     const turn = await this.codexManager.startTurn({
       threadId: record.codexThreadId,
-      prompt,
-      model: effectiveModel,
-      effort: normalizedReasoning,
-      collaborationMode,
-      sandboxPolicy: buildTurnSandboxPolicy(sandboxMode, workspace.absPath),
+      prompt: input.prompt,
+      model: input.effectiveModel,
+      effort: input.normalizedReasoning,
+      collaborationMode: input.collaborationMode,
+      sandboxPolicy: buildTurnSandboxPolicy(input.sandboxMode, input.workspacePath),
     });
     upsertThreadTurnMetadata(this.db, {
       threadId: localThreadId,
       turnId: turn.id,
-      model: effectiveModel,
-      reasoningEffort: normalizedReasoning,
+      model: input.effectiveModel,
+      reasoningEffort: input.normalizedReasoning,
       reasoningEffortAvailable: this.reasoningEffortAvailableForModel(
         modelRecords,
-        effectiveModel,
+        input.effectiveModel,
       ),
     });
 
     const patch: Parameters<typeof updateThreadRecord>[2] = {
       codexTurnId: turn.id,
       status: 'running',
-      summaryText: prompt,
+      summaryText: input.prompt,
       lastError: null,
       lastTurnStartedAt: new Date().toISOString(),
-      model: effectiveModel,
-      reasoningEffort: normalizedReasoning,
-      collaborationMode,
-      sandboxMode,
+      model: input.effectiveModel,
+      reasoningEffort: input.normalizedReasoning,
+      collaborationMode: input.collaborationMode,
+      sandboxMode: input.sandboxMode,
     };
 
     if (isAutoGeneratedTitle(record.title)) {
-      patch.title = truncateAutoThreadTitle(prompt);
+      patch.title = truncateAutoThreadTitle(input.prompt);
     }
 
     updateThreadRecord(this.db, localThreadId, patch);
@@ -1725,6 +1860,90 @@ export class ThreadService {
     const updated = getThreadRecordById(this.db, localThreadId)!;
 
     return this.toThreadDto(updated, new Set([record.codexThreadId]));
+  }
+
+  private async steerOrStartPromptTurn(
+    localThreadId: string,
+    record: {
+      id: string;
+      codexThreadId: string;
+      codexTurnId: string;
+      status: string | null;
+      title: string;
+    },
+    input: {
+      prompt: string;
+      displayPrompt: string;
+      clientRequestId: string | null;
+      effectiveModel: string | null;
+      normalizedReasoning: ReasoningEffortDto | null;
+      collaborationMode: CollaborationModeDto;
+      sandboxMode: SandboxModeDto;
+      workspacePath: string;
+    },
+  ): Promise<ThreadDto> {
+    let steerTurnId = record.codexTurnId;
+    let retriedAfterTurnMismatch = false;
+
+    while (steerTurnId) {
+      try {
+        await this.codexManager.steerTurn({
+          threadId: record.codexThreadId!,
+          turnId: steerTurnId,
+          prompt: input.prompt,
+        });
+
+        updateThreadRecord(this.db, localThreadId, {
+          codexTurnId: steerTurnId,
+          status: 'running',
+          lastError: null,
+        });
+        createThreadPendingSteerRecord(this.db, {
+          threadId: localThreadId,
+          turnId: steerTurnId,
+          clientRequestId: input.clientRequestId,
+          displayPrompt: input.displayPrompt,
+          submittedPrompt: input.prompt,
+        });
+        this.invalidateThreadDetailCache(localThreadId);
+        this.emitThreadEvent('thread.updated', localThreadId, {
+          reason: 'pending_steer_updated',
+        });
+
+        const updated = getThreadRecordById(this.db, localThreadId)!;
+        return this.toThreadDto(updated, new Set([record.codexThreadId!]));
+      } catch (error) {
+        const steerRace = parseTurnSteerRace(error);
+        if (
+          steerRace?.type === 'turnIdMismatch' &&
+          !retriedAfterTurnMismatch &&
+          steerRace.actualTurnId !== steerTurnId
+        ) {
+          steerTurnId = steerRace.actualTurnId;
+          retriedAfterTurnMismatch = true;
+          updateThreadRecord(this.db, localThreadId, {
+            codexTurnId: steerTurnId,
+            status: 'running',
+          });
+          continue;
+        }
+
+        if (!steerRace) {
+          throw error;
+        }
+
+        break;
+      }
+    }
+
+    return this.startPromptTurn(localThreadId, record, {
+      prompt: input.displayPrompt,
+      effectiveModel: input.effectiveModel,
+      normalizedReasoning: input.normalizedReasoning,
+      collaborationMode: input.collaborationMode,
+      sandboxMode: input.sandboxMode,
+      workspacePath: input.workspacePath,
+    });
   }
 
   async updateThreadSettings(
@@ -1842,6 +2061,8 @@ export class ThreadService {
       lastError: interruptedTurn?.error?.message ?? null,
       lastTurnCompletedAt: new Date().toISOString()
     });
+    this.setLivePlan(localThreadId, null);
+    this.clearPendingSteersForTurn(localThreadId, turnId);
     this.invalidateThreadDetailCache(localThreadId);
 
     const updated = getThreadRecordById(this.db, localThreadId)!;
@@ -1867,8 +2088,11 @@ export class ThreadService {
     this.dismissedPlanDecisionTurns.delete(localThreadId);
     this.invalidateThreadDetailCache(localThreadId);
     this.threadContextUsage.delete(localThreadId);
+    this.threadLivePlans.delete(localThreadId);
+    this.answeredRequestNotes.delete(localThreadId);
     deleteViewerSessionsByThreadId(this.db, localThreadId);
     deleteNotificationsByThreadId(this.db, localThreadId);
+    deleteThreadPendingSteerRecordsByThreadId(this.db, localThreadId);
     deleteThreadTurnMetadataByThreadId(this.db, localThreadId);
     deleteThreadRecord(this.db, localThreadId);
 
@@ -1932,6 +2156,11 @@ export class ThreadService {
         this.dismissedPlanDecisionTurns.set(localThreadId, pending.request.turnId);
       }
     }
+
+    this.appendAnsweredRequestNote(
+      localThreadId,
+      buildAnsweredRequestNote(pending.request, input),
+    );
 
     this.emitThreadEvent('thread.request.resolved', localThreadId, {
       requestId
@@ -2016,6 +2245,7 @@ export class ThreadService {
           lastError: null,
           lastTurnStartedAt: new Date().toISOString()
         });
+        this.setLivePlan(record.id, null);
         this.resetThreadContextUsage(record.id, true);
         this.invalidateThreadDetailCache(record.id);
 
@@ -2035,6 +2265,13 @@ export class ThreadService {
         if (!record) {
           return;
         }
+
+        this.setLivePlan(record.id, {
+          turnId: params.turnId,
+          explanation: params.explanation,
+          plan: params.plan,
+          updatedAt: new Date().toISOString(),
+        });
 
         this.emitThreadEvent('thread.plan.updated', record.id, {
           turnId: params.turnId,
@@ -2080,6 +2317,8 @@ export class ThreadService {
           lastError: params.turn.error?.message ?? null,
           lastTurnCompletedAt: new Date().toISOString()
         });
+        this.setLivePlan(record.id, null);
+        this.clearPendingSteersForTurn(record.id, params.turn.id);
         this.pendingRequests.delete(record.id);
         if (
           params.turn.status === 'completed' &&
@@ -2119,6 +2358,8 @@ export class ThreadService {
           status: 'failed',
           lastError: params.error.message ?? 'Turn failed unexpectedly.'
         });
+        this.setLivePlan(record.id, null);
+        this.clearPendingSteersForTurn(record.id, params.turnId);
         this.pendingRequests.delete(record.id);
         this.dismissedPlanDecisionTurns.delete(record.id);
         this.invalidateThreadDetailCache(record.id);
@@ -2261,6 +2502,100 @@ export class ThreadService {
 
   private listPendingRequests(localThreadId: string): ThreadActionRequestDto[] {
     return [...(this.pendingRequests.get(localThreadId)?.values() ?? [])].map((entry) => entry.request);
+  }
+
+  private getLivePlan(localThreadId: string): ThreadLivePlanDto | null {
+    return this.threadLivePlans.get(localThreadId) ?? null;
+  }
+
+  private setLivePlan(localThreadId: string, plan: ThreadLivePlanDto | null) {
+    if (plan) {
+      this.threadLivePlans.set(localThreadId, plan);
+    } else {
+      this.threadLivePlans.delete(localThreadId);
+    }
+  }
+
+  private listAnsweredRequestNotes(localThreadId: string): ThreadAnsweredRequestNoteDto[] {
+    return [...(this.answeredRequestNotes.get(localThreadId) ?? [])];
+  }
+
+  private appendAnsweredRequestNote(
+    localThreadId: string,
+    note: ThreadAnsweredRequestNoteDto | null,
+  ) {
+    if (!note) {
+      return;
+    }
+
+    const current = this.answeredRequestNotes.get(localThreadId) ?? [];
+    const next = [...current.filter((entry) => entry.id !== note.id), note];
+    this.answeredRequestNotes.set(localThreadId, next.slice(-16));
+  }
+
+  private listPendingSteers(localThreadId: string): ThreadPendingSteerDto[] {
+    return listThreadPendingSteerRecordsByThreadId(this.db, localThreadId).map((record) => ({
+      id: record.id,
+      clientRequestId: record.clientRequestId ?? null,
+      turnId: record.turnId,
+      prompt: record.displayPrompt,
+      createdAt: record.createdAt,
+    }));
+  }
+
+  private clearPendingSteersForTurn(localThreadId: string, turnId: string) {
+    const records = listThreadPendingSteerRecordsByThreadId(this.db, localThreadId).filter(
+      (record) => record.turnId === turnId,
+    );
+    if (records.length === 0) {
+      return;
+    }
+
+    for (const record of records) {
+      deleteThreadPendingSteerRecordById(this.db, record.id);
+    }
+
+    this.invalidateThreadDetailCache(localThreadId);
+    this.emitThreadEvent('thread.updated', localThreadId, {
+      reason: 'pending_steer_updated',
+      turnId,
+    });
+  }
+
+  private reconcilePendingSteers(localThreadId: string, remoteThread: CodexThreadRecord) {
+    const records = listThreadPendingSteerRecordsByThreadId(this.db, localThreadId);
+    if (records.length === 0) {
+      return;
+    }
+
+    const turnsById = new Map(remoteThread.turns.map((turn) => [turn.id, turn]));
+    let removed = false;
+
+    for (const record of records) {
+      const turn = turnsById.get(record.turnId);
+      if (!turn) {
+        deleteThreadPendingSteerRecordById(this.db, record.id);
+        removed = true;
+        continue;
+      }
+
+      const turnMessages = extractTurnUserMessages(turn);
+      if (
+        turnMessages.includes(record.submittedPrompt) ||
+        turnMessages.includes(record.displayPrompt) ||
+        turn.status !== 'inProgress'
+      ) {
+        deleteThreadPendingSteerRecordById(this.db, record.id);
+        removed = true;
+      }
+    }
+
+    if (removed) {
+      this.invalidateThreadDetailCache(localThreadId);
+      this.emitThreadEvent('thread.updated', localThreadId, {
+        reason: 'pending_steer_updated',
+      });
+    }
   }
 
   private createPendingPlanDecisionRequest(

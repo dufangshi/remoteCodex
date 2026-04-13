@@ -97,6 +97,17 @@ export const threadTurnMetadata = sqliteTable(
   }),
 );
 
+export const threadPendingSteers = sqliteTable('thread_pending_steers', {
+  id: text('id').primaryKey(),
+  threadId: text('thread_id').notNull(),
+  turnId: text('turn_id').notNull(),
+  clientRequestId: text('client_request_id'),
+  displayPrompt: text('display_prompt').notNull(),
+  submittedPrompt: text('submitted_prompt').notNull(),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
 export const policies = sqliteTable('policies', {
   id: text('id').primaryKey(),
   key: text('key').notNull().unique(),

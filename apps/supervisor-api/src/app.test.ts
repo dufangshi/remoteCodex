@@ -1331,6 +1331,83 @@ describe('supervisor api', () => {
     });
   });
 
+  it('uses turn steer instead of rejecting prompts while a turn is already running', async () => {
+    fakeCodexManager.materializeSteersImmediately = false;
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Steer Thread',
+      },
+    });
+
+    const createdThread = createResponse.json();
+    const firstPromptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Initial request',
+      },
+    });
+
+    expect(firstPromptResponse.statusCode).toBe(200);
+
+    const steerPromptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Follow up while still running',
+        clientRequestId: 'client-steer-1',
+      },
+    });
+
+    expect(steerPromptResponse.statusCode).toBe(200);
+    expect(fakeCodexManager.steerTurnCalls).toEqual([
+      expect.objectContaining({
+        threadId: createdThread.codexThreadId,
+        turnId: firstPromptResponse.json().activeTurnId,
+        prompt: 'Follow up while still running',
+      }),
+    ]);
+
+    const remoteThread = fakeCodexManager.threads.get(createdThread.codexThreadId);
+    expect(remoteThread?.turns).toHaveLength(1);
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json()).toMatchObject({
+      thread: {
+        id: createdThread.id,
+        activeTurnId: firstPromptResponse.json().activeTurnId,
+        status: 'running',
+      },
+      pendingSteers: [
+        {
+          clientRequestId: 'client-steer-1',
+          turnId: firstPromptResponse.json().activeTurnId,
+          prompt: 'Follow up while still running',
+        },
+      ],
+    });
+  });
+
   it('disconnects a thread and marks it as not loaded', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',
@@ -1364,6 +1441,104 @@ describe('supervisor api', () => {
       thread: {
         id: createdThread.id,
         isLoaded: false
+      }
+    });
+  });
+
+  it('preserves a saved reasoning effort when a disconnected thread is resumed', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5.3-codex',
+        approvalMode: 'yolo',
+        title: 'Resume Keeps Reasoning'
+      }
+    });
+
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'hello'
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+
+    const remoteThread = fakeCodexManager.threads.get(createdThread.codexThreadId);
+    expect(remoteThread).toBeTruthy();
+    remoteThread!.status = { type: 'idle' };
+    remoteThread!.turns = remoteThread!.turns.map((turn) => ({
+      ...turn,
+      status: 'completed' as const,
+    }));
+
+    const disconnectResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/disconnect`
+    });
+
+    expect(disconnectResponse.statusCode).toBe(200);
+    expect(disconnectResponse.json()).toMatchObject({
+      thread: {
+        id: createdThread.id,
+        isLoaded: false,
+      }
+    });
+
+    const settingsResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${createdThread.id}/settings`,
+      payload: {
+        reasoningEffort: 'high',
+      }
+    });
+
+    expect(settingsResponse.statusCode).toBe(200);
+    expect(settingsResponse.json()).toMatchObject({
+      id: createdThread.id,
+      reasoningEffort: 'high',
+    });
+
+    fakeCodexManager.resumeReasoningEffort = 'medium';
+    const resumeResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/resume`,
+      payload: {}
+    });
+
+    expect(resumeResponse.statusCode).toBe(200);
+    expect(resumeResponse.json()).toMatchObject({
+      thread: {
+        id: createdThread.id,
+        isLoaded: true,
+        reasoningEffort: 'high',
+      }
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json()).toMatchObject({
+      thread: {
+        id: createdThread.id,
+        reasoningEffort: 'high',
       }
     });
   });
@@ -1801,6 +1976,186 @@ describe('supervisor api', () => {
     expect(refreshedDetailResponse.statusCode).toBe(200);
     expect(refreshedDetailResponse.json()).toMatchObject({
       pendingRequests: []
+    });
+  });
+
+  it('persists the latest live plan in thread detail for refreshes', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Live Plan Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Work through this carefully.',
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    const startedThread = promptResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const activeTurn = remoteThread?.turns.at(-1);
+    expect(activeTurn).toBeTruthy();
+
+    fakeCodexManager.emit('notification', {
+      method: 'turn/plan/updated',
+      params: {
+        threadId: startedThread.codexThreadId,
+        turnId: activeTurn!.id,
+        explanation: 'Working plan',
+        plan: [
+          { step: 'Inspect current state', status: 'completed' },
+          { step: 'Patch persistence bug', status: 'in_progress' },
+        ],
+      }
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json()).toMatchObject({
+      livePlan: {
+        turnId: activeTurn!.id,
+        explanation: 'Working plan',
+        plan: [
+          { step: 'Inspect current state', status: 'completed' },
+          { step: 'Patch persistence bug', status: 'in_progress' },
+        ],
+      },
+    });
+  });
+
+  it('persists answered request notes in thread detail for refreshes', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Plan Mode Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Plan the next change.',
+        collaborationMode: 'plan'
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+
+    const startedThread = promptResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const activeTurn = remoteThread?.turns.at(-1);
+    expect(activeTurn).toBeTruthy();
+
+    const completedTurn = {
+      ...activeTurn!,
+      status: 'completed' as const,
+      items: [
+        ...activeTurn!.items,
+        {
+          id: 'plan-item-1',
+          type: 'plan',
+          text: '# Plan\n\n- Inspect the implementation.\n- Apply one focused fix.\n- Verify the result.'
+        }
+      ]
+    };
+
+    fakeCodexManager.threads.set(startedThread.codexThreadId, {
+      ...remoteThread!,
+      status: { type: 'idle' },
+      turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: startedThread.codexThreadId,
+        turn: completedTurn
+      }
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+    const planRequestId = detailResponse.json().pendingRequests[0].id;
+
+    const stayResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/requests/${encodeURIComponent(planRequestId)}/respond`,
+      payload: {
+        answers: {
+          'plan-decision': {
+            answers: ['Stay in plan mode']
+          }
+        }
+      }
+    });
+
+    expect(stayResponse.statusCode).toBe(200);
+    expect(stayResponse.json()).toMatchObject({
+      answeredRequestNotes: [
+        {
+          id: planRequestId,
+          turnId: completedTurn.id,
+          title: 'Plan ready',
+          summaryLines: ['Next step: Stay in plan mode'],
+        },
+      ],
+    });
+
+    const refreshedDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(refreshedDetailResponse.statusCode).toBe(200);
+    expect(refreshedDetailResponse.json()).toMatchObject({
+      pendingRequests: [],
+      answeredRequestNotes: [
+        {
+          id: planRequestId,
+          turnId: completedTurn.id,
+          title: 'Plan ready',
+          summaryLines: ['Next step: Stay in plan mode'],
+        },
+      ],
     });
   });
 

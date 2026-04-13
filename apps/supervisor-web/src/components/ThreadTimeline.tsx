@@ -16,6 +16,7 @@ import type {
   ThreadActionRequestDto,
   ThreadHistoryItemDetailDto,
   ThreadHistoryItemDto,
+  ThreadPendingSteerDto,
   ThreadTurnDto,
 } from '../../../../packages/shared/src/index';
 import { LongTextDialog } from './LongTextDialog';
@@ -57,6 +58,16 @@ interface ThreadTimelineProps {
     turnId?: string | null;
     title: string;
     summaryLines: string[];
+    createdAt: string;
+  }>;
+  pendingSteers?: ThreadPendingSteerDto[];
+  optimisticSteers?: Array<{
+    id: string;
+    clientRequestId: string;
+    turnId: string;
+    prompt: string;
+    createdAt: string;
+    status: 'steering' | 'accepted';
   }>;
   optimisticTurn?: TimelineTurn | null;
   onLoadHistoryItemDetail?: (
@@ -346,7 +357,7 @@ function getLiveOutputTailForTurn(
     return '';
   }
 
-  const materializedAgentText = items
+  const materializedAgentTexts = items
     .filter(
       (
         item,
@@ -355,7 +366,23 @@ function getLiveOutputTailForTurn(
       } => item.kind === 'agentMessage',
     )
     .map((item) => item.text)
-    .join('');
+    .filter((text) => text.length > 0);
+
+  const lastMaterializedAgentText = materializedAgentTexts.at(-1) ?? '';
+  if (lastMaterializedAgentText) {
+    const anchorIndex = liveOutput.lastIndexOf(lastMaterializedAgentText);
+    if (anchorIndex >= 0) {
+      const anchoredTail = liveOutput.slice(
+        anchorIndex + lastMaterializedAgentText.length,
+      );
+      if (!anchoredTail.trim()) {
+        return '';
+      }
+      return anchoredTail;
+    }
+  }
+
+  const materializedAgentText = materializedAgentTexts.join('');
 
   if (!materializedAgentText) {
     return liveOutput;
@@ -1087,6 +1114,7 @@ const CompactMessageItem = memo(function CompactMessageItem({
     item.kind === 'userMessage'
       ? 'border-cyan-400/25 bg-cyan-400/10 text-cyan-200'
       : 'border-slate-300/30 bg-slate-200/12 text-slate-100';
+  const steeringStatus = item.kind === 'userMessage' && item.status === 'Steering';
 
   useEffect(() => {
     return () => {
@@ -1117,6 +1145,24 @@ const CompactMessageItem = memo(function CompactMessageItem({
     <div
       className={`relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
     >
+      {steeringStatus && (
+        <span className="absolute right-2.5 top-2.5 z-[1] inline-flex items-center gap-1 rounded-full border border-amber-300/30 bg-amber-300/10 px-2 py-1 text-[10px] font-medium tracking-[0.12em] text-amber-100 shadow-sm shadow-stone-950/20">
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 16 16"
+            className="h-3.5 w-3.5 fill-none stroke-current"
+            strokeWidth="1.45"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M3.25 8A4.75 4.75 0 0 1 8 3.25h2.75" />
+            <path d="m9.5 1.75 1.75 1.5-1.75 1.5" />
+            <path d="M12.75 8A4.75 4.75 0 0 1 8 12.75H5.25" />
+            <path d="m6.5 14.25-1.75-1.5 1.75-1.5" />
+          </svg>
+          <span>Steering</span>
+        </span>
+      )}
       <span
         className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${iconToneClassName}`}
       >
@@ -1147,7 +1193,7 @@ const CompactMessageItem = memo(function CompactMessageItem({
           ) : (
             <UserMessageBody threadId={threadId} text={item.text} />
           )}
-          {item.status && (
+          {item.status && !steeringStatus && (
             <p className="mt-1 text-xs text-stone-500">{item.status}</p>
           )}
         </div>
@@ -2300,6 +2346,7 @@ function AnsweredRequestNote({
     turnId?: string | null;
     title: string;
     summaryLines: string[];
+    createdAt?: string;
   };
 }) {
   return (
@@ -2326,6 +2373,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
   turn,
   absoluteIndex,
   isCollapsed,
+  livePlan,
   liveOutput,
   onToggleCollapse,
   onOpenExpandedText,
@@ -2337,6 +2385,13 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
   turn: TimelineTurn;
   absoluteIndex: number;
   isCollapsed: boolean;
+  livePlan:
+    | {
+        turnId: string;
+        explanation: string | null;
+        plan: Array<{ step: string; status: string }>;
+      }
+    | null;
   liveOutput: string;
   onToggleCollapse: (turnId: string) => void;
   onOpenExpandedText: (title: string, text: string) => void;
@@ -2450,6 +2505,32 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
               />
             ),
           )}
+          {livePlan && (
+            <div className="rounded-[1rem] border border-sky-300/15 bg-sky-300/5 px-3 py-3 sm:rounded-[1.2rem]">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-medium text-sky-100">Plan update</p>
+                <span className="rounded-full border border-sky-300/40 px-2 py-1 text-[11px] uppercase tracking-[0.2em] text-sky-200">
+                  Live
+                </span>
+              </div>
+              {livePlan.explanation && (
+                <p className="mt-3 text-sm text-stone-300">{livePlan.explanation}</p>
+              )}
+              <div className="mt-3 space-y-2">
+                {livePlan.plan.map((step, index) => (
+                  <div
+                    key={`${livePlan.turnId}-${index}`}
+                    className="flex items-center gap-2 rounded-xl border border-stone-800/80 bg-stone-950/45 px-3 py-2 text-sm"
+                  >
+                    <span className="rounded-full border border-stone-700 px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-stone-400">
+                      {step.status}
+                    </span>
+                    <span className="text-stone-200">{step.step}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {visibleLiveOutput && (
             <CompactMessageItem
               item={{
@@ -2475,6 +2556,7 @@ export function ThreadTimeline({
   turns,
   totalTurnCount,
   pendingRequests = [],
+  pendingSteers = [],
   livePlan = null,
   respondingRequestId = null,
   onRespondToRequest,
@@ -2487,14 +2569,18 @@ export function ThreadTimeline({
   onLoadEarlier,
   ephemeralUserNote = null,
   answeredRequestNotes = [],
+  optimisticSteers = [],
   optimisticTurn = null,
   onLoadHistoryItemDetail,
 }: ThreadTimelineProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const scrollContentRef = useRef<HTMLDivElement | null>(null);
   const lastHandledScrollRequestKeyRef = useRef(scrollRequestKey);
   const previousContentSignatureRef = useRef<string | null>(null);
   const previousBottomSpacerRef = useRef(bottomSpacer);
+  const lastObservedScrollHeightRef = useRef(0);
   const tailSentinelRef = useRef<HTMLDivElement | null>(null);
+  const isTailVisibleRef = useRef(true);
   const shouldStickToBottomRef = useRef(true);
   const expandedTextRequestIdRef = useRef(0);
   const deferredDetailCacheRef = useRef<Map<string, ThreadHistoryItemDetailDto>>(
@@ -2527,6 +2613,18 @@ export function ThreadTimeline({
           turnId: request.turnId,
           title: request.title,
         })),
+        pendingSteers: pendingSteers.map((steer) => ({
+          id: steer.id,
+          turnId: steer.turnId,
+          prompt: steer.prompt,
+          clientRequestId: steer.clientRequestId,
+        })),
+        optimisticSteers: optimisticSteers.map((steer) => ({
+          id: steer.id,
+          turnId: steer.turnId,
+          prompt: steer.prompt,
+          status: steer.status,
+        })),
         liveOutputLength: liveOutput.length,
         livePlan:
           livePlan === null
@@ -2549,15 +2647,25 @@ export function ThreadTimeline({
                   textLength: item.text.length,
                 })),
               },
+        answeredRequestNotes: answeredRequestNotes.map((note) => ({
+          id: note.id,
+          turnId: note.turnId ?? null,
+          title: note.title,
+          createdAt: note.createdAt ?? '',
+          summaryLines: note.summaryLines,
+        })),
         ephemeralUserNote,
         bottomSpacer,
       }),
     [
+      answeredRequestNotes,
       bottomSpacer,
       ephemeralUserNote,
       liveOutput,
       livePlan,
+      optimisticSteers,
       optimisticTurn,
+      pendingSteers,
       pendingRequests,
       turns,
     ],
@@ -2628,11 +2736,12 @@ export function ThreadTimeline({
       return;
     }
 
-    setIsTailVisible(
+    const nextIsTailVisible =
       tailSentinel
         ? isElementVisible(container, tailSentinel)
-        : isNearBottom(container),
-    );
+        : isNearBottom(container);
+    isTailVisibleRef.current = nextIsTailVisible;
+    setIsTailVisible(nextIsTailVisible);
   }, []);
 
   const handleScroll = useCallback(() => {
@@ -2642,6 +2751,19 @@ export function ThreadTimeline({
     }
     recomputeTailVisibility();
   }, [recomputeTailVisibility]);
+
+  const scrollToBottom = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container) {
+      return;
+    }
+
+    container.scrollTop = container.scrollHeight;
+    lastObservedScrollHeightRef.current = container.scrollHeight;
+    isTailVisibleRef.current = true;
+    setIsTailVisible(true);
+    shouldStickToBottomRef.current = true;
+  }, []);
 
   useEffect(() => {
     setVisibleCount((current) => {
@@ -2656,11 +2778,13 @@ export function ThreadTimeline({
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (container) {
+      lastObservedScrollHeightRef.current = container.scrollHeight;
       shouldStickToBottomRef.current = isNearBottom(container, FOLLOW_TAIL_THRESHOLD_PX);
     }
     recomputeTailVisibility();
   }, [
     bottomSpacer,
+    answeredRequestNotes,
     ephemeralUserNote,
     liveOutput,
     livePlan,
@@ -2684,14 +2808,7 @@ export function ThreadTimeline({
     }
 
     const frame = window.requestAnimationFrame(() => {
-      const container = scrollContainerRef.current;
-      if (!container) {
-        return;
-      }
-
-      container.scrollTop = container.scrollHeight;
-      setIsTailVisible(true);
-      shouldStickToBottomRef.current = true;
+      scrollToBottom();
     });
 
     if (scrollRequestKey !== lastHandledScrollRequestKeyRef.current) {
@@ -2704,8 +2821,41 @@ export function ThreadTimeline({
   }, [
     contentSignature,
     isTailVisible,
+    scrollToBottom,
     scrollRequestKey,
   ]);
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    const content = scrollContentRef.current;
+    if (!container || !content || typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    lastObservedScrollHeightRef.current = container.scrollHeight;
+    const observer = new ResizeObserver(() => {
+      const nextScrollHeight = container.scrollHeight;
+      const previousScrollHeight = lastObservedScrollHeightRef.current;
+      lastObservedScrollHeightRef.current = nextScrollHeight;
+
+      if (nextScrollHeight <= previousScrollHeight) {
+        return;
+      }
+
+      if (!(shouldStickToBottomRef.current || isTailVisibleRef.current)) {
+        return;
+      }
+
+      window.requestAnimationFrame(() => {
+        scrollToBottom();
+      });
+    });
+
+    observer.observe(content);
+    return () => {
+      observer.disconnect();
+    };
+  }, [scrollToBottom]);
 
   useEffect(() => {
     if (!isTailVisible) {
@@ -2719,20 +2869,13 @@ export function ThreadTimeline({
 
     previousBottomSpacerRef.current = bottomSpacer;
     const frame = window.requestAnimationFrame(() => {
-      const container = scrollContainerRef.current;
-      if (!container) {
-        return;
-      }
-
-      container.scrollTop = container.scrollHeight;
-      setIsTailVisible(true);
-      shouldStickToBottomRef.current = true;
+      scrollToBottom();
     });
 
     return () => {
       window.cancelAnimationFrame(frame);
     };
-  }, [bottomSpacer, isTailVisible]);
+  }, [bottomSpacer, isTailVisible, scrollToBottom]);
 
   useEffect(() => {
     onTailVisibilityChange?.(isTailVisible);
@@ -2785,6 +2928,20 @@ export function ThreadTimeline({
     },
     new Map(),
   );
+  const queuedSteers = [
+    ...pendingSteers.map((steer) => ({
+      id: steer.id,
+      prompt: steer.prompt,
+      status: null,
+      createdAt: steer.createdAt,
+    })),
+    ...optimisticSteers.map((steer) => ({
+      id: steer.id,
+      prompt: steer.prompt,
+      status: steer.status === 'steering' ? 'Steering' : null,
+      createdAt: steer.createdAt,
+    })),
+  ].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   const unanchoredAnsweredNotes = answeredRequestNotes.filter(
     (note) => !note.turnId || !visibleTurnIds.has(note.turnId),
   );
@@ -2802,6 +2959,7 @@ export function ThreadTimeline({
           className="thread-scroll-container min-h-0 flex-1 overflow-y-auto overscroll-contain"
           style={bottomSpacer > 0 ? { paddingBottom: bottomSpacer } : undefined}
         >
+          <div ref={scrollContentRef}>
           {turns.length > 0 && (
             <div className="px-2.5 pb-1 pt-2 sm:px-6 sm:pb-1.5 sm:pt-3">
               <div className="flex flex-wrap items-center gap-2.5 text-xs sm:text-sm">
@@ -2854,29 +3012,48 @@ export function ThreadTimeline({
                 <div key={turn.id}>
                   <ThreadTurnRow
                     threadId={threadId}
-                    turn={turn}
-                    absoluteIndex={visibleTurnAbsoluteOffset + visibleIndex + 1}
-                    isCollapsed={collapsedTurns[turn.id] ?? false}
-                    liveOutput={visibleIndex === liveOutputTurnIndex ? liveOutput : ''}
-                    onToggleCollapse={handleToggleCollapse}
-                    onOpenExpandedText={handleOpenExpandedText}
+                  turn={turn}
+                  absoluteIndex={visibleTurnAbsoluteOffset + visibleIndex + 1}
+                  isCollapsed={collapsedTurns[turn.id] ?? false}
+                  livePlan={livePlan?.turnId === turn.id ? livePlan : null}
+                  liveOutput={visibleIndex === liveOutputTurnIndex ? liveOutput : ''}
+                  onToggleCollapse={handleToggleCollapse}
+                  onOpenExpandedText={handleOpenExpandedText}
                     onOpenCommandDetail={handleOpenCommandDetail}
                     scrollRootRef={scrollContainerRef}
                     articleRef={undefined}
                   />
                   {(notesByTurnId.get(turn.id)?.length || pendingRequestsByTurnId.get(turn.id)?.length) ? (
                     <div className="space-y-3 border-t border-stone-800/80 px-2.5 py-4 sm:px-6">
-                      {(notesByTurnId.get(turn.id) ?? []).map((note) => (
-                        <AnsweredRequestNote key={note.id} note={note} />
-                      ))}
-                      {(pendingRequestsByTurnId.get(turn.id) ?? []).map((request) => (
-                        <PendingRequestCard
-                          key={request.id}
-                          request={request}
-                          busy={respondingRequestId === request.id}
-                          onRespond={onRespondToRequest ?? undefined}
-                        />
-                      ))}
+                      {[
+                        ...(notesByTurnId.get(turn.id) ?? []).map((note) => ({
+                          kind: 'note' as const,
+                          id: note.id,
+                          createdAt: note.createdAt ?? '',
+                          note,
+                        })),
+                        ...(pendingRequestsByTurnId.get(turn.id) ?? []).map((request) => ({
+                          kind: 'request' as const,
+                          id: request.id,
+                          createdAt: request.createdAt,
+                          request,
+                        })),
+                      ]
+                        .sort((left, right) =>
+                          left.createdAt.localeCompare(right.createdAt),
+                        )
+                        .map((entry) =>
+                          entry.kind === 'note' ? (
+                            <AnsweredRequestNote key={entry.id} note={entry.note} />
+                          ) : (
+                            <PendingRequestCard
+                              key={entry.id}
+                              request={entry.request}
+                              busy={respondingRequestId === entry.request.id}
+                              onRespond={onRespondToRequest ?? undefined}
+                            />
+                          ),
+                        )}
                     </div>
                   ) : null}
                 </div>
@@ -2887,6 +3064,7 @@ export function ThreadTimeline({
                   turn={optimisticTurn}
                   absoluteIndex={optimisticAbsoluteIndex}
                   isCollapsed={collapsedTurns[optimisticTurn.id] ?? false}
+                  livePlan={null}
                   liveOutput={liveOutputAttachedToOptimisticTurn ? liveOutput : ''}
                   onToggleCollapse={handleToggleCollapse}
                   onOpenExpandedText={handleOpenExpandedText}
@@ -2897,46 +3075,53 @@ export function ThreadTimeline({
             </div>
           )}
 
-          {livePlan && (
-            <div className="border-t border-sky-300/15 bg-sky-300/5 px-2.5 py-4 sm:px-6">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm font-medium text-sky-100">Plan update</p>
-                <span className="rounded-full border border-sky-300/40 px-2 py-1 text-[11px] uppercase tracking-[0.2em] text-sky-200">
-                  Live
-                </span>
-              </div>
-              {livePlan.explanation && (
-                <p className="mt-3 text-sm text-stone-300">{livePlan.explanation}</p>
-              )}
-              <div className="mt-3 space-y-2">
-                {livePlan.plan.map((step, index) => (
-                  <div
-                    key={`${livePlan.turnId}-${index}`}
-                    className="flex items-center gap-2 rounded-xl border border-stone-800/80 bg-stone-950/45 px-3 py-2 text-sm"
-                  >
-                    <span className="rounded-full border border-stone-700 px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-stone-400">
-                      {step.status}
-                    </span>
-                    <span className="text-stone-200">{step.step}</span>
-                  </div>
-                ))}
-              </div>
+          {queuedSteers.length > 0 && (
+            <div className="space-y-3 border-t border-stone-800/80 px-2.5 py-4 sm:px-6">
+              {queuedSteers.map((steer) => (
+                <CompactMessageItem
+                  key={steer.id}
+                  threadId={threadId}
+                  item={{
+                    id: steer.id,
+                    kind: 'userMessage',
+                    text: steer.prompt,
+                    status: steer.status,
+                  }}
+                  scrollRootRef={scrollContainerRef}
+                />
+              ))}
             </div>
           )}
 
           {(unanchoredPendingRequests.length > 0 || unanchoredAnsweredNotes.length > 0) && (
             <div className="space-y-3 border-t border-stone-800/80 px-2.5 py-4 sm:px-6">
-              {unanchoredAnsweredNotes.map((note) => (
-                <AnsweredRequestNote key={note.id} note={note} />
-              ))}
-              {unanchoredPendingRequests.map((request) => (
-                <PendingRequestCard
-                  key={request.id}
-                  request={request}
-                  busy={respondingRequestId === request.id}
-                  onRespond={onRespondToRequest ?? undefined}
-                />
-              ))}
+              {[
+                ...unanchoredAnsweredNotes.map((note) => ({
+                  kind: 'note' as const,
+                  id: note.id,
+                  createdAt: note.createdAt ?? '',
+                  note,
+                })),
+                ...unanchoredPendingRequests.map((request) => ({
+                  kind: 'request' as const,
+                  id: request.id,
+                  createdAt: request.createdAt,
+                  request,
+                })),
+              ]
+                .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+                .map((entry) =>
+                  entry.kind === 'note' ? (
+                    <AnsweredRequestNote key={entry.id} note={entry.note} />
+                  ) : (
+                    <PendingRequestCard
+                      key={entry.id}
+                      request={entry.request}
+                      busy={respondingRequestId === entry.request.id}
+                      onRespond={onRespondToRequest ?? undefined}
+                    />
+                  ),
+                )}
             </div>
           )}
 
@@ -2974,6 +3159,7 @@ export function ThreadTimeline({
             aria-hidden="true"
             className="h-px w-full"
           />
+          </div>
         </div>
       </section>
 

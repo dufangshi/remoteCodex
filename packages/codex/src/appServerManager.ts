@@ -13,7 +13,8 @@ import {
   ReasoningEffort,
   ThreadResumeInput,
   ThreadStartInput,
-  TurnStartInput
+  TurnStartInput,
+  TurnSteerInput
 } from './types';
 
 interface SpawnedChild {
@@ -240,6 +241,22 @@ export class CodexAppServerManager extends EventEmitter {
         : null
     });
     return mapTurn(response.turn);
+  }
+
+  async steerTurn(input: TurnSteerInput) {
+    await this.ensureReady();
+    const response = await this.client!.request<{ turn?: any }>('turn/steer', {
+      threadId: input.threadId,
+      expectedTurnId: input.turnId,
+      input: [
+        {
+          type: 'text',
+          text: input.prompt,
+          text_elements: []
+        }
+      ]
+    });
+    return response.turn ? mapTurn(response.turn) : null;
   }
 
   async interruptTurn(threadId: string, turnId: string) {
