@@ -54,6 +54,7 @@ import {
   ThreadEventEnvelope,
   ThreadHistoryItemDetailDto,
   ThreadHistoryItemDto,
+  ThreadLiveItemsDto,
   ThreadLivePlanDto,
   ThreadPendingSteerDto,
   ThreadSourceDto,
@@ -1106,6 +1107,24 @@ function itemToHistoryItem(
   }
 }
 
+function liveCodexItemToHistoryItem(
+  item: CodexTurnItem,
+  phase: 'started' | 'completed',
+): ThreadHistoryItemDto | null {
+  const historyItem = itemToHistoryItem(item);
+
+  if (historyItem.kind !== 'commandExecution') {
+    return null;
+  }
+
+  return {
+    ...historyItem,
+    status:
+      historyItem.status ??
+      (phase === 'started' ? 'running' : 'completed'),
+  };
+}
+
 function turnToDto(
   turn: CodexTurnRecord,
   deferredDetails?: Map<string, ThreadHistoryItemDetailDto>,
@@ -1173,6 +1192,7 @@ export class ThreadService {
   private readonly threadDetailCache = new Map<string, ThreadDetailCacheEntry>();
   private readonly threadContextUsage = new Map<string, ThreadContextUsageDto>();
   private readonly threadLivePlans = new Map<string, ThreadLivePlanDto>();
+  private readonly threadLiveItems = new Map<string, ThreadLiveItemsDto>();
   private readonly answeredRequestNotes = new Map<string, ThreadAnsweredRequestNoteDto[]>();
 
   constructor(
@@ -1522,6 +1542,11 @@ export class ThreadService {
     );
     const updated = getThreadRecordById(this.db, record.id)!;
     const pagedTurns = sliceTurnsForDetail(cachedDetail.turns, options);
+    const liveItems = this.getLiveItems(
+      updated.id,
+      cachedDetail.turns,
+      pagedTurns.turns,
+    );
     return {
       thread: this.toThreadDto(updated, loadedIds),
       workspace: toWorkspaceDto(workspace),
@@ -1532,6 +1557,7 @@ export class ThreadService {
       pendingSteers: this.listPendingSteers(updated.id),
       answeredRequestNotes: this.listAnsweredRequestNotes(updated.id),
       livePlan: this.getLivePlan(updated.id),
+      liveItems,
     };
   }
 
@@ -1782,9 +1808,16 @@ export class ThreadService {
         ? normalizeSandboxMode(input.sandboxMode)
         : normalizeSandboxMode(record.sandboxMode)) ??
       defaultSandboxModeForApprovalMode((record.approvalMode ?? 'yolo') as ApprovalMode);
+    const connectedRecord = {
+      ...record,
+      codexThreadId: record.codexThreadId,
+    };
 
     if (record.codexTurnId && record.status === 'running') {
-      return this.steerOrStartPromptTurn(localThreadId, record, {
+      return this.steerOrStartPromptTurn(localThreadId, {
+        ...connectedRecord,
+        codexTurnId: record.codexTurnId,
+      }, {
         prompt,
         displayPrompt,
         clientRequestId: input.clientRequestId ?? null,
@@ -1796,7 +1829,7 @@ export class ThreadService {
       });
     }
 
-    return this.startPromptTurn(localThreadId, record, {
+    return this.startPromptTurn(localThreadId, connectedRecord, {
       prompt,
       effectiveModel,
       normalizedReasoning,
@@ -1855,6 +1888,8 @@ export class ThreadService {
     }
 
     updateThreadRecord(this.db, localThreadId, patch);
+    this.setLivePlan(localThreadId, null);
+    this.setLiveItems(localThreadId, null);
     this.resetThreadContextUsage(localThreadId, true);
     this.invalidateThreadDetailCache(localThreadId);
     const updated = getThreadRecordById(this.db, localThreadId)!;
@@ -2062,6 +2097,7 @@ export class ThreadService {
       lastTurnCompletedAt: new Date().toISOString()
     });
     this.setLivePlan(localThreadId, null);
+    this.setLiveItems(localThreadId, null);
     this.clearPendingSteersForTurn(localThreadId, turnId);
     this.invalidateThreadDetailCache(localThreadId);
 
@@ -2089,6 +2125,7 @@ export class ThreadService {
     this.invalidateThreadDetailCache(localThreadId);
     this.threadContextUsage.delete(localThreadId);
     this.threadLivePlans.delete(localThreadId);
+    this.threadLiveItems.delete(localThreadId);
     this.answeredRequestNotes.delete(localThreadId);
     deleteViewerSessionsByThreadId(this.db, localThreadId);
     deleteNotificationsByThreadId(this.db, localThreadId);
@@ -2246,12 +2283,46 @@ export class ThreadService {
           lastTurnStartedAt: new Date().toISOString()
         });
         this.setLivePlan(record.id, null);
+        this.setLiveItems(record.id, null);
         this.resetThreadContextUsage(record.id, true);
         this.invalidateThreadDetailCache(record.id);
 
         this.emitThreadEvent('thread.turn.started', record.id, {
           turnId: params.turn.id
         });
+        return;
+      }
+      case 'item/started':
+      case 'item/completed': {
+        const params = event.params as {
+          threadId: string;
+          turnId: string;
+          item?: CodexTurnItem;
+        };
+        const record = getThreadRecordByCodexThreadId(this.db, params.threadId);
+        if (!record || !params.item) {
+          return;
+        }
+
+        const liveItem = liveCodexItemToHistoryItem(
+          params.item,
+          event.method === 'item/started' ? 'started' : 'completed',
+        );
+        if (!liveItem) {
+          return;
+        }
+
+        this.upsertLiveItem(record.id, params.turnId, liveItem);
+        this.emitThreadEvent(
+          event.method === 'item/started'
+            ? 'thread.item.started'
+            : 'thread.item.completed',
+          record.id,
+          {
+            turnId: params.turnId,
+            item: liveItem,
+          },
+        );
         return;
       }
       case 'turn/plan/updated': {
@@ -2318,6 +2389,7 @@ export class ThreadService {
           lastTurnCompletedAt: new Date().toISOString()
         });
         this.setLivePlan(record.id, null);
+        this.setLiveItems(record.id, null);
         this.clearPendingSteersForTurn(record.id, params.turn.id);
         this.pendingRequests.delete(record.id);
         if (
@@ -2359,6 +2431,7 @@ export class ThreadService {
           lastError: params.error.message ?? 'Turn failed unexpectedly.'
         });
         this.setLivePlan(record.id, null);
+        this.setLiveItems(record.id, null);
         this.clearPendingSteersForTurn(record.id, params.turnId);
         this.pendingRequests.delete(record.id);
         this.dismissedPlanDecisionTurns.delete(record.id);
@@ -2514,6 +2587,89 @@ export class ThreadService {
     } else {
       this.threadLivePlans.delete(localThreadId);
     }
+  }
+
+  private setLiveItems(localThreadId: string, liveItems: ThreadLiveItemsDto | null) {
+    if (liveItems && liveItems.items.length > 0) {
+      this.threadLiveItems.set(localThreadId, liveItems);
+      return;
+    }
+
+    this.threadLiveItems.delete(localThreadId);
+  }
+
+  private getLiveItems(
+    localThreadId: string,
+    allTurns: ThreadTurnDto[],
+    visibleTurns: ThreadTurnDto[] = allTurns,
+  ): ThreadLiveItemsDto | null {
+    const current = this.threadLiveItems.get(localThreadId);
+    if (!current) {
+      return null;
+    }
+
+    const reconciled = this.reconcileLiveItems(localThreadId, allTurns);
+    if (!reconciled) {
+      return null;
+    }
+
+    const visibleTurnIds = new Set(visibleTurns.map((turn) => turn.id));
+    return visibleTurnIds.has(reconciled.turnId) ? reconciled : null;
+  }
+
+  private upsertLiveItem(
+    localThreadId: string,
+    turnId: string,
+    item: ThreadHistoryItemDto,
+  ) {
+    const current = this.threadLiveItems.get(localThreadId);
+    const currentItems =
+      current?.turnId === turnId ? current.items : [];
+    const nextItems = [
+      ...currentItems.filter((entry) => entry.id !== item.id),
+      item,
+    ];
+
+    this.setLiveItems(localThreadId, {
+      turnId,
+      items: nextItems,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  private reconcileLiveItems(
+    localThreadId: string,
+    turns: ThreadTurnDto[],
+  ): ThreadLiveItemsDto | null {
+    const current = this.threadLiveItems.get(localThreadId);
+    if (!current) {
+      return null;
+    }
+
+    const matchingTurn = turns.find((turn) => turn.id === current.turnId);
+    const materializedItemIds = new Set(
+      matchingTurn?.items.map((item) => item.id) ?? [],
+    );
+    const nextItems = current.items.filter(
+      (item) => !materializedItemIds.has(item.id),
+    );
+
+    if (nextItems.length === current.items.length) {
+      return current;
+    }
+
+    if (nextItems.length === 0) {
+      this.threadLiveItems.delete(localThreadId);
+      return null;
+    }
+
+    const nextLiveItems: ThreadLiveItemsDto = {
+      ...current,
+      items: nextItems,
+      updatedAt: new Date().toISOString(),
+    };
+    this.threadLiveItems.set(localThreadId, nextLiveItems);
+    return nextLiveItems;
   }
 
   private listAnsweredRequestNotes(localThreadId: string): ThreadAnsweredRequestNoteDto[] {

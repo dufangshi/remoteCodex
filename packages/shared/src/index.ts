@@ -243,6 +243,12 @@ export interface ThreadPendingSteerDto {
   createdAt: string;
 }
 
+export interface ThreadLiveItemsDto {
+  turnId: string;
+  items: ThreadHistoryItemDto[];
+  updatedAt: string;
+}
+
 export interface ThreadDetailDto {
   thread: ThreadDto;
   workspace: WorkspaceDto;
@@ -253,6 +259,7 @@ export interface ThreadDetailDto {
   pendingSteers: ThreadPendingSteerDto[];
   answeredRequestNotes?: ThreadAnsweredRequestNoteDto[];
   livePlan?: ThreadLivePlanDto | null;
+  liveItems?: ThreadLiveItemsDto | null;
 }
 
 export type ShellStatusDto =
@@ -373,6 +380,8 @@ export interface ThreadEventEnvelope {
     | 'thread.updated'
     | 'thread.context.updated'
     | 'thread.turn.started'
+    | 'thread.item.started'
+    | 'thread.item.completed'
     | 'thread.plan.updated'
     | 'thread.request.created'
     | 'thread.request.resolved'

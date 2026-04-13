@@ -40,6 +40,10 @@ interface ThreadTimelineProps {
     explanation: string | null;
     plan: Array<{ step: string; status: string }>;
   } | null;
+  liveItems?: {
+    turnId: string;
+    items: ThreadHistoryItemDto[];
+  } | null;
   respondingRequestId?: string | null;
   onRespondToRequest?: (
     requestId: string,
@@ -58,7 +62,7 @@ interface ThreadTimelineProps {
     turnId?: string | null;
     title: string;
     summaryLines: string[];
-    createdAt: string;
+    createdAt?: string;
   }>;
   pendingSteers?: ThreadPendingSteerDto[];
   optimisticSteers?: Array<{
@@ -429,6 +433,23 @@ function prepareTurnItemsForRendering(
       status: 'Queued',
     };
   });
+}
+
+function mergeLiveTurnItems(
+  items: ThreadHistoryItemDto[],
+  liveItems: ThreadHistoryItemDto[] | null | undefined,
+) {
+  if (!liveItems || liveItems.length === 0) {
+    return items;
+  }
+
+  const existingIds = new Set(items.map((item) => item.id));
+  const uniqueLiveItems = liveItems.filter((item) => !existingIds.has(item.id));
+  if (uniqueLiveItems.length === 0) {
+    return items;
+  }
+
+  return [...items, ...uniqueLiveItems];
 }
 
 function getLiveOutputTailForTurn(
@@ -2462,6 +2483,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
   absoluteIndex,
   isCollapsed,
   livePlan,
+  liveItems,
   liveOutput,
   onToggleCollapse,
   onOpenExpandedText,
@@ -2480,6 +2502,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
         plan: Array<{ step: string; status: string }>;
       }
     | null;
+  liveItems: ThreadHistoryItemDto[] | null;
   liveOutput: string;
   onToggleCollapse: (turnId: string) => void;
   onOpenExpandedText: (title: string, text: string) => void;
@@ -2490,14 +2513,18 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
   scrollRootRef: RefObject<HTMLDivElement | null>;
   articleRef?: RefCallback<HTMLElement> | undefined;
 }) {
+  const mergedItems = useMemo(
+    () => mergeLiveTurnItems(turn.items, liveItems),
+    [liveItems, turn.items],
+  );
   const preparedItems = useMemo(
-    () => prepareTurnItemsForRendering(turn.items, isActiveTurnStatus(turn.status)),
-    [turn.items, turn.status],
+    () => prepareTurnItemsForRendering(mergedItems, isActiveTurnStatus(turn.status)),
+    [mergedItems, turn.status],
   );
   const groupedItems = useMemo(() => groupTimelineHistoryItems(preparedItems), [preparedItems]);
   const visibleLiveOutput = useMemo(
-    () => getLiveOutputTailForTurn(liveOutput, turn.items),
-    [liveOutput, turn.items],
+    () => getLiveOutputTailForTurn(liveOutput, mergedItems),
+    [liveOutput, mergedItems],
   );
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
     {},
@@ -2650,6 +2677,7 @@ export function ThreadTimeline({
   pendingRequests = [],
   pendingSteers = [],
   livePlan = null,
+  liveItems = null,
   respondingRequestId = null,
   onRespondToRequest,
   liveOutput,
@@ -2726,6 +2754,18 @@ export function ThreadTimeline({
                 explanation: livePlan.explanation,
                 steps: livePlan.plan.map((step) => `${step.status}:${step.step}`),
               },
+        liveItems:
+          liveItems === null
+            ? null
+            : {
+                turnId: liveItems.turnId,
+                items: liveItems.items.map((item) => ({
+                  id: item.id,
+                  kind: item.kind,
+                  status: item.status,
+                  textLength: item.text.length,
+                })),
+              },
         optimisticTurn:
           optimisticTurn === null
             ? null
@@ -2754,6 +2794,7 @@ export function ThreadTimeline({
       bottomSpacer,
       ephemeralUserNote,
       liveOutput,
+      liveItems,
       livePlan,
       optimisticSteers,
       optimisticTurn,
@@ -2879,6 +2920,7 @@ export function ThreadTimeline({
     answeredRequestNotes,
     ephemeralUserNote,
     liveOutput,
+    liveItems,
     livePlan,
     pendingRequests.length,
     recomputeTailVisibility,
@@ -3108,6 +3150,7 @@ export function ThreadTimeline({
                   absoluteIndex={visibleTurnAbsoluteOffset + visibleIndex + 1}
                   isCollapsed={collapsedTurns[turn.id] ?? false}
                   livePlan={livePlan?.turnId === turn.id ? livePlan : null}
+                  liveItems={liveItems?.turnId === turn.id ? liveItems.items : null}
                   liveOutput={visibleIndex === liveOutputTurnIndex ? liveOutput : ''}
                   onToggleCollapse={handleToggleCollapse}
                   onOpenExpandedText={handleOpenExpandedText}
@@ -3157,6 +3200,7 @@ export function ThreadTimeline({
                   absoluteIndex={optimisticAbsoluteIndex}
                   isCollapsed={collapsedTurns[optimisticTurn.id] ?? false}
                   livePlan={null}
+                  liveItems={null}
                   liveOutput={liveOutputAttachedToOptimisticTurn ? liveOutput : ''}
                   onToggleCollapse={handleToggleCollapse}
                   onOpenExpandedText={handleOpenExpandedText}

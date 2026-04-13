@@ -987,6 +987,58 @@ describe('ThreadTimeline', () => {
     );
   });
 
+  it('renders live command items before queued steer bubbles in the active turn', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        liveItems={{
+          turnId: 'turn-1',
+          items: [
+            {
+              id: 'command-live-1',
+              kind: 'commandExecution',
+              text: '/bin/bash -lc sleep 20',
+              status: 'running',
+            },
+          ],
+        }}
+        pendingSteers={[
+          {
+            id: 'pending-steer-1',
+            clientRequestId: 'client-steer-1',
+            turnId: 'turn-1',
+            prompt: 'Steer after sleep.',
+            createdAt: new Date(Date.UTC(2026, 3, 9, 6, 2, 0)).toISOString(),
+          },
+        ]}
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'inProgress',
+            error: null,
+            items: [
+              {
+                id: 'user-1',
+                kind: 'userMessage',
+                text: 'Run sleep 20.',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    const timelineText =
+      screen.getByTestId('thread-scroll-container').textContent ?? '';
+    expect(screen.getByText('/bin/bash -lc sleep 20')).toBeInTheDocument();
+    expect(screen.getByText('Steer after sleep.')).toBeInTheDocument();
+    expect(screen.getByText('Queued')).toBeInTheDocument();
+    expect(timelineText.indexOf('/bin/bash -lc sleep 20')).toBeLessThan(
+      timelineText.indexOf('Steer after sleep.'),
+    );
+  });
+
   it('renders optimistic steer bubbles under an optimistic running turn', () => {
     render(
       <ThreadTimeline

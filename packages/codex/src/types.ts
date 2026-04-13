@@ -221,6 +221,8 @@ export type CodexServerEvent =
   | { method: 'thread/name/updated'; params: { threadId: string; threadName?: string } }
   | { method: 'thread/tokenUsage/updated'; params: CodexThreadTokenUsageEvent }
   | { method: 'turn/started'; params: { threadId: string; turn: CodexTurnRecord } }
+  | { method: 'item/started'; params: { threadId: string; turnId: string; item: CodexTurnItem } }
+  | { method: 'item/completed'; params: { threadId: string; turnId: string; item: CodexTurnItem } }
   | { method: 'turn/plan/updated'; params: { threadId: string; turnId: string; explanation: string | null; plan: Array<{ step: string; status: string }> } }
   | { method: 'turn/completed'; params: { threadId: string; turn: CodexTurnRecord } }
   | { method: 'item/agentMessage/delta'; params: CodexOutputDeltaEvent }

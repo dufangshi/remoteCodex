@@ -253,6 +253,9 @@ export function ThreadDetailPage() {
     explanation: string | null;
     plan: Array<{ step: string; status: string }>;
   } | null>(null);
+  const [liveItems, setLiveItems] = useState<
+    NonNullable<ThreadDetailDto['liveItems']> | null
+  >(null);
   const [followTail, setFollowTail] = useState(true);
   const [scrollRequestKey, setScrollRequestKey] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -341,6 +344,7 @@ export function ThreadDetailPage() {
           : detailResponse;
       detailRef.current = nextDetail;
       setLivePlan(nextDetail.livePlan ?? null);
+      setLiveItems(nextDetail.liveItems ?? null);
       const threadHasEnded =
         nextDetail.thread.activeTurnId === null &&
         nextDetail.thread.status !== 'running';
@@ -411,6 +415,7 @@ export function ThreadDetailPage() {
         clearBufferedLiveOutput();
         setLiveOutput('');
         setLivePlan(null);
+        setLiveItems(null);
       }
     },
     [clearBufferedLiveOutput],
@@ -564,6 +569,7 @@ export function ThreadDetailPage() {
     setMetaSessionCopyState('idle');
     setOptimisticTurn(null);
     setOptimisticSteers([]);
+    setLiveItems(null);
     pendingThreadSettingsRef.current = null;
     terminalTurnPendingRef.current = null;
     supervisorHealthOkAtRef.current = null;
@@ -841,6 +847,7 @@ export function ThreadDetailPage() {
         if (event.type === 'thread.turn.started') {
           clearBufferedLiveOutput();
           setLiveOutput('');
+          setLiveItems(null);
           terminalTurnPendingRef.current = null;
           const eventTurnId =
             typeof event.payload.turnId === 'string' ? event.payload.turnId : null;
@@ -862,6 +869,7 @@ export function ThreadDetailPage() {
           event.type === 'thread.turn.completed' ||
           event.type === 'thread.turn.failed'
         ) {
+          setLiveItems(null);
           const eventTurnId =
             typeof event.payload.turnId === 'string' ? event.payload.turnId : null;
           if (eventTurnId) {
@@ -883,6 +891,32 @@ export function ThreadDetailPage() {
               );
             }
           }
+        }
+      }
+
+      if (
+        (event.type === 'thread.item.started' ||
+          event.type === 'thread.item.completed') &&
+        event.payload.item &&
+        typeof event.payload.item === 'object' &&
+        typeof event.payload.turnId === 'string'
+      ) {
+        const eventTurnId = event.payload.turnId;
+        const liveItem = event.payload.item as ThreadDetailDto['turns'][number]['items'][number];
+        if (typeof liveItem.id === 'string' && typeof liveItem.text === 'string') {
+          setLiveItems((current) => {
+            const currentItems =
+              current?.turnId === eventTurnId ? current.items : [];
+            const nextItems = [
+              ...currentItems.filter((item) => item.id !== liveItem.id),
+              liveItem,
+            ];
+            return {
+              turnId: eventTurnId,
+              items: nextItems,
+              updatedAt: new Date().toISOString(),
+            };
+          });
         }
       }
 
@@ -1105,7 +1139,8 @@ export function ThreadDetailPage() {
       optimisticTurn !== null ||
       optimisticSteers.length > 0 ||
       liveOutput.length > 0 ||
-      livePlan !== null;
+      livePlan !== null ||
+      liveItems !== null;
 
     if (!shouldPollForTurnUpdates) {
       return;
@@ -1126,6 +1161,7 @@ export function ThreadDetailPage() {
     detail?.thread.activeTurnId,
     detail?.thread.status,
     liveOutput.length,
+    liveItems,
     livePlan,
     loadThreadDetail,
     optimisticSteers.length,
@@ -1230,7 +1266,7 @@ export function ThreadDetailPage() {
               resumeSeedThread.collaborationMode ??
               resumed.thread.collaborationMode,
             sandboxMode:
-              resumeSeedThread.sandboxMode ?? resumed.thread.sandboxMode,
+              resumeSeedThread.sandboxMode ?? resumed.thread.sandboxMode ?? null,
           },
         };
         currentDetail = resumedDetail;
@@ -1638,6 +1674,7 @@ export function ThreadDetailPage() {
           : updated,
       );
       setLivePlan(updated.livePlan ?? null);
+      setLiveItems(updated.liveItems ?? null);
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -2024,6 +2061,7 @@ export function ThreadDetailPage() {
                   totalTurnCount={detail.totalTurnCount ?? detail.turns.length}
                   pendingRequests={detail.pendingRequests}
                   livePlan={livePlan}
+                  liveItems={liveItems}
                   respondingRequestId={respondingRequestId}
                   onRespondToRequest={handleRespondToRequest}
                   liveOutput={liveOutput}

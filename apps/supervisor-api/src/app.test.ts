@@ -2046,6 +2046,76 @@ describe('supervisor api', () => {
     });
   });
 
+  it('persists running command items in thread detail for refreshes', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Live Command Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Run sleep 20.',
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    const startedThread = promptResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const activeTurn = remoteThread?.turns.at(-1);
+    expect(activeTurn).toBeTruthy();
+
+    fakeCodexManager.emit('notification', {
+      method: 'item/started',
+      params: {
+        threadId: startedThread.codexThreadId,
+        turnId: activeTurn!.id,
+        item: {
+          id: 'command-live-1',
+          type: 'commandExecution',
+          command: '/bin/bash -lc sleep 20',
+        },
+      }
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json()).toMatchObject({
+      liveItems: {
+        turnId: activeTurn!.id,
+        items: [
+          {
+            id: 'command-live-1',
+            kind: 'commandExecution',
+            text: '/bin/bash -lc sleep 20',
+            status: 'running',
+          },
+        ],
+      },
+    });
+  });
+
   it('persists answered request notes in thread detail for refreshes', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',
