@@ -978,7 +978,7 @@ describe('ThreadTimeline', () => {
     expect(screen.getByText('Accepted steer prompt')).toBeInTheDocument();
     expect(screen.getByText('Still steering prompt')).toBeInTheDocument();
     expect(screen.getByText('Steering')).toBeInTheDocument();
-    expect(screen.getByText('Queued')).toBeInTheDocument();
+    expect(screen.getByText('Accepted')).toBeInTheDocument();
     expect(timelineText.indexOf('sleep 20')).toBeLessThan(
       timelineText.indexOf('Accepted steer prompt'),
     );
@@ -1033,10 +1033,69 @@ describe('ThreadTimeline', () => {
       screen.getByTestId('thread-scroll-container').textContent ?? '';
     expect(screen.getByText('/bin/bash -lc sleep 20')).toBeInTheDocument();
     expect(screen.getByText('Steer after sleep.')).toBeInTheDocument();
-    expect(screen.getByText('Queued')).toBeInTheDocument();
+    expect(screen.getByText('Accepted')).toBeInTheDocument();
     expect(timelineText.indexOf('/bin/bash -lc sleep 20')).toBeLessThan(
       timelineText.indexOf('Steer after sleep.'),
     );
+  });
+
+  it('advances live plan display when concrete execution results already appeared', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        livePlan={{
+          turnId: 'turn-1',
+          explanation: 'Ship the fix in three steps.',
+          plan: [
+            {
+              step: 'Inspect current state',
+              status: 'in_progress',
+            },
+            {
+              step: 'Patch the UI',
+              status: 'pending',
+            },
+            {
+              step: 'Verify the result',
+              status: 'pending',
+            },
+          ],
+        }}
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'inProgress',
+            error: null,
+            items: [
+              {
+                id: 'user-1',
+                kind: 'userMessage',
+                text: 'Fix the timeline.',
+              },
+              {
+                id: 'file-1',
+                kind: 'fileChange',
+                text: 'src/components/ThreadTimeline.tsx',
+                status: 'completed',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByLabelText('Plan step status: Completed'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Plan step status: In progress'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Plan step status: Pending'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('INPROGRESS')).not.toBeInTheDocument();
+    expect(screen.queryByText('PENDING')).not.toBeInTheDocument();
   });
 
   it('renders optimistic steer bubbles under an optimistic running turn', () => {
@@ -1065,7 +1124,7 @@ describe('ThreadTimeline', () => {
             id: 'optimistic-steer-1',
             clientRequestId: 'client-steer-1',
             turnId: 'turn-running-1',
-            prompt: 'Queued steer prompt',
+            prompt: 'Steer prompt still sending',
             createdAt: new Date(Date.UTC(2026, 3, 9, 6, 3, 5)).toISOString(),
             status: 'steering',
           },
@@ -1073,7 +1132,7 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    expect(screen.getByText('Queued steer prompt')).toBeInTheDocument();
+    expect(screen.getByText('Steer prompt still sending')).toBeInTheDocument();
     expect(screen.getByText('Steering')).toBeInTheDocument();
   });
 
@@ -1118,7 +1177,7 @@ describe('ThreadTimeline', () => {
     const timelineText =
       screen.getByTestId('thread-scroll-container').textContent ?? '';
     expect(screen.getByText('This is a steer probe')).toBeInTheDocument();
-    expect(screen.getByText('Queued')).toBeInTheDocument();
+    expect(screen.getByText('Awaiting response')).toBeInTheDocument();
     expect(timelineText.indexOf('sleep 20')).toBeLessThan(
       timelineText.indexOf('This is a steer probe'),
     );

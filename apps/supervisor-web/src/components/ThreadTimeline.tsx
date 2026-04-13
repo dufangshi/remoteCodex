@@ -430,7 +430,7 @@ function prepareTurnItemsForRendering(
 
     return {
       ...item,
-      status: 'Queued',
+      status: 'Awaiting response',
     };
   });
 }
@@ -791,10 +791,14 @@ function CopyIcon() {
 function RunningDots({
   tone = 'amber',
 }: {
-  tone?: 'amber' | 'emerald';
+  tone?: 'amber' | 'emerald' | 'sky';
 }) {
   const dotClassName =
-    tone === 'emerald' ? 'bg-sky-200/90' : 'bg-amber-200/90';
+    tone === 'emerald'
+      ? 'bg-sky-200/90'
+      : tone === 'sky'
+        ? 'bg-sky-300/90'
+        : 'bg-amber-200/90';
 
   return (
     <span className="ml-1.5 inline-flex items-center gap-1" aria-hidden="true">
@@ -805,6 +809,196 @@ function RunningDots({
           style={{ animationDelay: `${index * 180}ms` }}
         />
       ))}
+    </span>
+  );
+}
+
+function normalizePlanStepStatus(status: string) {
+  const normalized = status.trim().toLowerCase();
+
+  if (
+    normalized === 'completed' ||
+    normalized === 'done' ||
+    normalized === 'complete'
+  ) {
+    return 'completed' as const;
+  }
+
+  if (
+    normalized === 'in_progress' ||
+    normalized === 'in progress' ||
+    normalized === 'inprogress' ||
+    normalized === 'running' ||
+    normalized === 'active'
+  ) {
+    return 'in_progress' as const;
+  }
+
+  if (
+    normalized === 'pending' ||
+    normalized === 'todo' ||
+    normalized === 'not_started' ||
+    normalized === 'not started' ||
+    normalized === 'queued'
+  ) {
+    return 'pending' as const;
+  }
+
+  if (normalized === 'failed' || normalized === 'error') {
+    return 'failed' as const;
+  }
+
+  return 'other' as const;
+}
+
+function isLivePlanExecutionEvidence(item: ThreadHistoryItemDto) {
+  switch (item.kind) {
+    case 'fileChange':
+    case 'webSearch':
+    case 'image':
+    case 'contextCompaction':
+      return true;
+    case 'commandExecution':
+    case 'toolCall':
+      return !isRunningHistoryStatus(item.status);
+    default:
+      return false;
+  }
+}
+
+function deriveDisplayedLivePlan(
+  livePlan: {
+    turnId: string;
+    explanation: string | null;
+    plan: Array<{ step: string; status: string }>;
+  } | null,
+  items: ThreadHistoryItemDto[],
+  turnStatus: TimelineTurn['status'],
+) {
+  if (!livePlan || !isActiveTurnStatus(turnStatus)) {
+    return livePlan;
+  }
+
+  const firstInProgressIndex = livePlan.plan.findIndex(
+    (step) => normalizePlanStepStatus(step.status) === 'in_progress',
+  );
+  if (firstInProgressIndex < 0) {
+    return livePlan;
+  }
+
+  const nextPendingIndex = livePlan.plan.findIndex(
+    (step, index) =>
+      index > firstInProgressIndex &&
+      normalizePlanStepStatus(step.status) === 'pending',
+  );
+  if (nextPendingIndex < 0) {
+    return livePlan;
+  }
+
+  const hasExecutionEvidence = items.some((item) =>
+    isLivePlanExecutionEvidence(item),
+  );
+  if (!hasExecutionEvidence) {
+    return livePlan;
+  }
+
+  const nextPlan = livePlan.plan.map((step, index) => {
+    if (index === firstInProgressIndex) {
+      return { ...step, status: 'completed' };
+    }
+    if (index === nextPendingIndex) {
+      return { ...step, status: 'in_progress' };
+    }
+    return step;
+  });
+
+  return {
+    ...livePlan,
+    plan: nextPlan,
+  };
+}
+
+function ClockIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 fill-none stroke-current"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="8" cy="8" r="4.75" />
+      <path d="M8 5.25v2.9l2.05 1.2" />
+    </svg>
+  );
+}
+
+function PlanStepStatusIcon({
+  status,
+}: {
+  status: string;
+}) {
+  const normalized = normalizePlanStepStatus(status);
+  const label =
+    normalized === 'completed'
+      ? 'Plan step status: Completed'
+      : normalized === 'in_progress'
+        ? 'Plan step status: In progress'
+        : normalized === 'pending'
+          ? 'Plan step status: Pending'
+          : normalized === 'failed'
+            ? 'Plan step status: Failed'
+            : `Plan step status: ${status}`;
+
+  const className =
+    normalized === 'completed'
+      ? 'border-emerald-300/30 bg-emerald-300/10 text-emerald-100'
+      : normalized === 'in_progress'
+        ? 'border-sky-300/30 bg-sky-300/10 text-sky-100'
+        : normalized === 'pending'
+          ? 'border-stone-700/90 bg-stone-900/80 text-stone-300'
+          : normalized === 'failed'
+            ? 'border-rose-300/30 bg-rose-300/10 text-rose-100'
+            : 'border-stone-700/90 bg-stone-900/80 text-stone-300';
+
+  return (
+    <span
+      aria-label={label}
+      title={label.replace('Plan step status: ', '')}
+      className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border ${className}`}
+    >
+      {normalized === 'completed' ? (
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 16 16"
+          className="h-3.5 w-3.5 fill-none stroke-current"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="m3.75 8.25 2.5 2.5 6-6" />
+        </svg>
+      ) : normalized === 'in_progress' ? (
+        <RunningDots tone="sky" />
+      ) : normalized === 'pending' ? (
+        <ClockIcon />
+      ) : normalized === 'failed' ? (
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 16 16"
+          className="h-3.5 w-3.5 fill-none stroke-current"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="m5 5 6 6M11 5l-6 6" />
+        </svg>
+      ) : (
+        <span className="text-[10px] font-semibold uppercase tracking-[0.14em]">
+          ?
+        </span>
+      )}
     </span>
   );
 }
@@ -1219,11 +1413,17 @@ const CompactMessageItem = memo(function CompactMessageItem({
       : 'border-slate-300/30 bg-slate-200/12 text-slate-100';
   const queuedLikeStatus =
     item.kind === 'userMessage' &&
-    (item.status === 'Steering' || item.status === 'Queued');
+    (
+      item.status === 'Steering' ||
+      item.status === 'Accepted' ||
+      item.status === 'Awaiting response'
+    );
   const queuedBadgeClassName =
     item.status === 'Steering'
       ? 'border-amber-300/30 bg-amber-300/10 text-amber-100'
-      : 'border-sky-300/30 bg-sky-300/10 text-sky-100';
+      : item.status === 'Accepted'
+        ? 'border-emerald-300/30 bg-emerald-300/10 text-emerald-100'
+        : 'border-sky-300/30 bg-sky-300/10 text-sky-100';
 
   useEffect(() => {
     return () => {
@@ -2517,6 +2717,10 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
     () => mergeLiveTurnItems(turn.items, liveItems),
     [liveItems, turn.items],
   );
+  const displayedLivePlan = useMemo(
+    () => deriveDisplayedLivePlan(livePlan, mergedItems, turn.status),
+    [livePlan, mergedItems, turn.status],
+  );
   const preparedItems = useMemo(
     () => prepareTurnItemsForRendering(mergedItems, isActiveTurnStatus(turn.status)),
     [mergedItems, turn.status],
@@ -2624,7 +2828,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
               />
             ),
           )}
-          {livePlan && (
+          {displayedLivePlan && (
             <div className="rounded-[1rem] border border-sky-300/15 bg-sky-300/5 px-3 py-3 sm:rounded-[1.2rem]">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm font-medium text-sky-100">Plan update</p>
@@ -2632,19 +2836,17 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
                   Live
                 </span>
               </div>
-              {livePlan.explanation && (
-                <p className="mt-3 text-sm text-stone-300">{livePlan.explanation}</p>
+              {displayedLivePlan.explanation && (
+                <p className="mt-3 text-sm text-stone-300">{displayedLivePlan.explanation}</p>
               )}
               <div className="mt-3 space-y-2">
-                {livePlan.plan.map((step, index) => (
+                {displayedLivePlan.plan.map((step, index) => (
                   <div
-                    key={`${livePlan.turnId}-${index}`}
-                    className="flex items-center gap-2 rounded-xl border border-stone-800/80 bg-stone-950/45 px-3 py-2 text-sm"
+                    key={`${displayedLivePlan.turnId}-${index}`}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-stone-800/80 bg-stone-950/45 px-3 py-2 text-sm"
                   >
-                    <span className="rounded-full border border-stone-700 px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-stone-400">
-                      {step.status}
-                    </span>
-                    <span className="text-stone-200">{step.step}</span>
+                    <span className="min-w-0 flex-1 text-stone-200">{step.step}</span>
+                    <PlanStepStatusIcon status={step.status} />
                   </div>
                 ))}
               </div>
@@ -3066,7 +3268,7 @@ export function ThreadTimeline({
     ...pendingSteers.map((steer) => ({
       id: steer.id,
       prompt: steer.prompt,
-      status: 'Queued',
+      status: 'Accepted',
       createdAt: steer.createdAt,
     })),
     ...optimisticSteers.map((steer) => ({
