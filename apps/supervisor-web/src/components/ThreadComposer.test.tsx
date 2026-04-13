@@ -330,7 +330,8 @@ describe('ThreadComposer', () => {
     });
     expect(screen.getByText('Skill Creator')).toBeInTheDocument();
     expect(screen.getByText('Repo')).toBeInTheDocument();
-    expect(screen.getByText('On')).toBeInTheDocument();
+    expect(screen.getByText('$skill-creator')).toBeInTheDocument();
+    expect(screen.queryByText('On')).not.toBeInTheDocument();
   });
 
   it('opens the skills panel even when no skills are available yet', async () => {
@@ -436,6 +437,142 @@ describe('ThreadComposer', () => {
       expect(onOpenMcp).toHaveBeenCalled();
     });
     expect(screen.getByText('No MCP servers available right now.')).toBeInTheDocument();
+  });
+
+  it('shows mcp add options and writes an http server block into config.toml', async () => {
+    const onOpenMcp = vi.fn().mockResolvedValue(undefined);
+    const onReadCodexConfig = vi.fn().mockResolvedValue({
+      name: 'config.toml',
+      path: '/home/u/.codex/config.toml',
+      content: '[profile.default]\nmodel = "gpt-5.4"\n',
+      updatedAt: '2026-04-13T12:00:00.000Z',
+    });
+    const onWriteCodexConfig = vi.fn().mockResolvedValue({
+      name: 'config.toml',
+      path: '/home/u/.codex/config.toml',
+      content:
+        '[profile.default]\nmodel = "gpt-5.4"\n\n[mcp_servers.docs]\nurl = "https://developers.openai.com/mcp"\n',
+      updatedAt: '2026-04-13T12:00:01.000Z',
+    });
+
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={() => undefined}
+        onOpenMcp={onOpenMcp}
+        onReadCodexConfig={onReadCodexConfig}
+        onWriteCodexConfig={onWriteCodexConfig}
+        mcpState={{
+          status: 'ready',
+          error: null,
+          data: {
+            servers: [],
+          },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
+    fireEvent.click(screen.getByRole('button', { name: /\/mcp/i }));
+
+    await waitFor(() => {
+      expect(onOpenMcp).toHaveBeenCalled();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add MCP' }));
+    expect(
+      screen.getByRole('button', { name: /HTTP \/ Streamable HTTP.*Form/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /stdio \/ raw block.*TOML/i }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /HTTP \/ Streamable HTTP.*Form/i }),
+    );
+
+    fireEvent.change(screen.getByLabelText('MCP name'), {
+      target: { value: 'docs' },
+    });
+    fireEvent.change(screen.getByLabelText('URL'), {
+      target: { value: 'https://developers.openai.com/mcp' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Write HTTP MCP' }));
+
+    await waitFor(() => {
+      expect(onReadCodexConfig).toHaveBeenCalled();
+      expect(onWriteCodexConfig).toHaveBeenCalledWith(
+        '[profile.default]\nmodel = "gpt-5.4"\n\n[mcp_servers.docs]\nurl = "https://developers.openai.com/mcp"\n',
+      );
+    });
+    expect(
+      screen.getByText(/MCP entry written to config\.toml/i),
+    ).toBeInTheDocument();
+  });
+
+  it('writes a raw stdio mcp block into config.toml', async () => {
+    const onReadCodexConfig = vi.fn().mockResolvedValue({
+      name: 'config.toml',
+      path: '/home/u/.codex/config.toml',
+      content: '[profile.default]\nmodel = "gpt-5.4"\n',
+      updatedAt: '2026-04-13T12:00:00.000Z',
+    });
+    const onWriteCodexConfig = vi.fn().mockResolvedValue({
+      name: 'config.toml',
+      path: '/home/u/.codex/config.toml',
+      content:
+        '[profile.default]\nmodel = "gpt-5.4"\n\n[mcp_servers.local_docs]\ncommand = "npx"\nargs = ["-y", "@openai/example-mcp"]\n',
+      updatedAt: '2026-04-13T12:00:01.000Z',
+    });
+
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={() => undefined}
+        onReadCodexConfig={onReadCodexConfig}
+        onWriteCodexConfig={onWriteCodexConfig}
+        mcpState={{
+          status: 'ready',
+          error: null,
+          data: {
+            servers: [],
+          },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
+    fireEvent.click(screen.getByRole('button', { name: /\/mcp/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add MCP' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: /stdio \/ raw block.*TOML/i }),
+    );
+
+    const editor = await screen.findByLabelText('MCP block for config.toml');
+    fireEvent.change(editor, {
+      target: {
+        value:
+          '[mcp_servers.local_docs]\ncommand = "npx"\nargs = ["-y", "@openai/example-mcp"]\n',
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Write raw block' }));
+
+    await waitFor(() => {
+      expect(onWriteCodexConfig).toHaveBeenCalledWith(
+        '[profile.default]\nmodel = "gpt-5.4"\n\n[mcp_servers.local_docs]\ncommand = "npx"\nargs = ["-y", "@openai/example-mcp"]\n',
+      );
+    });
+    expect(
+      screen.getByText(/MCP entry written to config\.toml/i),
+    ).toBeInTheDocument();
   });
 
   it('keeps direct model controls available while fast mode is on', () => {

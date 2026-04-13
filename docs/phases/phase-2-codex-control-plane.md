@@ -145,7 +145,7 @@
 - [x] C1. slash 工具箱根列表新增 `/skills` 与 `/mcp` 两个入口。
 - [x] C2. `/skills` 点击后打开只读二级悬浮面板，而不是发送普通消息。
 - [x] C3. `/mcp` 点击后打开只读二级悬浮面板，而不是发送普通消息。
-- [x] C4. `/skills` 面板展示技能名称、描述、scope 与 enabled 状态。
+- [x] C4. `/skills` 面板展示技能名称、描述、scope 与实际调用名（如 `$imagegen`），不再伪造 on/off。
 - [x] C5. `/mcp` 面板展示 MCP server 名称、认证状态与工具概览。
 - [x] C6. `/skills` 数据直接对接 Codex App Server `skills/list`，不手搓本地目录扫描。
 - [x] C7. `/mcp` 数据直接对接 Codex App Server `mcpServerStatus/list`，不额外发明配置来源。
@@ -153,6 +153,8 @@
 - [x] C9. 为第二批 slash 功能补齐前端交互测试。
 - [x] C10. 为第二批 slash 功能补齐 API / service 测试。
 - [x] C11. 跑完本批相关测试后再打钩本批最终完成项。
+- [x] C12. `/skills` 面板去掉伪开关语义，改为目录 / 状态视图。
+- [x] C13. `/mcp` 面板补齐第一阶段管理方案：列表、添加 HTTP MCP、原始 TOML 编辑。
 
 当前计划兼容的命令范围如下：
 
@@ -260,6 +262,8 @@ fork 后的结果要求：
 定位：
 
 - `/skills` 是查看与理解当前 skills 状态的管理入口，不应作为普通消息发进模型上下文。
+- 当前已核对到的 OpenAI 官方公开材料不足以支持“网页端直接开关单个 skill”的设计。
+- 因此网页端不应把 `/skills` 设计成 toggle 控制台，而应设计成能力目录 / 发现面板。
 
 交互要求：
 
@@ -271,13 +275,25 @@ fork 后的结果要求：
 本阶段范围：
 
 - 第一阶段先做查看与展示。
-- 后续再补充启用、安装、刷新、更多详情等能力。
+- 展示内容优先包括：
+  - skill 名称
+  - 描述
+  - scope（`system` / `user` / `repo` / `admin`）
+  - 实际调用名（如 `$imagegen`）
+- 不展示伪造的 on/off 开关。
+- 如果后端返回 `enabled` 字段，也不把它渲染成用户可切换开关；只有在 OpenAI 官方明确提供稳定的 skill enable / disable 能力后，再补切换交互。
+- 安装、刷新、更多详情等能力后续再补。
+- 需要明确区分：
+  - `/skills` 只展示当前本机已经被 Codex 发现到的 skills。
+  - curated / experimental skills 不会因为打开 `/skills` 自动出现。
+  - 需要安装新 skill 时，应通过 `skill-installer` skill 调用其 helper scripts，把 skill 下载到 `$CODEX_HOME/skills/<skill-name>`，然后重启 Codex 让其重新发现。
 
 #### 3.8.5 `/mcp`
 
 定位：
 
 - `/mcp` 与 `/skills` 类似，属于能力面板入口，而不是普通消息。
+- 但 `/mcp` 最终应承载真实管理能力，而不只是只读查看。
 
 交互要求：
 
@@ -287,9 +303,26 @@ fork 后的结果要求：
 
 本阶段范围：
 
-- 第一阶段先做“查看当前可用 MCP”。
-- `add`、`edit`、`test` 等管理操作后续再补。
-- 后续很可能需要与左侧 `settings` 区域联动，但这一轮不把完整 MCP 配置编辑器纳入范围。
+- 官方对齐结论：
+  - Codex CLI / IDE extension 共用 `~/.codex/config.toml`
+  - MCP server 配置落在 `[mcp_servers.<name>]`
+  - 添加 HTTP MCP server 可优先复用官方 CLI：`codex mcp add <name> --url <url>`
+- 因此网页端 MCP 管理必须以 `~/.codex/config.toml` 为真实来源，而不是另起一套 supervisor 私有配置。
+- 第一阶段建议实现：
+  - 当前 MCP server 列表
+  - `Add MCP` 二级入口
+  - 添加 HTTP / Streamable HTTP MCP server
+  - 原始 TOML block 编辑入口
+- 列表项优先展示：
+  - server 名称
+  - 连接方式摘要（`url` 或 `command`）
+  - auth 状态
+  - tool 数量
+  - 最近错误或不可用原因
+- 添加成功后需要明确提示配置已写入 `~/.codex/config.toml`，并在必要时提示用户重启 Codex service 以确保生效。
+- 复杂 stdio MCP 第一阶段不急于堆大量 GUI 表单，更稳妥的方式是提供对应 TOML block 的原始编辑入口。
+- stdio MCP 的 GUI 只负责帮助用户编辑单个 `[mcp_servers.<name>]` block，不负责改写整份配置文件的其它段落。
+- `remove`、tool-level approval overrides、`test` / health check 后续再补。
 
 #### 3.8.6 `/init`
 

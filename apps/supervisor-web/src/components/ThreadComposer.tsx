@@ -14,6 +14,7 @@ import {
 
 import type {
   CollaborationModeDto,
+  CodexHostFileDto,
   ThreadMcpServersDto,
   ThreadSkillsDto,
   ModelOptionDto,
@@ -61,6 +62,10 @@ interface ThreadComposerProps {
   onCompact?: () => Promise<void> | void;
   onOpenSkills?: () => Promise<void> | void;
   onOpenMcp?: () => Promise<void> | void;
+  onReadCodexConfig?: () => Promise<CodexHostFileDto> | CodexHostFileDto;
+  onWriteCodexConfig?: (
+    content: string,
+  ) => Promise<CodexHostFileDto> | CodexHostFileDto;
   onToggleFollow?: () => void;
   onUpdateSettings?: (input: UpdateThreadSettingsInput) => Promise<void> | void;
   onToggleView?: () => void;
@@ -102,6 +107,7 @@ interface PromptAttachmentSegment {
 type PromptSegment = PromptTextSegment | PromptAttachmentSegment;
 type AttachmentPreviewMap = Record<string, string>;
 type SlashPanelView = 'root' | 'skills' | 'mcp';
+type McpPanelMode = 'list' | 'add' | 'http' | 'stdio';
 
 function normalizePromptText(value: string) {
   return value.replace(/\u00a0/g, ' ');
@@ -250,6 +256,89 @@ function skillScopeLabel(
     default:
       return 'User';
   }
+}
+
+function normalizeTomlContent(value: string) {
+  return value.replace(/\r\n/g, '\n');
+}
+
+function parseMcpServerName(value: string) {
+  const normalized = value.trim();
+  if (!/^[A-Za-z0-9_-]+$/.test(normalized)) {
+    return null;
+  }
+
+  return normalized;
+}
+
+function parseMcpServerNameFromBlock(value: string) {
+  const lines = normalizeTomlContent(value)
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const header = lines.find((line) => /^\[mcp_servers\.[^\]]+\]$/.test(line));
+  if (!header) {
+    return null;
+  }
+
+  const match = header.match(/^\[mcp_servers\.([A-Za-z0-9_-]+)\]$/);
+  return match?.[1] ?? null;
+}
+
+function renderHttpMcpBlock(name: string, url: string) {
+  return `[mcp_servers.${name}]\nurl = ${JSON.stringify(url.trim())}\n`;
+}
+
+function upsertMcpServerBlock(
+  configContent: string,
+  serverName: string,
+  blockContent: string,
+) {
+  const normalizedConfig = normalizeTomlContent(configContent);
+  const trimmedBlock = `${normalizeTomlContent(blockContent).trim()}\n`;
+  const lines = normalizedConfig.split('\n');
+  const exactHeader = `[mcp_servers.${serverName}]`;
+  const nestedPrefix = `[mcp_servers.${serverName}.`;
+
+  let start = -1;
+  let end = lines.length;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const trimmed = lines[index]?.trim() ?? '';
+    if (trimmed === exactHeader) {
+      start = index;
+      break;
+    }
+  }
+
+  if (start >= 0) {
+    for (let index = start + 1; index < lines.length; index += 1) {
+      const trimmed = lines[index]?.trim() ?? '';
+      if (!trimmed.startsWith('[')) {
+        continue;
+      }
+      if (trimmed === exactHeader || trimmed.startsWith(nestedPrefix)) {
+        continue;
+      }
+      end = index;
+      break;
+    }
+
+    const before = lines.slice(0, start).join('\n').trimEnd();
+    const after = lines.slice(end).join('\n').trim();
+    return [
+      before,
+      trimmedBlock.trimEnd(),
+      after,
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .concat('\n');
+  }
+
+  const base = normalizedConfig.trimEnd();
+  return base ? `${base}\n\n${trimmedBlock}` : trimmedBlock;
 }
 
 function clampPercent(value: number | null | undefined) {
@@ -516,6 +605,8 @@ export function ThreadComposer({
   onCompact,
   onOpenSkills,
   onOpenMcp,
+  onReadCodexConfig,
+  onWriteCodexConfig,
   onToggleFollow,
   onUpdateSettings,
   onToggleView,
@@ -532,6 +623,14 @@ export function ThreadComposer({
   });
   const [openMenu, setOpenMenu] = useState<SettingsMenu>(null);
   const [slashPanelView, setSlashPanelView] = useState<SlashPanelView>('root');
+  const [mcpPanelMode, setMcpPanelMode] = useState<McpPanelMode>('list');
+  const [mcpHttpName, setMcpHttpName] = useState('');
+  const [mcpHttpUrl, setMcpHttpUrl] = useState('');
+  const [mcpRawBlock, setMcpRawBlock] = useState('');
+  const [mcpConfigPath, setMcpConfigPath] = useState<string | null>(null);
+  const [mcpConfigBusy, setMcpConfigBusy] = useState(false);
+  const [mcpConfigError, setMcpConfigError] = useState<string | null>(null);
+  const [mcpConfigSuccess, setMcpConfigSuccess] = useState<string | null>(null);
   const menuRef = useRef<HTMLFormElement | null>(null);
   const promptRef = useRef<HTMLDivElement | null>(null);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
@@ -559,8 +658,19 @@ export function ThreadComposer({
   useEffect(() => {
     if (openMenu !== 'slash') {
       setSlashPanelView('root');
+      setMcpPanelMode('list');
+      setMcpConfigError(null);
+      setMcpConfigSuccess(null);
     }
   }, [openMenu]);
+
+  useEffect(() => {
+    if (slashPanelView !== 'mcp') {
+      setMcpPanelMode('list');
+      setMcpConfigError(null);
+      setMcpConfigSuccess(null);
+    }
+  }, [slashPanelView]);
 
   function updateDraft(
     updater: (current: {
@@ -658,6 +768,125 @@ export function ThreadComposer({
         .join('|'),
     [attachmentPreviewUrls],
   );
+
+  async function loadCodexConfig() {
+    if (!onReadCodexConfig) {
+      throw new Error('config.toml editing is unavailable in this view.');
+    }
+
+    const file = await onReadCodexConfig();
+    setMcpConfigPath(file.path);
+    return file;
+  }
+
+  async function writeMcpConfig(nextContent: string) {
+    if (!onWriteCodexConfig) {
+      throw new Error('config.toml editing is unavailable in this view.');
+    }
+
+    const updated = await onWriteCodexConfig(nextContent);
+    setMcpConfigPath(updated.path);
+    return updated;
+  }
+
+  async function handleSaveHttpMcp() {
+    const name = parseMcpServerName(mcpHttpName);
+    const url = mcpHttpUrl.trim();
+    if (!name) {
+      setMcpConfigError(
+        'MCP name must use only letters, numbers, underscore, or hyphen.',
+      );
+      return;
+    }
+    if (!/^https?:\/\//i.test(url)) {
+      setMcpConfigError('HTTP MCP URL must start with http:// or https://');
+      return;
+    }
+
+    setMcpConfigBusy(true);
+    setMcpConfigError(null);
+    setMcpConfigSuccess(null);
+
+    try {
+      const file = await loadCodexConfig();
+      const nextContent = upsertMcpServerBlock(
+        file.content,
+        name,
+        renderHttpMcpBlock(name, url),
+      );
+      await writeMcpConfig(nextContent);
+      setMcpConfigSuccess(
+        'MCP entry written to config.toml. Restart Codex service if it does not appear immediately.',
+      );
+      setMcpPanelMode('list');
+      setMcpHttpName('');
+      setMcpHttpUrl('');
+      void onOpenMcp?.();
+    } catch (error) {
+      setMcpConfigError(
+        error instanceof Error ? error.message : 'Unable to update config.toml.',
+      );
+    } finally {
+      setMcpConfigBusy(false);
+    }
+  }
+
+  async function handlePrepareRawMcpBlock() {
+    setMcpConfigBusy(true);
+    setMcpConfigError(null);
+    setMcpConfigSuccess(null);
+
+    try {
+      await loadCodexConfig();
+      if (!mcpRawBlock.trim()) {
+        setMcpRawBlock(
+          '[mcp_servers.example_stdio]\ncommand = "npx"\nargs = ["-y", "your-mcp-server"]\n',
+        );
+      }
+      setMcpPanelMode('stdio');
+    } catch (error) {
+      setMcpConfigError(
+        error instanceof Error ? error.message : 'Unable to load config.toml.',
+      );
+    } finally {
+      setMcpConfigBusy(false);
+    }
+  }
+
+  async function handleSaveRawMcpBlock() {
+    const serverName = parseMcpServerNameFromBlock(mcpRawBlock);
+    if (!serverName) {
+      setMcpConfigError(
+        'The raw MCP block must start with a header like [mcp_servers.name].',
+      );
+      return;
+    }
+
+    setMcpConfigBusy(true);
+    setMcpConfigError(null);
+    setMcpConfigSuccess(null);
+
+    try {
+      const file = await loadCodexConfig();
+      const nextContent = upsertMcpServerBlock(
+        file.content,
+        serverName,
+        mcpRawBlock,
+      );
+      await writeMcpConfig(nextContent);
+      setMcpConfigSuccess(
+        'MCP entry written to config.toml. Restart Codex service if it does not appear immediately.',
+      );
+      setMcpPanelMode('list');
+      void onOpenMcp?.();
+    } catch (error) {
+      setMcpConfigError(
+        error instanceof Error ? error.message : 'Unable to update config.toml.',
+      );
+    } finally {
+      setMcpConfigBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (isShellView) {
@@ -1634,14 +1863,8 @@ export function ThreadComposer({
                                         <span className="rounded-full border border-stone-700 px-2 py-1 text-stone-400">
                                           {skillScopeLabel(skill.scope)}
                                         </span>
-                                        <span
-                                          className={`rounded-full border px-2 py-1 ${
-                                            skill.enabled
-                                              ? 'border-emerald-500/35 text-emerald-300'
-                                              : 'border-stone-700 text-stone-500'
-                                          }`}
-                                        >
-                                          {skill.enabled ? 'On' : 'Off'}
+                                        <span className="rounded-full border border-stone-700 px-2 py-1 text-stone-300 normal-case tracking-normal">
+                                          ${skill.name}
                                         </span>
                                       </div>
                                     </div>
@@ -1675,6 +1898,30 @@ export function ThreadComposer({
                           </div>
                         ) : (
                           <div className="p-2">
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="text-xs text-stone-400">
+                                  MCP config source
+                                </p>
+                                <p className="truncate text-[11px] text-stone-500">
+                                  {mcpConfigPath ?? '~/.codex/config.toml'}
+                                </p>
+                              </div>
+                              {mcpPanelMode === 'list' ? (
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setMcpPanelMode('add');
+                                    setMcpConfigError(null);
+                                    setMcpConfigSuccess(null);
+                                  }}
+                                  className="shrink-0 rounded-full border border-sky-300/35 px-3 py-1.5 text-xs text-sky-100 transition hover:bg-sky-300/10"
+                                >
+                                  Add MCP
+                                </button>
+                              ) : null}
+                            </div>
                             {mcpState.status === 'loading' && !mcpState.data ? (
                               <p className="rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3 text-sm text-stone-400">
                                 Loading MCP servers…
@@ -1685,7 +1932,135 @@ export function ThreadComposer({
                                 {mcpState.error}
                               </p>
                             ) : null}
-                            {mcpState.data?.servers.length ? (
+                            {mcpConfigError ? (
+                              <p className="mb-2 rounded-xl border border-rose-500/35 bg-rose-500/10 px-3 py-3 text-sm text-rose-100/90">
+                                {mcpConfigError}
+                              </p>
+                            ) : null}
+                            {mcpConfigSuccess ? (
+                              <p className="mb-2 rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-3 py-3 text-sm text-emerald-100/90">
+                                {mcpConfigSuccess}
+                              </p>
+                            ) : null}
+                            {mcpPanelMode === 'add' ? (
+                              <div className="space-y-2">
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setMcpPanelMode('http');
+                                    setMcpConfigError(null);
+                                    setMcpConfigSuccess(null);
+                                  }}
+                                  className="block w-full rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3 text-left transition hover:bg-stone-900"
+                                >
+                                  <div className="flex items-center justify-between gap-3">
+                                    <span className="text-sm text-stone-100">HTTP / Streamable HTTP</span>
+                                    <span className="text-[11px] uppercase tracking-[0.16em] text-stone-500">
+                                      Form
+                                    </span>
+                                  </div>
+                                  <p className="mt-1 text-xs text-stone-400">
+                                    Add an MCP server with a name and URL, then write the matching block into config.toml.
+                                  </p>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    void handlePrepareRawMcpBlock();
+                                  }}
+                                  className="block w-full rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3 text-left transition hover:bg-stone-900"
+                                >
+                                  <div className="flex items-center justify-between gap-3">
+                                    <span className="text-sm text-stone-100">stdio / raw block</span>
+                                    <span className="text-[11px] uppercase tracking-[0.16em] text-stone-500">
+                                      TOML
+                                    </span>
+                                  </div>
+                                  <p className="mt-1 text-xs text-stone-400">
+                                    Write a single `[mcp_servers.name]` block, then save it back into config.toml.
+                                  </p>
+                                </button>
+                              </div>
+                            ) : null}
+                            {mcpPanelMode === 'http' ? (
+                              <div className="space-y-2 rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3">
+                                <div>
+                                  <label className="mb-1 block text-xs text-stone-400">
+                                    MCP name
+                                  </label>
+                                  <input
+                                    aria-label="MCP name"
+                                    value={mcpHttpName}
+                                    onChange={(event) => setMcpHttpName(event.target.value)}
+                                    placeholder="openaiDeveloperDocs"
+                                    className="w-full rounded-lg border border-stone-700 bg-stone-950 px-3 py-2 text-sm text-stone-100 outline-none placeholder:text-stone-500 focus:border-sky-300/50"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="mb-1 block text-xs text-stone-400">
+                                    URL
+                                  </label>
+                                  <input
+                                    aria-label="URL"
+                                    value={mcpHttpUrl}
+                                    onChange={(event) => setMcpHttpUrl(event.target.value)}
+                                    placeholder="https://developers.openai.com/mcp"
+                                    className="w-full rounded-lg border border-stone-700 bg-stone-950 px-3 py-2 text-sm text-stone-100 outline-none placeholder:text-stone-500 focus:border-sky-300/50"
+                                  />
+                                </div>
+                                <div className="flex items-center justify-between gap-2 pt-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => setMcpPanelMode('add')}
+                                    className="rounded-full border border-stone-700 px-3 py-1.5 text-xs text-stone-300 transition hover:bg-stone-800"
+                                  >
+                                    Back
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleSaveHttpMcp()}
+                                    disabled={mcpConfigBusy}
+                                    className="rounded-full border border-sky-300/35 px-3 py-1.5 text-xs text-sky-100 transition hover:bg-sky-300/10 disabled:cursor-not-allowed disabled:border-stone-700 disabled:text-stone-500"
+                                  >
+                                    {mcpConfigBusy ? 'Saving…' : 'Write HTTP MCP'}
+                                  </button>
+                                </div>
+                              </div>
+                            ) : null}
+                            {mcpPanelMode === 'stdio' ? (
+                              <div className="space-y-2 rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3">
+                                <label className="block text-xs text-stone-400">
+                                  MCP block for config.toml
+                                </label>
+                                <textarea
+                                  aria-label="MCP block for config.toml"
+                                  value={mcpRawBlock}
+                                  onChange={(event) => setMcpRawBlock(event.target.value)}
+                                  rows={8}
+                                  className="w-full rounded-lg border border-stone-700 bg-stone-950 px-3 py-2 text-sm text-stone-100 outline-none placeholder:text-stone-500 focus:border-sky-300/50"
+                                />
+                                <div className="flex items-center justify-between gap-2 pt-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => setMcpPanelMode('add')}
+                                    className="rounded-full border border-stone-700 px-3 py-1.5 text-xs text-stone-300 transition hover:bg-stone-800"
+                                  >
+                                    Back
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleSaveRawMcpBlock()}
+                                    disabled={mcpConfigBusy}
+                                    className="rounded-full border border-sky-300/35 px-3 py-1.5 text-xs text-sky-100 transition hover:bg-sky-300/10 disabled:cursor-not-allowed disabled:border-stone-700 disabled:text-stone-500"
+                                  >
+                                    {mcpConfigBusy ? 'Saving…' : 'Write raw block'}
+                                  </button>
+                                </div>
+                              </div>
+                            ) : null}
+                            {mcpPanelMode === 'list' && mcpState.data?.servers.length ? (
                               <div className="space-y-2">
                                 {mcpState.data.servers.map((server) => (
                                   <div
@@ -1718,7 +2093,8 @@ export function ThreadComposer({
                                 ))}
                               </div>
                             ) : null}
-                            {mcpState.status !== 'loading' &&
+                            {mcpPanelMode === 'list' &&
+                            mcpState.status !== 'loading' &&
                             !mcpState.error &&
                             (mcpState.data?.servers.length ?? 0) === 0 ? (
                               <p className="rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3 text-sm text-stone-400">
