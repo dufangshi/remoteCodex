@@ -1,5 +1,7 @@
 import {
+  ClipboardEvent,
   type Dispatch,
+  DragEvent,
   FormEvent,
   KeyboardEvent,
   useLayoutEffect,
@@ -77,6 +79,7 @@ interface PromptAttachmentSegment {
 }
 
 type PromptSegment = PromptTextSegment | PromptAttachmentSegment;
+type AttachmentPreviewMap = Record<string, string>;
 
 function normalizePromptText(value: string) {
   return value.replace(/\u00a0/g, ' ');
@@ -264,6 +267,76 @@ function normalizeAttachmentLabel(name: string) {
   return sanitized || 'attachment';
 }
 
+function classifyAttachmentKind(file: File): PromptAttachmentKindDto {
+  return file.type.startsWith('image/') ? 'photo' : 'file';
+}
+
+function extractFilesFromTransfer(
+  items: DataTransferItemList | null | undefined,
+  files: FileList | null | undefined,
+) {
+  const extractedFiles: File[] = [];
+
+  if (items) {
+    for (const item of Array.from(items)) {
+      if (item.kind !== 'file') {
+        continue;
+      }
+      const file = item.getAsFile();
+      if (file) {
+        extractedFiles.push(file);
+      }
+    }
+  }
+
+  if (extractedFiles.length > 0) {
+    return extractedFiles;
+  }
+
+  if (files) {
+    return Array.from(files);
+  }
+
+  return [];
+}
+
+function hasTransferFiles(
+  items: DataTransferItemList | null | undefined,
+  files: FileList | null | undefined,
+) {
+  return extractFilesFromTransfer(items, files).length > 0;
+}
+
+function segmentNodeText(child: ChildNode) {
+  if (
+    child instanceof HTMLElement &&
+    child.dataset.segmentType === 'attachment' &&
+    child.dataset.placeholder
+  ) {
+    return child.dataset.placeholder;
+  }
+
+  return child.textContent ?? '';
+}
+
+function basenameFromAttachmentPath(value: string) {
+  const normalized = value.replace(/[\\/]+$/, '').trim();
+  if (!normalized) {
+    return '';
+  }
+  const segments = normalized.split(/[\\/]/).filter(Boolean);
+  return segments.at(-1) ?? normalized;
+}
+
+function attachmentDisplayLabel(attachment: ComposerAttachmentDraft) {
+  const placeholderMatch = attachment.placeholder.match(/^\[(?:PHOTO|FILE)\s+(.+)\]$/);
+  if (placeholderMatch?.[1]) {
+    return placeholderMatch[1];
+  }
+
+  return basenameFromAttachmentPath(attachment.originalName);
+}
+
 function ChatIcon() {
   return (
     <svg
@@ -372,15 +445,19 @@ export function ThreadComposer({
     attachments: [],
   });
   const [openMenu, setOpenMenu] = useState<SettingsMenu>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLFormElement | null>(null);
   const promptRef = useRef<HTMLDivElement | null>(null);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pendingSelectionRef = useRef<{ start: number; end: number } | null>(null);
   const selectionSnapshotRef = useRef<{ start: number; end: number } | null>(null);
+  const previewUrlCacheRef = useRef<Map<string, string>>(new Map());
+  const renderedPreviewSignatureRef = useRef('');
   const isShellView = activeView === 'shell';
   const isMobileShell = Boolean(isShellView && shellControlState?.isMobileShell);
   const shellPromptLabel = shellControlState?.promptLabel ?? null;
+  const [attachmentPreviewUrls, setAttachmentPreviewUrls] = useState<AttachmentPreviewMap>({});
+  const [isDragTargetActive, setIsDragTargetActive] = useState(false);
   const isDraftControlled =
     !isShellView &&
     draftPrompt !== undefined &&
@@ -479,6 +556,57 @@ export function ThreadComposer({
     () => tokenizePrompt(prompt, attachments),
     [attachments, prompt],
   );
+  const previewSignature = useMemo(
+    () =>
+      Object.entries(attachmentPreviewUrls)
+        .sort(([leftId], [rightId]) => leftId.localeCompare(rightId))
+        .map(([clientId, previewUrl]) => `${clientId}:${previewUrl}`)
+        .join('|'),
+    [attachmentPreviewUrls],
+  );
+
+  useEffect(() => {
+    if (isShellView) {
+      setAttachmentPreviewUrls({});
+      return;
+    }
+
+    const nextPreviewUrls: AttachmentPreviewMap = {};
+    const activeClientIds = new Set<string>();
+
+    for (const attachment of attachments) {
+      if (attachment.kind !== 'photo') {
+        continue;
+      }
+
+      activeClientIds.add(attachment.clientId);
+      let previewUrl = previewUrlCacheRef.current.get(attachment.clientId);
+      if (!previewUrl) {
+        previewUrl = URL.createObjectURL(attachment.file);
+        previewUrlCacheRef.current.set(attachment.clientId, previewUrl);
+      }
+      nextPreviewUrls[attachment.clientId] = previewUrl;
+    }
+
+    for (const [clientId, previewUrl] of previewUrlCacheRef.current.entries()) {
+      if (activeClientIds.has(clientId)) {
+        continue;
+      }
+      URL.revokeObjectURL(previewUrl);
+      previewUrlCacheRef.current.delete(clientId);
+    }
+
+    setAttachmentPreviewUrls(nextPreviewUrls);
+  }, [attachments, isShellView]);
+
+  useEffect(() => {
+    return () => {
+      for (const previewUrl of previewUrlCacheRef.current.values()) {
+        URL.revokeObjectURL(previewUrl);
+      }
+      previewUrlCacheRef.current.clear();
+    };
+  }, []);
 
   function snapshotSelection() {
     const editor = promptRef.current;
@@ -495,18 +623,87 @@ export function ThreadComposer({
       return null;
     }
 
-    const startRange = range.cloneRange();
-    startRange.selectNodeContents(editor);
-    startRange.setEnd(range.startContainer, range.startOffset);
-
-    const endRange = range.cloneRange();
-    endRange.selectNodeContents(editor);
-    endRange.setEnd(range.endContainer, range.endOffset);
-
     return {
-      start: startRange.toString().length,
-      end: endRange.toString().length,
+      start: measureSelectionOffset(editor, range.startContainer, range.startOffset),
+      end: measureSelectionOffset(editor, range.endContainer, range.endOffset),
     };
+  }
+
+  function measureSelectionOffset(
+    root: HTMLDivElement,
+    container: Node,
+    offset: number,
+  ) {
+    let resolvedChild: ChildNode | null = null;
+    let offsetWithinChild = offset;
+
+    if (container === root) {
+      const childNodes = Array.from(root.childNodes);
+      let total = 0;
+      for (let index = 0; index < Math.min(offset, childNodes.length); index += 1) {
+        const child = childNodes[index];
+        if (child) {
+          total += segmentNodeText(child).length;
+        }
+      }
+      return total;
+    }
+
+    if (container.nodeType === Node.TEXT_NODE) {
+      resolvedChild = container as ChildNode;
+    } else {
+      const nearestChild = Array.from(root.childNodes).find((child) => child.contains(container));
+      if (!nearestChild) {
+        return serializeEditorPrompt().length;
+      }
+      resolvedChild = nearestChild;
+
+      if (
+        nearestChild instanceof HTMLElement &&
+        nearestChild.dataset.segmentType === 'attachment'
+      ) {
+        const range = document.createRange();
+        range.selectNodeContents(nearestChild);
+        const placeholderLength = segmentNodeText(nearestChild).length;
+        try {
+          range.setEnd(container, offset);
+          const visibleOffset = range.toString().length;
+          const attachmentTextLength = nearestChild.textContent?.length ?? 0;
+          if (attachmentTextLength === 0) {
+            offsetWithinChild = placeholderLength;
+          } else {
+            offsetWithinChild = Math.round(
+              Math.min(1, visibleOffset / attachmentTextLength) * placeholderLength,
+            );
+          }
+        } catch {
+          offsetWithinChild = placeholderLength;
+        }
+      } else {
+        const range = document.createRange();
+        range.selectNodeContents(nearestChild);
+        try {
+          range.setEnd(container, offset);
+          offsetWithinChild = range.toString().length;
+        } catch {
+          offsetWithinChild = segmentNodeText(nearestChild).length;
+        }
+      }
+    }
+
+    const childNodes = Array.from(root.childNodes);
+    let total = 0;
+    for (const child of childNodes) {
+      if (child === resolvedChild) {
+        if (child.nodeType === Node.TEXT_NODE) {
+          return total + offsetWithinChild;
+        }
+        return total + Math.min(offsetWithinChild, segmentNodeText(child).length);
+      }
+      total += segmentNodeText(child).length;
+    }
+
+    return total;
   }
 
   function resolveOffsetToDomPosition(root: HTMLDivElement, targetOffset: number) {
@@ -514,7 +711,7 @@ export function ThreadComposer({
     const childNodes = Array.from(root.childNodes);
 
     for (const [index, child] of childNodes.entries()) {
-      const childText = child.textContent ?? '';
+      const childText = segmentNodeText(child);
       const childLength = childText.length;
 
       if (child.nodeType === Node.TEXT_NODE) {
@@ -541,6 +738,13 @@ export function ThreadComposer({
         }
 
         if (remaining <= childLength) {
+          const nextChild = childNodes[index + 1];
+          if (remaining === childLength && nextChild?.nodeType === Node.TEXT_NODE) {
+            return {
+              node: nextChild,
+              offset: 0,
+            };
+          }
           return {
             node: root,
             offset: index + 1,
@@ -592,7 +796,7 @@ export function ThreadComposer({
 
     let nextPrompt = '';
     for (const child of Array.from(editor.childNodes)) {
-      nextPrompt += child.textContent ?? '';
+      nextPrompt += segmentNodeText(child);
     }
 
     return normalizePromptText(nextPrompt);
@@ -624,6 +828,19 @@ export function ThreadComposer({
     return `attachment-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   }
 
+  function buildAttachmentInsertionText(
+    basePrompt: string,
+    insertionPoint: { start: number; end: number },
+    placeholders: string[],
+  ) {
+    const beforeChar = insertionPoint.start > 0 ? basePrompt[insertionPoint.start - 1] : '';
+    const afterChar =
+      insertionPoint.end < basePrompt.length ? basePrompt[insertionPoint.end] : '';
+    const needsLeadingSpace = Boolean(beforeChar && !/\s/.test(beforeChar));
+    const needsTrailingSpace = !afterChar || !/\s/.test(afterChar);
+    return `${needsLeadingSpace ? ' ' : ''}${placeholders.join(' ')}${needsTrailingSpace ? ' ' : ''}`;
+  }
+
   function appendAttachments(
     files: FileList | null,
     kind: PromptAttachmentKindDto,
@@ -651,7 +868,6 @@ export function ThreadComposer({
       };
     });
 
-    const insertion = nextAttachments.map((entry) => entry.placeholder).join(' ');
     const selection = snapshotSelection() ?? selectionSnapshotRef.current;
     const insertionPoint = selection
       ? {
@@ -662,7 +878,12 @@ export function ThreadComposer({
           start: prompt.length,
           end: prompt.length,
         };
-    const nextPrompt = `${prompt.slice(0, insertionPoint.start)}${insertion}${prompt.slice(
+    const insertionText = buildAttachmentInsertionText(
+      prompt,
+      insertionPoint,
+      nextAttachments.map((entry) => entry.placeholder),
+    );
+    const nextPrompt = `${prompt.slice(0, insertionPoint.start)}${insertionText}${prompt.slice(
       insertionPoint.end,
     )}`;
 
@@ -670,11 +891,65 @@ export function ThreadComposer({
       prompt: nextPrompt,
       attachments: [...current.attachments, ...nextAttachments],
     }));
-    const nextCaret = insertionPoint.start + insertion.length;
+    const trailingSpacerOffset = insertionText.endsWith(' ') ? 1 : 0;
+    const nextCaret = insertionPoint.start + insertionText.length - trailingSpacerOffset;
     pendingSelectionRef.current = {
       start: nextCaret,
       end: nextCaret,
     };
+    setOpenMenu(null);
+  }
+
+  function appendDroppedAttachments(files: File[]) {
+    if (files.length === 0) {
+      return;
+    }
+
+    const groupedFiles = {
+      photo: files.filter((file) => classifyAttachmentKind(file) === 'photo'),
+      file: files.filter((file) => classifyAttachmentKind(file) === 'file'),
+    };
+
+    const nextFiles = [...groupedFiles.photo, ...groupedFiles.file];
+    const usedPlaceholders = new Set<string>(attachments.map((entry) => entry.placeholder));
+    const nextAttachments: ComposerAttachmentDraft[] = nextFiles.map((file) => {
+      const kind = classifyAttachmentKind(file);
+      const originalName = normalizedAttachmentFileName(file, kind);
+      const placeholder = buildAttachmentPlaceholder(
+        kind,
+        normalizeAttachmentLabel(originalName),
+        usedPlaceholders,
+      );
+      usedPlaceholders.add(placeholder);
+      return {
+        clientId: buildClientId(),
+        kind,
+        originalName,
+        placeholder,
+        file,
+      };
+    });
+
+    const selection = snapshotSelection() ?? selectionSnapshotRef.current;
+    const insertionPoint = selection
+      ? { start: selection.start, end: selection.end }
+      : { start: prompt.length, end: prompt.length };
+    const insertionText = buildAttachmentInsertionText(
+      prompt,
+      insertionPoint,
+      nextAttachments.map((entry) => entry.placeholder),
+    );
+    const nextPrompt = `${prompt.slice(0, insertionPoint.start)}${insertionText}${prompt.slice(
+      insertionPoint.end,
+    )}`;
+
+    updateDraft((current) => ({
+      prompt: nextPrompt,
+      attachments: [...current.attachments, ...nextAttachments],
+    }));
+    const trailingSpacerOffset = insertionText.endsWith(' ') ? 1 : 0;
+    const nextCaret = insertionPoint.start + insertionText.length - trailingSpacerOffset;
+    pendingSelectionRef.current = { start: nextCaret, end: nextCaret };
     setOpenMenu(null);
   }
 
@@ -700,7 +975,9 @@ export function ThreadComposer({
     }
 
     const pendingSelection = pendingSelectionRef.current;
-    const shouldSyncDom = serializeEditorPrompt() !== prompt;
+    const shouldSyncDom =
+      serializeEditorPrompt() !== prompt ||
+      renderedPreviewSignatureRef.current !== previewSignature;
 
     if (shouldSyncDom) {
       const fragment = document.createDocumentFragment();
@@ -716,23 +993,77 @@ export function ThreadComposer({
         token.dataset.segmentType = 'attachment';
         token.dataset.placeholder = attachment.placeholder;
         token.contentEditable = 'false';
-        token.className =
-          attachment.kind === 'photo'
-            ? 'mx-[0.08rem] inline-flex max-w-full items-center rounded-full border border-sky-300/35 bg-sky-300/14 px-2 py-1 align-baseline text-[10px] font-medium tracking-[0.08em] text-sky-50 shadow-sm shadow-stone-950/20'
-            : 'mx-[0.08rem] inline-flex max-w-full items-center rounded-full border border-emerald-300/35 bg-emerald-300/14 px-2 py-1 align-baseline text-[10px] font-medium tracking-[0.08em] text-emerald-50 shadow-sm shadow-stone-950/20';
-        token.textContent = attachment.placeholder;
+        token.className = 'mx-[0.12rem] inline-flex max-w-full align-baseline';
+
+        if (attachment.kind === 'photo') {
+          token.classList.add('rounded-[0.95rem]', 'border', 'border-sky-300/35', 'bg-sky-300/10', 'p-1', 'shadow-sm', 'shadow-stone-950/20');
+
+          const previewUrl = attachmentPreviewUrls[attachment.clientId];
+          if (previewUrl) {
+            const image = document.createElement('img');
+            image.src = previewUrl;
+            image.alt = attachment.originalName || 'Pasted image';
+            image.className = 'h-[4.5rem] w-[6rem] rounded-[0.7rem] bg-stone-950 object-contain';
+            image.draggable = false;
+            token.append(image);
+          } else {
+            const imagePlaceholder = document.createElement('span');
+            imagePlaceholder.className =
+              'inline-block h-[4.5rem] w-[6rem] rounded-[0.7rem] bg-stone-900/80';
+            imagePlaceholder.setAttribute('aria-hidden', 'true');
+            token.append(imagePlaceholder);
+          }
+
+          const caption = document.createElement('span');
+          caption.className = 'ml-2 inline-flex max-w-[8rem] items-center text-[10px] font-medium tracking-[0.08em] text-sky-50';
+          caption.textContent = attachmentDisplayLabel(attachment);
+
+          token.append(caption);
+        } else {
+          token.classList.add(
+            'items-center',
+            'gap-2',
+            'rounded-[0.95rem]',
+            'border',
+            'border-emerald-300/35',
+            'bg-emerald-300/10',
+            'px-2.5',
+            'py-2',
+            'text-[10px]',
+            'font-medium',
+            'tracking-[0.08em]',
+            'text-emerald-50',
+            'shadow-sm',
+            'shadow-stone-950/20',
+          );
+
+          const icon = document.createElement('span');
+          icon.className = 'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-emerald-200/25 bg-emerald-300/12 text-[9px]';
+          icon.textContent = 'FILE';
+
+          const label = document.createElement('span');
+          label.className = 'inline-flex max-w-[10rem] truncate';
+          label.textContent = attachmentDisplayLabel(attachment);
+
+          token.append(icon, label);
+        }
+
         fragment.append(token);
       }
 
       editor.replaceChildren(fragment);
+      renderedPreviewSignatureRef.current = previewSignature;
     }
 
-    if (document.activeElement === editor && (pendingSelection !== null || shouldSyncDom)) {
-      restoreSelection(pendingSelection ?? selectionSnapshotRef.current);
+    if (pendingSelection !== null) {
+      editor.focus();
+      restoreSelection(pendingSelection);
+    } else if (document.activeElement === editor && shouldSyncDom) {
+      restoreSelection(selectionSnapshotRef.current);
     }
 
     pendingSelectionRef.current = null;
-  }, [isShellView, promptSegments]);
+  }, [attachmentPreviewUrls, isShellView, previewSignature, prompt, promptSegments]);
 
   function dismissPromptFocus() {
     promptRef.current?.blur();
@@ -815,6 +1146,61 @@ export function ThreadComposer({
     }));
   }
 
+  function handlePromptPaste(event: ClipboardEvent<HTMLDivElement>) {
+    const files = extractFilesFromTransfer(
+      event.clipboardData?.items,
+      event.clipboardData?.files,
+    );
+    if (files.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    appendDroppedAttachments(files);
+  }
+
+  function handlePromptDragEnter(event: DragEvent<HTMLDivElement>) {
+    if (!hasTransferFiles(event.dataTransfer?.items, event.dataTransfer?.files)) {
+      return;
+    }
+
+    event.preventDefault();
+    setIsDragTargetActive(true);
+  }
+
+  function handlePromptDragOver(event: DragEvent<HTMLDivElement>) {
+    if (!hasTransferFiles(event.dataTransfer?.items, event.dataTransfer?.files)) {
+      return;
+    }
+
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy';
+    }
+    setIsDragTargetActive(true);
+  }
+
+  function handlePromptDragLeave(event: DragEvent<HTMLDivElement>) {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      return;
+    }
+    setIsDragTargetActive(false);
+  }
+
+  function handlePromptDrop(event: DragEvent<HTMLDivElement>) {
+    const files = extractFilesFromTransfer(
+      event.dataTransfer?.items,
+      event.dataTransfer?.files,
+    );
+    if (files.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    setIsDragTargetActive(false);
+    appendDroppedAttachments(files);
+  }
+
   function handlePromptKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key !== 'Enter') {
       return;
@@ -859,7 +1245,11 @@ export function ThreadComposer({
     ? 'relative z-20 shrink-0 bg-transparent px-3 pb-0 pt-3 sm:p-4'
     : 'relative z-20 shrink-0 bg-transparent px-3 pb-3 pt-0 sm:px-4 sm:pb-4 sm:pt-0';
   const promptInputClassName =
-    'min-h-[9.75rem] w-full rounded-[1.25rem] border border-stone-700 bg-stone-900 px-4 pr-14 pt-2.5 text-stone-100 outline-none transition focus-within:border-amber-300 sm:min-h-[8.25rem]';
+    `min-h-[9.75rem] w-full rounded-[1.25rem] border bg-stone-900 px-4 pr-14 pt-2.5 text-stone-100 outline-none transition sm:min-h-[8.25rem] ${
+      isDragTargetActive
+        ? 'border-sky-300/80 bg-sky-300/[0.08] shadow-[0_0_0_1px_rgba(125,211,252,0.2)]'
+        : 'border-stone-700 focus-within:border-amber-300'
+    }`;
 
   return (
     <div className="relative z-20 shrink-0">
@@ -893,13 +1283,13 @@ export function ThreadComposer({
           aria-label="Jump to latest"
           title={followTail ? 'Latest turn is in view' : 'Jump to the latest messages'}
           onClick={() => onToggleFollow?.()}
-          className="absolute left-1/2 top-0 z-20 inline-flex h-9 min-w-[5.75rem] -translate-x-1/2 -translate-y-[38%] items-start justify-center bg-transparent pt-1 touch-manipulation"
+          className="absolute left-1/2 top-3 z-40 inline-flex h-9 min-w-[5.75rem] -translate-x-1/2 -translate-y-[62%] items-start justify-center bg-transparent pt-1 touch-manipulation sm:top-4"
         >
           <span
             className={`pointer-events-none inline-flex h-4 min-w-[3.75rem] items-center justify-center rounded-[0.7rem] border shadow-sm transition ${
               followTail
-                ? 'border-sky-300/20 bg-transparent text-sky-100/70'
-                : 'border-stone-600/55 bg-transparent text-stone-300/70'
+                ? 'border-sky-300/36 bg-sky-300/[0.03] text-sky-100/86'
+                : 'border-stone-500/70 bg-stone-950/[0.08] text-stone-200/86'
             }`}
           >
             <svg
@@ -917,97 +1307,16 @@ export function ThreadComposer({
       )}
 
       <form
+        ref={menuRef}
         onSubmit={handleSubmit}
         className={formClassName}
       >
-        <div className="relative">
-          {isShellView ? (
-            <textarea
-              aria-label="Prompt"
-              disabled={false}
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              onKeyDown={
-                handlePromptKeyDown as unknown as (
-                  event: KeyboardEvent<HTMLTextAreaElement>,
-                ) => void
-              }
-              rows={2}
-              placeholder={promptPlaceholder}
-              className={`${promptInputClassName} resize-y pb-10`}
-            />
-          ) : (
-            <div className={promptInputClassName}>
-              {prompt.length === 0 && (
-                <span className="pointer-events-none absolute left-4 top-2.5 text-stone-500">
-                  {promptPlaceholder}
-                </span>
-              )}
-              <div
-                ref={promptRef}
-                role="textbox"
-                aria-label="Prompt"
-                aria-multiline="true"
-                contentEditable={!disabled}
-                suppressContentEditableWarning
-                onInput={() => handlePromptInput()}
-                onKeyDown={handlePromptKeyDown}
-                onKeyUp={() => {
-                  selectionSnapshotRef.current = snapshotSelection();
-                }}
-                onMouseUp={() => {
-                  selectionSnapshotRef.current = snapshotSelection();
-                }}
-                onBlur={() => {
-                  selectionSnapshotRef.current = snapshotSelection();
-                }}
-                className={`relative z-[1] min-h-[7.75rem] whitespace-pre-wrap break-words pb-10 outline-none sm:min-h-[6.5rem] ${
-                  disabled ? 'cursor-not-allowed text-stone-500' : ''
-                }`}
-              />
-            </div>
-          )}
-          <button
-            type="button"
-            aria-label={interruptLabel}
-            title={interruptLabel}
-            onClick={() => void onInterrupt?.()}
-            disabled={!canInterrupt}
-            className={`absolute right-2.5 top-2.5 inline-flex h-8 w-8 items-center justify-center rounded-full border transition ${
-              canInterrupt
-                ? 'border-rose-300/20 bg-rose-300/[0.04] text-rose-100/82 hover:bg-rose-300/[0.08]'
-                : 'cursor-not-allowed border-stone-600/20 bg-stone-400/[0.03] text-stone-500/70 opacity-55'
-            }`}
-          >
-            <span
-              aria-hidden="true"
-              className="block h-2.5 w-2.5 rounded-[2px] bg-current"
-            />
-          </button>
-          <button
-            type="submit"
-            aria-label={isShellView ? 'Send Shell Input' : 'Send Prompt'}
-            onMouseDown={(event) => {
-              event.preventDefault();
-            }}
-            onPointerDown={(event) => {
-              event.preventDefault();
-            }}
-            onTouchStart={(event) => {
-              event.preventDefault();
-            }}
-            disabled={busy || (activeView === 'chat' ? disabled : false)}
-            className={`absolute bottom-2.5 right-2.5 rounded-full px-3.5 py-1.5 text-sm font-medium shadow-lg shadow-stone-950/30 transition disabled:cursor-not-allowed disabled:bg-stone-700 disabled:text-stone-300 ${sendButtonClassName}`}
-          >
-            {sendButtonLabel}
-          </button>
-
-          <div
-            ref={menuRef}
-            className="absolute bottom-2.5 left-3 z-30 flex max-w-[calc(100%-7rem)] items-center gap-1.5 text-xs"
-          >
+        <div
+          className="relative z-30 mb-0 flex items-center gap-2 rounded-full border border-stone-800/40 bg-stone-950/18 px-2.5 py-1.5 text-xs shadow-lg shadow-stone-950/8"
+        >
+          <div className="flex shrink-0 items-center gap-1.5">
             {!isShellView && (
-              <>
+              <div className="relative">
                 <button
                   type="button"
                   aria-label="Add attachment"
@@ -1023,7 +1332,7 @@ export function ThreadComposer({
                 </button>
 
                 {openMenu === 'attachments' && (
-                  <div className="absolute bottom-full left-0 mb-2 w-32 overflow-hidden rounded-2xl border border-stone-700 bg-stone-900 shadow-2xl shadow-stone-950/40">
+                  <div className="absolute left-0 top-full mt-2 w-32 overflow-hidden rounded-2xl border border-stone-700 bg-stone-900 shadow-2xl shadow-stone-950/40">
                     <div className="p-2">
                       <button
                         type="button"
@@ -1048,7 +1357,7 @@ export function ThreadComposer({
                     </div>
                   </div>
                 )}
-              </>
+              </div>
             )}
 
             <button
@@ -1060,121 +1369,16 @@ export function ThreadComposer({
             >
               {isShellView ? <ChatIcon /> : <TerminalIcon />}
             </button>
+          </div>
 
+          <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
             {isShellView && shellPromptLabel && (
               <span
-                className="min-w-0 max-w-[11rem] truncate rounded-full px-1.5 py-1 text-stone-400"
+                className="min-w-0 max-w-[12rem] truncate rounded-full px-1.5 py-1 text-stone-400"
                 title={shellPromptLabel}
               >
                 {shellPromptLabel}
               </span>
-            )}
-
-            {!isShellView && (
-              <>
-                <div className="relative">
-                  <button
-                    type="button"
-                    aria-haspopup="menu"
-                    aria-expanded={openMenu === 'model'}
-                    aria-label={model ?? 'Select model'}
-                    disabled={settingsBusy || modelOptions.length === 0}
-                    onClick={() =>
-                      setOpenMenu((current) => (current === 'model' ? null : 'model'))
-                    }
-                    title={modelContextTitle}
-                    className="relative overflow-hidden rounded-full px-2.5 py-1 text-stone-300 transition hover:bg-stone-800/85 hover:text-stone-100 disabled:cursor-not-allowed disabled:text-stone-600"
-                  >
-                    {model ? <ContextRingFrame contextUsage={contextUsage} /> : null}
-                    <span className="relative z-[1]">{model ?? 'Select model'}</span>
-                  </button>
-                  {openMenu === 'model' && (
-                    <div className="absolute bottom-full left-0 mb-2 w-max min-w-[9rem] max-w-[14rem] overflow-hidden rounded-2xl border border-stone-700 bg-stone-900 shadow-2xl shadow-stone-950/40">
-                      <div className="max-h-72 overflow-auto p-2">
-                        {modelOptions.map((entry) => (
-                          <button
-                            key={entry.id}
-                            type="button"
-                            onClick={() =>
-                              void handleUpdateSettings({
-                                model: entry.model,
-                                reasoningEffort: entry.defaultReasoningEffort,
-                              })
-                            }
-                            className={`block w-full rounded-xl px-3 py-2 text-left transition ${
-                              entry.model === model
-                                ? 'bg-amber-300/12 text-stone-100'
-                                : 'text-stone-300 hover:bg-stone-800'
-                            }`}
-                          >
-                            <p className="text-sm font-medium">{entry.model}</p>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="relative">
-                  <button
-                    type="button"
-                    aria-haspopup="menu"
-                    aria-expanded={openMenu === 'effort'}
-                    disabled={settingsBusy || supportedEfforts.length === 0}
-                    onClick={() =>
-                      setOpenMenu((current) => (current === 'effort' ? null : 'effort'))
-                    }
-                    className="rounded-full px-2 py-1 text-stone-500 transition hover:bg-stone-800 hover:text-stone-200 disabled:cursor-not-allowed disabled:text-stone-700"
-                  >
-                    {formatReasoningEffortLabel(reasoningEffort)}
-                  </button>
-                  {openMenu === 'effort' && (
-                    <div className="absolute bottom-full left-0 mb-2 w-max min-w-[8rem] max-w-[12rem] overflow-hidden rounded-2xl border border-stone-700 bg-stone-900 shadow-2xl shadow-stone-950/40">
-                      <div className="max-h-72 overflow-auto p-2">
-                        {supportedEfforts.map((entry) => (
-                          <button
-                            key={entry.reasoningEffort}
-                            type="button"
-                            onClick={() =>
-                              void handleUpdateSettings({
-                                reasoningEffort: entry.reasoningEffort,
-                              })
-                            }
-                            className={`block w-full rounded-xl px-3 py-2 text-left transition ${
-                              entry.reasoningEffort === reasoningEffort
-                                ? 'bg-amber-300/12 text-stone-100'
-                                : 'text-stone-300 hover:bg-stone-800'
-                            }`}
-                          >
-                            <p className="text-sm font-medium">
-                              {formatReasoningEffortLabel(entry.reasoningEffort)}
-                            </p>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <button
-                  type="button"
-                  aria-pressed={collaborationMode === 'plan'}
-                  disabled={settingsBusy}
-                  onClick={() =>
-                    void handleUpdateSettings({
-                      collaborationMode:
-                        collaborationMode === 'plan' ? 'default' : 'plan',
-                    })
-                  }
-                  className={`rounded-full px-2.5 py-1 transition ${
-                    collaborationMode === 'plan'
-                      ? 'bg-sky-300/18 text-sky-100'
-                      : 'text-stone-500 hover:bg-stone-800 hover:text-stone-200'
-                  } disabled:cursor-not-allowed disabled:opacity-60`}
-                >
-                  Plan
-                </button>
-              </>
             )}
 
             {isMobileShell && (
@@ -1195,7 +1399,7 @@ export function ThreadComposer({
                 </button>
                 {openMenu === 'shellTools' && (
                   <div
-                    className="absolute bottom-full right-0 z-40 mb-2 w-[11.5rem] max-w-[calc(100vw-1.5rem)] rounded-[1rem] border border-stone-700/90 bg-stone-950/96 p-2 shadow-2xl shadow-stone-950/40 sm:w-48"
+                    className="absolute right-0 top-full z-40 mt-2 w-[11.5rem] max-w-[calc(100vw-1.5rem)] rounded-[1rem] border border-stone-700/90 bg-stone-950/96 p-2 shadow-2xl shadow-stone-950/40 sm:w-48"
                     onMouseDown={(event) => {
                       event.stopPropagation();
                     }}
@@ -1328,6 +1532,203 @@ export function ThreadComposer({
               </div>
             )}
           </div>
+        </div>
+
+        <div className="relative">
+          {isShellView ? (
+            <textarea
+              aria-label="Prompt"
+              disabled={false}
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              onKeyDown={
+                handlePromptKeyDown as unknown as (
+                  event: KeyboardEvent<HTMLTextAreaElement>,
+                ) => void
+              }
+              rows={2}
+              placeholder={promptPlaceholder}
+              className={`${promptInputClassName} resize-y pb-10`}
+            />
+          ) : (
+            <div className={promptInputClassName}>
+              {prompt.length === 0 && (
+                <span className="pointer-events-none absolute left-4 top-2.5 text-stone-500">
+                  {promptPlaceholder}
+                </span>
+              )}
+              <div
+                ref={promptRef}
+                role="textbox"
+                aria-label="Prompt"
+                aria-multiline="true"
+                contentEditable={!disabled}
+                suppressContentEditableWarning
+                onInput={() => handlePromptInput()}
+                onPaste={handlePromptPaste}
+                onKeyDown={handlePromptKeyDown}
+                onKeyUp={() => {
+                  selectionSnapshotRef.current = snapshotSelection();
+                }}
+                onMouseUp={() => {
+                  selectionSnapshotRef.current = snapshotSelection();
+                }}
+                onBlur={() => {
+                  selectionSnapshotRef.current = snapshotSelection();
+                  setIsDragTargetActive(false);
+                }}
+                onDragEnter={handlePromptDragEnter}
+                onDragOver={handlePromptDragOver}
+                onDragLeave={handlePromptDragLeave}
+                onDrop={handlePromptDrop}
+                className={`relative z-[1] min-h-[7.75rem] whitespace-pre-wrap break-words pb-10 outline-none sm:min-h-[6.5rem] ${
+                  disabled ? 'cursor-not-allowed text-stone-500' : ''
+                }`}
+              />
+            </div>
+          )}
+          <button
+            type="button"
+            aria-label={interruptLabel}
+            title={interruptLabel}
+            onClick={() => void onInterrupt?.()}
+            disabled={!canInterrupt}
+            className={`absolute right-2.5 top-2.5 inline-flex h-8 w-8 items-center justify-center rounded-full border transition ${
+              canInterrupt
+                ? 'border-rose-300/55 bg-rose-300/[0.14] text-rose-50 shadow-lg shadow-rose-950/20 hover:bg-rose-300/[0.22]'
+                : 'cursor-not-allowed border-stone-700/30 bg-stone-400/[0.02] text-stone-500/55 opacity-55'
+            }`}
+          >
+            <span
+              aria-hidden="true"
+              className="block h-2.5 w-2.5 rounded-[2px] bg-current"
+            />
+          </button>
+          <button
+            type="submit"
+            aria-label={isShellView ? 'Send Shell Input' : 'Send Prompt'}
+            onMouseDown={(event) => {
+              event.preventDefault();
+            }}
+            onPointerDown={(event) => {
+              event.preventDefault();
+            }}
+            onTouchStart={(event) => {
+              event.preventDefault();
+            }}
+            disabled={busy || (activeView === 'chat' ? disabled : false)}
+            className={`absolute bottom-2.5 right-2.5 rounded-full px-3.5 py-1.5 text-sm font-medium shadow-lg shadow-stone-950/30 transition disabled:cursor-not-allowed disabled:bg-stone-700 disabled:text-stone-300 ${sendButtonClassName}`}
+          >
+            {sendButtonLabel}
+          </button>
+          {!isShellView && (
+            <div className="absolute bottom-2.5 left-3 z-30 flex max-w-[calc(100%-7rem)] items-center gap-1.5 text-xs">
+              <div className="relative min-w-0">
+                <button
+                  type="button"
+                  aria-haspopup="menu"
+                  aria-expanded={openMenu === 'model'}
+                  aria-label={model ?? 'Select model'}
+                  disabled={settingsBusy || modelOptions.length === 0}
+                  onClick={() =>
+                    setOpenMenu((current) => (current === 'model' ? null : 'model'))
+                  }
+                  title={modelContextTitle}
+                  className="relative inline-flex min-w-0 max-w-[8.75rem] items-center overflow-hidden rounded-full px-2.5 py-1 text-left text-stone-300 transition hover:bg-stone-800/85 hover:text-stone-100 disabled:cursor-not-allowed disabled:text-stone-600 sm:max-w-[11rem]"
+                >
+                  {model ? <ContextRingFrame contextUsage={contextUsage} /> : null}
+                  <span className="relative z-[1] block min-w-0 truncate whitespace-nowrap [direction:rtl]">
+                    {model ?? 'Select model'}
+                  </span>
+                </button>
+                {openMenu === 'model' && (
+                  <div className="absolute bottom-full left-0 mb-2 w-max min-w-[9rem] max-w-[14rem] overflow-hidden rounded-2xl border border-stone-700 bg-stone-900 shadow-2xl shadow-stone-950/40">
+                    <div className="max-h-72 overflow-auto p-2">
+                      {modelOptions.map((entry) => (
+                        <button
+                          key={entry.id}
+                          type="button"
+                          onClick={() =>
+                            void handleUpdateSettings({
+                              model: entry.model,
+                              reasoningEffort: entry.defaultReasoningEffort,
+                            })
+                          }
+                          className={`block w-full rounded-xl px-3 py-2 text-left transition ${
+                            entry.model === model
+                              ? 'bg-amber-300/12 text-stone-100'
+                              : 'text-stone-300 hover:bg-stone-800'
+                          }`}
+                        >
+                          <p className="text-sm font-medium">{entry.model}</p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="relative">
+                <button
+                  type="button"
+                  aria-haspopup="menu"
+                  aria-expanded={openMenu === 'effort'}
+                  disabled={settingsBusy || supportedEfforts.length === 0}
+                  onClick={() =>
+                    setOpenMenu((current) => (current === 'effort' ? null : 'effort'))
+                  }
+                  className="rounded-full px-2 py-1 text-stone-500 transition hover:bg-stone-800 hover:text-stone-200 disabled:cursor-not-allowed disabled:text-stone-700"
+                >
+                  {formatReasoningEffortLabel(reasoningEffort)}
+                </button>
+                {openMenu === 'effort' && (
+                  <div className="absolute bottom-full left-0 mb-2 w-max min-w-[8rem] max-w-[12rem] overflow-hidden rounded-2xl border border-stone-700 bg-stone-900 shadow-2xl shadow-stone-950/40">
+                    <div className="max-h-72 overflow-auto p-2">
+                      {supportedEfforts.map((entry) => (
+                        <button
+                          key={entry.reasoningEffort}
+                          type="button"
+                          onClick={() =>
+                            void handleUpdateSettings({
+                              reasoningEffort: entry.reasoningEffort,
+                            })
+                          }
+                          className={`block w-full rounded-xl px-3 py-2 text-left transition ${
+                            entry.reasoningEffort === reasoningEffort
+                              ? 'bg-amber-300/12 text-stone-100'
+                              : 'text-stone-300 hover:bg-stone-800'
+                          }`}
+                        >
+                          <p className="text-sm font-medium">
+                            {formatReasoningEffortLabel(entry.reasoningEffort)}
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <button
+                type="button"
+                aria-pressed={collaborationMode === 'plan'}
+                disabled={settingsBusy}
+                onClick={() =>
+                  void handleUpdateSettings({
+                    collaborationMode:
+                      collaborationMode === 'plan' ? 'default' : 'plan',
+                  })
+                }
+                className={`rounded-full px-2.5 py-1 transition ${
+                  collaborationMode === 'plan'
+                    ? 'bg-sky-300/18 text-sky-100'
+                    : 'text-stone-500 hover:bg-stone-800 hover:text-stone-200'
+                } disabled:cursor-not-allowed disabled:opacity-60`}
+              >
+                Plan
+              </button>
+            </div>
+          )}
         </div>
         {error && (
           <div className="mt-2 rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">

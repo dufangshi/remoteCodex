@@ -838,7 +838,7 @@ describe('ThreadDetailPage', () => {
     });
 
     const editor = screen.getByLabelText('Prompt');
-    setPromptValue(editor, `Please inspect ${editor.textContent ?? ''}`);
+    setPromptValue(editor, 'Please inspect [FILE notes.txt]');
     fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
 
     await waitFor(() => {

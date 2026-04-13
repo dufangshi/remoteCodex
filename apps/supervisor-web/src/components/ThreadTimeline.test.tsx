@@ -234,6 +234,40 @@ describe('ThreadTimeline', () => {
     expect(screen.queryByText('Agent')).not.toBeInTheDocument();
   });
 
+  it('renders inline photo and file attachments inside user messages', () => {
+    render(
+      <ThreadTimeline
+        threadId="thread-1"
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'user-1',
+                kind: 'userMessage',
+                text: 'Please inspect [PHOTO ./.temp/threads/thread-1/camera.png] and [FILE ./.temp/threads/thread-1/notes.txt] today.',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    const image = screen.getByAltText('camera.png');
+    expect(image).toBeInTheDocument();
+    expect(image).toHaveAttribute(
+      'src',
+      '/api/threads/thread-1/assets/image?path=.%2F.temp%2Fthreads%2Fthread-1%2Fcamera.png',
+    );
+    expect(screen.getByText('notes.txt')).toBeInTheDocument();
+    expect(screen.getByText(/Please inspect/)).toBeInTheDocument();
+    expect(screen.getByText(/today\./)).toBeInTheDocument();
+  });
+
   it('keeps plain text agent replies as plain text even after viewport activation', async () => {
     render(
       <ThreadTimeline

@@ -30,7 +30,7 @@ import {
 } from './threadPresentation';
 
 interface ThreadTimelineProps {
-  threadId?: string;
+  threadId?: string | undefined;
   turns: ThreadTurnDto[];
   totalTurnCount?: number;
   pendingRequests?: ThreadActionRequestDto[];
@@ -54,6 +54,7 @@ interface ThreadTimelineProps {
   ephemeralUserNote?: string | null;
   answeredRequestNotes?: Array<{
     id: string;
+    turnId?: string | null;
     title: string;
     summaryLines: string[];
   }>;
@@ -83,6 +84,11 @@ interface SearchHistoryItem extends ThreadHistoryItemDto {
 interface ContextCompactionHistoryItem extends ThreadHistoryItemDto {
   kind: 'contextCompaction';
 }
+
+type UserMessageSegment =
+  | { type: 'text'; key: string; text: string }
+  | { type: 'photo'; key: string; path: string }
+  | { type: 'file'; key: string; path: string };
 
 type TimelineHistoryEntry =
   | {
@@ -201,6 +207,64 @@ function summarizeInlinePreviewText(text: string) {
     showGap: true,
     isTruncated: true,
   };
+}
+
+function basenameFromAssetPath(value: string) {
+  const normalized = value.replace(/[\\/]+$/, '').trim();
+  if (!normalized) {
+    return '';
+  }
+  const segments = normalized.split(/[\\/]/).filter(Boolean);
+  return segments.at(-1) ?? normalized;
+}
+
+function tokenizeUserMessageText(text: string): UserMessageSegment[] {
+  if (!text) {
+    return [];
+  }
+
+  const matcher = /\[(PHOTO|FILE)\s+([^\]]+)\]/g;
+  const segments: UserMessageSegment[] = [];
+  let cursor = 0;
+  let index = 0;
+
+  for (const match of text.matchAll(matcher)) {
+    const start = match.index ?? 0;
+    if (start > cursor) {
+      segments.push({
+        type: 'text',
+        key: `text-${index}`,
+        text: text.slice(cursor, start),
+      });
+      index += 1;
+    }
+
+    const kind = match[1];
+    const path = match[2]?.trim() ?? '';
+    if (kind === 'PHOTO' && path) {
+      segments.push({ type: 'photo', key: `photo-${index}`, path });
+    } else if (kind === 'FILE' && path) {
+      segments.push({ type: 'file', key: `file-${index}`, path });
+    } else {
+      segments.push({
+        type: 'text',
+        key: `text-${index}`,
+        text: match[0],
+      });
+    }
+    index += 1;
+    cursor = start + match[0].length;
+  }
+
+  if (cursor < text.length) {
+    segments.push({
+      type: 'text',
+      key: `text-${index}`,
+      text: text.slice(cursor),
+    });
+  }
+
+  return segments;
 }
 
 function formatTrailingPathLabel(label: string, maxLength = 42) {
@@ -334,10 +398,13 @@ function isActiveTurnStatus(status: TimelineTurn['status']) {
   return status === 'inProgress' || status === 'sending';
 }
 
-function isNearBottom(container: HTMLDivElement) {
+function isNearBottom(
+  container: HTMLDivElement,
+  threshold = FOLLOW_TAIL_THRESHOLD_PX,
+) {
   const distanceFromBottom =
     container.scrollHeight - container.scrollTop - container.clientHeight;
-  return distanceFromBottom <= FOLLOW_TAIL_THRESHOLD_PX;
+  return distanceFromBottom <= threshold;
 }
 
 function isElementVisible(container: HTMLDivElement, element: HTMLElement) {
@@ -864,11 +931,150 @@ function AgentMessageBody({
   );
 }
 
+function UserMessageBody({
+  threadId,
+  text,
+}: {
+  threadId?: string | undefined;
+  text: string;
+}) {
+  const segments = useMemo(() => tokenizeUserMessageText(text), [text]);
+
+  return (
+    <div className="whitespace-pre-wrap break-words text-[15px] leading-6 text-stone-300">
+      {segments.map((segment) => {
+        if (segment.type === 'text') {
+          return <span key={segment.key}>{segment.text}</span>;
+        }
+
+        if (segment.type === 'photo') {
+          const imageUrl =
+            threadId
+              ? `/api/threads/${threadId}/assets/image?path=${encodeURIComponent(segment.path)}`
+              : null;
+          const label = basenameFromAssetPath(segment.path) || 'Attached image';
+
+          return (
+            <span key={segment.key} className="mx-[0.14rem] inline-flex align-middle">
+              <span className="inline-flex max-w-full flex-col rounded-[1rem] border border-sky-300/28 bg-sky-300/[0.08] p-1.5 shadow-sm shadow-stone-950/20">
+                {imageUrl ? (
+                  <img
+                    src={imageUrl}
+                    alt={label}
+                    className="h-[4.5rem] w-[6rem] rounded-[0.75rem] bg-stone-950 object-contain"
+                    loading="lazy"
+                  />
+                ) : (
+                  <span className="inline-flex h-[4.5rem] w-[6rem] items-center justify-center rounded-[0.75rem] bg-stone-950 text-[10px] text-sky-100">
+                    PHOTO
+                  </span>
+                )}
+                <span
+                  className="mt-1 max-w-[7rem] truncate text-[10px] font-medium tracking-[0.08em] text-sky-50"
+                  title={segment.path}
+                >
+                  {label}
+                </span>
+              </span>
+            </span>
+          );
+        }
+
+        const fileName = basenameFromAssetPath(segment.path) || 'Attached file';
+        return (
+          <span key={segment.key} className="mx-[0.14rem] inline-flex align-middle">
+            <span
+              className="inline-flex max-w-[12rem] items-center gap-2 rounded-[0.95rem] border border-emerald-300/28 bg-emerald-300/[0.08] px-2.5 py-2 text-[10px] font-medium tracking-[0.08em] text-emerald-50 shadow-sm shadow-stone-950/20"
+              title={segment.path}
+            >
+              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-emerald-200/20 bg-emerald-300/12 text-[9px]">
+                FILE
+              </span>
+              <span className="min-w-0 truncate">{fileName}</span>
+            </span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function commandStatusBadgeClassName(status: ThreadHistoryItemDto['status']) {
+  if (status === 'completed') {
+    return 'border-emerald-300/35 bg-emerald-300/12 text-emerald-100';
+  }
+
+  if (status === 'failed') {
+    return 'border-rose-300/35 bg-rose-300/12 text-rose-100';
+  }
+
+  if (status === 'interrupted') {
+    return 'border-amber-300/35 bg-amber-300/12 text-amber-100';
+  }
+
+  return 'border-sky-300/35 bg-sky-300/12 text-sky-100';
+}
+
+function CommandStatusIcon({
+  status,
+}: {
+  status: ThreadHistoryItemDto['status'];
+}) {
+  if (status === 'completed') {
+    return (
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 16 16"
+        className="h-3.5 w-3.5 fill-none stroke-current"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="m3.75 8.25 2.5 2.5 6-6" />
+      </svg>
+    );
+  }
+
+  if (status === 'failed') {
+    return (
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 16 16"
+        className="h-3.5 w-3.5 fill-none stroke-current"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="m5 5 6 6M11 5l-6 6" />
+      </svg>
+    );
+  }
+
+  if (status === 'interrupted') {
+    return (
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 16 16"
+        className="h-3.5 w-3.5 fill-none stroke-current"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M6 4.5v7M10 4.5v7" />
+      </svg>
+    );
+  }
+
+  return <RunningDots tone="emerald" />;
+}
+
 const CompactMessageItem = memo(function CompactMessageItem({
+  threadId,
   item,
   scrollRootRef,
   streaming = false,
 }: {
+  threadId?: string | undefined;
   item: ThreadHistoryItemDto & {
     kind: Extract<ThreadHistoryItemDto['kind'], 'userMessage' | 'agentMessage'>;
   };
@@ -881,9 +1087,6 @@ const CompactMessageItem = memo(function CompactMessageItem({
     item.kind === 'userMessage'
       ? 'border-cyan-400/25 bg-cyan-400/10 text-cyan-200'
       : 'border-slate-300/30 bg-slate-200/12 text-slate-100';
-
-  const textToneClassName =
-    item.kind === 'userMessage' ? 'text-stone-300' : 'text-stone-100';
 
   useEffect(() => {
     return () => {
@@ -942,11 +1145,7 @@ const CompactMessageItem = memo(function CompactMessageItem({
               streaming={streaming}
             />
           ) : (
-            <p
-              className={`whitespace-pre-wrap break-words text-[15px] leading-6 ${textToneClassName}`}
-            >
-              {item.text}
-            </p>
+            <UserMessageBody threadId={threadId} text={item.text} />
           )}
           {item.status && (
             <p className="mt-1 text-xs text-stone-500">{item.status}</p>
@@ -1023,39 +1222,34 @@ const CommandItem = memo(function CommandItem({
           {isRunningHistoryStatus(item.status) && <RunningDots />}
         </div>
         <div className="relative min-w-0 w-full flex-1 rounded-[0.9rem] border border-stone-800/80 bg-stone-950/45 px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2">
-          <button
-            type="button"
-            aria-label="Expand command"
-            title="Expand command"
-            onClick={() => onOpen(item, 'Command Output')}
-            className={`absolute right-0 top-0 inline-flex h-5 w-5 items-center justify-center rounded-bl-[0.7rem] rounded-tr-[0.9rem] border shadow-sm shadow-stone-950/25 transition sm:right-2 sm:top-2 sm:h-7 sm:w-7 sm:rounded-full ${overlayBadgeClassName('action')} hover:bg-stone-800`}
-          >
-            <span className="scale-[0.72] sm:scale-100">
-              <ExpandIcon />
-            </span>
-          </button>
-          {item.status ? (
-            <p className="absolute left-2.5 right-8 top-0 flex h-5 items-center truncate text-xs text-stone-500 sm:left-3 sm:right-10 sm:top-2 sm:h-7">
-              {item.status}
-            </p>
-          ) : null}
-          <button
-            type="button"
-            aria-label="Open full command"
-            onClick={() => onOpen(item, 'Command Output')}
-            className="block w-full text-left"
-          >
-            <div className="flex min-w-0 items-center gap-2 text-sm leading-6">
-              <p className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip text-stone-200">
-                {summary.firstLine}
-              </p>
-              {summary.showGap ? (
-                <span className="shrink-0 text-[11px] font-medium tracking-[0.28em] text-stone-400">
-                  ...
-                </span>
-              ) : null}
-            </div>
-          </button>
+            <button
+              type="button"
+              aria-label={item.status ? `Command status: ${item.status}` : 'Command status'}
+              title={item.status ?? 'Command status'}
+              onClick={() => onOpen(item, 'Command Output')}
+              className={`absolute right-0 top-0 inline-flex h-5 w-5 items-center justify-center rounded-bl-[0.7rem] rounded-tr-[0.9rem] border shadow-sm shadow-stone-950/25 transition sm:right-2 sm:top-2 sm:h-7 sm:w-7 sm:rounded-full ${commandStatusBadgeClassName(item.status)} hover:brightness-110`}
+            >
+              <span className="scale-[0.72] sm:scale-100">
+                <CommandStatusIcon status={item.status} />
+              </span>
+            </button>
+            <button
+              type="button"
+              aria-label="Open full command"
+              onClick={() => onOpen(item, 'Command Output')}
+              className="block w-full text-left"
+            >
+              <div className="flex min-w-0 items-center gap-2 text-sm leading-6">
+                <p className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip text-stone-200">
+                  {summary.firstLine}
+                </p>
+                {summary.showGap ? (
+                  <span className="shrink-0 text-[11px] font-medium tracking-[0.28em] text-stone-400">
+                    ...
+                  </span>
+                ) : null}
+              </div>
+            </button>
         </div>
       </div>
     </div>
@@ -1775,6 +1969,7 @@ const HistoryItemRow = memo(function HistoryItemRow({
   if (isCompactChatItem(item.kind)) {
     return (
       <CompactMessageItem
+        threadId={threadId}
         item={
           item as ThreadHistoryItemDto & {
             kind: 'userMessage' | 'agentMessage';
@@ -2102,6 +2297,7 @@ function AnsweredRequestNote({
 }: {
   note: {
     id: string;
+    turnId?: string | null;
     title: string;
     summaryLines: string[];
   };
@@ -2296,8 +2492,10 @@ export function ThreadTimeline({
 }: ThreadTimelineProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const lastHandledScrollRequestKeyRef = useRef(scrollRequestKey);
+  const previousContentSignatureRef = useRef<string | null>(null);
   const previousBottomSpacerRef = useRef(bottomSpacer);
   const tailSentinelRef = useRef<HTMLDivElement | null>(null);
+  const shouldStickToBottomRef = useRef(true);
   const expandedTextRequestIdRef = useRef(0);
   const deferredDetailCacheRef = useRef<Map<string, ThreadHistoryItemDetailDto>>(
     new Map(),
@@ -2309,6 +2507,61 @@ export function ThreadTimeline({
     {},
   );
   const [isTailVisible, setIsTailVisible] = useState(true);
+  const contentSignature = useMemo(
+    () =>
+      JSON.stringify({
+        turns: turns.map((turn) => ({
+          id: turn.id,
+          status: turn.status,
+          startedAt: turn.startedAt,
+          error: turn.error,
+          items: turn.items.map((item) => ({
+            id: item.id,
+            kind: item.kind,
+            status: item.status,
+            textLength: item.text.length,
+          })),
+        })),
+        pendingRequests: pendingRequests.map((request) => ({
+          id: request.id,
+          turnId: request.turnId,
+          title: request.title,
+        })),
+        liveOutputLength: liveOutput.length,
+        livePlan:
+          livePlan === null
+            ? null
+            : {
+                turnId: livePlan.turnId,
+                explanation: livePlan.explanation,
+                steps: livePlan.plan.map((step) => `${step.status}:${step.step}`),
+              },
+        optimisticTurn:
+          optimisticTurn === null
+            ? null
+            : {
+                id: optimisticTurn.id,
+                status: optimisticTurn.status,
+                error: optimisticTurn.error,
+                items: optimisticTurn.items.map((item) => ({
+                  id: item.id,
+                  kind: item.kind,
+                  textLength: item.text.length,
+                })),
+              },
+        ephemeralUserNote,
+        bottomSpacer,
+      }),
+    [
+      bottomSpacer,
+      ephemeralUserNote,
+      liveOutput,
+      livePlan,
+      optimisticTurn,
+      pendingRequests,
+      turns,
+    ],
+  );
   const serverManagedHistory =
     typeof onLoadEarlier === 'function' ||
     totalTurnCount !== undefined;
@@ -2383,6 +2636,10 @@ export function ThreadTimeline({
   }, []);
 
   const handleScroll = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (container) {
+      shouldStickToBottomRef.current = isNearBottom(container, FOLLOW_TAIL_THRESHOLD_PX);
+    }
     recomputeTailVisibility();
   }, [recomputeTailVisibility]);
 
@@ -2397,6 +2654,10 @@ export function ThreadTimeline({
   }, [turns.length]);
 
   useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (container) {
+      shouldStickToBottomRef.current = isNearBottom(container, FOLLOW_TAIL_THRESHOLD_PX);
+    }
     recomputeTailVisibility();
   }, [
     bottomSpacer,
@@ -2412,7 +2673,11 @@ export function ThreadTimeline({
   useEffect(() => {
     const shouldForceScroll =
       scrollRequestKey !== lastHandledScrollRequestKeyRef.current;
-    const shouldAutoScroll = isTailVisible || shouldForceScroll;
+    const contentChanged = previousContentSignatureRef.current !== contentSignature;
+    previousContentSignatureRef.current = contentSignature;
+    const shouldAutoScroll =
+      shouldForceScroll ||
+      (contentChanged && (isTailVisible || shouldStickToBottomRef.current));
 
     if (!shouldAutoScroll) {
       return;
@@ -2426,6 +2691,7 @@ export function ThreadTimeline({
 
       container.scrollTop = container.scrollHeight;
       setIsTailVisible(true);
+      shouldStickToBottomRef.current = true;
     });
 
     if (scrollRequestKey !== lastHandledScrollRequestKeyRef.current) {
@@ -2436,13 +2702,9 @@ export function ThreadTimeline({
       window.cancelAnimationFrame(frame);
     };
   }, [
-    bottomSpacer,
+    contentSignature,
     isTailVisible,
-    liveOutput,
-    livePlan,
-    pendingRequests,
     scrollRequestKey,
-    turns,
   ]);
 
   useEffect(() => {
@@ -2464,6 +2726,7 @@ export function ThreadTimeline({
 
       container.scrollTop = container.scrollHeight;
       setIsTailVisible(true);
+      shouldStickToBottomRef.current = true;
     });
 
     return () => {
@@ -2497,6 +2760,37 @@ export function ThreadTimeline({
     optimisticTurn.status !== 'failed';
   const liveOutputAttachedToTurn =
     liveOutputTurnIndex >= 0 || liveOutputAttachedToOptimisticTurn;
+  const visibleTurnIds = new Set(visibleTurns.map((turn) => turn.id));
+  const notesByTurnId = answeredRequestNotes.reduce<Map<string, typeof answeredRequestNotes>>(
+    (map, note) => {
+      if (!note.turnId || !visibleTurnIds.has(note.turnId)) {
+        return map;
+      }
+      const current = map.get(note.turnId) ?? [];
+      current.push(note);
+      map.set(note.turnId, current);
+      return map;
+    },
+    new Map(),
+  );
+  const pendingRequestsByTurnId = pendingRequests.reduce<Map<string, typeof pendingRequests>>(
+    (map, request) => {
+      if (!request.turnId || !visibleTurnIds.has(request.turnId)) {
+        return map;
+      }
+      const current = map.get(request.turnId) ?? [];
+      current.push(request);
+      map.set(request.turnId, current);
+      return map;
+    },
+    new Map(),
+  );
+  const unanchoredAnsweredNotes = answeredRequestNotes.filter(
+    (note) => !note.turnId || !visibleTurnIds.has(note.turnId),
+  );
+  const unanchoredPendingRequests = pendingRequests.filter(
+    (request) => !request.turnId || !visibleTurnIds.has(request.turnId),
+  );
 
   return (
     <>
@@ -2557,19 +2851,35 @@ export function ThreadTimeline({
           {(visibleTurns.length > 0 || optimisticTurn) && (
             <div className="divide-y divide-stone-800/80">
               {visibleTurns.map((turn, visibleIndex) => (
-                <ThreadTurnRow
-                  key={turn.id}
-                  threadId={threadId}
-                  turn={turn}
-                  absoluteIndex={visibleTurnAbsoluteOffset + visibleIndex + 1}
-                  isCollapsed={collapsedTurns[turn.id] ?? false}
-                  liveOutput={visibleIndex === liveOutputTurnIndex ? liveOutput : ''}
-                  onToggleCollapse={handleToggleCollapse}
-                  onOpenExpandedText={handleOpenExpandedText}
-                  onOpenCommandDetail={handleOpenCommandDetail}
-                  scrollRootRef={scrollContainerRef}
-                  articleRef={undefined}
-                />
+                <div key={turn.id}>
+                  <ThreadTurnRow
+                    threadId={threadId}
+                    turn={turn}
+                    absoluteIndex={visibleTurnAbsoluteOffset + visibleIndex + 1}
+                    isCollapsed={collapsedTurns[turn.id] ?? false}
+                    liveOutput={visibleIndex === liveOutputTurnIndex ? liveOutput : ''}
+                    onToggleCollapse={handleToggleCollapse}
+                    onOpenExpandedText={handleOpenExpandedText}
+                    onOpenCommandDetail={handleOpenCommandDetail}
+                    scrollRootRef={scrollContainerRef}
+                    articleRef={undefined}
+                  />
+                  {(notesByTurnId.get(turn.id)?.length || pendingRequestsByTurnId.get(turn.id)?.length) ? (
+                    <div className="space-y-3 border-t border-stone-800/80 px-2.5 py-4 sm:px-6">
+                      {(notesByTurnId.get(turn.id) ?? []).map((note) => (
+                        <AnsweredRequestNote key={note.id} note={note} />
+                      ))}
+                      {(pendingRequestsByTurnId.get(turn.id) ?? []).map((request) => (
+                        <PendingRequestCard
+                          key={request.id}
+                          request={request}
+                          busy={respondingRequestId === request.id}
+                          onRespond={onRespondToRequest ?? undefined}
+                        />
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
               ))}
               {optimisticTurn && (
                 <ThreadTurnRow
@@ -2614,12 +2924,12 @@ export function ThreadTimeline({
             </div>
           )}
 
-          {(pendingRequests.length > 0 || answeredRequestNotes.length > 0) && (
+          {(unanchoredPendingRequests.length > 0 || unanchoredAnsweredNotes.length > 0) && (
             <div className="space-y-3 border-t border-stone-800/80 px-2.5 py-4 sm:px-6">
-              {answeredRequestNotes.map((note) => (
+              {unanchoredAnsweredNotes.map((note) => (
                 <AnsweredRequestNote key={note.id} note={note} />
               ))}
-              {pendingRequests.map((request) => (
+              {unanchoredPendingRequests.map((request) => (
                 <PendingRequestCard
                   key={request.id}
                   request={request}
@@ -2633,6 +2943,7 @@ export function ThreadTimeline({
           {ephemeralUserNote && (
             <div className="border-t border-stone-800/80 px-2.5 py-2.5 sm:px-6">
               <CompactMessageItem
+                threadId={threadId}
                 item={{
                   id: 'ephemeral-plan-decision-note',
                   kind: 'userMessage',
@@ -2646,6 +2957,7 @@ export function ThreadTimeline({
           {liveOutput && !liveOutputAttachedToTurn && (
             <div className="border-t border-stone-800/80 px-2.5 py-2.5 sm:px-6">
               <CompactMessageItem
+                threadId={threadId}
                 item={{
                   id: 'live-agent-message-fallback',
                   kind: 'agentMessage',

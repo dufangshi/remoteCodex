@@ -112,6 +112,7 @@ interface OptimisticTurnState {
 
 interface LocalAnsweredRequestNote {
   id: string;
+  turnId: string | null;
   title: string;
   summaryLines: string[];
 }
@@ -120,7 +121,7 @@ function buildAnsweredRequestNote(
   request: ThreadActionRequestDto | undefined,
   input: { answers: Record<string, { answers: string[] }> },
 ): LocalAnsweredRequestNote | null {
-  if (!request || request.kind === 'planDecision') {
+  if (!request) {
     return null;
   }
 
@@ -141,6 +142,7 @@ function buildAnsweredRequestNote(
 
   return {
     id: request.id,
+    turnId: request.turnId,
     title: request.title,
     summaryLines,
   };
@@ -240,6 +242,7 @@ export function ThreadDetailPage() {
   const loadRequestIdRef = useRef(0);
   const pageContextRequestIdRef = useRef(0);
   const terminalTurnPendingRef = useRef<string | null>(null);
+  const detailRef = useRef<ThreadDetailDto | null>(null);
   const [detail, setDetail] = useState<ThreadDetailDto | null>(null);
   const [threads, setThreads] = useState<ThreadDto[]>([]);
   const [modelOptions, setModelOptions] = useState<ModelOptionDto[]>([]);
@@ -326,6 +329,7 @@ export function ThreadDetailPage() {
 
   const applyDetailResponse = useCallback(
     (detailResponse: ThreadDetailDto) => {
+      detailRef.current = detailResponse;
       const threadHasEnded =
         detailResponse.thread.activeTurnId === null &&
         detailResponse.thread.status !== 'running';
@@ -367,6 +371,10 @@ export function ThreadDetailPage() {
     },
     [clearBufferedLiveOutput],
   );
+
+  useEffect(() => {
+    detailRef.current = detail;
+  }, [detail]);
 
   const loadPageContext = useCallback(
     async ({ seedThread }: { seedThread?: ThreadDto | null } = {}) => {
@@ -1145,8 +1153,9 @@ export function ThreadDetailPage() {
     setScrollRequestKey((current) => current + 1);
     const optimisticTurnId = `optimistic-${Date.now()}`;
     const optimisticStartedAt = new Date().toISOString();
-    const optimisticModel = detail?.thread.model ?? null;
-    const optimisticReasoningEffort = detail?.thread.reasoningEffort ?? null;
+    const activeDetail = detailRef.current;
+    const optimisticModel = activeDetail?.thread.model ?? null;
+    const optimisticReasoningEffort = activeDetail?.thread.reasoningEffort ?? null;
     setOptimisticTurn({
       id: optimisticTurnId,
       serverTurnId: null,
@@ -1163,7 +1172,7 @@ export function ThreadDetailPage() {
     });
 
     try {
-      let currentDetail = detail;
+      let currentDetail = detailRef.current;
       if (currentDetail && !currentDetail.thread.isLoaded) {
         const resumed = await resumeThread(
           id,
@@ -1175,6 +1184,7 @@ export function ThreadDetailPage() {
           },
         );
         currentDetail = resumed;
+        detailRef.current = resumed;
         setDetail((current) =>
           current
             ? {
@@ -1389,6 +1399,10 @@ export function ThreadDetailPage() {
     };
 
     setSettingsBusy(true);
+    detailRef.current = {
+      ...detail,
+      thread: optimisticThread,
+    };
     setDetail((current) =>
       current
         ? {
@@ -1416,6 +1430,12 @@ export function ThreadDetailPage() {
           ? { sandboxMode: input.sandboxMode }
           : {}),
       });
+      detailRef.current = previousDetail
+        ? {
+            ...previousDetail,
+            thread: updated,
+          }
+        : null;
       setDetail((current) =>
         current
           ? {
@@ -1428,6 +1448,7 @@ export function ThreadDetailPage() {
         current.map((entry) => (entry.id === updated.id ? updated : entry)),
       );
     } catch (caught) {
+      detailRef.current = previousDetail;
       setDetail(previousDetail);
       setThreads((current) =>
         current.map((entry) =>
@@ -1789,6 +1810,24 @@ export function ThreadDetailPage() {
       <RealtimeConnectionIcon status={realtimeConnection.status} />
     </div>
   );
+  const desktopSessionConnectionIndicator = !threadLoaded ? (
+    <button
+      type="button"
+      onClick={() => void handleThreadConnectionToggle()}
+      disabled={busy || !detail}
+      title={busy ? 'Connecting thread' : realtimeConnectionTitle}
+      className={`hidden lg:inline-flex h-9 w-9 items-center justify-center rounded-full transition ${realtimeConnectionIndicatorClassName}`}
+    >
+      <RealtimeConnectionIcon status="detached" />
+    </button>
+  ) : (
+    <div
+      title={realtimeConnectionTitle}
+      className={`hidden lg:inline-flex h-9 w-9 items-center justify-center rounded-full transition ${realtimeConnectionIndicatorClassName}`}
+    >
+      <RealtimeConnectionIcon status={realtimeConnection.status} />
+    </div>
+  );
 
   return (
     <ThreadWorkspaceLayout
@@ -1807,7 +1846,12 @@ export function ThreadDetailPage() {
       mobileHeaderAction={mobileSessionConnectionButton}
       onRenameThread={handleRenameThread}
     >
-      <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-none border-y border-stone-800 bg-stone-900/85 shadow-2xl shadow-stone-950/20 sm:flex-none sm:rounded-[2rem] sm:border">
+      <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-none border-y border-stone-800 bg-stone-900/85 shadow-2xl shadow-stone-950/20 sm:flex-none sm:rounded-[2rem] sm:border">
+        <div className="pointer-events-none absolute right-4 top-4 z-30 hidden lg:block">
+          <div className="pointer-events-auto">
+            {desktopSessionConnectionIndicator}
+          </div>
+        </div>
         {error && !loading && (
           <div className="shrink-0 border-b border-rose-500/20 bg-rose-500/10 px-5 py-4 text-sm text-rose-100 sm:px-6">
             {error}

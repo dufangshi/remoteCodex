@@ -19,6 +19,7 @@
     "service:start": "node scripts/service-manager.mjs start",
     "service:stop": "node scripts/service-manager.mjs stop",
     "service:status": "node scripts/service-manager.mjs status",
+    "service:restart": "node scripts/service-restart.mjs launch",
     "build": "pnpm -r --if-present build",
     "lint": "pnpm -r --if-present lint",
     "typecheck": "pnpm -r --if-present typecheck",

@@ -193,6 +193,35 @@ describe('ThreadComposer', () => {
     );
   });
 
+  it('keeps the model control label compact and left-truncated while toolbar keeps only utility buttons', () => {
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4-super-long-mobile-label"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={[
+          {
+            ...modelOptions[0],
+            model: 'gpt-5.4-super-long-mobile-label',
+          },
+        ]}
+        onSubmit={() => undefined}
+      />,
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'gpt-5.4-super-long-mobile-label' }),
+    ).toHaveClass('max-w-[8.75rem]');
+    expect(
+      screen.getByText('gpt-5.4-super-long-mobile-label'),
+    ).toHaveClass('truncate', 'whitespace-nowrap', '[direction:rtl]');
+    expect(screen.getByRole('button', { name: 'Add attachment' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Switch to shell' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'medium' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Plan' })).toBeInTheDocument();
+  });
+
   it('submits on ctrl or command enter while plain enter stays as newline behavior', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
 
@@ -280,11 +309,11 @@ describe('ThreadComposer', () => {
       },
     });
 
-    expect(screen.getByText('[FILE notes.txt]')).toBeInTheDocument();
-    expect(screen.getByText('[FILE notes.txt (2)]')).toBeInTheDocument();
+    expect(screen.getAllByText('notes.txt').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('notes.txt (2)').length).toBeGreaterThan(0);
 
     const editor = screen.getByLabelText('Prompt');
-    setPromptValue(editor, `Please inspect ${editor.textContent ?? ''}`);
+    setPromptValue(editor, 'Please inspect [FILE notes.txt] [FILE notes.txt (2)]');
     fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
 
     await waitFor(() => {
@@ -333,7 +362,7 @@ describe('ThreadComposer', () => {
       },
     });
 
-    expect(screen.getByText('[PHOTO photo-1712800000000.heic]')).toBeInTheDocument();
+    expect(screen.getByAltText('photo-1712800000000.heic')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
 
@@ -393,14 +422,14 @@ describe('ThreadComposer', () => {
       },
     });
 
-    expect(screen.getByText('[FILE notes.txt]')).toBeInTheDocument();
+    expect(screen.getAllByText('notes.txt').length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole('button', { name: 'Remount' }));
 
-    expect(screen.getByText('[FILE notes.txt]')).toBeInTheDocument();
+    expect(screen.getAllByText('notes.txt').length).toBeGreaterThan(0);
   });
 
-  it('renders attachment chips inline inside the prompt editor flow', async () => {
+  it('renders attachment previews inline inside the prompt editor flow', async () => {
     const { container } = render(
       <ThreadComposer
         activeView="chat"
@@ -423,7 +452,129 @@ describe('ThreadComposer', () => {
       },
     });
 
-    expect(screen.getByLabelText('Prompt')).toHaveTextContent('[FILE notes.txt]');
+    expect(
+      screen.getByLabelText('Prompt').querySelector('[data-placeholder=\"[FILE notes.txt]\"]'),
+    ).toBeTruthy();
+    expect(screen.getAllByText('notes.txt').length).toBeGreaterThan(0);
+  });
+
+  it('pastes image attachments into the chat prompt as preview tokens', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const imageFile = new File(['img'], 'clipboard.png', { type: 'image/png' });
+
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    const editor = screen.getByLabelText('Prompt');
+    const pasteEvent = createEvent.paste(editor, {
+      bubbles: true,
+      cancelable: true,
+    });
+    Object.assign(pasteEvent, {
+      clipboardData: {
+        items: [
+          {
+            kind: 'file',
+            getAsFile: () => imageFile,
+          },
+        ],
+        files: [imageFile],
+      },
+    });
+    fireEvent(editor, pasteEvent);
+
+    expect(screen.getByAltText('clipboard.png')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({
+        prompt: '[PHOTO clipboard.png]',
+        attachments: [
+          expect.objectContaining({
+            kind: 'photo',
+            originalName: 'clipboard.png',
+            placeholder: '[PHOTO clipboard.png]',
+          }),
+        ],
+      });
+    });
+  });
+
+  it('accepts dropped files into the chat prompt and highlights the drop target', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const droppedFile = new File(['drag'], 'drop.txt', { type: 'text/plain' });
+
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    const editor = screen.getByLabelText('Prompt');
+    const dragEnterEvent = createEvent.dragEnter(editor, {
+      bubbles: true,
+      cancelable: true,
+    });
+    Object.assign(dragEnterEvent, {
+      dataTransfer: {
+        items: [
+          {
+            kind: 'file',
+            getAsFile: () => droppedFile,
+          },
+        ],
+        files: [droppedFile],
+      },
+    });
+    fireEvent(editor, dragEnterEvent);
+
+    expect(editor.parentElement).toHaveClass('border-sky-300/80');
+
+    const dropEvent = createEvent.drop(editor, {
+      bubbles: true,
+      cancelable: true,
+    });
+    Object.assign(dropEvent, {
+      dataTransfer: {
+        items: [
+          {
+            kind: 'file',
+            getAsFile: () => droppedFile,
+          },
+        ],
+        files: [droppedFile],
+      },
+    });
+    fireEvent(editor, dropEvent);
+
+    expect(screen.getAllByText('drop.txt').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({
+        prompt: '[FILE drop.txt]',
+        attachments: [
+          expect.objectContaining({
+            kind: 'file',
+            originalName: 'drop.txt',
+            placeholder: '[FILE drop.txt]',
+          }),
+        ],
+      });
+    });
   });
 
   it('keeps the caret in place when editing in the middle of chat prompt text', async () => {
