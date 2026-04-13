@@ -1331,7 +1331,7 @@ describe('ThreadTimeline', () => {
     expect(screen.getByText('streaming draft')).toBeInTheDocument();
   });
 
-  it('shows per-turn model metadata plus detailed token usage in the turn header', () => {
+  it('shows per-turn model metadata plus price in the turn header', () => {
     render(
       <ThreadTimeline
         liveOutput=""
@@ -1361,6 +1361,15 @@ describe('ThreadTimeline', () => {
               },
               modelContextWindow: 272000,
             },
+            priceEstimate: {
+              pricingModelKey: 'gpt-5.4',
+              pricingTierKey: 'standard',
+              currency: 'USD',
+              inputUsd: 0.025,
+              cachedInputUsd: 0.0005,
+              outputUsd: 0.0636,
+              totalUsd: 0.0891,
+            },
             items: [
               {
                 id: 'agent-1',
@@ -1374,16 +1383,12 @@ describe('ThreadTimeline', () => {
     );
 
     expect(screen.getByText('gpt-5.4 · high')).toBeInTheDocument();
-    expect(screen.getAllByText('14k').length).toBeGreaterThan(0);
-    expect(screen.getByText('10k')).toBeInTheDocument();
-    expect(screen.getByText('2k')).toBeInTheDocument();
-    expect(screen.getByText('4.2k')).toBeInTheDocument();
-    expect(screen.getByText('1.2k')).toBeInTheDocument();
+    expect(screen.getAllByText('$0.089').length).toBeGreaterThan(0);
     expect(screen.getByLabelText('Completed')).toBeInTheDocument();
     expect(screen.queryByText('Completed')).not.toBeInTheDocument();
   });
 
-  it('shows compact token breakdown badges in the running footer bubble', () => {
+  it('shows price plus token breakdown badges in the running footer bubble', () => {
     render(
       <ThreadTimeline
         liveOutput=""
@@ -1413,6 +1418,15 @@ describe('ThreadTimeline', () => {
               },
               modelContextWindow: 272000,
             },
+            priceEstimate: {
+              pricingModelKey: 'gpt-5.4',
+              pricingTierKey: 'standard',
+              currency: 'USD',
+              inputUsd: 0.025,
+              cachedInputUsd: 0.0005,
+              outputUsd: 0.0636,
+              totalUsd: 0.0891,
+            },
             items: [
               {
                 id: 'user-1',
@@ -1425,14 +1439,14 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    expect(screen.getAllByText('14k').length).toBeGreaterThan(0);
     expect(screen.getAllByText('10k').length).toBeGreaterThan(0);
     expect(screen.getAllByText('2k').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('4.2k').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('3k').length).toBeGreaterThan(0);
     expect(screen.getAllByText('1.2k').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('$0.089').length).toBeGreaterThan(0);
   });
 
-  it('opens the mobile token usage popover when the total badge is clicked', () => {
+  it('opens the mobile token and price popover when the price badge is clicked', () => {
     render(
       <ThreadTimeline
         liveOutput=""
@@ -1462,6 +1476,15 @@ describe('ThreadTimeline', () => {
               },
               modelContextWindow: 272000,
             },
+            priceEstimate: {
+              pricingModelKey: 'gpt-5.4',
+              pricingTierKey: 'standard',
+              currency: 'USD',
+              inputUsd: 0.025,
+              cachedInputUsd: 0.0005,
+              outputUsd: 0.0636,
+              totalUsd: 0.0891,
+            },
             items: [
               {
                 id: 'agent-1',
@@ -1474,13 +1497,122 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show token usage details' }));
+    fireEvent.click(
+      screen.getAllByRole('button', { name: 'Show token and price details' }).at(-1)!,
+    );
 
-    expect(screen.getAllByText('All').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('In').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Cache').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Out').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Reason').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('$0.0250').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('10k').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('$0.0005').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('$0.0450').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('3k').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('$0.0186').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('1.2k').length).toBeGreaterThan(0);
+  });
+
+  it('opens the desktop token and price popover on hover over the price badge', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            model: 'gpt-5.4',
+            reasoningEffort: 'high',
+            reasoningEffortAvailable: true,
+            tokenUsage: {
+              total: {
+                totalTokens: 18240,
+                inputTokens: 12000,
+                cachedInputTokens: 2000,
+                outputTokens: 4240,
+                reasoningOutputTokens: 1240,
+              },
+              last: {
+                totalTokens: 18240,
+                inputTokens: 12000,
+                cachedInputTokens: 2000,
+                outputTokens: 4240,
+                reasoningOutputTokens: 1240,
+              },
+              modelContextWindow: 272000,
+            },
+            priceEstimate: {
+              pricingModelKey: 'gpt-5.4',
+              pricingTierKey: 'standard',
+              currency: 'USD',
+              inputUsd: 0.025,
+              cachedInputUsd: 0.0005,
+              outputUsd: 0.0636,
+              totalUsd: 0.0891,
+            },
+            items: [
+              {
+                id: 'agent-1',
+                kind: 'agentMessage',
+                text: 'Done.',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.mouseEnter(screen.getAllByRole('button', { name: 'Show token and price details' })[0]!);
+
+    expect(screen.getAllByText('$0.0250').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('10k').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('$0.0450').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('3k').length).toBeGreaterThan(0);
+  });
+
+  it('shows -- for token price when the turn model has no local pricing entry', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            model: 'gpt-5-mini',
+            reasoningEffort: null,
+            reasoningEffortAvailable: false,
+            tokenUsage: {
+              total: {
+                totalTokens: 4200,
+                inputTokens: 3000,
+                cachedInputTokens: 0,
+                outputTokens: 1200,
+                reasoningOutputTokens: 0,
+              },
+              last: {
+                totalTokens: 4200,
+                inputTokens: 3000,
+                cachedInputTokens: 0,
+                outputTokens: 1200,
+                reasoningOutputTokens: 0,
+              },
+              modelContextWindow: 272000,
+            },
+            priceEstimate: null,
+            items: [
+              {
+                id: 'agent-1',
+                kind: 'agentMessage',
+                text: 'No pricing entry.',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getAllByText('--').length).toBeGreaterThan(0);
   });
 
   it('shows -- for legacy turns and - for fixed-effort models', () => {

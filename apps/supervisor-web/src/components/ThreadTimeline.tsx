@@ -137,8 +137,10 @@ type TimelineTurn = Omit<ThreadTurnDto, 'status'> & {
 interface TurnTokenDetail {
   id: string;
   label: string;
-  compactValue: string;
-  rawValue: number;
+  tokenCompactValue: string;
+  tokenRawValue: number;
+  usdCompactValue: string;
+  usdRawValue: number | null;
   className: string;
   icon: ReactNode | null;
 }
@@ -1106,6 +1108,7 @@ function TurnStatusBar({
   const label = turnStatusLabel(turn.status);
   const runtimeSummary = formatTurnRuntimeSummary(turn);
   const tokenBadges = buildTurnTokenBadges(turn);
+  const priceBadge = buildTurnPriceBadge(turn);
   const active = isActiveTurnStatus(turn.status);
   const toneClassName =
     turn.status === 'failed'
@@ -1134,8 +1137,16 @@ function TurnStatusBar({
             </time>
           )}
         </div>
-        {tokenBadges.length > 0 && (
+        {(priceBadge || tokenBadges.length > 0) && (
           <div className="flex flex-wrap items-center gap-1.5 pl-6">
+            {priceBadge ? (
+              <span
+                className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${priceBadge.className}`}
+                title={priceBadge.title}
+              >
+                {priceBadge.label}
+              </span>
+            ) : null}
             {tokenBadges.map((badge) => (
               <span
                 key={badge.label}
@@ -1234,12 +1245,6 @@ function TokenReasonIcon() {
   );
 }
 
-function blendedTurnTokenTotal(usage: NonNullable<TimelineTurn['tokenUsage']>['total']) {
-  const cachedInput = Math.max(usage.cachedInputTokens, 0);
-  const nonCachedInput = Math.max(usage.inputTokens - cachedInput, 0);
-  return Math.max(nonCachedInput + Math.max(usage.outputTokens, 0), 0);
-}
-
 function formatCompactTokenCount(value: number) {
   if (!Number.isFinite(value) || value <= 0) {
     return '0';
@@ -1258,57 +1263,154 @@ function formatCompactTokenCount(value: number) {
   return String(Math.round(value));
 }
 
+function formatCompactUsd(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return '$0';
+  }
+
+  if (value >= 100) {
+    return `$${Math.round(value)}`;
+  }
+
+  if (value >= 10) {
+    return `$${String(value.toFixed(1)).replace(/\.0$/, '')}`;
+  }
+
+  if (value >= 1) {
+    return `$${String(value.toFixed(2)).replace(/0$/, '').replace(/\.$/, '')}`;
+  }
+
+  if (value >= 0.1) {
+    return `$${value.toFixed(2)}`;
+  }
+
+  if (value >= 0.01) {
+    return `$${value.toFixed(3)}`;
+  }
+
+  if (value >= 0.001) {
+    return `$${value.toFixed(4)}`;
+  }
+
+  return '<$0.001';
+}
+
+function formatDetailedUsd(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return '$0.0000';
+  }
+
+  return `$${value.toFixed(4)}`;
+}
+
+function proportionalOutputUsd(
+  totalOutputUsd: number | null | undefined,
+  outputTokens: number,
+  sliceTokens: number,
+) {
+  const outputUsdValue = totalOutputUsd ?? null;
+  if (
+    !Number.isFinite(outputUsdValue ?? NaN) ||
+    outputUsdValue === null ||
+    outputTokens <= 0 ||
+    sliceTokens <= 0
+  ) {
+    return null;
+  }
+
+  return (outputUsdValue * sliceTokens) / outputTokens;
+}
+
 function buildTurnTokenDetails(turn: TimelineTurn) {
   const usage = turn.tokenUsage?.total;
   if (!usage) {
     return [];
   }
 
+  const nonCachedInputTokens = Math.max(
+    usage.inputTokens - usage.cachedInputTokens,
+    0,
+  );
+  const cachedInputTokens = Math.max(usage.cachedInputTokens, 0);
+  const reasoningOutputTokens = Math.max(usage.reasoningOutputTokens, 0);
+  const nonReasoningOutputTokens = Math.max(
+    usage.outputTokens - reasoningOutputTokens,
+    0,
+  );
+
   const details: Array<TurnTokenDetail | null> = [
-    {
-      id: 'all',
-      label: 'All',
-      compactValue: formatCompactTokenCount(blendedTurnTokenTotal(usage)),
-      rawValue: blendedTurnTokenTotal(usage),
-      className: 'border-stone-600/80 bg-stone-950/75 text-stone-100',
-      icon: null,
-    },
-    {
-      id: 'in',
-      label: 'In',
-      compactValue: formatCompactTokenCount(
-        Math.max(usage.inputTokens - usage.cachedInputTokens, 0),
-      ),
-      rawValue: Math.max(usage.inputTokens - usage.cachedInputTokens, 0),
-      className: 'border-emerald-300/28 bg-emerald-300/10 text-emerald-100',
-      icon: <TokenInIcon />,
-    },
-    usage.cachedInputTokens > 0
+    nonCachedInputTokens > 0
+      ? {
+          id: 'in',
+          label: 'Input',
+          tokenCompactValue: formatCompactTokenCount(nonCachedInputTokens),
+          tokenRawValue: nonCachedInputTokens,
+          usdCompactValue: turn.priceEstimate
+            ? formatDetailedUsd(turn.priceEstimate.inputUsd)
+            : '--',
+          usdRawValue: turn.priceEstimate?.inputUsd ?? null,
+          className: 'border-emerald-300/28 bg-emerald-300/10 text-emerald-100',
+          icon: <TokenInIcon />,
+        }
+      : null,
+    cachedInputTokens > 0
       ? {
           id: 'cache',
-          label: 'Cache',
-          compactValue: formatCompactTokenCount(usage.cachedInputTokens),
-          rawValue: usage.cachedInputTokens,
+          label: 'Cached input',
+          tokenCompactValue: formatCompactTokenCount(cachedInputTokens),
+          tokenRawValue: cachedInputTokens,
+          usdCompactValue: turn.priceEstimate
+            ? formatDetailedUsd(turn.priceEstimate.cachedInputUsd)
+            : '--',
+          usdRawValue: turn.priceEstimate?.cachedInputUsd ?? null,
           className: 'border-sky-300/28 bg-sky-300/10 text-sky-100',
           icon: <TokenCacheIcon />,
         }
       : null,
-    usage.outputTokens > 0
+    nonReasoningOutputTokens > 0
       ? {
           id: 'out',
-          label: 'Out',
-          compactValue: formatCompactTokenCount(usage.outputTokens),
-          rawValue: usage.outputTokens,
+          label: 'Output',
+          tokenCompactValue: formatCompactTokenCount(nonReasoningOutputTokens),
+          tokenRawValue: nonReasoningOutputTokens,
+          usdCompactValue: turn.priceEstimate
+            ? formatDetailedUsd(
+                proportionalOutputUsd(
+                  turn.priceEstimate.outputUsd,
+                  Math.max(usage.outputTokens, 0),
+                  nonReasoningOutputTokens,
+                ) ?? 0,
+              )
+            : '--',
+          usdRawValue: proportionalOutputUsd(
+            turn.priceEstimate?.outputUsd,
+            Math.max(usage.outputTokens, 0),
+            nonReasoningOutputTokens,
+          ),
           className: 'border-violet-300/28 bg-violet-300/10 text-violet-100',
           icon: <TokenOutIcon />,
         }
       : null,
-    usage.reasoningOutputTokens > 0
+    reasoningOutputTokens > 0
       ? {
           id: 'reason',
-          label: 'Reason',
-          compactValue: formatCompactTokenCount(usage.reasoningOutputTokens),
-          rawValue: usage.reasoningOutputTokens,
+          label: 'Reasoning',
+          tokenCompactValue: formatCompactTokenCount(reasoningOutputTokens),
+          tokenRawValue: reasoningOutputTokens,
+          usdCompactValue: turn.priceEstimate
+            ? formatDetailedUsd(
+                proportionalOutputUsd(
+                  turn.priceEstimate.outputUsd,
+                  Math.max(usage.outputTokens, 0),
+                  reasoningOutputTokens,
+                ) ?? 0,
+              )
+            : '--',
+          usdRawValue: proportionalOutputUsd(
+            turn.priceEstimate?.outputUsd,
+            Math.max(usage.outputTokens, 0),
+            reasoningOutputTokens,
+          ),
           className: 'border-amber-300/28 bg-amber-300/10 text-amber-100',
           icon: <TokenReasonIcon />,
         }
@@ -1320,30 +1422,55 @@ function buildTurnTokenDetails(turn: TimelineTurn) {
 
 function buildTurnTokenBadges(turn: TimelineTurn) {
   return buildTurnTokenDetails(turn).map((detail) => ({
-    label: detail.compactValue,
-    title: `${detail.label}: ${detail.rawValue} tokens`,
+    label: detail.tokenCompactValue,
+    title: `${detail.label}: ${detail.tokenRawValue} tokens`,
     className: detail.className,
     icon: detail.icon,
   }));
 }
 
+function buildTurnPriceBadge(turn: TimelineTurn) {
+  return {
+    label: turn.priceEstimate
+      ? formatCompactUsd(turn.priceEstimate.totalUsd)
+      : '--',
+    title:
+      turn.priceEstimate === null || turn.priceEstimate === undefined
+        ? 'Price estimate unavailable for this model.'
+        : `Estimated cost: ${formatDetailedUsd(turn.priceEstimate.totalUsd)}`,
+    className: turn.priceEstimate
+      ? 'border-lime-300/28 bg-lime-300/10 text-lime-100'
+      : 'border-stone-700/90 bg-stone-900/70 text-stone-300',
+  };
+}
+
+const TURN_HEADER_BADGE_CLASS_NAME =
+  'inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-normal leading-none sm:text-[11px]';
+
 function TurnTokenSummary({ turn }: { turn: TimelineTurn }) {
   const details = buildTurnTokenDetails(turn);
+  const priceBadge = buildTurnPriceBadge(turn);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [isDesktopOpen, setIsDesktopOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const desktopPriceRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (!isMobileOpen) {
+    if (!isMobileOpen && !isDesktopOpen) {
       return;
     }
 
     const handlePointerDown = (event: PointerEvent) => {
-      if (
-        containerRef.current &&
-        event.target instanceof Node &&
-        !containerRef.current.contains(event.target)
-      ) {
+      if (!(event.target instanceof Node)) {
+        return;
+      }
+
+      if (containerRef.current && !containerRef.current.contains(event.target)) {
         setIsMobileOpen(false);
+      }
+
+      if (desktopPriceRef.current && !desktopPriceRef.current.contains(event.target)) {
+        setIsDesktopOpen(false);
       }
     };
 
@@ -1351,72 +1478,93 @@ function TurnTokenSummary({ turn }: { turn: TimelineTurn }) {
     return () => {
       document.removeEventListener('pointerdown', handlePointerDown);
     };
-  }, [isMobileOpen]);
+  }, [isDesktopOpen, isMobileOpen]);
 
-  if (details.length === 0) {
+  if (!priceBadge && details.length === 0) {
     return null;
   }
 
-  const [totalDetail, ...secondaryDetails] = details;
-  if (!totalDetail) {
-    return null;
-  }
-  const totalLabel = totalDetail.compactValue;
+  const renderBreakdownPopover = () => (
+    <div className="min-w-[12rem] rounded-2xl border border-stone-700/90 bg-stone-950/96 p-2.5 shadow-2xl shadow-black/35 backdrop-blur">
+      <div className="space-y-1">
+        {details.map((detail) => (
+          <div
+            key={detail.id}
+            className="flex items-center justify-between gap-3 rounded-xl border border-stone-800/80 bg-stone-900/70 px-2.5 py-1.5 text-[11px]"
+            title={`${detail.label}: ${detail.tokenRawValue} tokens`}
+          >
+            <span className="inline-flex min-w-0 items-center gap-2 text-stone-300">
+              <span className="inline-flex shrink-0">{detail.icon}</span>
+              <span className="font-medium text-stone-100">{detail.usdCompactValue}</span>
+            </span>
+            <span className="shrink-0 font-medium text-stone-400">
+              {detail.tokenCompactValue}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <>
-      <span className="hidden min-w-0 items-center gap-1.5 overflow-hidden text-[10px] text-stone-400 md:inline-flex md:text-[11px]">
-        <span
-          className="shrink-0 rounded-full border border-stone-700/90 bg-stone-900/70 px-2 py-1 font-medium text-stone-200"
-          title={`${totalDetail.label}: ${totalDetail.rawValue} tokens`}
-        >
-          {totalLabel}
-        </span>
-        {secondaryDetails.map((detail) => (
+      <div
+        className="hidden shrink-0 items-center gap-1.5 md:inline-flex"
+      >
+        {priceBadge ? (
+          <div
+            ref={desktopPriceRef}
+            className="relative shrink-0"
+            onMouseEnter={() => setIsDesktopOpen(true)}
+            onMouseLeave={() => setIsDesktopOpen(false)}
+          >
+            <button
+              type="button"
+              aria-label="Show token and price details"
+              aria-expanded={isDesktopOpen}
+              onFocus={() => setIsDesktopOpen(true)}
+              onBlur={() => setIsDesktopOpen(false)}
+              className={`${TURN_HEADER_BADGE_CLASS_NAME} appearance-none whitespace-nowrap bg-transparent !text-[10px] !font-normal !leading-none transition hover:bg-stone-800/90 sm:!text-[11px] ${priceBadge.className}`}
+              title={priceBadge.title}
+            >
+              {priceBadge.label}
+            </button>
+            {isDesktopOpen && details.length > 0 ? (
+              <div className="absolute left-1/2 top-full z-30 mt-1.5 -translate-x-1/2">
+                {renderBreakdownPopover()}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        {details.map((detail) => (
           <span
             key={detail.id}
-            className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-1 ${detail.className}`}
-            title={`${detail.label}: ${detail.rawValue} tokens`}
+            className={`${TURN_HEADER_BADGE_CLASS_NAME} ${detail.className}`}
+            title={`${detail.label}: ${detail.usdCompactValue}, ${detail.tokenRawValue} tokens`}
           >
             {detail.icon}
-            <span>{detail.compactValue}</span>
+            <span className="font-medium text-stone-100">{detail.tokenCompactValue}</span>
           </span>
         ))}
-      </span>
+      </div>
       <div ref={containerRef} className="relative shrink-0 md:hidden">
-        <button
-          type="button"
-          aria-label="Show token usage details"
-          aria-expanded={isMobileOpen}
-          onClick={() => setIsMobileOpen((current) => !current)}
-          className="inline-flex whitespace-nowrap rounded-full border border-stone-700/90 bg-stone-900/70 px-1.5 py-0.5 text-[9px] font-medium leading-none text-stone-200 transition hover:bg-stone-800/90"
-        >
-          {totalLabel}
-        </button>
-        {isMobileOpen && (
-          <div className="absolute right-0 top-full z-30 mt-1.5 min-w-[11rem] rounded-2xl border border-stone-700/90 bg-stone-950/96 p-2.5 shadow-2xl shadow-black/35 backdrop-blur">
-            <div className="space-y-1">
-              {details.map((detail) => (
-                <div
-                  key={detail.id}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-stone-800/80 bg-stone-900/70 px-2.5 py-1.5 text-[11px]"
-                >
-                  <span className="inline-flex items-center gap-1.5 text-stone-300">
-                    {detail.icon ?? (
-                      <span className="text-[10px] font-medium text-stone-500">
-                        All
-                      </span>
-                    )}
-                    <span>{detail.label}</span>
-                  </span>
-                  <span className="font-medium text-stone-100">
-                    {detail.compactValue}
-                  </span>
-                </div>
-              ))}
-            </div>
+        {priceBadge ? (
+          <button
+            type="button"
+            aria-label="Show token and price details"
+            aria-expanded={isMobileOpen}
+            onClick={() => setIsMobileOpen((current) => !current)}
+            className={`${TURN_HEADER_BADGE_CLASS_NAME} appearance-none whitespace-nowrap bg-transparent !text-[10px] !font-normal !leading-none transition hover:bg-stone-800/90 sm:!text-[11px] ${priceBadge.className}`}
+            title={priceBadge.title}
+          >
+            {priceBadge.label}
+          </button>
+        ) : null}
+        {isMobileOpen && details.length > 0 ? (
+          <div className="absolute left-1/2 top-full z-30 mt-1.5 -translate-x-1/2">
+            {renderBreakdownPopover()}
           </div>
-        )}
+        ) : null}
       </div>
     </>
   );

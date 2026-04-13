@@ -64,6 +64,8 @@ export interface UpsertThreadTurnMetadataInput {
   model?: string | null;
   reasoningEffort?: string | null;
   reasoningEffortAvailable?: boolean | null;
+  pricingModelKey?: string | null;
+  pricingTierKey?: string | null;
   tokenUsageJson?: string | null;
 }
 
@@ -280,6 +282,14 @@ export function upsertThreadTurnMetadata(
           input.reasoningEffortAvailable !== undefined
             ? input.reasoningEffortAvailable
             : existing.reasoningEffortAvailable,
+        pricingModelKey:
+          input.pricingModelKey !== undefined
+            ? input.pricingModelKey
+            : existing.pricingModelKey,
+        pricingTierKey:
+          input.pricingTierKey !== undefined
+            ? input.pricingTierKey
+            : existing.pricingTierKey,
         tokenUsageJson:
           input.tokenUsageJson !== undefined
             ? input.tokenUsageJson
@@ -299,6 +309,8 @@ export function upsertThreadTurnMetadata(
       model: input.model ?? null,
       reasoningEffort: input.reasoningEffort ?? null,
       reasoningEffortAvailable: input.reasoningEffortAvailable ?? null,
+      pricingModelKey: input.pricingModelKey ?? null,
+      pricingTierKey: input.pricingTierKey ?? null,
       tokenUsageJson: input.tokenUsageJson ?? null,
       createdAt: now,
       updatedAt: now,

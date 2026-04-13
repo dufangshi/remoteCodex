@@ -89,6 +89,8 @@ export const threadTurnMetadata = sqliteTable(
     reasoningEffortAvailable: integer('reasoning_effort_available', {
       mode: 'boolean',
     }),
+    pricingModelKey: text('pricing_model_key'),
+    pricingTierKey: text('pricing_tier_key'),
     tokenUsageJson: text('token_usage_json'),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),

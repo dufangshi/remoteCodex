@@ -199,6 +199,18 @@ export interface ThreadTurnTokenUsageDto {
   modelContextWindow: number | null;
 }
 
+export type ThreadTurnPricingTierDto = 'standard' | 'fast';
+
+export interface ThreadTurnPriceEstimateDto {
+  pricingModelKey: string;
+  pricingTierKey: ThreadTurnPricingTierDto;
+  currency: 'USD';
+  inputUsd: number;
+  cachedInputUsd: number;
+  outputUsd: number;
+  totalUsd: number;
+}
+
 export interface ThreadTurnDto {
   id: string;
   startedAt: string | null;
@@ -208,6 +220,7 @@ export interface ThreadTurnDto {
   reasoningEffort?: ReasoningEffortDto | null;
   reasoningEffortAvailable?: boolean | null;
   tokenUsage?: ThreadTurnTokenUsageDto | null;
+  priceEstimate?: ThreadTurnPriceEstimateDto | null;
   items: ThreadHistoryItemDto[];
 }
 

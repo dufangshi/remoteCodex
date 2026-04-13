@@ -1,0 +1,49 @@
+{
+  "currency": "USD",
+  "tiers": {
+    "standard": {
+      "multiplier": 1
+    },
+    "fast": {
+      "multiplier": 2
+    }
+  },
+  "models": {
+    "gpt-5.3-codex": {
+      "inputUsdPerMillion": 1.75,
+      "cachedInputUsdPerMillion": 0.175,
+      "outputUsdPerMillion": 14,
+      "supportsFastMode": true
+    },
+    "gpt-5.4": {
+      "inputUsdPerMillion": 2.5,
+      "cachedInputUsdPerMillion": 0.25,
+      "outputUsdPerMillion": 15,
+      "supportsFastMode": true
+    },
+    "gpt-5.2-codex": {
+      "inputUsdPerMillion": 1.75,
+      "cachedInputUsdPerMillion": 0.175,
+      "outputUsdPerMillion": 14,
+      "supportsFastMode": false
+    },
+    "gpt-5.1-codex-max": {
+      "inputUsdPerMillion": 1.25,
+      "cachedInputUsdPerMillion": 0.125,
+      "outputUsdPerMillion": 10,
+      "supportsFastMode": false
+    },
+    "gpt-5.2": {
+      "inputUsdPerMillion": 1.75,
+      "cachedInputUsdPerMillion": 0.175,
+      "outputUsdPerMillion": 14,
+      "supportsFastMode": false
+    },
+    "gpt-5.1-codex-mini": {
+      "inputUsdPerMillion": 0.25,
+      "cachedInputUsdPerMillion": 0.025,
+      "outputUsdPerMillion": 2,
+      "supportsFastMode": false
+    }
+  }
+}

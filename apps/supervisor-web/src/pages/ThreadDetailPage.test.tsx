@@ -3104,6 +3104,15 @@ describe('ThreadDetailPage', () => {
             },
             modelContextWindow: 272000,
           },
+          priceEstimate: {
+            pricingModelKey: 'gpt-5.4',
+            pricingTierKey: 'standard',
+            currency: 'USD',
+            inputUsd: 0.025,
+            cachedInputUsd: 0.0005,
+            outputUsd: 0.0636,
+            totalUsd: 0.0891,
+          },
         },
       });
       await Promise.resolve();
@@ -3112,8 +3121,7 @@ describe('ThreadDetailPage', () => {
     await waitFor(() => {
       expect(screen.getAllByText('gpt-5.4 · high').length).toBeGreaterThan(0);
     });
-    expect(screen.getAllByText('14k').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('10k').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('$0.089').length).toBeGreaterThan(0);
   });
 
   it('shows a gray connect button in the mobile header for detached threads and reconnects on click', async () => {

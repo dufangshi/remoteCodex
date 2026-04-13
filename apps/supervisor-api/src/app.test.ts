@@ -736,7 +736,7 @@ describe('supervisor api', () => {
     });
   });
 
-  it('accumulates per-turn token usage from notification deltas instead of thread totals', async () => {
+  it('uses the app-server cumulative total minus the turn baseline for per-turn token usage', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',
       url: '/api/workspaces',
@@ -751,7 +751,7 @@ describe('supervisor api', () => {
       url: '/api/threads/start',
       payload: {
         workspaceId: workspace.id,
-        model: 'gpt-5',
+        model: 'gpt-5.4',
         approvalMode: 'yolo',
         title: 'Turn Token Usage Thread',
       },
@@ -833,14 +833,15 @@ describe('supervisor api', () => {
     });
 
     expect(detailResponse.statusCode).toBe(200);
-    expect(detailResponse.json().turns.at(-1)).toMatchObject({
+    const turn = detailResponse.json().turns.at(-1);
+    expect(turn).toMatchObject({
       id: turnId,
       tokenUsage: {
         total: {
-          totalTokens: 4700,
-          inputTokens: 3200,
-          cachedInputTokens: 400,
-          outputTokens: 1500,
+          totalTokens: 20540,
+          inputTokens: 13600,
+          cachedInputTokens: 2200,
+          outputTokens: 4940,
           reasoningOutputTokens: 420,
         },
         last: {
@@ -849,6 +850,319 @@ describe('supervisor api', () => {
           cachedInputTokens: 200,
           outputTokens: 700,
           reasoningOutputTokens: 100,
+        },
+        modelContextWindow: 272000,
+      },
+      priceEstimate: {
+        pricingModelKey: 'gpt-5.4',
+        pricingTierKey: 'standard',
+        currency: 'USD',
+        inputUsd: 0.0285,
+        cachedInputUsd: 0.00055,
+        outputUsd: 0.0741,
+      },
+    });
+    expect(turn?.priceEstimate?.totalUsd).toBeCloseTo(0.10315, 10);
+  });
+
+  it('replaces prior totals when cumulative token usage updates arrive for the same request', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5.4',
+        approvalMode: 'yolo',
+        title: 'Turn Token Delta Thread',
+      },
+    });
+
+    const createdThread = createResponse.json();
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Track my token usage carefully.',
+      },
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+
+    const initialDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+
+    expect(initialDetailResponse.statusCode).toBe(200);
+    const turnId = initialDetailResponse.json().turns.at(-1)?.id;
+    expect(typeof turnId).toBe('string');
+
+    fakeCodexManager.emit('notification', {
+      method: 'thread/tokenUsage/updated',
+      params: {
+        threadId: createdThread.codexThreadId,
+        turnId,
+        tokenUsage: {
+          total: {
+            totalTokens: 12000,
+            inputTokens: 10000,
+            cachedInputTokens: 8000,
+            outputTokens: 2000,
+            reasoningOutputTokens: 500,
+          },
+          last: {
+            totalTokens: 1200,
+            inputTokens: 1000,
+            cachedInputTokens: 800,
+            outputTokens: 200,
+            reasoningOutputTokens: 50,
+          },
+          modelContextWindow: 272000,
+        },
+      },
+    });
+
+    fakeCodexManager.emit('notification', {
+      method: 'thread/tokenUsage/updated',
+      params: {
+        threadId: createdThread.codexThreadId,
+        turnId,
+        tokenUsage: {
+          total: {
+            totalTokens: 12800,
+            inputTokens: 10600,
+            cachedInputTokens: 8400,
+            outputTokens: 2200,
+            reasoningOutputTokens: 540,
+          },
+          last: {
+            totalTokens: 1600,
+            inputTokens: 1300,
+            cachedInputTokens: 1000,
+            outputTokens: 300,
+            reasoningOutputTokens: 80,
+          },
+          modelContextWindow: 272000,
+        },
+      },
+    });
+
+    fakeCodexManager.emit('notification', {
+      method: 'thread/tokenUsage/updated',
+      params: {
+        threadId: createdThread.codexThreadId,
+        turnId,
+        tokenUsage: {
+          total: {
+            totalTokens: 18000,
+            inputTokens: 15000,
+            cachedInputTokens: 12000,
+            outputTokens: 3000,
+            reasoningOutputTokens: 900,
+          },
+          last: {
+            totalTokens: 900,
+            inputTokens: 700,
+            cachedInputTokens: 500,
+            outputTokens: 200,
+            reasoningOutputTokens: 30,
+          },
+          modelContextWindow: 272000,
+        },
+      },
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    const turn = detailResponse.json().turns.at(-1);
+    expect(turn).toMatchObject({
+      id: turnId,
+      tokenUsage: {
+        total: {
+          totalTokens: 18000,
+          inputTokens: 15000,
+          cachedInputTokens: 12000,
+          outputTokens: 3000,
+          reasoningOutputTokens: 900,
+        },
+        last: {
+          totalTokens: 900,
+          inputTokens: 700,
+          cachedInputTokens: 500,
+          outputTokens: 200,
+          reasoningOutputTokens: 30,
+        },
+        modelContextWindow: 272000,
+      },
+      priceEstimate: {
+        pricingModelKey: 'gpt-5.4',
+        pricingTierKey: 'standard',
+        currency: 'USD',
+        inputUsd: 0.0075,
+        cachedInputUsd: 0.003,
+        outputUsd: 0.045,
+      },
+    });
+    expect(turn?.priceEstimate?.totalUsd).toBeCloseTo(0.0555, 10);
+  });
+
+  it('subtracts the previous turn cumulative total as the new turn baseline', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5.4',
+        approvalMode: 'yolo',
+        title: 'Turn Token Baseline Thread',
+      },
+    });
+
+    const createdThread = createResponse.json();
+
+    const firstPromptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'First turn.',
+      },
+    });
+
+    expect(firstPromptResponse.statusCode).toBe(200);
+
+    let detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+    const firstTurnId = detailResponse.json().turns.at(-1)?.id;
+    expect(typeof firstTurnId).toBe('string');
+
+    fakeCodexManager.emit('notification', {
+      method: 'thread/tokenUsage/updated',
+      params: {
+        threadId: createdThread.codexThreadId,
+        turnId: firstTurnId,
+        tokenUsage: {
+          total: {
+            totalTokens: 12000,
+            inputTokens: 10000,
+            cachedInputTokens: 8000,
+            outputTokens: 2000,
+            reasoningOutputTokens: 500,
+          },
+          last: {
+            totalTokens: 12000,
+            inputTokens: 10000,
+            cachedInputTokens: 8000,
+            outputTokens: 2000,
+            reasoningOutputTokens: 500,
+          },
+          modelContextWindow: 272000,
+        },
+      },
+    });
+
+    fakeCodexManager.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: createdThread.codexThreadId,
+        turn: {
+          id: firstTurnId,
+          status: 'completed',
+          error: null,
+          items: [],
+        },
+      },
+    });
+
+    const secondPromptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Second turn.',
+      },
+    });
+
+    expect(secondPromptResponse.statusCode).toBe(200);
+
+    detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+    const secondTurnId = detailResponse.json().turns.at(-1)?.id;
+    expect(typeof secondTurnId).toBe('string');
+    expect(secondTurnId).not.toBe(firstTurnId);
+
+    fakeCodexManager.emit('notification', {
+      method: 'thread/tokenUsage/updated',
+      params: {
+        threadId: createdThread.codexThreadId,
+        turnId: secondTurnId,
+        tokenUsage: {
+          total: {
+            totalTokens: 18240,
+            inputTokens: 12000,
+            cachedInputTokens: 8200,
+            outputTokens: 6240,
+            reasoningOutputTokens: 1240,
+          },
+          last: {
+            totalTokens: 2400,
+            inputTokens: 1600,
+            cachedInputTokens: 200,
+            outputTokens: 800,
+            reasoningOutputTokens: 320,
+          },
+          modelContextWindow: 272000,
+        },
+      },
+    });
+
+    detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    const secondTurn = detailResponse.json().turns.at(-1);
+    expect(secondTurn).toMatchObject({
+      id: secondTurnId,
+      tokenUsage: {
+        total: {
+          totalTokens: 6240,
+          inputTokens: 2000,
+          cachedInputTokens: 200,
+          outputTokens: 4240,
+          reasoningOutputTokens: 740,
+        },
+        last: {
+          totalTokens: 2400,
+          inputTokens: 1600,
+          cachedInputTokens: 200,
+          outputTokens: 800,
+          reasoningOutputTokens: 320,
         },
         modelContextWindow: 272000,
       },
@@ -1757,7 +2071,7 @@ describe('supervisor api', () => {
       url: '/api/threads/start',
       payload: {
         workspaceId: workspace.id,
-        model: 'gpt-5',
+        model: 'gpt-5.4',
         approvalMode: 'yolo',
         title: 'Fast Mode Thread',
       },
@@ -1778,7 +2092,7 @@ describe('supervisor api', () => {
     expect(settingsResponse.json()).toMatchObject({
       id: createdThread.id,
       fastMode: true,
-      model: 'gpt-5',
+      model: 'gpt-5.4',
       reasoningEffort: 'medium',
     });
     await expect(fs.readFile(path.join(codexHome, 'config.toml'), 'utf8')).resolves.toContain(
@@ -1797,7 +2111,7 @@ describe('supervisor api', () => {
       thread: {
         id: createdThread.id,
         fastMode: true,
-        model: 'gpt-5',
+        model: 'gpt-5.4',
         reasoningEffort: 'medium',
       },
       activityNotes: expect.arrayContaining([
@@ -1854,6 +2168,43 @@ describe('supervisor api', () => {
     expect(fakeCodexManager.startTurnCalls.at(-1)).toMatchObject({
       prompt: 'standard turn',
       serviceTier: null,
+    });
+  });
+
+  it('rejects enabling fast mode for an unsupported model', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+    const workspace = workspaceResponse.json();
+
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Unsupported Fast Thread',
+      },
+    });
+    const createdThread = createResponse.json();
+
+    const settingsResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${createdThread.id}/settings`,
+      payload: {
+        fastMode: true,
+      },
+    });
+
+    expect(settingsResponse.statusCode).toBe(400);
+    expect(settingsResponse.json()).toMatchObject({
+      code: 'bad_request',
+      message: 'Current model does not support fast mode.',
     });
   });
 

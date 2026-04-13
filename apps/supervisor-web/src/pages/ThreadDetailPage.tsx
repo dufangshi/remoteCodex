@@ -11,6 +11,7 @@ import {
   ThreadSkillsDto,
   ThreadDto,
   ThreadEventEnvelope,
+  ThreadTurnPriceEstimateDto,
   ThreadTurnTokenUsageDto,
 } from '../../../../packages/shared/src/index';
 import { ThreadComposer } from '../components/ThreadComposer';
@@ -30,6 +31,7 @@ import {
   compactThread,
   connectSupervisorEvents,
   disconnectThread,
+  fetchCodexHostFile,
   fetchCodexModels,
   fetchCodexStatus,
   fetchThreadMcpServers,
@@ -45,6 +47,7 @@ import {
   type PromptAttachmentUpload,
   type SendThreadPromptRequestInput,
   updateThread,
+  updateCodexHostFile,
   updateThreadSettings,
 } from '../lib/api';
 
@@ -114,6 +117,7 @@ interface OptimisticTurnState {
   reasoningEffort: ThreadDetailDto['thread']['reasoningEffort'];
   reasoningEffortAvailable: boolean | null;
   tokenUsage: ThreadTurnTokenUsageDto | null;
+  priceEstimate: ThreadTurnPriceEstimateDto | null;
 }
 
 interface OptimisticSteerState {
@@ -180,6 +184,7 @@ function mergeTurnTokenUsage(
   turns: ThreadDetailDto['turns'],
   turnId: string,
   tokenUsage: ThreadTurnTokenUsageDto,
+  priceEstimate: ThreadTurnPriceEstimateDto | null,
 ) {
   let changed = false;
   const nextTurns = turns.map((turn) => {
@@ -191,6 +196,7 @@ function mergeTurnTokenUsage(
     return {
       ...turn,
       tokenUsage,
+      priceEstimate,
     };
   });
 
@@ -962,6 +968,11 @@ export function ThreadDetailPage() {
       ) {
         const eventTurnId = event.payload.turnId;
         const tokenUsage = event.payload.tokenUsage as ThreadTurnTokenUsageDto;
+        const priceEstimate =
+          event.payload.priceEstimate &&
+          typeof event.payload.priceEstimate === 'object'
+            ? (event.payload.priceEstimate as ThreadTurnPriceEstimateDto)
+            : null;
 
         setDetail((current) => {
           if (!current) {
@@ -972,6 +983,7 @@ export function ThreadDetailPage() {
             current.turns,
             eventTurnId,
             tokenUsage,
+            priceEstimate,
           );
 
           return nextTurns === current.turns
@@ -988,6 +1000,7 @@ export function ThreadDetailPage() {
             ? {
                 ...current,
                 tokenUsage,
+                priceEstimate,
               }
             : current,
         );
@@ -1488,6 +1501,7 @@ export function ThreadDetailPage() {
             optimisticModel,
           ),
           tokenUsage: null,
+          priceEstimate: null,
         });
       }
 
@@ -1546,6 +1560,7 @@ export function ThreadDetailPage() {
               optimisticModel,
             ),
             tokenUsage: null,
+            priceEstimate: null,
           });
         } else {
           setOptimisticSteers((current) =>
@@ -1570,6 +1585,7 @@ export function ThreadDetailPage() {
                 status: 'inProgress',
                 error: null,
                 tokenUsage: current.tokenUsage,
+                priceEstimate: current.priceEstimate,
               }
             : current,
         );
@@ -2127,6 +2143,7 @@ export function ThreadDetailPage() {
           reasoningEffort: optimisticTurn.reasoningEffort,
           reasoningEffortAvailable: optimisticTurn.reasoningEffortAvailable,
           tokenUsage: optimisticTurn.tokenUsage,
+          priceEstimate: optimisticTurn.priceEstimate,
           items: [
             {
               id: `${optimisticTurn.id}-user-message`,
@@ -2314,6 +2331,10 @@ export function ThreadDetailPage() {
                       onCompact={handleCompactThread}
                       onOpenSkills={handleOpenSkills}
                       onOpenMcp={handleOpenMcp}
+                      onReadCodexConfig={() => fetchCodexHostFile('config.toml')}
+                      onWriteCodexConfig={(content) =>
+                        updateCodexHostFile('config.toml', { content })
+                      }
                       onToggleFollow={() => setScrollRequestKey((current) => current + 1)}
                       onUpdateSettings={handleUpdateThreadSettings}
                       onToggleView={handleToggleView}
@@ -2351,6 +2372,10 @@ export function ThreadDetailPage() {
                       onCompact={handleCompactThread}
                       onOpenSkills={handleOpenSkills}
                       onOpenMcp={handleOpenMcp}
+                      onReadCodexConfig={() => fetchCodexHostFile('config.toml')}
+                      onWriteCodexConfig={(content) =>
+                        updateCodexHostFile('config.toml', { content })
+                      }
                       onToggleFollow={() => setScrollRequestKey((current) => current + 1)}
                       onUpdateSettings={handleUpdateThreadSettings}
                       onToggleView={handleToggleView}
