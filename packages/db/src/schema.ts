@@ -28,6 +28,9 @@ export const threads = sqliteTable('threads', {
   title: text('title').notNull(),
   model: text('model'),
   reasoningEffort: text('reasoning_effort'),
+  fastMode: integer('fast_mode', { mode: 'boolean' }).notNull().default(false),
+  fastBaseModel: text('fast_base_model'),
+  fastBaseReasoningEffort: text('fast_base_reasoning_effort'),
   collaborationMode: text('collaboration_mode').notNull().default('default'),
   approvalMode: text('approval_mode'),
   sandboxMode: text('sandbox_mode'),
@@ -86,6 +89,7 @@ export const threadTurnMetadata = sqliteTable(
     reasoningEffortAvailable: integer('reasoning_effort_available', {
       mode: 'boolean',
     }),
+    tokenUsageJson: text('token_usage_json'),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },
@@ -106,6 +110,14 @@ export const threadPendingSteers = sqliteTable('thread_pending_steers', {
   submittedPrompt: text('submitted_prompt').notNull(),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
+});
+
+export const threadActivityNotes = sqliteTable('thread_activity_notes', {
+  id: text('id').primaryKey(),
+  threadId: text('thread_id').notNull(),
+  kind: text('kind').notNull(),
+  text: text('text').notNull(),
+  createdAt: text('created_at').notNull(),
 });
 
 export const policies = sqliteTable('policies', {

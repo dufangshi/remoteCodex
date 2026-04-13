@@ -14,6 +14,8 @@ import {
 
 import type {
   CollaborationModeDto,
+  ThreadMcpServersDto,
+  ThreadSkillsDto,
   ModelOptionDto,
   PromptAttachmentKindDto,
   ThreadContextUsageDto,
@@ -28,9 +30,11 @@ interface ThreadComposerProps {
   edgeToEdgeMobile?: boolean;
   busy?: boolean;
   settingsBusy?: boolean;
+  compactBusy?: boolean;
   error?: string | null;
   model?: string | null;
   reasoningEffort?: ReasoningEffortDto | null;
+  fastMode?: boolean;
   collaborationMode?: CollaborationModeDto;
   modelOptions?: ModelOptionDto[];
   contextUsage?: ThreadContextUsageDto | null | undefined;
@@ -41,6 +45,8 @@ interface ThreadComposerProps {
   shellControlState?: ThreadShellControlState | null;
   draftPrompt?: string | undefined;
   draftAttachments?: PromptAttachmentUpload[] | undefined;
+  skillsState?: SlashPanelState<ThreadSkillsDto>;
+  mcpState?: SlashPanelState<ThreadMcpServersDto>;
   onDraftChange?: Dispatch<
     SetStateAction<{
       prompt: string;
@@ -52,6 +58,9 @@ interface ThreadComposerProps {
     attachments?: PromptAttachmentUpload[];
   }) => Promise<void> | void;
   onInterrupt?: () => Promise<void> | void;
+  onCompact?: () => Promise<void> | void;
+  onOpenSkills?: () => Promise<void> | void;
+  onOpenMcp?: () => Promise<void> | void;
   onToggleFollow?: () => void;
   onUpdateSettings?: (input: UpdateThreadSettingsInput) => Promise<void> | void;
   onToggleView?: () => void;
@@ -62,9 +71,21 @@ interface ThreadComposerProps {
   canInterrupt?: boolean;
 }
 
-type SettingsMenu = 'attachments' | 'model' | 'effort' | 'shellTools' | null;
+type SettingsMenu =
+  | 'attachments'
+  | 'slash'
+  | 'model'
+  | 'effort'
+  | 'shellTools'
+  | null;
 
 interface ComposerAttachmentDraft extends PromptAttachmentUpload {}
+
+interface SlashPanelState<T> {
+  status: 'idle' | 'loading' | 'ready' | 'failed';
+  data: T | null;
+  error: string | null;
+}
 
 interface PromptTextSegment {
   type: 'text';
@@ -80,6 +101,7 @@ interface PromptAttachmentSegment {
 
 type PromptSegment = PromptTextSegment | PromptAttachmentSegment;
 type AttachmentPreviewMap = Record<string, string>;
+type SlashPanelView = 'root' | 'skills' | 'mcp';
 
 function normalizePromptText(value: string) {
   return value.replace(/\u00a0/g, ' ');
@@ -179,6 +201,55 @@ function PlusIcon() {
       <path d="M8 3.25v9.5M3.25 8h9.5" />
     </svg>
   );
+}
+
+function SlashIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 fill-none stroke-current"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M10.75 2.5 5.25 13.5" />
+      <path d="M4.25 5.25h2.25" />
+      <path d="M9.5 10.75h2.25" />
+    </svg>
+  );
+}
+
+function authStatusLabel(
+  value: ThreadMcpServersDto['servers'][number]['authStatus'],
+) {
+  switch (value) {
+    case 'bearerToken':
+      return 'Token';
+    case 'oAuth':
+      return 'OAuth';
+    case 'notLoggedIn':
+      return 'Login';
+    case 'unsupported':
+    default:
+      return 'None';
+  }
+}
+
+function skillScopeLabel(
+  value: ThreadSkillsDto['skills'][number]['scope'],
+) {
+  switch (value) {
+    case 'repo':
+      return 'Repo';
+    case 'system':
+      return 'System';
+    case 'admin':
+      return 'Admin';
+    case 'user':
+    default:
+      return 'User';
+  }
 }
 
 function clampPercent(value: number | null | undefined) {
@@ -414,9 +485,11 @@ export function ThreadComposer({
   edgeToEdgeMobile = false,
   busy = false,
   settingsBusy = false,
+  compactBusy = false,
   error,
   model = null,
   reasoningEffort = null,
+  fastMode = false,
   collaborationMode = 'default',
   modelOptions = [],
   contextUsage = null,
@@ -427,9 +500,22 @@ export function ThreadComposer({
   shellControlState = null,
   draftPrompt,
   draftAttachments,
+  skillsState = {
+    status: 'idle',
+    data: null,
+    error: null,
+  },
+  mcpState = {
+    status: 'idle',
+    data: null,
+    error: null,
+  },
   onDraftChange,
   onSubmit,
   onInterrupt,
+  onCompact,
+  onOpenSkills,
+  onOpenMcp,
   onToggleFollow,
   onUpdateSettings,
   onToggleView,
@@ -445,6 +531,7 @@ export function ThreadComposer({
     attachments: [],
   });
   const [openMenu, setOpenMenu] = useState<SettingsMenu>(null);
+  const [slashPanelView, setSlashPanelView] = useState<SlashPanelView>('root');
   const menuRef = useRef<HTMLFormElement | null>(null);
   const promptRef = useRef<HTMLDivElement | null>(null);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
@@ -468,6 +555,12 @@ export function ThreadComposer({
   const attachments = (isDraftControlled
     ? draftAttachments
     : internalDraft.attachments) as ComposerAttachmentDraft[];
+
+  useEffect(() => {
+    if (openMenu !== 'slash') {
+      setSlashPanelView('root');
+    }
+  }, [openMenu]);
 
   function updateDraft(
     updater: (current: {
@@ -1003,16 +1096,30 @@ export function ThreadComposer({
   }
 
   useEffect(() => {
-    function handleWindowClick(event: MouseEvent) {
-      if (!menuRef.current?.contains(event.target as Node)) {
+    function handleWindowPointerDown(event: PointerEvent) {
+      const menuNode = menuRef.current;
+      if (!menuNode) {
+        return;
+      }
+
+      const eventPath =
+        typeof event.composedPath === 'function' ? event.composedPath() : [];
+      if (
+        eventPath.includes(menuNode) ||
+        menuNode.contains(event.target as Node | null)
+      ) {
+        return;
+      }
+
+      if (openMenu) {
         setOpenMenu(null);
       }
     }
 
     if (openMenu) {
-      window.addEventListener('click', handleWindowClick);
+      window.addEventListener('pointerdown', handleWindowPointerDown);
       return () => {
-        window.removeEventListener('click', handleWindowClick);
+        window.removeEventListener('pointerdown', handleWindowPointerDown);
       };
     }
   }, [openMenu]);
@@ -1297,11 +1404,12 @@ export function ThreadComposer({
   const sendButtonClassName = !threadConnected
     ? 'bg-rose-400/92 text-rose-950 hover:bg-rose-300'
     : 'bg-amber-300/95 text-stone-950 hover:bg-amber-200';
+  const modelControlsDisabled = settingsBusy;
   const formClassName = edgeToEdgeMobile || isMobileShell
     ? 'relative z-20 shrink-0 bg-transparent px-3 pb-0 pt-3 sm:p-4'
     : 'relative z-20 shrink-0 bg-transparent px-3 pb-3 pt-0 sm:px-4 sm:pb-4 sm:pt-0';
   const promptInputClassName =
-    `min-h-[9.75rem] w-full rounded-[1.25rem] border bg-stone-900 px-4 pr-14 pt-2.5 text-stone-100 outline-none transition sm:min-h-[8.25rem] ${
+    `min-h-[7.25rem] w-full rounded-[1.25rem] border bg-stone-900 px-4 pr-14 pt-2.5 text-stone-100 outline-none transition sm:min-h-[6.25rem] ${
       isDragTargetActive
         ? 'border-sky-300/80 bg-sky-300/[0.08] shadow-[0_0_0_1px_rgba(125,211,252,0.2)]'
         : 'border-stone-700 focus-within:border-amber-300'
@@ -1371,6 +1479,261 @@ export function ThreadComposer({
           className="relative z-30 mb-0 flex items-center gap-2 rounded-full border border-stone-800/40 bg-stone-950/18 px-2.5 py-1.5 text-xs shadow-lg shadow-stone-950/8"
         >
           <div className="flex shrink-0 items-center gap-1.5">
+            {!isShellView && (
+              <div className="relative">
+                <button
+                  type="button"
+                  aria-label="Open slash toolbox"
+                  title="Open slash toolbox"
+                  onClick={() =>
+                    setOpenMenu((current) =>
+                      current === 'slash' ? null : 'slash',
+                    )
+                  }
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-stone-700 bg-stone-900/92 text-stone-200 transition hover:bg-stone-800"
+                >
+                  <SlashIcon />
+                </button>
+
+                {openMenu === 'slash' && (
+                  <div
+                    className="absolute bottom-full left-0 z-40 mb-2 w-72 overflow-hidden rounded-2xl border border-stone-700/75 bg-stone-900/72 shadow-2xl shadow-stone-950/40 backdrop-blur-xl"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                    }}
+                    onMouseDown={(event) => {
+                      event.stopPropagation();
+                    }}
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                    }}
+                    onTouchStart={(event) => {
+                      event.stopPropagation();
+                    }}
+                  >
+                    {slashPanelView === 'root' ? (
+                      <div className="p-2">
+                        <button
+                          type="button"
+                          disabled={settingsBusy}
+                          onClick={() => {
+                            void handleUpdateSettings({
+                              fastMode: !fastMode,
+                            });
+                          }}
+                          className={`block w-full rounded-xl px-3 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                            fastMode
+                              ? 'bg-amber-300/12 text-amber-100 hover:bg-amber-300/18'
+                              : 'text-stone-200 hover:bg-stone-800'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <span>/fast</span>
+                            <span className="text-[11px] uppercase tracking-[0.16em] text-stone-400">
+                              {fastMode ? 'On' : 'Off'}
+                            </span>
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={compactBusy || busy}
+                          onClick={() => {
+                            setOpenMenu(null);
+                            void onCompact?.();
+                          }}
+                          className="mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm text-stone-200 transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <span>/compact</span>
+                            <span className="text-[11px] uppercase tracking-[0.16em] text-stone-400">
+                              {compactBusy ? 'Busy' : 'Run'}
+                            </span>
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setSlashPanelView('skills');
+                            void onOpenSkills?.();
+                          }}
+                          className="mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm text-stone-200 transition hover:bg-stone-800"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <span>/skills</span>
+                            <span className="text-[11px] uppercase tracking-[0.16em] text-stone-400">
+                              View
+                            </span>
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setSlashPanelView('mcp');
+                            void onOpenMcp?.();
+                          }}
+                          className="mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm text-stone-200 transition hover:bg-stone-800"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <span>/mcp</span>
+                            <span className="text-[11px] uppercase tracking-[0.16em] text-stone-400">
+                              View
+                            </span>
+                          </div>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="max-h-80 overflow-auto">
+                        <div className="sticky top-0 flex items-center justify-between border-b border-stone-800/80 bg-stone-900/70 px-3 py-2 backdrop-blur-xl">
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setSlashPanelView('root');
+                            }}
+                            className="rounded-full px-2 py-1 text-[11px] uppercase tracking-[0.16em] text-stone-400 transition hover:bg-stone-800 hover:text-stone-200"
+                          >
+                            Back
+                          </button>
+                          <span className="text-[11px] uppercase tracking-[0.16em] text-stone-500">
+                            {slashPanelView === 'skills' ? '/skills' : '/mcp'}
+                          </span>
+                        </div>
+                        {slashPanelView === 'skills' ? (
+                          <div className="p-2">
+                            {skillsState.status === 'loading' && !skillsState.data ? (
+                              <p className="rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3 text-sm text-stone-400">
+                                Loading skills…
+                              </p>
+                            ) : null}
+                            {skillsState.error ? (
+                              <p className="mb-2 rounded-xl border border-rose-500/35 bg-rose-500/10 px-3 py-3 text-sm text-rose-100/90">
+                                {skillsState.error}
+                              </p>
+                            ) : null}
+                            {skillsState.data?.skills.length ? (
+                              <div className="space-y-2">
+                                {skillsState.data.skills.map((skill) => (
+                                  <div
+                                    key={skill.path}
+                                    className="rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-2.5"
+                                  >
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div className="min-w-0">
+                                        <p className="truncate text-sm font-medium text-stone-100">
+                                          {skill.interface?.displayName ?? skill.name}
+                                        </p>
+                                        <p className="mt-0.5 text-xs text-stone-400">
+                                          {skill.interface?.shortDescription ??
+                                            skill.shortDescription ??
+                                            skill.description}
+                                        </p>
+                                      </div>
+                                      <div className="flex shrink-0 items-center gap-1.5 text-[10px] uppercase tracking-[0.14em]">
+                                        <span className="rounded-full border border-stone-700 px-2 py-1 text-stone-400">
+                                          {skillScopeLabel(skill.scope)}
+                                        </span>
+                                        <span
+                                          className={`rounded-full border px-2 py-1 ${
+                                            skill.enabled
+                                              ? 'border-emerald-500/35 text-emerald-300'
+                                              : 'border-stone-700 text-stone-500'
+                                          }`}
+                                        >
+                                          {skill.enabled ? 'On' : 'Off'}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                            {skillsState.data?.errors.length ? (
+                              <div className="mt-2 space-y-2">
+                                {skillsState.data.errors.map((entry) => (
+                                  <div
+                                    key={`${entry.path}:${entry.message}`}
+                                    className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-100/85"
+                                  >
+                                    <p className="font-medium">{entry.message}</p>
+                                    <p className="mt-1 break-all text-amber-100/60">
+                                      {entry.path}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                            {skillsState.status !== 'loading' &&
+                            !skillsState.error &&
+                            (skillsState.data?.skills.length ?? 0) === 0 &&
+                            (skillsState.data?.errors.length ?? 0) === 0 ? (
+                              <p className="rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3 text-sm text-stone-400">
+                                No skills available right now.
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <div className="p-2">
+                            {mcpState.status === 'loading' && !mcpState.data ? (
+                              <p className="rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3 text-sm text-stone-400">
+                                Loading MCP servers…
+                              </p>
+                            ) : null}
+                            {mcpState.error ? (
+                              <p className="mb-2 rounded-xl border border-rose-500/35 bg-rose-500/10 px-3 py-3 text-sm text-rose-100/90">
+                                {mcpState.error}
+                              </p>
+                            ) : null}
+                            {mcpState.data?.servers.length ? (
+                              <div className="space-y-2">
+                                {mcpState.data.servers.map((server) => (
+                                  <div
+                                    key={server.name}
+                                    className="rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-2.5"
+                                  >
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div className="min-w-0">
+                                        <p className="truncate text-sm font-medium text-stone-100">
+                                          {server.name}
+                                        </p>
+                                        <p className="mt-0.5 text-xs text-stone-400">
+                                          {server.tools.length} tools · {server.resourceCount}{' '}
+                                          resources · {server.resourceTemplateCount} templates
+                                        </p>
+                                      </div>
+                                      <span className="shrink-0 rounded-full border border-stone-700 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-stone-300">
+                                        {authStatusLabel(server.authStatus)}
+                                      </span>
+                                    </div>
+                                    {server.tools.length > 0 ? (
+                                      <p className="mt-2 line-clamp-2 text-xs text-stone-500">
+                                        {server.tools
+                                          .slice(0, 4)
+                                          .map((tool) => tool.title ?? tool.name)
+                                          .join(' · ')}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                            {mcpState.status !== 'loading' &&
+                            !mcpState.error &&
+                            (mcpState.data?.servers.length ?? 0) === 0 ? (
+                              <p className="rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3 text-sm text-stone-400">
+                                No MCP servers available right now.
+                              </p>
+                            ) : null}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {!isShellView && (
               <div className="relative">
                 <button
@@ -1637,7 +2000,7 @@ export function ThreadComposer({
                 onDragOver={handlePromptDragOver}
                 onDragLeave={handlePromptDragLeave}
                 onDrop={handlePromptDrop}
-                className={`relative z-[1] min-h-[7.75rem] whitespace-pre-wrap break-words pb-10 outline-none sm:min-h-[6.5rem] ${
+                className={`relative z-[1] min-h-[5.75rem] whitespace-pre-wrap break-words pb-10 outline-none sm:min-h-[4.875rem] ${
                   disabled ? 'cursor-not-allowed text-stone-500' : ''
                 }`}
               />
@@ -1685,11 +2048,15 @@ export function ThreadComposer({
                   aria-haspopup="menu"
                   aria-expanded={openMenu === 'model'}
                   aria-label={model ?? 'Select model'}
-                  disabled={settingsBusy || modelOptions.length === 0}
+                  disabled={modelControlsDisabled || modelOptions.length === 0}
                   onClick={() =>
                     setOpenMenu((current) => (current === 'model' ? null : 'model'))
                   }
-                  title={modelContextTitle}
+                  title={
+                    fastMode
+                      ? 'Fast mode is on. Turn it off from the slash toolbox to edit model.'
+                      : modelContextTitle
+                  }
                   className="relative inline-flex min-w-0 max-w-[8.75rem] items-center overflow-hidden rounded-full px-2.5 py-1 text-left text-stone-300 transition hover:bg-stone-800/85 hover:text-stone-100 disabled:cursor-not-allowed disabled:text-stone-600 sm:max-w-[11rem]"
                 >
                   {model ? <ContextRingFrame contextUsage={contextUsage} /> : null}
@@ -1729,9 +2096,14 @@ export function ThreadComposer({
                   type="button"
                   aria-haspopup="menu"
                   aria-expanded={openMenu === 'effort'}
-                  disabled={settingsBusy || supportedEfforts.length === 0}
+                  disabled={modelControlsDisabled || supportedEfforts.length === 0}
                   onClick={() =>
                     setOpenMenu((current) => (current === 'effort' ? null : 'effort'))
+                  }
+                  title={
+                    fastMode
+                      ? 'Fast mode is on. Turn it off from the slash toolbox to edit reasoning.'
+                      : undefined
                   }
                   className="rounded-full px-2 py-1 text-stone-500 transition hover:bg-stone-800 hover:text-stone-200 disabled:cursor-not-allowed disabled:text-stone-700"
                 >

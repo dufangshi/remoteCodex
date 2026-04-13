@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
   type RefCallback,
   type RefObject,
 } from 'react';
@@ -14,6 +15,7 @@ import { Streamdown } from 'streamdown';
 import type {
   RespondThreadActionRequestInput,
   ThreadActionRequestDto,
+  ThreadActivityNoteDto,
   ThreadHistoryItemDetailDto,
   ThreadHistoryItemDto,
   ThreadPendingSteerDto,
@@ -64,6 +66,7 @@ interface ThreadTimelineProps {
     summaryLines: string[];
     createdAt?: string;
   }>;
+  activityNotes?: ThreadActivityNoteDto[];
   pendingSteers?: ThreadPendingSteerDto[];
   optimisticSteers?: Array<{
     id: string;
@@ -130,6 +133,15 @@ type TimelineHistoryEntry =
 type TimelineTurn = Omit<ThreadTurnDto, 'status'> & {
   status: ThreadTurnDto['status'] | 'sending';
 };
+
+interface TurnTokenDetail {
+  id: string;
+  label: string;
+  compactValue: string;
+  rawValue: number;
+  className: string;
+  icon: ReactNode | null;
+}
 
 const INITIAL_VISIBLE_TURNS = 10;
 const LOAD_STEP = 10;
@@ -1093,6 +1105,7 @@ function TurnStatusBar({
 }) {
   const label = turnStatusLabel(turn.status);
   const runtimeSummary = formatTurnRuntimeSummary(turn);
+  const tokenBadges = buildTurnTokenBadges(turn);
   const active = isActiveTurnStatus(turn.status);
   const toneClassName =
     turn.status === 'failed'
@@ -1104,52 +1117,324 @@ function TurnStatusBar({
   if (variant === 'footer') {
     return (
       <div
-        className={`flex w-full items-center justify-between gap-3 rounded-[0.95rem] border px-3 py-2 text-xs ${toneClassName}`}
+        className={`flex w-full flex-col gap-1.5 rounded-[0.95rem] border px-3 py-2 text-xs ${toneClassName}`}
       >
-        <div className="flex min-w-0 items-center gap-2">
-          <TurnStatusIndicator status={turn.status} />
-          <span className="shrink-0 font-medium">{label}</span>
-          <span className="text-stone-500">•</span>
-          <span className="min-w-0 truncate text-stone-300">{runtimeSummary}</span>
+        <div className="flex w-full items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <TurnStatusIndicator status={turn.status} />
+            <span className="min-w-0 truncate text-stone-300">{runtimeSummary}</span>
+          </div>
+          {turn.startedAt && (
+            <time
+              dateTime={turn.startedAt}
+              title={formatLongTimestamp(turn.startedAt)}
+              className="shrink-0 text-[11px] text-stone-400"
+            >
+              {formatShortTimestamp(turn.startedAt)}
+            </time>
+          )}
         </div>
-        {turn.startedAt && (
-          <time
-            dateTime={turn.startedAt}
-            title={formatLongTimestamp(turn.startedAt)}
-            className="shrink-0 text-[11px] text-stone-400"
-          >
-            {formatShortTimestamp(turn.startedAt)}
-          </time>
+        {tokenBadges.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 pl-6">
+            {tokenBadges.map((badge) => (
+              <span
+                key={badge.label}
+                className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${badge.className}`}
+                title={badge.title}
+              >
+                {badge.icon ? <span className="mr-1">{badge.icon}</span> : null}
+                {badge.label}
+              </span>
+            ))}
+          </div>
         )}
       </div>
     );
   }
 
+  const title = `${label} · ${runtimeSummary}`;
+
   return (
     <span
       className={`inline-flex min-w-0 items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] sm:text-[11px] ${toneClassName}`}
-      title={`${label} · ${runtimeSummary}`}
+      title={title}
     >
       <TurnStatusIndicator status={turn.status} />
-      <span className="shrink-0 font-medium">{label}</span>
-      <span className="text-stone-500">•</span>
       <span className="min-w-0 truncate text-stone-400">{runtimeSummary}</span>
     </span>
   );
 }
 
+function TokenInIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 fill-none stroke-current"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M8 2.75v8" />
+      <path d="m4.75 7.5 3.25 3.25L11.25 7.5" />
+    </svg>
+  );
+}
+
+function TokenOutIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 fill-none stroke-current"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M8 13.25v-8" />
+      <path d="m11.25 8.5-3.25-3.25L4.75 8.5" />
+    </svg>
+  );
+}
+
+function TokenCacheIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 fill-none stroke-current"
+      strokeWidth="1.45"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3.25 5.25 8 2.75l4.75 2.5L8 7.75l-4.75-2.5Z" />
+      <path d="M3.25 8 8 10.5 12.75 8" />
+      <path d="M3.25 10.75 8 13.25l4.75-2.5" />
+      <path d="M3.25 5.25v5.5" />
+      <path d="M12.75 5.25v5.5" />
+    </svg>
+  );
+}
+
+function TokenReasonIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 fill-none stroke-current"
+      strokeWidth="1.45"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M6.2 3.2a2.3 2.3 0 0 0-2.95 3.5A2.4 2.4 0 0 0 4.5 11h.2c.25 1.1 1.1 1.8 2.3 1.8h1.8c1.2 0 2.05-.7 2.3-1.8h.2A2.4 2.4 0 0 0 12.75 6.7 2.3 2.3 0 0 0 9.8 3.2" />
+      <path d="M6.3 6.15c.45-.42 1.02-.65 1.7-.65s1.25.23 1.7.65" />
+      <path d="M8 5.5v4.75" />
+      <path d="M6.75 9.05 8 10.25l1.25-1.2" />
+    </svg>
+  );
+}
+
+function blendedTurnTokenTotal(usage: NonNullable<TimelineTurn['tokenUsage']>['total']) {
+  const cachedInput = Math.max(usage.cachedInputTokens, 0);
+  const nonCachedInput = Math.max(usage.inputTokens - cachedInput, 0);
+  return Math.max(nonCachedInput + Math.max(usage.outputTokens, 0), 0);
+}
+
+function formatCompactTokenCount(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return '0';
+  }
+
+  if (value >= 1_000_000) {
+    const rounded = value >= 10_000_000 ? Math.round(value / 1_000_000) : value / 1_000_000;
+    return `${String(rounded.toFixed(1)).replace(/\.0$/, '')}m`;
+  }
+
+  if (value >= 1_000) {
+    const rounded = value >= 10_000 ? Math.round(value / 1_000) : value / 1_000;
+    return `${String(rounded.toFixed(1)).replace(/\.0$/, '')}k`;
+  }
+
+  return String(Math.round(value));
+}
+
+function buildTurnTokenDetails(turn: TimelineTurn) {
+  const usage = turn.tokenUsage?.total;
+  if (!usage) {
+    return [];
+  }
+
+  const details: Array<TurnTokenDetail | null> = [
+    {
+      id: 'all',
+      label: 'All',
+      compactValue: formatCompactTokenCount(blendedTurnTokenTotal(usage)),
+      rawValue: blendedTurnTokenTotal(usage),
+      className: 'border-stone-600/80 bg-stone-950/75 text-stone-100',
+      icon: null,
+    },
+    {
+      id: 'in',
+      label: 'In',
+      compactValue: formatCompactTokenCount(
+        Math.max(usage.inputTokens - usage.cachedInputTokens, 0),
+      ),
+      rawValue: Math.max(usage.inputTokens - usage.cachedInputTokens, 0),
+      className: 'border-emerald-300/28 bg-emerald-300/10 text-emerald-100',
+      icon: <TokenInIcon />,
+    },
+    usage.cachedInputTokens > 0
+      ? {
+          id: 'cache',
+          label: 'Cache',
+          compactValue: formatCompactTokenCount(usage.cachedInputTokens),
+          rawValue: usage.cachedInputTokens,
+          className: 'border-sky-300/28 bg-sky-300/10 text-sky-100',
+          icon: <TokenCacheIcon />,
+        }
+      : null,
+    usage.outputTokens > 0
+      ? {
+          id: 'out',
+          label: 'Out',
+          compactValue: formatCompactTokenCount(usage.outputTokens),
+          rawValue: usage.outputTokens,
+          className: 'border-violet-300/28 bg-violet-300/10 text-violet-100',
+          icon: <TokenOutIcon />,
+        }
+      : null,
+    usage.reasoningOutputTokens > 0
+      ? {
+          id: 'reason',
+          label: 'Reason',
+          compactValue: formatCompactTokenCount(usage.reasoningOutputTokens),
+          rawValue: usage.reasoningOutputTokens,
+          className: 'border-amber-300/28 bg-amber-300/10 text-amber-100',
+          icon: <TokenReasonIcon />,
+        }
+      : null,
+  ];
+
+  return details.filter((detail): detail is TurnTokenDetail => detail !== null);
+}
+
+function buildTurnTokenBadges(turn: TimelineTurn) {
+  return buildTurnTokenDetails(turn).map((detail) => ({
+    label: detail.compactValue,
+    title: `${detail.label}: ${detail.rawValue} tokens`,
+    className: detail.className,
+    icon: detail.icon,
+  }));
+}
+
+function TurnTokenSummary({ turn }: { turn: TimelineTurn }) {
+  const details = buildTurnTokenDetails(turn);
+  const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!isMobileOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (
+        containerRef.current &&
+        event.target instanceof Node &&
+        !containerRef.current.contains(event.target)
+      ) {
+        setIsMobileOpen(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+    };
+  }, [isMobileOpen]);
+
+  if (details.length === 0) {
+    return null;
+  }
+
+  const [totalDetail, ...secondaryDetails] = details;
+  if (!totalDetail) {
+    return null;
+  }
+  const totalLabel = totalDetail.compactValue;
+
+  return (
+    <>
+      <span className="hidden min-w-0 items-center gap-1.5 overflow-hidden text-[10px] text-stone-400 md:inline-flex md:text-[11px]">
+        <span
+          className="shrink-0 rounded-full border border-stone-700/90 bg-stone-900/70 px-2 py-1 font-medium text-stone-200"
+          title={`${totalDetail.label}: ${totalDetail.rawValue} tokens`}
+        >
+          {totalLabel}
+        </span>
+        {secondaryDetails.map((detail) => (
+          <span
+            key={detail.id}
+            className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-1 ${detail.className}`}
+            title={`${detail.label}: ${detail.rawValue} tokens`}
+          >
+            {detail.icon}
+            <span>{detail.compactValue}</span>
+          </span>
+        ))}
+      </span>
+      <div ref={containerRef} className="relative shrink-0 md:hidden">
+        <button
+          type="button"
+          aria-label="Show token usage details"
+          aria-expanded={isMobileOpen}
+          onClick={() => setIsMobileOpen((current) => !current)}
+          className="inline-flex whitespace-nowrap rounded-full border border-stone-700/90 bg-stone-900/70 px-1.5 py-0.5 text-[9px] font-medium leading-none text-stone-200 transition hover:bg-stone-800/90"
+        >
+          {totalLabel}
+        </button>
+        {isMobileOpen && (
+          <div className="absolute right-0 top-full z-30 mt-1.5 min-w-[11rem] rounded-2xl border border-stone-700/90 bg-stone-950/96 p-2.5 shadow-2xl shadow-black/35 backdrop-blur">
+            <div className="space-y-1">
+              {details.map((detail) => (
+                <div
+                  key={detail.id}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-stone-800/80 bg-stone-900/70 px-2.5 py-1.5 text-[11px]"
+                >
+                  <span className="inline-flex items-center gap-1.5 text-stone-300">
+                    {detail.icon ?? (
+                      <span className="text-[10px] font-medium text-stone-500">
+                        All
+                      </span>
+                    )}
+                    <span>{detail.label}</span>
+                  </span>
+                  <span className="font-medium text-stone-100">
+                    {detail.compactValue}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
 function formatTurnRuntimeSummary(turn: TimelineTurn) {
   const modelLabel = turn.model?.trim() ? turn.model.trim() : '--';
+  let reasoningLabel = '--';
 
   if (turn.reasoningEffortAvailable === null || turn.reasoningEffortAvailable === undefined) {
-    return `${modelLabel} · --`;
+    reasoningLabel = '--';
+  } else if (turn.reasoningEffortAvailable === false) {
+    reasoningLabel = '-';
+  } else {
+    reasoningLabel = turn.reasoningEffort ?? '--';
   }
 
-  if (turn.reasoningEffortAvailable === false) {
-    return `${modelLabel} · -`;
-  }
-
-  return `${modelLabel} · ${turn.reasoningEffort ?? '--'}`;
+  return [modelLabel, reasoningLabel].join(' · ');
 }
 
 function MarkdownContent({
@@ -2677,6 +2962,30 @@ function AnsweredRequestNote({
   );
 }
 
+function ActivityNoteCard({
+  note,
+}: {
+  note: ThreadActivityNoteDto;
+}) {
+  return (
+    <div className="w-full rounded-2xl border border-amber-300/18 bg-amber-300/[0.05] px-3 py-2.5">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[11px] uppercase tracking-[0.2em] text-amber-200/80">
+          System
+        </p>
+        <time
+          dateTime={note.createdAt}
+          title={formatLongTimestamp(note.createdAt)}
+          className="text-[10px] text-stone-500"
+        >
+          {formatShortTimestamp(note.createdAt)}
+        </time>
+      </div>
+      <p className="mt-1 text-[13px] leading-5 text-stone-200">{note.text}</p>
+    </div>
+  );
+}
+
 const ThreadTurnRow = memo(function ThreadTurnRow({
   threadId,
   turn,
@@ -2743,24 +3052,27 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
 
   return (
     <article ref={articleRef} className="px-2 py-1.5 sm:px-6 sm:py-2">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex flex-1 items-center gap-1.5 overflow-hidden">
-          <span className="rounded-[0.6rem] border border-stone-700 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.16em] text-stone-400">
-            Turn {absoluteIndex}
-          </span>
-          <time
-            dateTime={turn.startedAt ?? undefined}
-            title={formatLongTimestamp(turn.startedAt)}
-            className="shrink-0 text-[10px] text-stone-400 sm:text-[11px]"
-          >
-            {formatShortTimestamp(turn.startedAt)}
-          </time>
-          <TurnStatusBar turn={turn} />
-          {turn.error && (
-            <p className="hidden truncate text-[11px] text-rose-200 sm:block">
-              {turn.error}
-            </p>
-          )}
+        <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex flex-1 items-start gap-1.5">
+          <div className="min-w-0 flex flex-1 items-center gap-1.5 overflow-hidden">
+            <span className="rounded-[0.6rem] border border-stone-700 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.16em] text-stone-400">
+              Turn {absoluteIndex}
+            </span>
+            <time
+              dateTime={turn.startedAt ?? undefined}
+              title={formatLongTimestamp(turn.startedAt)}
+              className="shrink-0 text-[10px] text-stone-400 sm:text-[11px]"
+            >
+              {formatShortTimestamp(turn.startedAt)}
+            </time>
+            <TurnStatusBar turn={turn} />
+            {turn.error && (
+              <p className="hidden truncate text-[11px] text-rose-200 sm:block">
+                {turn.error}
+              </p>
+            )}
+          </div>
+          <TurnTokenSummary turn={turn} />
         </div>
         <button
           type="button"
@@ -2891,6 +3203,7 @@ export function ThreadTimeline({
   onLoadEarlier,
   ephemeralUserNote = null,
   answeredRequestNotes = [],
+  activityNotes = [],
   optimisticSteers = [],
   optimisticTurn = null,
   onLoadHistoryItemDetail,
@@ -2988,10 +3301,17 @@ export function ThreadTimeline({
           createdAt: note.createdAt ?? '',
           summaryLines: note.summaryLines,
         })),
+        activityNotes: activityNotes.map((note) => ({
+          id: note.id,
+          kind: note.kind,
+          text: note.text,
+          createdAt: note.createdAt,
+        })),
         ephemeralUserNote,
         bottomSpacer,
       }),
     [
+      activityNotes,
       answeredRequestNotes,
       bottomSpacer,
       ephemeralUserNote,
@@ -3284,6 +3604,45 @@ export function ThreadTimeline({
   const unanchoredPendingRequests = pendingRequests.filter(
     (request) => !request.turnId || !visibleTurnIds.has(request.turnId),
   );
+  const activityNoteAnchors = useMemo(() => {
+    const sortedNotes = [...activityNotes].sort((left, right) =>
+      left.createdAt.localeCompare(right.createdAt),
+    );
+    const turnSequence = [
+      ...visibleTurns.map((turn) => ({
+        id: turn.id,
+        startedAt: turn.startedAt ?? '',
+      })),
+      ...(optimisticTurn
+        ? [
+            {
+              id: optimisticTurn.id,
+              startedAt: optimisticTurn.startedAt ?? '',
+            },
+          ]
+        : []),
+    ];
+    const beforeTurnId = new Map<string, ThreadActivityNoteDto[]>();
+    const trailing: ThreadActivityNoteDto[] = [];
+
+    for (const note of sortedNotes) {
+      const anchor = turnSequence.find(
+        (turn) => turn.startedAt && note.createdAt.localeCompare(turn.startedAt) <= 0,
+      );
+      if (!anchor) {
+        trailing.push(note);
+        continue;
+      }
+      const current = beforeTurnId.get(anchor.id) ?? [];
+      current.push(note);
+      beforeTurnId.set(anchor.id, current);
+    }
+
+    return {
+      beforeTurnId,
+      trailing,
+    };
+  }, [activityNotes, optimisticTurn, visibleTurns]);
 
   return (
     <>
@@ -3346,6 +3705,13 @@ export function ThreadTimeline({
             <div className="divide-y divide-stone-800/80">
               {visibleTurns.map((turn, visibleIndex) => (
                 <div key={turn.id}>
+                  {(activityNoteAnchors.beforeTurnId.get(turn.id)?.length ?? 0) > 0 ? (
+                    <div className="space-y-3 border-b border-stone-800/80 px-2.5 py-4 sm:px-6">
+                      {(activityNoteAnchors.beforeTurnId.get(turn.id) ?? []).map((note) => (
+                        <ActivityNoteCard key={note.id} note={note} />
+                      ))}
+                    </div>
+                  ) : null}
                   <ThreadTurnRow
                     threadId={threadId}
                   turn={turn}
@@ -3396,19 +3762,30 @@ export function ThreadTimeline({
                 </div>
               ))}
               {optimisticTurn && (
-                <ThreadTurnRow
-                  threadId={threadId}
-                  turn={optimisticTurn}
-                  absoluteIndex={optimisticAbsoluteIndex}
-                  isCollapsed={collapsedTurns[optimisticTurn.id] ?? false}
-                  livePlan={null}
-                  liveItems={null}
-                  liveOutput={liveOutputAttachedToOptimisticTurn ? liveOutput : ''}
-                  onToggleCollapse={handleToggleCollapse}
-                  onOpenExpandedText={handleOpenExpandedText}
-                  onOpenCommandDetail={handleOpenCommandDetail}
-                  scrollRootRef={scrollContainerRef}
-                />
+                <>
+                  {(activityNoteAnchors.beforeTurnId.get(optimisticTurn.id)?.length ?? 0) > 0 ? (
+                    <div className="space-y-3 border-b border-stone-800/80 px-2.5 py-4 sm:px-6">
+                      {(activityNoteAnchors.beforeTurnId.get(optimisticTurn.id) ?? []).map(
+                        (note) => (
+                          <ActivityNoteCard key={note.id} note={note} />
+                        ),
+                      )}
+                    </div>
+                  ) : null}
+                  <ThreadTurnRow
+                    threadId={threadId}
+                    turn={optimisticTurn}
+                    absoluteIndex={optimisticAbsoluteIndex}
+                    isCollapsed={collapsedTurns[optimisticTurn.id] ?? false}
+                    livePlan={null}
+                    liveItems={null}
+                    liveOutput={liveOutputAttachedToOptimisticTurn ? liveOutput : ''}
+                    onToggleCollapse={handleToggleCollapse}
+                    onOpenExpandedText={handleOpenExpandedText}
+                    onOpenCommandDetail={handleOpenCommandDetail}
+                    scrollRootRef={scrollContainerRef}
+                  />
+                </>
               )}
             </div>
           )}
@@ -3431,9 +3808,17 @@ export function ThreadTimeline({
             </div>
           )}
 
-          {(unanchoredPendingRequests.length > 0 || unanchoredAnsweredNotes.length > 0) && (
+          {(unanchoredPendingRequests.length > 0 ||
+            unanchoredAnsweredNotes.length > 0 ||
+            activityNoteAnchors.trailing.length > 0) && (
             <div className="space-y-3 border-t border-stone-800/80 px-2.5 py-4 sm:px-6">
               {[
+                ...activityNoteAnchors.trailing.map((note) => ({
+                  kind: 'activity' as const,
+                  id: note.id,
+                  createdAt: note.createdAt,
+                  note,
+                })),
                 ...unanchoredAnsweredNotes.map((note) => ({
                   kind: 'note' as const,
                   id: note.id,
@@ -3449,7 +3834,9 @@ export function ThreadTimeline({
               ]
                 .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
                 .map((entry) =>
-                  entry.kind === 'note' ? (
+                  entry.kind === 'activity' ? (
+                    <ActivityNoteCard key={entry.id} note={entry.note} />
+                  ) : entry.kind === 'note' ? (
                     <AnsweredRequestNote key={entry.id} note={entry.note} />
                   ) : (
                     <PendingRequestCard

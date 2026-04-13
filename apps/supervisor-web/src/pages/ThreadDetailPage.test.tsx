@@ -852,18 +852,20 @@ describe('ThreadDetailPage', () => {
   });
 
   it('keeps a pending high reasoning selection when a stale detail refresh arrives before send', async () => {
-    const intervalCallbacks = new Map<number, TimerHandler>();
+    const intervalCallbacks = new Map<number, () => void>();
     let nextIntervalId = 1;
     const promptBodies: Array<Record<string, unknown>> = [];
-    let resolveSettingsUpdate:
-      | ((value: { ok: true; json: () => Promise<unknown> }) => void)
-      | null = null;
+    let resolveSettingsUpdate: (
+      value:
+        | { ok: true; json: () => Promise<unknown> }
+        | PromiseLike<{ ok: true; json: () => Promise<unknown> }>
+    ) => void = () => undefined;
 
     vi.spyOn(window, 'setInterval').mockImplementation(
       ((callback: TimerHandler) => {
         const id = nextIntervalId;
         nextIntervalId += 1;
-        intervalCallbacks.set(id, callback);
+        intervalCallbacks.set(id, callback as () => void);
         return id as unknown as number;
       }) as typeof window.setInterval,
     );
@@ -1028,7 +1030,7 @@ describe('ThreadDetailPage', () => {
     expect(promptBodies[0]?.reasoningEffort).toBe('high');
     expect(screen.getAllByRole('button', { name: 'high' }).length).toBeGreaterThan(0);
 
-    resolveSettingsUpdate?.({
+    resolveSettingsUpdate({
       ok: true,
       json: async () => ({
         id: 'thread-1',
@@ -1719,9 +1721,11 @@ describe('ThreadDetailPage', () => {
   it('shows a steering bubble for prompts sent while the current turn is running', async () => {
     const startedAt = new Date(Date.UTC(2026, 3, 10, 0, 0, 0)).toISOString();
     const promptBodies: Array<Record<string, unknown>> = [];
-    let resolvePromptRequest:
-      | ((value: { ok: true; json: () => Promise<Record<string, unknown>> }) => void)
-      | null = null;
+    let resolvePromptRequest: (
+      value:
+        | { ok: true; json: () => Promise<Record<string, unknown>> }
+        | PromiseLike<{ ok: true; json: () => Promise<Record<string, unknown>> }>
+    ) => void = () => undefined;
 
     vi.stubGlobal(
       'fetch',
@@ -1854,7 +1858,7 @@ describe('ThreadDetailPage', () => {
     expect(screen.getByText('Steering')).toBeInTheDocument();
     expect(screen.queryByLabelText('Sending')).not.toBeInTheDocument();
 
-    resolvePromptRequest?.({
+    resolvePromptRequest({
       ok: true,
       json: async () => ({
         id: 'thread-1',
@@ -2726,14 +2730,14 @@ describe('ThreadDetailPage', () => {
 
   it('polls active thread detail so completed replies appear even without websocket events', async () => {
     let detailCallCount = 0;
-    const intervalCallbacks = new Map<number, TimerHandler>();
+    const intervalCallbacks = new Map<number, () => void>();
     let nextIntervalId = 1;
 
     vi.spyOn(window, 'setInterval').mockImplementation(
       ((callback: TimerHandler) => {
         const id = nextIntervalId;
         nextIntervalId += 1;
-        intervalCallbacks.set(id, callback);
+        intervalCallbacks.set(id, callback as () => void);
         return id as unknown as number;
       }) as typeof window.setInterval,
     );
@@ -2957,6 +2961,159 @@ describe('ThreadDetailPage', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('Browser offline')).toBeInTheDocument();
     });
+  });
+
+  it('merges realtime per-turn token usage updates into the visible timeline', async () => {
+    vi.stubGlobal(
+      'fetch',
+      withHealthz((input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.includes('/api/codex/status')) {
+          return okJsonResponse({
+            state: 'ready',
+            transport: 'stdio',
+            lastStartedAt: new Date().toISOString(),
+            lastError: null,
+            restartCount: 0,
+          });
+        }
+
+        if (url.includes('/api/codex/models')) {
+          return okJsonResponse(modelOptionsResponse);
+        }
+
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
+          return okJsonResponse({
+            thread: {
+              id: 'thread-1',
+              workspaceId: 'workspace-1',
+              codexThreadId: 'codex-1',
+              source: 'supervisor',
+              title: 'Demo Thread',
+              model: 'gpt-5.4',
+              reasoningEffort: 'high',
+              collaborationMode: 'default',
+              approvalMode: 'yolo',
+              status: 'running',
+              summaryText: 'Explain the failure',
+              lastError: null,
+              activeTurnId: 'turn-1',
+              isLoaded: true,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: new Date().toISOString(),
+              lastTurnCompletedAt: null,
+            },
+            workspace: {
+              id: 'workspace-1',
+              hostId: 'host-1',
+              label: 'Demo Workspace',
+              absPath: '/tmp/demo',
+              isFavorite: false,
+              createdAt: new Date().toISOString(),
+              lastOpenedAt: null,
+            },
+            workspacePathStatus: 'present',
+            pendingRequests: [],
+            turns: [
+              {
+                id: 'turn-1',
+                startedAt: new Date().toISOString(),
+                status: 'inProgress',
+                error: null,
+                model: 'gpt-5.4',
+                reasoningEffort: 'high',
+                reasoningEffortAvailable: true,
+                items: [
+                  {
+                    id: 'user-1',
+                    kind: 'userMessage',
+                    text: 'Explain the failure',
+                  },
+                ],
+              },
+            ],
+          });
+        }
+
+        if (url.endsWith('/api/threads')) {
+          return okJsonResponse([
+            {
+              id: 'thread-1',
+              workspaceId: 'workspace-1',
+              codexThreadId: 'codex-1',
+              source: 'supervisor',
+              title: 'Demo Thread',
+              model: 'gpt-5.4',
+              reasoningEffort: 'high',
+              collaborationMode: 'default',
+              approvalMode: 'yolo',
+              status: 'running',
+              summaryText: 'Explain the failure',
+              lastError: null,
+              activeTurnId: 'turn-1',
+              isLoaded: true,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: new Date().toISOString(),
+              lastTurnCompletedAt: null,
+            },
+          ]);
+        }
+
+        return Promise.reject(new Error(`Unexpected request: ${url}`));
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Explain the failure')).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      emitSocketMessage(FakeWebSocket.instances[0]!, {
+        type: 'thread.turn.token.updated',
+        threadId: 'thread-1',
+        timestamp: new Date().toISOString(),
+        payload: {
+          turnId: 'turn-1',
+          tokenUsage: {
+            total: {
+              totalTokens: 18240,
+              inputTokens: 12000,
+              cachedInputTokens: 2000,
+              outputTokens: 4240,
+              reasoningOutputTokens: 1240,
+            },
+            last: {
+              totalTokens: 2400,
+              inputTokens: 1600,
+              cachedInputTokens: 200,
+              outputTokens: 800,
+              reasoningOutputTokens: 320,
+            },
+            modelContextWindow: 272000,
+          },
+        },
+      });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText('gpt-5.4 · high').length).toBeGreaterThan(0);
+    });
+    expect(screen.getAllByText('14k').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('10k').length).toBeGreaterThan(0);
   });
 
   it('shows a gray connect button in the mobile header for detached threads and reconnects on click', async () => {

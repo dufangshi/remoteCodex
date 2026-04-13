@@ -193,7 +193,7 @@ describe('ThreadComposer', () => {
     );
   });
 
-  it('keeps the model control label compact and left-truncated while toolbar keeps only utility buttons', () => {
+  it('keeps the model control label compact and left-truncated while toolbar keeps slash plus utility buttons', () => {
     render(
       <ThreadComposer
         activeView="chat"
@@ -202,7 +202,8 @@ describe('ThreadComposer', () => {
         collaborationMode="default"
         modelOptions={[
           {
-            ...modelOptions[0],
+            ...modelOptions[0]!,
+            id: 'model-long',
             model: 'gpt-5.4-super-long-mobile-label',
           },
         ]}
@@ -216,10 +217,242 @@ describe('ThreadComposer', () => {
     expect(
       screen.getByText('gpt-5.4-super-long-mobile-label'),
     ).toHaveClass('truncate', 'whitespace-nowrap', '[direction:rtl]');
+    expect(screen.getByRole('button', { name: 'Open slash toolbox' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Add attachment' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Switch to shell' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'medium' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Plan' })).toBeInTheDocument();
+  });
+
+  it('shows slash toolbox actions for fast toggle and compact', async () => {
+    const onUpdateSettings = vi.fn().mockResolvedValue(undefined);
+    const onCompact = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={() => undefined}
+        onUpdateSettings={onUpdateSettings}
+        onCompact={onCompact}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
+    expect(screen.getByRole('button', { name: /\/fast/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /\/compact/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /\/fast/i }));
+    await waitFor(() => {
+      expect(onUpdateSettings).toHaveBeenCalledWith({
+        fastMode: true,
+      });
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
+    fireEvent.click(screen.getByRole('button', { name: /\/compact/i }));
+    await waitFor(() => {
+      expect(onCompact).toHaveBeenCalled();
+    });
+  });
+
+  it('opens the slash toolbox upward, keeps the trigger neutral, and highlights fast inside the list', () => {
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        fastMode
+        modelOptions={modelOptions}
+        onSubmit={() => undefined}
+      />,
+    );
+
+    const trigger = screen.getByRole('button', { name: 'Open slash toolbox' });
+    expect(trigger).toHaveClass('border-stone-700');
+    expect(trigger).not.toHaveClass('border-amber-300/60');
+
+    fireEvent.click(trigger);
+
+    const panel = screen.getByRole('button', { name: /\/fast/i }).closest('div[class*="absolute"]');
+    expect(panel).toHaveClass('bottom-full', 'mb-2', 'bg-stone-900/72', 'backdrop-blur-xl');
+    expect(screen.getByRole('button', { name: /\/fast/i })).toHaveClass(
+      'bg-amber-300/12',
+      'text-amber-100',
+    );
+  });
+
+  it('opens the skills panel from the slash toolbox and renders read-only skill entries', async () => {
+    const onOpenSkills = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={() => undefined}
+        onOpenSkills={onOpenSkills}
+        skillsState={{
+          status: 'ready',
+          error: null,
+          data: {
+            cwd: '/tmp/demo',
+            skills: [
+              {
+                name: 'skill-creator',
+                description: 'Create or update a Codex skill',
+                interface: {
+                  displayName: 'Skill Creator',
+                  shortDescription: 'Create or update a Codex skill',
+                },
+                path: '/tmp/demo/.codex/skills/skill-creator/SKILL.md',
+                scope: 'repo',
+                enabled: true,
+              },
+            ],
+            errors: [],
+          },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
+    fireEvent.click(screen.getByRole('button', { name: /\/skills/i }));
+
+    await waitFor(() => {
+      expect(onOpenSkills).toHaveBeenCalled();
+    });
+    expect(screen.getByText('Skill Creator')).toBeInTheDocument();
+    expect(screen.getByText('Repo')).toBeInTheDocument();
+    expect(screen.getByText('On')).toBeInTheDocument();
+  });
+
+  it('opens the skills panel even when no skills are available yet', async () => {
+    const onOpenSkills = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={() => undefined}
+        onOpenSkills={onOpenSkills}
+        skillsState={{
+          status: 'idle',
+          error: null,
+          data: null,
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
+    fireEvent.click(screen.getByRole('button', { name: /\/skills/i }));
+
+    await waitFor(() => {
+      expect(onOpenSkills).toHaveBeenCalled();
+    });
+    expect(screen.getByText('No skills available right now.')).toBeInTheDocument();
+  });
+
+  it('opens the mcp panel from the slash toolbox and renders server status', async () => {
+    const onOpenMcp = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={() => undefined}
+        onOpenMcp={onOpenMcp}
+        mcpState={{
+          status: 'ready',
+          error: null,
+          data: {
+            servers: [
+              {
+                name: 'github',
+                authStatus: 'oAuth',
+                tools: [
+                  {
+                    name: 'search_issues',
+                    title: 'Search Issues',
+                    description: 'Find issues',
+                  },
+                ],
+                resourceCount: 2,
+                resourceTemplateCount: 1,
+              },
+            ],
+          },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
+    fireEvent.click(screen.getByRole('button', { name: /\/mcp/i }));
+
+    await waitFor(() => {
+      expect(onOpenMcp).toHaveBeenCalled();
+    });
+    expect(screen.getByText('github')).toBeInTheDocument();
+    expect(screen.getByText('OAuth')).toBeInTheDocument();
+    expect(screen.getByText('Search Issues')).toBeInTheDocument();
+  });
+
+  it('opens the mcp panel even when no mcp servers are available yet', async () => {
+    const onOpenMcp = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={() => undefined}
+        onOpenMcp={onOpenMcp}
+        mcpState={{
+          status: 'idle',
+          error: null,
+          data: null,
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
+    fireEvent.click(screen.getByRole('button', { name: /\/mcp/i }));
+
+    await waitFor(() => {
+      expect(onOpenMcp).toHaveBeenCalled();
+    });
+    expect(screen.getByText('No MCP servers available right now.')).toBeInTheDocument();
+  });
+
+  it('keeps direct model controls available while fast mode is on', () => {
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5-mini"
+        reasoningEffort="low"
+        fastMode
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={() => undefined}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'gpt-5-mini' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'low' })).toBeEnabled();
   });
 
   it('submits on ctrl or command enter while plain enter stays as newline behavior', async () => {

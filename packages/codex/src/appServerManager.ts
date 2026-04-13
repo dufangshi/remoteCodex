@@ -5,9 +5,11 @@ import { JsonRpcClient, JsonRpcClientError } from './jsonrpc';
 import {
   AppServerStatusSnapshot,
   CodexClientInfo,
+  CodexMcpServerRecord,
   CodexModelRecord,
   CodexServerRequest,
   CodexServerEvent,
+  CodexSkillsListEntry,
   CodexThreadRecord,
   CodexTurnRecord,
   ReasoningEffort,
@@ -71,6 +73,53 @@ function mapModel(record: any): CodexModelRecord {
         }))
       : [],
     defaultReasoningEffort: record.defaultReasoningEffort ?? 'medium'
+  };
+}
+
+function mapSkillsListEntry(record: any): CodexSkillsListEntry {
+  return {
+    cwd: record.cwd,
+    skills: Array.isArray(record.skills)
+      ? record.skills.map((skill: any) => ({
+          name: skill.name,
+          description: skill.description ?? '',
+          shortDescription: skill.shortDescription ?? null,
+          interface: skill.interface
+            ? {
+                displayName: skill.interface.displayName ?? null,
+                shortDescription: skill.interface.shortDescription ?? null,
+                brandColor: skill.interface.brandColor ?? null,
+                defaultPrompt: skill.interface.defaultPrompt ?? null,
+              }
+            : null,
+          path: skill.path,
+          scope: skill.scope,
+          enabled: skill.enabled === true,
+        }))
+      : [],
+    errors: Array.isArray(record.errors)
+      ? record.errors.map((error: any) => ({
+          path: error.path,
+          message: error.message,
+        }))
+      : [],
+  };
+}
+
+function mapMcpServer(record: any): CodexMcpServerRecord {
+  const tools = record.tools ?? {};
+  return {
+    name: record.name,
+    authStatus: record.authStatus ?? record.auth_status ?? 'unsupported',
+    tools: Object.values(tools).map((tool: any) => ({
+      name: tool.name,
+      title: tool.title ?? null,
+      description: tool.description ?? null,
+    })),
+    resourceCount: Array.isArray(record.resources) ? record.resources.length : 0,
+    resourceTemplateCount: Array.isArray(record.resourceTemplates)
+      ? record.resourceTemplates.length
+      : 0,
   };
 }
 
@@ -171,11 +220,43 @@ export class CodexAppServerManager extends EventEmitter {
     return response.data;
   }
 
+  async listSkills(input: { cwds?: string[]; forceReload?: boolean } = {}) {
+    await this.ensureReady();
+    const response = await this.client!.request<{ data: any[] }>('skills/list', {
+      ...(input.cwds && input.cwds.length > 0 ? { cwds: input.cwds } : {}),
+      ...(input.forceReload !== undefined ? { forceReload: input.forceReload } : {}),
+    });
+    return response.data.map(mapSkillsListEntry);
+  }
+
+  async listMcpServers() {
+    await this.ensureReady();
+    const servers: CodexMcpServerRecord[] = [];
+    let cursor: string | null = null;
+
+    do {
+      const response: {
+        data: any[];
+        nextCursor?: string | null;
+        next_cursor?: string | null;
+      } = await this.client!.request('mcpServerStatus/list', {
+        cursor,
+        limit: 100,
+        detail: 'full',
+      });
+      servers.push(...response.data.map(mapMcpServer));
+      cursor = response.nextCursor ?? response.next_cursor ?? null;
+    } while (cursor);
+
+    return servers;
+  }
+
   async startThread(input: ThreadStartInput) {
     await this.ensureReady();
     const response = await this.client!.request<{ thread: any; model: string; reasoningEffort?: ReasoningEffort | null; sandbox?: string | null }>('thread/start', {
       cwd: input.cwd,
       model: input.model,
+      serviceTier: input.serviceTier,
       approvalPolicy: input.approvalPolicy,
       sandbox: input.sandbox ?? null,
       experimentalRawEvents: false,
@@ -204,6 +285,7 @@ export class CodexAppServerManager extends EventEmitter {
     const response = await this.client!.request<{ thread: any; model: string; reasoningEffort?: ReasoningEffort | null; sandbox?: string | null }>('thread/resume', {
       threadId: input.threadId,
       model: input.model ?? null,
+      serviceTier: input.serviceTier,
       sandbox: input.sandbox ?? null,
       persistExtendedHistory: true
     });
@@ -227,6 +309,8 @@ export class CodexAppServerManager extends EventEmitter {
         }
       ],
       model: input.model ?? null,
+      serviceTier:
+        input.serviceTier === undefined ? undefined : input.serviceTier,
       effort: input.effort ?? null,
       sandboxPolicy: input.sandboxPolicy ?? null,
       collaborationMode: input.collaborationMode
@@ -257,6 +341,13 @@ export class CodexAppServerManager extends EventEmitter {
       ]
     });
     return response.turn ? mapTurn(response.turn) : null;
+  }
+
+  async compactThread(threadId: string) {
+    await this.ensureReady();
+    await this.client!.request<unknown>('thread/compact/start', {
+      threadId,
+    });
   }
 
   async interruptTurn(threadId: string, turnId: string) {

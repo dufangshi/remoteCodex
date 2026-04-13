@@ -921,7 +921,7 @@ describe('ThreadTimeline', () => {
         screen.getByRole('heading', { name: 'Streaming reply in progress' }),
       ).toBeInTheDocument();
     });
-    expect(screen.getAllByText('Running')).toHaveLength(2);
+    expect(screen.getAllByLabelText('Running')).toHaveLength(2);
     expect(screen.queryByText('Streaming output')).not.toBeInTheDocument();
   });
 
@@ -1331,7 +1331,7 @@ describe('ThreadTimeline', () => {
     expect(screen.getByText('streaming draft')).toBeInTheDocument();
   });
 
-  it('shows per-turn model and reasoning metadata in the turn header', () => {
+  it('shows per-turn model metadata plus detailed token usage in the turn header', () => {
     render(
       <ThreadTimeline
         liveOutput=""
@@ -1344,6 +1344,23 @@ describe('ThreadTimeline', () => {
             model: 'gpt-5.4',
             reasoningEffort: 'high',
             reasoningEffortAvailable: true,
+            tokenUsage: {
+              total: {
+                totalTokens: 18240,
+                inputTokens: 12000,
+                cachedInputTokens: 2000,
+                outputTokens: 4240,
+                reasoningOutputTokens: 1240,
+              },
+              last: {
+                totalTokens: 18240,
+                inputTokens: 12000,
+                cachedInputTokens: 2000,
+                outputTokens: 4240,
+                reasoningOutputTokens: 1240,
+              },
+              modelContextWindow: 272000,
+            },
             items: [
               {
                 id: 'agent-1',
@@ -1357,7 +1374,113 @@ describe('ThreadTimeline', () => {
     );
 
     expect(screen.getByText('gpt-5.4 · high')).toBeInTheDocument();
+    expect(screen.getAllByText('14k').length).toBeGreaterThan(0);
+    expect(screen.getByText('10k')).toBeInTheDocument();
+    expect(screen.getByText('2k')).toBeInTheDocument();
+    expect(screen.getByText('4.2k')).toBeInTheDocument();
+    expect(screen.getByText('1.2k')).toBeInTheDocument();
     expect(screen.getByLabelText('Completed')).toBeInTheDocument();
+    expect(screen.queryByText('Completed')).not.toBeInTheDocument();
+  });
+
+  it('shows compact token breakdown badges in the running footer bubble', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'inProgress',
+            error: null,
+            model: 'gpt-5.4',
+            reasoningEffort: 'high',
+            reasoningEffortAvailable: true,
+            tokenUsage: {
+              total: {
+                totalTokens: 18240,
+                inputTokens: 12000,
+                cachedInputTokens: 2000,
+                outputTokens: 4240,
+                reasoningOutputTokens: 1240,
+              },
+              last: {
+                totalTokens: 2400,
+                inputTokens: 1600,
+                cachedInputTokens: 200,
+                outputTokens: 800,
+                reasoningOutputTokens: 320,
+              },
+              modelContextWindow: 272000,
+            },
+            items: [
+              {
+                id: 'user-1',
+                kind: 'userMessage',
+                text: 'Keep going.',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getAllByText('14k').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('10k').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('2k').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('4.2k').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('1.2k').length).toBeGreaterThan(0);
+  });
+
+  it('opens the mobile token usage popover when the total badge is clicked', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            model: 'gpt-5.4',
+            reasoningEffort: 'high',
+            reasoningEffortAvailable: true,
+            tokenUsage: {
+              total: {
+                totalTokens: 18240,
+                inputTokens: 12000,
+                cachedInputTokens: 2000,
+                outputTokens: 4240,
+                reasoningOutputTokens: 1240,
+              },
+              last: {
+                totalTokens: 18240,
+                inputTokens: 12000,
+                cachedInputTokens: 2000,
+                outputTokens: 4240,
+                reasoningOutputTokens: 1240,
+              },
+              modelContextWindow: 272000,
+            },
+            items: [
+              {
+                id: 'agent-1',
+                kind: 'agentMessage',
+                text: 'Done.',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show token usage details' }));
+
+    expect(screen.getAllByText('All').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('In').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Cache').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Out').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Reason').length).toBeGreaterThan(0);
   });
 
   it('shows -- for legacy turns and - for fixed-effort models', () => {
@@ -1700,6 +1823,83 @@ describe('ThreadTimeline', () => {
     expect(screen.getByText('You selected Plan object: foundation')).toBeInTheDocument();
     expect(screen.getByText('You selected Detail level: medium')).toBeInTheDocument();
     expect(screen.queryByText('User')).not.toBeInTheDocument();
+  });
+
+  it('renders fast mode activity notes as small system cards', () => {
+    render(
+      <ThreadTimeline
+        turns={[]}
+        liveOutput=""
+        activityNotes={[
+          {
+            id: 'activity-1',
+            kind: 'fastMode',
+            text: 'Fast mode on',
+            createdAt: new Date(Date.UTC(2026, 3, 9, 6, 2, 0)).toISOString(),
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('System')).toBeInTheDocument();
+    expect(screen.getByText('Fast mode on')).toBeInTheDocument();
+  });
+
+  it('renders fast mode activity notes before newer turns instead of pinning them to the bottom', () => {
+    render(
+      <ThreadTimeline
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'user-1',
+                kind: 'userMessage',
+                text: 'First turn',
+              },
+            ],
+          },
+          {
+            id: 'turn-2',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 3, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'user-2',
+                kind: 'userMessage',
+                text: 'Second turn',
+              },
+            ],
+          },
+        ]}
+        liveOutput=""
+        activityNotes={[
+          {
+            id: 'activity-1',
+            kind: 'fastMode',
+            text: 'Fast mode on',
+            createdAt: new Date(Date.UTC(2026, 3, 9, 6, 2, 0)).toISOString(),
+          },
+        ]}
+      />,
+    );
+
+    const firstTurn = screen.getByText('First turn');
+    const activity = screen.getByText('Fast mode on');
+    const secondTurn = screen.getByText('Second turn');
+
+    expect(
+      firstTurn.compareDocumentPosition(activity) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      activity.compareDocumentPosition(secondTurn) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it('renders answered request notes before newer pending requests within the same turn', () => {

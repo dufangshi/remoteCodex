@@ -136,6 +136,7 @@ export interface ThreadDto {
   title: string;
   model: string | null;
   reasoningEffort: ReasoningEffortDto | null;
+  fastMode?: boolean;
   collaborationMode: CollaborationModeDto;
   approvalMode: ApprovalMode;
   sandboxMode?: SandboxModeDto | null;
@@ -184,6 +185,20 @@ export interface ThreadHistoryItemDetailDto {
   text: string;
 }
 
+export interface ThreadTurnTokenBreakdownDto {
+  totalTokens: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+}
+
+export interface ThreadTurnTokenUsageDto {
+  total: ThreadTurnTokenBreakdownDto;
+  last: ThreadTurnTokenBreakdownDto;
+  modelContextWindow: number | null;
+}
+
 export interface ThreadTurnDto {
   id: string;
   startedAt: string | null;
@@ -192,6 +207,7 @@ export interface ThreadTurnDto {
   model?: string | null;
   reasoningEffort?: ReasoningEffortDto | null;
   reasoningEffortAvailable?: boolean | null;
+  tokenUsage?: ThreadTurnTokenUsageDto | null;
   items: ThreadHistoryItemDto[];
 }
 
@@ -228,6 +244,67 @@ export interface ThreadAnsweredRequestNoteDto {
   createdAt: string;
 }
 
+export interface ThreadActivityNoteDto {
+  id: string;
+  kind: 'fastMode';
+  text: string;
+  createdAt: string;
+}
+
+export type CodexSkillScopeDto = 'user' | 'repo' | 'system' | 'admin';
+
+export interface CodexSkillInterfaceDto {
+  displayName?: string;
+  shortDescription?: string;
+  brandColor?: string;
+  defaultPrompt?: string;
+}
+
+export interface CodexSkillDto {
+  name: string;
+  description: string;
+  shortDescription?: string;
+  interface?: CodexSkillInterfaceDto;
+  path: string;
+  scope: CodexSkillScopeDto;
+  enabled: boolean;
+}
+
+export interface CodexSkillErrorDto {
+  path: string;
+  message: string;
+}
+
+export interface ThreadSkillsDto {
+  cwd: string;
+  skills: CodexSkillDto[];
+  errors: CodexSkillErrorDto[];
+}
+
+export type CodexMcpAuthStatusDto =
+  | 'unsupported'
+  | 'notLoggedIn'
+  | 'bearerToken'
+  | 'oAuth';
+
+export interface CodexMcpToolDto {
+  name: string;
+  title: string | null;
+  description: string | null;
+}
+
+export interface CodexMcpServerDto {
+  name: string;
+  authStatus: CodexMcpAuthStatusDto;
+  tools: CodexMcpToolDto[];
+  resourceCount: number;
+  resourceTemplateCount: number;
+}
+
+export interface ThreadMcpServersDto {
+  servers: CodexMcpServerDto[];
+}
+
 export interface ThreadLivePlanDto {
   turnId: string;
   explanation: string | null;
@@ -258,6 +335,7 @@ export interface ThreadDetailDto {
   pendingRequests: ThreadActionRequestDto[];
   pendingSteers: ThreadPendingSteerDto[];
   answeredRequestNotes?: ThreadAnsweredRequestNoteDto[];
+  activityNotes?: ThreadActivityNoteDto[];
   livePlan?: ThreadLivePlanDto | null;
   liveItems?: ThreadLiveItemsDto | null;
 }
@@ -328,6 +406,7 @@ export interface CreateThreadInput {
 export interface UpdateThreadSettingsInput {
   model?: string;
   reasoningEffort?: ReasoningEffortDto | null;
+  fastMode?: boolean;
   collaborationMode?: CollaborationModeDto;
   sandboxMode?: SandboxModeDto | null;
 }
@@ -379,6 +458,7 @@ export interface ThreadEventEnvelope {
   type:
     | 'thread.updated'
     | 'thread.context.updated'
+    | 'thread.turn.token.updated'
     | 'thread.turn.started'
     | 'thread.item.started'
     | 'thread.item.completed'

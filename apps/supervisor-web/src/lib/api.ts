@@ -21,6 +21,8 @@ import type {
   SupervisorSocketServerEnvelope,
   ThreadDetailDto,
   ThreadHistoryItemDetailDto,
+  ThreadMcpServersDto,
+  ThreadSkillsDto,
   ThreadDto,
   ThreadEventEnvelope,
   ThreadShellStateDto,
@@ -273,6 +275,24 @@ export function updateThreadSettings(id: string, input: UpdateThreadSettingsInpu
   return request<ThreadDto>(`/api/threads/${id}/settings`, {
     method: 'PATCH',
     body: JSON.stringify(input)
+  });
+}
+
+export function compactThread(id: string) {
+  return request<ThreadDto>(`/api/threads/${id}/compact`, {
+    method: 'POST',
+  });
+}
+
+export function fetchThreadSkills(id: string) {
+  return request<ThreadSkillsDto>(`/api/threads/${id}/skills`, {
+    cache: 'no-store',
+  });
+}
+
+export function fetchThreadMcpServers(id: string) {
+  return request<ThreadMcpServersDto>(`/api/threads/${id}/mcp-servers`, {
+    cache: 'no-store',
   });
 }
 

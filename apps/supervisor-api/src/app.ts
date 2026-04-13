@@ -86,7 +86,8 @@ export function buildApp(
     codexManager,
     eventBus,
     localSessionStore,
-    config.workspaceRoot
+    config.workspaceRoot,
+    config.codexHome,
   );
   const shellService =
     options.shellService ??

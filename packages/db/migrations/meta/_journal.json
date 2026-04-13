@@ -20,6 +20,11 @@
       "idx": 3,
       "tag": "0003_thread_runtime_settings",
       "when": 1740000003000
+    },
+    {
+      "idx": 4,
+      "tag": "0008_thread_fast_mode_and_activity_notes",
+      "when": 1740000008000
     }
   ]
 }

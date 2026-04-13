@@ -7,8 +7,11 @@ import {
   SandboxModeDto,
   SupervisorSocketServerEnvelope,
   ThreadDetailDto,
+  ThreadMcpServersDto,
+  ThreadSkillsDto,
   ThreadDto,
   ThreadEventEnvelope,
+  ThreadTurnTokenUsageDto,
 } from '../../../../packages/shared/src/index';
 import { ThreadComposer } from '../components/ThreadComposer';
 import {
@@ -24,11 +27,14 @@ import {
 } from '../components/threadPresentation';
 import {
   ApiError,
+  compactThread,
   connectSupervisorEvents,
   disconnectThread,
   fetchCodexModels,
   fetchCodexStatus,
+  fetchThreadMcpServers,
   fetchThreadHistoryItemDetail,
+  fetchThreadSkills,
   fetchSupervisorHealth,
   fetchThreads,
   fetchThreadDetail,
@@ -107,6 +113,7 @@ interface OptimisticTurnState {
   model: string | null;
   reasoningEffort: ThreadDetailDto['thread']['reasoningEffort'];
   reasoningEffortAvailable: boolean | null;
+  tokenUsage: ThreadTurnTokenUsageDto | null;
 }
 
 interface OptimisticSteerState {
@@ -118,10 +125,16 @@ interface OptimisticSteerState {
   status: 'steering' | 'accepted';
 }
 
+interface SlashPanelState<T> {
+  status: 'idle' | 'loading' | 'ready' | 'failed';
+  data: T | null;
+  error: string | null;
+}
+
 type PendingThreadSettings = Partial<
   Pick<
     ThreadDto,
-    'model' | 'reasoningEffort' | 'collaborationMode' | 'sandboxMode'
+    'model' | 'reasoningEffort' | 'fastMode' | 'collaborationMode' | 'sandboxMode'
   >
 >;
 
@@ -161,6 +174,27 @@ function turnHasUserMessage(
       (item) => item.kind === 'userMessage' && item.text.trim() === prompt,
     ) ?? false
   );
+}
+
+function mergeTurnTokenUsage(
+  turns: ThreadDetailDto['turns'],
+  turnId: string,
+  tokenUsage: ThreadTurnTokenUsageDto,
+) {
+  let changed = false;
+  const nextTurns = turns.map((turn) => {
+    if (turn.id !== turnId) {
+      return turn;
+    }
+
+    changed = true;
+    return {
+      ...turn,
+      tokenUsage,
+    };
+  });
+
+  return changed ? nextTurns : turns;
 }
 
 function CopyIcon() {
@@ -278,6 +312,7 @@ export function ThreadDetailPage() {
   const [pendingShellConnectionToggle, setPendingShellConnectionToggle] =
     useState(false);
   const [settingsBusy, setSettingsBusy] = useState(false);
+  const [compactBusy, setCompactBusy] = useState(false);
   const [respondingRequestId, setRespondingRequestId] = useState<string | null>(null);
   const [metaSessionCopyState, setMetaSessionCopyState] =
     useState<'idle' | 'copied' | 'failed'>('idle');
@@ -293,6 +328,16 @@ export function ThreadDetailPage() {
   const [optimisticSteers, setOptimisticSteers] = useState<OptimisticSteerState[]>(
     [],
   );
+  const [skillsState, setSkillsState] = useState<SlashPanelState<ThreadSkillsDto>>({
+    status: 'idle',
+    data: null,
+    error: null,
+  });
+  const [mcpState, setMcpState] = useState<SlashPanelState<ThreadMcpServersDto>>({
+    status: 'idle',
+    data: null,
+    error: null,
+  });
   const [error, setError] = useState<string | null>(null);
 
   const flushBufferedLiveOutput = useCallback(() => {
@@ -328,6 +373,79 @@ export function ThreadDetailPage() {
       liveOutputFrameRef.current = null;
     }
   }, []);
+
+  useEffect(() => {
+    setSkillsState({
+      status: 'idle',
+      data: null,
+      error: null,
+    });
+    setMcpState({
+      status: 'idle',
+      data: null,
+      error: null,
+    });
+  }, [id]);
+
+  async function handleOpenSkills() {
+    if (!id) {
+      return;
+    }
+
+    setSkillsState((current) => ({
+      status: 'loading',
+      data: current.data,
+      error: null,
+    }));
+
+    try {
+      const next = await fetchThreadSkills(id);
+      setSkillsState({
+        status: 'ready',
+        data: next,
+        error: null,
+      });
+    } catch (requestError) {
+      setSkillsState((current) => ({
+        status: 'failed',
+        data: current.data,
+        error:
+          requestError instanceof ApiError
+            ? requestError.payload.message
+            : 'Unable to load skills.',
+      }));
+    }
+  }
+
+  async function handleOpenMcp() {
+    if (!id) {
+      return;
+    }
+
+    setMcpState((current) => ({
+      status: 'loading',
+      data: current.data,
+      error: null,
+    }));
+
+    try {
+      const next = await fetchThreadMcpServers(id);
+      setMcpState({
+        status: 'ready',
+        data: next,
+        error: null,
+      });
+    } catch (requestError) {
+      setMcpState((current) => ({
+        status: 'failed',
+        data: current.data,
+        error:
+          requestError instanceof ApiError
+            ? requestError.payload.message
+            : 'Unable to load MCP servers.',
+      }));
+    }
+  }
 
   const applyDetailResponse = useCallback(
     (detailResponse: ThreadDetailDto) => {
@@ -796,6 +914,7 @@ export function ThreadDetailPage() {
                   serverTurnId: eventTurnId,
                   id: eventTurnId,
                   status: current.status === 'failed' ? current.status : 'inProgress',
+                  tokenUsage: current.tokenUsage,
                 }
               : current,
           );
@@ -836,6 +955,45 @@ export function ThreadDetailPage() {
       }
 
       if (
+        event.type === 'thread.turn.token.updated' &&
+        typeof event.payload.turnId === 'string' &&
+        event.payload.tokenUsage &&
+        typeof event.payload.tokenUsage === 'object'
+      ) {
+        const eventTurnId = event.payload.turnId;
+        const tokenUsage = event.payload.tokenUsage as ThreadTurnTokenUsageDto;
+
+        setDetail((current) => {
+          if (!current) {
+            return current;
+          }
+
+          const nextTurns = mergeTurnTokenUsage(
+            current.turns,
+            eventTurnId,
+            tokenUsage,
+          );
+
+          return nextTurns === current.turns
+            ? current
+            : {
+                ...current,
+                turns: nextTurns,
+              };
+        });
+
+        setOptimisticTurn((current) =>
+          current &&
+          (current.serverTurnId === eventTurnId || current.id === eventTurnId)
+            ? {
+                ...current,
+                tokenUsage,
+              }
+            : current,
+        );
+      }
+
+      if (
         event.type === 'thread.turn.started' ||
         event.type === 'thread.turn.completed' ||
         event.type === 'thread.turn.failed' ||
@@ -860,6 +1018,7 @@ export function ThreadDetailPage() {
                     id: eventTurnId,
                     status: current.status === 'failed' ? current.status : 'inProgress',
                     error: null,
+                    tokenUsage: current.tokenUsage,
                   }
                 : current,
             );
@@ -886,6 +1045,7 @@ export function ThreadDetailPage() {
                         typeof event.payload.error === 'string'
                           ? event.payload.error
                           : 'Unable to complete the turn.',
+                      tokenUsage: current.tokenUsage,
                     }
                   : current,
               );
@@ -1327,6 +1487,7 @@ export function ThreadDetailPage() {
             modelOptions,
             optimisticModel,
           ),
+          tokenUsage: null,
         });
       }
 
@@ -1384,6 +1545,7 @@ export function ThreadDetailPage() {
               modelOptions,
               optimisticModel,
             ),
+            tokenUsage: null,
           });
         } else {
           setOptimisticSteers((current) =>
@@ -1407,6 +1569,7 @@ export function ThreadDetailPage() {
                 serverTurnId: nextThread.activeTurnId ?? current.serverTurnId,
                 status: 'inProgress',
                 error: null,
+                tokenUsage: current.tokenUsage,
               }
             : current,
         );
@@ -1560,6 +1723,7 @@ export function ThreadDetailPage() {
   async function handleUpdateThreadSettings(input: {
     model?: string;
     reasoningEffort?: ThreadDto['reasoningEffort'];
+    fastMode?: boolean;
     collaborationMode?: ThreadDto['collaborationMode'];
     sandboxMode?: ThreadDto['sandboxMode'];
   }) {
@@ -1574,6 +1738,7 @@ export function ThreadDetailPage() {
       ...(input.reasoningEffort !== undefined
         ? { reasoningEffort: input.reasoningEffort }
         : {}),
+      ...(input.fastMode !== undefined ? { fastMode: input.fastMode } : {}),
       ...(input.collaborationMode !== undefined
         ? { collaborationMode: input.collaborationMode }
         : {}),
@@ -1612,6 +1777,7 @@ export function ThreadDetailPage() {
         ...(input.reasoningEffort !== undefined
           ? { reasoningEffort: input.reasoningEffort }
           : {}),
+        ...(input.fastMode !== undefined ? { fastMode: input.fastMode } : {}),
         ...(input.collaborationMode !== undefined
           ? { collaborationMode: input.collaborationMode }
           : {}),
@@ -1683,6 +1849,38 @@ export function ThreadDetailPage() {
       );
     } finally {
       setRespondingRequestId(null);
+    }
+  }
+
+  async function handleCompactThread() {
+    if (!detail) {
+      return;
+    }
+
+    setCompactBusy(true);
+    setError(null);
+
+    try {
+      const updated = await compactThread(id);
+      setDetail((current) =>
+        current
+          ? {
+              ...current,
+              thread: updated,
+            }
+          : current,
+      );
+      setThreads((current) =>
+        current.map((entry) => (entry.id === updated.id ? updated : entry)),
+      );
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : 'Unable to compact this thread context.',
+      );
+    } finally {
+      setCompactBusy(false);
     }
   }
 
@@ -1928,6 +2126,7 @@ export function ThreadDetailPage() {
           model: optimisticTurn.model,
           reasoningEffort: optimisticTurn.reasoningEffort,
           reasoningEffortAvailable: optimisticTurn.reasoningEffortAvailable,
+          tokenUsage: optimisticTurn.tokenUsage,
           items: [
             {
               id: `${optimisticTurn.id}-user-message`,
@@ -2075,6 +2274,7 @@ export function ThreadDetailPage() {
                     fetchThreadHistoryItemDetail(detail.thread.id, itemId)
                   }
                   answeredRequestNotes={detail.answeredRequestNotes ?? []}
+                  activityNotes={detail.activityNotes ?? []}
                   pendingSteers={detail.pendingSteers ?? []}
                   optimisticSteers={optimisticSteers}
                   optimisticTurn={timelineOptimisticTurn}
@@ -2096,6 +2296,7 @@ export function ThreadDetailPage() {
                       error={null}
                       model={detail.thread.model}
                       reasoningEffort={detail.thread.reasoningEffort}
+                      fastMode={detail.thread.fastMode ?? false}
                       collaborationMode={detail.thread.collaborationMode}
                       modelOptions={modelOptions}
                       contextUsage={detail.thread.contextUsage}
@@ -2110,11 +2311,17 @@ export function ThreadDetailPage() {
                       canInterrupt={Boolean(detail.thread.activeTurnId)}
                       onSubmit={handlePrompt}
                       onInterrupt={handleInterrupt}
+                      onCompact={handleCompactThread}
+                      onOpenSkills={handleOpenSkills}
+                      onOpenMcp={handleOpenMcp}
                       onToggleFollow={() => setScrollRequestKey((current) => current + 1)}
                       onUpdateSettings={handleUpdateThreadSettings}
                       onToggleView={handleToggleView}
                       onShellCopy={handleShellCopy}
                       onShellControl={handleShellControl}
+                      compactBusy={compactBusy}
+                      skillsState={skillsState}
+                      mcpState={mcpState}
                     />
                   </div>
                 ) : (
@@ -2126,6 +2333,7 @@ export function ThreadDetailPage() {
                       error={null}
                       model={detail.thread.model}
                       reasoningEffort={detail.thread.reasoningEffort}
+                      fastMode={detail.thread.fastMode ?? false}
                       collaborationMode={detail.thread.collaborationMode}
                       modelOptions={modelOptions}
                       contextUsage={detail.thread.contextUsage}
@@ -2140,11 +2348,17 @@ export function ThreadDetailPage() {
                       canInterrupt={Boolean(detail.thread.activeTurnId)}
                       onSubmit={handlePrompt}
                       onInterrupt={handleInterrupt}
+                      onCompact={handleCompactThread}
+                      onOpenSkills={handleOpenSkills}
+                      onOpenMcp={handleOpenMcp}
                       onToggleFollow={() => setScrollRequestKey((current) => current + 1)}
                       onUpdateSettings={handleUpdateThreadSettings}
                       onToggleView={handleToggleView}
                       onShellCopy={handleShellCopy}
                       onShellControl={handleShellControl}
+                      compactBusy={compactBusy}
+                      skillsState={skillsState}
+                      mcpState={mcpState}
                     />
                   </div>
                 )}

@@ -736,6 +736,125 @@ describe('supervisor api', () => {
     });
   });
 
+  it('accumulates per-turn token usage from notification deltas instead of thread totals', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Turn Token Usage Thread',
+      },
+    });
+
+    const createdThread = createResponse.json();
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Track my token usage.',
+      },
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+
+    const initialDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+
+    expect(initialDetailResponse.statusCode).toBe(200);
+    const turnId = initialDetailResponse.json().turns.at(-1)?.id;
+    expect(typeof turnId).toBe('string');
+
+    fakeCodexManager.emit('notification', {
+      method: 'thread/tokenUsage/updated',
+      params: {
+        threadId: createdThread.codexThreadId,
+        turnId,
+        tokenUsage: {
+          total: {
+            totalTokens: 18240,
+            inputTokens: 12000,
+            cachedInputTokens: 2000,
+            outputTokens: 4240,
+            reasoningOutputTokens: 1240,
+          },
+          last: {
+            totalTokens: 2400,
+            inputTokens: 1600,
+            cachedInputTokens: 200,
+            outputTokens: 800,
+            reasoningOutputTokens: 320,
+          },
+          modelContextWindow: 272000,
+        },
+      },
+    });
+
+    fakeCodexManager.emit('notification', {
+      method: 'thread/tokenUsage/updated',
+      params: {
+        threadId: createdThread.codexThreadId,
+        turnId,
+        tokenUsage: {
+          total: {
+            totalTokens: 20540,
+            inputTokens: 13600,
+            cachedInputTokens: 2200,
+            outputTokens: 4940,
+            reasoningOutputTokens: 420,
+          },
+          last: {
+            totalTokens: 2300,
+            inputTokens: 1600,
+            cachedInputTokens: 200,
+            outputTokens: 700,
+            reasoningOutputTokens: 100,
+          },
+          modelContextWindow: 272000,
+        },
+      },
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json().turns.at(-1)).toMatchObject({
+      id: turnId,
+      tokenUsage: {
+        total: {
+          totalTokens: 4700,
+          inputTokens: 3200,
+          cachedInputTokens: 400,
+          outputTokens: 1500,
+          reasoningOutputTokens: 420,
+        },
+        last: {
+          totalTokens: 2300,
+          inputTokens: 1600,
+          cachedInputTokens: 200,
+          outputTokens: 700,
+          reasoningOutputTokens: 100,
+        },
+        modelContextWindow: 272000,
+      },
+    });
+  });
+
   it('surfaces CLI-aligned context remaining estimates from token usage notifications', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',
@@ -1590,6 +1709,316 @@ describe('supervisor api', () => {
           ]
         }
       ]
+    });
+  });
+
+  it('persists fast mode via config service_tier and records a timeline activity note', async () => {
+    fakeCodexManager.models = [
+      {
+        ...fakeCodexManager.models[0]!,
+        model: 'gpt-5',
+        displayName: 'GPT-5',
+        description: 'Default model',
+        hidden: false,
+        isDefault: true,
+        supportedReasoningEfforts: [
+          { reasoningEffort: 'medium', description: 'Balanced' },
+          { reasoningEffort: 'high', description: 'Deep' },
+        ],
+        defaultReasoningEffort: 'medium',
+      },
+      {
+        ...fakeCodexManager.models[0]!,
+        id: 'model-2',
+        model: 'gpt-5-mini',
+        displayName: 'GPT-5 Mini',
+        description: 'Fast model',
+        hidden: false,
+        isDefault: false,
+        supportedReasoningEfforts: [
+          { reasoningEffort: 'low', description: 'Fastest' },
+          { reasoningEffort: 'medium', description: 'Balanced' },
+        ],
+        defaultReasoningEffort: 'low',
+      },
+    ];
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+    const workspace = workspaceResponse.json();
+
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Fast Mode Thread',
+      },
+    });
+    const createdThread = createResponse.json();
+    const baselineStopCalls = fakeCodexManager.stopCalls;
+    const baselineStartCalls = fakeCodexManager.startCalls;
+
+    const settingsResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${createdThread.id}/settings`,
+      payload: {
+        fastMode: true,
+      },
+    });
+
+    expect(settingsResponse.statusCode).toBe(200);
+    expect(settingsResponse.json()).toMatchObject({
+      id: createdThread.id,
+      fastMode: true,
+      model: 'gpt-5',
+      reasoningEffort: 'medium',
+    });
+    await expect(fs.readFile(path.join(codexHome, 'config.toml'), 'utf8')).resolves.toContain(
+      'service_tier = "fast"',
+    );
+    expect(fakeCodexManager.stopCalls).toBe(baselineStopCalls);
+    expect(fakeCodexManager.startCalls).toBe(baselineStartCalls);
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json()).toMatchObject({
+      thread: {
+        id: createdThread.id,
+        fastMode: true,
+        model: 'gpt-5',
+        reasoningEffort: 'medium',
+      },
+      activityNotes: expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'fastMode',
+          text: 'Fast mode on',
+        }),
+      ]),
+    });
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'fast turn',
+      },
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    expect(fakeCodexManager.startTurnCalls.at(-1)).toMatchObject({
+      prompt: 'fast turn',
+      serviceTier: 'fast',
+    });
+
+    const interruptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/interrupt`,
+    });
+
+    expect(interruptResponse.statusCode).toBe(200);
+
+    const disableResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${createdThread.id}/settings`,
+      payload: {
+        fastMode: false,
+      },
+    });
+
+    expect(disableResponse.statusCode).toBe(200);
+    await expect(fs.readFile(path.join(codexHome, 'config.toml'), 'utf8')).resolves.not.toContain(
+      'service_tier = "fast"',
+    );
+
+    const secondPromptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'standard turn',
+      },
+    });
+
+    expect(secondPromptResponse.statusCode).toBe(200);
+    expect(fakeCodexManager.startTurnCalls.at(-1)).toMatchObject({
+      prompt: 'standard turn',
+      serviceTier: null,
+    });
+  });
+
+  it('calls the codex manager compact action from the compact endpoint', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+    const workspace = workspaceResponse.json();
+
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Compact Thread',
+      },
+    });
+    const createdThread = createResponse.json();
+
+    const compactResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/compact`,
+    });
+
+    expect(compactResponse.statusCode).toBe(200);
+    expect(fakeCodexManager.compactThreadCalls).toEqual([
+      createdThread.codexThreadId,
+    ]);
+  });
+
+  it('lists thread skills from the codex manager for the thread workspace', async () => {
+    fakeCodexManager.skillsEntries = [
+      {
+        cwd: path.join(tempDir, 'workspace'),
+        skills: [
+          {
+            name: 'skill-creator',
+            description: 'Create or update a Codex skill',
+            shortDescription: 'Create or update a Codex skill',
+            interface: {
+              displayName: 'Skill Creator',
+              shortDescription: 'Create or update a Codex skill',
+              brandColor: '#111111',
+              defaultPrompt: 'Add a new skill.',
+            },
+            path: path.join(tempDir, 'workspace/.codex/skills/skill-creator/SKILL.md'),
+            scope: 'repo',
+            enabled: true,
+          },
+        ],
+        errors: [],
+      },
+    ];
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+    const workspace = workspaceResponse.json();
+
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Skills Thread',
+      },
+    });
+    const createdThread = createResponse.json();
+
+    const skillsResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}/skills`,
+    });
+
+    expect(skillsResponse.statusCode).toBe(200);
+    expect(skillsResponse.json()).toMatchObject({
+      cwd: path.join(tempDir, 'workspace'),
+      skills: [
+        {
+          name: 'skill-creator',
+          description: 'Create or update a Codex skill',
+          path: path.join(tempDir, 'workspace/.codex/skills/skill-creator/SKILL.md'),
+          scope: 'repo',
+          enabled: true,
+          interface: {
+            displayName: 'Skill Creator',
+          },
+        },
+      ],
+      errors: [],
+    });
+  });
+
+  it('lists thread mcp servers from the codex manager', async () => {
+    fakeCodexManager.mcpServers = [
+      {
+        name: 'github',
+        authStatus: 'oAuth',
+        tools: [
+          {
+            name: 'search_issues',
+            title: 'Search Issues',
+            description: 'Find issues',
+          },
+        ],
+        resourceCount: 2,
+        resourceTemplateCount: 1,
+      },
+    ];
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+    const workspace = workspaceResponse.json();
+
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'MCP Thread',
+      },
+    });
+    const createdThread = createResponse.json();
+
+    const mcpResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}/mcp-servers`,
+    });
+
+    expect(mcpResponse.statusCode).toBe(200);
+    expect(mcpResponse.json()).toEqual({
+      servers: [
+        {
+          name: 'github',
+          authStatus: 'oAuth',
+          tools: [
+            {
+              name: 'search_issues',
+              title: 'Search Issues',
+              description: 'Find issues',
+            },
+          ],
+          resourceCount: 2,
+          resourceTemplateCount: 1,
+        },
+      ],
     });
   });
 

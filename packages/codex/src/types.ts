@@ -67,6 +67,9 @@ export type ReasoningEffort =
 
 export type CollaborationModeKind = 'default' | 'plan';
 export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
+export type ServiceTier = 'fast' | 'flex';
+export type SkillScope = 'user' | 'repo' | 'system' | 'admin';
+export type McpAuthStatus = 'unsupported' | 'notLoggedIn' | 'bearerToken' | 'oAuth';
 export type NetworkAccess = 'restricted' | 'enabled';
 export type ReadOnlyAccess =
   | {
@@ -144,17 +147,59 @@ export interface CodexThreadRecord {
   turns: CodexTurnRecord[];
 }
 
+export interface CodexSkillRecord {
+  name: string;
+  description: string;
+  shortDescription: string | null;
+  interface: {
+    displayName: string | null;
+    shortDescription: string | null;
+    brandColor: string | null;
+    defaultPrompt: string | null;
+  } | null;
+  path: string;
+  scope: SkillScope;
+  enabled: boolean;
+}
+
+export interface CodexSkillErrorRecord {
+  path: string;
+  message: string;
+}
+
+export interface CodexSkillsListEntry {
+  cwd: string;
+  skills: CodexSkillRecord[];
+  errors: CodexSkillErrorRecord[];
+}
+
+export interface CodexMcpToolRecord {
+  name: string;
+  title: string | null;
+  description: string | null;
+}
+
+export interface CodexMcpServerRecord {
+  name: string;
+  authStatus: McpAuthStatus;
+  tools: CodexMcpToolRecord[];
+  resourceCount: number;
+  resourceTemplateCount: number;
+}
+
 export interface ThreadStartInput {
   cwd: string;
   model: string;
   approvalPolicy: 'never' | 'on-request';
   sandbox?: SandboxMode | null;
+  serviceTier?: ServiceTier | null;
 }
 
 export interface ThreadResumeInput {
   threadId: string;
   model?: string | null;
   sandbox?: SandboxMode | null;
+  serviceTier?: ServiceTier | null;
 }
 
 export interface TurnStartInput {
@@ -164,12 +209,17 @@ export interface TurnStartInput {
   effort?: ReasoningEffort | null;
   collaborationMode?: CollaborationModeKind | null;
   sandboxPolicy?: SandboxPolicy | null;
+  serviceTier?: ServiceTier | null;
 }
 
 export interface TurnSteerInput {
   threadId: string;
   turnId: string;
   prompt: string;
+}
+
+export interface ThreadCompactInput {
+  threadId: string;
 }
 
 export interface CodexServerRequest {

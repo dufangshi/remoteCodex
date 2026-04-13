@@ -1,7 +1,13 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 
-import { CodexThreadRecord, JsonRpcClientError, ReasoningEffort } from '../../../../packages/codex/src/index';
+import {
+  CodexMcpServerRecord,
+  CodexSkillsListEntry,
+  CodexThreadRecord,
+  JsonRpcClientError,
+  ReasoningEffort,
+} from '../../../../packages/codex/src/index';
 
 function makeThread(overrides: Partial<CodexThreadRecord> = {}): CodexThreadRecord {
   return {
@@ -48,13 +54,27 @@ export class FakeCodexManager extends EventEmitter {
   loadedThreadIds = new Set<string>();
   readThreadErrors = new Map<string, JsonRpcClientError>();
   readThreadCallCount = new Map<string, number>();
+  skillsEntries: CodexSkillsListEntry[] = [];
+  mcpServers: CodexMcpServerRecord[] = [];
   steerError: JsonRpcClientError | null = null;
   materializeSteersImmediately = true;
   steerTurnCalls: Array<{ threadId: string; turnId: string; prompt: string }> = [];
+  compactThreadCalls: string[] = [];
+  stopCalls = 0;
+  startCalls = 0;
+  startTurnCalls: Array<{
+    threadId: string;
+    prompt: string;
+    serviceTier?: 'fast' | 'flex' | null;
+  }> = [];
 
-  async start() {}
+  async start() {
+    this.startCalls += 1;
+  }
 
-  async stop() {}
+  async stop() {
+    this.stopCalls += 1;
+  }
 
   getStatus() {
     return this.status;
@@ -72,7 +92,15 @@ export class FakeCodexManager extends EventEmitter {
     return [...this.loadedThreadIds];
   }
 
-  async startThread(input: { cwd: string; model: string; sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access' | null }) {
+  async listSkills(_input: { cwds?: string[]; forceReload?: boolean } = {}) {
+    return this.skillsEntries;
+  }
+
+  async listMcpServers() {
+    return this.mcpServers;
+  }
+
+  async startThread(input: { cwd: string; model: string; sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access' | null; serviceTier?: 'fast' | 'flex' | null }) {
     const thread = makeThread({
       id: `codex-${this.threads.size + 1}`,
       cwd: input.cwd,
@@ -111,7 +139,7 @@ export class FakeCodexManager extends EventEmitter {
     return thread;
   }
 
-  async resumeThread(input: { threadId: string; model?: string | null; sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access' | null }) {
+  async resumeThread(input: { threadId: string; model?: string | null; sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access' | null; serviceTier?: 'fast' | 'flex' | null }) {
     const thread = this.threads.get(input.threadId) ?? makeThread({ id: input.threadId });
     if (thread.turns.length === 0) {
       throw new JsonRpcClientError(`no rollout found for thread id ${input.threadId}`, 'remote_error', {
@@ -136,7 +164,15 @@ export class FakeCodexManager extends EventEmitter {
     effort?: ReasoningEffort | null;
     collaborationMode?: 'default' | 'plan' | null;
     sandboxPolicy?: 'read-only' | 'workspace-write' | 'danger-full-access' | null;
+    serviceTier?: 'fast' | 'flex' | null;
   }) {
+    this.startTurnCalls.push({
+      threadId: input.threadId,
+      prompt: input.prompt,
+      ...(input.serviceTier !== undefined
+        ? { serviceTier: input.serviceTier }
+        : {}),
+    });
     const existing = this.threads.get(input.threadId) ?? makeThread({ id: input.threadId });
     const turn = {
       id: `turn-${Date.now()}`,
@@ -207,6 +243,10 @@ export class FakeCodexManager extends EventEmitter {
       error: null,
       items: []
     };
+  }
+
+  async compactThread(threadId: string) {
+    this.compactThreadCalls.push(threadId);
   }
 
   respondToServerRequest(id: number, result: unknown) {

@@ -53,6 +53,7 @@ const updateThreadSchema = z.object({
 const updateThreadSettingsSchema = z.object({
   model: z.string().min(1).optional(),
   reasoningEffort: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as [ReasoningEffortDto, ...ReasoningEffortDto[]]).nullable().optional(),
+  fastMode: z.boolean().optional(),
   collaborationMode: z.enum(['default', 'plan']).optional(),
   sandboxMode: z.enum(['read-only', 'workspace-write', 'danger-full-access'] as [SandboxModeDto, ...SandboxModeDto[]]).nullable().optional()
 }).refine((body) => Object.keys(body).length > 0, {
@@ -405,10 +406,26 @@ export async function registerThreadRoutes(app: FastifyInstance) {
     const input: UpdateThreadSettingsInput = {
       ...(body.model !== undefined ? { model: body.model } : {}),
       ...(body.reasoningEffort !== undefined ? { reasoningEffort: body.reasoningEffort } : {}),
+      ...(body.fastMode !== undefined ? { fastMode: body.fastMode } : {}),
       ...(body.collaborationMode !== undefined ? { collaborationMode: body.collaborationMode } : {}),
       ...(body.sandboxMode !== undefined ? { sandboxMode: body.sandboxMode } : {})
     };
     return app.services.threadService.updateThreadSettings(params.id, input);
+  });
+
+  app.post('/api/threads/:id/compact', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    return app.services.threadService.compactThread(params.id);
+  });
+
+  app.get('/api/threads/:id/skills', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    return app.services.threadService.listThreadSkills(params.id);
+  });
+
+  app.get('/api/threads/:id/mcp-servers', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    return app.services.threadService.listThreadMcpServers(params.id);
   });
 
   app.post('/api/threads/:id/resume', async (request) => {

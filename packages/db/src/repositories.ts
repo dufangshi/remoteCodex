@@ -7,6 +7,7 @@ import { getDefaultHostRecord } from './client';
 import {
   notifications,
   shellSessions,
+  threadActivityNotes,
   threadPendingSteers,
   threadTurnMetadata,
   threads,
@@ -24,6 +25,9 @@ export interface CreateThreadRecordInput {
   title: string;
   model?: string | null;
   reasoningEffort?: string | null;
+  fastMode?: boolean;
+  fastBaseModel?: string | null;
+  fastBaseReasoningEffort?: string | null;
   collaborationMode?: string;
   approvalMode: string;
   sandboxMode?: string | null;
@@ -39,6 +43,9 @@ export interface UpdateThreadRecordInput {
   title?: string;
   model?: string | null;
   reasoningEffort?: string | null;
+  fastMode?: boolean;
+  fastBaseModel?: string | null;
+  fastBaseReasoningEffort?: string | null;
   collaborationMode?: string;
   approvalMode?: string;
   sandboxMode?: string | null;
@@ -57,6 +64,7 @@ export interface UpsertThreadTurnMetadataInput {
   model?: string | null;
   reasoningEffort?: string | null;
   reasoningEffortAvailable?: boolean | null;
+  tokenUsageJson?: string | null;
 }
 
 export interface CreateThreadPendingSteerRecordInput {
@@ -65,6 +73,12 @@ export interface CreateThreadPendingSteerRecordInput {
   clientRequestId?: string | null;
   displayPrompt: string;
   submittedPrompt: string;
+}
+
+export interface CreateThreadActivityNoteRecordInput {
+  threadId: string;
+  kind: string;
+  text: string;
 }
 
 export interface CreateShellSessionRecordInput {
@@ -178,6 +192,9 @@ export function createThreadRecord(db: DatabaseClient, input: CreateThreadRecord
     title: input.title,
     model: input.model ?? null,
     reasoningEffort: input.reasoningEffort ?? null,
+    fastMode: input.fastMode ?? false,
+    fastBaseModel: input.fastBaseModel ?? null,
+    fastBaseReasoningEffort: input.fastBaseReasoningEffort ?? null,
     collaborationMode: input.collaborationMode ?? 'default',
     approvalMode: input.approvalMode,
     sandboxMode: input.sandboxMode ?? null,
@@ -218,6 +235,23 @@ export function listThreadTurnMetadataByThreadId(db: DatabaseClient, threadId: s
   return db.select().from(threadTurnMetadata).where(eq(threadTurnMetadata.threadId, threadId)).all();
 }
 
+export function getThreadTurnMetadataByThreadAndTurnId(
+  db: DatabaseClient,
+  threadId: string,
+  turnId: string,
+) {
+  return db
+    .select()
+    .from(threadTurnMetadata)
+    .where(
+      and(
+        eq(threadTurnMetadata.threadId, threadId),
+        eq(threadTurnMetadata.turnId, turnId),
+      ),
+    )
+    .get();
+}
+
 export function upsertThreadTurnMetadata(
   db: DatabaseClient,
   input: UpsertThreadTurnMetadataInput,
@@ -237,9 +271,19 @@ export function upsertThreadTurnMetadata(
   if (existing) {
     db.update(threadTurnMetadata)
       .set({
-        model: input.model ?? null,
-        reasoningEffort: input.reasoningEffort ?? null,
-        reasoningEffortAvailable: input.reasoningEffortAvailable ?? null,
+        model: input.model !== undefined ? input.model : existing.model,
+        reasoningEffort:
+          input.reasoningEffort !== undefined
+            ? input.reasoningEffort
+            : existing.reasoningEffort,
+        reasoningEffortAvailable:
+          input.reasoningEffortAvailable !== undefined
+            ? input.reasoningEffortAvailable
+            : existing.reasoningEffortAvailable,
+        tokenUsageJson:
+          input.tokenUsageJson !== undefined
+            ? input.tokenUsageJson
+            : existing.tokenUsageJson,
         updatedAt: now,
       })
       .where(eq(threadTurnMetadata.id, existing.id))
@@ -255,6 +299,7 @@ export function upsertThreadTurnMetadata(
       model: input.model ?? null,
       reasoningEffort: input.reasoningEffort ?? null,
       reasoningEffortAvailable: input.reasoningEffortAvailable ?? null,
+      tokenUsageJson: input.tokenUsageJson ?? null,
       createdAt: now,
       updatedAt: now,
     })
@@ -306,6 +351,41 @@ export function deleteThreadPendingSteerRecordsByThreadId(
   threadId: string,
 ) {
   db.delete(threadPendingSteers).where(eq(threadPendingSteers.threadId, threadId)).run();
+}
+
+export function listThreadActivityNotesByThreadId(
+  db: DatabaseClient,
+  threadId: string,
+) {
+  return db
+    .select()
+    .from(threadActivityNotes)
+    .where(eq(threadActivityNotes.threadId, threadId))
+    .orderBy(threadActivityNotes.createdAt)
+    .all();
+}
+
+export function createThreadActivityNoteRecord(
+  db: DatabaseClient,
+  input: CreateThreadActivityNoteRecordInput,
+) {
+  const record = {
+    id: randomUUID(),
+    threadId: input.threadId,
+    kind: input.kind,
+    text: input.text,
+    createdAt: new Date().toISOString(),
+  };
+
+  db.insert(threadActivityNotes).values(record).run();
+  return record;
+}
+
+export function deleteThreadActivityNotesByThreadId(
+  db: DatabaseClient,
+  threadId: string,
+) {
+  db.delete(threadActivityNotes).where(eq(threadActivityNotes.threadId, threadId)).run();
 }
 
 export function listShellSessionRecords(db: DatabaseClient) {
