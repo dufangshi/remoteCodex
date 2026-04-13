@@ -978,6 +978,7 @@ describe('ThreadTimeline', () => {
     expect(screen.getByText('Accepted steer prompt')).toBeInTheDocument();
     expect(screen.getByText('Still steering prompt')).toBeInTheDocument();
     expect(screen.getByText('Steering')).toBeInTheDocument();
+    expect(screen.getByText('Queued')).toBeInTheDocument();
     expect(timelineText.indexOf('sleep 20')).toBeLessThan(
       timelineText.indexOf('Accepted steer prompt'),
     );
@@ -1022,6 +1023,53 @@ describe('ThreadTimeline', () => {
 
     expect(screen.getByText('Queued steer prompt')).toBeInTheDocument();
     expect(screen.getByText('Steering')).toBeInTheDocument();
+  });
+
+  it('reorders materialized steer messages after preceding command results while still queued', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'inProgress',
+            error: null,
+            items: [
+              {
+                id: 'user-1',
+                kind: 'userMessage',
+                text: 'Run sleep 20.',
+              },
+              {
+                id: 'agent-1',
+                kind: 'agentMessage',
+                text: 'Running sleep now.',
+              },
+              {
+                id: 'steer-1',
+                kind: 'userMessage',
+                text: 'This is a steer probe',
+              },
+              {
+                id: 'command-1',
+                kind: 'commandExecution',
+                text: 'sleep 20',
+                status: 'completed',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    const timelineText =
+      screen.getByTestId('thread-scroll-container').textContent ?? '';
+    expect(screen.getByText('This is a steer probe')).toBeInTheDocument();
+    expect(screen.getByText('Queued')).toBeInTheDocument();
+    expect(timelineText.indexOf('sleep 20')).toBeLessThan(
+      timelineText.indexOf('This is a steer probe'),
+    );
   });
 
   it('shows only the unmaterialized tail of streaming output', () => {

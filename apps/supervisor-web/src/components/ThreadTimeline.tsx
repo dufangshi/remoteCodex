@@ -349,6 +349,88 @@ function isCompactChatItem(kind: ThreadHistoryItemDto['kind']) {
   return kind === 'userMessage' || kind === 'agentMessage';
 }
 
+function isSteerTailHistoryItem(kind: ThreadHistoryItemDto['kind']) {
+  return (
+    kind === 'commandExecution' ||
+    kind === 'webSearch' ||
+    kind === 'fileChange' ||
+    kind === 'image' ||
+    kind === 'contextCompaction'
+  );
+}
+
+function isSteerConsumptionHistoryItem(kind: ThreadHistoryItemDto['kind']) {
+  return (
+    kind === 'agentMessage' ||
+    kind === 'reasoning' ||
+    kind === 'toolCall' ||
+    kind === 'plan'
+  );
+}
+
+function prepareTurnItemsForRendering(
+  items: ThreadHistoryItemDto[],
+  active: boolean,
+) {
+  if (!active) {
+    return items;
+  }
+
+  const prepared = [...items];
+  const firstUserIndex = prepared.findIndex((item) => item.kind === 'userMessage');
+  if (firstUserIndex < 0) {
+    return prepared;
+  }
+
+  for (let index = firstUserIndex + 1; index < prepared.length; index += 1) {
+    const item = prepared[index];
+    if (!item || item.kind !== 'userMessage') {
+      continue;
+    }
+
+    let tailEnd = index + 1;
+    while (
+      tailEnd < prepared.length &&
+      isSteerTailHistoryItem(prepared[tailEnd]!.kind)
+    ) {
+      tailEnd += 1;
+    }
+
+    if (tailEnd === index + 1) {
+      continue;
+    }
+
+    const [steerItem] = prepared.splice(index, 1);
+    prepared.splice(tailEnd - 1, 0, steerItem!);
+    index = tailEnd - 1;
+  }
+
+  let seenPrimaryUserMessage = false;
+  return prepared.map((item, index) => {
+    if (item.kind !== 'userMessage') {
+      return item;
+    }
+
+    if (!seenPrimaryUserMessage) {
+      seenPrimaryUserMessage = true;
+      return item;
+    }
+
+    const hasConsumptionAfter = prepared
+      .slice(index + 1)
+      .some((nextItem) => isSteerConsumptionHistoryItem(nextItem.kind));
+
+    if (hasConsumptionAfter) {
+      return item;
+    }
+
+    return {
+      ...item,
+      status: 'Queued',
+    };
+  });
+}
+
 function getLiveOutputTailForTurn(
   liveOutput: string,
   items: ThreadHistoryItemDto[],
@@ -1114,7 +1196,13 @@ const CompactMessageItem = memo(function CompactMessageItem({
     item.kind === 'userMessage'
       ? 'border-cyan-400/25 bg-cyan-400/10 text-cyan-200'
       : 'border-slate-300/30 bg-slate-200/12 text-slate-100';
-  const steeringStatus = item.kind === 'userMessage' && item.status === 'Steering';
+  const queuedLikeStatus =
+    item.kind === 'userMessage' &&
+    (item.status === 'Steering' || item.status === 'Queued');
+  const queuedBadgeClassName =
+    item.status === 'Steering'
+      ? 'border-amber-300/30 bg-amber-300/10 text-amber-100'
+      : 'border-sky-300/30 bg-sky-300/10 text-sky-100';
 
   useEffect(() => {
     return () => {
@@ -1145,8 +1233,8 @@ const CompactMessageItem = memo(function CompactMessageItem({
     <div
       className={`relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
     >
-      {steeringStatus && (
-        <span className="absolute right-2.5 top-2.5 z-[1] inline-flex items-center gap-1 rounded-full border border-amber-300/30 bg-amber-300/10 px-2 py-1 text-[10px] font-medium tracking-[0.12em] text-amber-100 shadow-sm shadow-stone-950/20">
+      {queuedLikeStatus && (
+        <span className={`absolute right-2.5 top-2.5 z-[1] inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-medium tracking-[0.12em] shadow-sm shadow-stone-950/20 ${queuedBadgeClassName}`}>
           <svg
             aria-hidden="true"
             viewBox="0 0 16 16"
@@ -1160,7 +1248,7 @@ const CompactMessageItem = memo(function CompactMessageItem({
             <path d="M12.75 8A4.75 4.75 0 0 1 8 12.75H5.25" />
             <path d="m6.5 14.25-1.75-1.5 1.75-1.5" />
           </svg>
-          <span>Steering</span>
+          <span>{item.status}</span>
         </span>
       )}
       <span
@@ -1193,7 +1281,7 @@ const CompactMessageItem = memo(function CompactMessageItem({
           ) : (
             <UserMessageBody threadId={threadId} text={item.text} />
           )}
-          {item.status && !steeringStatus && (
+          {item.status && !queuedLikeStatus && (
             <p className="mt-1 text-xs text-stone-500">{item.status}</p>
           )}
         </div>
@@ -2402,7 +2490,11 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
   scrollRootRef: RefObject<HTMLDivElement | null>;
   articleRef?: RefCallback<HTMLElement> | undefined;
 }) {
-  const groupedItems = useMemo(() => groupTimelineHistoryItems(turn.items), [turn.items]);
+  const preparedItems = useMemo(
+    () => prepareTurnItemsForRendering(turn.items, isActiveTurnStatus(turn.status)),
+    [turn.items, turn.status],
+  );
+  const groupedItems = useMemo(() => groupTimelineHistoryItems(preparedItems), [preparedItems]);
   const visibleLiveOutput = useMemo(
     () => getLiveOutputTailForTurn(liveOutput, turn.items),
     [liveOutput, turn.items],
@@ -2932,7 +3024,7 @@ export function ThreadTimeline({
     ...pendingSteers.map((steer) => ({
       id: steer.id,
       prompt: steer.prompt,
-      status: null,
+      status: 'Queued',
       createdAt: steer.createdAt,
     })),
     ...optimisticSteers.map((steer) => ({
