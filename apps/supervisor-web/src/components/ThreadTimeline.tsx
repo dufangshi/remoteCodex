@@ -1167,7 +1167,7 @@ function TurnStatusBar({
             ) : null}
             {tokenBadges.map((badge) => (
               <span
-                key={badge.label}
+                key={badge.id}
                 className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${badge.className}`}
                 title={badge.title}
               >
@@ -1440,6 +1440,7 @@ function buildTurnTokenDetails(turn: TimelineTurn) {
 
 function buildTurnTokenBadges(turn: TimelineTurn) {
   return buildTurnTokenDetails(turn).map((detail) => ({
+    id: detail.id,
     label: detail.tokenCompactValue,
     title: `${detail.label}: ${detail.tokenRawValue} tokens`,
     className: detail.className,

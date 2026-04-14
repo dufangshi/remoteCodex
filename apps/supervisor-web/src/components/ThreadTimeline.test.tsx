@@ -1493,6 +1493,62 @@ describe('ThreadTimeline', () => {
     expect(screen.getAllByText('$0.089').length).toBeGreaterThan(0);
   });
 
+  it('keeps distinct footer token badges when multiple categories share the same compact label', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'inProgress',
+            error: null,
+            model: 'gpt-5.4',
+            reasoningEffort: 'high',
+            reasoningEffortAvailable: true,
+            tokenUsage: {
+              total: {
+                totalTokens: 16000,
+                inputTokens: 8000,
+                cachedInputTokens: 0,
+                outputTokens: 8000,
+                reasoningOutputTokens: 4000,
+              },
+              last: {
+                totalTokens: 1600,
+                inputTokens: 800,
+                cachedInputTokens: 0,
+                outputTokens: 800,
+                reasoningOutputTokens: 400,
+              },
+              modelContextWindow: 272000,
+            },
+            priceEstimate: {
+              pricingModelKey: 'gpt-5.4',
+              pricingTierKey: 'standard',
+              currency: 'USD',
+              inputUsd: 0.02,
+              cachedInputUsd: 0,
+              outputUsd: 0.06,
+              totalUsd: 0.08,
+            },
+            items: [
+              {
+                id: 'user-1',
+                kind: 'userMessage',
+                text: 'Keep going.',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByTitle('Input: 8000 tokens')).toBeInTheDocument();
+    expect(screen.getByTitle('Output: 4000 tokens')).toBeInTheDocument();
+    expect(screen.getByTitle('Reasoning: 4000 tokens')).toBeInTheDocument();
+  });
+
   it('opens the mobile token and price popover when the price badge is clicked', () => {
     render(
       <ThreadTimeline
