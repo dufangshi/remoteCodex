@@ -152,27 +152,27 @@ const FOLLOW_TAIL_THRESHOLD_PX = 80;
 function itemSurfaceClassName(kind: ThreadHistoryItemDto['kind']) {
   switch (kind) {
     case 'userMessage':
-      return 'bg-cyan-500/[0.045] text-stone-300';
+      return 'timeline-user';
     case 'agentMessage':
-      return 'bg-slate-400/[0.11] text-stone-100 shadow-lg shadow-stone-950/10';
+      return 'timeline-agent';
     case 'image':
-      return 'bg-indigo-400/[0.07] text-stone-100';
+      return 'timeline-action';
     case 'contextCompaction':
-      return 'bg-teal-400/[0.06] text-stone-100';
+      return 'timeline-action';
     case 'commandExecution':
-      return 'bg-amber-500/[0.06] text-stone-200';
+      return 'timeline-command';
     case 'webSearch':
-      return 'bg-sky-400/[0.07] text-stone-100';
+      return 'timeline-search';
     case 'reasoning':
-      return 'bg-violet-500/[0.05] text-stone-300';
+      return 'timeline-reasoning';
     case 'toolCall':
-      return 'bg-fuchsia-500/[0.05] text-stone-300';
+      return 'timeline-action';
     case 'plan':
-      return 'bg-sky-500/[0.05] text-stone-300';
+      return 'timeline-plan';
     case 'fileChange':
-      return 'bg-lime-500/[0.05] text-stone-300';
+      return 'timeline-file-change';
     case 'other':
-      return 'bg-stone-950 text-stone-300';
+      return 'timeline-other';
   }
 }
 
@@ -181,15 +181,15 @@ function overlayBadgeClassName(
 ) {
   switch (tone) {
     case 'user':
-      return 'border-cyan-400/30 bg-cyan-400/12 text-cyan-200';
+      return 'timeline-overlay-badge timeline-overlay-badge-user';
     case 'agent':
-      return 'border-slate-300/35 bg-slate-200/14 text-slate-100';
+      return 'timeline-overlay-badge timeline-overlay-badge-agent';
     case 'command':
-      return 'border-amber-300/30 bg-amber-300/12 text-amber-200';
+      return 'timeline-overlay-badge timeline-overlay-badge-command';
     case 'search':
-      return 'border-sky-300/35 bg-sky-300/14 text-sky-100';
+      return 'timeline-overlay-badge timeline-overlay-badge-search';
     case 'action':
-      return 'border-stone-700/90 bg-stone-900/75 text-stone-300';
+      return 'timeline-overlay-badge timeline-overlay-badge-action';
   }
 }
 
@@ -1044,11 +1044,11 @@ function TurnStatusIndicator({
 
   if (status === 'completed') {
     return (
-      <span
-        aria-label={label}
-        title={label}
-        className="inline-flex h-4 w-4 items-center justify-center text-emerald-200"
-      >
+        <span
+          aria-label={label}
+          title={label}
+          className="timeline-status-icon timeline-status-icon-success inline-flex h-4 w-4 items-center justify-center"
+        >
         <svg
           aria-hidden="true"
           viewBox="0 0 16 16"
@@ -1065,11 +1065,11 @@ function TurnStatusIndicator({
 
   if (status === 'failed') {
     return (
-      <span
-        aria-label={label}
-        title={label}
-        className="inline-flex h-4 w-4 items-center justify-center text-rose-200"
-      >
+        <span
+          aria-label={label}
+          title={label}
+          className="timeline-status-icon timeline-status-icon-failed inline-flex h-4 w-4 items-center justify-center"
+        >
         <svg
           aria-hidden="true"
           viewBox="0 0 16 16"
@@ -1086,11 +1086,11 @@ function TurnStatusIndicator({
 
   if (status === 'interrupted') {
     return (
-      <span
-        aria-label={label}
-        title={label}
-        className="inline-flex h-4 w-4 items-center justify-center text-amber-200"
-      >
+        <span
+          aria-label={label}
+          title={label}
+          className="timeline-status-icon timeline-status-icon-warning inline-flex h-4 w-4 items-center justify-center"
+        >
         <svg
           aria-hidden="true"
           viewBox="0 0 16 16"
@@ -1367,7 +1367,7 @@ function buildTurnTokenDetails(turn: TimelineTurn) {
             ? formatDetailedUsd(turn.priceEstimate.inputUsd)
             : '--',
           usdRawValue: turn.priceEstimate?.inputUsd ?? null,
-          className: 'border-emerald-300/28 bg-emerald-300/10 text-emerald-100',
+          className: 'token-badge-in',
           icon: <TokenInIcon />,
         }
       : null,
@@ -1381,7 +1381,7 @@ function buildTurnTokenDetails(turn: TimelineTurn) {
             ? formatDetailedUsd(turn.priceEstimate.cachedInputUsd)
             : '--',
           usdRawValue: turn.priceEstimate?.cachedInputUsd ?? null,
-          className: 'border-sky-300/28 bg-sky-300/10 text-sky-100',
+          className: 'token-badge-cache',
           icon: <TokenCacheIcon />,
         }
       : null,
@@ -1405,7 +1405,7 @@ function buildTurnTokenDetails(turn: TimelineTurn) {
             Math.max(usage.outputTokens, 0),
             nonReasoningOutputTokens,
           ),
-          className: 'border-violet-300/28 bg-violet-300/10 text-violet-100',
+          className: 'token-badge-out',
           icon: <TokenOutIcon />,
         }
       : null,
@@ -1429,7 +1429,7 @@ function buildTurnTokenDetails(turn: TimelineTurn) {
             Math.max(usage.outputTokens, 0),
             reasoningOutputTokens,
           ),
-          className: 'border-amber-300/28 bg-amber-300/10 text-amber-100',
+          className: 'token-badge-reason',
           icon: <TokenReasonIcon />,
         }
       : null,
@@ -1458,8 +1458,8 @@ function buildTurnPriceBadge(turn: TimelineTurn) {
         ? 'Price estimate unavailable for this model.'
         : `Estimated cost: ${formatDetailedUsd(turn.priceEstimate.totalUsd)}`,
     className: turn.priceEstimate
-      ? 'border-lime-300/28 bg-lime-300/10 text-lime-100'
-      : 'border-stone-700/90 bg-stone-900/70 text-stone-300',
+      ? 'token-badge-total'
+      : 'token-badge-empty',
   };
 }
 
@@ -1504,19 +1504,19 @@ function TurnTokenSummary({ turn }: { turn: TimelineTurn }) {
   }
 
   const renderBreakdownPopover = () => (
-    <div className="min-w-[12rem] rounded-2xl border border-stone-700/90 bg-stone-950/96 p-2.5 shadow-2xl shadow-black/35 backdrop-blur">
+    <div className="thread-token-popover min-w-[12rem] rounded-2xl border p-2.5 shadow-2xl shadow-black/20 backdrop-blur">
       <div className="space-y-1">
         {details.map((detail) => (
           <div
             key={detail.id}
-            className="flex items-center justify-between gap-3 rounded-xl border border-stone-800/80 bg-stone-900/70 px-2.5 py-1.5 text-[11px]"
+            className="thread-token-popover-row flex items-center justify-between gap-3 rounded-xl border px-2.5 py-1.5 text-[11px]"
             title={`${detail.label}: ${detail.tokenRawValue} tokens`}
           >
-            <span className="inline-flex min-w-0 items-center gap-2 text-stone-300">
+            <span className="thread-token-popover-text inline-flex min-w-0 items-center gap-2">
               <span className="inline-flex shrink-0">{detail.icon}</span>
-              <span className="font-medium text-stone-100">{detail.usdCompactValue}</span>
+              <span className="thread-token-popover-strong font-medium">{detail.usdCompactValue}</span>
             </span>
-            <span className="shrink-0 font-medium text-stone-400">
+            <span className="thread-token-popover-text shrink-0 font-medium">
               {detail.tokenCompactValue}
             </span>
           </div>
@@ -1543,7 +1543,7 @@ function TurnTokenSummary({ turn }: { turn: TimelineTurn }) {
               aria-expanded={isDesktopOpen}
               onFocus={() => setIsDesktopOpen(true)}
               onBlur={() => setIsDesktopOpen(false)}
-              className={`${TURN_HEADER_BADGE_CLASS_NAME} appearance-none whitespace-nowrap bg-transparent !text-[10px] !font-normal !leading-none transition hover:bg-stone-800/90 sm:!text-[11px] ${priceBadge.className}`}
+              className={`${TURN_HEADER_BADGE_CLASS_NAME} appearance-none whitespace-nowrap bg-transparent !text-[10px] !font-normal !leading-none transition hover:bg-[var(--theme-hover)] sm:!text-[11px] ${priceBadge.className}`}
               title={priceBadge.title}
             >
               {priceBadge.label}
@@ -1573,7 +1573,7 @@ function TurnTokenSummary({ turn }: { turn: TimelineTurn }) {
             aria-label="Show token and price details"
             aria-expanded={isMobileOpen}
             onClick={() => setIsMobileOpen((current) => !current)}
-            className={`${TURN_HEADER_BADGE_CLASS_NAME} appearance-none whitespace-nowrap bg-transparent !text-[10px] !font-normal !leading-none transition hover:bg-stone-800/90 sm:!text-[11px] ${priceBadge.className}`}
+            className={`${TURN_HEADER_BADGE_CLASS_NAME} appearance-none whitespace-nowrap bg-transparent !text-[10px] !font-normal !leading-none transition hover:bg-[var(--theme-hover)] sm:!text-[11px] ${priceBadge.className}`}
             title={priceBadge.title}
           >
             {priceBadge.label}
@@ -1861,8 +1861,8 @@ const CompactMessageItem = memo(function CompactMessageItem({
   const resetTimerRef = useRef<number | null>(null);
   const iconToneClassName =
     item.kind === 'userMessage'
-      ? 'border-cyan-400/25 bg-cyan-400/10 text-cyan-200'
-      : 'border-slate-300/30 bg-slate-200/12 text-slate-100';
+      ? 'thread-message-icon thread-message-icon-user'
+      : 'thread-message-icon thread-message-icon-agent';
   const queuedLikeStatus =
     item.kind === 'userMessage' &&
     (
@@ -1904,7 +1904,7 @@ const CompactMessageItem = memo(function CompactMessageItem({
 
   return (
     <div
-      className={`relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
+      className={`timeline-item-frame relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
     >
       {queuedLikeStatus && (
         <span className={`absolute right-2.5 top-2.5 z-[1] inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-medium tracking-[0.12em] shadow-sm shadow-stone-950/20 ${queuedBadgeClassName}`}>
@@ -2007,7 +2007,7 @@ const CommandItem = memo(function CommandItem({
 
   return (
     <div
-      className={`relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
+      className={`timeline-item-frame relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
     >
       <span
         className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('command')}`}
@@ -2028,7 +2028,7 @@ const CommandItem = memo(function CommandItem({
           </span>
           {isRunningHistoryStatus(item.status) && <RunningDots />}
         </div>
-        <div className="relative min-w-0 w-full flex-1 rounded-[0.9rem] border border-stone-800/80 bg-stone-950/45 px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2">
+        <div className="timeline-item-inner relative min-w-0 w-full flex-1 rounded-[0.9rem] border px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2">
             <button
               type="button"
               aria-label={item.status ? `Command status: ${item.status}` : 'Command status'}
@@ -2077,7 +2077,7 @@ const ToolCallItem = memo(function ToolCallItem({
 
   return (
     <div
-      className={`relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
+      className={`timeline-item-frame relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
     >
       <span
         className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('action')}`}
@@ -2098,7 +2098,7 @@ const ToolCallItem = memo(function ToolCallItem({
           </span>
           {isRunningHistoryStatus(item.status) && <RunningDots />}
         </div>
-        <div className="relative min-w-0 w-full flex-1 rounded-[0.9rem] border border-stone-800/80 bg-stone-950/45 px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2">
+        <div className="timeline-item-inner relative min-w-0 w-full flex-1 rounded-[0.9rem] border px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2">
           <button
             type="button"
             aria-label={item.status ? `Tool status: ${item.status}` : 'Tool status'}
@@ -2725,12 +2725,12 @@ const FileChangeGroupItem = memo(function FileChangeGroupItem({
             </div>
             <span className="inline-flex shrink-0 items-center gap-1.5">
               {addedLines > 0 && (
-                <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-200">
+                <span className="timeline-delta-badge timeline-delta-badge-add rounded-full border px-1.5 py-0.5 text-[11px] font-medium">
                   +{addedLines}
                 </span>
               )}
               {removedLines > 0 && (
-                <span className="rounded-full border border-rose-400/20 bg-rose-400/10 px-1.5 py-0.5 text-[11px] font-medium text-rose-200">
+                <span className="timeline-delta-badge timeline-delta-badge-remove rounded-full border px-1.5 py-0.5 text-[11px] font-medium">
                   -{removedLines}
                 </span>
               )}
@@ -2777,12 +2777,12 @@ const FileChangeGroupItem = memo(function FileChangeGroupItem({
                       </span>
                       <span className="inline-flex shrink-0 items-center gap-1.5">
                         {(item.addedLines ?? 0) > 0 && (
-                          <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-200">
+                          <span className="timeline-delta-badge timeline-delta-badge-add rounded-full border px-1.5 py-0.5 text-[11px] font-medium">
                             +{item.addedLines}
                           </span>
                         )}
                         {(item.removedLines ?? 0) > 0 && (
-                          <span className="rounded-full border border-rose-400/20 bg-rose-400/10 px-1.5 py-0.5 text-[11px] font-medium text-rose-200">
+                          <span className="timeline-delta-badge timeline-delta-badge-remove rounded-full border px-1.5 py-0.5 text-[11px] font-medium">
                             -{item.removedLines}
                           </span>
                         )}

@@ -7,7 +7,10 @@ import {
 } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 
-import { AppShellNavContext } from './components/AppShellNavContext';
+import {
+  AppShellNavContext,
+  type ThemeMode,
+} from './components/AppShellNavContext';
 import {
   AppShellMenuButton,
   AppShellNavigationMenu,
@@ -21,7 +24,42 @@ import { ThreadsPage } from './pages/ThreadsPage';
 import { WorkspaceNewPage } from './pages/WorkspaceNewPage';
 import { WorkspacesPage } from './pages/WorkspacesPage';
 
-function AppShell() {
+const THEME_STORAGE_KEY = 'remote-codex-theme-mode';
+
+function readInitialThemeMode(): ThemeMode {
+  if (typeof window === 'undefined') {
+    return 'system';
+  }
+
+  const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+  if (stored === 'light' || stored === 'dark' || stored === 'system') {
+    return stored;
+  }
+
+  return 'system';
+}
+
+function systemThemePreference(): 'light' | 'dark' {
+  if (
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-color-scheme: dark)').matches
+  ) {
+    return 'dark';
+  }
+
+  return 'light';
+}
+
+function AppShell({
+  themeMode,
+  setThemeMode,
+  effectiveTheme,
+}: {
+  themeMode: ThemeMode;
+  setThemeMode: (mode: ThemeMode) => void;
+  effectiveTheme: 'light' | 'dark';
+}) {
   const [navOpen, setNavOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const location = useLocation();
@@ -50,10 +88,13 @@ function AppShell() {
           setSettingsOpen(true);
         },
         closeSettings: () => setSettingsOpen(false),
+        themeMode,
+        setThemeMode,
+        effectiveTheme,
       }}
     >
       <div
-        className={`bg-stone-950 text-stone-100 ${
+        className={`bg-[var(--app-bg)] text-[var(--app-fg)] ${
           isViewportLockedRoute
             ? 'fixed inset-0 overflow-hidden overscroll-none'
             : 'min-h-screen'
@@ -102,19 +143,75 @@ function AppShell() {
 }
 
 export function App() {
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => readInitialThemeMode());
+  const [systemTheme, setSystemTheme] = useState<'light' | 'dark'>(() =>
+    systemThemePreference(),
+  );
+  const effectiveTheme = themeMode === 'system' ? systemTheme : themeMode;
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const update = () => {
+      setSystemTheme(mediaQuery.matches ? 'dark' : 'light');
+    };
+
+    update();
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', update);
+    } else {
+      mediaQuery.addListener(update);
+    }
+    return () => {
+      if (typeof mediaQuery.removeEventListener === 'function') {
+        mediaQuery.removeEventListener('change', update);
+      } else {
+        mediaQuery.removeListener(update);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
+  }, [themeMode]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.themeMode = themeMode;
+    root.dataset.themeEffective = effectiveTheme;
+    root.style.colorScheme = effectiveTheme;
+  }, [effectiveTheme, themeMode]);
+
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<LandingPage />} />
-        <Route element={<AppShell />}>
-          <Route path="/workspaces" element={<WorkspacesPage />} />
-          <Route path="/workspaces/new" element={<WorkspaceNewPage />} />
-          <Route path="/threads" element={<ThreadsPage />} />
-          <Route path="/threads/import" element={<ThreadImportPage />} />
-          <Route path="/threads/new" element={<ThreadNewPage />} />
-          <Route path="/threads/:id" element={<ThreadDetailPage />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+    <div className="theme-shell theme-scrollbar">
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route
+            element={
+              <AppShell
+                themeMode={themeMode}
+                setThemeMode={setThemeMode}
+                effectiveTheme={effectiveTheme}
+              />
+            }
+          >
+            <Route path="/workspaces" element={<WorkspacesPage />} />
+            <Route path="/workspaces/new" element={<WorkspaceNewPage />} />
+            <Route path="/threads" element={<ThreadsPage />} />
+            <Route path="/threads/import" element={<ThreadImportPage />} />
+            <Route path="/threads/new" element={<ThreadNewPage />} />
+            <Route path="/threads/:id" element={<ThreadDetailPage />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </div>
   );
 }

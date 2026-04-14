@@ -12,6 +12,7 @@ import {
 function NavigationHarness() {
   const [navOpen, setNavOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [themeMode, setThemeMode] = useState<'system' | 'light' | 'dark'>('system');
 
   return (
     <AppShellNavContext.Provider
@@ -26,6 +27,9 @@ function NavigationHarness() {
           setSettingsOpen(true);
         },
         closeSettings: () => setSettingsOpen(false),
+        themeMode,
+        setThemeMode,
+        effectiveTheme: themeMode === 'system' ? 'dark' : themeMode,
       }}
     >
       <AppShellNavigationMenu />
@@ -126,6 +130,18 @@ describe('AppShellNavigation', () => {
     expect(screen.queryByRole('button', { name: 'New Thread' })).not.toBeInTheDocument();
   });
 
+  it('closes the navigation menu when clicking outside it', () => {
+    render(
+      <MemoryRouter initialEntries={['/threads?workspaceId=workspace-1']}>
+        <NavigationHarness />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument();
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument();
+  });
+
   it('opens and closes the settings dialog from the shared navigation menu', () => {
     render(
       <MemoryRouter initialEntries={['/threads?workspaceId=workspace-1']}>
@@ -191,10 +207,29 @@ describe('AppShellNavigation', () => {
       content: 'model = "gpt-5.4"\napproval_policy = "never"\n',
     });
 
-    fireEvent.click(
-      screen.getByRole('button', { name: /config\.toml.*codex runtime configuration/i }),
+    fireEvent.click(screen.getByRole('button', { name: 'Close File Editor' }));
+
+    expect(screen.queryByLabelText('Edit config.toml')).not.toBeInTheDocument();
+  });
+
+  it('does not render the idle editor area before a file is selected', async () => {
+    render(
+      <MemoryRouter initialEntries={['/threads?workspaceId=workspace-1']}>
+        <NavigationHarness />
+      </MemoryRouter>,
     );
 
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /config\.toml.*codex runtime configuration/i }),
+      ).toBeInTheDocument();
+    });
+
+    expect(
+      screen.queryByText(/Select `config\.toml` or `auth\.json` to open the editor\./i),
+    ).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Edit config.toml')).not.toBeInTheDocument();
   });
 
@@ -221,5 +256,28 @@ describe('AppShellNavigation', () => {
       ([url, init]) => String(url) === '/api/codex/restart' && init?.method === 'POST',
     );
     expect(restartCall).toBeTruthy();
+  });
+
+  it('lets the user switch the appearance mode from settings', async () => {
+    render(
+      <MemoryRouter initialEntries={['/threads?workspaceId=workspace-1']}>
+        <NavigationHarness />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Light/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Light/i }));
+    expect(screen.getByText(/Active:\s*light\./i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Dark/i }));
+    expect(screen.getByText(/Active:\s*dark\./i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /System/i }));
+    expect(screen.getByText(/Active:\s*dark\./i)).toBeInTheDocument();
   });
 });

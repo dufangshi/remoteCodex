@@ -139,6 +139,7 @@
 - [x] B3. `/mcp` 悬浮列表只读展示落地。
 - [ ] B4. `/review` 的网页端高频入口形态定稿并实现。
 - [ ] B5. `/init` 是否进入网页端范围，需要单独评审后再决定。
+- [ ] B6. `/plugins` 插件目录 / 管理面板方案定稿并实现。
 
 第二批：`/skills`、`/mcp`
 
@@ -164,6 +165,8 @@
   - 用于查看和管理当前可用 skills，便于在网页端理解和启用 Codex 能力增强。
 - `/mcp`
   - 用于查看和管理 MCP 服务及其可用状态，满足远程环境排障与能力确认需求。
+- `/plugins`
+  - 用于浏览、安装、启用和禁用插件，并查看插件打包的 skills、apps 与 MCP 能力。
 - `/fast`
   - 用于切换 Codex 的 `service_tier` 到更偏速度优先的 `fast` 服务层级。
 - `/init`
@@ -324,7 +327,82 @@ fork 后的结果要求：
 - stdio MCP 的 GUI 只负责帮助用户编辑单个 `[mcp_servers.<name>]` block，不负责改写整份配置文件的其它段落。
 - `remove`、tool-level approval overrides、`test` / health check 后续再补。
 
-#### 3.8.6 `/init`
+#### 3.8.6 `/plugins`
+
+定位：
+
+- 官方对齐命令是 `/plugins`，不是 `/plugin`。
+- `/plugins` 属于插件目录 / 管理面板入口，不应作为普通消息发进模型上下文。
+- 它的职责是浏览、发现、安装、启用、禁用与查看详情，而不是直接“运行某个插件动作”。
+- 真正使用插件时，仍以自然语言任务描述或 prompt 中 `@plugin-or-skill` 的显式调用为主。
+
+交互要求：
+
+- 在 slash 工具箱中点击 `/plugins` 后，打开一个二级悬浮面板。
+- 面板整体交互风格与当前已落地的 `/skills`、`/mcp` 面板保持一致。
+- 时间线上不留记录，因为它属于控制面操作，不属于会话内容。
+- 面板分为两个主区域：
+  - `Installed`
+  - `Discover`
+- `Installed` 区域展示当前已安装的 plugins，并允许 enable / disable。
+- `Discover` 区域展示当前可发现的 plugins，并支持关键词搜索。
+- 点击任一 plugin 后打开 details 视图，展示该 plugin 的详细信息与可执行管理动作。
+
+本阶段范围：
+
+- 第一阶段先做插件目录与基础管理，不做 plugin authoring UI。
+- `Installed` 列表项优先展示：
+  - display name
+  - plugin id
+  - version
+  - source / marketplace 来源
+  - enabled / disabled 状态
+- `Installed` 列表项允许直接执行：
+  - `Enable`
+  - `Disable`
+- `Discover` 列表优先支持：
+  - 关键词搜索
+  - 按来源区分 discoverable plugins
+  - 从列表进入 details
+- details 视图优先展示：
+  - display name
+  - plugin id
+  - 描述
+  - version
+  - marketplace / source
+  - bundled skills
+  - bundled MCP servers
+  - bundled apps
+  - install / uninstall / enable / disable 入口
+- 如果插件需要认证，应在 details 中展示 auth policy 或需要认证的提示。
+
+状态与持久化要求：
+
+- 插件启用 / 禁用状态以 `~/.codex/config.toml` 为真实来源。
+- 官方对齐方式为在 `[plugins.\"<plugin-id>\"]` 下写入 `enabled = true/false`。
+- 插件 discover / install 来源需要兼容：
+  - 官方 curated marketplace
+  - repo marketplace：`$REPO_ROOT/.agents/plugins/marketplace.json`
+  - personal marketplace：`~/.agents/plugins/marketplace.json`
+- 本项目不应发明一套独立于 Codex 的 plugin 状态存储。
+- 页面刷新、线程切换、跨端进入同一 workspace 时，插件状态读取结果必须一致。
+
+实现策略要求：
+
+- 如果 Codex App Server 已暴露插件列表 / 详情 / 安装能力，优先直接复用上游能力。
+- 如果上游尚未暴露完整插件管理接口，则 supervisor 侧可以在第一阶段补一层面向 plugin marketplace 与 config 的控制面封装。
+- 搜索行为优先在当前已获取的 discoverable plugin 列表上执行前端过滤；只有在上游明确支持远端搜索时，再切换为服务端搜索。
+- enable / disable 完成后，UI 应立即更新，并在失败时复用现有顶部错误提示。
+- 安装成功后，UI 应明确提示用户通常需要在新 thread 中开始使用该 plugin。
+
+当前明确不做的范围：
+
+- `/plugins` 第一阶段不承担发布插件能力。
+- 不在网页端第一阶段提供完整 `.codex-plugin/plugin.json` 图形化编辑器。
+- 不在第一阶段提供 marketplace 发布、审核或上传能力。
+- plugin authoring 流程后续如有需要，应单独作为“插件开发工具”能力评审。
+
+#### 3.8.7 `/init`
 
 定位：
 
@@ -350,7 +428,8 @@ fork 后的结果要求：
 4. `/fork`
 5. `/skills`
 6. `/mcp`
-7. `/review`
+7. `/plugins`
+8. `/review`
 
 `/init` 当前不排期。
 

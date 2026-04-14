@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import type { CodexHostFileNameDto } from '../../../../packages/shared/src/index';
@@ -8,7 +8,7 @@ import {
   restartCodexAppServer,
   updateCodexHostFile,
 } from '../lib/api';
-import { useAppShellNav } from './AppShellNavContext';
+import { type ThemeMode, useAppShellNav } from './AppShellNavContext';
 
 function MenuIcon() {
   return (
@@ -37,10 +37,32 @@ function CloseIcon() {
 function menuItemClassName(disabled = false) {
   return `flex w-full items-center rounded-[0.95rem] px-3 py-2 text-left text-sm transition ${
     disabled
-      ? 'cursor-not-allowed bg-stone-800/60 text-stone-500'
-      : 'text-stone-200 hover:bg-stone-800'
+      ? 'cursor-not-allowed bg-[var(--theme-muted)] text-[var(--theme-fg-muted)]'
+      : 'text-[var(--theme-fg)] hover:bg-[var(--theme-hover)]'
   }`;
 }
+
+const themeOptions: Array<{
+  value: ThemeMode;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: 'light',
+    label: 'Light',
+    description: 'Always use the bright theme.',
+  },
+  {
+    value: 'dark',
+    label: 'Dark',
+    description: 'Always use the dark theme.',
+  },
+  {
+    value: 'system',
+    label: 'System',
+    description: 'Follow the operating system appearance.',
+  },
+];
 
 export function AppShellMenuButton({
   className = '',
@@ -60,7 +82,7 @@ export function AppShellMenuButton({
       aria-expanded={shellNav.navOpen}
       aria-controls="app-shell-navigation-menu"
       onClick={shellNav.toggleNav}
-      className={`inline-flex h-10 w-10 shrink-0 items-center justify-center text-stone-100 transition hover:text-stone-300 ${className}`.trim()}
+      className={`inline-flex h-10 w-10 shrink-0 items-center justify-center text-[var(--theme-fg)] transition hover:text-[var(--theme-fg-soft)] ${className}`.trim()}
     >
       {shellNav.navOpen ? <CloseIcon /> : <MenuIcon />}
     </button>
@@ -75,7 +97,42 @@ export function AppShellNavigationMenu({
   const shellNav = useAppShellNav();
   const location = useLocation();
   const navigate = useNavigate();
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const isWorkspacesRoute = location.pathname === '/workspaces';
+
+  useEffect(() => {
+    if (!shellNav?.navOpen) {
+      return;
+    }
+
+    const activeNav = shellNav;
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target as Node | null;
+      if (!target) {
+        return;
+      }
+
+      const menuNode = menuRef.current;
+      if (menuNode?.contains(target)) {
+        return;
+      }
+
+      const trigger = target instanceof Element
+        ? target.closest('[aria-controls="app-shell-navigation-menu"]')
+        : null;
+      if (trigger) {
+        return;
+      }
+
+      activeNav.closeNav();
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+    };
+  }, [shellNav]);
 
   if (!shellNav?.navOpen) {
     return null;
@@ -83,14 +140,24 @@ export function AppShellNavigationMenu({
 
   return (
     <div
+      ref={menuRef}
       id="app-shell-navigation-menu"
-      className={`rounded-[1.8rem] border border-stone-800 bg-stone-900/94 p-4 shadow-2xl shadow-stone-950/35 backdrop-blur ${className}`.trim()}
+      onPointerDown={(event) => {
+        event.stopPropagation();
+      }}
+      onMouseDown={(event) => {
+        event.stopPropagation();
+      }}
+      onTouchStart={(event) => {
+        event.stopPropagation();
+      }}
+      className={`rounded-[1.8rem] border border-[var(--theme-border)] bg-[var(--theme-panel)] p-4 shadow-2xl shadow-black/15 backdrop-blur ${className}`.trim()}
     >
       <div>
-        <p className="text-base font-semibold tracking-wide text-amber-300">
+        <p className="text-base font-semibold tracking-wide text-[var(--theme-accent-strong)]">
           Remote Codex
         </p>
-        <p className="mt-1 text-xs uppercase tracking-[0.24em] text-stone-500">
+        <p className="mt-1 text-xs uppercase tracking-[0.24em] text-[var(--theme-fg-muted)]">
           Navigation
         </p>
       </div>
@@ -193,6 +260,8 @@ export function AppShellSettingsDialog() {
     message: null,
     error: null,
   });
+  const selectedThemeMode = shellNav?.themeMode ?? 'system';
+  const effectiveTheme = shellNav?.effectiveTheme ?? 'dark';
 
   useEffect(() => {
     if (!shellNav?.settingsOpen) {
@@ -381,24 +450,24 @@ export function AppShellSettingsDialog() {
         type="button"
         aria-label="Close Settings"
         onClick={shellNav.closeSettings}
-        className="absolute inset-0 bg-stone-950/72 backdrop-blur-sm"
+        className="absolute inset-0 bg-black/42 backdrop-blur-sm"
       />
       <section
         role="dialog"
         aria-modal="true"
         aria-label="Settings"
-        className="relative z-10 flex max-h-[calc(100vh-2rem)] w-full max-w-4xl flex-col overflow-hidden rounded-[1.8rem] border border-stone-800 bg-stone-900/96 shadow-2xl shadow-stone-950/45"
+        className="relative z-10 flex max-h-[calc(100vh-2rem)] w-full max-w-4xl flex-col overflow-hidden rounded-[1.8rem] border border-[var(--theme-border)] bg-[var(--theme-panel)] shadow-2xl shadow-black/20"
       >
         <div className="shrink-0 p-5 pb-0">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-xs uppercase tracking-[0.24em] text-stone-500">
+              <p className="text-xs uppercase tracking-[0.24em] text-[var(--theme-fg-muted)]">
                 Settings
               </p>
-              <h2 className="mt-2 text-xl font-semibold text-stone-100">
+              <h2 className="mt-2 text-xl font-semibold text-[var(--theme-fg)]">
                 Settings
               </h2>
-              <p className="mt-2 text-sm leading-6 text-stone-400">
+              <p className="mt-2 text-sm leading-6 text-[var(--theme-fg-soft)]">
                 Edit host-side Codex configuration files through supervisor.
               </p>
             </div>
@@ -406,155 +475,204 @@ export function AppShellSettingsDialog() {
               type="button"
               aria-label="Close Settings"
               onClick={shellNav.closeSettings}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-stone-700/80 bg-stone-900/88 text-stone-100 transition hover:border-stone-500 hover:bg-stone-900"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--theme-border-strong)] bg-[var(--theme-surface-strong)] text-[var(--theme-fg)] transition hover:border-[var(--theme-border-contrast)] hover:bg-[var(--theme-hover)]"
             >
               <CloseIcon />
             </button>
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-5 pt-5">
-          <div className="grid gap-4 lg:grid-cols-[15rem_minmax(0,1fr)]">
-            <div className="space-y-2">
-              <div className="rounded-[1.1rem] border border-stone-800 bg-stone-950/55 px-3 py-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-stone-100">Codex app-server</p>
-                    <p className="mt-1 text-xs leading-5 text-stone-500">
-                      Restart after editing host configuration to force a fresh reload.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void handleRestartAppServer()}
-                    disabled={restartState.busy}
-                    className="shrink-0 rounded-full border border-sky-300/30 bg-sky-300/12 px-3 py-1.5 text-xs font-medium text-sky-100 transition hover:bg-sky-300/20 disabled:cursor-not-allowed disabled:border-stone-700 disabled:bg-stone-800 disabled:text-stone-500"
-                  >
-                    {restartState.busy ? 'Restarting...' : 'Restart'}
-                  </button>
+          <div className="space-y-2">
+            <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-[var(--theme-fg)]">Appearance</p>
+                  <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
+                    Choose light, dark, or follow the system setting. Active: {effectiveTheme}.
+                  </p>
                 </div>
-                {restartState.error ? (
-                  <p className="mt-2 text-xs text-rose-300">{restartState.error}</p>
-                ) : restartState.message ? (
-                  <p className="mt-2 text-xs text-emerald-300">{restartState.message}</p>
-                ) : null}
               </div>
-
-              {editableFiles.map((file) => {
-                const state = files[file.name];
-                const selected = selectedFileName === file.name;
-                const dirty = state.draftContent !== state.originalContent;
-
-                return (
-                  <button
-                    key={file.name}
-                    type="button"
-                    aria-expanded={selected}
-                    onClick={() =>
-                      setSelectedFileName((current) => (current === file.name ? null : file.name))
-                    }
-                    className={`block w-full rounded-[1.1rem] border px-3 py-3 text-left transition ${
-                      selected
-                        ? 'border-amber-300/45 bg-amber-300/[0.08]'
-                        : 'border-stone-800 bg-stone-950/55 hover:bg-stone-900'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-stone-100">
-                          {file.label}
-                        </p>
-                        <p className="mt-1 text-xs leading-5 text-stone-500">
-                          {file.description}
-                        </p>
+              <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                {themeOptions.map((option) => {
+                  const active = selectedThemeMode === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => shellNav.setThemeMode(option.value)}
+                      className={`block rounded-[1rem] border px-3 py-2.5 text-left transition ${
+                        active
+                          ? 'border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)]'
+                          : 'border-[var(--theme-border)] bg-[var(--theme-surface-strong)] hover:bg-[var(--theme-hover)]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-medium text-[var(--theme-fg)]">
+                          {option.label}
+                        </span>
+                        {active ? (
+                          <span className="rounded-full border border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)] px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-[var(--theme-accent-strong)]">
+                            Active
+                          </span>
+                        ) : null}
                       </div>
-                      <div className="shrink-0">
-                        {state.loading ? (
-                          <span className="text-[11px] uppercase tracking-[0.2em] text-stone-500">
-                            Loading
-                          </span>
-                        ) : dirty ? (
-                          <span className="rounded-full border border-amber-300/28 bg-amber-300/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-amber-100">
-                            Unsaved
-                          </span>
-                        ) : state.exists ? (
-                          <span className="rounded-full border border-emerald-400/25 bg-emerald-400/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-emerald-100">
-                            Ready
-                          </span>
-                        ) : (
-                          <span className="rounded-full border border-sky-300/25 bg-sky-300/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-sky-100">
-                            New
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
+                      <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
+                        {option.description}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
-            {selectedFileName && selectedFile ? (
-              <div className="min-w-0 rounded-[1.25rem] border border-stone-800 bg-stone-950/55 p-3 sm:p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-stone-100">{selectedFileName}</p>
-                    <p className="mt-1 break-all font-mono text-xs text-stone-500">
-                      {selectedFile.path}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {selectedFile.error ? (
-                      <span className="text-xs text-rose-300">{selectedFile.error}</span>
-                    ) : selectedFile.saveMessage ? (
-                      <span className="text-xs text-emerald-300">{selectedFile.saveMessage}</span>
-                    ) : null}
-                    <button
-                      type="button"
-                      onClick={() => void handleSave(selectedFileName)}
-                      disabled={
-                        selectedFile.loading ||
-                        selectedFile.saving ||
-                        selectedFile.draftContent === selectedFile.originalContent
-                      }
-                      className="rounded-full bg-amber-300 px-4 py-2 text-sm font-medium text-stone-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:bg-stone-700 disabled:text-stone-400"
-                    >
-                      {selectedFile.saving ? 'Saving...' : 'Save'}
-                    </button>
-                  </div>
+            <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-[var(--theme-fg)]">Codex app-server</p>
+                  <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
+                    Restart after editing host configuration to force a fresh reload.
+                  </p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => void handleRestartAppServer()}
+                  disabled={restartState.busy}
+                  className="shrink-0 rounded-full border border-sky-400/35 bg-sky-400/10 px-3 py-1.5 text-xs font-medium text-sky-500 transition hover:bg-sky-400/16 disabled:cursor-not-allowed disabled:border-[var(--theme-border)] disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
+                >
+                  {restartState.busy ? 'Restarting...' : 'Restart'}
+                </button>
+              </div>
+              {restartState.error ? (
+                <p className="mt-2 text-xs text-rose-300">{restartState.error}</p>
+              ) : restartState.message ? (
+                <p className="mt-2 text-xs text-emerald-300">{restartState.message}</p>
+              ) : null}
+            </div>
 
-                <textarea
-                  aria-label={`Edit ${selectedFileName}`}
-                  value={selectedFile.draftContent}
-                  onChange={(event) =>
-                    setFiles((current) => ({
-                      ...current,
-                      [selectedFileName]: {
-                        ...current[selectedFileName],
-                        draftContent: event.target.value,
-                        error: null,
-                        saveMessage: null,
-                      },
-                    }))
-                  }
-                  spellCheck={false}
-                  className="mt-4 min-h-[22rem] w-full rounded-[1rem] border border-stone-800 bg-stone-950 px-3 py-3 font-mono text-[13px] leading-6 text-stone-100 outline-none transition focus:border-amber-300"
-                  placeholder={
-                    selectedFile.loading
-                      ? 'Loading...'
-                      : `Edit ${selectedFileName} here`
-                  }
-                />
+            <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-[var(--theme-fg)]">Host files</p>
+                  <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
+                    Open `config.toml` or `auth.json` in a secondary editor dialog when needed.
+                  </p>
+                </div>
               </div>
-            ) : (
-              <div className="flex min-h-[12rem] items-center justify-center rounded-[1.25rem] border border-dashed border-stone-800 bg-stone-950/35 px-4 py-6 text-center">
-                <p className="max-w-sm text-sm leading-6 text-stone-500">
-                  Select `config.toml` or `auth.json` to open the editor.
-                </p>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {editableFiles.map((file) => {
+                  const state = files[file.name];
+                  const dirty = state.draftContent !== state.originalContent;
+
+                  return (
+                    <button
+                      key={file.name}
+                      type="button"
+                      onClick={() => setSelectedFileName(file.name)}
+                      className="block rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-3 text-left transition hover:bg-[var(--theme-hover)]"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-[var(--theme-fg)]">
+                            {file.label}
+                          </p>
+                          <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
+                            {file.description}
+                          </p>
+                        </div>
+                        <div className="shrink-0">
+                          {state.loading ? (
+                            <span className="text-[11px] uppercase tracking-[0.2em] text-[var(--theme-fg-muted)]">
+                              Loading
+                            </span>
+                          ) : dirty ? (
+                            <span className="rounded-full border border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)] px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-[var(--theme-accent-strong)]">
+                              Unsaved
+                            </span>
+                          ) : state.exists ? (
+                            <span className="rounded-full border border-emerald-400/25 bg-emerald-400/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-emerald-600 dark:text-emerald-100">
+                              Ready
+                            </span>
+                          ) : (
+                            <span className="rounded-full border border-sky-300/25 bg-sky-300/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-sky-600 dark:text-sky-100">
+                              New
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
-            )}
+            </div>
           </div>
         </div>
       </section>
+
+      {selectedFileName && selectedFile ? (
+        <div className="pointer-events-none fixed inset-0 z-[71] flex items-center justify-center p-4">
+          <div className="pointer-events-auto relative z-10 flex max-h-[min(88vh,56rem)] w-full max-w-3xl flex-col overflow-hidden rounded-[1.6rem] border border-[var(--theme-border)] bg-[var(--theme-panel)] shadow-2xl shadow-black/25">
+            <div className="flex items-start justify-between gap-3 border-b border-[var(--theme-border)] px-4 py-3 sm:px-5">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-[var(--theme-fg)]">{selectedFileName}</p>
+                <p className="mt-1 break-all font-mono text-xs text-[var(--theme-fg-muted)]">
+                  {selectedFile.path}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {selectedFile.error ? (
+                  <span className="text-xs text-rose-300">{selectedFile.error}</span>
+                ) : selectedFile.saveMessage ? (
+                  <span className="text-xs text-emerald-300">{selectedFile.saveMessage}</span>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => void handleSave(selectedFileName)}
+                  disabled={
+                    selectedFile.loading ||
+                    selectedFile.saving ||
+                    selectedFile.draftContent === selectedFile.originalContent
+                  }
+                  className="rounded-full bg-[var(--theme-accent-solid)] px-4 py-2 text-sm font-medium text-[var(--theme-accent-solid-fg)] transition hover:bg-[var(--theme-accent-solid-hover)] disabled:cursor-not-allowed disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
+                >
+                  {selectedFile.saving ? 'Saving...' : 'Save'}
+                </button>
+                <button
+                  type="button"
+                  aria-label="Close File Editor"
+                  onClick={() => setSelectedFileName(null)}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--theme-border-strong)] bg-[var(--theme-surface-strong)] text-[var(--theme-fg)] transition hover:border-[var(--theme-border-contrast)] hover:bg-[var(--theme-hover)]"
+                >
+                  <CloseIcon />
+                </button>
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+              <textarea
+                aria-label={`Edit ${selectedFileName}`}
+                value={selectedFile.draftContent}
+                onChange={(event) =>
+                  setFiles((current) => ({
+                    ...current,
+                    [selectedFileName]: {
+                      ...current[selectedFileName],
+                      draftContent: event.target.value,
+                      error: null,
+                      saveMessage: null,
+                    },
+                  }))
+                }
+                spellCheck={false}
+                className="min-h-[28rem] w-full rounded-[1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-3 font-mono text-[13px] leading-6 text-[var(--theme-fg)] outline-none transition focus:border-[var(--theme-accent-border)]"
+                placeholder={
+                  selectedFile.loading
+                    ? 'Loading...'
+                    : `Edit ${selectedFileName} here`
+                }
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

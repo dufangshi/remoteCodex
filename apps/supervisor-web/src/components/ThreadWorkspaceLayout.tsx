@@ -104,17 +104,17 @@ function SidebarSection({
   const [open, setOpen] = useState(defaultOpen);
 
   return (
-    <section className="border-t border-stone-800/80 pt-4 first:border-t-0 first:pt-0">
+    <section className="border-t border-[var(--theme-border)] pt-4 first:border-t-0 first:pt-0">
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
         aria-expanded={open}
         className="flex w-full items-center justify-between gap-3 text-left"
       >
-        <span className="text-xs uppercase tracking-[0.28em] text-stone-500">
+        <span className="text-xs uppercase tracking-[0.28em] text-[var(--theme-fg-muted)]">
           {title}
         </span>
-        <span className="text-xs text-stone-500">{open ? 'Hide' : 'Show'}</span>
+        <span className="text-xs text-[var(--theme-fg-muted)]">{open ? 'Hide' : 'Show'}</span>
       </button>
       {open && <div className="mt-3">{children}</div>}
     </section>
@@ -206,17 +206,17 @@ function ThreadCard({
           onOpenThread(thread.id);
         }
       }}
-      className={`relative block rounded-[1.2rem] border px-3 py-2.5 transition ${
+      className={`thread-sidebar-card relative block rounded-[1.2rem] border px-3 py-2.5 transition ${
         isCurrentThread
-          ? 'border-amber-300/40 bg-amber-300/10 shadow-lg shadow-stone-950/20'
-          : 'border-stone-800 bg-stone-900/75 hover:border-stone-700 hover:bg-stone-900'
+          ? 'thread-sidebar-card-active shadow-lg shadow-stone-950/12'
+          : ''
       } ${showSessionCopyButton && thread.codexThreadId ? 'pb-4' : ''}`}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1">
             <p
-              className="min-w-0 w-fit max-w-[calc(100%-2rem)] truncate text-[13px] font-medium leading-5 text-stone-100"
+              className="min-w-0 w-fit max-w-[calc(100%-2rem)] truncate text-[13px] font-medium leading-5 text-[var(--theme-fg)]"
               title={thread.title}
             >
               {thread.title}
@@ -228,7 +228,7 @@ function ThreadCard({
                 onBeginRenameThread(thread);
               }}
               aria-label={`Rename thread ${thread.title}`}
-              className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-stone-500 transition hover:text-stone-100"
+              className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-[var(--theme-fg-muted)] transition hover:text-[var(--theme-fg)]"
             >
               <svg
                 aria-hidden="true"
@@ -253,7 +253,7 @@ function ThreadCard({
             )}
           </div>
           {workspaceLabel && !currentWorkspaceId && (
-            <p className="mt-1 truncate text-xs text-stone-500">
+            <p className="mt-1 truncate text-xs text-[var(--theme-fg-muted)]">
               {workspaceLabel}
             </p>
           )}
@@ -264,7 +264,7 @@ function ThreadCard({
           {threadStatusLabel(thread.status)}
         </span>
       </div>
-      <div className={`mt-2 flex items-center justify-between gap-3 text-[11px] text-stone-500 ${showSessionCopyButton && thread.codexThreadId ? 'pr-9' : ''}`}>
+      <div className={`mt-2 flex items-center justify-between gap-3 text-[11px] text-[var(--theme-fg-muted)] ${showSessionCopyButton && thread.codexThreadId ? 'pr-9' : ''}`}>
         <time dateTime={thread.lastTurnStartedAt ?? thread.updatedAt}>
           {formatShortTimestamp(thread.lastTurnStartedAt ?? thread.updatedAt)}
         </time>
@@ -290,7 +290,7 @@ function ThreadCard({
               ? 'border-sky-300/40 bg-sky-300/16 text-sky-100'
               : copyState === 'failed'
                 ? 'border-rose-300/35 bg-rose-300/12 text-rose-100'
-                : 'border-stone-700/90 bg-stone-900/60 text-stone-300 hover:bg-stone-800/92'
+                : 'border-[var(--theme-border-strong)] bg-[var(--theme-surface-strong)] text-[var(--theme-fg-soft)] hover:bg-[var(--theme-hover)]'
           }`}
         >
           <CopyIcon />
@@ -442,12 +442,12 @@ export function ThreadWorkspaceLayout({
       <div className="space-y-4">
         <section>
           <div className="mb-3 flex items-center justify-between gap-3">
-            <p className="text-xs uppercase tracking-[0.28em] text-stone-500">
+            <p className="text-xs uppercase tracking-[0.28em] text-[var(--theme-fg-muted)]">
               Thread List
             </p>
             <div className="flex items-center gap-2">
               {loading && (
-                <span className="text-xs text-stone-500">Refreshing...</span>
+                <span className="text-xs text-[var(--theme-fg-muted)]">Refreshing...</span>
               )}
               <Link
                 to={newThreadHref}
@@ -455,7 +455,7 @@ export function ThreadWorkspaceLayout({
                   setMobileSidebarOpen(false);
                   shellNav?.closeNav();
                 }}
-                className="inline-flex h-7 items-center rounded-full bg-amber-300 px-2.5 text-[10px] font-medium uppercase tracking-[0.16em] text-stone-950 transition hover:bg-amber-200"
+                className="inline-flex h-7 items-center rounded-full bg-[var(--theme-accent-solid)] px-2.5 text-[10px] font-medium uppercase tracking-[0.16em] text-[var(--theme-accent-solid-fg)] transition hover:bg-[var(--theme-accent-solid-hover)]"
               >
                 New Thread
               </Link>
@@ -469,7 +469,7 @@ export function ThreadWorkspaceLayout({
           )}
 
           {!error && visibleThreads.length === 0 && !loading && (
-            <div className="rounded-2xl border border-dashed border-stone-700 bg-stone-950/50 px-4 py-6 text-sm text-stone-500">
+            <div className="rounded-2xl border border-dashed border-[var(--theme-border)] bg-[var(--theme-surface)] px-4 py-6 text-sm text-[var(--theme-fg-muted)]">
               No threads available in this view.
             </div>
           )}
@@ -488,7 +488,7 @@ export function ThreadWorkspaceLayout({
 
         <SidebarSection title="Thread Meta" defaultOpen>
           {metaContent ?? (
-            <p className="text-sm text-stone-500">
+            <p className="text-sm text-[var(--theme-fg-muted)]">
               Select a thread to inspect metadata.
             </p>
           )}
@@ -496,7 +496,7 @@ export function ThreadWorkspaceLayout({
 
         <SidebarSection title="Settings">
           {settingsContent ?? (
-            <p className="text-sm text-stone-500">
+            <p className="text-sm text-[var(--theme-fg-muted)]">
               No thread settings available.
             </p>
           )}
@@ -517,7 +517,7 @@ export function ThreadWorkspaceLayout({
         <div className="lg:hidden">
           <div className="relative">
             <div
-              className={`grid h-10 items-center gap-1.5 border-b border-stone-800 bg-stone-950/96 px-2.5 backdrop-blur ${
+              className={`thread-topbar-surface grid h-10 items-center gap-1.5 border-b px-2.5 backdrop-blur ${
                 showMobileAppMenu && (showMobileNewThreadShortcut || mobileHeaderAction)
                   ? 'grid-cols-[2.5rem_minmax(0,1fr)_auto]'
                   : showMobileAppMenu
@@ -539,13 +539,13 @@ export function ThreadWorkspaceLayout({
                       ? 'Collapse thread navigation'
                       : 'Expand thread navigation'
                   }
-                  className="inline-flex min-w-0 items-center justify-center gap-1 px-1 text-center text-sm font-medium text-stone-100"
+                  className="inline-flex min-w-0 items-center justify-center gap-1 px-1 text-center text-sm font-medium text-[var(--theme-fg)]"
                   title={threadScopeLabel}
                 >
                   <span className="min-w-0 truncate">{threadScopeLabel}</span>
                   <span
                     aria-hidden="true"
-                    className={`inline-flex h-4 w-4 shrink-0 items-center justify-center text-stone-500 transition ${
+                    className={`inline-flex h-4 w-4 shrink-0 items-center justify-center text-[var(--theme-fg-muted)] transition ${
                       mobileSidebarOpen ? 'rotate-180' : ''
                     }`}
                   >
@@ -562,7 +562,7 @@ export function ThreadWorkspaceLayout({
                 </button>
               ) : (
                 <p
-                  className="min-w-0 truncate px-1 text-center text-sm font-medium text-stone-100"
+                  className="min-w-0 truncate px-1 text-center text-sm font-medium text-[var(--theme-fg)]"
                   title={threadScopeLabel}
                 >
                   {threadScopeLabel}
@@ -580,7 +580,7 @@ export function ThreadWorkspaceLayout({
                       setMobileSidebarOpen(false);
                     }}
                     aria-label="New Thread"
-                    className="inline-flex h-8 min-w-0 shrink-0 items-center justify-center gap-1 rounded-full bg-amber-300 px-2 text-[10px] font-medium uppercase tracking-[0.16em] text-stone-950 transition hover:bg-amber-200"
+                    className="inline-flex h-8 min-w-0 shrink-0 items-center justify-center gap-1 rounded-full bg-[var(--theme-accent-solid)] px-2 text-[10px] font-medium uppercase tracking-[0.16em] text-[var(--theme-accent-solid-fg)] transition hover:bg-[var(--theme-accent-solid-hover)]"
                   >
                     <NewThreadIcon />
                     <span className="hidden sm:inline">New</span>
@@ -593,7 +593,7 @@ export function ThreadWorkspaceLayout({
             )}
 
             {showMobileThreadNavToggle && mobileSidebarOpen && (
-              <aside className="absolute inset-x-2 top-[calc(100%+0.35rem)] z-10 max-h-[40dvh] overflow-y-auto rounded-[1.35rem] border border-stone-800 bg-stone-900/96 p-4 shadow-2xl shadow-stone-950/30 backdrop-blur">
+              <aside className="thread-sidebar-surface absolute inset-x-2 top-[calc(100%+0.35rem)] z-10 max-h-[40dvh] overflow-y-auto rounded-[1.35rem] border p-4 shadow-2xl shadow-stone-950/18 backdrop-blur">
                 {renderSidebarContent()}
               </aside>
             )}
@@ -602,7 +602,7 @@ export function ThreadWorkspaceLayout({
 
         <aside className="hidden min-h-0 lg:block">
           <div
-            className={`sticky top-4 rounded-[2rem] border border-stone-800 bg-stone-900/85 p-4 shadow-2xl shadow-stone-950/15 backdrop-blur ${
+            className={`thread-sidebar-surface sticky top-4 rounded-[2rem] border p-4 shadow-2xl shadow-stone-950/12 backdrop-blur ${
               viewportConstrained
                 ? 'h-full max-h-full overflow-y-auto'
                 : ''

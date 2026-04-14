@@ -23,6 +23,7 @@ import {
   fetchThreadShellState,
   terminateShell,
 } from '../lib/api';
+import { useAppShellNav } from './AppShellNavContext';
 
 interface ThreadShellPanelProps {
   threadId: string;
@@ -59,6 +60,30 @@ export interface ThreadShellPanelHandle {
   terminate: () => Promise<void>;
   focus: () => void;
   refreshLayout: (options?: { focus?: boolean }) => void;
+}
+
+function terminalThemeFor(effectiveTheme: 'light' | 'dark') {
+  return {
+    background: effectiveTheme === 'light' ? '#f2ede5' : '#0c1117',
+    foreground: effectiveTheme === 'light' ? '#3f3a36' : '#d6dde6',
+    cursor: effectiveTheme === 'light' ? '#3f3a36' : '#d6dde6',
+    black: effectiveTheme === 'light' ? '#d8cfc2' : '#0f1720',
+    brightBlack: effectiveTheme === 'light' ? '#8a7f73' : '#475569',
+    red: '#f87171',
+    brightRed: '#fb7185',
+    green: effectiveTheme === 'light' ? '#16a34a' : '#86efac',
+    brightGreen: effectiveTheme === 'light' ? '#22c55e' : '#4ade80',
+    yellow: '#fbbf24',
+    brightYellow: '#fcd34d',
+    blue: effectiveTheme === 'light' ? '#2563eb' : '#93c5fd',
+    brightBlue: effectiveTheme === 'light' ? '#3b82f6' : '#60a5fa',
+    magenta: effectiveTheme === 'light' ? '#7c3aed' : '#c4b5fd',
+    brightMagenta: effectiveTheme === 'light' ? '#8b5cf6' : '#a78bfa',
+    cyan: effectiveTheme === 'light' ? '#0891b2' : '#67e8f9',
+    brightCyan: effectiveTheme === 'light' ? '#06b6d4' : '#22d3ee',
+    white: effectiveTheme === 'light' ? '#5b5148' : '#e2e8f0',
+    brightWhite: effectiveTheme === 'light' ? '#2c2723' : '#f8fafc',
+  };
 }
 
 function statusLabel(status: ShellStatusDto) {
@@ -322,10 +347,10 @@ function ControlIcon({
 }) {
   const toneClassName =
     tone === 'rose'
-      ? 'border-rose-300/35 bg-rose-300/14 text-rose-50'
+      ? 'border-rose-300/35 bg-rose-300/14 text-rose-600 dark:text-rose-50'
       : tone === 'sky'
-        ? 'border-sky-300/35 bg-sky-300/14 text-sky-50'
-        : 'border-stone-700/90 bg-stone-900/80 text-stone-100';
+        ? 'border-sky-300/35 bg-sky-300/14 text-sky-600 dark:text-sky-50'
+        : 'shell-control-chip border';
 
   return (
     <span
@@ -368,6 +393,7 @@ export const ThreadShellPanel = forwardRef<
   }: ThreadShellPanelProps,
   ref,
 ) {
+  const shellNav = useAppShellNav();
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<ReturnType<typeof connectShellSocket> | null>(null);
@@ -408,6 +434,7 @@ export const ThreadShellPanel = forwardRef<
     tone: ToolboxFeedbackState;
     text: string;
   } | null>(null);
+  const effectiveTheme = shellNav?.effectiveTheme ?? 'dark';
 
   const setTransientToolboxFeedback = useCallback(
     (tone: ToolboxFeedbackState, text: string) => {
@@ -518,10 +545,10 @@ export const ThreadShellPanel = forwardRef<
           : 'Create shell';
   const toolboxFeedbackToneClassName =
     toolboxFeedback?.tone === 'done'
-      ? 'border-emerald-300/35 bg-emerald-300/12 text-emerald-50'
+      ? 'shell-floating-feedback shell-floating-feedback-done'
       : toolboxFeedback?.tone === 'failed'
-        ? 'border-rose-300/35 bg-rose-300/12 text-rose-50'
-        : 'border-stone-700/90 bg-stone-900/90 text-stone-200';
+        ? 'shell-floating-feedback shell-floating-feedback-failed'
+        : 'shell-floating-feedback';
 
   const loadShellState = useCallback(async () => {
     setLoading(true);
@@ -603,27 +630,7 @@ export const ThreadShellPanel = forwardRef<
         fontSize: 13,
         lineHeight: 1.25,
         scrollback: 3000,
-        theme: {
-          background: '#0c1117',
-          foreground: '#d6dde6',
-          cursor: '#d6dde6',
-          black: '#0f1720',
-          brightBlack: '#475569',
-          red: '#f87171',
-          brightRed: '#fb7185',
-          green: '#86efac',
-          brightGreen: '#4ade80',
-          yellow: '#fbbf24',
-          brightYellow: '#fcd34d',
-          blue: '#93c5fd',
-          brightBlue: '#60a5fa',
-          magenta: '#c4b5fd',
-          brightMagenta: '#a78bfa',
-          cyan: '#67e8f9',
-          brightCyan: '#22d3ee',
-          white: '#e2e8f0',
-          brightWhite: '#f8fafc',
-        },
+        theme: terminalThemeFor(effectiveTheme),
       });
       const fitAddon = new FitAddon();
       terminal.loadAddon(fitAddon);
@@ -1055,7 +1062,15 @@ export const ThreadShellPanel = forwardRef<
           }
         : current,
     );
-  }, []);
+  }, [effectiveTheme]);
+
+  useEffect(() => {
+    if (!terminalRef.current) {
+      return;
+    }
+
+    terminalRef.current.options.theme = terminalThemeFor(effectiveTheme);
+  }, [effectiveTheme]);
 
   const handleConnectionToggle = useCallback(async () => {
     if (busy || loading || status === 'creating' || status === 'workspace_missing') {
@@ -1216,13 +1231,13 @@ export const ThreadShellPanel = forwardRef<
   );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-stone-900/30">
+    <div className="shell-panel flex min-h-0 flex-1 flex-col">
       {showHeader && (
-        <div className="shrink-0 border-b border-stone-800/80 bg-stone-900/90 px-3 py-3 sm:px-5">
+        <div className="shell-header shrink-0 border-b px-3 py-3 sm:px-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Shell</p>
-              <p className="mt-1 truncate text-sm text-stone-300">
+              <p className="text-xs uppercase tracking-[0.24em] text-[var(--theme-fg-muted)]">Shell</p>
+              <p className="mt-1 truncate text-sm text-[var(--theme-fg-soft)]">
                 {promptLabel ?? shellMeta?.cwd ?? 'Create a durable shell for this thread.'}
               </p>
             </div>
@@ -1242,7 +1257,7 @@ export const ThreadShellPanel = forwardRef<
                   type="button"
                   disabled={busy}
                   onClick={() => void handleTerminateShell()}
-                  className="rounded-full border border-rose-300/35 bg-rose-300/12 px-3 py-2 text-sm text-rose-100 transition hover:bg-rose-300/18 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="rounded-full border border-rose-300/35 bg-rose-300/12 px-3 py-2 text-sm text-rose-600 transition hover:bg-rose-300/18 dark:text-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Terminate
                 </button>
@@ -1250,15 +1265,15 @@ export const ThreadShellPanel = forwardRef<
             </div>
           </div>
           {(connectionError || loading || shellState?.workspacePathStatus === 'missing') && (
-            <div className="mt-3 rounded-2xl border border-stone-800/80 bg-stone-950/55 px-3 py-3 text-sm">
-              {loading && <p className="text-stone-400">Loading shell state...</p>}
+            <div className="shell-banner mt-3 rounded-2xl border px-3 py-3 text-sm">
+              {loading && <p className="text-[var(--theme-fg-muted)]">Loading shell state...</p>}
               {!loading && shellState?.workspacePathStatus === 'missing' && (
-                <p className="text-rose-100">
+                <p className="text-rose-600 dark:text-rose-100">
                   Workspace path is missing on this machine. Restore the path before creating a shell.
                 </p>
               )}
               {!loading && connectionError && (
-                <p className="text-amber-100">{connectionError}</p>
+                <p className="text-amber-700 dark:text-amber-100">{connectionError}</p>
               )}
             </div>
           )}
@@ -1268,9 +1283,9 @@ export const ThreadShellPanel = forwardRef<
       <div className="min-h-0 flex-1">
         {status === 'not_created' || status === 'workspace_missing' ? (
           <div className="flex h-full items-center justify-center px-6 text-center">
-            <div className="max-w-md rounded-[1.6rem] border border-stone-800 bg-stone-950/55 px-6 py-8">
-              <p className="text-base font-medium text-stone-100">Durable thread shell</p>
-              <p className="mt-3 text-sm leading-6 text-stone-400">
+            <div className="shell-empty-state max-w-md rounded-[1.6rem] border px-6 py-8">
+              <p className="text-base font-medium text-[var(--theme-fg)]">Durable thread shell</p>
+              <p className="mt-3 text-sm leading-6 text-[var(--theme-fg-muted)]">
                 The shell runs under supervisor-managed tmux and survives browser disconnects.
                 Create it explicitly when you want to inspect or take over the workspace.
               </p>
@@ -1278,20 +1293,20 @@ export const ThreadShellPanel = forwardRef<
           </div>
         ) : (
           <div className="h-full min-h-0 p-2 sm:p-3">
-            <div className="relative h-full rounded-[1.4rem] border border-stone-800 bg-[#0c1117] shadow-inner shadow-black/25">
+            <div className="shell-terminal-frame relative h-full rounded-[1.4rem] border shadow-inner">
               {!showHeader &&
                 (connectionError ||
                   loading ||
                   shellState?.workspacePathStatus === 'missing') && (
-                  <div className="absolute left-2 right-2 top-2 z-10 rounded-2xl border border-stone-800/80 bg-stone-950/88 px-3 py-3 text-sm backdrop-blur sm:left-3 sm:right-3 sm:top-3">
-                    {loading && <p className="text-stone-400">Loading shell state...</p>}
+                  <div className="shell-banner absolute left-2 right-2 top-2 z-10 rounded-2xl border px-3 py-3 text-sm backdrop-blur sm:left-3 sm:right-3 sm:top-3">
+                    {loading && <p className="text-[var(--theme-fg-muted)]">Loading shell state...</p>}
                     {!loading && shellState?.workspacePathStatus === 'missing' && (
-                      <p className="text-rose-100">
+                      <p className="text-rose-600 dark:text-rose-100">
                         Workspace path is missing on this machine. Restore the path before creating a shell.
                       </p>
                     )}
                     {!loading && connectionError && (
-                      <p className="text-amber-100">{connectionError}</p>
+                      <p className="text-amber-700 dark:text-amber-100">{connectionError}</p>
                     )}
                   </div>
                 )}
@@ -1312,7 +1327,7 @@ export const ThreadShellPanel = forwardRef<
                     </div>
                   )}
                   {toolboxOpen && (
-                    <div className="pointer-events-auto rounded-[1.2rem] border border-stone-700/90 bg-stone-950/92 p-2 shadow-2xl shadow-black/35 backdrop-blur">
+                    <div className="shell-toolbox pointer-events-auto rounded-[1.2rem] border p-2 shadow-2xl backdrop-blur">
                       <div className="grid grid-cols-2 gap-2">
                         <button
                           type="button"
@@ -1322,7 +1337,7 @@ export const ThreadShellPanel = forwardRef<
                               'Use the prompt box tools to paste',
                             );
                           }}
-                          className="inline-flex items-center justify-center rounded-full border border-sky-300/35 bg-sky-300/12 px-2.5 py-2 text-sky-50"
+                          className="inline-flex items-center justify-center rounded-full border border-sky-300/35 bg-sky-300/12 px-2.5 py-2 text-sky-600 dark:text-sky-50"
                         >
                           <span className="inline-flex items-center gap-1.5">
                             <ClipboardIcon />
@@ -1334,7 +1349,7 @@ export const ThreadShellPanel = forwardRef<
                         <button
                           type="button"
                           onClick={() => void handleCopyVisibleShellText()}
-                          className="inline-flex items-center justify-center rounded-full border border-stone-700/90 bg-stone-900/80 px-2.5 py-2 text-stone-100"
+                          className="shell-toolbox-copy inline-flex items-center justify-center rounded-full border px-2.5 py-2"
                         >
                           <span className="inline-flex items-center gap-1.5">
                             <ClipboardIcon />
@@ -1449,7 +1464,7 @@ export const ThreadShellPanel = forwardRef<
                     aria-expanded={toolboxOpen}
                     aria-label={toolboxOpen ? 'Close shell tools' : 'Open shell tools'}
                     onClick={() => setToolboxOpen((current) => !current)}
-                    className="pointer-events-auto inline-flex h-11 w-11 items-center justify-center rounded-full border border-stone-700/90 bg-stone-950/90 text-stone-100 shadow-2xl shadow-black/35 backdrop-blur transition hover:bg-stone-900"
+                    className="shell-toolbox-trigger pointer-events-auto inline-flex h-11 w-11 items-center justify-center rounded-full border shadow-2xl backdrop-blur transition"
                   >
                     <WrenchScrewdriverIcon />
                   </button>

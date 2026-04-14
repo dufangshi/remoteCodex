@@ -145,6 +145,29 @@ describe('ThreadComposer', () => {
     });
   });
 
+  it('closes model and reasoning menus when clicking outside the popup', () => {
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={() => undefined}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'gpt-5.4' }));
+    expect(screen.getByRole('button', { name: 'gpt-5-mini' })).toBeInTheDocument();
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole('button', { name: 'gpt-5-mini' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'medium' }));
+    expect(screen.getByRole('button', { name: 'high' })).toBeInTheDocument();
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole('button', { name: 'high' })).not.toBeInTheDocument();
+  });
+
   it('shows context remaining state on the model control title', () => {
     const { rerender } = render(
       <ThreadComposer

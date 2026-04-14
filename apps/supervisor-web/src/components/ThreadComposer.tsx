@@ -632,6 +632,7 @@ export function ThreadComposer({
   const [mcpConfigBusy, setMcpConfigBusy] = useState(false);
   const [mcpConfigError, setMcpConfigError] = useState<string | null>(null);
   const [mcpConfigSuccess, setMcpConfigSuccess] = useState<string | null>(null);
+  const [copiedSkillName, setCopiedSkillName] = useState<string | null>(null);
   const menuRef = useRef<HTMLFormElement | null>(null);
   const promptRef = useRef<HTMLDivElement | null>(null);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
@@ -672,6 +673,22 @@ export function ThreadComposer({
       setMcpConfigSuccess(null);
     }
   }, [slashPanelView]);
+
+  useEffect(() => {
+    if (!copiedSkillName) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setCopiedSkillName((current) =>
+        current === copiedSkillName ? null : current,
+      );
+    }, 1400);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [copiedSkillName]);
 
   function updateDraft(
     updater: (current: {
@@ -744,6 +761,15 @@ export function ThreadComposer({
         attachments: next,
       };
     });
+  }
+
+  async function handleCopySkillInvokeName(skillName: string) {
+    try {
+      await navigator.clipboard.writeText(`$${skillName}`);
+      setCopiedSkillName(skillName);
+    } catch {
+      setCopiedSkillName(null);
+    }
   }
 
   const currentModel = useMemo(
@@ -1327,17 +1353,15 @@ export function ThreadComposer({
 
   useEffect(() => {
     function handleWindowPointerDown(event: PointerEvent) {
-      const menuNode = menuRef.current;
-      if (!menuNode) {
-        return;
-      }
-
       const eventPath =
         typeof event.composedPath === 'function' ? event.composedPath() : [];
-      if (
-        eventPath.includes(menuNode) ||
-        menuNode.contains(event.target as Node | null)
-      ) {
+      const clickedInsideInteractiveMenu = eventPath.some(
+        (node) =>
+          node instanceof HTMLElement &&
+          (node.dataset.composerMenuSurface === 'true' ||
+            node.dataset.composerMenuTrigger === 'true'),
+      );
+      if (clickedInsideInteractiveMenu) {
         return;
       }
 
@@ -1639,10 +1663,10 @@ export function ThreadComposer({
     ? 'relative z-20 shrink-0 bg-transparent px-3 pb-0 pt-3 sm:p-4'
     : 'relative z-20 shrink-0 bg-transparent px-3 pb-3 pt-0 sm:px-4 sm:pb-4 sm:pt-0';
   const promptInputClassName =
-    `min-h-[7.25rem] w-full rounded-[1.25rem] border bg-stone-900 px-4 pr-14 pt-2.5 text-stone-100 outline-none transition sm:min-h-[6.25rem] ${
+    `thread-composer-input min-h-[7.25rem] w-full rounded-[1.25rem] border px-4 pr-14 pt-2.5 outline-none transition sm:min-h-[6.25rem] ${
       isDragTargetActive
-        ? 'border-sky-300/80 bg-sky-300/[0.08] shadow-[0_0_0_1px_rgba(125,211,252,0.2)]'
-        : 'border-stone-700 focus-within:border-amber-300'
+        ? 'is-drag-target border-sky-300/80 bg-sky-300/[0.08] shadow-[0_0_0_1px_rgba(125,211,252,0.2)]'
+        : 'border-stone-700 focus-within:border-[var(--theme-accent-border)]'
     }`;
 
   return (
@@ -1680,9 +1704,9 @@ export function ThreadComposer({
           className="absolute left-1/2 top-3 z-40 inline-flex h-9 min-w-[5.75rem] -translate-x-1/2 -translate-y-[62%] items-start justify-center bg-transparent pt-1 touch-manipulation sm:top-4"
         >
           <span
-            className={`pointer-events-none inline-flex h-4 min-w-[3.75rem] items-center justify-center rounded-[0.7rem] border shadow-sm transition ${
+            className={`thread-jump-latest-badge pointer-events-none inline-flex h-4 min-w-[3.75rem] items-center justify-center rounded-[0.7rem] border shadow-sm transition ${
               followTail
-                ? 'border-sky-300/36 bg-sky-300/[0.03] text-sky-100/86'
+                ? 'is-active border-sky-300/36 bg-sky-300/[0.03] text-sky-100/86'
                 : 'border-stone-500/70 bg-stone-950/[0.08] text-stone-200/86'
             }`}
           >
@@ -1706,13 +1730,14 @@ export function ThreadComposer({
         className={formClassName}
       >
         <div
-          className="relative z-30 mb-0 flex items-center gap-2 rounded-full border border-stone-800/40 bg-stone-950/18 px-2.5 py-1.5 text-xs shadow-lg shadow-stone-950/8"
+          className="thread-composer-toolbar relative z-30 mb-0 flex items-center gap-2 rounded-full border px-2.5 py-1.5 text-xs shadow-lg shadow-stone-950/8"
         >
           <div className="flex shrink-0 items-center gap-1.5">
             {!isShellView && (
               <div className="relative">
                 <button
                   type="button"
+                  data-composer-menu-trigger="true"
                   aria-label="Open slash toolbox"
                   title="Open slash toolbox"
                   onClick={() =>
@@ -1720,14 +1745,15 @@ export function ThreadComposer({
                       current === 'slash' ? null : 'slash',
                     )
                   }
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-stone-700 bg-stone-900/92 text-stone-200 transition hover:bg-stone-800"
+                  className="thread-composer-icon-button inline-flex h-7 w-7 items-center justify-center rounded-full border border-stone-700 bg-stone-900/92 text-stone-200 transition hover:bg-stone-800"
                 >
                   <SlashIcon />
                 </button>
 
                 {openMenu === 'slash' && (
                   <div
-                    className="absolute bottom-full left-0 z-40 mb-2 w-72 overflow-hidden rounded-2xl border border-stone-700/75 bg-stone-900/72 shadow-2xl shadow-stone-950/40 backdrop-blur-xl"
+                    data-composer-menu-surface="true"
+                    className="thread-composer-menu absolute bottom-full left-0 z-40 mb-2 w-72 overflow-hidden rounded-2xl border bg-stone-900/72 shadow-2xl shadow-stone-950/20 backdrop-blur-xl"
                     onClick={(event) => {
                       event.stopPropagation();
                     }}
@@ -1753,8 +1779,8 @@ export function ThreadComposer({
                           }}
                           className={`block w-full rounded-xl px-3 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
                             fastMode
-                              ? 'bg-amber-300/12 text-amber-100 hover:bg-amber-300/18'
-                              : 'text-stone-200 hover:bg-stone-800'
+                              ? 'bg-[var(--theme-accent-soft)] bg-amber-300/12 text-[var(--theme-accent-strong)] text-amber-100'
+                              : 'thread-composer-menu-item'
                           }`}
                         >
                           <div className="flex items-center justify-between gap-3">
@@ -1771,7 +1797,7 @@ export function ThreadComposer({
                             setOpenMenu(null);
                             void onCompact?.();
                           }}
-                          className="mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm text-stone-200 transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-60"
+                          className="thread-composer-menu-item mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           <div className="flex items-center justify-between gap-3">
                             <span>/compact</span>
@@ -1787,7 +1813,7 @@ export function ThreadComposer({
                             setSlashPanelView('skills');
                             void onOpenSkills?.();
                           }}
-                          className="mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm text-stone-200 transition hover:bg-stone-800"
+                          className="thread-composer-menu-item mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm transition"
                         >
                           <div className="flex items-center justify-between gap-3">
                             <span>/skills</span>
@@ -1803,7 +1829,7 @@ export function ThreadComposer({
                             setSlashPanelView('mcp');
                             void onOpenMcp?.();
                           }}
-                          className="mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm text-stone-200 transition hover:bg-stone-800"
+                          className="thread-composer-menu-item mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm transition"
                         >
                           <div className="flex items-center justify-between gap-3">
                             <span>/mcp</span>
@@ -1815,21 +1841,6 @@ export function ThreadComposer({
                       </div>
                     ) : (
                       <div className="max-h-80 overflow-auto">
-                        <div className="sticky top-0 flex items-center justify-between border-b border-stone-800/80 bg-stone-900/70 px-3 py-2 backdrop-blur-xl">
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setSlashPanelView('root');
-                            }}
-                            className="rounded-full px-2 py-1 text-[11px] uppercase tracking-[0.16em] text-stone-400 transition hover:bg-stone-800 hover:text-stone-200"
-                          >
-                            Back
-                          </button>
-                          <span className="text-[11px] uppercase tracking-[0.16em] text-stone-500">
-                            {slashPanelView === 'skills' ? '/skills' : '/mcp'}
-                          </span>
-                        </div>
                         {slashPanelView === 'skills' ? (
                           <div className="p-2">
                             {skillsState.status === 'loading' && !skillsState.data ? (
@@ -1849,25 +1860,34 @@ export function ThreadComposer({
                                     key={skill.path}
                                     className="rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-2.5"
                                   >
-                                    <div className="flex items-start justify-between gap-3">
-                                      <div className="min-w-0">
-                                        <p className="truncate text-sm font-medium text-stone-100">
-                                          {skill.interface?.displayName ?? skill.name}
-                                        </p>
-                                        <p className="mt-0.5 text-xs text-stone-400">
-                                          {skill.interface?.shortDescription ??
-                                            skill.shortDescription ??
-                                            skill.description}
-                                        </p>
-                                      </div>
-                                      <div className="flex shrink-0 items-center gap-1.5 text-[10px] uppercase tracking-[0.14em]">
+                                    <div className="space-y-2">
+                                      <p className="truncate text-sm font-medium text-stone-100">
+                                        {skill.interface?.displayName ?? skill.name}
+                                      </p>
+                                      <div className="flex flex-wrap items-center gap-1.5 text-[10px] uppercase tracking-[0.14em]">
                                         <span className="rounded-full border border-stone-700 px-2 py-1 text-stone-400">
                                           {skillScopeLabel(skill.scope)}
                                         </span>
-                                        <span className="rounded-full border border-stone-700 px-2 py-1 text-stone-300 normal-case tracking-normal">
+                                        <button
+                                          type="button"
+                                          className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 normal-case tracking-normal transition ${
+                                            copiedSkillName === skill.name
+                                              ? 'border-emerald-400/45 bg-emerald-400/12 text-emerald-100'
+                                              : 'thread-composer-chip-button border-stone-700 text-stone-300 hover:border-stone-500'
+                                          }`}
+                                          onClick={() => void handleCopySkillInvokeName(skill.name)}
+                                          title={`Copy $${skill.name}`}
+                                          aria-label={`Copy $${skill.name}`}
+                                        >
+                                          <ClipboardIcon />
                                           ${skill.name}
-                                        </span>
+                                        </button>
                                       </div>
+                                      <p className="text-xs leading-5 text-stone-400">
+                                        {skill.interface?.shortDescription ??
+                                          skill.shortDescription ??
+                                          skill.description}
+                                      </p>
                                     </div>
                                   </div>
                                 ))}
@@ -1953,7 +1973,7 @@ export function ThreadComposer({
                                     setMcpConfigError(null);
                                     setMcpConfigSuccess(null);
                                   }}
-                                  className="block w-full rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3 text-left transition hover:bg-stone-900"
+                                  className="thread-composer-panel-button block w-full rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3 text-left transition"
                                 >
                                   <div className="flex items-center justify-between gap-3">
                                     <span className="text-sm text-stone-100">HTTP / Streamable HTTP</span>
@@ -1971,7 +1991,7 @@ export function ThreadComposer({
                                     event.stopPropagation();
                                     void handlePrepareRawMcpBlock();
                                   }}
-                                  className="block w-full rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3 text-left transition hover:bg-stone-900"
+                                  className="thread-composer-panel-button block w-full rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3 text-left transition"
                                 >
                                   <div className="flex items-center justify-between gap-3">
                                     <span className="text-sm text-stone-100">stdio / raw block</span>
@@ -2015,7 +2035,7 @@ export function ThreadComposer({
                                   <button
                                     type="button"
                                     onClick={() => setMcpPanelMode('add')}
-                                    className="rounded-full border border-stone-700 px-3 py-1.5 text-xs text-stone-300 transition hover:bg-stone-800"
+                                    className="thread-composer-chip-button rounded-full border border-stone-700 px-3 py-1.5 text-xs text-stone-300 transition"
                                   >
                                     Back
                                   </button>
@@ -2046,7 +2066,7 @@ export function ThreadComposer({
                                   <button
                                     type="button"
                                     onClick={() => setMcpPanelMode('add')}
-                                    className="rounded-full border border-stone-700 px-3 py-1.5 text-xs text-stone-300 transition hover:bg-stone-800"
+                                    className="thread-composer-chip-button rounded-full border border-stone-700 px-3 py-1.5 text-xs text-stone-300 transition"
                                   >
                                     Back
                                   </button>
@@ -2115,6 +2135,7 @@ export function ThreadComposer({
               <div className="relative">
                 <button
                   type="button"
+                  data-composer-menu-trigger="true"
                   aria-label="Add attachment"
                   title="Add attachment"
                   onClick={() =>
@@ -2122,13 +2143,16 @@ export function ThreadComposer({
                       current === 'attachments' ? null : 'attachments',
                     )
                   }
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-stone-700 bg-stone-900/92 text-stone-200 transition hover:bg-stone-800"
+                  className="thread-composer-icon-button inline-flex h-7 w-7 items-center justify-center rounded-full border border-stone-700 bg-stone-900/92 text-stone-200 transition hover:bg-stone-800"
                 >
                   <PlusIcon />
                 </button>
 
                 {openMenu === 'attachments' && (
-                  <div className="absolute left-0 top-full mt-2 w-32 overflow-hidden rounded-2xl border border-stone-700 bg-stone-900 shadow-2xl shadow-stone-950/40">
+                  <div
+                    data-composer-menu-surface="true"
+                    className="thread-composer-menu absolute left-0 top-full mt-2 w-32 overflow-hidden rounded-2xl border bg-stone-900/72 shadow-2xl shadow-stone-950/20"
+                  >
                     <div className="p-2">
                       <button
                         type="button"
@@ -2136,7 +2160,7 @@ export function ThreadComposer({
                           dismissPromptFocus();
                           photoInputRef.current?.click();
                         }}
-                        className="block w-full rounded-xl px-3 py-2 text-left text-sm text-stone-200 transition hover:bg-stone-800"
+                        className="thread-composer-menu-item block w-full rounded-xl px-3 py-2 text-left text-sm transition"
                       >
                         Photo
                       </button>
@@ -2146,7 +2170,7 @@ export function ThreadComposer({
                           dismissPromptFocus();
                           fileInputRef.current?.click();
                         }}
-                        className="mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm text-stone-200 transition hover:bg-stone-800"
+                        className="thread-composer-menu-item mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm transition"
                       >
                         File
                       </button>
@@ -2161,7 +2185,7 @@ export function ThreadComposer({
               aria-label={isShellView ? 'Switch to chat' : 'Switch to shell'}
               title={isShellView ? 'Switch to chat' : 'Switch to shell'}
               onClick={() => onToggleView?.()}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-stone-700 bg-stone-900/92 text-stone-200 transition hover:bg-stone-800"
+              className="thread-composer-icon-button inline-flex h-7 w-7 items-center justify-center rounded-full border border-stone-700 bg-stone-900/92 text-stone-200 transition hover:bg-stone-800"
             >
               {isShellView ? <ChatIcon /> : <TerminalIcon />}
             </button>
@@ -2181,6 +2205,7 @@ export function ThreadComposer({
               <div className="relative">
                 <button
                   type="button"
+                  data-composer-menu-trigger="true"
                   aria-label={openMenu === 'shellTools' ? 'Close shell tools' : 'Open shell tools'}
                   aria-haspopup="menu"
                   aria-expanded={openMenu === 'shellTools'}
@@ -2195,6 +2220,7 @@ export function ThreadComposer({
                 </button>
                 {openMenu === 'shellTools' && (
                   <div
+                    data-composer-menu-surface="true"
                     className="absolute right-0 top-full z-40 mt-2 w-[11.5rem] max-w-[calc(100vw-1.5rem)] rounded-[1rem] border border-stone-700/90 bg-stone-950/96 p-2 shadow-2xl shadow-stone-950/40 sm:w-48"
                     onMouseDown={(event) => {
                       event.stopPropagation();
@@ -2422,6 +2448,7 @@ export function ThreadComposer({
               <div className="relative min-w-0">
                 <button
                   type="button"
+                  data-composer-menu-trigger="true"
                   aria-haspopup="menu"
                   aria-expanded={openMenu === 'model'}
                   aria-label={model ?? 'Select model'}
@@ -2434,7 +2461,7 @@ export function ThreadComposer({
                       ? 'Fast mode is on. Turn it off from the slash toolbox to edit model.'
                       : modelContextTitle
                   }
-                  className="relative inline-flex min-w-0 max-w-[8.75rem] items-center overflow-hidden rounded-full px-2.5 py-1 text-left text-stone-300 transition hover:bg-stone-800/85 hover:text-stone-100 disabled:cursor-not-allowed disabled:text-stone-600 sm:max-w-[11rem]"
+                  className="thread-composer-inline-toggle relative inline-flex min-w-0 max-w-[8.75rem] items-center overflow-hidden rounded-full px-2.5 py-1 text-left text-stone-300 transition disabled:cursor-not-allowed disabled:text-stone-600 sm:max-w-[11rem]"
                 >
                   {model ? <ContextRingFrame contextUsage={contextUsage} /> : null}
                   <span className="relative z-[1] block min-w-0 truncate whitespace-nowrap [direction:rtl]">
@@ -2442,7 +2469,10 @@ export function ThreadComposer({
                   </span>
                 </button>
                 {openMenu === 'model' && (
-                  <div className="absolute bottom-full left-0 mb-2 w-max min-w-[9rem] max-w-[14rem] overflow-hidden rounded-2xl border border-stone-700 bg-stone-900 shadow-2xl shadow-stone-950/40">
+                  <div
+                    data-composer-menu-surface="true"
+                    className="absolute bottom-full left-0 mb-2 w-max min-w-[9rem] max-w-[14rem] overflow-hidden rounded-2xl border border-stone-700 bg-stone-900 shadow-2xl shadow-stone-950/40"
+                  >
                     <div className="max-h-72 overflow-auto p-2">
                       {modelOptions.map((entry) => (
                         <button
@@ -2457,7 +2487,7 @@ export function ThreadComposer({
                           className={`block w-full rounded-xl px-3 py-2 text-left transition ${
                             entry.model === model
                               ? 'bg-amber-300/12 text-stone-100'
-                              : 'text-stone-300 hover:bg-stone-800'
+                              : 'thread-composer-menu-item text-stone-300'
                           }`}
                         >
                           <p className="text-sm font-medium">{entry.model}</p>
@@ -2471,6 +2501,7 @@ export function ThreadComposer({
               <div className="relative">
                 <button
                   type="button"
+                  data-composer-menu-trigger="true"
                   aria-haspopup="menu"
                   aria-expanded={openMenu === 'effort'}
                   disabled={modelControlsDisabled || supportedEfforts.length === 0}
@@ -2482,12 +2513,15 @@ export function ThreadComposer({
                       ? 'Fast mode is on. Turn it off from the slash toolbox to edit reasoning.'
                       : undefined
                   }
-                  className="rounded-full px-2 py-1 text-stone-500 transition hover:bg-stone-800 hover:text-stone-200 disabled:cursor-not-allowed disabled:text-stone-700"
+                  className="thread-composer-inline-toggle rounded-full px-2 py-1 text-stone-500 transition disabled:cursor-not-allowed disabled:text-stone-700"
                 >
                   {formatReasoningEffortLabel(reasoningEffort)}
                 </button>
                 {openMenu === 'effort' && (
-                  <div className="absolute bottom-full left-0 mb-2 w-max min-w-[8rem] max-w-[12rem] overflow-hidden rounded-2xl border border-stone-700 bg-stone-900 shadow-2xl shadow-stone-950/40">
+                  <div
+                    data-composer-menu-surface="true"
+                    className="absolute bottom-full left-0 mb-2 w-max min-w-[8rem] max-w-[12rem] overflow-hidden rounded-2xl border border-stone-700 bg-stone-900 shadow-2xl shadow-stone-950/40"
+                  >
                     <div className="max-h-72 overflow-auto p-2">
                       {supportedEfforts.map((entry) => (
                         <button
@@ -2501,7 +2535,7 @@ export function ThreadComposer({
                           className={`block w-full rounded-xl px-3 py-2 text-left transition ${
                             entry.reasoningEffort === reasoningEffort
                               ? 'bg-amber-300/12 text-stone-100'
-                              : 'text-stone-300 hover:bg-stone-800'
+                              : 'thread-composer-menu-item text-stone-300'
                           }`}
                         >
                           <p className="text-sm font-medium">
@@ -2524,10 +2558,10 @@ export function ThreadComposer({
                       collaborationMode === 'plan' ? 'default' : 'plan',
                   })
                 }
-                className={`rounded-full px-2.5 py-1 transition ${
+                className={`thread-composer-inline-toggle rounded-full px-2.5 py-1 transition ${
                   collaborationMode === 'plan'
                     ? 'bg-sky-300/18 text-sky-100'
-                    : 'text-stone-500 hover:bg-stone-800 hover:text-stone-200'
+                    : 'text-stone-500'
                 } disabled:cursor-not-allowed disabled:opacity-60`}
               >
                 Plan

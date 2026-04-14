@@ -2090,12 +2090,6 @@ export function ThreadDetailPage() {
           {detail.thread.activeTurnId ?? 'None'}
         </dd>
       </div>
-      {detail.thread.lastError && (
-        <div>
-          <dt className="text-stone-500">Last error</dt>
-          <dd className="mt-1 text-rose-200">{detail.thread.lastError}</dd>
-        </div>
-      )}
     </dl>
   ) : null;
 
@@ -2237,7 +2231,7 @@ export function ThreadDetailPage() {
       mobileHeaderAction={mobileSessionConnectionButton}
       onRenameThread={handleRenameThread}
     >
-      <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-none border-y border-stone-800 bg-stone-900/85 shadow-2xl shadow-stone-950/20 sm:flex-none sm:rounded-[2rem] sm:border">
+      <div className="thread-detail-surface relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-none border-y shadow-2xl shadow-stone-950/20 sm:flex-none sm:rounded-[2rem] sm:border">
         <div className="pointer-events-none absolute right-4 top-4 z-30 hidden lg:block">
           <div className="pointer-events-auto">
             {desktopSessionConnectionIndicator}
@@ -2283,7 +2277,7 @@ export function ThreadDetailPage() {
                   liveOutput={liveOutput}
                   scrollRequestKey={scrollRequestKey}
                   bottomSpacer={timelineBottomSpacer}
-                  className="min-h-0 flex-1 bg-stone-900/30"
+                  className="thread-timeline-surface min-h-0 flex-1"
                   onTailVisibilityChange={setFollowTail}
                   loadingEarlier={loadingEarlier}
                   onLoadEarlier={handleLoadEarlierTurns}
@@ -2407,11 +2401,11 @@ export function ThreadDetailPage() {
                 )}
                 {activeView === 'shell' && !detail.thread.isLoaded && (
                   <div className="flex min-h-0 flex-1 items-center justify-center p-4 sm:p-6">
-                    <div className="max-w-md rounded-[1.6rem] border border-stone-800 bg-stone-950/55 px-6 py-8 text-center">
-                      <p className="text-base font-medium text-stone-100">
+                    <div className="thread-empty-surface max-w-md rounded-[1.6rem] border px-6 py-8 text-center">
+                      <p className="text-base font-medium text-[var(--theme-fg)]">
                         Thread disconnected
                       </p>
-                      <p className="mt-3 text-sm leading-6 text-stone-400">
+                      <p className="mt-3 text-sm leading-6 text-[var(--theme-fg-soft)]">
                         Reconnect this thread before creating or attaching a shell.
                       </p>
                     </div>

@@ -170,6 +170,9 @@ describe('ThreadsPage', () => {
           settingsOpen: false,
           openSettings: vi.fn(),
           closeSettings: vi.fn(),
+          themeMode: 'dark',
+          setThemeMode: vi.fn(),
+          effectiveTheme: 'dark',
         }}
       >
         <MemoryRouter initialEntries={[initialEntry]}>

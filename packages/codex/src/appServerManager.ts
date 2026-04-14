@@ -128,6 +128,7 @@ export class CodexAppServerManager extends EventEmitter {
   private readonly spawnProcess: (command: string, args: string[]) => SpawnedChild;
   private process: SpawnedChild | null = null;
   private client: JsonRpcClient | null = null;
+  private readonly intentionallyStopping = new Set<SpawnedChild>();
   private status: AppServerStatusSnapshot = {
     state: 'stopped',
     transport: 'stdio',
@@ -174,12 +175,20 @@ export class CodexAppServerManager extends EventEmitter {
 
   async stop(): Promise<void> {
     this.intentionalStop = true;
-    this.client?.close();
-    this.client = null;
+    const client = this.client;
+    const process = this.process;
 
-    if (this.process) {
-      this.process.kill('SIGTERM');
-      this.process = null;
+    client?.close();
+    if (this.client === client) {
+      this.client = null;
+    }
+
+    if (process) {
+      this.intentionallyStopping.add(process);
+      process.kill('SIGTERM');
+      if (this.process === process) {
+        this.process = null;
+      }
     }
 
     this.setStatus('stopped', null);
@@ -392,12 +401,26 @@ export class CodexAppServerManager extends EventEmitter {
     });
 
     child.once('exit', (code, signal) => {
-      this.client?.close();
-      this.client = null;
-      this.process = null;
+      const intentionallyStopping = this.intentionallyStopping.delete(child);
+      const isCurrentClient = this.client === client;
+      const isCurrentProcess = this.process === child;
 
-      if (this.intentionalStop) {
-        this.setStatus('stopped', null);
+      if (isCurrentClient) {
+        this.client?.close();
+        this.client = null;
+      }
+      if (isCurrentProcess) {
+        this.process = null;
+      }
+
+      if (!isCurrentClient && !isCurrentProcess) {
+        return;
+      }
+
+      if (intentionallyStopping || this.intentionalStop) {
+        if (isCurrentProcess || isCurrentClient) {
+          this.setStatus('stopped', null);
+        }
         return;
       }
 

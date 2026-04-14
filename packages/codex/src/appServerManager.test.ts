@@ -1,10 +1,69 @@
 import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
-import { PassThrough } from 'node:stream';
+import { PassThrough, Writable } from 'node:stream';
 
 import { describe, expect, it } from 'vitest';
 
 import { CodexAppServerManager } from './appServerManager';
+
+class ScriptedChild extends EventEmitter {
+  stdout = new PassThrough();
+  stderr = new PassThrough();
+  stdin: Writable;
+
+  constructor(
+    private readonly options: {
+      initializeDelayMs?: number;
+      exitOnKillDelayMs?: number;
+    } = {},
+  ) {
+    super();
+
+    let buffer = '';
+    this.stdin = new Writable({
+      write: (chunk, _encoding, callback) => {
+        buffer += chunk.toString();
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) {
+            continue;
+          }
+          const message = JSON.parse(trimmed);
+          if (message.method === 'initialize') {
+            const delay = this.options.initializeDelayMs ?? 0;
+            setTimeout(() => {
+              this.stdout.write(
+                `${JSON.stringify({
+                  id: message.id,
+                  result: {
+                    userAgent: 'fake',
+                    codexHome: '/tmp',
+                    platformFamily: 'unix',
+                    platformOs: 'linux',
+                  },
+                })}\n`,
+              );
+            }, delay);
+          }
+        }
+
+        callback();
+      },
+    });
+  }
+
+  kill() {
+    const delay = this.options.exitOnKillDelayMs ?? 0;
+    setTimeout(() => {
+      this.stdout.end();
+      this.emit('exit', 0, 'SIGTERM');
+    }, delay);
+    return true;
+  }
+}
 
 describe('CodexAppServerManager', () => {
   it('starts against a newline-delimited JSON-RPC process', async () => {
@@ -121,6 +180,42 @@ describe('CodexAppServerManager', () => {
       id: 'turn-1',
       status: 'inProgress',
     });
+
+    await manager.stop();
+  });
+
+  it('does not let a stale child exit close the replacement app-server client during restart', async () => {
+    const firstChild = new ScriptedChild({
+      initializeDelayMs: 0,
+      exitOnKillDelayMs: 5,
+    });
+    const secondChild = new ScriptedChild({
+      initializeDelayMs: 15,
+      exitOnKillDelayMs: 0,
+    });
+    const spawnedChildren = [firstChild, secondChild];
+
+    const manager = new CodexAppServerManager({
+      command: 'fake-codex',
+      startupTimeoutMs: 1000,
+      clientInfo: {
+        name: 'test',
+        title: 'test',
+        version: '0.1.0',
+      },
+      spawnProcess: () => {
+        const child = spawnedChildren.shift();
+        if (!child) {
+          throw new Error('No scripted child available');
+        }
+        return child as any;
+      },
+    });
+
+    await manager.start();
+    await manager.stop();
+    await expect(manager.start()).resolves.toBeUndefined();
+    expect(manager.getStatus().state).toBe('ready');
 
     await manager.stop();
   });

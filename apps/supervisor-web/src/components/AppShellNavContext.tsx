@@ -1,5 +1,7 @@
 import { createContext, useContext } from 'react';
 
+export type ThemeMode = 'system' | 'light' | 'dark';
+
 interface AppShellNavContextValue {
   navOpen: boolean;
   openNav: () => void;
@@ -8,6 +10,9 @@ interface AppShellNavContextValue {
   settingsOpen: boolean;
   openSettings: () => void;
   closeSettings: () => void;
+  themeMode: ThemeMode;
+  setThemeMode: (mode: ThemeMode) => void;
+  effectiveTheme: 'light' | 'dark';
 }
 
 export const AppShellNavContext = createContext<AppShellNavContextValue | null>(
