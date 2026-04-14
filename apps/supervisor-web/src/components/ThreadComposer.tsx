@@ -237,8 +237,9 @@ function authStatusLabel(
     case 'notLoggedIn':
       return 'Login';
     case 'unsupported':
+      return 'Public';
     default:
-      return 'None';
+      return 'Unknown';
   }
 }
 

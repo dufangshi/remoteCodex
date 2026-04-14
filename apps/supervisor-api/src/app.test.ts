@@ -3078,6 +3078,115 @@ describe('supervisor api', () => {
     });
   });
 
+  it('auto-approves broader positive MCP authorization prompts for yolo threads', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Broader Auto Approval Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    fakeCodexManager.emit('request', {
+      id: 78,
+      method: 'item/mcp/requestAuthorization',
+      params: {
+        threadId: createdThread.codexThreadId,
+        turnId: 'turn-1',
+        itemId: 'mcp-2',
+        questions: [
+          {
+            id: 'approval',
+            header: 'Authorization required',
+            question: 'Do you want to let openaiDeveloperDocs access this MCP tool?',
+            isOther: false,
+            isSecret: false,
+            options: [
+              { label: 'Yes, once', description: 'Allow this invocation once.' },
+              { label: 'No', description: 'Reject this invocation.' },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(fakeCodexManager.serverRequestResponses).toContainEqual({
+      id: 78,
+      result: {
+        answers: {
+          approval: {
+            answers: ['Yes, once'],
+          },
+        },
+      },
+    });
+  });
+
+  it('auto-approves MCP elicitation approval requests for yolo threads', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'MCP Elicitation Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    fakeCodexManager.emit('request', {
+      id: 79,
+      method: 'mcpServer/elicitation/request',
+      params: {
+        threadId: createdThread.codexThreadId,
+        turnId: 'turn-1',
+        serverName: 'openaiDeveloperDocs',
+        mode: 'form',
+        message: 'Allow the openaiDeveloperDocs MCP server to run tool "list_api_endpoints"?',
+        requestedSchema: {
+          type: 'object',
+          properties: {},
+        },
+        _meta: {
+          codex_approval_kind: 'mcp_tool_call',
+          tool_title: 'List API Endpoints',
+          tool_description: 'List all OpenAI API endpoint URLs available in the OpenAPI spec.',
+        },
+      },
+    });
+
+    expect(fakeCodexManager.serverRequestResponses).toContainEqual({
+      id: 79,
+      result: {
+        action: 'accept',
+        content: {},
+      },
+    });
+  });
+
   it('maps web search turn items into dedicated history entries', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',

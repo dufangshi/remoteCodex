@@ -101,6 +101,7 @@ type PendingThreadRequestRecord =
   | {
       source: 'server';
       serverRequestId: number;
+      responseKind: 'answers' | 'mcpElicitation';
       request: ThreadActionRequestDto;
     }
   | {
@@ -855,6 +856,7 @@ function formatToolCallHistoryItem(
   const nestedRecords = [item, action, result, input, output];
   const toolName = uniqueStrings([
     stringOrNull(valueFromNestedRecords(nestedRecords, [
+      'tool',
       'toolName',
       'tool_name',
       'name',
@@ -865,6 +867,7 @@ function formatToolCallHistoryItem(
   ])[0] ?? null;
   const serverName = uniqueStrings([
     stringOrNull(valueFromNestedRecords(nestedRecords, [
+      'server',
       'serverName',
       'server_name',
       'mcpServer',
@@ -1514,7 +1517,8 @@ function liveCodexItemToHistoryItem(
   item: CodexTurnItem,
   phase: 'started' | 'completed',
 ): ThreadHistoryItemDto | null {
-  const historyItem = itemToHistoryItem(item);
+  const deferredDetails = new Map<string, ThreadHistoryItemDetailDto>();
+  const historyItem = itemToHistoryItem(item, deferredDetails);
 
   if (
     historyItem.kind !== 'commandExecution' &&
@@ -1547,7 +1551,47 @@ function isDenyOptionLabel(value: string) {
   );
 }
 
+function isLikelyPositiveApprovalOption(value: string) {
+  const normalized = normalizeOptionLabelForApproval(value);
+  return (
+    isAllowOptionLabel(value) ||
+    /^(yes|continue|proceed|trust|always|once|ok)\b/.test(normalized)
+  );
+}
+
+function isLikelyApprovalPrompt(
+  requestMethod: string,
+  questions: Array<{
+    header: string;
+    question: string;
+    options: Array<{ label: string; description: string }> | null;
+  }>,
+) {
+  const methodText = requestMethod.toLowerCase();
+  if (
+    methodText.includes('approval') ||
+    methodText.includes('authorize') ||
+    methodText.includes('requestuserinput')
+  ) {
+    return true;
+  }
+
+  const combinedText = questions
+    .flatMap((question) => [
+      question.header,
+      question.question,
+      ...(question.options?.map((option) => option.label) ?? []),
+    ])
+    .join(' ')
+    .toLowerCase();
+
+  return /(allow|approve|permission|authorize|authorization|auth|mcp|tool)/.test(
+    combinedText,
+  );
+}
+
 function buildAutoApprovedAnswersForServerQuestions(
+  requestMethod: string,
   questions: Array<{
     id: string;
     header: string;
@@ -1557,6 +1601,10 @@ function buildAutoApprovedAnswersForServerQuestions(
     options: Array<{ label: string; description: string }> | null;
   }>,
 ) {
+  if (!isLikelyApprovalPrompt(requestMethod, questions)) {
+    return null;
+  }
+
   const answers: Record<string, { answers: string[] }> = {};
 
   for (const question of questions) {
@@ -1564,14 +1612,17 @@ function buildAutoApprovedAnswersForServerQuestions(
       return null;
     }
 
-    const allowOption = question.options.find((option) =>
-      isAllowOptionLabel(option.label),
+    const recommendedOption = question.options.find((option) =>
+      /\(recommended\)\s*$/i.test(option.label),
     );
-    const denyOption = question.options.find((option) =>
-      isDenyOptionLabel(option.label),
-    );
+    const allowOption =
+      recommendedOption && isLikelyPositiveApprovalOption(recommendedOption.label)
+        ? recommendedOption
+        : question.options.find((option) =>
+            isLikelyPositiveApprovalOption(option.label),
+          );
 
-    if (!allowOption || !denyOption) {
+    if (!allowOption) {
       return null;
     }
 
@@ -1581,6 +1632,86 @@ function buildAutoApprovedAnswersForServerQuestions(
   }
 
   return answers;
+}
+
+function isMcpElicitationRequest(
+  request: CodexServerRequest,
+): request is CodexServerRequest & {
+  params: {
+    threadId: string;
+    turnId?: string;
+    serverName?: string;
+    mode?: string;
+    message?: string;
+    requestedSchema?: Record<string, unknown>;
+    _meta?: Record<string, unknown>;
+  };
+} {
+  return request.method === 'mcpServer/elicitation/request';
+}
+
+function buildAutoApprovedMcpElicitationResult(
+  request: CodexServerRequest,
+) {
+  if (!isMcpElicitationRequest(request)) {
+    return null;
+  }
+
+  return {
+    action: 'accept',
+    content: {},
+  } as const;
+}
+
+function buildThreadRequestFromMcpElicitation(
+  request: CodexServerRequest & {
+    params: {
+      threadId: string;
+      turnId?: string;
+      serverName?: string;
+      mode?: string;
+      message?: string;
+      requestedSchema?: Record<string, unknown>;
+      _meta?: Record<string, unknown>;
+    };
+  },
+): ThreadActionRequestDto {
+  const meta = isRecord(request.params._meta) ? request.params._meta : null;
+  const toolTitle = stringOrNull(meta?.tool_title);
+  const toolDescription = stringOrNull(meta?.tool_description);
+  const serverName = stringOrNull(request.params.serverName) ?? 'MCP';
+  const message =
+    stringOrNull(request.params.message) ??
+    `Allow the ${serverName} MCP server to continue?`;
+
+  return {
+    id: String(request.id),
+    kind: 'requestUserInput',
+    title: toolTitle ?? `${serverName} MCP`,
+    description: toolDescription ?? message,
+    turnId: request.params.turnId ?? null,
+    itemId: null,
+    createdAt: new Date().toISOString(),
+    questions: [
+      {
+        id: 'decision',
+        header: toolTitle ?? `${serverName} MCP`,
+        question: message,
+        isOther: false,
+        isSecret: false,
+        options: [
+          {
+            label: 'Allow',
+            description: 'Permit this MCP tool call.',
+          },
+          {
+            label: 'Deny',
+            description: 'Reject this MCP tool call.',
+          },
+        ],
+      },
+    ],
+  };
 }
 
 function turnToDto(
@@ -2812,9 +2943,20 @@ export class ThreadService {
     }
 
     if (pending.source === 'server') {
-      this.codexManager.respondToServerRequest(pending.serverRequestId, {
-        answers: input.answers
-      });
+      const selectedAnswer = Object.values(input.answers)[0]?.answers[0]?.trim().toLowerCase();
+      const result =
+        pending.responseKind === 'mcpElicitation'
+          ? {
+              action:
+                selectedAnswer && /^(deny|reject|block|cancel|no|abort)\b/.test(selectedAnswer)
+                  ? 'decline'
+                  : 'accept',
+              content: {},
+            }
+          : {
+              answers: input.answers,
+            };
+      this.codexManager.respondToServerRequest(pending.serverRequestId, result);
       this.pendingRequests.get(localThreadId)?.delete(requestId);
       if (this.pendingRequests.get(localThreadId)?.size === 0) {
         this.pendingRequests.delete(localThreadId);
@@ -3160,7 +3302,38 @@ export class ThreadService {
   }
 
   private async handleServerRequest(request: CodexServerRequest) {
-    if (request.method !== 'item/tool/requestUserInput') {
+    if (isMcpElicitationRequest(request)) {
+      const record = getThreadRecordByCodexThreadId(this.db, request.params.threadId);
+      if (!record) {
+        return;
+      }
+
+      const approvalMode = (record.approvalMode ?? 'yolo') as ApprovalMode;
+      const autoApprovedResult =
+        approvalMode === 'yolo'
+          ? buildAutoApprovedMcpElicitationResult(request)
+          : null;
+      if (autoApprovedResult) {
+        this.codexManager.respondToServerRequest(request.id, autoApprovedResult);
+        return;
+      }
+
+      const threadRequest = buildThreadRequestFromMcpElicitation(request);
+      let threadRequests = this.pendingRequests.get(record.id);
+      if (!threadRequests) {
+        threadRequests = new Map();
+        this.pendingRequests.set(record.id, threadRequests);
+      }
+      threadRequests.set(threadRequest.id, {
+        source: 'server',
+        serverRequestId: request.id,
+        responseKind: 'mcpElicitation',
+        request: threadRequest,
+      });
+
+      this.emitThreadEvent('thread.request.created', record.id, {
+        request: threadRequest,
+      });
       return;
     }
 
@@ -3202,7 +3375,10 @@ export class ThreadService {
     const approvalMode = (record.approvalMode ?? 'yolo') as ApprovalMode;
     const autoApprovedAnswers =
       approvalMode === 'yolo'
-        ? buildAutoApprovedAnswersForServerQuestions(params.questions)
+        ? buildAutoApprovedAnswersForServerQuestions(
+            request.method,
+            params.questions,
+          )
         : null;
     if (autoApprovedAnswers) {
       this.codexManager.respondToServerRequest(request.id, {
@@ -3230,6 +3406,7 @@ export class ThreadService {
     threadRequests.set(threadRequest.id, {
       source: 'server',
       serverRequestId: request.id,
+      responseKind: 'answers',
       request: threadRequest
     });
 

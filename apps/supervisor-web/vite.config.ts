@@ -9,6 +9,9 @@ export default defineConfig(({ mode }) => {
     process.env.NODE_ENV = 'test';
   }
 
+  const apiProxyTarget = process.env.VITE_API_PROXY_TARGET ?? 'http://127.0.0.1:8787';
+  const wsProxyTarget = process.env.VITE_WS_PROXY_TARGET ?? 'ws://127.0.0.1:8787';
+
   return {
     plugins: [react(), tailwindcss()],
     server: {
@@ -18,10 +21,10 @@ export default defineConfig(({ mode }) => {
         allow: [path.resolve(__dirname, '../..')]
       },
       proxy: {
-        '/api': 'http://127.0.0.1:8787',
-        '/healthz': 'http://127.0.0.1:8787',
+        '/api': apiProxyTarget,
+        '/healthz': apiProxyTarget,
         '/ws': {
-          target: 'ws://127.0.0.1:8787',
+          target: wsProxyTarget,
           ws: true
         }
       }
