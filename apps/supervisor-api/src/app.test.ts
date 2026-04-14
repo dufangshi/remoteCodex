@@ -3009,6 +3009,75 @@ describe('supervisor api', () => {
     });
   });
 
+  it('auto-approves allow or deny style tool input requests for yolo threads', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Auto Approval Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    fakeCodexManager.emit('request', {
+      id: 77,
+      method: 'item/tool/requestUserInput',
+      params: {
+        threadId: createdThread.codexThreadId,
+        turnId: 'turn-1',
+        itemId: 'mcp-1',
+        questions: [
+          {
+            id: 'approval',
+            header: 'MCP Approval',
+            question: 'Allow openaiDeveloperDocs to run?',
+            isOther: false,
+            isSecret: false,
+            options: [
+              { label: 'Allow', description: 'Permit this tool call.' },
+              { label: 'Deny', description: 'Reject this tool call.' },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(fakeCodexManager.serverRequestResponses).toEqual([
+      {
+        id: 77,
+        result: {
+          answers: {
+            approval: {
+              answers: ['Allow'],
+            },
+          },
+        },
+      },
+    ]);
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json()).toMatchObject({
+      pendingRequests: [],
+    });
+  });
+
   it('maps web search turn items into dedicated history entries', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',

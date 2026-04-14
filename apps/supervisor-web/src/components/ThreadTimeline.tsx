@@ -682,6 +682,24 @@ function CommandIcon() {
   );
 }
 
+function ToolCallIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 fill-none stroke-current"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M6.25 4.25 3.5 7l2.75 2.75" />
+      <path d="M9.75 4.25 12.5 7 9.75 9.75" />
+      <path d="M8.9 3.5 7.1 10.5" />
+      <path d="M3 12.25h10" />
+    </svg>
+  );
+}
+
 function CommandBatchIcon() {
   return (
     <svg
@@ -2044,6 +2062,76 @@ const CommandItem = memo(function CommandItem({
   );
 });
 
+const ToolCallItem = memo(function ToolCallItem({
+  item,
+  onOpen,
+}: {
+  item: ThreadHistoryItemDto & { kind: 'toolCall' };
+  onOpen: (
+    item: ThreadHistoryItemDto & { kind: 'toolCall' },
+    title: string,
+  ) => void;
+}) {
+  const summary = summarizeInlinePreviewText(item.text);
+
+  return (
+    <div
+      className={`relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
+    >
+      <span
+        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('action')}`}
+      >
+        <span className="scale-[0.78]">
+          <ToolCallIcon />
+        </span>
+      </span>
+      {isRunningHistoryStatus(item.status) && (
+        <span className="absolute left-5 top-0 inline-flex sm:hidden">
+          <RunningDots />
+        </span>
+      )}
+      <div className="flex items-start gap-2.5">
+        <div className="mt-0.5 hidden shrink-0 items-center sm:flex">
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-fuchsia-300/25 bg-fuchsia-300/10 text-fuchsia-100">
+            <ToolCallIcon />
+          </span>
+          {isRunningHistoryStatus(item.status) && <RunningDots />}
+        </div>
+        <div className="relative min-w-0 w-full flex-1 rounded-[0.9rem] border border-stone-800/80 bg-stone-950/45 px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2">
+          <button
+            type="button"
+            aria-label={item.status ? `Tool status: ${item.status}` : 'Tool status'}
+            title={item.status ?? 'Tool status'}
+            onClick={() => onOpen(item, 'Tool Call Details')}
+            className={`absolute right-0 top-0 inline-flex h-5 w-5 items-center justify-center rounded-bl-[0.7rem] rounded-tr-[0.9rem] border shadow-sm shadow-stone-950/25 transition sm:right-2 sm:top-2 sm:h-7 sm:w-7 sm:rounded-full ${commandStatusBadgeClassName(item.status)} hover:brightness-110`}
+          >
+            <span className="scale-[0.72] sm:scale-100">
+              <CommandStatusIcon status={item.status} />
+            </span>
+          </button>
+          <button
+            type="button"
+            aria-label="Open full tool call"
+            onClick={() => onOpen(item, 'Tool Call Details')}
+            className="block w-full text-left"
+          >
+            <div className="flex min-w-0 items-center gap-2 text-sm leading-6">
+              <p className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip text-stone-200">
+                {summary.firstLine}
+              </p>
+              {summary.showGap ? (
+                <span className="shrink-0 text-[11px] font-medium tracking-[0.28em] text-stone-400">
+                  ...
+                </span>
+              ) : null}
+            </div>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+});
+
 const CommandGroupItem = memo(function CommandGroupItem({
   items,
   expanded,
@@ -2744,6 +2832,7 @@ const HistoryItemRow = memo(function HistoryItemRow({
   scrollRootRef,
   onOpenExpandedText,
   onOpenCommandDetail,
+  onOpenToolCallDetail,
 }: {
   threadId: string | undefined;
   item: ThreadHistoryItemDto;
@@ -2751,6 +2840,10 @@ const HistoryItemRow = memo(function HistoryItemRow({
   onOpenExpandedText: (title: string, text: string) => void;
   onOpenCommandDetail: (
     item: ThreadHistoryItemDto & { kind: 'commandExecution' },
+    title: string,
+  ) => void;
+  onOpenToolCallDetail: (
+    item: ThreadHistoryItemDto & { kind: 'toolCall' },
     title: string,
   ) => void;
 }) {
@@ -2777,6 +2870,19 @@ const HistoryItemRow = memo(function HistoryItemRow({
           }
         }
         onOpen={onOpenCommandDetail}
+      />
+    );
+  }
+
+  if (item.kind === 'toolCall') {
+    return (
+      <ToolCallItem
+        item={
+          item as ThreadHistoryItemDto & {
+            kind: 'toolCall';
+          }
+        }
+        onOpen={onOpenToolCallDetail}
       />
     );
   }
@@ -3145,6 +3251,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
   onToggleCollapse,
   onOpenExpandedText,
   onOpenCommandDetail,
+  onOpenToolCallDetail,
   scrollRootRef,
   articleRef,
 }: {
@@ -3165,6 +3272,10 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
   onOpenExpandedText: (title: string, text: string) => void;
   onOpenCommandDetail: (
     item: ThreadHistoryItemDto & { kind: 'commandExecution' },
+    title: string,
+  ) => void;
+  onOpenToolCallDetail: (
+    item: ThreadHistoryItemDto & { kind: 'toolCall' },
     title: string,
   ) => void;
   scrollRootRef: RefObject<HTMLDivElement | null>;
@@ -3285,6 +3396,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
                 scrollRootRef={scrollRootRef}
                 onOpenExpandedText={onOpenExpandedText}
                 onOpenCommandDetail={onOpenCommandDetail}
+                onOpenToolCallDetail={onOpenToolCallDetail}
               />
             ),
           )}
@@ -3526,6 +3638,50 @@ export function ThreadTimeline({
             caught instanceof Error
               ? caught.message
               : 'Unable to load full command output.',
+        });
+      }
+    },
+    [onLoadHistoryItemDetail],
+  );
+
+  const handleOpenToolCallDetail = useCallback(
+    async (
+      item: ThreadHistoryItemDto & { kind: 'toolCall' },
+      fallbackTitle: string,
+    ) => {
+      const inlineText = item.detailText?.trim() || item.text || 'Tool call';
+      if (!item.hasDeferredDetail || !onLoadHistoryItemDetail) {
+        setExpandedText({ title: fallbackTitle, text: inlineText });
+        return;
+      }
+
+      const cached = deferredDetailCacheRef.current.get(item.id);
+      if (cached) {
+        setExpandedText({ title: cached.title, text: cached.text });
+        return;
+      }
+
+      const requestId = expandedTextRequestIdRef.current + 1;
+      expandedTextRequestIdRef.current = requestId;
+      setExpandedText({ title: fallbackTitle, text: 'Loading full tool call details...' });
+
+      try {
+        const detail = await onLoadHistoryItemDetail(item.id);
+        deferredDetailCacheRef.current.set(item.id, detail);
+        if (expandedTextRequestIdRef.current !== requestId) {
+          return;
+        }
+        setExpandedText({ title: detail.title, text: detail.text });
+      } catch (caught) {
+        if (expandedTextRequestIdRef.current !== requestId) {
+          return;
+        }
+        setExpandedText({
+          title: fallbackTitle,
+          text:
+            caught instanceof Error
+              ? caught.message
+              : 'Unable to load full tool call details.',
         });
       }
     },
@@ -3870,9 +4026,10 @@ export function ThreadTimeline({
                   liveOutput={visibleIndex === liveOutputTurnIndex ? liveOutput : ''}
                   onToggleCollapse={handleToggleCollapse}
                   onOpenExpandedText={handleOpenExpandedText}
-                    onOpenCommandDetail={handleOpenCommandDetail}
-                    scrollRootRef={scrollContainerRef}
-                    articleRef={undefined}
+                  onOpenCommandDetail={handleOpenCommandDetail}
+                  onOpenToolCallDetail={handleOpenToolCallDetail}
+                  scrollRootRef={scrollContainerRef}
+                  articleRef={undefined}
                   />
                   {(notesByTurnId.get(turn.id)?.length || pendingRequestsByTurnId.get(turn.id)?.length) ? (
                     <div className="space-y-3 border-t border-stone-800/80 px-2.5 py-4 sm:px-6">
@@ -3931,6 +4088,7 @@ export function ThreadTimeline({
                     onToggleCollapse={handleToggleCollapse}
                     onOpenExpandedText={handleOpenExpandedText}
                     onOpenCommandDetail={handleOpenCommandDetail}
+                    onOpenToolCallDetail={handleOpenToolCallDetail}
                     scrollRootRef={scrollContainerRef}
                   />
                 </>

@@ -60,6 +60,7 @@ export class FakeCodexManager extends EventEmitter {
   materializeSteersImmediately = true;
   steerTurnCalls: Array<{ threadId: string; turnId: string; prompt: string }> = [];
   compactThreadCalls: string[] = [];
+  serverRequestResponses: Array<{ id: number; result: unknown }> = [];
   stopCalls = 0;
   startCalls = 0;
   startTurnCalls: Array<{
@@ -250,7 +251,6 @@ export class FakeCodexManager extends EventEmitter {
   }
 
   respondToServerRequest(id: number, result: unknown) {
-    void id;
-    void result;
+    this.serverRequestResponses.push({ id, result });
   }
 }

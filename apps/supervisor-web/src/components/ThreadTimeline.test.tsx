@@ -527,6 +527,53 @@ describe('ThreadTimeline', () => {
     });
   });
 
+  it('loads deferred tool call details on demand before opening the dialog', async () => {
+    const loadDetail = vi.fn(async () => ({
+      id: 'tool-1',
+      kind: 'toolCall' as const,
+      title: 'Tool Call Details',
+      text: 'openaiDeveloperDocs/list_api_endpoints\n\nArguments\n{\n  "limit": 5\n}\n\nResult\n{\n  "count": 123\n}',
+    }));
+
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        onLoadHistoryItemDetail={loadDetail}
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'tool-1',
+                kind: 'toolCall',
+                text: 'openaiDeveloperDocs/list_api_endpoints',
+                detailText: null,
+                hasDeferredDetail: true,
+                status: 'completed',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open full tool call' }));
+
+    expect(loadDetail).toHaveBeenCalledWith('tool-1');
+    expect(
+      screen.getByRole('dialog', { name: 'Tool Call Details' }),
+    ).toHaveTextContent('Loading full tool call details...');
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('dialog', { name: 'Tool Call Details' }),
+      ).toHaveTextContent('"count": 123');
+    });
+  });
+
   it('groups consecutive command outputs into a single collapsible bubble', () => {
     render(
       <ThreadTimeline

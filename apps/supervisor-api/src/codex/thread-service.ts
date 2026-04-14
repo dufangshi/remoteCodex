@@ -92,6 +92,7 @@ const LOCAL_PLAN_DECISION_PREFIX = 'plan-decision:';
 const IMPLEMENT_APPROVED_PLAN_PROMPT = 'Implement the approved plan.';
 const THREAD_DETAIL_CACHE_TTL_MS = 5_000;
 const DEFERRED_COMMAND_DETAIL_TITLE = 'Command Output';
+const DEFERRED_TOOL_DETAIL_TITLE = 'Tool Call Details';
 const CONTEXT_BASELINE_TOKENS = 12_000;
 const FAST_MODE_NOTE_ON = 'Fast mode on';
 const FAST_MODE_NOTE_OFF = 'Fast mode off';
@@ -760,6 +761,20 @@ function summarizeCommandText(text: string) {
   return lines.find((line) => line.trim().length > 0) ?? lines[0] ?? 'Command output';
 }
 
+function safeJsonStringify(value: unknown) {
+  try {
+    const serialized = JSON.stringify(value, null, 2);
+    return serialized && serialized !== 'null' ? serialized : null;
+  } catch {
+    return String(value);
+  }
+}
+
+function summarizeToolCallText(text: string) {
+  const lines = normalizeTextLines(text);
+  return lines.find((line) => line.trim().length > 0) ?? lines[0] ?? 'Tool call';
+}
+
 function deferCommandHistoryItem(
   item: ThreadHistoryItemDto & { kind: 'commandExecution' },
   deferredDetails: Map<string, ThreadHistoryItemDetailDto>,
@@ -780,6 +795,132 @@ function deferCommandHistoryItem(
   };
 }
 
+function deferToolCallHistoryItem(
+  item: ThreadHistoryItemDto & { kind: 'toolCall' },
+  deferredDetails: Map<string, ThreadHistoryItemDetailDto>,
+): ThreadHistoryItemDto {
+  const fullText = item.detailText?.trim() || item.text || 'Tool call';
+  deferredDetails.set(item.id, {
+    id: item.id,
+    kind: item.kind,
+    title: DEFERRED_TOOL_DETAIL_TITLE,
+    text: fullText,
+  });
+
+  return {
+    ...item,
+    text: summarizeToolCallText(fullText),
+    detailText: null,
+    hasDeferredDetail: true,
+  };
+}
+
+function extractToolCallRecords(item: CodexTurnItem) {
+  const action = isRecord(item.action) ? item.action : null;
+  const result = isRecord(item.result) ? item.result : null;
+
+  return {
+    action,
+    result,
+    input: action && isRecord(action.input) ? action.input : null,
+    output: result && isRecord(result.output) ? result.output : null,
+  };
+}
+
+function valueFromNestedRecords(
+  records: Array<Record<string, unknown> | null | undefined>,
+  keys: string[],
+) {
+  for (const record of records) {
+    if (!record) {
+      continue;
+    }
+
+    for (const key of keys) {
+      const value = record[key];
+      if (value !== undefined && value !== null) {
+        return value;
+      }
+    }
+  }
+
+  return null;
+}
+
+function formatToolCallHistoryItem(
+  item: CodexTurnItem,
+  deferredDetails?: Map<string, ThreadHistoryItemDetailDto>,
+): ThreadHistoryItemDto {
+  const { action, result, input, output } = extractToolCallRecords(item);
+  const nestedRecords = [item, action, result, input, output];
+  const toolName = uniqueStrings([
+    stringOrNull(valueFromNestedRecords(nestedRecords, [
+      'toolName',
+      'tool_name',
+      'name',
+      'title',
+      'functionName',
+      'function_name',
+    ])),
+  ])[0] ?? null;
+  const serverName = uniqueStrings([
+    stringOrNull(valueFromNestedRecords(nestedRecords, [
+      'serverName',
+      'server_name',
+      'mcpServer',
+      'mcp_server',
+      'namespace',
+    ])),
+  ])[0] ?? null;
+  const status = stringOrNull(item.status) ?? stringOrNull(item.phase) ?? null;
+  const summaryLine = serverName && toolName
+    ? `${serverName}/${toolName}`
+    : toolName ?? serverName ?? stringOrNull(item.text) ?? item.type;
+
+  const detailLines = [summaryLine];
+  if (status) {
+    detailLines.push(`Status: ${status}`);
+  }
+
+  const text = stringOrNull(item.text);
+  if (text && text !== summaryLine) {
+    detailLines.push('', text);
+  }
+
+  const argumentPayload = input ?? action;
+  const resultPayload = output ?? result;
+  const argumentText = safeJsonStringify(argumentPayload);
+  const resultText = safeJsonStringify(resultPayload);
+
+  if (argumentText) {
+    detailLines.push('', 'Arguments', argumentText);
+  }
+  if (resultText) {
+    detailLines.push('', 'Result', resultText);
+  }
+
+  const historyItem: ThreadHistoryItemDto = {
+    id: item.id,
+    kind: 'toolCall',
+    text: summaryLine,
+    previewText: summaryLine,
+    detailText: detailLines.join('\n'),
+    status,
+  };
+
+  if (
+    deferredDetails &&
+    (Boolean(argumentText) || Boolean(resultText) || historyItem.detailText.length > 240)
+  ) {
+    return deferToolCallHistoryItem(
+      historyItem as ThreadHistoryItemDto & { kind: 'toolCall' },
+      deferredDetails,
+    );
+  }
+
+  return historyItem;
+}
+
 function deferLargeHistoryItemDetails(
   turn: ThreadTurnDto,
   deferredDetails: Map<string, ThreadHistoryItemDetailDto>,
@@ -792,6 +933,11 @@ function deferLargeHistoryItemDetails(
             item as ThreadHistoryItemDto & { kind: 'commandExecution' },
             deferredDetails,
           )
+        : item.kind === 'toolCall'
+          ? deferToolCallHistoryItem(
+              item as ThreadHistoryItemDto & { kind: 'toolCall' },
+              deferredDetails,
+            )
         : item,
     ),
   };
@@ -1354,12 +1500,7 @@ function itemToHistoryItem(
     case 'mcpToolCall':
     case 'dynamicToolCall':
     case 'collabAgentToolCall':
-      return {
-        id: item.id,
-        kind: 'toolCall',
-        text: item.text ?? item.type,
-        status: item.status ?? null
-      };
+      return formatToolCallHistoryItem(item, deferredDetails);
     default:
       return {
         id: item.id,
@@ -1375,7 +1516,10 @@ function liveCodexItemToHistoryItem(
 ): ThreadHistoryItemDto | null {
   const historyItem = itemToHistoryItem(item);
 
-  if (historyItem.kind !== 'commandExecution') {
+  if (
+    historyItem.kind !== 'commandExecution' &&
+    historyItem.kind !== 'toolCall'
+  ) {
     return null;
   }
 
@@ -1385,6 +1529,58 @@ function liveCodexItemToHistoryItem(
       historyItem.status ??
       (phase === 'started' ? 'running' : 'completed'),
   };
+}
+
+function normalizeOptionLabelForApproval(value: string) {
+  return value.replace(/\s*\(recommended\)\s*$/i, '').trim().toLowerCase();
+}
+
+function isAllowOptionLabel(value: string) {
+  const normalized = normalizeOptionLabelForApproval(value);
+  return /^(allow|approve|yes|continue|proceed|trust)\b/.test(normalized);
+}
+
+function isDenyOptionLabel(value: string) {
+  const normalized = normalizeOptionLabelForApproval(value);
+  return /^(deny|reject|block|cancel|no|abort|disallow|don't allow|do not allow)\b/.test(
+    normalized,
+  );
+}
+
+function buildAutoApprovedAnswersForServerQuestions(
+  questions: Array<{
+    id: string;
+    header: string;
+    question: string;
+    isOther: boolean;
+    isSecret: boolean;
+    options: Array<{ label: string; description: string }> | null;
+  }>,
+) {
+  const answers: Record<string, { answers: string[] }> = {};
+
+  for (const question of questions) {
+    if (!question.options || question.options.length === 0) {
+      return null;
+    }
+
+    const allowOption = question.options.find((option) =>
+      isAllowOptionLabel(option.label),
+    );
+    const denyOption = question.options.find((option) =>
+      isDenyOptionLabel(option.label),
+    );
+
+    if (!allowOption || !denyOption) {
+      return null;
+    }
+
+    answers[question.id] = {
+      answers: [allowOption.label],
+    };
+  }
+
+  return answers;
 }
 
 function turnToDto(
@@ -3002,6 +3198,18 @@ export class ThreadService {
         description: option.description
       })) ?? null
     }));
+
+    const approvalMode = (record.approvalMode ?? 'yolo') as ApprovalMode;
+    const autoApprovedAnswers =
+      approvalMode === 'yolo'
+        ? buildAutoApprovedAnswersForServerQuestions(params.questions)
+        : null;
+    if (autoApprovedAnswers) {
+      this.codexManager.respondToServerRequest(request.id, {
+        answers: autoApprovedAnswers,
+      });
+      return;
+    }
 
     const threadRequest: ThreadActionRequestDto = {
       id: String(request.id),
