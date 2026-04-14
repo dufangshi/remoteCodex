@@ -80,6 +80,7 @@ interface ThreadTimelineProps {
   onLoadHistoryItemDetail?: (
     itemId: string,
   ) => Promise<ThreadHistoryItemDetailDto> | ThreadHistoryItemDetailDto;
+  onOpenThread?: (threadId: string) => void;
 }
 
 interface ExpandedTextState {
@@ -3219,14 +3220,29 @@ function AnsweredRequestNote({
 
 function ActivityNoteCard({
   note,
+  onOpenThread,
 }: {
   note: ThreadActivityNoteDto;
+  onOpenThread?: ((threadId: string) => void) | undefined;
 }) {
+  const title =
+    note.kind === 'forkCreated'
+      ? 'Fork'
+      : note.kind === 'forkSource'
+        ? 'Fork source'
+        : 'System';
+  const body =
+    note.kind === 'forkCreated'
+      ? `Thread forked from Turn ${note.turnIndex ?? '?'}`
+      : note.kind === 'forkSource'
+        ? `Forked from ${note.linkedThreadTitle ?? 'source thread'} at Turn ${note.turnIndex ?? '?'}`
+        : note.text ?? '';
+
   return (
     <div className="w-full rounded-2xl border border-amber-300/18 bg-amber-300/[0.05] px-3 py-2.5">
       <div className="flex items-center justify-between gap-3">
         <p className="text-[11px] uppercase tracking-[0.2em] text-amber-200/80">
-          System
+          {title}
         </p>
         <time
           dateTime={note.createdAt}
@@ -3236,7 +3252,25 @@ function ActivityNoteCard({
           {formatShortTimestamp(note.createdAt)}
         </time>
       </div>
-      <p className="mt-1 text-[13px] leading-5 text-stone-200">{note.text}</p>
+      <p className="mt-1 text-[13px] leading-5 text-stone-200">{body}</p>
+      {note.linkedThreadId ? (
+        <button
+          type="button"
+          onClick={() => {
+            if (onOpenThread) {
+              onOpenThread(note.linkedThreadId!);
+              return;
+            }
+
+            if (typeof window !== 'undefined') {
+              window.location.assign(`/threads/${note.linkedThreadId}`);
+            }
+          }}
+          className="relative z-10 mt-2 inline-flex cursor-pointer rounded-full border border-amber-300/30 px-3 py-1.5 text-xs text-amber-100 transition hover:bg-amber-300/10"
+        >
+          {note.kind === 'forkCreated' ? 'Open fork' : 'Back to source'}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -3468,6 +3502,7 @@ export function ThreadTimeline({
   optimisticSteers = [],
   optimisticTurn = null,
   onLoadHistoryItemDetail,
+  onOpenThread,
 }: ThreadTimelineProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollContentRef = useRef<HTMLDivElement | null>(null);
@@ -3927,10 +3962,22 @@ export function ThreadTimeline({
           ]
         : []),
     ];
+    const leading: ThreadActivityNoteDto[] = [];
     const beforeTurnId = new Map<string, ThreadActivityNoteDto[]>();
+    const afterTurnId = new Map<string, ThreadActivityNoteDto[]>();
     const trailing: ThreadActivityNoteDto[] = [];
 
     for (const note of sortedNotes) {
+      if (note.anchorTurnId === '__leading__') {
+        leading.push(note);
+        continue;
+      }
+      if (note.anchorTurnId) {
+        const current = afterTurnId.get(note.anchorTurnId) ?? [];
+        current.push(note);
+        afterTurnId.set(note.anchorTurnId, current);
+        continue;
+      }
       const anchor = turnSequence.find(
         (turn) => turn.startedAt && note.createdAt.localeCompare(turn.startedAt) <= 0,
       );
@@ -3944,7 +3991,9 @@ export function ThreadTimeline({
     }
 
     return {
+      leading,
       beforeTurnId,
+      afterTurnId,
       trailing,
     };
   }, [activityNotes, optimisticTurn, visibleTurns]);
@@ -4008,12 +4057,19 @@ export function ThreadTimeline({
 
           {(visibleTurns.length > 0 || optimisticTurn) && (
             <div className="divide-y divide-stone-800/80">
+              {activityNoteAnchors.leading.length > 0 ? (
+                <div className="space-y-3 border-b border-stone-800/80 px-2.5 py-4 sm:px-6">
+                  {activityNoteAnchors.leading.map((note) => (
+                    <ActivityNoteCard key={note.id} note={note} onOpenThread={onOpenThread} />
+                  ))}
+                </div>
+              ) : null}
               {visibleTurns.map((turn, visibleIndex) => (
                 <div key={turn.id}>
                   {(activityNoteAnchors.beforeTurnId.get(turn.id)?.length ?? 0) > 0 ? (
                     <div className="space-y-3 border-b border-stone-800/80 px-2.5 py-4 sm:px-6">
                       {(activityNoteAnchors.beforeTurnId.get(turn.id) ?? []).map((note) => (
-                        <ActivityNoteCard key={note.id} note={note} />
+                        <ActivityNoteCard key={note.id} note={note} onOpenThread={onOpenThread} />
                       ))}
                     </div>
                   ) : null}
@@ -4032,6 +4088,13 @@ export function ThreadTimeline({
                   scrollRootRef={scrollContainerRef}
                   articleRef={undefined}
                   />
+                  {(activityNoteAnchors.afterTurnId.get(turn.id)?.length ?? 0) > 0 ? (
+                    <div className="space-y-3 border-t border-stone-800/80 px-2.5 py-4 sm:px-6">
+                      {(activityNoteAnchors.afterTurnId.get(turn.id) ?? []).map((note) => (
+                        <ActivityNoteCard key={note.id} note={note} />
+                      ))}
+                    </div>
+                  ) : null}
                   {(notesByTurnId.get(turn.id)?.length || pendingRequestsByTurnId.get(turn.id)?.length) ? (
                     <div className="space-y-3 border-t border-stone-800/80 px-2.5 py-4 sm:px-6">
                       {[
@@ -4073,7 +4136,7 @@ export function ThreadTimeline({
                     <div className="space-y-3 border-b border-stone-800/80 px-2.5 py-4 sm:px-6">
                       {(activityNoteAnchors.beforeTurnId.get(optimisticTurn.id) ?? []).map(
                         (note) => (
-                          <ActivityNoteCard key={note.id} note={note} />
+                          <ActivityNoteCard key={note.id} note={note} onOpenThread={onOpenThread} />
                         ),
                       )}
                     </div>
@@ -4092,6 +4155,15 @@ export function ThreadTimeline({
                     onOpenToolCallDetail={handleOpenToolCallDetail}
                     scrollRootRef={scrollContainerRef}
                   />
+                  {(activityNoteAnchors.afterTurnId.get(optimisticTurn.id)?.length ?? 0) > 0 ? (
+                    <div className="space-y-3 border-t border-stone-800/80 px-2.5 py-4 sm:px-6">
+                      {(activityNoteAnchors.afterTurnId.get(optimisticTurn.id) ?? []).map(
+                        (note) => (
+                          <ActivityNoteCard key={note.id} note={note} onOpenThread={onOpenThread} />
+                        ),
+                      )}
+                    </div>
+                  ) : null}
                 </>
               )}
             </div>
@@ -4142,7 +4214,7 @@ export function ThreadTimeline({
                 .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
                 .map((entry) =>
                   entry.kind === 'activity' ? (
-                    <ActivityNoteCard key={entry.id} note={entry.note} />
+                    <ActivityNoteCard key={entry.id} note={entry.note} onOpenThread={onOpenThread} />
                   ) : entry.kind === 'note' ? (
                     <AnsweredRequestNote key={entry.id} note={entry.note} />
                   ) : (

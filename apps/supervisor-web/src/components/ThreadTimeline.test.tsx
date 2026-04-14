@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ThreadTimeline } from './ThreadTimeline';
@@ -2125,6 +2126,109 @@ describe('ThreadTimeline', () => {
 
     const firstTurn = screen.getByText('First turn');
     const activity = screen.getByText('Fast mode on');
+    const secondTurn = screen.getByText('Second turn');
+
+    expect(
+      firstTurn.compareDocumentPosition(activity) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      activity.compareDocumentPosition(secondTurn) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('renders fork source notes as leading cards with navigation affordance', () => {
+    const onOpenThread = vi.fn();
+
+    render(
+      <ThreadTimeline
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 3, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'user-1',
+                kind: 'userMessage',
+                text: 'Second turn',
+              },
+            ],
+          },
+        ]}
+        liveOutput=""
+        activityNotes={[
+          {
+            id: 'fork-source-1',
+            kind: 'forkSource',
+            createdAt: new Date(Date.UTC(2026, 3, 9, 6, 2, 0)).toISOString(),
+            anchorTurnId: '__leading__',
+            linkedThreadId: 'thread-source',
+            linkedThreadTitle: 'Original thread',
+            turnIndex: 1,
+          },
+        ]}
+        onOpenThread={onOpenThread}
+      />,
+    );
+
+    expect(screen.getByText('Fork source')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Back to source/i }));
+    expect(onOpenThread).toHaveBeenCalledWith('thread-source');
+  });
+
+  it('renders fork created notes after the anchored turn', () => {
+    render(
+      <MemoryRouter>
+        <ThreadTimeline
+          turns={[
+            {
+              id: 'turn-1',
+              startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+              status: 'completed',
+              error: null,
+              items: [
+                {
+                  id: 'user-1',
+                  kind: 'userMessage',
+                  text: 'First turn',
+                },
+              ],
+            },
+            {
+              id: 'turn-2',
+              startedAt: new Date(Date.UTC(2026, 3, 9, 6, 3, 0)).toISOString(),
+              status: 'completed',
+              error: null,
+              items: [
+                {
+                  id: 'user-2',
+                  kind: 'userMessage',
+                  text: 'Second turn',
+                },
+              ],
+            },
+          ]}
+          liveOutput=""
+          activityNotes={[
+            {
+              id: 'fork-created-1',
+              kind: 'forkCreated',
+              createdAt: new Date(Date.UTC(2026, 3, 9, 6, 2, 0)).toISOString(),
+              anchorTurnId: 'turn-1',
+              linkedThreadId: 'thread-fork',
+              linkedThreadTitle: 'Forked thread',
+              turnIndex: 1,
+            },
+          ]}
+        />
+      </MemoryRouter>,
+    );
+
+    const firstTurn = screen.getByText('First turn');
+    const activity = screen.getByText('Thread forked from Turn 1');
     const secondTurn = screen.getByText('Second turn');
 
     expect(

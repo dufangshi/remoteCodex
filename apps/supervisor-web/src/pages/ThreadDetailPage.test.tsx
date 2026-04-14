@@ -3474,4 +3474,5 @@ describe('ThreadDetailPage', () => {
     expect(detailCallCount).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('Recovered after reconnect.')).toBeInTheDocument();
   });
+
 });
