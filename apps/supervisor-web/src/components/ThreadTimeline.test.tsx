@@ -1614,6 +1614,110 @@ describe('ThreadTimeline', () => {
     expect(screen.getAllByText('1.2k').length).toBeGreaterThan(0);
   });
 
+  it('shifts the mobile token and price popover away from the viewport edge', () => {
+    const originalInnerWidth = window.innerWidth;
+    const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: 375,
+    });
+    Element.prototype.getBoundingClientRect = function getBoundingClientRect() {
+      const className = String(this.getAttribute('class') ?? '');
+      if (className.includes('md:hidden')) {
+        return {
+          bottom: 24,
+          height: 20,
+          left: 340,
+          right: 376,
+          top: 4,
+          width: 36,
+          x: 340,
+          y: 4,
+          toJSON: () => ({}),
+        };
+      }
+      if (className.includes('absolute left-1/2 top-full')) {
+        return {
+          bottom: 150,
+          height: 120,
+          left: 0,
+          right: 192,
+          top: 30,
+          width: 192,
+          x: 0,
+          y: 30,
+          toJSON: () => ({}),
+        };
+      }
+      return originalGetBoundingClientRect.call(this);
+    };
+
+    try {
+      render(
+        <ThreadTimeline
+          liveOutput=""
+          turns={[
+            {
+              id: 'turn-1',
+              startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+              status: 'completed',
+              error: null,
+              model: 'gpt-5.4',
+              reasoningEffort: 'high',
+              reasoningEffortAvailable: true,
+              tokenUsage: {
+                total: {
+                  totalTokens: 18240,
+                  inputTokens: 12000,
+                  cachedInputTokens: 2000,
+                  outputTokens: 4240,
+                  reasoningOutputTokens: 1240,
+                },
+                last: {
+                  totalTokens: 18240,
+                  inputTokens: 12000,
+                  cachedInputTokens: 2000,
+                  outputTokens: 4240,
+                  reasoningOutputTokens: 1240,
+                },
+                modelContextWindow: 272000,
+              },
+              priceEstimate: {
+                pricingModelKey: 'gpt-5.4',
+                pricingTierKey: 'standard',
+                currency: 'USD',
+                inputUsd: 0.025,
+                cachedInputUsd: 0.0005,
+                outputUsd: 0.0636,
+                totalUsd: 0.0891,
+              },
+              items: [
+                {
+                  id: 'agent-1',
+                  kind: 'agentMessage',
+                  text: 'Done.',
+                },
+              ],
+            },
+          ]}
+        />,
+      );
+
+      fireEvent.click(
+        screen.getAllByRole('button', { name: 'Show token and price details' }).at(-1)!,
+      );
+
+      const popoverShell = document.querySelector('.thread-token-popover')?.parentElement;
+      expect(popoverShell).toHaveStyle({ transform: 'translateX(-91px) translateX(-50%)' });
+    } finally {
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      Object.defineProperty(window, 'innerWidth', {
+        configurable: true,
+        value: originalInnerWidth,
+      });
+    }
+  });
+
   it('opens the desktop token and price popover on hover over the price badge', () => {
     render(
       <ThreadTimeline

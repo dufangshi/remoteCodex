@@ -2,6 +2,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -1472,8 +1473,45 @@ function TurnTokenSummary({ turn }: { turn: TimelineTurn }) {
   const priceBadge = buildTurnPriceBadge(turn);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [isDesktopOpen, setIsDesktopOpen] = useState(false);
+  const [mobilePopoverShift, setMobilePopoverShift] = useState(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const desktopPriceRef = useRef<HTMLDivElement | null>(null);
+  const mobilePopoverRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    if (!isMobileOpen || details.length === 0) {
+      setMobilePopoverShift(0);
+      return;
+    }
+
+    const updatePopoverShift = () => {
+      const anchor = containerRef.current;
+      const popover = mobilePopoverRef.current;
+      if (!anchor || !popover) {
+        return;
+      }
+
+      const anchorRect = anchor.getBoundingClientRect();
+      const popoverWidth = popover.offsetWidth || popover.getBoundingClientRect().width;
+      if (popoverWidth <= 0) {
+        return;
+      }
+
+      const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+      const viewportPadding = 12;
+      const desiredLeft = anchorRect.left + anchorRect.width / 2 - popoverWidth / 2;
+      const minLeft = viewportPadding;
+      const maxLeft = Math.max(minLeft, viewportWidth - viewportPadding - popoverWidth);
+      const clampedLeft = Math.min(Math.max(desiredLeft, minLeft), maxLeft);
+      setMobilePopoverShift(Math.round(clampedLeft - desiredLeft));
+    };
+
+    updatePopoverShift();
+    window.addEventListener('resize', updatePopoverShift);
+    return () => {
+      window.removeEventListener('resize', updatePopoverShift);
+    };
+  }, [details.length, isMobileOpen]);
 
   useEffect(() => {
     if (!isMobileOpen && !isDesktopOpen) {
@@ -1581,7 +1619,11 @@ function TurnTokenSummary({ turn }: { turn: TimelineTurn }) {
           </button>
         ) : null}
         {isMobileOpen && details.length > 0 ? (
-          <div className="absolute left-1/2 top-full z-30 mt-1.5 -translate-x-1/2">
+          <div
+            ref={mobilePopoverRef}
+            className="absolute left-1/2 top-full z-30 mt-1.5"
+            style={{ transform: `translateX(${mobilePopoverShift}px) translateX(-50%)` }}
+          >
             {renderBreakdownPopover()}
           </div>
         ) : null}
