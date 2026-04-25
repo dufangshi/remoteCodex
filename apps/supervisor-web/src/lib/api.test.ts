@@ -7,6 +7,7 @@ import {
   fetchCodexHostFile,
   fetchCodexStatus,
   importThread,
+  buildAndRestartService,
   restartCodexAppServer,
   resumeThread,
   sendThreadPrompt,
@@ -107,10 +108,13 @@ describe('api request helper', () => {
   it('uses the expected codex status endpoints', async () => {
     await fetchCodexStatus();
     await restartCodexAppServer();
+    await buildAndRestartService();
 
     const calls = vi.mocked(fetch).mock.calls;
     expect(calls[0]?.[0]).toBe('/api/codex/status');
     expect(calls[1]?.[0]).toBe('/api/codex/restart');
     expect(calls[1]?.[1]?.method).toBe('POST');
+    expect(calls[2]?.[0]).toBe('/api/codex/build-restart');
+    expect(calls[2]?.[1]?.method).toBe('POST');
   });
 });

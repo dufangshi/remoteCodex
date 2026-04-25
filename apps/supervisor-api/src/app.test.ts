@@ -14,6 +14,7 @@ describe('supervisor api', () => {
   let codexHome = '';
   let app: ReturnType<typeof buildApp>;
   let fakeCodexManager: FakeCodexManager;
+  let launchBuildRestartCalls = 0;
 
   beforeEach(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'remote-codex-api-'));
@@ -22,6 +23,7 @@ describe('supervisor api', () => {
     await fs.writeFile(path.join(tempDir, 'workspace', 'README.md'), '# hello');
     await fs.mkdir(codexHome, { recursive: true });
     fakeCodexManager = new FakeCodexManager();
+    launchBuildRestartCalls = 0;
 
     app = buildApp({
       env: {
@@ -32,7 +34,13 @@ describe('supervisor api', () => {
         WORKSPACE_ROOT: tempDir,
         CODEX_HOME: codexHome
       },
-      codexManager: fakeCodexManager as any
+      codexManager: fakeCodexManager as any,
+      serviceLifecycle: {
+        async launchBuildRestart() {
+          launchBuildRestartCalls += 1;
+          return { pid: 12345 };
+        },
+      },
     });
 
     await app.ready();
@@ -191,6 +199,21 @@ describe('supervisor api', () => {
       state: 'ready',
       transport: 'stdio',
     });
+  });
+
+  it('launches detached service build and restart on demand', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/codex/build-restart',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      status: 'launched',
+      pid: 12345,
+      message: 'Build and restart launched.',
+    });
+    expect(launchBuildRestartCalls).toBe(1);
   });
 
   it('reads editable codex host files from CODEX_HOME', async () => {
@@ -734,6 +757,127 @@ describe('supervisor api', () => {
       reasoningEffort: 'medium',
       reasoningEffortAvailable: true,
     });
+  });
+
+  it('forks a thread from a selected turn and returns fork turn options', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Fork Source Thread',
+      },
+    });
+
+    const createdThread = createResponse.json();
+    const sourceThread = fakeCodexManager.threads.get(createdThread.codexThreadId);
+    expect(sourceThread).toBeTruthy();
+    sourceThread!.turns = [
+      {
+        id: 'turn-1',
+        status: 'completed',
+        error: null,
+        items: [
+          {
+            id: 'user-1',
+            type: 'userMessage',
+            content: [{ type: 'text', text: 'First turn' }],
+          },
+        ],
+      },
+      {
+        id: 'turn-2',
+        status: 'completed',
+        error: null,
+        items: [
+          {
+            id: 'user-2',
+            type: 'userMessage',
+            content: [{ type: 'text', text: 'Second turn' }],
+          },
+        ],
+      },
+    ];
+
+    const forkTurnsResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}/fork-turns`,
+    });
+
+    expect(forkTurnsResponse.statusCode).toBe(200);
+    expect(forkTurnsResponse.json()).toMatchObject([
+      {
+        turnIndex: 1,
+      },
+      {
+        turnIndex: 2,
+      },
+    ]);
+
+    const targetTurnId = forkTurnsResponse.json()[0].turnId;
+    const forkResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/fork`,
+      payload: {
+        mode: 'turn',
+        turnId: targetTurnId,
+      },
+    });
+
+    expect(forkResponse.statusCode).toBe(200);
+    expect(fakeCodexManager.forkThreadCalls).toEqual([
+      createdThread.codexThreadId,
+    ]);
+    expect(fakeCodexManager.rollbackThreadCalls).toMatchObject([
+      {
+        count: 1,
+      },
+    ]);
+    expect(forkResponse.json()).toMatchObject({
+      sourceThreadId: createdThread.id,
+      sourceTurnId: targetTurnId,
+      sourceTurnIndex: 1,
+      thread: {
+        thread: {
+          title: 'Fork Source Thread / fork',
+        },
+        turns: [
+          {
+            items: [
+              {
+                text: 'First turn',
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const sourceDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+    expect(sourceDetailResponse.statusCode).toBe(200);
+    expect(sourceDetailResponse.json().activityNotes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'forkCreated',
+          linkedThreadTitle: 'Fork Source Thread / fork',
+          turnIndex: 1,
+        }),
+      ]),
+    );
   });
 
   it('uses the app-server cumulative total minus the turn baseline for per-turn token usage', async () => {

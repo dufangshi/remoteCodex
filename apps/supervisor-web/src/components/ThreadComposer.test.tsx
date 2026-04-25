@@ -309,6 +309,59 @@ describe('ThreadComposer', () => {
     );
   });
 
+  it('opens the fork panel and triggers latest or selected-turn fork actions', async () => {
+    const onForkLatest = vi.fn().mockResolvedValue(undefined);
+    const onForkTurn = vi.fn().mockResolvedValue(undefined);
+    const onOpenForkTurns = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={() => undefined}
+        onForkLatest={onForkLatest}
+        onForkTurn={onForkTurn}
+        onOpenForkTurns={onOpenForkTurns}
+        forkTurnOptionsState={{
+          status: 'ready',
+          error: null,
+          data: [
+            {
+              turnId: 'turn-1',
+              turnIndex: 1,
+              startedAt: '2026-04-10T00:00:00.000Z',
+              status: 'completed',
+            },
+          ],
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
+    fireEvent.click(screen.getByRole('button', { name: /\/fork/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Fork from latest/i }));
+
+    await waitFor(() => {
+      expect(onForkLatest).toHaveBeenCalled();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
+    fireEvent.click(screen.getByRole('button', { name: /\/fork/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Fork from selected turn/i }));
+
+    await waitFor(() => {
+      expect(onOpenForkTurns).toHaveBeenCalled();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Turn 1/i }));
+    await waitFor(() => {
+      expect(onForkTurn).toHaveBeenCalledWith('turn-1');
+    });
+  });
+
   it('opens the skills panel from the slash toolbox and renders read-only skill entries', async () => {
     const onOpenSkills = vi.fn().mockResolvedValue(undefined);
 

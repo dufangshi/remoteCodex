@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 
 import {
   CodexStatusDto,
@@ -11,6 +11,7 @@ import {
   ThreadSkillsDto,
   ThreadDto,
   ThreadEventEnvelope,
+  ThreadForkTurnOptionDto,
   ThreadTurnPriceEstimateDto,
   ThreadTurnTokenUsageDto,
 } from '../../../../packages/shared/src/index';
@@ -34,12 +35,14 @@ import {
   fetchCodexHostFile,
   fetchCodexModels,
   fetchCodexStatus,
+  fetchThreadForkTurns,
   fetchThreadMcpServers,
   fetchThreadHistoryItemDetail,
   fetchThreadSkills,
   fetchSupervisorHealth,
   fetchThreads,
   fetchThreadDetail,
+  forkThread,
   interruptThread,
   respondToThreadRequest,
   resumeThread,
@@ -265,6 +268,7 @@ function threadConnectionSummary(isLoaded: boolean, connection: RealtimeConnecti
 
 export function ThreadDetailPage() {
   const { id = '' } = useParams();
+  const navigate = useNavigate();
   const liveOutputBufferRef = useRef('');
   const liveOutputFrameRef = useRef<number | null>(null);
   const supervisorSocketRef = useRef<WebSocket | null>(null);
@@ -344,6 +348,13 @@ export function ThreadDetailPage() {
     data: null,
     error: null,
   });
+  const [forkTurnOptionsState, setForkTurnOptionsState] = useState<
+    SlashPanelState<ThreadForkTurnOptionDto[]>
+  >({
+    status: 'idle',
+    data: null,
+    error: null,
+  });
   const [error, setError] = useState<string | null>(null);
 
   const flushBufferedLiveOutput = useCallback(() => {
@@ -387,6 +398,11 @@ export function ThreadDetailPage() {
       error: null,
     });
     setMcpState({
+      status: 'idle',
+      data: null,
+      error: null,
+    });
+    setForkTurnOptionsState({
       status: 'idle',
       data: null,
       error: null,
@@ -451,6 +467,56 @@ export function ThreadDetailPage() {
             : 'Unable to load MCP servers.',
       }));
     }
+  }
+
+  async function handleOpenForkTurns() {
+    if (!id) {
+      return;
+    }
+
+    setForkTurnOptionsState((current) => ({
+      status: 'loading',
+      data: current.data,
+      error: null,
+    }));
+
+    try {
+      const next = await fetchThreadForkTurns(id);
+      setForkTurnOptionsState({
+        status: 'ready',
+        data: next,
+        error: null,
+      });
+    } catch (requestError) {
+      setForkTurnOptionsState((current) => ({
+        status: 'failed',
+        data: current.data,
+        error:
+          requestError instanceof ApiError
+            ? requestError.payload.message
+            : 'Unable to load turns for forking.',
+      }));
+    }
+  }
+
+  async function handleForkLatest() {
+    if (!id) {
+      return;
+    }
+
+    const result = await forkThread(id, { mode: 'latest' });
+    setThreads((current) => mergeThreadIntoList(current, result.thread.thread));
+    navigate(`/threads/${result.thread.thread.id}`);
+  }
+
+  async function handleForkTurn(turnId: string) {
+    if (!id) {
+      return;
+    }
+
+    const result = await forkThread(id, { mode: 'turn', turnId });
+    setThreads((current) => mergeThreadIntoList(current, result.thread.thread));
+    navigate(`/threads/${result.thread.thread.id}`);
   }
 
   const applyDetailResponse = useCallback(
@@ -2323,6 +2389,9 @@ export function ThreadDetailPage() {
                       onSubmit={handlePrompt}
                       onInterrupt={handleInterrupt}
                       onCompact={handleCompactThread}
+                      onOpenForkTurns={handleOpenForkTurns}
+                      onForkLatest={handleForkLatest}
+                      onForkTurn={handleForkTurn}
                       onOpenSkills={handleOpenSkills}
                       onOpenMcp={handleOpenMcp}
                       onReadCodexConfig={() => fetchCodexHostFile('config.toml')}
@@ -2337,6 +2406,7 @@ export function ThreadDetailPage() {
                       compactBusy={compactBusy}
                       skillsState={skillsState}
                       mcpState={mcpState}
+                      forkTurnOptionsState={forkTurnOptionsState}
                     />
                   </div>
                 ) : (
@@ -2364,6 +2434,9 @@ export function ThreadDetailPage() {
                       onSubmit={handlePrompt}
                       onInterrupt={handleInterrupt}
                       onCompact={handleCompactThread}
+                      onOpenForkTurns={handleOpenForkTurns}
+                      onForkLatest={handleForkLatest}
+                      onForkTurn={handleForkTurn}
                       onOpenSkills={handleOpenSkills}
                       onOpenMcp={handleOpenMcp}
                       onReadCodexConfig={() => fetchCodexHostFile('config.toml')}
@@ -2378,6 +2451,7 @@ export function ThreadDetailPage() {
                       compactBusy={compactBusy}
                       skillsState={skillsState}
                       mcpState={mcpState}
+                      forkTurnOptionsState={forkTurnOptionsState}
                     />
                   </div>
                 )}

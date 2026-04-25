@@ -14,11 +14,14 @@ import {
 } from '../../../../packages/codex/src/index';
 import {
   createThreadActivityNoteRecord,
+  createThreadForkRecord,
   createThreadPendingSteerRecord,
   createThreadRecord,
   createWorkspaceRecord,
   DatabaseClient,
   deleteThreadActivityNotesByThreadId,
+  deleteThreadForkRecordsByForkedThreadId,
+  deleteThreadForkRecordsBySourceThreadId,
   deleteNotificationsByThreadId,
   deleteThreadPendingSteerRecordById,
   deleteThreadPendingSteerRecordsByThreadId,
@@ -31,6 +34,8 @@ import {
   getWorkspaceRecordByPath,
   getWorkspaceRecordById,
   listThreadActivityNotesByThreadId,
+  listThreadForkRecordsByForkedThreadId,
+  listThreadForkRecordsBySourceThreadId,
   listThreadPendingSteerRecordsByThreadId,
   listThreadTurnMetadataByThreadId,
   listThreadRecords,
@@ -41,6 +46,7 @@ import {
   ApprovalMode,
   CollaborationModeDto,
   CreateThreadInput,
+  ForkThreadInput,
   ImportThreadInput,
   ModelOptionDto,
   PromptAttachmentManifestEntryDto,
@@ -57,6 +63,8 @@ import {
   ThreadDetailDto,
   ThreadDto,
   ThreadEventEnvelope,
+  ThreadForkResultDto,
+  ThreadForkTurnOptionDto,
   ThreadHistoryItemDetailDto,
   ThreadHistoryItemDto,
   ThreadLiveItemsDto,
@@ -81,6 +89,7 @@ import { SupervisorEventBus } from './event-bus';
 import { LocalCodexSessionStore } from './local-session-store';
 import {
   buildTurnPricingSnapshot,
+  contextWindowForModel,
   estimateTurnPrice,
   supportsFastMode,
 } from './modelPricing';
@@ -516,12 +525,15 @@ function computeContextRemainingPercent(
 
 function buildThreadContextUsageFromPayload(
   payload: ThreadContextTokenUsagePayload | null | undefined,
+  model: string | null | undefined = null,
   timestamp = new Date().toISOString(),
 ): ThreadContextUsageDto {
   const tokenUsage = isRecord(payload) ? payload : null;
-  const modelContextWindow = numberOrNull(
-    tokenUsage?.modelContextWindow ?? tokenUsage?.model_context_window,
-  );
+  const modelContextWindow =
+    contextWindowForModel(model) ??
+    numberOrNull(
+      tokenUsage?.modelContextWindow ?? tokenUsage?.model_context_window,
+    );
   const lastUsage = isRecord(tokenUsage?.last) ? tokenUsage.last : null;
   const tokensInContextWindow = numberOrNull(
     lastUsage?.totalTokens ?? lastUsage?.total_tokens,
@@ -913,7 +925,9 @@ function formatToolCallHistoryItem(
 
   if (
     deferredDetails &&
-    (Boolean(argumentText) || Boolean(resultText) || historyItem.detailText.length > 240)
+    (Boolean(argumentText) ||
+      Boolean(resultText) ||
+      (historyItem.detailText?.length ?? 0) > 240)
   ) {
     return deferToolCallHistoryItem(
       historyItem as ThreadHistoryItemDto & { kind: 'toolCall' },
@@ -2774,6 +2788,131 @@ export class ThreadService {
     return this.toThreadDto(updated, refreshedLoadedIds);
   }
 
+  async listForkTurnOptions(localThreadId: string): Promise<ThreadForkTurnOptionDto[]> {
+    const record = getThreadRecordById(this.db, localThreadId);
+    if (!record || !record.codexThreadId) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Thread was not found.',
+      });
+    }
+
+    const turnMetadataById = new Map<string, ThreadTurnMetadataRecord>(
+      listThreadTurnMetadataByThreadId(this.db, localThreadId).map((entry) => [
+        entry.turnId,
+        {
+          model: entry.model ?? null,
+          reasoningEffort: entry.reasoningEffort ?? null,
+          reasoningEffortAvailable: entry.reasoningEffortAvailable ?? null,
+          pricingModelKey: entry.pricingModelKey ?? null,
+          pricingTierKey: normalizePricingTier(entry.pricingTierKey),
+          tokenUsageJson: entry.tokenUsageJson ?? null,
+        },
+      ]),
+    );
+    const cachedDetail = await this.buildThreadDetailCacheEntry(
+      localThreadId,
+      record,
+      turnMetadataById,
+    );
+
+    return cachedDetail.turns.map((turn, index) => ({
+      turnId: turn.id,
+      turnIndex: index + 1,
+      startedAt: turn.startedAt,
+      status: turn.status,
+    }));
+  }
+
+  async forkThread(
+    localThreadId: string,
+    input: ForkThreadInput,
+  ): Promise<ThreadForkResultDto> {
+    const record = getThreadRecordById(this.db, localThreadId);
+    if (!record || !record.codexThreadId) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Thread was not found.',
+      });
+    }
+
+    if (record.status === 'running') {
+      throw new HttpError(409, {
+        code: 'conflict',
+        message: 'Cannot fork a thread while it is still running.',
+      });
+    }
+
+    const turnOptions = await this.listForkTurnOptions(localThreadId);
+    const selectedTurn =
+      input.mode === 'turn'
+        ? turnOptions.find((turn) => turn.turnId === input.turnId)
+        : turnOptions.at(-1) ?? null;
+
+    if (input.mode === 'turn' && !selectedTurn) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'The selected fork turn was not found.',
+      });
+    }
+
+    const forkedThread = await this.codexManager.forkThread({
+      threadId: record.codexThreadId,
+    });
+    const turnsToRollback =
+      selectedTurn == null ? 0 : Math.max(0, turnOptions.length - selectedTurn.turnIndex);
+    if (turnsToRollback > 0) {
+      await this.codexManager.rollbackThread({
+        threadId: forkedThread.id,
+        count: turnsToRollback,
+      });
+    }
+
+    const forkTitleBase = record.title.trim() || DEFAULT_THREAD_TITLE;
+    const created = createThreadRecord(this.db, {
+      workspaceId: record.workspaceId,
+      title: `${forkTitleBase} / fork`,
+      model: record.model,
+      reasoningEffort: record.reasoningEffort,
+      fastMode: normalizeFastMode(record.fastMode),
+      fastBaseModel: record.fastBaseModel,
+      fastBaseReasoningEffort: record.fastBaseReasoningEffort,
+      collaborationMode: normalizeCollaborationMode(record.collaborationMode),
+      approvalMode: (record.approvalMode ?? 'yolo') as ApprovalMode,
+      sandboxMode: normalizeSandboxMode(record.sandboxMode),
+      codexThreadId: forkedThread.id,
+      summaryText: forkedThread.preview,
+      source: 'supervisor',
+      isConnected: true,
+    });
+
+    updateThreadRecord(this.db, created.id, {
+      ...this.buildThreadPatch(
+        forkedThread,
+        record.model,
+        normalizeReasoningEffort(record.reasoningEffort),
+      ),
+      title: `${forkTitleBase} / fork`,
+    });
+
+    createThreadForkRecord(this.db, {
+      sourceThreadId: localThreadId,
+      sourceTurnId: selectedTurn?.turnId ?? null,
+      sourceTurnIndex: selectedTurn?.turnIndex ?? null,
+      forkedThreadId: created.id,
+    });
+
+    this.invalidateThreadDetailCache(localThreadId);
+    this.invalidateThreadDetailCache(created.id);
+
+    return {
+      thread: await this.getThreadDetail(created.id),
+      sourceThreadId: localThreadId,
+      sourceTurnId: selectedTurn?.turnId ?? null,
+      sourceTurnIndex: selectedTurn?.turnIndex ?? null,
+    };
+  }
+
   async listThreadSkills(localThreadId: string): Promise<ThreadSkillsDto> {
     const record = getThreadRecordById(this.db, localThreadId);
     if (!record) {
@@ -2913,6 +3052,8 @@ export class ThreadService {
     this.answeredRequestNotes.delete(localThreadId);
     deleteViewerSessionsByThreadId(this.db, localThreadId);
     deleteNotificationsByThreadId(this.db, localThreadId);
+    deleteThreadForkRecordsBySourceThreadId(this.db, localThreadId);
+    deleteThreadForkRecordsByForkedThreadId(this.db, localThreadId);
     deleteThreadActivityNotesByThreadId(this.db, localThreadId);
     deleteThreadPendingSteerRecordsByThreadId(this.db, localThreadId);
     deleteThreadTurnMetadataByThreadId(this.db, localThreadId);
@@ -3058,7 +3199,10 @@ export class ThreadService {
           return;
         }
 
-        const usage = buildThreadContextUsageFromPayload(params.tokenUsage);
+        const usage = buildThreadContextUsageFromPayload(
+          params.tokenUsage,
+          record.model,
+        );
         this.setThreadContextUsage(record.id, usage, true);
         const existingTurnMetadata = getThreadTurnMetadataByThreadAndTurnId(
           this.db,
@@ -3593,12 +3737,44 @@ export class ThreadService {
   }
 
   private listActivityNotes(localThreadId: string): ThreadActivityNoteDto[] {
-    return listThreadActivityNotesByThreadId(this.db, localThreadId).map((record) => ({
+    const notes: ThreadActivityNoteDto[] = listThreadActivityNotesByThreadId(
+      this.db,
+      localThreadId,
+    ).map((record) => ({
       id: record.id,
       kind: 'fastMode',
       text: record.text,
       createdAt: record.createdAt,
+      anchorTurnId: null,
     }));
+
+    for (const record of listThreadForkRecordsBySourceThreadId(this.db, localThreadId)) {
+      const forkedThread = getThreadRecordById(this.db, record.forkedThreadId);
+      notes.push({
+        id: `fork-created:${record.id}`,
+        kind: 'forkCreated',
+        createdAt: record.createdAt,
+        anchorTurnId: record.sourceTurnId ?? null,
+        linkedThreadId: record.forkedThreadId,
+        linkedThreadTitle: forkedThread?.title ?? null,
+        turnIndex: record.sourceTurnIndex ?? null,
+      });
+    }
+
+    for (const record of listThreadForkRecordsByForkedThreadId(this.db, localThreadId)) {
+      const sourceThread = getThreadRecordById(this.db, record.sourceThreadId);
+      notes.push({
+        id: `fork-source:${record.id}`,
+        kind: 'forkSource',
+        createdAt: record.createdAt,
+        anchorTurnId: '__leading__',
+        linkedThreadId: record.sourceThreadId,
+        linkedThreadTitle: sourceThread?.title ?? null,
+        turnIndex: record.sourceTurnIndex ?? null,
+      });
+    }
+
+    return notes.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
 
   private appendActivityNote(

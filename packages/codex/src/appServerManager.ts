@@ -13,6 +13,8 @@ import {
   CodexThreadRecord,
   CodexTurnRecord,
   ReasoningEffort,
+  ThreadForkInput,
+  ThreadRollbackInput,
   ThreadResumeInput,
   ThreadStartInput,
   TurnStartInput,
@@ -304,6 +306,23 @@ export class CodexAppServerManager extends EventEmitter {
       reasoningEffort: response.reasoningEffort ?? null,
       sandbox: response.sandbox ?? null,
     };
+  }
+
+  async forkThread(input: ThreadForkInput) {
+    await this.ensureReady();
+    const response = await this.client!.request<{ thread: any }>('thread/fork', {
+      threadId: input.threadId,
+    });
+    return mapThread(response.thread);
+  }
+
+  async rollbackThread(input: ThreadRollbackInput) {
+    await this.ensureReady();
+    const response = await this.client!.request<{ thread: any }>('thread/rollback', {
+      threadId: input.threadId,
+      count: input.count,
+    });
+    return mapThread(response.thread);
   }
 
   async startTurn(input: TurnStartInput) {

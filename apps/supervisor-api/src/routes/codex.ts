@@ -26,6 +26,16 @@ export async function registerCodexRoutes(app: FastifyInstance) {
     return codexStatusDto(app);
   });
 
+  app.post('/api/codex/build-restart', async () => {
+    const launched = await app.services.serviceLifecycle.launchBuildRestart();
+
+    return {
+      status: 'launched',
+      pid: launched.pid,
+      message: 'Build and restart launched.',
+    };
+  });
+
   app.get('/api/codex/models', async () => {
     const models = await app.services.threadService.listModels();
     return models satisfies ModelOptionDto[];

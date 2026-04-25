@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import type { CodexHostFileNameDto } from '../../../../packages/shared/src/index';
 import {
   ApiError,
+  buildAndRestartService,
   fetchCodexHostFile,
   restartCodexAppServer,
   updateCodexHostFile,
@@ -392,6 +393,36 @@ export function AppShellSettingsDialog() {
     }
   }
 
+  async function handleBuildAndRestartService() {
+    if (restartState.busy) {
+      return;
+    }
+
+    setRestartState({
+      busy: true,
+      message: null,
+      error: null,
+    });
+
+    try {
+      await buildAndRestartService();
+      setRestartState({
+        busy: false,
+        message: 'Build and restart launched. The page may disconnect briefly.',
+        error: null,
+      });
+    } catch (error) {
+      setRestartState({
+        busy: false,
+        message: null,
+        error:
+          error instanceof ApiError
+            ? error.message
+            : 'Unable to launch build and restart.',
+      });
+    }
+  }
+
   async function handleSave(name: CodexHostFileNameDto) {
     const fileState = files[name];
     if (!fileState || fileState.saving) {
@@ -533,14 +564,24 @@ export function AppShellSettingsDialog() {
                     Restart after editing host configuration to force a fresh reload.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void handleRestartAppServer()}
-                  disabled={restartState.busy}
-                  className="shrink-0 rounded-full border border-sky-400/35 bg-sky-400/10 px-3 py-1.5 text-xs font-medium text-sky-500 transition hover:bg-sky-400/16 disabled:cursor-not-allowed disabled:border-[var(--theme-border)] disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
-                >
-                  {restartState.busy ? 'Restarting...' : 'Restart'}
-                </button>
+                <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleRestartAppServer()}
+                    disabled={restartState.busy}
+                    className="rounded-full border border-sky-400/35 bg-sky-400/10 px-3 py-1.5 text-xs font-medium text-sky-500 transition hover:bg-sky-400/16 disabled:cursor-not-allowed disabled:border-[var(--theme-border)] disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
+                  >
+                    {restartState.busy ? 'Restarting...' : 'Restart'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleBuildAndRestartService()}
+                    disabled={restartState.busy}
+                    className="rounded-full border border-amber-400/35 bg-amber-400/10 px-3 py-1.5 text-xs font-medium text-amber-500 transition hover:bg-amber-400/16 disabled:cursor-not-allowed disabled:border-[var(--theme-border)] disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
+                  >
+                    {restartState.busy ? 'Working...' : 'Build and restart'}
+                  </button>
+                </div>
               </div>
               {restartState.error ? (
                 <p className="mt-2 text-xs text-rose-300">{restartState.error}</p>

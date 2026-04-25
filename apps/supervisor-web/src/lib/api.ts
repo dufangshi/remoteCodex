@@ -4,6 +4,7 @@ import type {
   CodexHostFileNameDto,
   CodexStatusDto,
   CreateThreadInput,
+  ForkThreadInput,
   CreateWorkspaceInput,
   HealthDto,
   ImportThreadInput,
@@ -25,6 +26,8 @@ import type {
   ThreadSkillsDto,
   ThreadDto,
   ThreadEventEnvelope,
+  ThreadForkResultDto,
+  ThreadForkTurnOptionDto,
   ThreadShellStateDto,
   UpdateThreadSettingsInput,
   UpdateCodexHostFileInput,
@@ -113,6 +116,15 @@ export function restartCodexAppServer() {
   return request<CodexStatusDto>('/api/codex/restart', {
     method: 'POST',
   });
+}
+
+export function buildAndRestartService() {
+  return request<{ status: 'launched'; pid: number | null; message: string }>(
+    '/api/codex/build-restart',
+    {
+      method: 'POST',
+    },
+  );
 }
 
 export function fetchCodexModels() {
@@ -281,6 +293,19 @@ export function updateThreadSettings(id: string, input: UpdateThreadSettingsInpu
 export function compactThread(id: string) {
   return request<ThreadDto>(`/api/threads/${id}/compact`, {
     method: 'POST',
+  });
+}
+
+export function fetchThreadForkTurns(id: string) {
+  return request<ThreadForkTurnOptionDto[]>(`/api/threads/${id}/fork-turns`, {
+    cache: 'no-store',
+  });
+}
+
+export function forkThread(id: string, input: ForkThreadInput) {
+  return request<ThreadForkResultDto>(`/api/threads/${id}/fork`, {
+    method: 'POST',
+    body: JSON.stringify(input),
   });
 }
 

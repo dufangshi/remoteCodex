@@ -10,6 +10,8 @@ interface ModelPricingEntry {
   cachedInputUsdPerMillion: number;
   outputUsdPerMillion: number;
   supportsFastMode: boolean;
+  fastMultiplier?: number;
+  contextWindowTokens?: number;
 }
 
 interface PricingTierConfig {
@@ -112,6 +114,8 @@ function parsePricingConfig(raw: unknown): PricingConfig {
       cachedInputUsdPerMillion?: unknown;
       outputUsdPerMillion?: unknown;
       supportsFastMode?: unknown;
+      fastMultiplier?: unknown;
+      contextWindowTokens?: unknown;
     };
 
     if (
@@ -122,12 +126,30 @@ function parsePricingConfig(raw: unknown): PricingConfig {
     ) {
       throw new Error(`Pricing config model "${modelKey}" has invalid fields.`);
     }
+    if (
+      entry.fastMultiplier !== undefined &&
+      !isPositiveNumber(entry.fastMultiplier)
+    ) {
+      throw new Error(`Pricing config model "${modelKey}" fastMultiplier must be a non-negative number.`);
+    }
+    if (
+      entry.contextWindowTokens !== undefined &&
+      !isPositiveNumber(entry.contextWindowTokens)
+    ) {
+      throw new Error(`Pricing config model "${modelKey}" contextWindowTokens must be a non-negative number.`);
+    }
 
     models[modelKey] = {
       inputUsdPerMillion: entry.inputUsdPerMillion as number,
       cachedInputUsdPerMillion: entry.cachedInputUsdPerMillion as number,
       outputUsdPerMillion: entry.outputUsdPerMillion as number,
       supportsFastMode: entry.supportsFastMode,
+      ...(entry.fastMultiplier !== undefined
+        ? { fastMultiplier: entry.fastMultiplier as number }
+        : {}),
+      ...(entry.contextWindowTokens !== undefined
+        ? { contextWindowTokens: entry.contextWindowTokens as number }
+        : {}),
     };
   }
 
@@ -159,6 +181,17 @@ export function supportsFastMode(model: string | null | undefined) {
   }
 
   return getPricingConfig().models[model]?.supportsFastMode === true;
+}
+
+export function contextWindowForModel(model: string | null | undefined) {
+  if (!model) {
+    return null;
+  }
+
+  const contextWindow = getPricingConfig().models[model]?.contextWindowTokens;
+  return typeof contextWindow === 'number' && contextWindow > 0
+    ? contextWindow
+    : null;
 }
 
 export function buildTurnPricingSnapshot(
@@ -220,7 +253,10 @@ export function estimateTurnPrice(
   );
   const cachedInputTokens = Math.max(usage.total.cachedInputTokens, 0);
   const outputTokens = Math.max(usage.total.outputTokens, 0);
-  const multiplier = tier.multiplier;
+  const multiplier =
+    tierKey === 'fast' && modelPricing.fastMultiplier !== undefined
+      ? modelPricing.fastMultiplier
+      : tier.multiplier;
 
   const inputUsd =
     (nonCachedInputTokens * modelPricing.inputUsdPerMillion * multiplier) /

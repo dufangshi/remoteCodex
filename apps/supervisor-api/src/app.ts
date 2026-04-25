@@ -1,6 +1,8 @@
 import Fastify, { FastifyInstance } from 'fastify';
 import multipart from '@fastify/multipart';
 import websocket from '@fastify/websocket';
+import { spawn } from 'node:child_process';
+import path from 'node:path';
 import { ZodError } from 'zod';
 
 import { CodexAppServerManager, JsonRpcClientError } from '../../../packages/codex/src/index';
@@ -45,9 +47,44 @@ export interface AppServices {
   config: RuntimeConfig;
   database: DatabaseContext;
   codexManager: CodexAppServerManager;
+  serviceLifecycle: {
+    launchBuildRestart: () => Promise<{ pid: number | null }>;
+  };
   eventBus: SupervisorEventBus;
   threadService: ThreadService;
   shellService: ShellSessionService;
+}
+
+function findRepoRoot(start = process.cwd()) {
+  let current = path.resolve(start);
+
+  while (current !== path.dirname(current)) {
+    if (path.basename(current) === 'remoteCodex') {
+      return current;
+    }
+
+    current = path.dirname(current);
+  }
+
+  return path.resolve(process.cwd());
+}
+
+function createServiceLifecycle() {
+  return {
+    async launchBuildRestart() {
+      const repoRoot = findRepoRoot();
+      const restartScript = path.join(repoRoot, 'scripts', 'service-restart.mjs');
+      const child = spawn(process.execPath, [restartScript, 'launch'], {
+        cwd: repoRoot,
+        detached: true,
+        env: process.env,
+        stdio: 'ignore',
+      });
+
+      child.unref();
+      return { pid: child.pid ?? null };
+    },
+  };
 }
 
 declare module 'fastify' {
@@ -61,6 +98,7 @@ export function buildApp(
     env?: NodeJS.ProcessEnv;
     codexManager?: CodexAppServerManager;
     shellService?: ShellSessionService;
+    serviceLifecycle?: AppServices['serviceLifecycle'];
   } = {}
 ): FastifyInstance {
   const config = loadRuntimeConfig(options.env);
@@ -114,6 +152,7 @@ export function buildApp(
     config,
     database,
     codexManager,
+    serviceLifecycle: options.serviceLifecycle ?? createServiceLifecycle(),
     eventBus,
     threadService,
     shellService

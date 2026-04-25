@@ -202,6 +202,15 @@ export interface ThreadResumeInput {
   serviceTier?: ServiceTier | null;
 }
 
+export interface ThreadForkInput {
+  threadId: string;
+}
+
+export interface ThreadRollbackInput {
+  threadId: string;
+  count: number;
+}
+
 export interface TurnStartInput {
   threadId: string;
   prompt: string;

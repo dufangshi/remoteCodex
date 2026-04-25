@@ -2138,6 +2138,64 @@ describe('ThreadTimeline', () => {
     ).toBeTruthy();
   });
 
+  it('renders unanchored answered request notes by timestamp instead of pinning them to the bottom', () => {
+    render(
+      <ThreadTimeline
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'user-1',
+                kind: 'userMessage',
+                text: 'First turn',
+              },
+            ],
+          },
+          {
+            id: 'turn-2',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 3, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'user-2',
+                kind: 'userMessage',
+                text: 'Second turn',
+              },
+            ],
+          },
+        ]}
+        liveOutput=""
+        answeredRequestNotes={[
+          {
+            id: 'request-1',
+            turnId: null,
+            title: 'Planning Preferences',
+            summaryLines: ['Plan object: foundation'],
+            createdAt: new Date(Date.UTC(2026, 3, 9, 6, 2, 0)).toISOString(),
+          },
+        ]}
+      />,
+    );
+
+    const firstTurn = screen.getByText('First turn');
+    const note = screen.getByText('You selected Plan object: foundation');
+    const secondTurn = screen.getByText('Second turn');
+
+    expect(
+      firstTurn.compareDocumentPosition(note) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      note.compareDocumentPosition(secondTurn) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it('renders fork source notes as leading cards with navigation affordance', () => {
     const onOpenThread = vi.fn();
 

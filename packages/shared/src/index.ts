@@ -259,9 +259,13 @@ export interface ThreadAnsweredRequestNoteDto {
 
 export interface ThreadActivityNoteDto {
   id: string;
-  kind: 'fastMode';
-  text: string;
+  kind: 'fastMode' | 'forkCreated' | 'forkSource';
   createdAt: string;
+  text?: string;
+  anchorTurnId?: string | null;
+  linkedThreadId?: string;
+  linkedThreadTitle?: string | null;
+  turnIndex?: number | null;
 }
 
 export type CodexSkillScopeDto = 'user' | 'repo' | 'system' | 'admin';
@@ -351,6 +355,25 @@ export interface ThreadDetailDto {
   activityNotes?: ThreadActivityNoteDto[];
   livePlan?: ThreadLivePlanDto | null;
   liveItems?: ThreadLiveItemsDto | null;
+}
+
+export interface ThreadForkTurnOptionDto {
+  turnId: string;
+  turnIndex: number;
+  startedAt: string | null;
+  status: ThreadTurnDto['status'];
+}
+
+export interface ForkThreadInput {
+  mode: 'latest' | 'turn';
+  turnId?: string;
+}
+
+export interface ThreadForkResultDto {
+  thread: ThreadDetailDto;
+  sourceThreadId: string;
+  sourceTurnId: string | null;
+  sourceTurnIndex: number | null;
 }
 
 export type ShellStatusDto =

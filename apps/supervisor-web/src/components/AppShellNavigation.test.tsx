@@ -106,6 +106,17 @@ describe('AppShellNavigation', () => {
           } satisfies Partial<Response>;
         }
 
+        if (url === '/api/codex/build-restart' && init?.method === 'POST') {
+          return {
+            ok: true,
+            json: async () => ({
+              status: 'launched',
+              pid: 12345,
+              message: 'Build and restart launched.',
+            }),
+          } satisfies Partial<Response>;
+        }
+
         return {
           ok: false,
           json: async () => ({
@@ -254,6 +265,33 @@ describe('AppShellNavigation', () => {
 
     const restartCall = vi.mocked(fetch).mock.calls.find(
       ([url, init]) => String(url) === '/api/codex/restart' && init?.method === 'POST',
+    );
+    expect(restartCall).toBeTruthy();
+  });
+
+  it('launches service build and restart from settings', async () => {
+    render(
+      <MemoryRouter initialEntries={['/threads?workspaceId=workspace-1']}>
+        <NavigationHarness />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Build and restart' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Build and restart' }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('Build and restart launched. The page may disconnect briefly.'),
+      ).toBeInTheDocument();
+    });
+
+    const restartCall = vi.mocked(fetch).mock.calls.find(
+      ([url, init]) => String(url) === '/api/codex/build-restart' && init?.method === 'POST',
     );
     expect(restartCall).toBeTruthy();
   });

@@ -9,6 +9,14 @@
     }
   },
   "models": {
+    "gpt-5.5": {
+      "inputUsdPerMillion": 5,
+      "cachedInputUsdPerMillion": 0.5,
+      "outputUsdPerMillion": 30,
+      "supportsFastMode": true,
+      "fastMultiplier": 2.5,
+      "contextWindowTokens": 400000
+    },
     "gpt-5.3-codex": {
       "inputUsdPerMillion": 1.75,
       "cachedInputUsdPerMillion": 0.175,

@@ -60,6 +60,8 @@ export class FakeCodexManager extends EventEmitter {
   materializeSteersImmediately = true;
   steerTurnCalls: Array<{ threadId: string; turnId: string; prompt: string }> = [];
   compactThreadCalls: string[] = [];
+  forkThreadCalls: string[] = [];
+  rollbackThreadCalls: Array<{ threadId: string; count: number }> = [];
   serverRequestResponses: Array<{ id: number; result: unknown }> = [];
   stopCalls = 0;
   startCalls = 0;
@@ -248,6 +250,32 @@ export class FakeCodexManager extends EventEmitter {
 
   async compactThread(threadId: string) {
     this.compactThreadCalls.push(threadId);
+  }
+
+  async forkThread(input: { threadId: string }) {
+    this.forkThreadCalls.push(input.threadId);
+    const source = this.threads.get(input.threadId) ?? makeThread({ id: input.threadId });
+    const forked = makeThread({
+      ...source,
+      id: `fork-${this.threads.size + 1}`,
+      updatedAt: Math.floor(Date.now() / 1000),
+    });
+    this.threads.set(forked.id, forked);
+    this.loadedThreadIds.add(forked.id);
+    return forked;
+  }
+
+  async rollbackThread(input: { threadId: string; count: number }) {
+    this.rollbackThreadCalls.push(input);
+    const source = this.threads.get(input.threadId) ?? makeThread({ id: input.threadId });
+    const retainedTurnCount = Math.max(0, source.turns.length - Math.max(0, input.count));
+    const nextThread = {
+      ...source,
+      updatedAt: Math.floor(Date.now() / 1000),
+      turns: source.turns.slice(0, retainedTurnCount),
+    };
+    this.threads.set(input.threadId, nextThread);
+    return nextThread;
   }
 
   respondToServerRequest(id: number, result: unknown) {

@@ -1,5 +1,6 @@
 import {
   ClipboardEvent,
+  type CSSProperties,
   type Dispatch,
   DragEvent,
   FormEvent,
@@ -17,6 +18,7 @@ import type {
   CodexHostFileDto,
   ThreadMcpServersDto,
   ThreadSkillsDto,
+  ThreadForkTurnOptionDto,
   ModelOptionDto,
   PromptAttachmentKindDto,
   ThreadContextUsageDto,
@@ -48,6 +50,7 @@ interface ThreadComposerProps {
   draftAttachments?: PromptAttachmentUpload[] | undefined;
   skillsState?: SlashPanelState<ThreadSkillsDto>;
   mcpState?: SlashPanelState<ThreadMcpServersDto>;
+  forkTurnOptionsState?: SlashPanelState<ThreadForkTurnOptionDto[]>;
   onDraftChange?: Dispatch<
     SetStateAction<{
       prompt: string;
@@ -62,6 +65,9 @@ interface ThreadComposerProps {
   onCompact?: () => Promise<void> | void;
   onOpenSkills?: () => Promise<void> | void;
   onOpenMcp?: () => Promise<void> | void;
+  onOpenForkTurns?: () => Promise<void> | void;
+  onForkLatest?: () => Promise<void> | void;
+  onForkTurn?: (turnId: string) => Promise<void> | void;
   onReadCodexConfig?: () => Promise<CodexHostFileDto> | CodexHostFileDto;
   onWriteCodexConfig?: (
     content: string,
@@ -106,7 +112,7 @@ interface PromptAttachmentSegment {
 
 type PromptSegment = PromptTextSegment | PromptAttachmentSegment;
 type AttachmentPreviewMap = Record<string, string>;
-type SlashPanelView = 'root' | 'skills' | 'mcp';
+type SlashPanelView = 'root' | 'skills' | 'mcp' | 'fork' | 'forkTurns';
 type McpPanelMode = 'list' | 'add' | 'http' | 'stdio';
 
 function normalizePromptText(value: string) {
@@ -358,7 +364,7 @@ function ContextRingFrame({
   const availability = contextUsage?.availability ?? 'unavailable';
   const percent = clampPercent(contextUsage?.remainingPercent);
   const progressPercent = availability === 'available' ? percent : 100;
-  const progressStroke =
+  const progressColor =
     availability !== 'available'
       ? 'rgba(120,113,108,0.55)'
       : percent <= 20
@@ -368,37 +374,16 @@ function ContextRingFrame({
           : 'rgba(125,211,252,0.95)';
 
   return (
-    <svg
+    <span
       aria-hidden="true"
-      viewBox="0 0 100 32"
-      preserveAspectRatio="none"
-      className="pointer-events-none absolute inset-0 h-full w-full"
-    >
-      <rect
-        x="1"
-        y="1"
-        width="98"
-        height="30"
-        rx="15"
-        pathLength="100"
-        fill="none"
-        stroke="rgba(41,37,36,0.92)"
-        strokeWidth="1.5"
-      />
-      <rect
-        x="1"
-        y="1"
-        width="98"
-        height="30"
-        rx="15"
-        pathLength="100"
-        fill="none"
-        stroke={progressStroke}
-        strokeWidth="1.75"
-        strokeLinecap="round"
-        strokeDasharray={`${progressPercent} 100`}
-      />
-    </svg>
+      className="thread-context-progress-frame pointer-events-none absolute inset-0"
+      style={
+        {
+          '--context-ring-progress': `${progressPercent}%`,
+          '--context-ring-color': progressColor,
+        } as CSSProperties
+      }
+    />
   );
 }
 
@@ -600,12 +585,20 @@ export function ThreadComposer({
     data: null,
     error: null,
   },
+  forkTurnOptionsState = {
+    status: 'idle',
+    data: null,
+    error: null,
+  },
   onDraftChange,
   onSubmit,
   onInterrupt,
   onCompact,
   onOpenSkills,
   onOpenMcp,
+  onOpenForkTurns,
+  onForkLatest,
+  onForkTurn,
   onReadCodexConfig,
   onWriteCodexConfig,
   onToggleFollow,
@@ -633,6 +626,7 @@ export function ThreadComposer({
   const [mcpConfigError, setMcpConfigError] = useState<string | null>(null);
   const [mcpConfigSuccess, setMcpConfigSuccess] = useState<string | null>(null);
   const [copiedSkillName, setCopiedSkillName] = useState<string | null>(null);
+  const [forkBusy, setForkBusy] = useState(false);
   const menuRef = useRef<HTMLFormElement | null>(null);
   const promptRef = useRef<HTMLDivElement | null>(null);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
@@ -671,6 +665,12 @@ export function ThreadComposer({
       setMcpPanelMode('list');
       setMcpConfigError(null);
       setMcpConfigSuccess(null);
+    }
+  }, [slashPanelView]);
+
+  useEffect(() => {
+    if (slashPanelView !== 'forkTurns') {
+      setForkBusy(false);
     }
   }, [slashPanelView]);
 
@@ -769,6 +769,34 @@ export function ThreadComposer({
       setCopiedSkillName(skillName);
     } catch {
       setCopiedSkillName(null);
+    }
+  }
+
+  async function handleForkLatest() {
+    if (!onForkLatest) {
+      return;
+    }
+
+    setForkBusy(true);
+    try {
+      await onForkLatest();
+      setOpenMenu(null);
+    } finally {
+      setForkBusy(false);
+    }
+  }
+
+  async function handleForkTurn(turnId: string) {
+    if (!onForkTurn) {
+      return;
+    }
+
+    setForkBusy(true);
+    try {
+      await onForkTurn(turnId);
+      setOpenMenu(null);
+    } finally {
+      setForkBusy(false);
     }
   }
 
@@ -1808,6 +1836,22 @@ export function ThreadComposer({
                         </button>
                         <button
                           type="button"
+                          disabled={busy || forkBusy}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setSlashPanelView('fork');
+                          }}
+                          className="thread-composer-menu-item mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <span>/fork</span>
+                            <span className="text-[11px] uppercase tracking-[0.16em] text-stone-400">
+                              {busy ? 'Idle only' : 'Open'}
+                            </span>
+                          </div>
+                        </button>
+                        <button
+                          type="button"
                           onClick={(event) => {
                             event.stopPropagation();
                             setSlashPanelView('skills');
@@ -1841,7 +1885,88 @@ export function ThreadComposer({
                       </div>
                     ) : (
                       <div className="max-h-80 overflow-auto">
-                        {slashPanelView === 'skills' ? (
+                        {slashPanelView === 'fork' ? (
+                          <div className="p-2">
+                            <button
+                              type="button"
+                              disabled={busy || forkBusy}
+                              onClick={() => void handleForkLatest()}
+                              className="thread-composer-menu-item block w-full rounded-xl px-3 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <span>Fork from latest</span>
+                                <span className="text-[11px] uppercase tracking-[0.16em] text-stone-400">
+                                  {forkBusy ? 'Forking' : 'Run'}
+                                </span>
+                              </div>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busy || forkBusy}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setSlashPanelView('forkTurns');
+                                void onOpenForkTurns?.();
+                              }}
+                              className="thread-composer-menu-item mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <span>Fork from selected turn</span>
+                                <span className="text-[11px] uppercase tracking-[0.16em] text-stone-400">
+                                  Pick
+                                </span>
+                              </div>
+                            </button>
+                            {busy ? (
+                              <p className="mt-2 rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3 text-sm text-stone-400">
+                                Fork is only available while the thread is idle.
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : slashPanelView === 'forkTurns' ? (
+                          <div className="p-2">
+                            {forkTurnOptionsState.status === 'loading' &&
+                            !forkTurnOptionsState.data ? (
+                              <p className="rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3 text-sm text-stone-400">
+                                Loading turns…
+                              </p>
+                            ) : null}
+                            {forkTurnOptionsState.error ? (
+                              <p className="mb-2 rounded-xl border border-rose-500/35 bg-rose-500/10 px-3 py-3 text-sm text-rose-100/90">
+                                {forkTurnOptionsState.error}
+                              </p>
+                            ) : null}
+                            {forkTurnOptionsState.data?.length ? (
+                              <div className="space-y-2">
+                                {forkTurnOptionsState.data.map((turn) => (
+                                  <button
+                                    key={turn.turnId}
+                                    type="button"
+                                    disabled={forkBusy}
+                                    onClick={() => void handleForkTurn(turn.turnId)}
+                                    className="thread-composer-panel-button block w-full rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-60"
+                                  >
+                                    <div className="flex items-center justify-between gap-3">
+                                      <span className="text-sm text-stone-100">
+                                        Turn {turn.turnIndex}
+                                      </span>
+                                      <span className="text-[11px] uppercase tracking-[0.16em] text-stone-500">
+                                        {forkBusy ? 'Forking' : turn.status}
+                                      </span>
+                                    </div>
+                                  </button>
+                                ))}
+                              </div>
+                            ) : null}
+                            {forkTurnOptionsState.status !== 'loading' &&
+                            !forkTurnOptionsState.error &&
+                            (forkTurnOptionsState.data?.length ?? 0) === 0 ? (
+                              <p className="rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3 text-sm text-stone-400">
+                                No turns available to fork yet.
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : slashPanelView === 'skills' ? (
                           <div className="p-2">
                             {skillsState.status === 'loading' && !skillsState.data ? (
                               <p className="rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3 text-sm text-stone-400">

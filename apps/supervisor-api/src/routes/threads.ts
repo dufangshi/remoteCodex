@@ -12,6 +12,7 @@ import {
 } from '../../../../packages/db/src/index';
 import {
   ImportThreadInput,
+  ForkThreadInput,
   PromptAttachmentManifestEntryDto,
   ReasoningEffortDto,
   RespondThreadActionRequestInput,
@@ -72,6 +73,16 @@ const resumeThreadSchema = z.object({
   model: z.string().min(1).optional(),
   sandboxMode: z.enum(['read-only', 'workspace-write', 'danger-full-access'] as [SandboxModeDto, ...SandboxModeDto[]]).nullable().optional()
 });
+
+const forkThreadSchema = z.discriminatedUnion('mode', [
+  z.object({
+    mode: z.literal('latest'),
+  }),
+  z.object({
+    mode: z.literal('turn'),
+    turnId: z.string().min(1),
+  }),
+]);
 
 const respondThreadRequestSchema = z.object({
   answers: z.record(z.string(), z.object({
@@ -416,6 +427,17 @@ export async function registerThreadRoutes(app: FastifyInstance) {
   app.post('/api/threads/:id/compact', async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     return app.services.threadService.compactThread(params.id);
+  });
+
+  app.get('/api/threads/:id/fork-turns', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    return app.services.threadService.listForkTurnOptions(params.id);
+  });
+
+  app.post('/api/threads/:id/fork', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = forkThreadSchema.parse(request.body) satisfies ForkThreadInput;
+    return app.services.threadService.forkThread(params.id, body);
   });
 
   app.get('/api/threads/:id/skills', async (request) => {

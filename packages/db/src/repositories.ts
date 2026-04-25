@@ -8,6 +8,7 @@ import {
   notifications,
   shellSessions,
   threadActivityNotes,
+  threadForks,
   threadPendingSteers,
   threadTurnMetadata,
   threads,
@@ -81,6 +82,13 @@ export interface CreateThreadActivityNoteRecordInput {
   threadId: string;
   kind: string;
   text: string;
+}
+
+export interface CreateThreadForkRecordInput {
+  sourceThreadId: string;
+  sourceTurnId?: string | null;
+  sourceTurnIndex?: number | null;
+  forkedThreadId: string;
 }
 
 export interface CreateShellSessionRecordInput {
@@ -398,6 +406,61 @@ export function deleteThreadActivityNotesByThreadId(
   threadId: string,
 ) {
   db.delete(threadActivityNotes).where(eq(threadActivityNotes.threadId, threadId)).run();
+}
+
+export function listThreadForkRecordsBySourceThreadId(
+  db: DatabaseClient,
+  sourceThreadId: string,
+) {
+  return db
+    .select()
+    .from(threadForks)
+    .where(eq(threadForks.sourceThreadId, sourceThreadId))
+    .orderBy(threadForks.createdAt)
+    .all();
+}
+
+export function listThreadForkRecordsByForkedThreadId(
+  db: DatabaseClient,
+  forkedThreadId: string,
+) {
+  return db
+    .select()
+    .from(threadForks)
+    .where(eq(threadForks.forkedThreadId, forkedThreadId))
+    .orderBy(threadForks.createdAt)
+    .all();
+}
+
+export function createThreadForkRecord(
+  db: DatabaseClient,
+  input: CreateThreadForkRecordInput,
+) {
+  const record = {
+    id: randomUUID(),
+    sourceThreadId: input.sourceThreadId,
+    sourceTurnId: input.sourceTurnId ?? null,
+    sourceTurnIndex: input.sourceTurnIndex ?? null,
+    forkedThreadId: input.forkedThreadId,
+    createdAt: new Date().toISOString(),
+  };
+
+  db.insert(threadForks).values(record).run();
+  return record;
+}
+
+export function deleteThreadForkRecordsBySourceThreadId(
+  db: DatabaseClient,
+  sourceThreadId: string,
+) {
+  db.delete(threadForks).where(eq(threadForks.sourceThreadId, sourceThreadId)).run();
+}
+
+export function deleteThreadForkRecordsByForkedThreadId(
+  db: DatabaseClient,
+  forkedThreadId: string,
+) {
+  db.delete(threadForks).where(eq(threadForks.forkedThreadId, forkedThreadId)).run();
 }
 
 export function listShellSessionRecords(db: DatabaseClient) {

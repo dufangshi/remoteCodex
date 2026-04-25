@@ -122,6 +122,15 @@ export const threadActivityNotes = sqliteTable('thread_activity_notes', {
   createdAt: text('created_at').notNull(),
 });
 
+export const threadForks = sqliteTable('thread_forks', {
+  id: text('id').primaryKey(),
+  sourceThreadId: text('source_thread_id').notNull(),
+  sourceTurnId: text('source_turn_id'),
+  sourceTurnIndex: integer('source_turn_index'),
+  forkedThreadId: text('forked_thread_id').notNull(),
+  createdAt: text('created_at').notNull(),
+});
+
 export const policies = sqliteTable('policies', {
   id: text('id').primaryKey(),
   key: text('key').notNull().unique(),

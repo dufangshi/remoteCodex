@@ -3944,6 +3944,96 @@ export function ThreadTimeline({
   const unanchoredPendingRequests = pendingRequests.filter(
     (request) => !request.turnId || !visibleTurnIds.has(request.turnId),
   );
+  const requestEntryAnchors = useMemo(() => {
+    const turnSequence = [
+      ...visibleTurns.map((turn) => ({
+        id: turn.id,
+        startedAt: turn.startedAt ?? '',
+      })),
+      ...(optimisticTurn
+        ? [
+            {
+              id: optimisticTurn.id,
+              startedAt: optimisticTurn.startedAt ?? '',
+            },
+          ]
+        : []),
+    ];
+    const beforeTurnId = new Map<
+      string,
+      Array<
+        | {
+            kind: 'note';
+            id: string;
+            createdAt: string;
+            note: (typeof answeredRequestNotes)[number];
+          }
+        | {
+            kind: 'request';
+            id: string;
+            createdAt: string;
+            request: (typeof pendingRequests)[number];
+          }
+      >
+    >();
+    const trailing: Array<
+      | {
+          kind: 'note';
+          id: string;
+          createdAt: string;
+          note: (typeof answeredRequestNotes)[number];
+        }
+      | {
+          kind: 'request';
+          id: string;
+          createdAt: string;
+          request: (typeof pendingRequests)[number];
+        }
+    > = [];
+
+    const entries = [
+      ...unanchoredAnsweredNotes.map((note) => ({
+        kind: 'note' as const,
+        id: note.id,
+        createdAt: note.createdAt ?? '',
+        note,
+      })),
+      ...unanchoredPendingRequests.map((request) => ({
+        kind: 'request' as const,
+        id: request.id,
+        createdAt: request.createdAt,
+        request,
+      })),
+    ].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+
+    for (const entry of entries) {
+      const anchor = turnSequence.find(
+        (turn) =>
+          entry.createdAt &&
+          turn.startedAt &&
+          entry.createdAt.localeCompare(turn.startedAt) <= 0,
+      );
+      if (!anchor) {
+        trailing.push(entry);
+        continue;
+      }
+
+      const current = beforeTurnId.get(anchor.id) ?? [];
+      current.push(entry);
+      beforeTurnId.set(anchor.id, current);
+    }
+
+    return {
+      beforeTurnId,
+      trailing,
+    };
+  }, [
+    optimisticTurn,
+    pendingRequests,
+    unanchoredAnsweredNotes,
+    unanchoredPendingRequests,
+    visibleTurns,
+  ]);
   const activityNoteAnchors = useMemo(() => {
     const sortedNotes = [...activityNotes].sort((left, right) =>
       left.createdAt.localeCompare(right.createdAt),
@@ -4073,20 +4163,36 @@ export function ThreadTimeline({
                       ))}
                     </div>
                   ) : null}
+                  {(requestEntryAnchors.beforeTurnId.get(turn.id)?.length ?? 0) > 0 ? (
+                    <div className="space-y-3 border-b border-stone-800/80 px-2.5 py-4 sm:px-6">
+                      {(requestEntryAnchors.beforeTurnId.get(turn.id) ?? []).map((entry) =>
+                        entry.kind === 'note' ? (
+                          <AnsweredRequestNote key={entry.id} note={entry.note} />
+                        ) : (
+                          <PendingRequestCard
+                            key={entry.id}
+                            request={entry.request}
+                            busy={respondingRequestId === entry.request.id}
+                            onRespond={onRespondToRequest ?? undefined}
+                          />
+                        ),
+                      )}
+                    </div>
+                  ) : null}
                   <ThreadTurnRow
                     threadId={threadId}
-                  turn={turn}
-                  absoluteIndex={visibleTurnAbsoluteOffset + visibleIndex + 1}
-                  isCollapsed={collapsedTurns[turn.id] ?? false}
-                  livePlan={livePlan?.turnId === turn.id ? livePlan : null}
-                  liveItems={liveItems?.turnId === turn.id ? liveItems.items : null}
-                  liveOutput={visibleIndex === liveOutputTurnIndex ? liveOutput : ''}
-                  onToggleCollapse={handleToggleCollapse}
-                  onOpenExpandedText={handleOpenExpandedText}
-                  onOpenCommandDetail={handleOpenCommandDetail}
-                  onOpenToolCallDetail={handleOpenToolCallDetail}
-                  scrollRootRef={scrollContainerRef}
-                  articleRef={undefined}
+                    turn={turn}
+                    absoluteIndex={visibleTurnAbsoluteOffset + visibleIndex + 1}
+                    isCollapsed={collapsedTurns[turn.id] ?? false}
+                    livePlan={livePlan?.turnId === turn.id ? livePlan : null}
+                    liveItems={liveItems?.turnId === turn.id ? liveItems.items : null}
+                    liveOutput={visibleIndex === liveOutputTurnIndex ? liveOutput : ''}
+                    onToggleCollapse={handleToggleCollapse}
+                    onOpenExpandedText={handleOpenExpandedText}
+                    onOpenCommandDetail={handleOpenCommandDetail}
+                    onOpenToolCallDetail={handleOpenToolCallDetail}
+                    scrollRootRef={scrollContainerRef}
+                    articleRef={undefined}
                   />
                   {(activityNoteAnchors.afterTurnId.get(turn.id)?.length ?? 0) > 0 ? (
                     <div className="space-y-3 border-t border-stone-800/80 px-2.5 py-4 sm:px-6">
@@ -4141,6 +4247,23 @@ export function ThreadTimeline({
                       )}
                     </div>
                   ) : null}
+                  {(requestEntryAnchors.beforeTurnId.get(optimisticTurn.id)?.length ?? 0) > 0 ? (
+                    <div className="space-y-3 border-b border-stone-800/80 px-2.5 py-4 sm:px-6">
+                      {(requestEntryAnchors.beforeTurnId.get(optimisticTurn.id) ?? []).map(
+                        (entry) =>
+                          entry.kind === 'note' ? (
+                            <AnsweredRequestNote key={entry.id} note={entry.note} />
+                          ) : (
+                            <PendingRequestCard
+                              key={entry.id}
+                              request={entry.request}
+                              busy={respondingRequestId === entry.request.id}
+                              onRespond={onRespondToRequest ?? undefined}
+                            />
+                          ),
+                      )}
+                    </div>
+                  ) : null}
                   <ThreadTurnRow
                     threadId={threadId}
                     turn={optimisticTurn}
@@ -4187,8 +4310,7 @@ export function ThreadTimeline({
             </div>
           )}
 
-          {(unanchoredPendingRequests.length > 0 ||
-            unanchoredAnsweredNotes.length > 0 ||
+          {(requestEntryAnchors.trailing.length > 0 ||
             activityNoteAnchors.trailing.length > 0) && (
             <div className="space-y-3 border-t border-stone-800/80 px-2.5 py-4 sm:px-6">
               {[
@@ -4198,18 +4320,7 @@ export function ThreadTimeline({
                   createdAt: note.createdAt,
                   note,
                 })),
-                ...unanchoredAnsweredNotes.map((note) => ({
-                  kind: 'note' as const,
-                  id: note.id,
-                  createdAt: note.createdAt ?? '',
-                  note,
-                })),
-                ...unanchoredPendingRequests.map((request) => ({
-                  kind: 'request' as const,
-                  id: request.id,
-                  createdAt: request.createdAt,
-                  request,
-                })),
+                ...requestEntryAnchors.trailing,
               ]
                 .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
                 .map((entry) =>
