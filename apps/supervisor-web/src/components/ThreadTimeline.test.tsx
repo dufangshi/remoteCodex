@@ -430,6 +430,47 @@ describe('ThreadTimeline', () => {
     expect(screen.getByText('const value = 42;')).toBeInTheDocument();
   });
 
+  it('keeps JSON code blocks readable with preserved line breaks', async () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'agent-1',
+                kind: 'agentMessage',
+                text: [
+                  '```json',
+                  '{',
+                  '  "name": "remoteCodex",',
+                  '  "scripts": {',
+                  '    "build": "vite build"',
+                  '  }',
+                  '}',
+                  '```',
+                ].join('\n'),
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    FakeIntersectionObserver.triggerAll();
+
+    await waitFor(() => {
+      expect(screen.getByText(/"name": "remoteCodex"/)).toBeInTheDocument();
+    });
+
+    const pre = screen.getByText(/"name": "remoteCodex"/).closest('pre');
+    expect(pre).toHaveTextContent(/"scripts": \{\s+"build": "vite build"\s+\}/);
+  });
+
   it('copies the full agent reply from the floating copy button', async () => {
     render(
       <ThreadTimeline

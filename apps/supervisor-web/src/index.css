@@ -725,6 +725,8 @@ input {
 .agent-markdown :where(pre) {
   max-width: 100%;
   overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   border: 1px solid rgb(71 85 105 / 0.95);
   border-radius: 0.95rem;
   background:
@@ -748,6 +750,9 @@ input {
 
 .agent-markdown :where(pre code) {
   font-size: 0.9rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   font-family:
     'IBM Plex Mono',
     'SFMono-Regular',
