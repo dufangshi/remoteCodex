@@ -1667,6 +1667,59 @@ function MarkdownContent({
   );
 }
 
+const PLAIN_URL_PATTERN = /\b(?:https?:\/\/|www\.)[^\s<>"'`]+/gi;
+const TRAILING_URL_PUNCTUATION_PATTERN = /[),.;:!?]+$/;
+
+function normalizeHref(value: string) {
+  return value.startsWith('www.') ? `https://${value}` : value;
+}
+
+function LinkifiedPlainText({ text }: { text: string }) {
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+
+  for (const match of text.matchAll(PLAIN_URL_PATTERN)) {
+    const rawMatch = match[0];
+    const index = match.index ?? 0;
+    const trailingPunctuation = rawMatch.match(TRAILING_URL_PUNCTUATION_PATTERN)?.[0] ?? '';
+    const urlText = trailingPunctuation
+      ? rawMatch.slice(0, -trailingPunctuation.length)
+      : rawMatch;
+
+    if (!urlText) {
+      continue;
+    }
+
+    if (index > cursor) {
+      parts.push(text.slice(cursor, index));
+    }
+
+    parts.push(
+      <a
+        key={`${index}-${urlText}`}
+        href={normalizeHref(urlText)}
+        target="_blank"
+        rel="noreferrer"
+        className="thread-inline-link"
+      >
+        {urlText}
+      </a>,
+    );
+
+    if (trailingPunctuation) {
+      parts.push(trailingPunctuation);
+    }
+
+    cursor = index + rawMatch.length;
+  }
+
+  if (cursor < text.length) {
+    parts.push(text.slice(cursor));
+  }
+
+  return <>{parts.length > 0 ? parts : text}</>;
+}
+
 function MarkdownAwareBody({
   text,
   scrollRootRef,
@@ -1725,7 +1778,9 @@ function MarkdownAwareBody({
       {isActivated && shouldRenderMarkdown ? (
         <MarkdownContent text={text} className={markdownClassName} />
       ) : (
-        <p className={plainTextClassName}>{text}</p>
+        <p className={plainTextClassName}>
+          <LinkifiedPlainText text={text} />
+        </p>
       )}
     </div>
   );
@@ -2849,22 +2904,22 @@ const GenericHistoryItem = memo(function GenericHistoryItem({
 }) {
   return (
     <div
-      className={`min-w-0 w-full rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
+      className={`min-w-0 w-full rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2 sm:rounded-[1.2rem] sm:px-3`}
     >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-[11px] uppercase tracking-[0.2em] text-stone-500">
+      <div className="flex flex-wrap items-center justify-between gap-1.5 leading-none">
+        <span className="text-[10px] uppercase tracking-[0.16em] text-stone-500">
           {historyItemLabel(item.kind)}
         </span>
         {item.status && (
-          <span className="text-xs text-stone-500">{item.status}</span>
+          <span className="text-[10px] text-stone-500">{item.status}</span>
         )}
       </div>
       <pre
-        className={`mt-1.5 whitespace-pre-wrap break-words text-sm leading-6 text-stone-300 ${
+        className={`mt-1 whitespace-pre-wrap break-words text-[13px] leading-5 text-stone-300 ${
           isScrollableHistoryItem(item.kind) ? 'max-h-56 overflow-auto' : ''
         }`}
       >
-        {item.text}
+        <LinkifiedPlainText text={item.text} />
       </pre>
     </div>
   );

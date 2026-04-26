@@ -352,6 +352,36 @@ describe('ThreadTimeline', () => {
     expect(screen.queryByRole('list')).not.toBeInTheDocument();
   });
 
+  it('highlights plain links in agent text without requiring markdown syntax', async () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'agent-1',
+                kind: 'agentMessage',
+                text: 'See https://example.com/docs for details.',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    FakeIntersectionObserver.triggerAll();
+
+    const link = await screen.findByRole('link', { name: 'https://example.com/docs' });
+    expect(link).toHaveAttribute('href', 'https://example.com/docs');
+    expect(link).toHaveClass('thread-inline-link');
+    expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+  });
+
   it('renders agent replies as markdown once they enter the viewport', async () => {
     render(
       <ThreadTimeline

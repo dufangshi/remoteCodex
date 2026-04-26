@@ -669,6 +669,10 @@ input {
   margin: 0;
 }
 
+.agent-markdown :where(p) {
+  white-space: pre-wrap;
+}
+
 .agent-markdown :where(p + p, p + ul, p + ol, ul + p, ol + p, pre + p, p + pre, blockquote + p, p + blockquote, table + p, p + table, ul + ul, ol + ol) {
   margin-top: 0.65rem;
 }
@@ -683,9 +687,33 @@ input {
 
 .agent-markdown :where(a) {
   color: rgb(147 197 253);
+  border-radius: 0.35rem;
+  background: rgb(59 130 246 / 0.1);
+  padding: 0.02rem 0.18rem;
+  font-weight: 500;
   text-decoration: underline;
-  text-decoration-color: rgb(96 165 250 / 0.45);
+  text-decoration-color: rgb(96 165 250 / 0.65);
   text-underline-offset: 0.18em;
+}
+
+.thread-inline-link {
+  border-radius: 0.35rem;
+  background: rgb(59 130 246 / 0.1);
+  padding: 0.02rem 0.18rem;
+  color: rgb(147 197 253);
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: rgb(96 165 250 / 0.65);
+  text-underline-offset: 0.18em;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.thread-inline-link:hover,
+.agent-markdown :where(a:hover) {
+  background: rgb(59 130 246 / 0.18);
+  color: rgb(191 219 254);
 }
 
 .agent-markdown :where(blockquote) {
@@ -767,7 +795,20 @@ input {
 
 :root[data-theme-effective='light'] .agent-markdown :where(a) {
   color: rgb(29 78 216);
-  text-decoration-color: rgb(96 165 250 / 0.55);
+  background: rgb(37 99 235 / 0.09);
+  text-decoration-color: rgb(37 99 235 / 0.55);
+}
+
+:root[data-theme-effective='light'] .thread-inline-link {
+  background: rgb(37 99 235 / 0.09);
+  color: rgb(29 78 216);
+  text-decoration-color: rgb(37 99 235 / 0.55);
+}
+
+:root[data-theme-effective='light'] .thread-inline-link:hover,
+:root[data-theme-effective='light'] .agent-markdown :where(a:hover) {
+  background: rgb(37 99 235 / 0.16);
+  color: rgb(30 64 175);
 }
 
 :root[data-theme-effective='light'] .agent-markdown :where(blockquote) {

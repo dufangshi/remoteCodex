@@ -769,6 +769,19 @@ function normalizeTextLines(text: string) {
   return lines;
 }
 
+function textFromContentEntries(
+  content: CodexTurnItem['content'],
+  fallback = '',
+) {
+  const text =
+    content
+      ?.map((entry) => (entry.type === 'text' ? (entry.text ?? '') : `[${entry.type}]`))
+      .join('\n')
+      .trim();
+
+  return text || fallback;
+}
+
 function summarizeCommandText(text: string) {
   const lines = normalizeTextLines(text);
   return lines.find((line) => line.trim().length > 0) ?? lines[0] ?? 'Command output';
@@ -1456,17 +1469,19 @@ function itemToHistoryItem(
       return {
         id: item.id,
         kind: 'userMessage',
-        text:
-          item.content
-            ?.map((entry) => (entry.type === 'text' ? (entry.text ?? '') : `[${entry.type}]`))
-            .join('\n')
-            .trim() ?? ''
+        text: textFromContentEntries(item.content),
       };
     case 'agentMessage':
       return {
         id: item.id,
         kind: 'agentMessage',
         text: item.text ?? ''
+      };
+    case 'text':
+      return {
+        id: item.id,
+        kind: 'agentMessage',
+        text: item.text ?? textFromContentEntries(item.content, '')
       };
     case 'plan':
       return {
