@@ -471,6 +471,46 @@ describe('ThreadTimeline', () => {
     expect(pre).toHaveTextContent(/"scripts": \{\s+"build": "vite build"\s+\}/);
   });
 
+  it('renders markdown soft line breaks as visible line breaks', async () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'agent-1',
+                kind: 'agentMessage',
+                text: [
+                  '**Repository tree**',
+                  '.',
+                  '├── README.md',
+                  '├── pyproject.toml',
+                ].join('\n'),
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    FakeIntersectionObserver.triggerAll();
+
+    await waitFor(() => {
+      expect(screen.getByText('Repository tree')).toBeInTheDocument();
+    });
+
+    const paragraph = screen.getByText('Repository tree').closest('p');
+    expect(paragraph?.querySelectorAll('br')).toHaveLength(3);
+    expect(paragraph).toHaveTextContent('Repository tree');
+    expect(paragraph).toHaveTextContent('├── README.md');
+    expect(paragraph).toHaveTextContent('├── pyproject.toml');
+  });
+
   it('copies the full agent reply from the floating copy button', async () => {
     render(
       <ThreadTimeline

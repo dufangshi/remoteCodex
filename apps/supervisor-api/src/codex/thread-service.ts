@@ -771,15 +771,37 @@ function normalizeTextLines(text: string) {
 
 function textFromContentEntries(
   content: CodexTurnItem['content'],
-  fallback = '',
+  fallback: string | null = null,
 ) {
   const text =
     content
-      ?.map((entry) => (entry.type === 'text' ? (entry.text ?? '') : `[${entry.type}]`))
+      ?.map((entry) => {
+        if (typeof entry.text === 'string') {
+          return entry.text;
+        }
+
+        return `[${entry.type}]`;
+      })
       .join('\n')
       .trim();
 
   return text || fallback;
+}
+
+function codexItemText(item: CodexTurnItem, fallback = '') {
+  const contentText = textFromContentEntries(item.content);
+  const directText = typeof item.text === 'string' && item.text.trim() ? item.text : null;
+
+  if (
+    contentText &&
+    (!directText ||
+      contentText.includes('\n') ||
+      (Array.isArray(item.content) && item.content.length > 1))
+  ) {
+    return contentText;
+  }
+
+  return directText ?? contentText ?? fallback;
 }
 
 function summarizeCommandText(text: string) {
@@ -1469,25 +1491,25 @@ function itemToHistoryItem(
       return {
         id: item.id,
         kind: 'userMessage',
-        text: textFromContentEntries(item.content),
+        text: codexItemText(item),
       };
     case 'agentMessage':
       return {
         id: item.id,
         kind: 'agentMessage',
-        text: item.text ?? ''
+        text: codexItemText(item)
       };
     case 'text':
       return {
         id: item.id,
         kind: 'agentMessage',
-        text: item.text ?? textFromContentEntries(item.content, '')
+        text: codexItemText(item)
       };
     case 'plan':
       return {
         id: item.id,
         kind: 'plan',
-        text: item.text ?? ''
+        text: codexItemText(item)
       };
     case 'contextCompaction':
     case 'context_compaction':
@@ -1537,7 +1559,7 @@ function itemToHistoryItem(
       return {
         id: item.id,
         kind: 'other',
-        text: item.text ?? item.type
+        text: codexItemText(item, item.type)
       };
   }
 }

@@ -11,7 +11,7 @@ import {
   type RefObject,
 } from 'react';
 import { code } from '@streamdown/code';
-import { Streamdown } from 'streamdown';
+import { Streamdown, defaultRemarkPlugins } from 'streamdown';
 
 import type {
   RespondThreadActionRequestInput,
@@ -1660,11 +1660,57 @@ function MarkdownContent({
       plugins={{ code }}
       controls={false}
       lineNumbers={false}
+      remarkPlugins={MARKDOWN_REMARK_PLUGINS}
       className={className}
     >
       {text}
     </Streamdown>
   );
+}
+
+type MarkdownTreeNode = {
+  type?: string;
+  value?: string;
+  children?: MarkdownTreeNode[];
+};
+
+function remarkPreserveSoftBreaks() {
+  return (tree: MarkdownTreeNode) => {
+    preserveSoftBreaksInNode(tree);
+  };
+}
+
+const MARKDOWN_REMARK_PLUGINS = [
+  ...Object.values(defaultRemarkPlugins),
+  remarkPreserveSoftBreaks,
+];
+
+function preserveSoftBreaksInNode(node: MarkdownTreeNode) {
+  if (!Array.isArray(node.children)) {
+    return;
+  }
+
+  const nextChildren: MarkdownTreeNode[] = [];
+  for (const child of node.children) {
+    if (child.type === 'text' && typeof child.value === 'string' && child.value.includes('\n')) {
+      const lines = child.value.split('\n');
+      lines.forEach((line, index) => {
+        if (index > 0) {
+          nextChildren.push({ type: 'break' });
+        }
+
+        if (line) {
+          nextChildren.push({ ...child, value: line });
+        }
+      });
+      continue;
+    }
+
+    preserveSoftBreaksInNode(child);
+    nextChildren.push(child);
+  }
+
+  node.children = nextChildren;
 }
 
 const PLAIN_URL_PATTERN = /\b(?:https?:\/\/|www\.)[^\s<>"'`]+/gi;

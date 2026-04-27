@@ -571,6 +571,64 @@ describe('supervisor api', () => {
     expect(refreshedDetailResponse.json().turns.at(-1).id).toBe('turn-13');
   });
 
+  it('preserves multiline content from raw text items', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Text Item Thread'
+      }
+    });
+
+    const createdThread = createResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(createdThread.codexThreadId);
+    expect(remoteThread).toBeTruthy();
+    remoteThread!.status = { type: 'idle' };
+    remoteThread!.turns = [
+      {
+        id: 'turn-text-1',
+        status: 'completed',
+        error: null,
+        items: [
+          {
+            id: 'raw-text-1',
+            type: 'text',
+            text: '.├── README.md├── pyproject.toml',
+            content: [
+              {
+                type: 'text',
+                text: ['.', '├── README.md', '├── pyproject.toml'].join('\n'),
+              },
+            ],
+          },
+        ],
+      } as any,
+    ];
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json().turns[0].items[0]).toMatchObject({
+      kind: 'agentMessage',
+      text: ['.', '├── README.md', '├── pyproject.toml'].join('\n'),
+    });
+  });
+
   it('returns deferred command details separately from the thread detail payload', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',
