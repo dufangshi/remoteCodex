@@ -722,11 +722,51 @@ input {
   color: rgb(226 232 240);
 }
 
+.agent-markdown :where([data-streamdown='code-block']) {
+  position: relative;
+  gap: 0;
+  margin: 0.55rem 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.agent-markdown :where([data-streamdown='code-block-header']) {
+  position: absolute;
+  right: 0.65rem;
+  top: 0.55rem;
+  z-index: 2;
+  height: auto;
+  border: 1px solid rgb(96 165 250 / 0.24);
+  border-radius: 999px;
+  background: rgb(15 23 42 / 0.74);
+  padding: 0.1rem 0.45rem;
+  color: rgb(191 219 254);
+  line-height: 1.15;
+  backdrop-filter: blur(10px);
+  pointer-events: none;
+}
+
+.agent-markdown :where([data-streamdown='code-block-header'] span) {
+  margin-left: 0;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.agent-markdown :where([data-streamdown='code-block-body']) {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
 .agent-markdown :where(pre) {
   max-width: 100%;
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  padding: 0.9rem;
   border: 1px solid rgb(71 85 105 / 0.95);
   border-radius: 0.95rem;
   background:
@@ -824,6 +864,12 @@ input {
 :root[data-theme-effective='light'] .agent-markdown :where(blockquote) {
   border-left-color: rgb(148 163 184 / 0.9);
   color: rgb(68 64 60);
+}
+
+:root[data-theme-effective='light'] .agent-markdown :where([data-streamdown='code-block-header']) {
+  border-color: rgb(37 99 235 / 0.22);
+  background: rgb(248 250 252 / 0.78);
+  color: rgb(29 78 216);
 }
 
 :root[data-theme-effective='light'] .agent-markdown :where(pre) {
