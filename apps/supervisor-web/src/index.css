@@ -762,6 +762,11 @@ input {
   color: rgb(226 232 240);
 }
 
+.agent-markdown :where([data-streamdown='code-block-body'] pre code > span) {
+  display: block;
+  min-height: 1.35em;
+}
+
 .agent-markdown :where(pre code span) {
   text-shadow: 0 0 0.01px currentColor;
 }

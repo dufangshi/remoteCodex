@@ -469,6 +469,8 @@ describe('ThreadTimeline', () => {
 
     const pre = screen.getByText(/"name": "remoteCodex"/).closest('pre');
     expect(pre).toHaveTextContent(/"scripts": \{\s+"build": "vite build"\s+\}/);
+    const code = pre?.querySelector('code');
+    expect(code?.children.length).toBeGreaterThan(1);
   });
 
   it('renders markdown soft line breaks as visible line breaks', async () => {
