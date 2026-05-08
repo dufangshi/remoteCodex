@@ -266,6 +266,106 @@ describe('supervisor api', () => {
     );
   });
 
+  it('creates and lists codex host config archives', async () => {
+    await fs.writeFile(path.join(codexHome, 'config.toml'), 'model = "gpt-5.4"\n', 'utf8');
+
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/config/codex-archives',
+      payload: {
+        label: 'Known good config',
+      },
+    });
+
+    expect(createResponse.statusCode).toBe(200);
+    expect(createResponse.json()).toMatchObject({
+      label: 'Known good config',
+      files: {
+        'config.toml': { name: 'config.toml', exists: true },
+        'auth.json': { name: 'auth.json', exists: false },
+      },
+    });
+
+    const listResponse = await app.inject({
+      method: 'GET',
+      url: '/api/config/codex-archives',
+    });
+
+    expect(listResponse.statusCode).toBe(200);
+    expect(listResponse.json()).toHaveLength(1);
+    expect(listResponse.json()[0]).toMatchObject({
+      label: 'Known good config',
+    });
+  });
+
+  it('renames codex host config archives', async () => {
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/config/codex-archives',
+      payload: {
+        label: 'Before',
+      },
+    });
+    const archiveId = createResponse.json().id;
+
+    const renameResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/config/codex-archives/${archiveId}`,
+      payload: {
+        label: 'After',
+      },
+    });
+
+    expect(renameResponse.statusCode).toBe(200);
+    expect(renameResponse.json()).toMatchObject({
+      id: archiveId,
+      label: 'After',
+    });
+  });
+
+  it('applies codex host config archives and restarts the app-server', async () => {
+    await fs.writeFile(path.join(codexHome, 'config.toml'), 'model = "gpt-5.4"\n', 'utf8');
+    await fs.writeFile(path.join(codexHome, 'auth.json'), '{"token":"old"}\n', 'utf8');
+
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/config/codex-archives',
+      payload: {
+        label: 'Snapshot',
+      },
+    });
+    const archiveId = createResponse.json().id;
+
+    await fs.writeFile(path.join(codexHome, 'config.toml'), 'model = "gpt-5.5"\n', 'utf8');
+    await fs.rm(path.join(codexHome, 'auth.json'), { force: true });
+    const stopCallsBeforeApply = fakeCodexManager.stopCalls;
+    const startCallsBeforeApply = fakeCodexManager.startCalls;
+
+    const applyResponse = await app.inject({
+      method: 'POST',
+      url: `/api/config/codex-archives/${archiveId}/apply`,
+    });
+
+    expect(applyResponse.statusCode).toBe(200);
+    expect(applyResponse.json()).toMatchObject({
+      archive: {
+        id: archiveId,
+        label: 'Snapshot',
+      },
+      status: {
+        state: 'ready',
+      },
+    });
+    await expect(fs.readFile(path.join(codexHome, 'config.toml'), 'utf8')).resolves.toBe(
+      'model = "gpt-5.4"\n',
+    );
+    await expect(fs.readFile(path.join(codexHome, 'auth.json'), 'utf8')).resolves.toBe(
+      '{"token":"old"}\n',
+    );
+    expect(fakeCodexManager.stopCalls).toBe(stopCallsBeforeApply + 1);
+    expect(fakeCodexManager.startCalls).toBe(startCallsBeforeApply + 1);
+  });
+
   it('creates and lists workspaces', async () => {
     const createResponse = await app.inject({
       method: 'POST',
@@ -3280,6 +3380,131 @@ describe('supervisor api', () => {
     });
   });
 
+  it('auto-approves command execution approval requests for yolo threads', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Command Approval Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    fakeCodexManager.emit('request', {
+      id: 80,
+      method: 'item/commandExecution/requestApproval',
+      params: {
+        threadId: createdThread.codexThreadId,
+        turnId: 'turn-1',
+        itemId: 'command-1',
+        reason: 'Command requires approval by policy.',
+        command: 'rm -rf ./cache',
+        cwd: path.join(tempDir, 'workspace'),
+      },
+    });
+
+    expect(fakeCodexManager.serverRequestResponses).toContainEqual({
+      id: 80,
+      result: {
+        decision: 'accept',
+      },
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json()).toMatchObject({
+      pendingRequests: [],
+    });
+  });
+
+  it('surfaces command execution approval requests for guarded threads', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'guarded',
+        title: 'Guarded Command Approval Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    fakeCodexManager.emit('request', {
+      id: 81,
+      method: 'item/commandExecution/requestApproval',
+      params: {
+        threadId: createdThread.codexThreadId,
+        turnId: 'turn-1',
+        itemId: 'command-1',
+        reason: 'Command requires approval by policy.',
+        command: 'rm -rf ./cache',
+        cwd: path.join(tempDir, 'workspace'),
+      },
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json()).toMatchObject({
+      pendingRequests: [
+        {
+          id: '81',
+          title: 'Command approval required',
+          description: expect.stringContaining('rm -rf ./cache'),
+        },
+      ],
+    });
+
+    const approvalResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/requests/81/respond`,
+      payload: {
+        answers: {
+          approval: {
+            answers: ['Allow'],
+          },
+        },
+      },
+    });
+
+    expect(approvalResponse.statusCode).toBe(200);
+    expect(fakeCodexManager.serverRequestResponses).toContainEqual({
+      id: 81,
+      result: {
+        decision: 'accept',
+      },
+    });
+  });
+
   it('auto-approves broader positive MCP authorization prompts for yolo threads', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',
@@ -3650,5 +3875,76 @@ describe('supervisor api', () => {
         })
       ])
     });
+  });
+
+  it('sets, reads, and clears a Codex thread goal', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Goal Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const setResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${createdThread.id}/goal`,
+      payload: {
+        objective: 'Finish the migration and keep tests green.',
+        status: 'active',
+        tokenBudget: 12000,
+      }
+    });
+
+    expect(setResponse.statusCode).toBe(200);
+    expect(setResponse.json().goal).toMatchObject({
+      objective: 'Finish the migration and keep tests green.',
+      status: 'active',
+      tokenBudget: 12000,
+    });
+    expect(setResponse.json().goal.createdAt).toMatch(/^20\d\d-/);
+    expect(fakeCodexManager.stopCalls).toBeGreaterThan(0);
+    expect(fakeCodexManager.startCalls).toBeGreaterThan(0);
+    await expect(fs.readFile(path.join(codexHome, 'config.toml'), 'utf8')).resolves.toContain(
+      'goals = true',
+    );
+    expect(fakeCodexManager.goalSetCalls.at(-1)).toMatchObject({
+      threadId: createdThread.codexThreadId,
+      objective: 'Finish the migration and keep tests green.',
+      status: 'active',
+      tokenBudget: 12000,
+    });
+
+    const getResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}/goal`
+    });
+
+    expect(getResponse.statusCode).toBe(200);
+    expect(getResponse.json().goal).toMatchObject({
+      objective: 'Finish the migration and keep tests green.',
+    });
+
+    const clearResponse = await app.inject({
+      method: 'DELETE',
+      url: `/api/threads/${createdThread.id}/goal`
+    });
+
+    expect(clearResponse.statusCode).toBe(200);
+    expect(clearResponse.json()).toEqual({ cleared: true });
+    expect(fakeCodexManager.goalClearCalls).toContain(createdThread.codexThreadId);
   });
 });

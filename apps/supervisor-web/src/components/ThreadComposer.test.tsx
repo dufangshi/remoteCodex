@@ -267,6 +267,7 @@ describe('ThreadComposer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
     expect(screen.getByRole('button', { name: /\/fast/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /\/compact/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /\/goal/i })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /\/fast/i }));
     await waitFor(() => {
@@ -280,6 +281,86 @@ describe('ThreadComposer', () => {
     await waitFor(() => {
       expect(onCompact).toHaveBeenCalled();
     });
+  });
+
+  it('opens the goal panel and sets a goal objective', async () => {
+    const onOpenGoal = vi.fn().mockResolvedValue(undefined);
+    const onUpdateGoal = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={() => undefined}
+        onOpenGoal={onOpenGoal}
+        onUpdateGoal={onUpdateGoal}
+        goalState={{
+          status: 'ready',
+          error: null,
+          data: null,
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
+    fireEvent.click(screen.getByRole('button', { name: /\/goal/i }));
+
+    await waitFor(() => {
+      expect(onOpenGoal).toHaveBeenCalled();
+    });
+
+    fireEvent.change(screen.getByLabelText('Goal objective'), {
+      target: { value: 'Finish the migration and keep tests green.' },
+    });
+    fireEvent.change(screen.getByLabelText('Goal token budget'), {
+      target: { value: '12000' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Set goal/i }));
+
+    await waitFor(() => {
+      expect(onUpdateGoal).toHaveBeenCalledWith({
+        objective: 'Finish the migration and keep tests green.',
+        status: 'active',
+        tokenBudget: 12000,
+      });
+    });
+  });
+
+  it('highlights the goal slash item while an active goal exists', () => {
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={() => undefined}
+        goalState={{
+          status: 'ready',
+          error: null,
+          data: {
+            threadId: 'codex-thread-1',
+            objective: 'Keep tests green.',
+            status: 'active',
+            tokenBudget: null,
+            tokensUsed: 1200,
+            timeUsedSeconds: 60,
+            createdAt: '2026-05-08T00:00:00.000Z',
+            updatedAt: '2026-05-08T00:01:00.000Z',
+          },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
+
+    expect(screen.getByRole('button', { name: /\/goal/i })).toHaveClass(
+      'bg-amber-300/12',
+      'text-amber-100',
+    );
   });
 
   it('opens the slash toolbox upward, keeps the trigger neutral, and highlights fast inside the list', () => {
@@ -950,6 +1031,123 @@ describe('ThreadComposer', () => {
             placeholder: '[PHOTO clipboard.png]',
           }),
         ],
+      });
+    });
+  });
+
+  it('pastes formatted clipboard text as plain text without preserving rich markup', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    const editor = screen.getByLabelText('Prompt');
+    const pasteEvent = createEvent.paste(editor, {
+      bubbles: true,
+      cancelable: true,
+    });
+    Object.assign(pasteEvent, {
+      clipboardData: {
+        items: [],
+        files: [],
+        getData: (type: string) =>
+          type === 'text/plain' ? 'Large black text' : '<span style="font-size: 72px; color: black">Large black text</span>',
+      },
+    });
+
+    fireEvent(editor, pasteEvent);
+
+    expect(editor).toHaveTextContent('Large black text');
+    expect(editor.querySelector('span[style]')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({
+        prompt: 'Large black text',
+      });
+    });
+  });
+
+  it('pastes html-only clipboard text as plain text without preserving rich markup', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    const editor = screen.getByLabelText('Prompt');
+    const pasteEvent = createEvent.paste(editor, {
+      bubbles: true,
+      cancelable: true,
+    });
+    Object.assign(pasteEvent, {
+      clipboardData: {
+        items: [],
+        files: [],
+        getData: (type: string) =>
+          type === 'text/html'
+            ? '<span style="font-size: 72px; color: black; background: black;">Large black text</span>'
+            : '',
+      },
+    });
+
+    fireEvent(editor, pasteEvent);
+
+    expect(pasteEvent.defaultPrevented).toBe(true);
+    expect(editor).toHaveTextContent('Large black text');
+    expect(editor.querySelector('span[style]')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({
+        prompt: 'Large black text',
+      });
+    });
+  });
+
+  it('sanitizes styled rich text if it reaches the prompt editor DOM', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    const editor = screen.getByLabelText('Prompt');
+    editor.innerHTML =
+      '<span style="font-size: 72px; color: black; background: black;">Large black text</span>';
+    fireEvent.input(editor);
+
+    await waitFor(() => {
+      expect(editor.querySelector('span[style]')).toBeNull();
+    });
+    expect(editor).toHaveTextContent('Large black text');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({
+        prompt: 'Large black text',
       });
     });
   });

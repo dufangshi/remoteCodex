@@ -19,6 +19,7 @@ import {
   ResumeThreadInput,
   SandboxModeDto,
   SendThreadPromptInput,
+  UpdateThreadGoalInput,
   UpdateThreadSettingsInput,
   UpdateThreadInput,
 } from '../../../../packages/shared/src/index';
@@ -59,6 +60,14 @@ const updateThreadSettingsSchema = z.object({
   sandboxMode: z.enum(['read-only', 'workspace-write', 'danger-full-access'] as [SandboxModeDto, ...SandboxModeDto[]]).nullable().optional()
 }).refine((body) => Object.keys(body).length > 0, {
   message: 'At least one thread setting must be provided.'
+});
+
+const updateThreadGoalSchema = z.object({
+  objective: z.string().min(1).nullable().optional(),
+  status: z.enum(['active', 'paused', 'budgetLimited', 'complete']).nullable().optional(),
+  tokenBudget: z.number().int().positive().nullable().optional(),
+}).refine((body) => Object.keys(body).length > 0, {
+  message: 'At least one goal field must be provided.'
 });
 
 const interruptSchema = z.object({
@@ -427,6 +436,27 @@ export async function registerThreadRoutes(app: FastifyInstance) {
   app.post('/api/threads/:id/compact', async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     return app.services.threadService.compactThread(params.id);
+  });
+
+  app.get('/api/threads/:id/goal', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    return { goal: await app.services.threadService.getThreadGoal(params.id) };
+  });
+
+  app.patch('/api/threads/:id/goal', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const parsedBody = updateThreadGoalSchema.parse(request.body);
+    const body: UpdateThreadGoalInput = {
+      ...(parsedBody.objective !== undefined ? { objective: parsedBody.objective } : {}),
+      ...(parsedBody.status !== undefined ? { status: parsedBody.status } : {}),
+      ...(parsedBody.tokenBudget !== undefined ? { tokenBudget: parsedBody.tokenBudget } : {}),
+    };
+    return { goal: await app.services.threadService.updateThreadGoal(params.id, body) };
+  });
+
+  app.delete('/api/threads/:id/goal', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    return app.services.threadService.clearThreadGoal(params.id);
   });
 
   app.get('/api/threads/:id/fork-turns', async (request) => {

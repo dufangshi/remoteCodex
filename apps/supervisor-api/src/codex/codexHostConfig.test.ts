@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { upsertCodexServiceTier } from './codexHostConfig';
+import {
+  isCodexFeatureEnabledFromConfig,
+  upsertCodexFeatureFlag,
+  upsertCodexServiceTier,
+} from './codexHostConfig';
 
 describe('codexHostConfig', () => {
   it('adds service_tier = "fast" when enabling fast mode', () => {
@@ -41,5 +45,44 @@ describe('codexHostConfig', () => {
 
   it('clears the file when disabling and service_tier is the only entry', () => {
     expect(upsertCodexServiceTier('service_tier = "fast"\n', false)).toBe('');
+  });
+
+  it('inserts feature flags without merging with the next section header', () => {
+    expect(
+      upsertCodexFeatureFlag(
+        [
+          'model = "gpt-5.4"',
+          '',
+          '[features]',
+          'multi_agent = true',
+          '[notice]',
+          'hide_full_access_warning = true',
+          '',
+        ].join('\n'),
+        'goals',
+        true,
+      ),
+    ).toBe(
+      [
+        'model = "gpt-5.4"',
+        '',
+        '[features]',
+        'multi_agent = true',
+        'goals = true',
+        '',
+        '[notice]',
+        'hide_full_access_warning = true',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it('reads feature flags only from the features section', () => {
+    expect(
+      isCodexFeatureEnabledFromConfig(
+        '[features]\ngoals = true\n\n[notice]\ngoals = false\n',
+        'goals',
+      ),
+    ).toBe(true);
   });
 });

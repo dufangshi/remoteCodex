@@ -4,9 +4,11 @@ import { randomUUID } from 'node:crypto';
 import {
   CodexMcpServerRecord,
   CodexSkillsListEntry,
+  CodexThreadGoalRecord,
   CodexThreadRecord,
   JsonRpcClientError,
   ReasoningEffort,
+  ThreadGoalSetInput,
 } from '../../../../packages/codex/src/index';
 
 function makeThread(overrides: Partial<CodexThreadRecord> = {}): CodexThreadRecord {
@@ -56,6 +58,10 @@ export class FakeCodexManager extends EventEmitter {
   readThreadCallCount = new Map<string, number>();
   skillsEntries: CodexSkillsListEntry[] = [];
   mcpServers: CodexMcpServerRecord[] = [];
+  goals = new Map<string, CodexThreadGoalRecord>();
+  goalSetCalls: ThreadGoalSetInput[] = [];
+  goalClearCalls: string[] = [];
+  experimentalFeatureEnablementCalls: Record<string, boolean>[] = [];
   steerError: JsonRpcClientError | null = null;
   materializeSteersImmediately = true;
   steerTurnCalls: Array<{ threadId: string; turnId: string; prompt: string }> = [];
@@ -250,6 +256,41 @@ export class FakeCodexManager extends EventEmitter {
 
   async compactThread(threadId: string) {
     this.compactThreadCalls.push(threadId);
+  }
+
+  async getThreadGoal(threadId: string) {
+    return this.goals.get(threadId) ?? null;
+  }
+
+  async setThreadGoal(input: ThreadGoalSetInput) {
+    this.goalSetCalls.push(input);
+    const existing = this.goals.get(input.threadId);
+    const now = Date.now();
+    const goal: CodexThreadGoalRecord = {
+      threadId: input.threadId,
+      objective: input.objective ?? existing?.objective ?? 'Test goal',
+      status: input.status ?? existing?.status ?? 'active',
+      tokenBudget:
+        input.tokenBudget !== undefined
+          ? input.tokenBudget
+          : existing?.tokenBudget ?? null,
+      tokensUsed: existing?.tokensUsed ?? 0,
+      timeUsedSeconds: existing?.timeUsedSeconds ?? 0,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    this.goals.set(input.threadId, goal);
+    return goal;
+  }
+
+  async clearThreadGoal(threadId: string) {
+    this.goalClearCalls.push(threadId);
+    const existed = this.goals.delete(threadId);
+    return existed;
+  }
+
+  async setExperimentalFeatureEnablement(enablement: Record<string, boolean>) {
+    this.experimentalFeatureEnablementCalls.push(enablement);
   }
 
   async forkThread(input: { threadId: string }) {

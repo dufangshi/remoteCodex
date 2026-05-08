@@ -10,9 +10,11 @@ import {
   CodexServerRequest,
   CodexServerEvent,
   CodexSkillsListEntry,
+  CodexThreadGoalRecord,
   CodexThreadRecord,
   CodexTurnRecord,
   ReasoningEffort,
+  ThreadGoalSetInput,
   ThreadForkInput,
   ThreadRollbackInput,
   ThreadResumeInput,
@@ -122,6 +124,39 @@ function mapMcpServer(record: any): CodexMcpServerRecord {
     resourceTemplateCount: Array.isArray(record.resourceTemplates)
       ? record.resourceTemplates.length
       : 0,
+  };
+}
+
+function parseGoalTimestamp(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const numericValue = Number(value);
+    if (Number.isFinite(numericValue) && value.trim() !== '') {
+      return numericValue;
+    }
+
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) {
+      return Math.floor(parsed / 1000);
+    }
+  }
+
+  return Math.floor(Date.now() / 1000);
+}
+
+function mapThreadGoal(record: any): CodexThreadGoalRecord {
+  return {
+    threadId: record.threadId,
+    objective: record.objective,
+    status: record.status,
+    tokenBudget: record.tokenBudget ?? null,
+    tokensUsed: record.tokensUsed ?? 0,
+    timeUsedSeconds: record.timeUsedSeconds ?? 0,
+    createdAt: parseGoalTimestamp(record.createdAt),
+    updatedAt: parseGoalTimestamp(record.updatedAt),
   };
 }
 
@@ -375,6 +410,40 @@ export class CodexAppServerManager extends EventEmitter {
     await this.ensureReady();
     await this.client!.request<unknown>('thread/compact/start', {
       threadId,
+    });
+  }
+
+  async getThreadGoal(threadId: string) {
+    await this.ensureReady();
+    const response = await this.client!.request<{ goal: any | null }>('thread/goal/get', {
+      threadId,
+    });
+    return response.goal ? mapThreadGoal(response.goal) : null;
+  }
+
+  async setThreadGoal(input: ThreadGoalSetInput) {
+    await this.ensureReady();
+    const response = await this.client!.request<{ goal: any }>('thread/goal/set', {
+      threadId: input.threadId,
+      ...(input.objective !== undefined ? { objective: input.objective } : {}),
+      ...(input.status !== undefined ? { status: input.status } : {}),
+      ...(input.tokenBudget !== undefined ? { tokenBudget: input.tokenBudget } : {}),
+    });
+    return mapThreadGoal(response.goal);
+  }
+
+  async clearThreadGoal(threadId: string) {
+    await this.ensureReady();
+    const response = await this.client!.request<{ cleared: boolean }>('thread/goal/clear', {
+      threadId,
+    });
+    return response.cleared;
+  }
+
+  async setExperimentalFeatureEnablement(enablement: Record<string, boolean>) {
+    await this.ensureReady();
+    await this.client!.request<unknown>('experimentalFeature/enablement/set', {
+      enablement,
     });
   }
 

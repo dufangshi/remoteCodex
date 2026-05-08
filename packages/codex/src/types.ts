@@ -70,6 +70,7 @@ export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access'
 export type ServiceTier = 'fast' | 'flex';
 export type SkillScope = 'user' | 'repo' | 'system' | 'admin';
 export type McpAuthStatus = 'unsupported' | 'notLoggedIn' | 'bearerToken' | 'oAuth';
+export type ThreadGoalStatus = 'active' | 'paused' | 'budgetLimited' | 'complete';
 export type NetworkAccess = 'restricted' | 'enabled';
 export type ReadOnlyAccess =
   | {
@@ -187,6 +188,17 @@ export interface CodexMcpServerRecord {
   resourceTemplateCount: number;
 }
 
+export interface CodexThreadGoalRecord {
+  threadId: string;
+  objective: string;
+  status: ThreadGoalStatus;
+  tokenBudget: number | null;
+  tokensUsed: number;
+  timeUsedSeconds: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface ThreadStartInput {
   cwd: string;
   model: string;
@@ -229,6 +241,13 @@ export interface TurnSteerInput {
 
 export interface ThreadCompactInput {
   threadId: string;
+}
+
+export interface ThreadGoalSetInput {
+  threadId: string;
+  objective?: string | null;
+  status?: ThreadGoalStatus | null;
+  tokenBudget?: number | null;
 }
 
 export interface CodexServerRequest {
@@ -278,6 +297,8 @@ export type CodexServerEvent =
   | { method: 'thread/started'; params: { thread: CodexThreadRecord } }
   | { method: 'thread/status/changed'; params: { threadId: string; status: CodexThreadStatus } }
   | { method: 'thread/name/updated'; params: { threadId: string; threadName?: string } }
+  | { method: 'thread/goal/updated'; params: { threadId: string; turnId: string | null; goal: CodexThreadGoalRecord } }
+  | { method: 'thread/goal/cleared'; params: { threadId: string } }
   | { method: 'thread/tokenUsage/updated'; params: CodexThreadTokenUsageEvent }
   | { method: 'turn/started'; params: { threadId: string; turn: CodexTurnRecord } }
   | { method: 'item/started'; params: { threadId: string; turnId: string; item: CodexTurnItem } }

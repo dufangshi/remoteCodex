@@ -65,6 +65,7 @@ import {
   ThreadEventEnvelope,
   ThreadForkResultDto,
   ThreadForkTurnOptionDto,
+  ThreadGoalDto,
   ThreadHistoryItemDetailDto,
   ThreadHistoryItemDto,
   ThreadLiveItemsDto,
@@ -77,12 +78,15 @@ import {
   ThreadTurnPricingTierDto,
   ThreadTurnTokenUsageDto,
   ThreadStatusDto,
+  UpdateThreadGoalInput,
   UpdateThreadSettingsInput,
   WorkspaceDto
 } from '../../../../packages/shared/src/index';
 import { HttpError } from '../app';
 import {
   readCodexFastModeSync,
+  readCodexFeatureFlag,
+  writeCodexFeatureFlag,
   writeCodexFastMode,
 } from './codexHostConfig';
 import { SupervisorEventBus } from './event-bus';
@@ -106,11 +110,22 @@ const CONTEXT_BASELINE_TOKENS = 12_000;
 const FAST_MODE_NOTE_ON = 'Fast mode on';
 const FAST_MODE_NOTE_OFF = 'Fast mode off';
 
+const GOAL_FEATURE_DISABLED_MESSAGE =
+  'Codex /goal is experimental. Enable it by adding `goals = true` under `[features]` in ~/.codex/config.toml, then restart the Codex app-server.';
+
 type PendingThreadRequestRecord =
   | {
       source: 'server';
       serverRequestId: number;
-      responseKind: 'answers' | 'mcpElicitation';
+      responseKind:
+        | 'answers'
+        | 'mcpElicitation'
+        | 'commandExecutionApproval'
+        | 'fileChangeApproval'
+        | 'permissionsApproval'
+        | 'legacyExecApproval'
+        | 'legacyApplyPatchApproval';
+      responsePayload?: Record<string, unknown>;
       request: ThreadActionRequestDto;
     }
   | {
@@ -156,6 +171,55 @@ interface ThreadTurnMetadataRecord {
   pricingModelKey: string | null;
   pricingTierKey: ThreadTurnPricingTierDto | null;
   tokenUsageJson: string | null;
+}
+
+function toIsoFromEpoch(value: number | null | undefined) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return new Date().toISOString();
+  }
+  const epochMs = value < 10_000_000_000 ? value * 1000 : value;
+  return new Date(epochMs).toISOString();
+}
+
+function toThreadGoalDto(goal: {
+  threadId: string;
+  objective: string;
+  status: ThreadGoalDto['status'];
+  tokenBudget: number | null;
+  tokensUsed: number;
+  timeUsedSeconds: number;
+  createdAt: number;
+  updatedAt: number;
+}): ThreadGoalDto {
+  return {
+    threadId: goal.threadId,
+    objective: goal.objective,
+    status: goal.status,
+    tokenBudget: goal.tokenBudget,
+    tokensUsed: goal.tokensUsed,
+    timeUsedSeconds: goal.timeUsedSeconds,
+    createdAt: toIsoFromEpoch(goal.createdAt),
+    updatedAt: toIsoFromEpoch(goal.updatedAt),
+  };
+}
+
+function mapCodexGoalError(error: unknown): never {
+  if (error instanceof JsonRpcClientError) {
+    const remoteMessage = error.message || '';
+    if (remoteMessage.toLowerCase().includes('goals feature is disabled')) {
+      throw new HttpError(409, {
+        code: 'goal_feature_disabled',
+        message: GOAL_FEATURE_DISABLED_MESSAGE,
+      });
+    }
+
+    throw new HttpError(502, {
+      code: 'codex_goal_error',
+      message: remoteMessage || 'Codex goal operation failed.',
+    });
+  }
+
+  throw error;
 }
 
 function approvalModeToPolicy(approvalMode: ApprovalMode): 'never' | 'on-request' {
@@ -1714,6 +1778,162 @@ function buildAutoApprovedMcpElicitationResult(
   } as const;
 }
 
+function stringFromUnknown(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function arrayTextFromUnknown(value: unknown) {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const parts = value
+    .map((entry) => (typeof entry === 'string' ? entry : null))
+    .filter((entry): entry is string => Boolean(entry));
+  return parts.length > 0 ? parts.join(' ') : null;
+}
+
+function commandTextFromApprovalParams(params: Record<string, unknown>) {
+  return stringFromUnknown(params.command) ?? arrayTextFromUnknown(params.command);
+}
+
+function buildApprovalRequestDescription(params: Record<string, unknown>) {
+  return [
+    stringFromUnknown(params.reason),
+    commandTextFromApprovalParams(params)
+      ? `Command: ${commandTextFromApprovalParams(params)}`
+      : null,
+    stringFromUnknown(params.cwd) ? `CWD: ${stringFromUnknown(params.cwd)}` : null,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+function buildGenericApprovalThreadRequest(
+  request: CodexServerRequest,
+  options: {
+    title: string;
+    descriptionFallback: string;
+  },
+): ThreadActionRequestDto {
+  const params = request.params as {
+    turnId?: string;
+    itemId?: string;
+  };
+  const description = buildApprovalRequestDescription(request.params);
+
+  return {
+    id: String(request.id),
+    kind: 'requestUserInput',
+    title: options.title,
+    description: description || options.descriptionFallback,
+    turnId: params.turnId ?? null,
+    itemId: params.itemId ?? null,
+    createdAt: new Date().toISOString(),
+    questions: [
+      {
+        id: 'approval',
+        header: options.title,
+        question: description || options.descriptionFallback,
+        isOther: false,
+        isSecret: false,
+        options: [
+          {
+            label: 'Allow',
+            description: 'Permit this action and continue the current turn.',
+          },
+          {
+            label: 'Deny',
+            description: 'Decline this action.',
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function yoloApprovalResultForServerRequest(request: CodexServerRequest) {
+  switch (request.method) {
+    case 'item/commandExecution/requestApproval':
+      return { decision: 'accept' };
+    case 'item/fileChange/requestApproval':
+      return { decision: 'accept' };
+    case 'item/permissions/requestApproval': {
+      const params = request.params as { permissions?: unknown };
+      return {
+        permissions: isRecord(params.permissions) ? params.permissions : {},
+        scope: 'turn',
+      };
+    }
+    case 'execCommandApproval':
+      return { decision: 'approved' };
+    case 'applyPatchApproval':
+      return { decision: 'approved' };
+    default:
+      return null;
+  }
+}
+
+function responseKindForApprovalRequest(
+  request: CodexServerRequest,
+): Extract<PendingThreadRequestRecord, { source: 'server' }>['responseKind'] | null {
+  switch (request.method) {
+    case 'item/commandExecution/requestApproval':
+      return 'commandExecutionApproval';
+    case 'item/fileChange/requestApproval':
+      return 'fileChangeApproval';
+    case 'item/permissions/requestApproval':
+      return 'permissionsApproval';
+    case 'execCommandApproval':
+      return 'legacyExecApproval';
+    case 'applyPatchApproval':
+      return 'legacyApplyPatchApproval';
+    default:
+      return null;
+  }
+}
+
+function interactiveApprovalResultForServerRequest(
+  pending: Extract<PendingThreadRequestRecord, { source: 'server' }>,
+  input: RespondThreadActionRequestInput,
+) {
+  const selectedAnswer = Object.values(input.answers)[0]?.answers[0]?.trim().toLowerCase();
+  const allowed = Boolean(selectedAnswer && /^(allow|approve|yes|continue|proceed)\b/.test(selectedAnswer));
+
+  switch (pending.responseKind) {
+    case 'mcpElicitation':
+      return {
+        action: allowed ? 'accept' : 'decline',
+        content: {},
+      };
+    case 'commandExecutionApproval':
+      return { decision: allowed ? 'accept' : 'decline' };
+    case 'fileChangeApproval':
+      return { decision: allowed ? 'accept' : 'decline' };
+    case 'permissionsApproval':
+      return allowed
+        ? {
+            permissions:
+              isRecord(pending.responsePayload?.permissions)
+                ? pending.responsePayload.permissions
+                : {},
+            scope: 'turn',
+          }
+        : {
+            permissions: {},
+            scope: 'turn',
+          };
+    case 'legacyExecApproval':
+    case 'legacyApplyPatchApproval':
+      return { decision: allowed ? 'approved' : 'denied' };
+    case 'answers':
+    default:
+      return {
+        answers: input.answers,
+      };
+  }
+}
+
 function buildThreadRequestFromMcpElicitation(
   request: CodexServerRequest & {
     params: {
@@ -2219,6 +2439,7 @@ export class ThreadService {
       cachedDetail.turns,
       pagedTurns.turns,
     );
+    const goal = await this.getThreadGoalForRecord(updated).catch(() => null);
     return {
       thread: this.toThreadDto(updated, loadedIds),
       workspace: toWorkspaceDto(workspace),
@@ -2229,9 +2450,157 @@ export class ThreadService {
       pendingSteers: this.listPendingSteers(updated.id),
       answeredRequestNotes: this.listAnsweredRequestNotes(updated.id),
       activityNotes: this.listActivityNotes(updated.id),
+      goal,
       livePlan: this.getLivePlan(updated.id),
       liveItems,
     };
+  }
+
+  async getThreadGoal(localThreadId: string): Promise<ThreadGoalDto | null> {
+    const record = getThreadRecordById(this.db, localThreadId);
+    if (!record || !record.codexThreadId) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Thread was not found.',
+      });
+    }
+
+    return this.getThreadGoalForRecord(record, { allowEnableFeature: true });
+  }
+
+  async updateThreadGoal(
+    localThreadId: string,
+    input: UpdateThreadGoalInput,
+  ): Promise<ThreadGoalDto | null> {
+    const record = getThreadRecordById(this.db, localThreadId);
+    if (!record || !record.codexThreadId) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Thread was not found.',
+      });
+    }
+
+    if (record.isConnected === false) {
+      throw new HttpError(409, {
+        code: 'conflict',
+        message: 'Connect this thread before changing its goal.',
+      });
+    }
+
+    try {
+      await this.ensureGoalsFeatureEnabled();
+      await this.ensureThreadLoadedForCodexOperation(record);
+      const goal = await this.codexManager.setThreadGoal({
+        threadId: record.codexThreadId,
+        ...(input.objective !== undefined ? { objective: input.objective } : {}),
+        ...(input.status !== undefined ? { status: input.status } : {}),
+        ...(input.tokenBudget !== undefined ? { tokenBudget: input.tokenBudget } : {}),
+      });
+      const dto = toThreadGoalDto(goal);
+      this.emitThreadEvent('thread.goal.updated', localThreadId, {
+        goal: dto,
+      });
+      return dto;
+    } catch (error) {
+      mapCodexGoalError(error);
+    }
+  }
+
+  async clearThreadGoal(localThreadId: string): Promise<{ cleared: boolean }> {
+    const record = getThreadRecordById(this.db, localThreadId);
+    if (!record || !record.codexThreadId) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Thread was not found.',
+      });
+    }
+
+    if (record.isConnected === false) {
+      throw new HttpError(409, {
+        code: 'conflict',
+        message: 'Connect this thread before clearing its goal.',
+      });
+    }
+
+    try {
+      await this.ensureGoalsFeatureEnabled();
+      await this.ensureThreadLoadedForCodexOperation(record);
+      const cleared = await this.codexManager.clearThreadGoal(record.codexThreadId);
+      this.emitThreadEvent('thread.goal.cleared', localThreadId, {});
+      return { cleared };
+    } catch (error) {
+      mapCodexGoalError(error);
+    }
+  }
+
+  private async getThreadGoalForRecord(record: {
+    id: string;
+    codexThreadId: string | null;
+  }, options: { allowEnableFeature?: boolean } = {}): Promise<ThreadGoalDto | null> {
+    if (!record.codexThreadId) {
+      return null;
+    }
+
+    try {
+      if (options.allowEnableFeature) {
+        await this.ensureGoalsFeatureEnabled();
+        await this.ensureThreadLoadedForCodexOperation(record);
+      }
+      const goal = await this.codexManager.getThreadGoal(record.codexThreadId);
+      return goal ? toThreadGoalDto(goal) : null;
+    } catch (error) {
+      if (error instanceof JsonRpcClientError) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  private async ensureGoalsFeatureEnabled() {
+    try {
+      if (await readCodexFeatureFlag(this.codexHome, 'goals')) {
+        return;
+      }
+
+      await writeCodexFeatureFlag(this.codexHome, 'goals', true);
+      await this.codexManager.stop();
+      await this.codexManager.start();
+    } catch (error) {
+      if (error instanceof JsonRpcClientError) {
+        throw new HttpError(409, {
+          code: 'goal_feature_disabled',
+          message: GOAL_FEATURE_DISABLED_MESSAGE,
+        });
+      }
+      throw error;
+    }
+  }
+
+  private async ensureThreadLoadedForCodexOperation(record: {
+    id: string;
+    codexThreadId: string | null;
+    model?: string | null;
+    sandboxMode?: string | null;
+    approvalMode?: string | null;
+  }) {
+    if (!record.codexThreadId) {
+      return;
+    }
+
+    const loadedIds = new Set(await this.codexManager.listLoadedThreads().catch(() => []));
+    if (loadedIds.has(record.codexThreadId)) {
+      return;
+    }
+
+    const resumeInput: ResumeThreadInput = {};
+    if (record.model) {
+      resumeInput.model = record.model;
+    }
+    const normalizedSandboxMode = normalizeSandboxMode(record.sandboxMode);
+    if (normalizedSandboxMode) {
+      resumeInput.sandboxMode = normalizedSandboxMode;
+    }
+    await this.resumeThread(record.id, resumeInput);
   }
 
   async getThreadHistoryItemDetail(
@@ -3121,19 +3490,7 @@ export class ThreadService {
     }
 
     if (pending.source === 'server') {
-      const selectedAnswer = Object.values(input.answers)[0]?.answers[0]?.trim().toLowerCase();
-      const result =
-        pending.responseKind === 'mcpElicitation'
-          ? {
-              action:
-                selectedAnswer && /^(deny|reject|block|cancel|no|abort)\b/.test(selectedAnswer)
-                  ? 'decline'
-                  : 'accept',
-              content: {},
-            }
-          : {
-              answers: input.answers,
-            };
+      const result = interactiveApprovalResultForServerRequest(pending, input);
       this.codexManager.respondToServerRequest(pending.serverRequestId, result);
       this.pendingRequests.get(localThreadId)?.delete(requestId);
       if (this.pendingRequests.get(localThreadId)?.size === 0) {
@@ -3223,6 +3580,33 @@ export class ThreadService {
         this.emitThreadEvent('thread.updated', record.id, {
           title: getThreadRecordById(this.db, record.id)?.title ?? record.title
         });
+        return;
+      }
+      case 'thread/goal/updated': {
+        const params = event.params as {
+          threadId: string;
+          turnId: string | null;
+          goal: Parameters<typeof toThreadGoalDto>[0];
+        };
+        const record = getThreadRecordByCodexThreadId(this.db, params.threadId);
+        if (!record) {
+          return;
+        }
+
+        this.emitThreadEvent('thread.goal.updated', record.id, {
+          turnId: params.turnId,
+          goal: toThreadGoalDto(params.goal),
+        });
+        return;
+      }
+      case 'thread/goal/cleared': {
+        const params = event.params as { threadId: string };
+        const record = getThreadRecordByCodexThreadId(this.db, params.threadId);
+        if (!record) {
+          return;
+        }
+
+        this.emitThreadEvent('thread.goal.cleared', record.id, {});
         return;
       }
       case 'thread/tokenUsage/updated': {
@@ -3483,6 +3867,63 @@ export class ThreadService {
   }
 
   private async handleServerRequest(request: CodexServerRequest) {
+    const approvalResponseKind = responseKindForApprovalRequest(request);
+    if (approvalResponseKind) {
+      const params = request.params as {
+        threadId?: string;
+        conversationId?: string;
+        permissions?: unknown;
+      };
+      const codexThreadId = params.threadId ?? params.conversationId;
+      const record = codexThreadId
+        ? getThreadRecordByCodexThreadId(this.db, codexThreadId)
+        : null;
+      if (!record) {
+        return;
+      }
+
+      const approvalMode = (record.approvalMode ?? 'yolo') as ApprovalMode;
+      const autoApprovedResult =
+        approvalMode === 'yolo' ? yoloApprovalResultForServerRequest(request) : null;
+      if (autoApprovedResult) {
+        this.codexManager.respondToServerRequest(request.id, autoApprovedResult);
+        return;
+      }
+
+      const title =
+        approvalResponseKind === 'commandExecutionApproval' ||
+        approvalResponseKind === 'legacyExecApproval'
+          ? 'Command approval required'
+          : approvalResponseKind === 'fileChangeApproval' ||
+              approvalResponseKind === 'legacyApplyPatchApproval'
+            ? 'File change approval required'
+            : 'Permissions approval required';
+      const threadRequest = buildGenericApprovalThreadRequest(request, {
+        title,
+        descriptionFallback: 'Codex needs approval before it can continue this action.',
+      });
+      let threadRequests = this.pendingRequests.get(record.id);
+      if (!threadRequests) {
+        threadRequests = new Map();
+        this.pendingRequests.set(record.id, threadRequests);
+      }
+      const pendingRequest: Extract<PendingThreadRequestRecord, { source: 'server' }> = {
+        source: 'server',
+        serverRequestId: request.id,
+        responseKind: approvalResponseKind,
+        request: threadRequest,
+      };
+      if (approvalResponseKind === 'permissionsApproval' && isRecord(params.permissions)) {
+        pendingRequest.responsePayload = { permissions: params.permissions };
+      }
+      threadRequests.set(threadRequest.id, pendingRequest);
+
+      this.emitThreadEvent('thread.request.created', record.id, {
+        request: threadRequest,
+      });
+      return;
+    }
+
     if (isMcpElicitationRequest(request)) {
       const record = getThreadRecordByCodexThreadId(this.db, request.params.threadId);
       if (!record) {

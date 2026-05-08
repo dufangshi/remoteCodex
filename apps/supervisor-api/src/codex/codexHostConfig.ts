@@ -83,3 +83,106 @@ export async function writeCodexFastMode(codexHome: string, enabled: boolean) {
   await fsp.writeFile(configPath, next, 'utf8');
   return next;
 }
+
+export function isCodexFeatureEnabledFromConfig(content: string, featureName: string) {
+  const escaped = featureName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const featuresMatch = content.match(/^[^\S\r\n]*\[features\][^\S\r\n]*$/m);
+  if (!featuresMatch || featuresMatch.index === undefined) {
+    return false;
+  }
+
+  const sectionStart = featuresMatch.index + featuresMatch[0].length;
+  const nextSectionMatch = content
+    .slice(sectionStart)
+    .match(/^[^\S\r\n]*\[[^\]\r\n]+\][^\S\r\n]*$/m);
+  const sectionEnd =
+    nextSectionMatch && nextSectionMatch.index !== undefined
+      ? sectionStart + nextSectionMatch.index
+      : content.length;
+  const featuresBody = content.slice(sectionStart, sectionEnd);
+  return new RegExp(`^\\s*${escaped}\\s*=\\s*true\\s*(?:#.*)?$`, 'm').test(featuresBody);
+}
+
+export async function readCodexFeatureFlag(
+  codexHome: string,
+  featureName: string,
+) {
+  try {
+    const content = await fsp.readFile(resolveCodexConfigPath(codexHome), 'utf8');
+    return isCodexFeatureEnabledFromConfig(content, featureName);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return false;
+    }
+    throw error;
+  }
+}
+
+export function upsertCodexFeatureFlag(
+  content: string,
+  featureName: string,
+  enabled: boolean,
+) {
+  const normalized = content.replace(/\r\n/g, '\n');
+  const escaped = featureName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const featuresMatch = normalized.match(/^[^\S\r\n]*\[features\][^\S\r\n]*$/m);
+  const nextLine = `${featureName} = ${enabled ? 'true' : 'false'}`;
+
+  if (!featuresMatch || featuresMatch.index === undefined) {
+    const prefix = normalized.trimEnd();
+    return prefix
+      ? `${prefix}\n\n[features]\n${nextLine}\n`
+      : `[features]\n${nextLine}\n`;
+  }
+
+  const sectionStart = featuresMatch.index + featuresMatch[0].length;
+  const nextSectionMatch = normalized
+    .slice(sectionStart)
+    .match(/^[^\S\r\n]*\[[^\]\r\n]+\][^\S\r\n]*$/m);
+  const sectionEnd =
+    nextSectionMatch && nextSectionMatch.index !== undefined
+      ? sectionStart + nextSectionMatch.index
+      : normalized.length;
+  const beforeSectionBody = normalized.slice(0, sectionStart);
+  const sectionBody = normalized.slice(sectionStart, sectionEnd);
+  const afterSection = normalized.slice(sectionEnd);
+  const flagPattern = new RegExp(
+    `(^[^\\S\\r\\n]*)${escaped}[^\\S\\r\\n]*=[^\\S\\r\\n]*(true|false)[^\\S\\r\\n]*(?:#.*)?$`,
+    'm',
+  );
+
+  if (flagPattern.test(sectionBody)) {
+    return (
+      beforeSectionBody +
+      sectionBody.replace(flagPattern, `$1${nextLine}`) +
+      afterSection
+    );
+  }
+
+  const bodyWithFlag = `${sectionBody.replace(/\n*$/, '')}\n${nextLine}\n`;
+  const normalizedAfterSection = afterSection.startsWith('\n')
+    ? afterSection
+    : `\n${afterSection}`;
+  return beforeSectionBody + bodyWithFlag + normalizedAfterSection;
+}
+
+export async function writeCodexFeatureFlag(
+  codexHome: string,
+  featureName: string,
+  enabled: boolean,
+) {
+  const configPath = resolveCodexConfigPath(codexHome);
+  let current = '';
+  try {
+    current = await fsp.readFile(configPath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+  }
+
+  const next = upsertCodexFeatureFlag(current, featureName, enabled);
+  await fsp.mkdir(path.dirname(configPath), { recursive: true });
+  await fsp.writeFile(configPath, next, 'utf8');
+  return next;
+}

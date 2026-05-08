@@ -19,6 +19,8 @@ import type {
   ThreadMcpServersDto,
   ThreadSkillsDto,
   ThreadForkTurnOptionDto,
+  ThreadGoalDto,
+  ThreadGoalStatusDto,
   ModelOptionDto,
   PromptAttachmentKindDto,
   ThreadContextUsageDto,
@@ -51,6 +53,7 @@ interface ThreadComposerProps {
   skillsState?: SlashPanelState<ThreadSkillsDto>;
   mcpState?: SlashPanelState<ThreadMcpServersDto>;
   forkTurnOptionsState?: SlashPanelState<ThreadForkTurnOptionDto[]>;
+  goalState?: SlashPanelState<ThreadGoalDto | null | undefined>;
   onDraftChange?: Dispatch<
     SetStateAction<{
       prompt: string;
@@ -65,6 +68,13 @@ interface ThreadComposerProps {
   onCompact?: () => Promise<void> | void;
   onOpenSkills?: () => Promise<void> | void;
   onOpenMcp?: () => Promise<void> | void;
+  onOpenGoal?: () => Promise<void> | void;
+  onUpdateGoal?: (input: {
+    objective?: string | null;
+    status?: ThreadGoalStatusDto | null;
+    tokenBudget?: number | null;
+  }) => Promise<void> | void;
+  onClearGoal?: () => Promise<void> | void;
   onOpenForkTurns?: () => Promise<void> | void;
   onForkLatest?: () => Promise<void> | void;
   onForkTurn?: (turnId: string) => Promise<void> | void;
@@ -112,11 +122,25 @@ interface PromptAttachmentSegment {
 
 type PromptSegment = PromptTextSegment | PromptAttachmentSegment;
 type AttachmentPreviewMap = Record<string, string>;
-type SlashPanelView = 'root' | 'skills' | 'mcp' | 'fork' | 'forkTurns';
+type SlashPanelView = 'root' | 'skills' | 'mcp' | 'fork' | 'forkTurns' | 'goal';
 type McpPanelMode = 'list' | 'add' | 'http' | 'stdio';
 
 function normalizePromptText(value: string) {
   return value.replace(/\u00a0/g, ' ');
+}
+
+function textFromClipboardHtml(value: string) {
+  if (!value) {
+    return '';
+  }
+
+  const container = document.createElement('div');
+  container.innerHTML = value;
+  return container.textContent ?? '';
+}
+
+function editorContainsStyledRichText(editor: HTMLDivElement) {
+  return Boolean(editor.querySelector('[style], font'));
 }
 
 function tokenizePrompt(
@@ -263,6 +287,34 @@ function skillScopeLabel(
     default:
       return 'User';
   }
+}
+
+function goalStatusLabel(value: ThreadGoalStatusDto) {
+  switch (value) {
+    case 'active':
+      return 'Active';
+    case 'paused':
+      return 'Paused';
+    case 'budgetLimited':
+      return 'Budget';
+    case 'complete':
+      return 'Complete';
+    default:
+      return value;
+  }
+}
+
+function formatGoalUsage(goal: ThreadGoalDto) {
+  const minutes = Math.max(0, Math.round(goal.timeUsedSeconds / 60));
+  const formatCompact = (value: number) =>
+    new Intl.NumberFormat(undefined, {
+      notation: 'compact',
+      maximumFractionDigits: 1,
+    }).format(value);
+
+  return goal.tokenBudget === null
+    ? `${formatCompact(goal.tokensUsed)} tok · ${minutes}m`
+    : `${formatCompact(goal.tokensUsed)}/${formatCompact(goal.tokenBudget)} tok · ${minutes}m`;
 }
 
 function normalizeTomlContent(value: string) {
@@ -585,6 +637,11 @@ export function ThreadComposer({
     data: null,
     error: null,
   },
+  goalState = {
+    status: 'idle',
+    data: null,
+    error: null,
+  },
   forkTurnOptionsState = {
     status: 'idle',
     data: null,
@@ -596,6 +653,9 @@ export function ThreadComposer({
   onCompact,
   onOpenSkills,
   onOpenMcp,
+  onOpenGoal,
+  onUpdateGoal,
+  onClearGoal,
   onOpenForkTurns,
   onForkLatest,
   onForkTurn,
@@ -627,6 +687,10 @@ export function ThreadComposer({
   const [mcpConfigSuccess, setMcpConfigSuccess] = useState<string | null>(null);
   const [copiedSkillName, setCopiedSkillName] = useState<string | null>(null);
   const [forkBusy, setForkBusy] = useState(false);
+  const [goalObjective, setGoalObjective] = useState('');
+  const [goalTokenBudget, setGoalTokenBudget] = useState('');
+  const [goalBusy, setGoalBusy] = useState(false);
+  const [goalLocalError, setGoalLocalError] = useState<string | null>(null);
   const menuRef = useRef<HTMLFormElement | null>(null);
   const promptRef = useRef<HTMLDivElement | null>(null);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
@@ -636,11 +700,13 @@ export function ThreadComposer({
   const selectionSnapshotRef = useRef<{ start: number; end: number } | null>(null);
   const previewUrlCacheRef = useRef<Map<string, string>>(new Map());
   const renderedPreviewSignatureRef = useRef('');
+  const renderedSanitizeNonceRef = useRef(0);
   const isShellView = activeView === 'shell';
   const isMobileShell = Boolean(isShellView && shellControlState?.isMobileShell);
   const shellPromptLabel = shellControlState?.promptLabel ?? null;
   const [attachmentPreviewUrls, setAttachmentPreviewUrls] = useState<AttachmentPreviewMap>({});
   const [isDragTargetActive, setIsDragTargetActive] = useState(false);
+  const [editorSanitizeNonce, setEditorSanitizeNonce] = useState(0);
   const isDraftControlled =
     !isShellView &&
     draftPrompt !== undefined &&
@@ -671,6 +737,12 @@ export function ThreadComposer({
   useEffect(() => {
     if (slashPanelView !== 'forkTurns') {
       setForkBusy(false);
+    }
+  }, [slashPanelView]);
+
+  useEffect(() => {
+    if (slashPanelView !== 'goal') {
+      setGoalLocalError(null);
     }
   }, [slashPanelView]);
 
@@ -797,6 +869,86 @@ export function ThreadComposer({
       setOpenMenu(null);
     } finally {
       setForkBusy(false);
+    }
+  }
+
+  async function handleSetGoal() {
+    const objective = goalObjective.trim();
+    if (!objective) {
+      setGoalLocalError('Goal objective cannot be empty.');
+      return;
+    }
+
+    const normalizedBudget = goalTokenBudget.trim();
+    const tokenBudget =
+      normalizedBudget.length > 0 ? Number(normalizedBudget) : null;
+    if (
+      normalizedBudget.length > 0 &&
+      (tokenBudget === null || !Number.isInteger(tokenBudget) || tokenBudget <= 0)
+    ) {
+      setGoalLocalError('Token budget must be a positive integer.');
+      return;
+    }
+
+    if (!onUpdateGoal) {
+      setGoalLocalError('/goal is unavailable in this view.');
+      return;
+    }
+
+    setGoalBusy(true);
+    setGoalLocalError(null);
+    try {
+      await onUpdateGoal({
+        objective,
+        status: 'active',
+        tokenBudget,
+      });
+      setGoalObjective('');
+      setGoalTokenBudget('');
+    } catch (error) {
+      setGoalLocalError(
+        error instanceof Error ? error.message : 'Unable to set goal.',
+      );
+    } finally {
+      setGoalBusy(false);
+    }
+  }
+
+  async function handleSetGoalStatus(status: ThreadGoalStatusDto) {
+    if (!onUpdateGoal) {
+      setGoalLocalError('/goal is unavailable in this view.');
+      return;
+    }
+
+    setGoalBusy(true);
+    setGoalLocalError(null);
+    try {
+      await onUpdateGoal({ status });
+    } catch (error) {
+      setGoalLocalError(
+        error instanceof Error ? error.message : 'Unable to update goal.',
+      );
+    } finally {
+      setGoalBusy(false);
+    }
+  }
+
+  async function handleClearGoal() {
+    if (!onClearGoal) {
+      setGoalLocalError('/goal is unavailable in this view.');
+      return;
+    }
+
+    setGoalBusy(true);
+    setGoalLocalError(null);
+    try {
+      await onClearGoal();
+    } catch (error) {
+      setGoalLocalError(
+        error instanceof Error ? error.message : 'Unable to clear goal.',
+      );
+    } finally {
+      setGoalBusy(false);
     }
   }
 
@@ -1379,6 +1531,33 @@ export function ThreadComposer({
     setOpenMenu(null);
   }
 
+  function insertPlainTextIntoPrompt(text: string) {
+    if (!text) {
+      return;
+    }
+
+    const selection = snapshotSelection() ?? selectionSnapshotRef.current;
+    const start = selection?.start ?? prompt.length;
+    const end = selection?.end ?? start;
+    const normalizedText = normalizePromptText(text);
+    const nextPrompt = `${prompt.slice(0, start)}${normalizedText}${prompt.slice(end)}`;
+
+    updateDraft((current) => ({
+      prompt: nextPrompt,
+      attachments: current.attachments,
+    }));
+
+    const nextCaret = start + normalizedText.length;
+    pendingSelectionRef.current = {
+      start: nextCaret,
+      end: nextCaret,
+    };
+    selectionSnapshotRef.current = {
+      start: nextCaret,
+      end: nextCaret,
+    };
+  }
+
   useEffect(() => {
     function handleWindowPointerDown(event: PointerEvent) {
       const eventPath =
@@ -1415,7 +1594,8 @@ export function ThreadComposer({
     const pendingSelection = pendingSelectionRef.current;
     const shouldSyncDom =
       serializeEditorPrompt() !== prompt ||
-      renderedPreviewSignatureRef.current !== previewSignature;
+      renderedPreviewSignatureRef.current !== previewSignature ||
+      renderedSanitizeNonceRef.current !== editorSanitizeNonce;
 
     if (shouldSyncDom) {
       const fragment = document.createDocumentFragment();
@@ -1494,6 +1674,7 @@ export function ThreadComposer({
 
       editor.replaceChildren(fragment);
       renderedPreviewSignatureRef.current = previewSignature;
+      renderedSanitizeNonceRef.current = editorSanitizeNonce;
     }
 
     if (pendingSelection !== null) {
@@ -1508,7 +1689,14 @@ export function ThreadComposer({
 
     pendingSelectionRef.current = null;
     pendingInsertedAttachmentIdsRef.current = [];
-  }, [attachmentPreviewUrls, isShellView, previewSignature, prompt, promptSegments]);
+  }, [
+    attachmentPreviewUrls,
+    editorSanitizeNonce,
+    isShellView,
+    previewSignature,
+    prompt,
+    promptSegments,
+  ]);
 
   function dismissPromptFocus() {
     promptRef.current?.blur();
@@ -1530,23 +1718,7 @@ export function ThreadComposer({
 
     try {
       const clipboardText = await navigator.clipboard.readText();
-      if (!clipboardText) {
-        return;
-      }
-
-      const selection = snapshotSelection() ?? selectionSnapshotRef.current;
-      const start = selection?.start ?? prompt.length;
-      const end = selection?.end ?? start;
-      const nextPrompt = `${prompt.slice(0, start)}${clipboardText}${prompt.slice(end)}`;
-      updateDraft((current) => ({
-        prompt: nextPrompt,
-        attachments: current.attachments,
-      }));
-      const nextCaret = start + clipboardText.length;
-      pendingSelectionRef.current = {
-        start: nextCaret,
-        end: nextCaret,
-      };
+      insertPlainTextIntoPrompt(clipboardText);
     } catch {
       return;
     }
@@ -1582,6 +1754,13 @@ export function ThreadComposer({
     const nextPrompt = serializeEditorPrompt();
     const nextSelection = snapshotSelection();
     selectionSnapshotRef.current = nextSelection;
+    const editor = promptRef.current;
+    const needsPlainTextDomSync = editor ? editorContainsStyledRichText(editor) : false;
+
+    if (needsPlainTextDomSync) {
+      pendingSelectionRef.current = nextSelection;
+      setEditorSanitizeNonce((current) => current + 1);
+    }
 
     updateDraft((current) => ({
       prompt: nextPrompt,
@@ -1597,6 +1776,15 @@ export function ThreadComposer({
       event.clipboardData?.files,
     );
     if (files.length === 0) {
+      const plainText = event.clipboardData?.getData('text/plain') ?? '';
+      const htmlText = event.clipboardData?.getData('text/html') ?? '';
+      const clipboardText = plainText || textFromClipboardHtml(htmlText);
+      if (!clipboardText && !htmlText) {
+        return;
+      }
+
+      event.preventDefault();
+      insertPlainTextIntoPrompt(clipboardText);
       return;
     }
 
@@ -1836,6 +2024,34 @@ export function ThreadComposer({
                         </button>
                         <button
                           type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setSlashPanelView('goal');
+                            setGoalObjective(goalState.data?.objective ?? '');
+                            setGoalTokenBudget(
+                              goalState.data?.tokenBudget
+                                ? String(goalState.data.tokenBudget)
+                                : '',
+                            );
+                            void onOpenGoal?.();
+                          }}
+                          className={`mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm transition ${
+                            goalState.data?.status === 'active'
+                              ? 'bg-[var(--theme-accent-soft)] bg-amber-300/12 text-[var(--theme-accent-strong)] text-amber-100'
+                              : 'thread-composer-menu-item'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <span>/goal</span>
+                            <span className="text-[11px] uppercase tracking-[0.16em] text-stone-400">
+                              {goalState.data
+                                ? goalStatusLabel(goalState.data.status)
+                                : 'Open'}
+                            </span>
+                          </div>
+                        </button>
+                        <button
+                          type="button"
                           disabled={busy || forkBusy}
                           onClick={(event) => {
                             event.stopPropagation();
@@ -1965,6 +2181,106 @@ export function ThreadComposer({
                                 No turns available to fork yet.
                               </p>
                             ) : null}
+                          </div>
+                        ) : slashPanelView === 'goal' ? (
+                          <div className="space-y-2 p-2">
+                            {goalState.status === 'loading' && !goalState.data ? (
+                              <p className="rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3 text-sm text-stone-400">
+                                Loading goal…
+                              </p>
+                            ) : null}
+                            {goalState.error ? (
+                              <p className="rounded-xl border border-rose-500/35 bg-rose-500/10 px-3 py-3 text-sm text-rose-100/90">
+                                {goalState.error}
+                              </p>
+                            ) : null}
+                            {goalLocalError ? (
+                              <p className="rounded-xl border border-rose-500/35 bg-rose-500/10 px-3 py-3 text-sm text-rose-100/90">
+                                {goalLocalError}
+                              </p>
+                            ) : null}
+                            {goalState.data ? (
+                              <div className="rounded-xl border border-amber-300/20 bg-amber-300/10 px-3 py-3">
+                                <div className="flex items-start justify-between gap-3">
+                                  <p className="min-w-0 break-words text-sm font-medium text-stone-100">
+                                    {goalState.data.objective}
+                                  </p>
+                                  <span className="shrink-0 rounded-full border border-amber-300/30 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-amber-100">
+                                    {goalStatusLabel(goalState.data.status)}
+                                  </span>
+                                </div>
+                                <p className="mt-2 text-xs text-stone-400">
+                                  {formatGoalUsage(goalState.data)}
+                                </p>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={goalBusy || goalState.data.status === 'active'}
+                                    onClick={() => void handleSetGoalStatus('active')}
+                                    className="thread-composer-chip-button rounded-full border border-stone-700 px-3 py-1.5 text-xs text-stone-300 transition disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    Resume
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={goalBusy || goalState.data.status === 'paused'}
+                                    onClick={() => void handleSetGoalStatus('paused')}
+                                    className="thread-composer-chip-button rounded-full border border-stone-700 px-3 py-1.5 text-xs text-stone-300 transition disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    Pause
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={goalBusy}
+                                    onClick={() => void handleClearGoal()}
+                                    className="rounded-full border border-rose-400/35 px-3 py-1.5 text-xs text-rose-100 transition hover:bg-rose-400/10 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    Clear
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <p className="rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3 text-sm text-stone-400">
+                                No active goal. Set one to keep Codex focused on a long-running objective.
+                              </p>
+                            )}
+                            <div className="space-y-2 rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3">
+                              <label className="block text-xs text-stone-400">
+                                Goal objective
+                              </label>
+                              <textarea
+                                aria-label="Goal objective"
+                                value={goalObjective}
+                                onChange={(event) => setGoalObjective(event.target.value)}
+                                rows={3}
+                                placeholder="Finish the migration and keep tests green"
+                                className="w-full rounded-lg border border-stone-700 bg-stone-950 px-3 py-2 text-sm text-stone-100 outline-none placeholder:text-stone-500 focus:border-amber-300/50"
+                              />
+                              <label className="block text-xs text-stone-400">
+                                Token budget, optional
+                              </label>
+                              <input
+                                aria-label="Goal token budget"
+                                value={goalTokenBudget}
+                                onChange={(event) => setGoalTokenBudget(event.target.value)}
+                                inputMode="numeric"
+                                placeholder="Optional"
+                                className="w-full rounded-lg border border-stone-700 bg-stone-950 px-3 py-2 text-sm text-stone-100 outline-none placeholder:text-stone-500 focus:border-amber-300/50"
+                              />
+                              <div className="flex items-center justify-between gap-2 pt-1">
+                                <span className="text-[11px] text-stone-500">
+                                  Requires `features.goals = true`.
+                                </span>
+                                <button
+                                  type="button"
+                                  disabled={goalBusy}
+                                  onClick={() => void handleSetGoal()}
+                                  className="rounded-full border border-amber-300/35 px-3 py-1.5 text-xs text-amber-100 transition hover:bg-amber-300/10 disabled:cursor-not-allowed disabled:border-stone-700 disabled:text-stone-500"
+                                >
+                                  {goalBusy ? 'Saving…' : 'Set goal'}
+                                </button>
+                              </div>
+                            </div>
                           </div>
                         ) : slashPanelView === 'skills' ? (
                           <div className="p-2">

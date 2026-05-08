@@ -31,11 +31,13 @@ import {
   ApiError,
   compactThread,
   connectSupervisorEvents,
+  clearThreadGoal,
   disconnectThread,
   fetchCodexHostFile,
   fetchCodexModels,
   fetchCodexStatus,
   fetchThreadForkTurns,
+  fetchThreadGoal,
   fetchThreadMcpServers,
   fetchThreadHistoryItemDetail,
   fetchThreadSkills,
@@ -51,6 +53,7 @@ import {
   type SendThreadPromptRequestInput,
   updateThread,
   updateCodexHostFile,
+  updateThreadGoal,
   updateThreadSettings,
 } from '../lib/api';
 
@@ -355,6 +358,13 @@ export function ThreadDetailPage() {
     data: null,
     error: null,
   });
+  const [goalState, setGoalState] = useState<
+    SlashPanelState<ThreadDetailDto['goal']>
+  >({
+    status: 'idle',
+    data: null,
+    error: null,
+  });
   const [error, setError] = useState<string | null>(null);
 
   const flushBufferedLiveOutput = useCallback(() => {
@@ -407,7 +417,132 @@ export function ThreadDetailPage() {
       data: null,
       error: null,
     });
+    setGoalState({
+      status: 'idle',
+      data: null,
+      error: null,
+    });
   }, [id]);
+
+  async function handleOpenGoal() {
+    if (!id) {
+      return;
+    }
+
+    setGoalState((current) => ({
+      status: 'loading',
+      data: current.data ?? detailRef.current?.goal ?? null,
+      error: null,
+    }));
+
+    try {
+      const next = await fetchThreadGoal(id);
+      setGoalState({
+        status: 'ready',
+        data: next.goal,
+        error: null,
+      });
+      setDetail((current) =>
+        current
+          ? {
+              ...current,
+              goal: next.goal,
+            }
+          : current,
+      );
+    } catch (requestError) {
+      setGoalState((current) => ({
+        status: 'failed',
+        data: current.data,
+        error:
+          requestError instanceof ApiError
+            ? requestError.payload.message
+            : 'Unable to load goal.',
+      }));
+    }
+  }
+
+  async function handleUpdateGoal(input: {
+    objective?: string | null;
+    status?: NonNullable<ThreadDetailDto['goal']>['status'] | null;
+    tokenBudget?: number | null;
+  }) {
+    if (!id) {
+      return;
+    }
+
+    setGoalState((current) => ({
+      status: 'loading',
+      data: current.data ?? detailRef.current?.goal ?? null,
+      error: null,
+    }));
+
+    try {
+      const next = await updateThreadGoal(id, input);
+      setGoalState({
+        status: 'ready',
+        data: next.goal,
+        error: null,
+      });
+      setDetail((current) =>
+        current
+          ? {
+              ...current,
+              goal: next.goal,
+            }
+          : current,
+      );
+    } catch (requestError) {
+      setGoalState((current) => ({
+        status: 'failed',
+        data: current.data,
+        error:
+          requestError instanceof ApiError
+            ? requestError.payload.message
+            : 'Unable to update goal.',
+      }));
+      throw requestError;
+    }
+  }
+
+  async function handleClearGoal() {
+    if (!id) {
+      return;
+    }
+
+    setGoalState((current) => ({
+      status: 'loading',
+      data: current.data ?? detailRef.current?.goal ?? null,
+      error: null,
+    }));
+
+    try {
+      await clearThreadGoal(id);
+      setGoalState({
+        status: 'ready',
+        data: null,
+        error: null,
+      });
+      setDetail((current) =>
+        current
+          ? {
+              ...current,
+              goal: null,
+            }
+          : current,
+      );
+    } catch (requestError) {
+      setGoalState((current) => ({
+        status: 'failed',
+        data: current.data,
+        error:
+          requestError instanceof ApiError
+            ? requestError.payload.message
+            : 'Unable to clear goal.',
+      }));
+      throw requestError;
+    }
+  }
 
   async function handleOpenSkills() {
     if (!id) {
@@ -535,6 +670,14 @@ export function ThreadDetailPage() {
       detailRef.current = nextDetail;
       setLivePlan(nextDetail.livePlan ?? null);
       setLiveItems(nextDetail.liveItems ?? null);
+      setGoalState((current) =>
+        current.status === 'idle'
+          ? current
+          : {
+              ...current,
+              data: nextDetail.goal ?? null,
+            },
+      );
       const threadHasEnded =
         nextDetail.thread.activeTurnId === null &&
         nextDetail.thread.status !== 'running';
@@ -1077,9 +1220,45 @@ export function ThreadDetailPage() {
         event.type === 'thread.turn.completed' ||
         event.type === 'thread.turn.failed' ||
         event.type === 'thread.updated' ||
+        event.type === 'thread.goal.updated' ||
+        event.type === 'thread.goal.cleared' ||
         event.type === 'thread.request.created' ||
         event.type === 'thread.request.resolved'
       ) {
+        if (event.type === 'thread.goal.updated') {
+          const goal =
+            event.payload.goal && typeof event.payload.goal === 'object'
+              ? (event.payload.goal as NonNullable<ThreadDetailDto['goal']>)
+              : null;
+          setGoalState({
+            status: 'ready',
+            data: goal,
+            error: null,
+          });
+          setDetail((current) =>
+            current
+              ? {
+                  ...current,
+                  goal,
+                }
+              : current,
+          );
+        }
+        if (event.type === 'thread.goal.cleared') {
+          setGoalState({
+            status: 'ready',
+            data: null,
+            error: null,
+          });
+          setDetail((current) =>
+            current
+              ? {
+                  ...current,
+                  goal: null,
+                }
+              : current,
+          );
+        }
         refreshThreadDetailSilently();
         if (event.type === 'thread.turn.started') {
           clearBufferedLiveOutput();
@@ -2394,6 +2573,10 @@ export function ThreadDetailPage() {
                       onForkTurn={handleForkTurn}
                       onOpenSkills={handleOpenSkills}
                       onOpenMcp={handleOpenMcp}
+                      goalState={goalState}
+                      onOpenGoal={handleOpenGoal}
+                      onUpdateGoal={handleUpdateGoal}
+                      onClearGoal={handleClearGoal}
                       onReadCodexConfig={() => fetchCodexHostFile('config.toml')}
                       onWriteCodexConfig={(content) =>
                         updateCodexHostFile('config.toml', { content })
@@ -2439,6 +2622,10 @@ export function ThreadDetailPage() {
                       onForkTurn={handleForkTurn}
                       onOpenSkills={handleOpenSkills}
                       onOpenMcp={handleOpenMcp}
+                      goalState={goalState}
+                      onOpenGoal={handleOpenGoal}
+                      onUpdateGoal={handleUpdateGoal}
+                      onClearGoal={handleClearGoal}
                       onReadCodexConfig={() => fetchCodexHostFile('config.toml')}
                       onWriteCodexConfig={(content) =>
                         updateCodexHostFile('config.toml', { content })
