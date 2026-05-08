@@ -2,7 +2,9 @@ export type ApiErrorCode =
   | 'bad_request'
   | 'not_found'
   | 'conflict'
+  | 'codex_goal_error'
   | 'forbidden'
+  | 'goal_feature_disabled'
   | 'internal_error'
   | 'service_unavailable';
 
@@ -61,6 +63,32 @@ export interface CodexHostFileDto {
 
 export interface UpdateCodexHostFileInput {
   content: string;
+}
+
+export interface CodexHostConfigArchiveFileDto {
+  name: CodexHostFileNameDto;
+  exists: boolean;
+}
+
+export interface CodexHostConfigArchiveDto {
+  id: string;
+  label: string;
+  createdAt: string;
+  updatedAt: string;
+  files: Record<CodexHostFileNameDto, CodexHostConfigArchiveFileDto>;
+}
+
+export interface CreateCodexHostConfigArchiveInput {
+  label?: string;
+}
+
+export interface RenameCodexHostConfigArchiveInput {
+  label: string;
+}
+
+export interface ApplyCodexHostConfigArchiveResultDto {
+  archive: CodexHostConfigArchiveDto;
+  status: CodexStatusDto;
 }
 
 export interface WorkspaceDto {
@@ -322,6 +350,25 @@ export interface ThreadMcpServersDto {
   servers: CodexMcpServerDto[];
 }
 
+export type ThreadGoalStatusDto = 'active' | 'paused' | 'budgetLimited' | 'complete';
+
+export interface ThreadGoalDto {
+  threadId: string;
+  objective: string;
+  status: ThreadGoalStatusDto;
+  tokenBudget: number | null;
+  tokensUsed: number;
+  timeUsedSeconds: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpdateThreadGoalInput {
+  objective?: string | null;
+  status?: ThreadGoalStatusDto | null;
+  tokenBudget?: number | null;
+}
+
 export interface ThreadLivePlanDto {
   turnId: string;
   explanation: string | null;
@@ -353,6 +400,7 @@ export interface ThreadDetailDto {
   pendingSteers: ThreadPendingSteerDto[];
   answeredRequestNotes?: ThreadAnsweredRequestNoteDto[];
   activityNotes?: ThreadActivityNoteDto[];
+  goal?: ThreadGoalDto | null;
   livePlan?: ThreadLivePlanDto | null;
   liveItems?: ThreadLiveItemsDto | null;
 }
@@ -494,6 +542,8 @@ export interface ThreadEventEnvelope {
   type:
     | 'thread.updated'
     | 'thread.context.updated'
+    | 'thread.goal.updated'
+    | 'thread.goal.cleared'
     | 'thread.turn.token.updated'
     | 'thread.turn.started'
     | 'thread.item.started'

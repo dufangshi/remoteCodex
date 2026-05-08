@@ -1,11 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
-import type { CodexHostFileNameDto } from '../../../../packages/shared/src/index';
+import type {
+  CodexHostConfigArchiveDto,
+  CodexHostFileNameDto,
+} from '../../../../packages/shared/src/index';
 import {
   ApiError,
+  applyCodexHostConfigArchive,
   buildAndRestartService,
+  createCodexHostConfigArchive,
   fetchCodexHostFile,
+  fetchCodexHostConfigArchives,
+  renameCodexHostConfigArchive,
   restartCodexAppServer,
   updateCodexHostFile,
 } from '../lib/api';
@@ -64,6 +71,22 @@ const themeOptions: Array<{
     description: 'Follow the operating system appearance.',
   },
 ];
+
+const codexHostFileNames: CodexHostFileNameDto[] = ['config.toml', 'auth.json'];
+
+function formatArchiveDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
 export function AppShellMenuButton({
   className = '',
@@ -261,6 +284,24 @@ export function AppShellSettingsDialog() {
     message: null,
     error: null,
   });
+  const [archives, setArchives] = useState<CodexHostConfigArchiveDto[]>([]);
+  const [archivesState, setArchivesState] = useState<{
+    loading: boolean;
+    creating: boolean;
+    applyingId: string | null;
+    renamingId: string | null;
+    renameDraft: string;
+    message: string | null;
+    error: string | null;
+  }>({
+    loading: false,
+    creating: false,
+    applyingId: null,
+    renamingId: null,
+    renameDraft: '',
+    message: null,
+    error: null,
+  });
   const selectedThemeMode = shellNav?.themeMode ?? 'system';
   const effectiveTheme = shellNav?.effectiveTheme ?? 'dark';
 
@@ -365,6 +406,55 @@ export function AppShellSettingsDialog() {
     };
   }, [editableFiles, shellNav?.settingsOpen]);
 
+  useEffect(() => {
+    if (!shellNav?.settingsOpen) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadArchives() {
+      setArchivesState((current) => ({
+        ...current,
+        loading: true,
+        error: null,
+        message: null,
+      }));
+
+      try {
+        const results = await fetchCodexHostConfigArchives();
+        if (cancelled) {
+          return;
+        }
+
+        setArchives(results);
+        setArchivesState((current) => ({
+          ...current,
+          loading: false,
+        }));
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        setArchivesState((current) => ({
+          ...current,
+          loading: false,
+          error:
+            error instanceof ApiError
+              ? error.message
+              : 'Unable to load config archives.',
+        }));
+      }
+    }
+
+    void loadArchives();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [shellNav?.settingsOpen]);
+
   async function handleRestartAppServer() {
     if (restartState.busy) {
       return;
@@ -467,6 +557,106 @@ export function AppShellSettingsDialog() {
             error instanceof ApiError ? error.message : 'Unable to save the file.',
           saveMessage: null,
         },
+      }));
+    }
+  }
+
+  async function handleCreateArchive() {
+    if (archivesState.creating) {
+      return;
+    }
+
+    setArchivesState((current) => ({
+      ...current,
+      creating: true,
+      message: null,
+      error: null,
+    }));
+
+    try {
+      const archive = await createCodexHostConfigArchive();
+      setArchives((current) => [archive, ...current]);
+      setArchivesState((current) => ({
+        ...current,
+        creating: false,
+        message: 'Backup created.',
+      }));
+    } catch (error) {
+      setArchivesState((current) => ({
+        ...current,
+        creating: false,
+        error:
+          error instanceof ApiError
+            ? error.message
+            : 'Unable to create a config backup.',
+      }));
+    }
+  }
+
+  async function handleApplyArchive(archive: CodexHostConfigArchiveDto) {
+    if (archivesState.applyingId) {
+      return;
+    }
+
+    setArchivesState((current) => ({
+      ...current,
+      applyingId: archive.id,
+      message: null,
+      error: null,
+    }));
+
+    try {
+      const result = await applyCodexHostConfigArchive(archive.id);
+      setArchivesState((current) => ({
+        ...current,
+        applyingId: null,
+        message:
+          result.status.state === 'ready'
+            ? `Applied "${result.archive.label}" and restarted app-server.`
+            : `Applied "${result.archive.label}". App-server state: ${result.status.state}.`,
+      }));
+    } catch (error) {
+      setArchivesState((current) => ({
+        ...current,
+        applyingId: null,
+        error:
+          error instanceof ApiError
+            ? error.message
+            : 'Unable to apply the config archive.',
+      }));
+    }
+  }
+
+  async function handleRenameArchive(archive: CodexHostConfigArchiveDto) {
+    const label = archivesState.renameDraft.trim();
+    if (!label || archivesState.renamingId !== archive.id) {
+      return;
+    }
+
+    setArchivesState((current) => ({
+      ...current,
+      message: null,
+      error: null,
+    }));
+
+    try {
+      const updated = await renameCodexHostConfigArchive(archive.id, { label });
+      setArchives((current) =>
+        current.map((entry) => (entry.id === archive.id ? updated : entry)),
+      );
+      setArchivesState((current) => ({
+        ...current,
+        renamingId: null,
+        renameDraft: '',
+        message: 'Backup renamed.',
+      }));
+    } catch (error) {
+      setArchivesState((current) => ({
+        ...current,
+        error:
+          error instanceof ApiError
+            ? error.message
+            : 'Unable to rename the config backup.',
       }));
     }
   }
@@ -643,6 +833,137 @@ export function AppShellSettingsDialog() {
                     </button>
                   );
                 })}
+              </div>
+            </div>
+
+            <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-[var(--theme-fg)]">Config archives</p>
+                  <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
+                    Backup `config.toml` and `auth.json`, then apply a saved archive with an
+                    app-server restart so Codex reloads the selected files.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleCreateArchive()}
+                  disabled={archivesState.creating}
+                  className="shrink-0 rounded-full border border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)] px-3 py-1.5 text-xs font-medium text-[var(--theme-accent-strong)] transition hover:bg-[var(--theme-hover)] disabled:cursor-not-allowed disabled:border-[var(--theme-border)] disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
+                >
+                  {archivesState.creating ? 'Creating...' : 'Create backup'}
+                </button>
+              </div>
+              {archivesState.error ? (
+                <p className="mt-2 text-xs text-rose-300">{archivesState.error}</p>
+              ) : archivesState.message ? (
+                <p className="mt-2 text-xs text-emerald-300">{archivesState.message}</p>
+              ) : null}
+              <div className="mt-3 space-y-2">
+                {archivesState.loading ? (
+                  <p className="rounded-[1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-3 text-xs text-[var(--theme-fg-muted)]">
+                    Loading backups...
+                  </p>
+                ) : archives.length === 0 ? (
+                  <p className="rounded-[1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-3 text-xs text-[var(--theme-fg-muted)]">
+                    No config backups yet.
+                  </p>
+                ) : (
+                  archives.map((archive) => {
+                    const renaming = archivesState.renamingId === archive.id;
+                    return (
+                      <div
+                        key={archive.id}
+                        className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-3"
+                      >
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="min-w-0">
+                            {renaming ? (
+                              <div className="flex max-w-xl gap-2">
+                                <input
+                                  aria-label={`Rename ${archive.label}`}
+                                  value={archivesState.renameDraft}
+                                  onChange={(event) =>
+                                    setArchivesState((current) => ({
+                                      ...current,
+                                      renameDraft: event.target.value,
+                                      error: null,
+                                      message: null,
+                                    }))
+                                  }
+                                  className="min-w-0 flex-1 rounded-full border border-[var(--theme-border)] bg-[var(--theme-panel)] px-3 py-1.5 text-sm text-[var(--theme-fg)] outline-none focus:border-[var(--theme-accent-border)]"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => void handleRenameArchive(archive)}
+                                  className="rounded-full bg-[var(--theme-accent-solid)] px-3 py-1.5 text-xs font-medium text-[var(--theme-accent-solid-fg)] transition hover:bg-[var(--theme-accent-solid-hover)]"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setArchivesState((current) => ({
+                                      ...current,
+                                      renamingId: null,
+                                      renameDraft: '',
+                                    }))
+                                  }
+                                  className="rounded-full border border-[var(--theme-border)] bg-[var(--theme-panel)] px-3 py-1.5 text-xs font-medium text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)]"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <p className="truncate text-sm font-medium text-[var(--theme-fg)]">
+                                {archive.label}
+                              </p>
+                            )}
+                            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-[var(--theme-fg-muted)]">
+                              <span>Created {formatArchiveDate(archive.createdAt)}</span>
+                              {codexHostFileNames.map((name) => (
+                                <span
+                                  key={name}
+                                  className="rounded-full border border-[var(--theme-border)] bg-[var(--theme-panel)] px-2 py-0.5 font-mono"
+                                >
+                                  {name}: {archive.files[name]?.exists ? 'saved' : 'missing'}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="flex shrink-0 flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setArchivesState((current) => ({
+                                  ...current,
+                                  renamingId: archive.id,
+                                  renameDraft: archive.label,
+                                  message: null,
+                                  error: null,
+                                }))
+                              }
+                              disabled={renaming}
+                              className="rounded-full border border-[var(--theme-border)] bg-[var(--theme-panel)] px-3 py-1.5 text-xs font-medium text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] disabled:cursor-not-allowed disabled:text-[var(--theme-fg-muted)]"
+                            >
+                              Rename
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleApplyArchive(archive)}
+                              disabled={archivesState.applyingId !== null}
+                              className="rounded-full border border-emerald-400/35 bg-emerald-400/10 px-3 py-1.5 text-xs font-medium text-emerald-600 transition hover:bg-emerald-400/16 disabled:cursor-not-allowed disabled:border-[var(--theme-border)] disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)] dark:text-emerald-100"
+                            >
+                              {archivesState.applyingId === archive.id
+                                ? 'Applying...'
+                                : 'Apply'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </div>
           </div>

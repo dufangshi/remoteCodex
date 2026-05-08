@@ -1,13 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  applyCodexHostConfigArchive,
   createThreadShell,
+  createCodexHostConfigArchive,
   createWorkspace,
   disconnectThread,
+  fetchCodexHostConfigArchives,
   fetchCodexHostFile,
   fetchCodexStatus,
   importThread,
   buildAndRestartService,
+  renameCodexHostConfigArchive,
   restartCodexAppServer,
   resumeThread,
   sendThreadPrompt,
@@ -103,6 +107,28 @@ describe('api request helper', () => {
     expect(JSON.parse(String(calls[1]?.[1]?.body))).toEqual({
       content: '{\n  "token": "abc"\n}\n',
     });
+  });
+
+  it('uses the expected codex config archive endpoints', async () => {
+    await fetchCodexHostConfigArchives();
+    await createCodexHostConfigArchive({ label: 'Known good' });
+    await renameCodexHostConfigArchive('archive-1', { label: 'Renamed' });
+    await applyCodexHostConfigArchive('archive-1');
+
+    const calls = vi.mocked(fetch).mock.calls;
+    expect(calls[0]?.[0]).toBe('/api/config/codex-archives');
+    expect(calls[1]?.[0]).toBe('/api/config/codex-archives');
+    expect(calls[1]?.[1]?.method).toBe('POST');
+    expect(JSON.parse(String(calls[1]?.[1]?.body))).toEqual({
+      label: 'Known good',
+    });
+    expect(calls[2]?.[0]).toBe('/api/config/codex-archives/archive-1');
+    expect(calls[2]?.[1]?.method).toBe('PATCH');
+    expect(JSON.parse(String(calls[2]?.[1]?.body))).toEqual({
+      label: 'Renamed',
+    });
+    expect(calls[3]?.[0]).toBe('/api/config/codex-archives/archive-1/apply');
+    expect(calls[3]?.[1]?.method).toBe('POST');
   });
 
   it('uses the expected codex status endpoints', async () => {

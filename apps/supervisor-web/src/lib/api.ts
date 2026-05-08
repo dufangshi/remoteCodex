@@ -1,8 +1,11 @@
 import type {
+  ApplyCodexHostConfigArchiveResultDto,
   ApiErrorShape,
+  CodexHostConfigArchiveDto,
   CodexHostFileDto,
   CodexHostFileNameDto,
   CodexStatusDto,
+  CreateCodexHostConfigArchiveInput,
   CreateThreadInput,
   ForkThreadInput,
   CreateWorkspaceInput,
@@ -22,6 +25,8 @@ import type {
   SupervisorSocketServerEnvelope,
   ThreadDetailDto,
   ThreadHistoryItemDetailDto,
+  ThreadGoalDto,
+  UpdateThreadGoalInput,
   ThreadMcpServersDto,
   ThreadSkillsDto,
   ThreadDto,
@@ -29,6 +34,7 @@ import type {
   ThreadForkResultDto,
   ThreadForkTurnOptionDto,
   ThreadShellStateDto,
+  RenameCodexHostConfigArchiveInput,
   UpdateThreadSettingsInput,
   UpdateCodexHostFileInput,
   UpdateThreadInput,
@@ -106,6 +112,41 @@ export function updateCodexHostFile(
     method: 'PATCH',
     body: JSON.stringify(input),
   });
+}
+
+export function fetchCodexHostConfigArchives() {
+  return request<CodexHostConfigArchiveDto[]>('/api/config/codex-archives', {
+    cache: 'no-store',
+  });
+}
+
+export function createCodexHostConfigArchive(input: CreateCodexHostConfigArchiveInput = {}) {
+  return request<CodexHostConfigArchiveDto>('/api/config/codex-archives', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function renameCodexHostConfigArchive(
+  id: string,
+  input: RenameCodexHostConfigArchiveInput,
+) {
+  return request<CodexHostConfigArchiveDto>(
+    `/api/config/codex-archives/${encodeURIComponent(id)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function applyCodexHostConfigArchive(id: string) {
+  return request<ApplyCodexHostConfigArchiveResultDto>(
+    `/api/config/codex-archives/${encodeURIComponent(id)}/apply`,
+    {
+      method: 'POST',
+    },
+  );
 }
 
 export function fetchCodexStatus() {
@@ -293,6 +334,25 @@ export function updateThreadSettings(id: string, input: UpdateThreadSettingsInpu
 export function compactThread(id: string) {
   return request<ThreadDto>(`/api/threads/${id}/compact`, {
     method: 'POST',
+  });
+}
+
+export function fetchThreadGoal(id: string) {
+  return request<{ goal: ThreadGoalDto | null }>(`/api/threads/${id}/goal`, {
+    cache: 'no-store',
+  });
+}
+
+export function updateThreadGoal(id: string, input: UpdateThreadGoalInput) {
+  return request<{ goal: ThreadGoalDto | null }>(`/api/threads/${id}/goal`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export function clearThreadGoal(id: string) {
+  return request<{ cleared: boolean }>(`/api/threads/${id}/goal`, {
+    method: 'DELETE',
   });
 }
 

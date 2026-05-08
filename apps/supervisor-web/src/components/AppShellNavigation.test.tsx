@@ -93,6 +93,81 @@ describe('AppShellNavigation', () => {
           } satisfies Partial<Response>;
         }
 
+        if (url === '/api/config/codex-archives' && !init?.method) {
+          return {
+            ok: true,
+            json: async () => [
+              {
+                id: 'archive-1',
+                label: 'Known good',
+                createdAt: '2026-04-11T00:00:00.000Z',
+                updatedAt: '2026-04-11T00:00:00.000Z',
+                files: {
+                  'config.toml': { name: 'config.toml', exists: true },
+                  'auth.json': { name: 'auth.json', exists: false },
+                },
+              },
+            ],
+          } satisfies Partial<Response>;
+        }
+
+        if (url === '/api/config/codex-archives' && init?.method === 'POST') {
+          return {
+            ok: true,
+            json: async () => ({
+              id: 'archive-2',
+              label: 'Backup 2026-04-11 00:00 UTC',
+              createdAt: '2026-04-11T00:00:00.000Z',
+              updatedAt: '2026-04-11T00:00:00.000Z',
+              files: {
+                'config.toml': { name: 'config.toml', exists: true },
+                'auth.json': { name: 'auth.json', exists: true },
+              },
+            }),
+          } satisfies Partial<Response>;
+        }
+
+        if (url === '/api/config/codex-archives/archive-1' && init?.method === 'PATCH') {
+          return {
+            ok: true,
+            json: async () => ({
+              id: 'archive-1',
+              label: JSON.parse(String(init.body)).label,
+              createdAt: '2026-04-11T00:00:00.000Z',
+              updatedAt: '2026-04-11T00:01:00.000Z',
+              files: {
+                'config.toml': { name: 'config.toml', exists: true },
+                'auth.json': { name: 'auth.json', exists: false },
+              },
+            }),
+          } satisfies Partial<Response>;
+        }
+
+        if (url === '/api/config/codex-archives/archive-1/apply' && init?.method === 'POST') {
+          return {
+            ok: true,
+            json: async () => ({
+              archive: {
+                id: 'archive-1',
+                label: 'Known good',
+                createdAt: '2026-04-11T00:00:00.000Z',
+                updatedAt: '2026-04-11T00:00:00.000Z',
+                files: {
+                  'config.toml': { name: 'config.toml', exists: true },
+                  'auth.json': { name: 'auth.json', exists: false },
+                },
+              },
+              status: {
+                state: 'ready',
+                transport: 'stdio',
+                lastStartedAt: '2026-04-11T00:00:00.000Z',
+                lastError: null,
+                restartCount: 2,
+              },
+            }),
+          } satisfies Partial<Response>;
+        }
+
         if (url === '/api/codex/restart' && init?.method === 'POST') {
           return {
             ok: true,
@@ -294,6 +369,55 @@ describe('AppShellNavigation', () => {
       ([url, init]) => String(url) === '/api/codex/build-restart' && init?.method === 'POST',
     );
     expect(restartCall).toBeTruthy();
+  });
+
+  it('manages codex config archives from settings', async () => {
+    render(
+      <MemoryRouter initialEntries={['/threads?workspaceId=workspace-1']}>
+        <NavigationHarness />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Known good')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/config\.toml: saved/i)).toBeInTheDocument();
+    expect(screen.getByText(/auth\.json: missing/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create backup' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Backup created.')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Rename' })[1]!);
+    fireEvent.change(screen.getByLabelText('Rename Known good'), {
+      target: { value: 'Laptop config' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Backup renamed.')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Apply' })[1]!);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('Applied "Known good" and restarted app-server.'),
+      ).toBeInTheDocument();
+    });
+
+    expect(
+      vi.mocked(fetch).mock.calls.some(
+        ([url, init]) =>
+          String(url) === '/api/config/codex-archives/archive-1/apply' &&
+          init?.method === 'POST',
+      ),
+    ).toBe(true);
   });
 
   it('lets the user switch the appearance mode from settings', async () => {
