@@ -2423,6 +2423,7 @@ describe('supervisor api', () => {
         }),
       ]),
     });
+    expect(detailResponse.json().activityNotes[0].anchorTurnId).toBeNull();
 
     const promptResponse = await app.inject({
       method: 'POST',
@@ -2456,6 +2457,21 @@ describe('supervisor api', () => {
     expect(disableResponse.statusCode).toBe(200);
     await expect(fs.readFile(path.join(codexHome, 'config.toml'), 'utf8')).resolves.not.toContain(
       'service_tier = "fast"',
+    );
+
+    const detailAfterDisableResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+    expect(detailAfterDisableResponse.statusCode).toBe(200);
+    expect(detailAfterDisableResponse.json().activityNotes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'fastMode',
+          text: 'Fast mode off',
+          anchorTurnId: promptResponse.json().activeTurnId,
+        }),
+      ]),
     );
 
     const secondPromptResponse = await app.inject({
@@ -3937,6 +3953,17 @@ describe('supervisor api', () => {
     expect(getResponse.json().goal).toMatchObject({
       objective: 'Finish the migration and keep tests green.',
     });
+    const detailWithGoalResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+    expect(detailWithGoalResponse.json().goalHistory).toEqual([
+      expect.objectContaining({
+        objective: 'Finish the migration and keep tests green.',
+        status: 'active',
+        tokenBudget: 12000,
+      })
+    ]);
 
     const clearResponse = await app.inject({
       method: 'DELETE',
@@ -3944,7 +3971,145 @@ describe('supervisor api', () => {
     });
 
     expect(clearResponse.statusCode).toBe(200);
-    expect(clearResponse.json()).toEqual({ cleared: true });
+    expect(clearResponse.json()).toMatchObject({
+      cleared: true,
+      goalHistory: [
+        expect.objectContaining({
+          objective: 'Finish the migration and keep tests green.',
+          status: 'terminated',
+        })
+      ],
+    });
     expect(fakeCodexManager.goalClearCalls).toContain(createdThread.codexThreadId);
+    const detailAfterClearResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+    expect(detailAfterClearResponse.json().goalHistory).toEqual([
+      expect.objectContaining({
+        objective: 'Finish the migration and keep tests green.',
+        status: 'terminated',
+      })
+    ]);
+  });
+
+  it('does not mark a goal complete while a turn is still running or duplicate terminal history', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Running Goal Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const setResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${createdThread.id}/goal`,
+      payload: {
+        objective: 'Keep working until all checklist items are done.',
+        status: 'active',
+      }
+    });
+    expect(setResponse.statusCode).toBe(200);
+
+    await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Start a long task.',
+      }
+    });
+
+    const runningRecord = fakeCodexManager.threads.get(createdThread.codexThreadId);
+    const activeTurnId = runningRecord?.turns.at(-1)?.id;
+    if (!activeTurnId) {
+      throw new Error('Expected fake Codex manager to start a turn.');
+    }
+    const activeGoal = fakeCodexManager.goals.get(createdThread.codexThreadId)!;
+    fakeCodexManager.emitServerEvent({
+      method: 'thread/goal/updated',
+      params: {
+        threadId: createdThread.codexThreadId,
+        turnId: activeTurnId,
+        goal: {
+          ...activeGoal,
+          status: 'complete',
+          updatedAt: Date.now(),
+        },
+      },
+    });
+
+    const runningDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+    expect(runningDetailResponse.json().goal).toMatchObject({
+      objective: 'Keep working until all checklist items are done.',
+      status: 'active',
+    });
+    expect(runningDetailResponse.json().goalHistory).toEqual([
+      expect.objectContaining({
+        objective: 'Keep working until all checklist items are done.',
+        status: 'active',
+        completedAt: null,
+      })
+    ]);
+
+    fakeCodexManager.completeTurn(createdThread.codexThreadId, activeTurnId, 'completed');
+    fakeCodexManager.goals.set(createdThread.codexThreadId, {
+      ...activeGoal,
+      status: 'complete',
+      updatedAt: Date.now(),
+    });
+
+    const completeGoalResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${createdThread.id}/goal`,
+      payload: {
+        status: 'complete',
+      }
+    });
+    expect(completeGoalResponse.statusCode).toBe(200);
+    const completedCreatedAt = completeGoalResponse.json().goal.createdAt;
+
+    const duplicateCompleteGoal = {
+      ...fakeCodexManager.goals.get(createdThread.codexThreadId)!,
+      status: 'complete',
+      createdAt: Date.parse(completedCreatedAt),
+      updatedAt: Date.now(),
+    };
+    fakeCodexManager.emitServerEvent({
+      method: 'thread/goal/updated',
+      params: {
+        threadId: createdThread.codexThreadId,
+        turnId: null,
+        goal: duplicateCompleteGoal,
+      },
+    });
+
+    const completedDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+    expect(completedDetailResponse.json().goalHistory).toEqual([
+      expect.objectContaining({
+        objective: 'Keep working until all checklist items are done.',
+        status: 'complete',
+      })
+    ]);
+    expect(completedDetailResponse.json().goalHistory[0].completedAt).toMatch(/^20\d\d-/);
   });
 });

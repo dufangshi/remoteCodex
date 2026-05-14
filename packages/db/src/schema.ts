@@ -119,6 +119,7 @@ export const threadActivityNotes = sqliteTable('thread_activity_notes', {
   threadId: text('thread_id').notNull(),
   kind: text('kind').notNull(),
   text: text('text').notNull(),
+  anchorTurnId: text('anchor_turn_id'),
   createdAt: text('created_at').notNull(),
 });
 
@@ -129,6 +130,21 @@ export const threadForks = sqliteTable('thread_forks', {
   sourceTurnIndex: integer('source_turn_index'),
   forkedThreadId: text('forked_thread_id').notNull(),
   createdAt: text('created_at').notNull(),
+});
+
+export const threadGoals = sqliteTable('thread_goals', {
+  id: text('id').primaryKey(),
+  threadId: text('thread_id').notNull(),
+  codexThreadId: text('codex_thread_id').notNull(),
+  objective: text('objective').notNull(),
+  status: text('status').notNull(),
+  tokenBudget: integer('token_budget'),
+  tokensUsed: integer('tokens_used').notNull().default(0),
+  timeUsedSeconds: integer('time_used_seconds').notNull().default(0),
+  startedAt: text('started_at').notNull(),
+  completedAt: text('completed_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
 });
 
 export const policies = sqliteTable('policies', {

@@ -22,6 +22,7 @@ import {
   deleteThreadActivityNotesByThreadId,
   deleteThreadForkRecordsByForkedThreadId,
   deleteThreadForkRecordsBySourceThreadId,
+  deleteThreadGoalRecordsByThreadId,
   deleteNotificationsByThreadId,
   deleteThreadPendingSteerRecordById,
   deleteThreadPendingSteerRecordsByThreadId,
@@ -29,6 +30,7 @@ import {
   deleteThreadTurnMetadataByThreadId,
   deleteViewerSessionsByThreadId,
   getThreadTurnMetadataByThreadAndTurnId,
+  getLatestThreadTurnMetadataByThreadId,
   getThreadRecordByCodexThreadId,
   getThreadRecordById,
   getWorkspaceRecordByPath,
@@ -36,9 +38,12 @@ import {
   listThreadActivityNotesByThreadId,
   listThreadForkRecordsByForkedThreadId,
   listThreadForkRecordsBySourceThreadId,
+  listThreadGoalRecordsByThreadId,
   listThreadPendingSteerRecordsByThreadId,
   listThreadTurnMetadataByThreadId,
   listThreadRecords,
+  markActiveThreadGoalRecordTerminated,
+  upsertThreadGoalRecord,
   upsertThreadTurnMetadata,
   updateThreadRecord
 } from '../../../../packages/db/src/index';
@@ -82,6 +87,9 @@ import {
   UpdateThreadSettingsInput,
   WorkspaceDto
 } from '../../../../packages/shared/src/index';
+
+type UpstreamThreadGoalStatus = Exclude<ThreadGoalDto['status'], 'terminated'>;
+type NormalizedThreadGoal = ThreadGoalDto;
 import { HttpError } from '../app';
 import {
   readCodexFastModeSync,
@@ -183,24 +191,75 @@ function toIsoFromEpoch(value: number | null | undefined) {
 
 function toThreadGoalDto(goal: {
   threadId: string;
+  localGoalId?: string | null;
   objective: string;
   status: ThreadGoalDto['status'];
   tokenBudget: number | null;
   tokensUsed: number;
   timeUsedSeconds: number;
-  createdAt: number;
-  updatedAt: number;
+  createdAt: number | string;
+  updatedAt: number | string;
+  completedAt?: string | null;
 }): ThreadGoalDto {
   return {
     threadId: goal.threadId,
+    localGoalId: goal.localGoalId ?? null,
     objective: goal.objective,
     status: goal.status,
     tokenBudget: goal.tokenBudget,
     tokensUsed: goal.tokensUsed,
     timeUsedSeconds: goal.timeUsedSeconds,
-    createdAt: toIsoFromEpoch(goal.createdAt),
-    updatedAt: toIsoFromEpoch(goal.updatedAt),
+    createdAt:
+      typeof goal.createdAt === 'string'
+        ? goal.createdAt
+        : toIsoFromEpoch(goal.createdAt),
+    updatedAt:
+      typeof goal.updatedAt === 'string'
+        ? goal.updatedAt
+        : toIsoFromEpoch(goal.updatedAt),
+    completedAt: goal.completedAt ?? null,
   };
+}
+
+function toThreadGoalDtoFromRecord(record: ReturnType<typeof listThreadGoalRecordsByThreadId>[number]): ThreadGoalDto {
+  const terminalCompletedAt =
+    record.completedAt ??
+    (['complete', 'terminated'].includes(record.status) ? record.updatedAt : null);
+  return toThreadGoalDto({
+    threadId: record.codexThreadId,
+    localGoalId: record.id,
+    objective: record.objective,
+    status: record.status as ThreadGoalDto['status'],
+    tokenBudget: record.tokenBudget,
+    tokensUsed: record.tokensUsed,
+    timeUsedSeconds: record.timeUsedSeconds,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    completedAt: terminalCompletedAt,
+  });
+}
+
+function normalizeThreadGoalStatusForThread(
+  goal: ThreadGoalDto,
+  record: {
+    id?: string;
+    codexThreadId?: string | null;
+    codexTurnId?: string | null;
+    status?: string | null;
+  },
+): NormalizedThreadGoal {
+  if (
+    goal.status === 'complete' &&
+    (record.codexTurnId || record.status === 'running')
+  ) {
+    return {
+      ...goal,
+      status: 'active',
+      completedAt: null,
+    };
+  }
+
+  return goal;
 }
 
 function mapCodexGoalError(error: unknown): never {
@@ -2440,6 +2499,7 @@ export class ThreadService {
       pagedTurns.turns,
     );
     const goal = await this.getThreadGoalForRecord(updated).catch(() => null);
+    const goalHistory = this.listThreadGoalHistory(updated.id);
     return {
       thread: this.toThreadDto(updated, loadedIds),
       workspace: toWorkspaceDto(workspace),
@@ -2451,6 +2511,7 @@ export class ThreadService {
       answeredRequestNotes: this.listAnsweredRequestNotes(updated.id),
       activityNotes: this.listActivityNotes(updated.id),
       goal,
+      goalHistory,
       livePlan: this.getLivePlan(updated.id),
       liveItems,
     };
@@ -2490,15 +2551,19 @@ export class ThreadService {
     try {
       await this.ensureGoalsFeatureEnabled();
       await this.ensureThreadLoadedForCodexOperation(record);
+      const upstreamStatus =
+        input.status === 'terminated' ? undefined : (input.status as UpstreamThreadGoalStatus | null | undefined);
       const goal = await this.codexManager.setThreadGoal({
         threadId: record.codexThreadId,
         ...(input.objective !== undefined ? { objective: input.objective } : {}),
-        ...(input.status !== undefined ? { status: input.status } : {}),
+        ...(upstreamStatus !== undefined ? { status: upstreamStatus } : {}),
         ...(input.tokenBudget !== undefined ? { tokenBudget: input.tokenBudget } : {}),
       });
-      const dto = toThreadGoalDto(goal);
+      const dto = normalizeThreadGoalStatusForThread(toThreadGoalDto(goal), record);
+      this.persistThreadGoalSnapshot(localThreadId, dto);
       this.emitThreadEvent('thread.goal.updated', localThreadId, {
         goal: dto,
+        goalHistory: this.listThreadGoalHistory(localThreadId),
       });
       return dto;
     } catch (error) {
@@ -2506,7 +2571,9 @@ export class ThreadService {
     }
   }
 
-  async clearThreadGoal(localThreadId: string): Promise<{ cleared: boolean }> {
+  async clearThreadGoal(
+    localThreadId: string,
+  ): Promise<{ cleared: boolean; goalHistory: ThreadGoalDto[] }> {
     const record = getThreadRecordById(this.db, localThreadId);
     if (!record || !record.codexThreadId) {
       throw new HttpError(404, {
@@ -2526,8 +2593,10 @@ export class ThreadService {
       await this.ensureGoalsFeatureEnabled();
       await this.ensureThreadLoadedForCodexOperation(record);
       const cleared = await this.codexManager.clearThreadGoal(record.codexThreadId);
-      this.emitThreadEvent('thread.goal.cleared', localThreadId, {});
-      return { cleared };
+      markActiveThreadGoalRecordTerminated(this.db, localThreadId);
+      const goalHistory = this.listThreadGoalHistory(localThreadId);
+      this.emitThreadEvent('thread.goal.cleared', localThreadId, { goalHistory });
+      return { cleared, goalHistory };
     } catch (error) {
       mapCodexGoalError(error);
     }
@@ -2547,13 +2616,52 @@ export class ThreadService {
         await this.ensureThreadLoadedForCodexOperation(record);
       }
       const goal = await this.codexManager.getThreadGoal(record.codexThreadId);
-      return goal ? toThreadGoalDto(goal) : null;
+      return goal
+        ? normalizeThreadGoalStatusForThread(toThreadGoalDto(goal), record)
+        : null;
     } catch (error) {
       if (error instanceof JsonRpcClientError) {
         return null;
       }
       throw error;
     }
+  }
+
+  private persistThreadGoalSnapshot(
+    localThreadId: string,
+    goal: ThreadGoalDto | Parameters<typeof toThreadGoalDto>[0],
+  ) {
+    const dto =
+      'createdAt' in goal && typeof goal.createdAt === 'string'
+        ? (goal as ThreadGoalDto)
+        : toThreadGoalDto(goal as Parameters<typeof toThreadGoalDto>[0]);
+    return upsertThreadGoalRecord(this.db, {
+      threadId: localThreadId,
+      codexThreadId: dto.threadId,
+      localGoalId: dto.localGoalId ?? null,
+      objective: dto.objective,
+      status: dto.status,
+      tokenBudget: dto.tokenBudget,
+      tokensUsed: dto.tokensUsed,
+      timeUsedSeconds: dto.timeUsedSeconds,
+      startedAt: dto.createdAt,
+      completedAt: dto.completedAt ?? null,
+      createdAt: dto.createdAt,
+      updatedAt: dto.updatedAt,
+    });
+  }
+
+  private listThreadGoalHistory(localThreadId: string): ThreadGoalDto[] {
+    const deduped = new Map<string, ThreadGoalDto>();
+    for (const goal of listThreadGoalRecordsByThreadId(this.db, localThreadId).map(
+      toThreadGoalDtoFromRecord,
+    )) {
+      const key = `${goal.threadId}:${goal.objective}:${goal.createdAt}`;
+      if (!deduped.has(key)) {
+        deduped.set(key, goal);
+      }
+    }
+    return [...deduped.values()];
   }
 
   private async ensureGoalsFeatureEnabled() {
@@ -3461,6 +3569,7 @@ export class ThreadService {
     deleteThreadForkRecordsBySourceThreadId(this.db, localThreadId);
     deleteThreadForkRecordsByForkedThreadId(this.db, localThreadId);
     deleteThreadActivityNotesByThreadId(this.db, localThreadId);
+    deleteThreadGoalRecordsByThreadId(this.db, localThreadId);
     deleteThreadPendingSteerRecordsByThreadId(this.db, localThreadId);
     deleteThreadTurnMetadataByThreadId(this.db, localThreadId);
     deleteThreadRecord(this.db, localThreadId);
@@ -3593,9 +3702,12 @@ export class ThreadService {
           return;
         }
 
+        const dto = normalizeThreadGoalStatusForThread(toThreadGoalDto(params.goal), record);
+        this.persistThreadGoalSnapshot(record.id, dto);
         this.emitThreadEvent('thread.goal.updated', record.id, {
           turnId: params.turnId,
-          goal: toThreadGoalDto(params.goal),
+          goal: dto,
+          goalHistory: this.listThreadGoalHistory(record.id),
         });
         return;
       }
@@ -3606,7 +3718,10 @@ export class ThreadService {
           return;
         }
 
-        this.emitThreadEvent('thread.goal.cleared', record.id, {});
+        markActiveThreadGoalRecordTerminated(this.db, record.id);
+        this.emitThreadEvent('thread.goal.cleared', record.id, {
+          goalHistory: this.listThreadGoalHistory(record.id),
+        });
         return;
       }
       case 'thread/tokenUsage/updated': {
@@ -4215,16 +4330,26 @@ export class ThreadService {
   }
 
   private listActivityNotes(localThreadId: string): ThreadActivityNoteDto[] {
+    const cachedTurns = this.threadDetailCache.get(localThreadId)?.turns ?? [];
     const notes: ThreadActivityNoteDto[] = listThreadActivityNotesByThreadId(
       this.db,
       localThreadId,
-    ).map((record) => ({
-      id: record.id,
-      kind: 'fastMode',
-      text: record.text,
-      createdAt: record.createdAt,
-      anchorTurnId: null,
-    }));
+    ).map((record) => {
+      const fallbackAnchor = [...cachedTurns]
+        .reverse()
+        .find(
+          (turn) =>
+            turn.startedAt &&
+            turn.startedAt.localeCompare(record.createdAt) <= 0,
+        );
+      return {
+        id: record.id,
+        kind: 'fastMode',
+        text: record.text,
+        createdAt: record.createdAt,
+        anchorTurnId: record.anchorTurnId ?? fallbackAnchor?.id ?? null,
+      };
+    });
 
     for (const record of listThreadForkRecordsBySourceThreadId(this.db, localThreadId)) {
       const forkedThread = getThreadRecordById(this.db, record.forkedThreadId);
@@ -4259,10 +4384,15 @@ export class ThreadService {
     localThreadId: string,
     input: { kind: 'fastMode'; text: string },
   ) {
+    const cachedAnchorTurnId =
+      this.threadDetailCache.get(localThreadId)?.turns.at(-1)?.id ?? null;
+    const metadataAnchorTurnId =
+      getLatestThreadTurnMetadataByThreadId(this.db, localThreadId)?.turnId ?? null;
     createThreadActivityNoteRecord(this.db, {
       threadId: localThreadId,
       kind: input.kind,
       text: input.text,
+      anchorTurnId: cachedAnchorTurnId ?? metadataAnchorTurnId,
     });
   }
 

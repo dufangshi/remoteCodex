@@ -350,10 +350,16 @@ export interface ThreadMcpServersDto {
   servers: CodexMcpServerDto[];
 }
 
-export type ThreadGoalStatusDto = 'active' | 'paused' | 'budgetLimited' | 'complete';
+export type ThreadGoalStatusDto =
+  | 'active'
+  | 'paused'
+  | 'budgetLimited'
+  | 'complete'
+  | 'terminated';
 
 export interface ThreadGoalDto {
   threadId: string;
+  localGoalId?: string | null;
   objective: string;
   status: ThreadGoalStatusDto;
   tokenBudget: number | null;
@@ -361,6 +367,7 @@ export interface ThreadGoalDto {
   timeUsedSeconds: number;
   createdAt: string;
   updatedAt: string;
+  completedAt?: string | null;
 }
 
 export interface UpdateThreadGoalInput {
@@ -401,6 +408,7 @@ export interface ThreadDetailDto {
   answeredRequestNotes?: ThreadAnsweredRequestNoteDto[];
   activityNotes?: ThreadActivityNoteDto[];
   goal?: ThreadGoalDto | null;
+  goalHistory?: ThreadGoalDto[];
   livePlan?: ThreadLivePlanDto | null;
   liveItems?: ThreadLiveItemsDto | null;
 }

@@ -351,7 +351,7 @@ export function updateThreadGoal(id: string, input: UpdateThreadGoalInput) {
 }
 
 export function clearThreadGoal(id: string) {
-  return request<{ cleared: boolean }>(`/api/threads/${id}/goal`, {
+  return request<{ cleared: boolean; goalHistory?: ThreadGoalDto[] }>(`/api/threads/${id}/goal`, {
     method: 'DELETE',
   });
 }

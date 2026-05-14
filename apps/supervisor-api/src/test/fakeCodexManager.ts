@@ -293,6 +293,46 @@ export class FakeCodexManager extends EventEmitter {
     this.experimentalFeatureEnablementCalls.push(enablement);
   }
 
+  emitServerEvent(event: unknown) {
+    this.emit('notification', event);
+  }
+
+  completeTurn(
+    threadId: string,
+    turnId: string,
+    status: 'completed' | 'interrupted' | 'failed' = 'completed',
+  ) {
+    const existing = this.threads.get(threadId) ?? makeThread({ id: threadId });
+    const turns = existing.turns.map((turn) =>
+      turn.id === turnId
+        ? {
+            ...turn,
+            status,
+          }
+        : turn,
+    );
+    const completedTurn =
+      turns.find((turn) => turn.id === turnId) ?? {
+        id: turnId,
+        status,
+        error: null,
+        items: [],
+      };
+    this.threads.set(threadId, {
+      ...existing,
+      updatedAt: Math.floor(Date.now() / 1000),
+      status: { type: 'idle' },
+      turns,
+    });
+    this.emitServerEvent({
+      method: 'turn/completed',
+      params: {
+        threadId,
+        turn: completedTurn,
+      },
+    });
+  }
+
   async forkThread(input: { threadId: string }) {
     this.forkThreadCalls.push(input.threadId);
     const source = this.threads.get(input.threadId) ?? makeThread({ id: input.threadId });

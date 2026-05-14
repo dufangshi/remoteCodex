@@ -9,6 +9,7 @@ import {
   shellSessions,
   threadActivityNotes,
   threadForks,
+  threadGoals,
   threadPendingSteers,
   threadTurnMetadata,
   threads,
@@ -82,6 +83,7 @@ export interface CreateThreadActivityNoteRecordInput {
   threadId: string;
   kind: string;
   text: string;
+  anchorTurnId?: string | null;
 }
 
 export interface CreateThreadForkRecordInput {
@@ -89,6 +91,21 @@ export interface CreateThreadForkRecordInput {
   sourceTurnId?: string | null;
   sourceTurnIndex?: number | null;
   forkedThreadId: string;
+}
+
+export interface UpsertThreadGoalRecordInput {
+  threadId: string;
+  codexThreadId: string;
+  localGoalId?: string | null;
+  objective: string;
+  status: string;
+  tokenBudget?: number | null;
+  tokensUsed?: number;
+  timeUsedSeconds?: number;
+  startedAt: string;
+  completedAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface CreateShellSessionRecordInput {
@@ -245,6 +262,18 @@ export function listThreadTurnMetadataByThreadId(db: DatabaseClient, threadId: s
   return db.select().from(threadTurnMetadata).where(eq(threadTurnMetadata.threadId, threadId)).all();
 }
 
+export function getLatestThreadTurnMetadataByThreadId(
+  db: DatabaseClient,
+  threadId: string,
+) {
+  return db
+    .select()
+    .from(threadTurnMetadata)
+    .where(eq(threadTurnMetadata.threadId, threadId))
+    .orderBy(desc(threadTurnMetadata.createdAt))
+    .get();
+}
+
 export function getThreadTurnMetadataByThreadAndTurnId(
   db: DatabaseClient,
   threadId: string,
@@ -394,6 +423,7 @@ export function createThreadActivityNoteRecord(
     threadId: input.threadId,
     kind: input.kind,
     text: input.text,
+    anchorTurnId: input.anchorTurnId ?? null,
     createdAt: new Date().toISOString(),
   };
 
@@ -461,6 +491,134 @@ export function deleteThreadForkRecordsByForkedThreadId(
   forkedThreadId: string,
 ) {
   db.delete(threadForks).where(eq(threadForks.forkedThreadId, forkedThreadId)).run();
+}
+
+export function listThreadGoalRecordsByThreadId(db: DatabaseClient, threadId: string) {
+  return db
+    .select()
+    .from(threadGoals)
+    .where(eq(threadGoals.threadId, threadId))
+    .orderBy(desc(threadGoals.updatedAt))
+    .all();
+}
+
+export function getActiveThreadGoalRecord(db: DatabaseClient, threadId: string) {
+  const records = db
+    .select()
+    .from(threadGoals)
+    .where(eq(threadGoals.threadId, threadId))
+    .orderBy(desc(threadGoals.updatedAt))
+    .all();
+
+  return records.find((record) =>
+    ['active', 'paused', 'budgetLimited'].includes(record.status),
+  ) ?? null;
+}
+
+function getThreadGoalRecordForUpsert(
+  db: DatabaseClient,
+  input: UpsertThreadGoalRecordInput,
+) {
+  if (input.localGoalId) {
+    const byId = db
+      .select()
+      .from(threadGoals)
+      .where(eq(threadGoals.id, input.localGoalId))
+      .get();
+    if (byId?.threadId === input.threadId) {
+      return byId;
+    }
+  }
+
+  const active = getActiveThreadGoalRecord(db, input.threadId);
+  if (active) {
+    return active;
+  }
+
+  return (
+    db
+      .select()
+      .from(threadGoals)
+      .where(
+        and(
+          eq(threadGoals.threadId, input.threadId),
+          eq(threadGoals.codexThreadId, input.codexThreadId),
+          eq(threadGoals.objective, input.objective),
+          eq(threadGoals.createdAt, input.createdAt ?? input.startedAt),
+        ),
+      )
+      .orderBy(desc(threadGoals.updatedAt))
+      .get() ?? null
+  );
+}
+
+export function upsertThreadGoalRecord(
+  db: DatabaseClient,
+  input: UpsertThreadGoalRecordInput,
+) {
+  const now = new Date().toISOString();
+  const existing = getThreadGoalRecordForUpsert(db, input);
+  const terminalCompletedAt =
+    input.completedAt ??
+    (['complete', 'terminated'].includes(input.status)
+        ? input.updatedAt ?? now
+        : null);
+
+  if (existing) {
+    const updated = {
+      objective: input.objective,
+      status: input.status,
+      tokenBudget: input.tokenBudget ?? null,
+      tokensUsed: input.tokensUsed ?? existing.tokensUsed,
+      timeUsedSeconds: input.timeUsedSeconds ?? existing.timeUsedSeconds,
+      codexThreadId: input.codexThreadId,
+      startedAt: input.startedAt,
+      completedAt: terminalCompletedAt,
+      updatedAt: input.updatedAt ?? now,
+    };
+    db.update(threadGoals).set(updated).where(eq(threadGoals.id, existing.id)).run();
+    return { ...existing, ...updated };
+  }
+
+  const record = {
+    id: randomUUID(),
+    threadId: input.threadId,
+    codexThreadId: input.codexThreadId,
+    objective: input.objective,
+    status: input.status,
+    tokenBudget: input.tokenBudget ?? null,
+    tokensUsed: input.tokensUsed ?? 0,
+    timeUsedSeconds: input.timeUsedSeconds ?? 0,
+    startedAt: input.startedAt,
+    completedAt: terminalCompletedAt,
+    createdAt: input.createdAt ?? now,
+    updatedAt: input.updatedAt ?? now,
+  };
+  db.insert(threadGoals).values(record).run();
+  return record;
+}
+
+export function markActiveThreadGoalRecordTerminated(
+  db: DatabaseClient,
+  threadId: string,
+) {
+  const existing = getActiveThreadGoalRecord(db, threadId);
+  if (!existing) {
+    return null;
+  }
+
+  const now = new Date().toISOString();
+  const updates = {
+    status: 'terminated',
+    completedAt: now,
+    updatedAt: now,
+  };
+  db.update(threadGoals).set(updates).where(eq(threadGoals.id, existing.id)).run();
+  return { ...existing, ...updates };
+}
+
+export function deleteThreadGoalRecordsByThreadId(db: DatabaseClient, threadId: string) {
+  db.delete(threadGoals).where(eq(threadGoals.threadId, threadId)).run();
 }
 
 export function listShellSessionRecords(db: DatabaseClient) {
