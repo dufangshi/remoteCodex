@@ -987,9 +987,9 @@ function PlanStepStatusIcon({
 
   const className =
     normalized === 'completed'
-      ? 'border-emerald-300/30 bg-emerald-300/10 text-emerald-100'
+      ? 'ui-status-success'
       : normalized === 'in_progress'
-        ? 'border-sky-300/30 bg-sky-300/10 text-sky-100'
+        ? 'ui-status-info'
         : normalized === 'pending'
           ? 'border-stone-700/90 bg-stone-900/80 text-stone-300'
           : normalized === 'failed'
@@ -1145,13 +1145,13 @@ function TurnStatusBar({
         <div className="flex w-full items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
             <TurnStatusIndicator status={turn.status} />
-            <span className="min-w-0 truncate text-stone-300">{runtimeSummary}</span>
+            <span className="timeline-soft-text min-w-0 truncate">{runtimeSummary}</span>
           </div>
           {turn.startedAt && (
             <time
               dateTime={turn.startedAt}
               title={formatLongTimestamp(turn.startedAt)}
-              className="shrink-0 text-[11px] text-stone-400"
+              className="timeline-meta-text shrink-0 text-[11px]"
             >
               {formatShortTimestamp(turn.startedAt)}
             </time>
@@ -1191,7 +1191,7 @@ function TurnStatusBar({
       title={title}
     >
       <TurnStatusIndicator status={turn.status} />
-      <span className="min-w-0 truncate text-stone-400">{runtimeSummary}</span>
+      <span className="timeline-meta-text min-w-0 truncate">{runtimeSummary}</span>
     </span>
   );
 }
@@ -1846,7 +1846,7 @@ function AgentMessageBody({
       text={text}
       scrollRootRef={scrollRootRef}
       streaming={streaming}
-      containerClassName="pb-7"
+      containerClassName="thread-message-prose pb-7"
     />
   );
 }
@@ -1861,7 +1861,7 @@ function UserMessageBody({
   const segments = useMemo(() => tokenizeUserMessageText(text), [text]);
 
   return (
-    <div className="whitespace-pre-wrap break-words text-[15px] leading-6 text-stone-300">
+    <div className="thread-message-prose whitespace-pre-wrap break-words text-[15px] leading-6 text-stone-300">
       {segments.map((segment) => {
         if (segment.type === 'text') {
           return <span key={segment.key}>{segment.text}</span>;
@@ -1921,18 +1921,10 @@ function UserMessageBody({
 
 function commandStatusBadgeClassName(status: ThreadHistoryItemDto['status']) {
   if (status === 'completed') {
-    return 'border-emerald-300/35 bg-emerald-300/12 text-emerald-100';
+    return 'timeline-command-status-complete';
   }
 
-  if (status === 'failed') {
-    return 'border-rose-300/35 bg-rose-300/12 text-rose-100';
-  }
-
-  if (status === 'interrupted') {
-    return 'border-amber-300/35 bg-amber-300/12 text-amber-100';
-  }
-
-  return 'border-sky-300/35 bg-sky-300/12 text-sky-100';
+  return 'timeline-command-status-pending';
 }
 
 function CommandStatusIcon({
@@ -1951,36 +1943,6 @@ function CommandStatusIcon({
         strokeLinejoin="round"
       >
         <path d="m3.75 8.25 2.5 2.5 6-6" />
-      </svg>
-    );
-  }
-
-  if (status === 'failed') {
-    return (
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 16 16"
-        className="h-3.5 w-3.5 fill-none stroke-current"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="m5 5 6 6M11 5l-6 6" />
-      </svg>
-    );
-  }
-
-  if (status === 'interrupted') {
-    return (
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 16 16"
-        className="h-3.5 w-3.5 fill-none stroke-current"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M6 4.5v7M10 4.5v7" />
       </svg>
     );
   }
@@ -2016,10 +1978,10 @@ const CompactMessageItem = memo(function CompactMessageItem({
     );
   const queuedBadgeClassName =
     item.status === 'Steering'
-      ? 'border-amber-300/30 bg-amber-300/10 text-amber-100'
+      ? 'ui-status-warning'
       : item.status === 'Accepted'
-        ? 'border-emerald-300/30 bg-emerald-300/10 text-emerald-100'
-        : 'border-sky-300/30 bg-sky-300/10 text-sky-100';
+        ? 'ui-status-success'
+        : 'ui-status-info';
 
   useEffect(() => {
     return () => {
@@ -2048,7 +2010,7 @@ const CompactMessageItem = memo(function CompactMessageItem({
 
   return (
     <div
-      className={`timeline-item-frame relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
+      className={`timeline-item-frame ${item.kind === 'agentMessage' ? 'timeline-has-corner-copy' : ''} relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
     >
       {queuedLikeStatus && (
         <span className={`absolute right-2.5 top-2.5 z-[1] inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-medium tracking-[0.12em] shadow-sm shadow-stone-950/20 ${queuedBadgeClassName}`}>
@@ -2075,7 +2037,7 @@ const CompactMessageItem = memo(function CompactMessageItem({
           <CompactMessageIcon kind={item.kind} />
         </span>
       </span>
-      <div className="flex min-w-0 items-start gap-0 pt-2 sm:gap-2.5 sm:pt-0">
+      <div className="timeline-mobile-bubble-content flex min-w-0 items-start gap-0 pt-2 sm:gap-2.5 sm:pt-0">
         <div className="mt-0.5 flex shrink-0 items-center">
           <span
             className={`hidden h-6 w-6 items-center justify-center rounded-full border sm:inline-flex ${iconToneClassName}`}
@@ -2099,7 +2061,7 @@ const CompactMessageItem = memo(function CompactMessageItem({
             <UserMessageBody threadId={threadId} text={item.text} />
           )}
           {item.status && !queuedLikeStatus && (
-            <p className="mt-1 text-xs text-stone-500">{item.status}</p>
+            <p className="timeline-meta-text mt-1 text-xs">{item.status}</p>
           )}
         </div>
       </div>
@@ -2120,15 +2082,17 @@ const CompactMessageItem = memo(function CompactMessageItem({
                 : 'Copy agent reply'
           }
           onClick={() => void handleCopy()}
-          className={`absolute bottom-0 right-0 inline-flex h-5 w-5 items-center justify-center rounded-tl-[0.7rem] rounded-br-[0.95rem] border shadow-sm shadow-stone-950/25 backdrop-blur transition sm:bottom-2.5 sm:right-2.5 sm:h-7 sm:w-7 sm:rounded-full ${
-            copyState === 'copied'
-              ? 'border-sky-300/40 bg-sky-300/16 text-sky-100'
-              : copyState === 'failed'
-                ? 'border-rose-300/35 bg-rose-300/12 text-rose-100'
-                : 'border-stone-700/90 bg-stone-900/60 text-stone-300 hover:bg-stone-800/92'
-          }`}
+          className="timeline-corner-copy absolute bottom-0 right-0 inline-flex h-5 w-5 items-center justify-center transition sm:bottom-2.5 sm:right-2.5 sm:h-7 sm:w-7"
         >
-          <span className="scale-[0.72] sm:scale-100">
+          <span
+            className={`timeline-corner-copy-visual inline-flex items-center justify-center border shadow-sm shadow-stone-950/25 backdrop-blur transition ${
+              copyState === 'copied'
+                ? 'ui-status-info'
+                : copyState === 'failed'
+                  ? 'ui-status-danger'
+                  : 'border-stone-700/90 bg-stone-900/60 text-stone-300 hover:bg-stone-800/92'
+            }`}
+          >
             <CopyIcon />
           </span>
         </button>
@@ -2151,7 +2115,7 @@ const CommandItem = memo(function CommandItem({
 
   return (
     <div
-      className={`timeline-item-frame relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
+      className={`timeline-item-frame timeline-mobile-dense-event timeline-mobile-dense-command relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
     >
       <span
         className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('command')}`}
@@ -2172,7 +2136,7 @@ const CommandItem = memo(function CommandItem({
           </span>
           {isRunningHistoryStatus(item.status) && <RunningDots />}
         </div>
-        <div className="timeline-item-inner relative min-w-0 w-full flex-1 rounded-[0.9rem] border px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2">
+        <div className="timeline-item-inner timeline-mobile-dense-inner timeline-mobile-bubble-content relative min-w-0 w-full flex-1 rounded-[0.9rem] border px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2">
             <button
               type="button"
               aria-label={item.status ? `Command status: ${item.status}` : 'Command status'}
@@ -2190,12 +2154,12 @@ const CommandItem = memo(function CommandItem({
               onClick={() => onOpen(item, 'Command Output')}
               className="block w-full text-left"
             >
-              <div className="flex min-w-0 items-center gap-2 text-sm leading-6">
-                <p className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip text-stone-200">
+              <div className="timeline-mobile-dense-line flex min-w-0 items-center gap-2 text-sm leading-6">
+                  <p className="timeline-primary-text min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip">
                   {summary.firstLine}
                 </p>
                 {summary.showGap ? (
-                  <span className="shrink-0 text-[11px] font-medium tracking-[0.28em] text-stone-400">
+                    <span className="timeline-meta-text shrink-0 text-[11px] font-medium tracking-[0.28em]">
                     ...
                   </span>
                 ) : null}
@@ -2221,7 +2185,7 @@ const ToolCallItem = memo(function ToolCallItem({
 
   return (
     <div
-      className={`timeline-item-frame relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
+      className={`timeline-item-frame relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
     >
       <span
         className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('action')}`}
@@ -2261,11 +2225,11 @@ const ToolCallItem = memo(function ToolCallItem({
             className="block w-full text-left"
           >
             <div className="flex min-w-0 items-center gap-2 text-sm leading-6">
-              <p className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip text-stone-200">
+                <p className="timeline-primary-text min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip">
                 {summary.firstLine}
               </p>
               {summary.showGap ? (
-                <span className="shrink-0 text-[11px] font-medium tracking-[0.28em] text-stone-400">
+                <span className="timeline-meta-text shrink-0 text-[11px] font-medium tracking-[0.28em]">
                   ...
                 </span>
               ) : null}
@@ -2292,7 +2256,7 @@ const CommandGroupItem = memo(function CommandGroupItem({
   const countLabel = items.length === 1 ? '1 command' : `${items.length} commands`;
 
   return (
-    <div className="relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 border-l-2 border-l-amber-200/35 bg-[linear-gradient(135deg,rgba(251,191,36,0.12),rgba(245,158,11,0.03)_46%,rgba(28,25,23,0.18)_100%)] px-2.5 py-2.5 shadow-[inset_0_1px_0_rgba(251,191,36,0.06)] sm:rounded-[1.2rem] sm:px-3">
+    <div className="timeline-mobile-dense-event timeline-mobile-dense-command relative min-w-0 w-full overflow-hidden rounded-[1rem] border timeline-special-warning px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3">
       <span
         className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('command')}`}
       >
@@ -2310,15 +2274,15 @@ const CommandGroupItem = memo(function CommandGroupItem({
           </span>
           {runningCount > 0 && <RunningDots />}
         </div>
-        <div className="min-w-0 flex-1 rounded-[0.9rem] border border-amber-300/14 bg-stone-950/55 px-2 py-1.5 sm:rounded-xl sm:px-3 sm:py-2">
+        <div className="timeline-batch-inner timeline-mobile-dense-batch timeline-mobile-bubble-content min-w-0 flex-1 rounded-[0.9rem] border px-2 py-1.5 sm:rounded-xl sm:px-3 sm:py-2">
           <button
             type="button"
             aria-expanded={expanded}
             aria-label={`${expanded ? 'Collapse' : 'Expand'} ${items.length} command entries`}
             onClick={onToggleExpanded}
-            className="flex w-full min-w-0 items-center justify-between gap-3 text-left"
+            className="timeline-mobile-dense-toggle flex w-full min-w-0 items-center justify-between gap-3 text-left"
           >
-            <div className="min-w-0 flex flex-1 flex-wrap items-center gap-2 pr-1">
+            <div className="timeline-mobile-dense-summary min-w-0 flex flex-1 flex-wrap items-center gap-2 pr-1">
               <span className="rounded-full border border-amber-300/28 bg-amber-300/12 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.24em] text-amber-100">
                 Batch
               </span>
@@ -2331,28 +2295,10 @@ const CommandGroupItem = memo(function CommandGroupItem({
                 </span>
               )}
             </div>
-            <span className="inline-flex shrink-0 items-center rounded-full border border-amber-300/18 bg-stone-900/85 p-1 text-[11px] font-medium text-stone-200">
-              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-stone-700/90 bg-stone-950/80 text-stone-300">
-                <svg
-                  aria-hidden="true"
-                  viewBox="0 0 16 16"
-                  className="h-3.5 w-3.5 fill-none stroke-current"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  {expanded ? (
-                    <path d="m4.5 10 3.5-3.5L11.5 10" />
-                  ) : (
-                    <path d="m4.5 6 3.5 3.5L11.5 6" />
-                  )}
-                </svg>
-              </span>
-            </span>
           </button>
 
           {expanded && (
-            <div className="mt-3 space-y-2 border-t border-amber-300/12 pt-3">
+            <div className="timeline-mobile-section-list mt-3 space-y-0 border-t border-amber-300/12 pt-3 sm:space-y-2">
               {items.map((item, index) => {
                 const summary = summarizeInlinePreviewText(item.text);
                 return (
@@ -2361,22 +2307,22 @@ const CommandGroupItem = memo(function CommandGroupItem({
                     type="button"
                     aria-label={`Open grouped command ${index + 1}`}
                     onClick={() => onOpen(item, `Command Output ${index + 1}`)}
-                    className="block w-full rounded-xl border border-stone-800/80 bg-stone-950/55 px-3 py-2 text-left transition hover:bg-stone-900"
+                    className="timeline-detail-row block w-full rounded-xl border px-3 py-2 text-left transition"
                   >
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="rounded-full border border-amber-300/18 bg-amber-300/[0.07] px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-amber-100">
                         Step {index + 1}
                       </span>
                       {item.status && (
-                        <span className="text-xs text-stone-500">{item.status}</span>
+                        <span className="timeline-meta-text text-xs">{item.status}</span>
                       )}
                     </div>
                     <div className="mt-1 flex min-w-0 items-center gap-2 text-sm leading-6">
-                      <p className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip text-stone-200">
+                      <p className="timeline-primary-text min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip">
                         {summary.firstLine}
                       </p>
                       {summary.showGap ? (
-                        <span className="shrink-0 text-[11px] font-medium tracking-[0.28em] text-stone-400">
+                        <span className="timeline-meta-text shrink-0 text-[11px] font-medium tracking-[0.28em]">
                           ...
                         </span>
                       ) : null}
@@ -2406,7 +2352,7 @@ const SearchGroupItem = memo(function SearchGroupItem({
   const countLabel = items.length === 1 ? '1 search' : `${items.length} searches`;
 
   return (
-    <div className="relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 border-l-2 border-l-sky-300/35 bg-[linear-gradient(135deg,rgba(56,189,248,0.12),rgba(14,165,233,0.03)_46%,rgba(28,25,23,0.18)_100%)] px-2.5 py-2.5 shadow-[inset_0_1px_0_rgba(125,211,252,0.06)] sm:rounded-[1.2rem] sm:px-3">
+    <div className="timeline-mobile-dense-event timeline-mobile-dense-search relative min-w-0 w-full overflow-hidden rounded-[1rem] border timeline-special-info px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3">
       <span
         className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('search')}`}
       >
@@ -2423,15 +2369,15 @@ const SearchGroupItem = memo(function SearchGroupItem({
             </span>
           </span>
         </div>
-        <div className="min-w-0 flex-1 rounded-[0.9rem] border border-sky-300/14 bg-stone-950/55 px-2 py-1.5 sm:rounded-xl sm:px-3 sm:py-2">
+        <div className="timeline-batch-inner timeline-mobile-dense-batch timeline-mobile-bubble-content min-w-0 flex-1 rounded-[0.9rem] border px-2 py-1.5 sm:rounded-xl sm:px-3 sm:py-2">
           <button
             type="button"
             aria-expanded={expanded}
             aria-label={`${expanded ? 'Collapse' : 'Expand'} ${items.length} web search entries`}
             onClick={onToggleExpanded}
-            className="flex w-full min-w-0 items-center justify-between gap-3 text-left"
+            className="timeline-mobile-dense-toggle flex w-full min-w-0 items-center justify-between gap-3 text-left"
           >
-            <div className="min-w-0 flex flex-1 flex-wrap items-center gap-2 pr-1">
+            <div className="timeline-mobile-dense-summary min-w-0 flex flex-1 flex-wrap items-center gap-2 pr-1">
               <span className="rounded-full border border-sky-300/28 bg-sky-300/12 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.24em] text-sky-100">
                 Batch
               </span>
@@ -2439,28 +2385,10 @@ const SearchGroupItem = memo(function SearchGroupItem({
                 {countLabel}
               </span>
             </div>
-            <span className="inline-flex shrink-0 items-center rounded-full border border-sky-300/18 bg-stone-900/85 p-1 text-[11px] font-medium text-stone-200">
-              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-stone-700/90 bg-stone-950/80 text-stone-300">
-                <svg
-                  aria-hidden="true"
-                  viewBox="0 0 16 16"
-                  className="h-3.5 w-3.5 fill-none stroke-current"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  {expanded ? (
-                    <path d="m4.5 10 3.5-3.5L11.5 10" />
-                  ) : (
-                    <path d="m4.5 6 3.5 3.5L11.5 6" />
-                  )}
-                </svg>
-              </span>
-            </span>
           </button>
 
           {expanded && (
-            <div className="mt-3 space-y-2 border-t border-sky-300/12 pt-3">
+            <div className="timeline-mobile-section-list mt-3 space-y-0 border-t border-sky-300/12 pt-3 sm:space-y-2">
               {items.map((item, index) => {
                 const previewText = item.previewText?.trim() || item.text || 'Web search';
                 const summary = summarizeInlinePreviewText(previewText);
@@ -2472,22 +2400,22 @@ const SearchGroupItem = memo(function SearchGroupItem({
                     type="button"
                     aria-label={`Open grouped web search ${index + 1}`}
                     onClick={() => onOpen(`Web Search ${index + 1}`, detailText)}
-                    className="block w-full rounded-xl border border-stone-800/80 bg-stone-950/55 px-3 py-2 text-left transition hover:bg-stone-900"
+                    className="timeline-detail-row block w-full rounded-xl border px-3 py-2 text-left transition"
                   >
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="rounded-full border border-sky-300/18 bg-sky-300/[0.07] px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-sky-100">
                         Search {index + 1}
                       </span>
                       {item.status && (
-                        <span className="text-xs text-stone-500">{item.status}</span>
+                        <span className="timeline-meta-text text-xs">{item.status}</span>
                       )}
                     </div>
                     <div className="mt-1 flex min-w-0 items-center gap-2 text-sm leading-6">
-                      <p className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip text-stone-200">
+                      <p className="timeline-primary-text min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip">
                         {summary.firstLine}
                       </p>
                       {summary.showGap ? (
-                        <span className="shrink-0 text-[11px] font-medium tracking-[0.28em] text-stone-400">
+                        <span className="timeline-meta-text shrink-0 text-[11px] font-medium tracking-[0.28em]">
                           ...
                         </span>
                       ) : null}
@@ -2512,14 +2440,14 @@ const PlanHistoryItem = memo(function PlanHistoryItem({
 }) {
   return (
     <div
-      className={`min-w-0 w-full rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
+      className={`min-w-0 w-full rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-[11px] uppercase tracking-[0.2em] text-stone-500">
+        <span className="timeline-meta-text text-[11px] uppercase tracking-[0.2em]">
           {historyItemLabel(item.kind)}
         </span>
         {item.status && (
-          <span className="text-xs text-stone-500">{item.status}</span>
+          <span className="timeline-meta-text text-xs">{item.status}</span>
         )}
       </div>
       <div className="mt-1.5">
@@ -2546,7 +2474,7 @@ const ContextCompactionItem = memo(function ContextCompactionItem({
 
   return (
     <div
-      className={`relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2 sm:rounded-[1.2rem] sm:px-3`}
+      className={`relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2 sm:rounded-[1.2rem] sm:px-3`}
     >
       <span
         className="absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border border-teal-300/30 bg-teal-300/12 text-[10px] text-teal-100 shadow-sm shadow-stone-950/20 sm:hidden"
@@ -2563,14 +2491,14 @@ const ContextCompactionItem = memo(function ContextCompactionItem({
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
-            <p className="truncate text-[13px] font-medium text-stone-200 sm:text-sm">
+            <p className="timeline-primary-text truncate text-[13px] font-medium sm:text-sm">
               {primaryText}
             </p>
             {isRunning ? <RunningDots tone="emerald" /> : null}
           </div>
           {secondaryText ? (
             <p
-              className="mt-0.5 truncate text-[11px] text-stone-500 sm:text-xs"
+              className="timeline-meta-text mt-0.5 truncate text-[11px] sm:text-xs"
               title={secondaryText}
             >
               {secondaryText}
@@ -2595,7 +2523,7 @@ const WebSearchItem = memo(function WebSearchItem({
 
   return (
     <div
-      className={`relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
+      className={`timeline-item-frame timeline-mobile-dense-event timeline-mobile-dense-search relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
     >
       <span
         className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('search')}`}
@@ -2610,7 +2538,7 @@ const WebSearchItem = memo(function WebSearchItem({
             <SearchIcon />
           </span>
         </div>
-        <div className="relative min-w-0 w-full flex-1 rounded-[0.9rem] border border-stone-800/80 bg-stone-950/45 px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2">
+        <div className="timeline-item-inner timeline-mobile-dense-inner timeline-mobile-bubble-content relative min-w-0 w-full flex-1 rounded-[0.9rem] border px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2">
           <button
             type="button"
             aria-label="Expand web search"
@@ -2623,7 +2551,7 @@ const WebSearchItem = memo(function WebSearchItem({
             </span>
           </button>
           {item.status && (
-            <p className="pr-8 text-xs text-stone-500 sm:pr-10">{item.status}</p>
+            <p className="timeline-meta-text pr-8 text-xs sm:pr-10">{item.status}</p>
           )}
           <button
             type="button"
@@ -2631,12 +2559,12 @@ const WebSearchItem = memo(function WebSearchItem({
             onClick={() => onOpen('Web Search Details', detailText)}
             className="block w-full text-left"
           >
-            <div className="flex min-w-0 items-center gap-2 text-sm leading-6">
-              <p className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip text-stone-200">
+            <div className="timeline-mobile-dense-line flex min-w-0 items-center gap-2 text-sm leading-6">
+              <p className="timeline-primary-text min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip">
                 {summary.firstLine}
               </p>
               {summary.showGap ? (
-                <span className="shrink-0 text-[11px] font-medium tracking-[0.28em] text-stone-400">
+                <span className="timeline-meta-text shrink-0 text-[11px] font-medium tracking-[0.28em]">
                   ...
                 </span>
               ) : null}
@@ -2665,7 +2593,7 @@ const ImageItem = memo(function ImageItem({
 
   return (
     <div
-      className={`relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
+      className={`timeline-item-frame relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
     >
       <span
         className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('search')}`}
@@ -2695,7 +2623,7 @@ const ImageItem = memo(function ImageItem({
               />
             </button>
           ) : (
-            <div className="rounded-xl border border-stone-700/80 bg-stone-950/45 px-3 py-3 text-sm text-stone-300">
+            <div className="timeline-item-inner rounded-xl border px-3 py-3 text-sm">
               {item.text}
             </div>
           )}
@@ -2703,14 +2631,14 @@ const ImageItem = memo(function ImageItem({
             <button
               type="button"
               onClick={() => onOpen('Image Path', assetPath)}
-              className="mt-2 block max-w-full truncate text-left text-xs text-stone-400 hover:text-stone-200"
+              className="timeline-meta-text mt-2 block max-w-full truncate text-left text-xs hover:text-[var(--theme-fg)]"
               title={assetPath}
             >
               {assetPath}
             </button>
           )}
           {item.status && (
-            <p className="mt-1 text-xs text-stone-500">{item.status}</p>
+            <p className="timeline-meta-text mt-1 text-xs">{item.status}</p>
           )}
         </div>
       </div>
@@ -2739,7 +2667,7 @@ const FileChangeItem = memo(function FileChangeItem({
 
   return (
     <div
-      className={`relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
+      className={`timeline-item-frame timeline-mobile-dense-event timeline-mobile-dense-file relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
     >
       <span
         className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('action')}`}
@@ -2762,32 +2690,28 @@ const FileChangeItem = memo(function FileChangeItem({
                 onClick: () => onOpen('File Change Details', detailText),
               }
             : {})}
-          className={`min-w-0 flex-1 rounded-[0.9rem] border border-stone-800/80 bg-stone-950/45 px-2.5 py-2 text-left sm:rounded-xl sm:px-3 ${
-            detailText ? 'transition hover:bg-stone-950/60 hover:text-stone-100' : ''
+          className={`timeline-item-inner timeline-mobile-dense-inner timeline-mobile-bubble-content min-w-0 flex-1 rounded-[0.9rem] border px-2.5 py-2 text-left sm:rounded-xl sm:px-3 ${
+            detailText ? 'transition hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)]' : ''
           }`}
         >
-          <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-2 gap-y-1">
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[11px] uppercase tracking-[0.2em] text-stone-500">
-                  {historyItemLabel(item.kind)}
-                </span>
-                {item.status && (
-                  <span className="text-xs text-stone-500">{item.status}</span>
-                )}
-              </div>
-            </div>
+          <div className="timeline-mobile-file-line flex min-w-0 items-center gap-2">
+            <span
+              className="timeline-primary-text min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip text-sm"
+              title={pathSummary ?? displayedPath}
+            >
+              {displayedPath}
+            </span>
             {summarySegments.length > 0 && (
-              <div className="ml-auto inline-flex max-w-full flex-wrap items-center justify-end gap-1.5 text-xs">
+              <div className="inline-flex shrink-0 items-center justify-end gap-1.5 text-xs">
                 {summarySegments.map((segment) => (
                   <span
                     key={segment}
-                    className={`whitespace-nowrap ${
+                    className={`timeline-delta-badge border ${
                       segment.startsWith('+')
-                        ? 'text-emerald-300'
+                        ? 'timeline-delta-badge-add text-emerald-300'
                         : segment.startsWith('-')
-                          ? 'text-rose-300'
-                          : 'text-stone-300'
+                          ? 'timeline-delta-badge-remove text-rose-300'
+                          : 'timeline-delta-badge-neutral'
                     }`}
                   >
                     {segment}
@@ -2795,16 +2719,8 @@ const FileChangeItem = memo(function FileChangeItem({
                 ))}
               </div>
             )}
-          </div>
-          <div className="mt-1 flex w-full min-w-0 items-center gap-2 text-left">
-            <span
-              className="min-w-0 flex-[2] text-xs text-stone-500"
-              title={pathSummary ?? undefined}
-            >
-              {displayedPath}
-            </span>
-          </div>
-        </ContainerTag>
+        </div>
+      </ContainerTag>
       </div>
     </div>
   );
@@ -2831,7 +2747,7 @@ const FileChangeGroupItem = memo(function FileChangeGroupItem({
     items.length === 1 ? '1 file change' : `${items.length} file changes`;
 
   return (
-    <div className="relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 border-l-2 border-l-lime-300/35 bg-[linear-gradient(135deg,rgba(163,230,53,0.12),rgba(132,204,22,0.03)_46%,rgba(28,25,23,0.18)_100%)] px-2.5 py-2.5 shadow-[inset_0_1px_0_rgba(163,230,53,0.06)] sm:rounded-[1.2rem] sm:px-3">
+    <div className="timeline-mobile-dense-event timeline-mobile-dense-file relative min-w-0 w-full overflow-hidden rounded-[1rem] border timeline-special-success px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3">
       <span
         className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('action')}`}
       >
@@ -2848,15 +2764,15 @@ const FileChangeGroupItem = memo(function FileChangeGroupItem({
             </span>
           </span>
         </div>
-        <div className="min-w-0 flex-1 rounded-[0.9rem] border border-lime-300/14 bg-stone-950/55 px-2 py-1.5 sm:rounded-xl sm:px-3 sm:py-2">
+        <div className="timeline-batch-inner timeline-mobile-dense-batch timeline-mobile-bubble-content min-w-0 flex-1 rounded-[0.9rem] border px-2 py-1.5 sm:rounded-xl sm:px-3 sm:py-2">
           <button
             type="button"
             aria-expanded={expanded}
             aria-label={`${expanded ? 'Collapse' : 'Expand'} ${items.length} file change entries`}
             onClick={onToggleExpanded}
-            className="flex w-full min-w-0 items-center justify-between gap-3 text-left"
+            className="timeline-mobile-dense-toggle flex w-full min-w-0 items-center justify-between gap-3 text-left"
           >
-            <div className="min-w-0 flex flex-1 flex-wrap items-center gap-2 pr-1">
+            <div className="timeline-mobile-dense-summary min-w-0 flex flex-1 flex-wrap items-center gap-2 pr-1">
               <span className="rounded-full border border-lime-300/28 bg-lime-300/12 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.24em] text-lime-100">
                 Batch
               </span>
@@ -2864,7 +2780,7 @@ const FileChangeGroupItem = memo(function FileChangeGroupItem({
                 {batchLabel}
               </span>
               {changedFiles > 0 && (
-                <span className="text-xs text-stone-400">{changedFiles} files</span>
+                <span className="timeline-meta-text text-xs">{changedFiles} files</span>
               )}
             </div>
             <span className="inline-flex shrink-0 items-center gap-1.5">
@@ -2878,29 +2794,11 @@ const FileChangeGroupItem = memo(function FileChangeGroupItem({
                   -{removedLines}
                 </span>
               )}
-              <span className="inline-flex items-center rounded-full border border-lime-300/18 bg-stone-900/85 p-1 text-[11px] font-medium text-stone-200">
-                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-stone-700/90 bg-stone-950/80 text-stone-300">
-                  <svg
-                    aria-hidden="true"
-                    viewBox="0 0 16 16"
-                    className="h-3.5 w-3.5 fill-none stroke-current"
-                    strokeWidth="1.6"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    {expanded ? (
-                      <path d="m4.5 10 3.5-3.5L11.5 10" />
-                    ) : (
-                      <path d="m4.5 6 3.5 3.5L11.5 6" />
-                    )}
-                  </svg>
-                </span>
-              </span>
             </span>
           </button>
 
           {expanded && (
-            <div className="mt-3 space-y-2 border-t border-lime-300/12 pt-3">
+            <div className="timeline-mobile-section-list mt-3 space-y-0 border-t border-lime-300/12 pt-3 sm:space-y-2">
               {items.map((item, index) => {
                 const detailText = item.detailText?.trim() || item.previewText?.trim() || item.text;
                 const pathSummary =
@@ -2913,10 +2811,10 @@ const FileChangeGroupItem = memo(function FileChangeGroupItem({
                     type="button"
                     aria-label={`Open grouped file change ${index + 1}`}
                     onClick={() => onOpen(`File Change ${index + 1}`, detailText)}
-                    className="block w-full rounded-xl border border-stone-800/80 bg-stone-950/55 px-3 py-2 text-left transition hover:bg-stone-900"
+                    className="timeline-detail-row block w-full rounded-xl border px-3 py-2 text-left transition"
                   >
                     <div className="flex min-w-0 items-center gap-2">
-                      <span className="min-w-0 flex-1 text-sm leading-6 text-stone-200" title={pathSummary}>
+                      <span className="timeline-primary-text min-w-0 flex-1 text-sm leading-6" title={pathSummary}>
                         {formatTrailingPathLabel(pathSummary, 34)}
                       </span>
                       <span className="inline-flex shrink-0 items-center gap-1.5">
@@ -2950,18 +2848,18 @@ const GenericHistoryItem = memo(function GenericHistoryItem({
 }) {
   return (
     <div
-      className={`min-w-0 w-full rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} border-l-2 ${itemSurfaceClassName(item.kind)} px-2.5 py-2 sm:rounded-[1.2rem] sm:px-3`}
+      className={`min-w-0 w-full rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2 sm:rounded-[1.2rem] sm:px-3`}
     >
       <div className="flex flex-wrap items-center justify-between gap-1.5 leading-none">
-        <span className="text-[10px] uppercase tracking-[0.16em] text-stone-500">
+        <span className="timeline-meta-text text-[10px] uppercase tracking-[0.16em]">
           {historyItemLabel(item.kind)}
         </span>
         {item.status && (
-          <span className="text-[10px] text-stone-500">{item.status}</span>
+          <span className="timeline-meta-text text-[10px]">{item.status}</span>
         )}
       </div>
       <pre
-        className={`mt-1 whitespace-pre-wrap break-words text-[13px] leading-5 text-stone-300 ${
+        className={`timeline-soft-text mt-1 whitespace-pre-wrap break-words text-[13px] leading-5 ${
           isScrollableHistoryItem(item.kind) ? 'max-h-56 overflow-auto' : ''
         }`}
       >
@@ -3158,12 +3056,12 @@ function PendingRequestCard({
   }
 
   return (
-    <div className="w-full rounded-[1rem] border border-sky-300/20 bg-sky-300/[0.06] px-3 py-3 sm:rounded-[1.2rem] sm:px-4">
+    <div className="timeline-pending-card w-full rounded-[1rem] border px-3 py-3 sm:rounded-[1.2rem] sm:px-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-medium text-sky-100">{cardTitle}</p>
+          <p className="timeline-primary-text text-sm font-medium">{cardTitle}</p>
           {request.kind !== 'planDecision' && request.description && (
-            <p className="mt-1 text-[13px] leading-5 text-stone-300">{request.description}</p>
+            <p className="timeline-soft-text mt-1 text-[13px] leading-5">{request.description}</p>
           )}
         </div>
       </div>
@@ -3171,12 +3069,12 @@ function PendingRequestCard({
         {request.questions.map((question) => (
           <div
             key={question.id}
-            className="rounded-xl border border-stone-800/80 bg-stone-950/45 p-2.5 sm:p-3"
+            className="timeline-question-section rounded-xl border p-2.5 sm:p-3"
           >
-            <p className="text-xs uppercase tracking-[0.2em] text-stone-500">
+            <p className="timeline-meta-text text-xs uppercase tracking-[0.2em]">
               {question.header}
             </p>
-            <p className="mt-1 text-[13px] leading-5 text-stone-100 sm:text-sm">
+            <p className="timeline-primary-text mt-1 text-[13px] leading-5 sm:text-sm">
               {question.question}
             </p>
             {request.kind === 'planDecision' && question.options && question.options.length > 0 ? (
@@ -3193,7 +3091,7 @@ function PendingRequestCard({
                       onClick={() => respondWithSingleAnswer(option.label)}
                       className={`relative rounded-2xl border px-2.5 py-1.5 pr-6 text-[12px] leading-4 transition sm:text-[13px] ${
                         index === 0
-                          ? 'border-sky-300/45 bg-sky-300/90 text-slate-950 hover:bg-sky-200'
+                          ? 'ui-action-info'
                           : 'border-stone-700 text-stone-200 hover:bg-stone-800'
                       } disabled:cursor-not-allowed disabled:opacity-60`}
                       title={option.description}
@@ -3233,7 +3131,7 @@ function PendingRequestCard({
                         }
                         className={`relative rounded-2xl border px-3 py-1.5 pr-6 text-[12px] leading-4 transition sm:text-[13px] ${
                           answers[question.id] === option.label
-                            ? 'border-amber-300/50 bg-amber-300/12 text-amber-100'
+                            ? 'ui-status-warning'
                             : 'border-stone-700 text-stone-300 hover:bg-stone-800'
                         } disabled:cursor-not-allowed disabled:opacity-60`}
                         title={option.description}
@@ -3262,7 +3160,7 @@ function PendingRequestCard({
                       }
                       className={`rounded-2xl border px-3 py-1.5 text-[12px] leading-4 transition sm:text-[13px] ${
                         answers[question.id] === OTHER_SENTINEL
-                          ? 'border-sky-300/50 bg-sky-300/12 text-sky-100'
+                          ? 'ui-status-info'
                           : 'border-stone-700 text-stone-300 hover:bg-stone-800'
                       } disabled:cursor-not-allowed disabled:opacity-60`}
                     >
@@ -3321,7 +3219,7 @@ function PendingRequestCard({
                 ),
               })
             }
-            className="rounded-full bg-sky-300 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-sky-200 disabled:cursor-not-allowed disabled:bg-stone-700 disabled:text-stone-300"
+            className="ui-action-info rounded-full px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed"
           >
             {busy ? 'Submitting...' : 'Submit'}
           </button>
@@ -3343,15 +3241,15 @@ function AnsweredRequestNote({
   };
 }) {
   return (
-    <div className="w-full rounded-2xl border border-cyan-400/18 bg-cyan-400/[0.05] px-3 py-2.5">
-      <p className="text-[11px] uppercase tracking-[0.2em] text-cyan-200/80">
+    <div className="timeline-note-card w-full rounded-2xl border px-3 py-2.5">
+      <p className="timeline-meta-text text-[11px] uppercase tracking-[0.2em]">
         {note.title}
       </p>
       <div className="mt-1 space-y-1">
         {note.summaryLines.map((line, index) => (
           <p
             key={`${note.id}-${index}`}
-            className="text-[13px] leading-5 text-stone-200"
+            className="timeline-primary-text text-[13px] leading-5"
           >
             You selected {line}
           </p>
@@ -3382,20 +3280,20 @@ function ActivityNoteCard({
         : note.text ?? '';
 
   return (
-    <div className="w-full rounded-2xl border border-amber-300/18 bg-amber-300/[0.05] px-3 py-2.5">
+    <div className="timeline-activity-card w-full rounded-2xl border px-3 py-2.5">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-[11px] uppercase tracking-[0.2em] text-amber-200/80">
+        <p className="timeline-meta-text text-[11px] uppercase tracking-[0.2em]">
           {title}
         </p>
         <time
           dateTime={note.createdAt}
           title={formatLongTimestamp(note.createdAt)}
-          className="text-[10px] text-stone-500"
+          className="timeline-meta-text text-[10px]"
         >
           {formatShortTimestamp(note.createdAt)}
         </time>
       </div>
-      <p className="mt-1 text-[13px] leading-5 text-stone-200">{body}</p>
+      <p className="timeline-primary-text mt-1 text-[13px] leading-5">{body}</p>
       {note.linkedThreadId ? (
         <button
           type="button"
@@ -3492,13 +3390,13 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
         <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex flex-1 items-start gap-1.5">
           <div className="min-w-0 flex flex-1 items-center gap-1.5 overflow-hidden">
-            <span className="rounded-[0.6rem] border border-stone-700 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.16em] text-stone-400">
+            <span className="timeline-meta-text rounded-[0.6rem] border border-stone-700 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.16em]">
               Turn {absoluteIndex}
             </span>
             <time
               dateTime={turn.startedAt ?? undefined}
               title={formatLongTimestamp(turn.startedAt)}
-              className="shrink-0 text-[10px] text-stone-400 sm:text-[11px]"
+              className="timeline-meta-text shrink-0 text-[10px] sm:text-[11px]"
             >
               {formatShortTimestamp(turn.startedAt)}
             </time>
@@ -3516,7 +3414,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
           aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} turn ${absoluteIndex}`}
           title={isCollapsed ? 'Expand turn' : 'Collapse turn'}
           onClick={() => onToggleCollapse(turn.id)}
-          className="inline-flex h-5 w-5 shrink-0 items-center justify-center text-stone-400 transition hover:text-stone-100"
+          className="timeline-compact-action timeline-meta-text inline-flex h-5 w-5 shrink-0 items-center justify-center transition hover:text-[var(--theme-fg)]"
         >
           <svg
             aria-hidden="true"
@@ -3579,23 +3477,23 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
             ),
           )}
           {displayedLivePlan && (
-            <div className="rounded-[1rem] border border-sky-300/15 bg-sky-300/5 px-3 py-3 sm:rounded-[1.2rem]">
+            <div className="timeline-live-plan-card rounded-[1rem] border px-3 py-3 sm:rounded-[1.2rem]">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm font-medium text-sky-100">Plan update</p>
+                <p className="timeline-primary-text text-sm font-medium">Plan update</p>
                 <span className="rounded-full border border-sky-300/40 px-2 py-1 text-[11px] uppercase tracking-[0.2em] text-sky-200">
                   Live
                 </span>
               </div>
               {displayedLivePlan.explanation && (
-                <p className="mt-3 text-sm text-stone-300">{displayedLivePlan.explanation}</p>
+                <p className="timeline-soft-text mt-3 text-sm">{displayedLivePlan.explanation}</p>
               )}
               <div className="mt-3 space-y-2">
                 {displayedLivePlan.plan.map((step, index) => (
                   <div
                     key={`${displayedLivePlan.turnId}-${index}`}
-                    className="flex items-center justify-between gap-3 rounded-xl border border-stone-800/80 bg-stone-950/45 px-3 py-2 text-sm"
+                    className="timeline-live-plan-step flex items-center justify-between gap-3 rounded-xl border px-3 py-2 text-sm"
                   >
-                    <span className="min-w-0 flex-1 text-stone-200">{step.step}</span>
+                    <span className="timeline-primary-text min-w-0 flex-1">{step.step}</span>
                     <PlanStepStatusIcon status={step.status} />
                   </div>
                 ))}
@@ -4199,6 +4097,11 @@ export function ThreadTimeline({
     const beforeTurnId = new Map<string, ThreadActivityNoteDto[]>();
     const afterTurnId = new Map<string, ThreadActivityNoteDto[]>();
     const trailing: ThreadActivityNoteDto[] = [];
+    const knownTurnTimes = turnSequence
+      .map((turn) => turn.startedAt)
+      .filter((startedAt): startedAt is string => Boolean(startedAt))
+      .sort();
+    const latestKnownTurnTime = knownTurnTimes.at(-1) ?? null;
 
     for (const note of sortedNotes) {
       if (note.anchorTurnId === '__leading__') {
@@ -4206,16 +4109,24 @@ export function ThreadTimeline({
         continue;
       }
       if (note.anchorTurnId) {
-        const current = afterTurnId.get(note.anchorTurnId) ?? [];
-        current.push(note);
-        afterTurnId.set(note.anchorTurnId, current);
+        if (turnSequence.some((turn) => turn.id === note.anchorTurnId)) {
+          const current = afterTurnId.get(note.anchorTurnId) ?? [];
+          current.push(note);
+          afterTurnId.set(note.anchorTurnId, current);
+        } else {
+          leading.push(note);
+        }
         continue;
       }
       const anchor = turnSequence.find(
         (turn) => turn.startedAt && note.createdAt.localeCompare(turn.startedAt) <= 0,
       );
       if (!anchor) {
-        trailing.push(note);
+        if (!latestKnownTurnTime || note.createdAt.localeCompare(latestKnownTurnTime) <= 0) {
+          leading.push(note);
+        } else {
+          trailing.push(note);
+        }
         continue;
       }
       const current = beforeTurnId.get(anchor.id) ?? [];
@@ -4274,7 +4185,7 @@ export function ThreadTimeline({
                     Load full history
                   </button>
                 )}
-                <p className="text-stone-500">
+                <p className="timeline-meta-text">
                   Showing {visibleTurns.length} of {effectiveTotalTurnCount} turns
                   {hiddenCount > 0 ? ` · ${hiddenCount} earlier hidden` : ''}
                 </p>
@@ -4283,12 +4194,15 @@ export function ThreadTimeline({
           )}
 
           {turns.length === 0 && !liveOutput && !optimisticTurn && (
-            <div className="px-2.5 py-8 text-sm text-stone-500 sm:px-6">
+            <div className="timeline-meta-text px-2.5 py-8 text-sm sm:px-6">
               Send the first prompt to start the thread.
             </div>
           )}
 
-          {(visibleTurns.length > 0 || optimisticTurn) && (
+          {(visibleTurns.length > 0 ||
+            optimisticTurn ||
+            activityNoteAnchors.leading.length > 0 ||
+            activityNoteAnchors.trailing.length > 0) && (
             <div className="divide-y divide-stone-800/80">
               {activityNoteAnchors.leading.length > 0 ? (
                 <div className="space-y-3 border-b border-stone-800/80 px-2.5 py-4 sm:px-6">

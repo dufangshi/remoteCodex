@@ -45,16 +45,16 @@ export function threadStatusLabel(status: ThreadDto['status']) {
 export function threadStatusClassName(status: ThreadDto['status']) {
   switch (status) {
     case 'idle':
-      return 'border-stone-700 bg-stone-900/80 text-stone-300';
+      return 'ui-status-neutral';
     case 'running':
-      return 'border-sky-500/30 bg-sky-500/10 text-sky-200';
+      return 'ui-status-info';
     case 'interrupted':
-      return 'border-amber-500/30 bg-amber-500/10 text-amber-200';
+      return 'ui-status-warning';
     case 'failed':
     case 'system_error':
-      return 'border-rose-500/30 bg-rose-500/10 text-rose-200';
+      return 'ui-status-danger';
     case 'not_loaded':
-      return 'border-stone-700 bg-stone-950 text-stone-400';
+      return 'ui-status-neutral';
   }
 }
 
@@ -76,42 +76,42 @@ export function turnStatusLabel(status: ThreadTurnDto['status'] | 'sending') {
 export function turnStatusClassName(status: ThreadTurnDto['status'] | 'sending') {
   switch (status) {
     case 'sending':
-      return 'border-violet-500/30 bg-violet-500/10 text-violet-200';
+      return 'ui-status-info';
     case 'completed':
-      return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200';
+      return 'ui-status-success';
     case 'interrupted':
-      return 'border-amber-500/30 bg-amber-500/10 text-amber-200';
+      return 'ui-status-warning';
     case 'failed':
-      return 'border-rose-500/30 bg-rose-500/10 text-rose-200';
+      return 'ui-status-danger';
     case 'inProgress':
-      return 'border-sky-500/30 bg-sky-500/10 text-sky-200';
+      return 'ui-status-info';
   }
 }
 
 export function historyItemAccentClassName(kind: ThreadHistoryItemDto['kind']) {
   switch (kind) {
     case 'userMessage':
-      return 'border-cyan-400/45';
+      return 'timeline-kind-user';
     case 'agentMessage':
-      return 'border-emerald-400/45';
+      return 'timeline-kind-agent';
     case 'image':
-      return 'border-indigo-300/45';
+      return 'timeline-kind-action';
     case 'contextCompaction':
-      return 'border-teal-300/45';
+      return 'timeline-kind-action';
     case 'commandExecution':
-      return 'border-amber-300/45';
+      return 'timeline-kind-command';
     case 'webSearch':
-      return 'border-sky-300/45';
+      return 'timeline-kind-search';
     case 'reasoning':
-      return 'border-violet-400/45';
+      return 'timeline-kind-reasoning';
     case 'toolCall':
-      return 'border-fuchsia-400/45';
+      return 'timeline-kind-action';
     case 'plan':
-      return 'border-sky-400/45';
+      return 'timeline-kind-plan';
     case 'fileChange':
-      return 'border-lime-400/45';
+      return 'timeline-kind-file';
     case 'other':
-      return 'border-stone-500/45';
+      return 'ui-status-neutral';
   }
 }
 

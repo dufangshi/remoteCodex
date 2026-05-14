@@ -110,7 +110,7 @@ export function RenameDialog({
           <button
             type="submit"
             disabled={busy || !value.trim()}
-            className="rounded-full bg-emerald-300 px-4 py-2 text-sm font-medium text-stone-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:bg-stone-700 disabled:text-stone-300"
+            className="ui-action-success rounded-full px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed"
           >
             Save
           </button>

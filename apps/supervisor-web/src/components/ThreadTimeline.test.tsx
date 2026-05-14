@@ -576,6 +576,11 @@ describe('ThreadTimeline', () => {
     expect(
       screen.getByRole('button', { name: 'Open full command' }),
     ).not.toHaveTextContent('final status: success');
+    const statusButton = screen.getByRole('button', {
+      name: 'Command status: completed',
+    });
+    expect(statusButton).toHaveClass('timeline-command-status-complete');
+    expect(statusButton).not.toHaveTextContent('completed');
     expect(screen.queryByText('middle output line')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open full command' }));
@@ -592,6 +597,36 @@ describe('ThreadTimeline', () => {
     expect(
       screen.queryByRole('dialog', { name: 'Command Output' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('renders unfinished command status as a compact pending icon only', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'inProgress',
+            error: null,
+            items: [
+              {
+                id: 'command-1',
+                kind: 'commandExecution',
+                text: 'pnpm test --watch',
+                status: 'running',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    const statusButton = screen.getByRole('button', {
+      name: 'Command status: running',
+    });
+    expect(statusButton).toHaveClass('timeline-command-status-pending');
+    expect(statusButton).not.toHaveTextContent('running');
   });
 
   it('loads deferred command details on demand before opening the dialog', async () => {
@@ -795,6 +830,7 @@ describe('ThreadTimeline', () => {
     expect(screen.getByText('-4')).toBeInTheDocument();
     expect(screen.getByText('+19')).toHaveClass('text-emerald-300');
     expect(screen.getByText('-4')).toHaveClass('text-rose-300');
+    expect(screen.queryByText('completed')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open file change details' }));
 
@@ -2351,6 +2387,86 @@ describe('ThreadTimeline', () => {
     ).toBeTruthy();
     expect(
       activity.compareDocumentPosition(secondTurn) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('renders anchored fast mode activity notes above loaded turns when the anchor turn is paged out', () => {
+    render(
+      <ThreadTimeline
+        turns={[
+          {
+            id: 'turn-newer',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 3, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'user-newer',
+                kind: 'userMessage',
+                text: 'Newer loaded turn',
+              },
+            ],
+          },
+        ]}
+        liveOutput=""
+        activityNotes={[
+          {
+            id: 'activity-1',
+            kind: 'fastMode',
+            text: 'Fast mode on',
+            createdAt: new Date(Date.UTC(2026, 3, 9, 6, 2, 0)).toISOString(),
+            anchorTurnId: 'turn-paged-out',
+          },
+        ]}
+      />,
+    );
+
+    const activity = screen.getByText('Fast mode on');
+    const newerTurn = screen.getByText('Newer loaded turn');
+
+    expect(
+      activity.compareDocumentPosition(newerTurn) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('renders old unanchored fast mode activity notes above the loaded page instead of trailing', () => {
+    render(
+      <ThreadTimeline
+        turns={[
+          {
+            id: 'turn-newer',
+            startedAt: new Date(Date.UTC(2026, 4, 8, 6, 3, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'user-newer',
+                kind: 'userMessage',
+                text: 'Loaded May turn',
+              },
+            ],
+          },
+        ]}
+        liveOutput=""
+        activityNotes={[
+          {
+            id: 'activity-1',
+            kind: 'fastMode',
+            text: 'Fast mode off',
+            createdAt: new Date(Date.UTC(2026, 3, 13, 6, 2, 0)).toISOString(),
+            anchorTurnId: null,
+          },
+        ]}
+      />,
+    );
+
+    const activity = screen.getByText('Fast mode off');
+    const newerTurn = screen.getByText('Loaded May turn');
+
+    expect(
+      activity.compareDocumentPosition(newerTurn) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });

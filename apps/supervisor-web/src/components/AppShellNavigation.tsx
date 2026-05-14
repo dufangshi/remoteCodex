@@ -671,7 +671,7 @@ export function AppShellSettingsDialog() {
         type="button"
         aria-label="Close Settings"
         onClick={shellNav.closeSettings}
-        className="absolute inset-0 bg-black/42 backdrop-blur-sm"
+        className="ui-overlay-scrim absolute inset-0 backdrop-blur-sm"
       />
       <section
         role="dialog"

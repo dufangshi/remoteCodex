@@ -87,7 +87,7 @@ export function ConfirmDialog({
             type="button"
             onClick={() => void onConfirm()}
             disabled={busy}
-            className="rounded-full bg-rose-300 px-4 py-2 text-sm font-medium text-stone-950 transition hover:bg-rose-200 disabled:cursor-not-allowed disabled:bg-stone-700 disabled:text-stone-300"
+            className="ui-action-danger rounded-full px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed"
           >
             {busy ? 'Deleting...' : confirmLabel}
           </button>
