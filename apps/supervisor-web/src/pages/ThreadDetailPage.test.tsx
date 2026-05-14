@@ -2963,6 +2963,136 @@ describe('ThreadDetailPage', () => {
     });
   });
 
+  it('deduplicates the current goal against persisted goal history in the monitor', async () => {
+    const createdAt = '2026-05-08T20:00:00.000Z';
+    vi.stubGlobal(
+      'fetch',
+      withHealthz((input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.includes('/api/codex/status')) {
+          return okJsonResponse({
+            state: 'ready',
+            transport: 'stdio',
+            lastStartedAt: new Date().toISOString(),
+            lastError: null,
+            restartCount: 0,
+          });
+        }
+
+        if (url.includes('/api/codex/models')) {
+          return okJsonResponse(modelOptionsResponse);
+        }
+
+        if (url.endsWith('/api/threads/thread-1/goal')) {
+          return okJsonResponse({
+            threadId: 'codex-1',
+            localGoalId: null,
+            objective: '现在审查/home/u/dev/EIAgente/references/EI...',
+            status: 'active',
+            tokenBudget: null,
+            tokensUsed: 6100,
+            timeUsedSeconds: 0,
+            createdAt,
+            updatedAt: '2026-05-08T20:12:01.000Z',
+            completedAt: null,
+          });
+        }
+
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
+          return okJsonResponse({
+            thread: {
+              id: 'thread-1',
+              workspaceId: 'workspace-1',
+              codexThreadId: 'codex-1',
+              source: 'supervisor',
+              title: 'Demo Thread',
+              model: 'gpt-5',
+              reasoningEffort: 'medium',
+              collaborationMode: 'default',
+              approvalMode: 'yolo',
+              status: 'idle',
+              summaryText: 'Preview',
+              lastError: null,
+              activeTurnId: null,
+              isLoaded: true,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: null,
+              lastTurnCompletedAt: null,
+            },
+            workspace: {
+              id: 'workspace-1',
+              hostId: 'host-1',
+              label: 'Demo Workspace',
+              absPath: '/tmp/demo',
+              isFavorite: false,
+              createdAt: new Date().toISOString(),
+              lastOpenedAt: null,
+            },
+            workspacePathStatus: 'present',
+            pendingRequests: [],
+            turns: [],
+            goal: {
+              threadId: 'codex-1',
+              localGoalId: null,
+              objective: '现在审查/home/u/dev/EIAgente/references/EI...',
+              status: 'active',
+              tokenBudget: null,
+              tokensUsed: 6100,
+              timeUsedSeconds: 0,
+              createdAt,
+              updatedAt: '2026-05-08T20:12:01.000Z',
+              completedAt: null,
+            },
+            goalHistory: [
+              {
+                threadId: 'codex-1',
+                localGoalId: 'local-goal-1',
+                objective: '现在审查/home/u/dev/EIAgente/references/EI...',
+                status: 'active',
+                tokenBudget: null,
+                tokensUsed: 6100,
+                timeUsedSeconds: 0,
+                createdAt,
+                updatedAt: '2026-05-08T20:12:00.000Z',
+                completedAt: null,
+              },
+            ],
+          });
+        }
+
+        if (url.endsWith('/api/threads')) {
+          return okJsonResponse([]);
+        }
+
+        return Promise.reject(new Error(`Unexpected request: ${url}`));
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByLabelText('Open goal monitor').length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getAllByLabelText('Open goal monitor')[0]!);
+
+    await waitFor(() => {
+      expect(screen.getByText('Goal monitor')).toBeInTheDocument();
+    });
+    expect(
+      screen.getAllByText('现在审查/home/u/dev/EIAgente/references/EI...'),
+    ).toHaveLength(1);
+  });
+
   it('merges realtime per-turn token usage updates into the visible timeline', async () => {
     vi.stubGlobal(
       'fetch',

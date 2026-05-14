@@ -283,7 +283,7 @@ describe('ThreadComposer', () => {
     });
   });
 
-  it('opens the goal panel and sets a goal objective', async () => {
+  it('uses the main prompt to set a goal objective', async () => {
     const onOpenGoal = vi.fn().mockResolvedValue(undefined);
     const onUpdateGoal = vi.fn().mockResolvedValue(undefined);
 
@@ -312,11 +312,17 @@ describe('ThreadComposer', () => {
       expect(onOpenGoal).toHaveBeenCalled();
     });
 
-    fireEvent.change(screen.getByLabelText('Goal objective'), {
-      target: { value: 'Finish the migration and keep tests green.' },
-    });
+    expect(
+      screen.queryByText('Write the goal in the main prompt box, then press Set goal.'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Goal token budget')).toBeInTheDocument();
+    expect(screen.getByText('Max tokens (k)')).toBeInTheDocument();
+    setPromptValue(
+      screen.getByRole('textbox', { name: 'Prompt' }),
+      'Finish the migration and keep tests green.',
+    );
     fireEvent.change(screen.getByLabelText('Goal token budget'), {
-      target: { value: '12000' },
+      target: { value: '12' },
     });
     fireEvent.click(screen.getByRole('button', { name: /Set goal/i }));
 
@@ -327,6 +333,38 @@ describe('ThreadComposer', () => {
         tokenBudget: 12000,
       });
     });
+  });
+
+  it('toggles goal compose mode off from the highlighted slash item', async () => {
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={() => undefined}
+        onOpenGoal={vi.fn().mockResolvedValue(undefined)}
+        onUpdateGoal={vi.fn().mockResolvedValue(undefined)}
+        goalState={{
+          status: 'ready',
+          error: null,
+          data: null,
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
+    fireEvent.click(screen.getByRole('button', { name: /\/goal/i }));
+    expect(screen.getByRole('button', { name: /Set goal/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
+    fireEvent.click(screen.getByRole('button', { name: /\/goal/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /Set goal/i })).not.toBeInTheDocument();
+    });
+    expect(screen.queryByLabelText('Goal token budget')).not.toBeInTheDocument();
   });
 
   it('highlights the goal slash item while an active goal exists', () => {
@@ -358,8 +396,7 @@ describe('ThreadComposer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
 
     expect(screen.getByRole('button', { name: /\/goal/i })).toHaveClass(
-      'bg-amber-300/12',
-      'text-amber-100',
+      'ui-status-warning',
     );
   });
 
@@ -385,8 +422,7 @@ describe('ThreadComposer', () => {
     const panel = screen.getByRole('button', { name: /\/fast/i }).closest('div[class*="absolute"]');
     expect(panel).toHaveClass('bottom-full', 'mb-2', 'bg-stone-900/72', 'backdrop-blur-xl');
     expect(screen.getByRole('button', { name: /\/fast/i })).toHaveClass(
-      'bg-amber-300/12',
-      'text-amber-100',
+      'ui-status-warning',
     );
   });
 

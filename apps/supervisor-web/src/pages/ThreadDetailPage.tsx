@@ -112,6 +112,62 @@ function mergeThreadIntoList(existing: ThreadDto[], thread: ThreadDto) {
   return [thread, ...remaining];
 }
 
+function goalKey(goal: NonNullable<ThreadDetailDto['goal']>) {
+  return `${goal.threadId}:${goal.createdAt}:${goal.objective}`;
+}
+
+function mergeGoalEntry(
+  existing: NonNullable<ThreadDetailDto['goal']>,
+  incoming: NonNullable<ThreadDetailDto['goal']>,
+) {
+  const existingUpdatedAt = Date.parse(existing.updatedAt) || 0;
+  const incomingUpdatedAt = Date.parse(incoming.updatedAt) || 0;
+  const latest = incomingUpdatedAt >= existingUpdatedAt ? incoming : existing;
+  const fallback = latest === incoming ? existing : incoming;
+  return {
+    ...latest,
+    localGoalId: latest.localGoalId ?? fallback.localGoalId ?? null,
+  };
+}
+
+function normalizeGoalHistory(
+  goals: NonNullable<ThreadDetailDto['goalHistory']>,
+) {
+  const byKey = new Map<string, NonNullable<ThreadDetailDto['goal']>>();
+  for (const goal of goals) {
+    const key = goalKey(goal);
+    const existing = byKey.get(key);
+    byKey.set(key, existing ? mergeGoalEntry(existing, goal) : goal);
+  }
+  return [...byKey.values()].sort(
+    (left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
+  );
+}
+
+function mergeGoalHistory(
+  existing: NonNullable<ThreadDetailDto['goalHistory']>,
+  goal: NonNullable<ThreadDetailDto['goal']>,
+) {
+  return normalizeGoalHistory([goal, ...existing]);
+}
+
+function formatGoalTokenUsage(goal: NonNullable<ThreadDetailDto['goal']>) {
+  const formatter = new Intl.NumberFormat(undefined, {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  });
+  return goal.tokenBudget === null
+    ? `${formatter.format(goal.tokensUsed)} tok`
+    : `${formatter.format(goal.tokensUsed)}/${formatter.format(goal.tokenBudget)} tok`;
+}
+
+function formatGoalRuntime(seconds: number) {
+  const minutes = Math.max(0, Math.floor(seconds / 60));
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return hours > 0 ? `${hours}h ${remainingMinutes}m` : `${minutes}m`;
+}
+
 interface OptimisticTurnState {
   id: string;
   serverTurnId: string | null;
@@ -318,6 +374,7 @@ export function ThreadDetailPage() {
   });
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [mobileComposerHeight, setMobileComposerHeight] = useState(0);
+  const [mobileComposerOverlap, setMobileComposerOverlap] = useState(0);
   const [mobileKeyboardInset, setMobileKeyboardInset] = useState(0);
   const [mobilePromptFocused, setMobilePromptFocused] = useState(false);
   const [shellControlState, setShellControlState] =
@@ -365,6 +422,11 @@ export function ThreadDetailPage() {
     data: null,
     error: null,
   });
+  const [goalMonitorOpen, setGoalMonitorOpen] = useState(false);
+  const [goalActionBusy, setGoalActionBusy] = useState(false);
+  const [expandedGoalIds, setExpandedGoalIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [error, setError] = useState<string | null>(null);
 
   const flushBufferedLiveOutput = useCallback(() => {
@@ -444,10 +506,16 @@ export function ThreadDetailPage() {
       });
       setDetail((current) =>
         current
-          ? {
-              ...current,
-              goal: next.goal,
-            }
+          ? next.goal
+            ? {
+                ...current,
+                goal: next.goal,
+                goalHistory: mergeGoalHistory(current.goalHistory ?? [], next.goal),
+              }
+            : {
+                ...current,
+                goal: next.goal,
+              }
           : current,
       );
     } catch (requestError) {
@@ -486,10 +554,16 @@ export function ThreadDetailPage() {
       });
       setDetail((current) =>
         current
-          ? {
-              ...current,
-              goal: next.goal,
-            }
+          ? next.goal
+            ? {
+                ...current,
+                goal: next.goal,
+                goalHistory: mergeGoalHistory(current.goalHistory ?? [], next.goal),
+              }
+            : {
+                ...current,
+                goal: next.goal,
+              }
           : current,
       );
     } catch (requestError) {
@@ -517,7 +591,7 @@ export function ThreadDetailPage() {
     }));
 
     try {
-      await clearThreadGoal(id);
+      const next = await clearThreadGoal(id);
       setGoalState({
         status: 'ready',
         data: null,
@@ -525,10 +599,16 @@ export function ThreadDetailPage() {
       });
       setDetail((current) =>
         current
-          ? {
-              ...current,
-              goal: null,
-            }
+          ? next.goalHistory
+            ? {
+                ...current,
+                goal: null,
+                goalHistory: next.goalHistory,
+              }
+            : {
+                ...current,
+                goal: null,
+              }
           : current,
       );
     } catch (requestError) {
@@ -541,6 +621,26 @@ export function ThreadDetailPage() {
             : 'Unable to clear goal.',
       }));
       throw requestError;
+    }
+  }
+
+  async function handleGoalStatusAction(
+    status: NonNullable<ThreadDetailDto['goal']>['status'],
+  ) {
+    setGoalActionBusy(true);
+    try {
+      await handleUpdateGoal({ status });
+    } finally {
+      setGoalActionBusy(false);
+    }
+  }
+
+  async function handleTerminateGoal() {
+    setGoalActionBusy(true);
+    try {
+      await handleClearGoal();
+    } finally {
+      setGoalActionBusy(false);
     }
   }
 
@@ -683,12 +783,18 @@ export function ThreadDetailPage() {
         nextDetail.thread.status !== 'running';
 
       setDetail((current) =>
-        current
+        current && !nextDetail.goalHistory
           ? {
               ...nextDetail,
               turns: appendLatestTurns(current.turns, nextDetail.turns),
+              ...(current.goalHistory ? { goalHistory: current.goalHistory } : {}),
             }
-          : nextDetail,
+          : current
+            ? {
+                ...nextDetail,
+                turns: appendLatestTurns(current.turns, nextDetail.turns),
+              }
+            : nextDetail,
       );
       setThreads((current) =>
         mergeThreadIntoList(current, nextDetail.thread),
@@ -1022,7 +1128,7 @@ export function ThreadDetailPage() {
       document.removeEventListener('focusin', updatePromptFocus);
       document.removeEventListener('focusout', updatePromptFocus);
     };
-  }, [activeView, isMobileViewport]);
+  }, [activeView, detail?.thread.id, isMobileViewport]);
 
   useEffect(() => {
     const node = composerHostRef.current;
@@ -1051,6 +1157,43 @@ export function ThreadDetailPage() {
       observer.disconnect();
     };
   }, [activeView, isMobileViewport]);
+
+  useEffect(() => {
+    const node = composerHostRef.current;
+    if (!node || !isMobileViewport || activeView !== 'chat') {
+      setMobileComposerOverlap(0);
+      return;
+    }
+
+    const updateOverlap = () => {
+      const rect = node.getBoundingClientRect();
+      setMobileComposerOverlap(Math.max(0, Math.ceil(window.innerHeight - rect.top)));
+    };
+
+    updateOverlap();
+    window.addEventListener('resize', updateOverlap);
+    window.visualViewport?.addEventListener('resize', updateOverlap);
+    window.visualViewport?.addEventListener('scroll', updateOverlap);
+
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(updateOverlap);
+      observer.observe(node);
+    }
+
+    return () => {
+      window.removeEventListener('resize', updateOverlap);
+      window.visualViewport?.removeEventListener('resize', updateOverlap);
+      window.visualViewport?.removeEventListener('scroll', updateOverlap);
+      observer?.disconnect();
+    };
+  }, [
+    activeView,
+    detail?.thread.id,
+    isMobileViewport,
+    mobileKeyboardInset,
+    mobilePromptFocused,
+  ]);
 
   useEffect(() => {
     void loadThreadDetail({ showLoading: true });
@@ -1230,6 +1373,10 @@ export function ThreadDetailPage() {
             event.payload.goal && typeof event.payload.goal === 'object'
               ? (event.payload.goal as NonNullable<ThreadDetailDto['goal']>)
               : null;
+          const goalHistory =
+            Array.isArray(event.payload.goalHistory)
+              ? (event.payload.goalHistory as NonNullable<ThreadDetailDto['goalHistory']>)
+              : null;
           setGoalState({
             status: 'ready',
             data: goal,
@@ -1237,14 +1384,30 @@ export function ThreadDetailPage() {
           });
           setDetail((current) =>
             current
-              ? {
-                  ...current,
-                  goal,
-                }
+              ? goalHistory
+                ? {
+                    ...current,
+                    goal,
+                    goalHistory,
+                  }
+                : goal
+                  ? {
+                      ...current,
+                      goal,
+                      goalHistory: mergeGoalHistory(current.goalHistory ?? [], goal),
+                    }
+                  : {
+                      ...current,
+                      goal,
+                    }
               : current,
           );
         }
         if (event.type === 'thread.goal.cleared') {
+          const goalHistory =
+            Array.isArray(event.payload.goalHistory)
+              ? (event.payload.goalHistory as NonNullable<ThreadDetailDto['goalHistory']>)
+              : null;
           setGoalState({
             status: 'ready',
             data: null,
@@ -1252,10 +1415,16 @@ export function ThreadDetailPage() {
           });
           setDetail((current) =>
             current
-              ? {
-                  ...current,
-                  goal: null,
-                }
+              ? goalHistory
+                ? {
+                    ...current,
+                    goal: null,
+                    goalHistory,
+                  }
+                : {
+                    ...current,
+                    goal: null,
+                  }
               : current,
           );
         }
@@ -2262,8 +2431,12 @@ export function ThreadDetailPage() {
   const floatingMobileComposerBottomOffset =
     useFloatingMobileComposer && mobilePromptFocused ? mobileKeyboardInset : 0;
   const effectiveMobileComposerHeight = Math.max(mobileComposerHeight, 144);
+  const effectiveMobileComposerOverlap = Math.max(
+    mobileComposerOverlap,
+    effectiveMobileComposerHeight + floatingMobileComposerBottomOffset,
+  );
   const timelineBottomSpacer = useFloatingMobileComposer
-    ? effectiveMobileComposerHeight + 12
+    ? effectiveMobileComposerOverlap + 12
     : 0;
 
   const metaContent = detail ? (
@@ -2285,11 +2458,11 @@ export function ThreadDetailPage() {
                   : 'Copy Codex session ID'
             }
             onClick={() => void handleCopyMetaSessionId()}
-            className={`absolute bottom-0 right-0 inline-flex h-5 w-5 items-center justify-center rounded-full border shadow-sm shadow-stone-950/25 backdrop-blur transition ${
+            className={`thread-mobile-hit-target absolute bottom-0 right-0 inline-flex h-5 w-5 items-center justify-center rounded-full border shadow-sm shadow-stone-950/25 backdrop-blur transition ${
               metaSessionCopyState === 'copied'
-                ? 'border-sky-300/40 bg-sky-300/16 text-sky-100'
+                ? 'ui-status-info'
                 : metaSessionCopyState === 'failed'
-                  ? 'border-rose-300/35 bg-rose-300/12 text-rose-100'
+                  ? 'ui-status-danger'
                   : 'border-stone-700/90 bg-stone-900/60 text-stone-300 hover:bg-stone-800/92'
             }`}
           >
@@ -2355,7 +2528,7 @@ export function ThreadDetailPage() {
                 onClick={() => void handleUpdateThreadSettings({ sandboxMode: entry })}
                 className={`block w-full rounded-xl border px-3 py-2 text-left text-sm transition ${
                   selected
-                    ? 'border-amber-300/35 bg-amber-300/12 text-stone-100'
+                    ? 'ui-status-warning'
                     : 'border-stone-800 bg-stone-950/40 text-stone-300 hover:bg-stone-800/80'
                 } disabled:cursor-not-allowed disabled:opacity-60`}
               >
@@ -2397,13 +2570,13 @@ export function ThreadDetailPage() {
   const realtimeConnectionIndicatorClassName =
     !threadLoaded
       ? 'border border-stone-700/90 bg-stone-900/85 text-stone-400 shadow-lg shadow-stone-950/20'
-      : realtimeConnection.status === 'connected'
-      ? 'border border-emerald-300/55 bg-emerald-400 text-emerald-950 shadow-lg shadow-emerald-950/25'
+    : realtimeConnection.status === 'connected'
+      ? 'ui-action-success shadow-lg shadow-stone-950/20'
       : realtimeConnection.status === 'reconnecting'
-        ? 'thread-live-connection-reconnecting border border-emerald-300/34 bg-emerald-300/18 text-emerald-50 shadow-lg shadow-stone-950/20'
+        ? 'thread-live-connection-reconnecting ui-status-success shadow-lg shadow-stone-950/20'
         : realtimeConnection.status === 'offline'
-          ? 'border border-rose-300/35 bg-rose-300/12 text-rose-100 shadow-lg shadow-stone-950/20'
-          : 'border border-amber-300/28 bg-amber-300/14 text-amber-50 shadow-lg shadow-stone-950/20';
+          ? 'ui-status-danger shadow-lg shadow-stone-950/20'
+          : 'ui-status-warning shadow-lg shadow-stone-950/20';
   const realtimeConnectionLabel = threadConnectionSummary(
     threadLoaded,
     realtimeConnection,
@@ -2418,7 +2591,7 @@ export function ThreadDetailPage() {
     .filter(Boolean)
     .join(' · ');
 
-  const mobileSessionConnectionButton = !threadLoaded ? (
+  const mobileSessionConnectionControl = !threadLoaded ? (
     <button
       type="button"
       onClick={() => void handleThreadConnectionToggle()}
@@ -2458,6 +2631,154 @@ export function ThreadDetailPage() {
       <RealtimeConnectionIcon status={realtimeConnection.status} />
     </div>
   );
+  const currentGoal = goalState.data ?? detail?.goal ?? null;
+  const goalHistory = detail?.goalHistory ?? [];
+  const monitorGoals = currentGoal
+    ? mergeGoalHistory(goalHistory, currentGoal)
+    : normalizeGoalHistory(goalHistory);
+  const goalIndicatorIcon = (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-4 w-4 fill-none stroke-current"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="8" cy="8" r="5.5" />
+      <circle cx="8" cy="8" r="2" />
+      <path d="M8 1.7v2M8 12.3v2M1.7 8h2M12.3 8h2" />
+    </svg>
+  );
+  const goalMonitorPanel = goalMonitorOpen ? (
+    <div className="w-96 max-w-[calc(100vw-1.5rem)] rounded-3xl border border-stone-700/80 bg-stone-950/92 p-3 text-left text-stone-100 shadow-2xl shadow-stone-950/35 backdrop-blur-xl">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold">Goal monitor</p>
+          <p className="text-xs text-stone-500">Current thread only</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setGoalMonitorOpen(false)}
+          className="rounded-full border border-stone-700 px-2.5 py-1 text-xs text-stone-300 transition hover:bg-stone-800"
+        >
+          Close
+        </button>
+      </div>
+      {goalState.error ? (
+        <p className="mt-3 rounded-2xl border border-rose-400/30 bg-rose-400/10 px-3 py-2 text-xs text-rose-100">
+          {goalState.error}
+        </p>
+      ) : null}
+      <div className="mt-3 max-h-[28rem] space-y-2 overflow-auto pr-1">
+        {monitorGoals.length === 0 ? (
+          <p className="rounded-2xl border border-stone-800 bg-stone-900/60 px-3 py-3 text-sm text-stone-400">
+            No goals in this thread yet.
+          </p>
+        ) : (
+          monitorGoals.map((goal) => {
+            const key = goalKey(goal);
+            const expanded = expandedGoalIds.has(key);
+            const active = ['active', 'paused', 'budgetLimited'].includes(goal.status);
+            return (
+              <div
+                key={key}
+                className={`rounded-2xl border px-3 py-3 ${
+                  active
+                    ? 'ui-status-info'
+                    : 'border-stone-800 bg-stone-900/60'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedGoalIds((current) => {
+                        const next = new Set(current);
+                        if (next.has(key)) {
+                          next.delete(key);
+                        } else {
+                          next.add(key);
+                        }
+                        return next;
+                      })
+                    }
+                    className="min-w-0 flex-1 text-left"
+                  >
+                    <p
+                      className={`text-sm font-medium leading-5 ${
+                        expanded ? '' : 'line-clamp-2'
+                      }`}
+                    >
+                      {goal.objective}
+                    </p>
+                  </button>
+                  <span className="shrink-0 rounded-full border border-stone-700 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-stone-300">
+                    {goal.status}
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-stone-400">
+                  <span>{formatGoalRuntime(goal.timeUsedSeconds)}</span>
+                  <span>{formatGoalTokenUsage(goal)}</span>
+                  <span title={formatLongTimestamp(goal.updatedAt)}>
+                    Updated {new Date(goal.updatedAt).toLocaleTimeString()}
+                  </span>
+                </div>
+                {active ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={goalActionBusy || goal.status === 'active'}
+                      onClick={() => void handleGoalStatusAction('active')}
+                      className="ui-status-info rounded-full px-3 py-1.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Continue
+                    </button>
+                    <button
+                      type="button"
+                      disabled={goalActionBusy || goal.status === 'paused'}
+                      onClick={() => void handleGoalStatusAction('paused')}
+                      className="rounded-full border border-stone-700 px-3 py-1.5 text-xs text-stone-300 transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Pause
+                    </button>
+                    <button
+                      type="button"
+                      disabled={goalActionBusy}
+                      onClick={() => void handleTerminateGoal()}
+                      className="rounded-full border border-rose-400/35 px-3 py-1.5 text-xs text-rose-100 transition hover:bg-rose-400/10 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Terminate
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  ) : null;
+  const goalMonitorButton = (
+    <button
+      type="button"
+      aria-label="Open goal monitor"
+      title="Open goal monitor"
+      onClick={() => {
+        setGoalMonitorOpen((current) => !current);
+        void handleOpenGoal();
+      }}
+      className="ui-status-info inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full shadow-lg shadow-stone-950/20 transition lg:h-9 lg:w-9"
+    >
+      {goalIndicatorIcon}
+    </button>
+  );
+  const mobileSessionConnectionButton = (
+    <div className="relative flex items-center justify-end gap-1.5">
+      {goalMonitorButton}
+      {mobileSessionConnectionControl}
+    </div>
+  );
 
   return (
     <ThreadWorkspaceLayout
@@ -2478,10 +2799,18 @@ export function ThreadDetailPage() {
     >
       <div className="thread-detail-surface relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-none border-y shadow-2xl shadow-stone-950/20 sm:flex-none sm:rounded-[2rem] sm:border">
         <div className="pointer-events-none absolute right-4 top-4 z-30 hidden lg:block">
-          <div className="pointer-events-auto">
-            {desktopSessionConnectionIndicator}
+          <div className="pointer-events-auto flex flex-col items-end gap-2">
+            <div className="flex items-center justify-end gap-2">
+              {goalMonitorButton}
+              {desktopSessionConnectionIndicator}
+            </div>
           </div>
         </div>
+        {goalMonitorPanel ? (
+          <div className="fixed right-3 top-20 z-50 lg:absolute lg:top-16 lg:right-4">
+            {goalMonitorPanel}
+          </div>
+        ) : null}
         {error && !loading && (
           <div className="shrink-0 border-b border-rose-500/20 bg-rose-500/10 px-5 py-4 text-sm text-rose-100 sm:px-6">
             {error}
@@ -2576,7 +2905,6 @@ export function ThreadDetailPage() {
                       goalState={goalState}
                       onOpenGoal={handleOpenGoal}
                       onUpdateGoal={handleUpdateGoal}
-                      onClearGoal={handleClearGoal}
                       onReadCodexConfig={() => fetchCodexHostFile('config.toml')}
                       onWriteCodexConfig={(content) =>
                         updateCodexHostFile('config.toml', { content })
@@ -2625,7 +2953,6 @@ export function ThreadDetailPage() {
                       goalState={goalState}
                       onOpenGoal={handleOpenGoal}
                       onUpdateGoal={handleUpdateGoal}
-                      onClearGoal={handleClearGoal}
                       onReadCodexConfig={() => fetchCodexHostFile('config.toml')}
                       onWriteCodexConfig={(content) =>
                         updateCodexHostFile('config.toml', { content })

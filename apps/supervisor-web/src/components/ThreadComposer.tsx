@@ -74,7 +74,6 @@ interface ThreadComposerProps {
     status?: ThreadGoalStatusDto | null;
     tokenBudget?: number | null;
   }) => Promise<void> | void;
-  onClearGoal?: () => Promise<void> | void;
   onOpenForkTurns?: () => Promise<void> | void;
   onForkLatest?: () => Promise<void> | void;
   onForkTurn?: (turnId: string) => Promise<void> | void;
@@ -122,7 +121,7 @@ interface PromptAttachmentSegment {
 
 type PromptSegment = PromptTextSegment | PromptAttachmentSegment;
 type AttachmentPreviewMap = Record<string, string>;
-type SlashPanelView = 'root' | 'skills' | 'mcp' | 'fork' | 'forkTurns' | 'goal';
+type SlashPanelView = 'root' | 'skills' | 'mcp' | 'fork' | 'forkTurns';
 type McpPanelMode = 'list' | 'add' | 'http' | 'stdio';
 
 function normalizePromptText(value: string) {
@@ -304,17 +303,29 @@ function goalStatusLabel(value: ThreadGoalStatusDto) {
   }
 }
 
-function formatGoalUsage(goal: ThreadGoalDto) {
-  const minutes = Math.max(0, Math.round(goal.timeUsedSeconds / 60));
-  const formatCompact = (value: number) =>
-    new Intl.NumberFormat(undefined, {
-      notation: 'compact',
-      maximumFractionDigits: 1,
-    }).format(value);
+function parseGoalTokenBudgetThousands(value: string) {
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
 
-  return goal.tokenBudget === null
-    ? `${formatCompact(goal.tokensUsed)} tok · ${minutes}m`
-    : `${formatCompact(goal.tokensUsed)}/${formatCompact(goal.tokenBudget)} tok · ${minutes}m`;
+  const thousands = Number(normalized);
+  if (!Number.isFinite(thousands) || thousands <= 0) {
+    return Number.NaN;
+  }
+
+  return Math.round(thousands * 1000);
+}
+
+function formatGoalTokenBudgetThousands(value: number | null | undefined) {
+  if (!value) {
+    return '';
+  }
+
+  const thousands = value / 1000;
+  return Number.isInteger(thousands)
+    ? String(thousands)
+    : String(Number(thousands.toFixed(1)));
 }
 
 function normalizeTomlContent(value: string) {
@@ -655,7 +666,6 @@ export function ThreadComposer({
   onOpenMcp,
   onOpenGoal,
   onUpdateGoal,
-  onClearGoal,
   onOpenForkTurns,
   onForkLatest,
   onForkTurn,
@@ -687,7 +697,7 @@ export function ThreadComposer({
   const [mcpConfigSuccess, setMcpConfigSuccess] = useState<string | null>(null);
   const [copiedSkillName, setCopiedSkillName] = useState<string | null>(null);
   const [forkBusy, setForkBusy] = useState(false);
-  const [goalObjective, setGoalObjective] = useState('');
+  const [goalComposeMode, setGoalComposeMode] = useState(false);
   const [goalTokenBudget, setGoalTokenBudget] = useState('');
   const [goalBusy, setGoalBusy] = useState(false);
   const [goalLocalError, setGoalLocalError] = useState<string | null>(null);
@@ -737,12 +747,6 @@ export function ThreadComposer({
   useEffect(() => {
     if (slashPanelView !== 'forkTurns') {
       setForkBusy(false);
-    }
-  }, [slashPanelView]);
-
-  useEffect(() => {
-    if (slashPanelView !== 'goal') {
-      setGoalLocalError(null);
     }
   }, [slashPanelView]);
 
@@ -873,20 +877,19 @@ export function ThreadComposer({
   }
 
   async function handleSetGoal() {
-    const objective = goalObjective.trim();
+    const objective = prompt.trim();
     if (!objective) {
       setGoalLocalError('Goal objective cannot be empty.');
       return;
     }
 
     const normalizedBudget = goalTokenBudget.trim();
-    const tokenBudget =
-      normalizedBudget.length > 0 ? Number(normalizedBudget) : null;
+    const tokenBudget = parseGoalTokenBudgetThousands(normalizedBudget);
     if (
       normalizedBudget.length > 0 &&
       (tokenBudget === null || !Number.isInteger(tokenBudget) || tokenBudget <= 0)
     ) {
-      setGoalLocalError('Token budget must be a positive integer.');
+      setGoalLocalError('Token budget must be a positive number in thousands.');
       return;
     }
 
@@ -903,8 +906,12 @@ export function ThreadComposer({
         status: 'active',
         tokenBudget,
       });
-      setGoalObjective('');
       setGoalTokenBudget('');
+      setGoalComposeMode(false);
+      updateDraft(() => ({
+        prompt: '',
+        attachments: [],
+      }));
     } catch (error) {
       setGoalLocalError(
         error instanceof Error ? error.message : 'Unable to set goal.',
@@ -914,42 +921,23 @@ export function ThreadComposer({
     }
   }
 
-  async function handleSetGoalStatus(status: ThreadGoalStatusDto) {
-    if (!onUpdateGoal) {
-      setGoalLocalError('/goal is unavailable in this view.');
-      return;
-    }
-
-    setGoalBusy(true);
+  function enterGoalComposeMode() {
+    setOpenMenu(null);
+    setSlashPanelView('root');
+    setGoalComposeMode(true);
+    setGoalTokenBudget(
+      formatGoalTokenBudgetThousands(goalState.data?.tokenBudget),
+    );
     setGoalLocalError(null);
-    try {
-      await onUpdateGoal({ status });
-    } catch (error) {
-      setGoalLocalError(
-        error instanceof Error ? error.message : 'Unable to update goal.',
-      );
-    } finally {
-      setGoalBusy(false);
-    }
+    void onOpenGoal?.();
+    requestAnimationFrame(() => {
+      promptRef.current?.focus();
+    });
   }
 
-  async function handleClearGoal() {
-    if (!onClearGoal) {
-      setGoalLocalError('/goal is unavailable in this view.');
-      return;
-    }
-
-    setGoalBusy(true);
+  function exitGoalComposeMode() {
+    setGoalComposeMode(false);
     setGoalLocalError(null);
-    try {
-      await onClearGoal();
-    } catch (error) {
-      setGoalLocalError(
-        error instanceof Error ? error.message : 'Unable to clear goal.',
-      );
-    } finally {
-      setGoalBusy(false);
-    }
   }
 
   const currentModel = useMemo(
@@ -1725,6 +1713,11 @@ export function ThreadComposer({
   }
 
   async function submitPrompt() {
+    if (goalComposeMode && !isShellView) {
+      await handleSetGoal();
+      return;
+    }
+
     if (!isShellView && !prompt.trim()) {
       return;
     }
@@ -1858,13 +1851,19 @@ export function ThreadComposer({
   }
 
   const promptPlaceholder =
-    disabledPlaceholder ??
+    goalComposeMode
+      ? 'Describe the goal Codex should continue working toward...'
+      : disabledPlaceholder ??
     (isShellView
       ? 'Send shell input to the attached terminal...'
       : 'Ask Codex to inspect, modify, or explain code...');
   const interruptLabel = isShellView ? 'Send Ctrl-C' : 'Stop Current Turn';
   const sendButtonLabel =
-    !threadConnected && busy
+    goalComposeMode
+      ? goalBusy
+        ? 'Setting...'
+        : 'Set goal'
+      : !threadConnected && busy
       ? 'Connecting...'
       : !threadConnected
       ? 'Send'
@@ -1872,8 +1871,10 @@ export function ThreadComposer({
         ? 'Sending...'
         : 'Send';
   const sendButtonClassName = !threadConnected
-    ? 'bg-rose-400/92 text-rose-950 hover:bg-rose-300'
-    : 'bg-amber-300/95 text-stone-950 hover:bg-amber-200';
+    ? 'ui-action-danger'
+    : goalComposeMode
+      ? 'ui-action-info'
+      : 'ui-action-primary';
   const modelControlsDisabled = settingsBusy;
   const formClassName = edgeToEdgeMobile || isMobileShell
     ? 'relative z-20 shrink-0 bg-transparent px-3 pb-0 pt-3 sm:p-4'
@@ -1995,7 +1996,7 @@ export function ThreadComposer({
                           }}
                           className={`block w-full rounded-xl px-3 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
                             fastMode
-                              ? 'bg-[var(--theme-accent-soft)] bg-amber-300/12 text-[var(--theme-accent-strong)] text-amber-100'
+                              ? 'ui-status-warning'
                               : 'thread-composer-menu-item'
                           }`}
                         >
@@ -2026,27 +2027,27 @@ export function ThreadComposer({
                           type="button"
                           onClick={(event) => {
                             event.stopPropagation();
-                            setSlashPanelView('goal');
-                            setGoalObjective(goalState.data?.objective ?? '');
-                            setGoalTokenBudget(
-                              goalState.data?.tokenBudget
-                                ? String(goalState.data.tokenBudget)
-                                : '',
-                            );
-                            void onOpenGoal?.();
+                            if (goalComposeMode) {
+                              exitGoalComposeMode();
+                              setOpenMenu(null);
+                            } else {
+                              enterGoalComposeMode();
+                            }
                           }}
                           className={`mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm transition ${
-                            goalState.data?.status === 'active'
-                              ? 'bg-[var(--theme-accent-soft)] bg-amber-300/12 text-[var(--theme-accent-strong)] text-amber-100'
+                            goalComposeMode || goalState.data?.status === 'active'
+                              ? 'ui-status-warning'
                               : 'thread-composer-menu-item'
                           }`}
                         >
                           <div className="flex items-center justify-between gap-3">
                             <span>/goal</span>
                             <span className="text-[11px] uppercase tracking-[0.16em] text-stone-400">
-                              {goalState.data
-                                ? goalStatusLabel(goalState.data.status)
-                                : 'Open'}
+                              {goalComposeMode
+                                ? 'Composing'
+                                : goalState.data
+                                  ? goalStatusLabel(goalState.data.status)
+                                  : 'Open'}
                             </span>
                           </div>
                         </button>
@@ -2181,106 +2182,6 @@ export function ThreadComposer({
                                 No turns available to fork yet.
                               </p>
                             ) : null}
-                          </div>
-                        ) : slashPanelView === 'goal' ? (
-                          <div className="space-y-2 p-2">
-                            {goalState.status === 'loading' && !goalState.data ? (
-                              <p className="rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3 text-sm text-stone-400">
-                                Loading goal…
-                              </p>
-                            ) : null}
-                            {goalState.error ? (
-                              <p className="rounded-xl border border-rose-500/35 bg-rose-500/10 px-3 py-3 text-sm text-rose-100/90">
-                                {goalState.error}
-                              </p>
-                            ) : null}
-                            {goalLocalError ? (
-                              <p className="rounded-xl border border-rose-500/35 bg-rose-500/10 px-3 py-3 text-sm text-rose-100/90">
-                                {goalLocalError}
-                              </p>
-                            ) : null}
-                            {goalState.data ? (
-                              <div className="rounded-xl border border-amber-300/20 bg-amber-300/10 px-3 py-3">
-                                <div className="flex items-start justify-between gap-3">
-                                  <p className="min-w-0 break-words text-sm font-medium text-stone-100">
-                                    {goalState.data.objective}
-                                  </p>
-                                  <span className="shrink-0 rounded-full border border-amber-300/30 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-amber-100">
-                                    {goalStatusLabel(goalState.data.status)}
-                                  </span>
-                                </div>
-                                <p className="mt-2 text-xs text-stone-400">
-                                  {formatGoalUsage(goalState.data)}
-                                </p>
-                                <div className="mt-3 flex flex-wrap gap-2">
-                                  <button
-                                    type="button"
-                                    disabled={goalBusy || goalState.data.status === 'active'}
-                                    onClick={() => void handleSetGoalStatus('active')}
-                                    className="thread-composer-chip-button rounded-full border border-stone-700 px-3 py-1.5 text-xs text-stone-300 transition disabled:cursor-not-allowed disabled:opacity-50"
-                                  >
-                                    Resume
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={goalBusy || goalState.data.status === 'paused'}
-                                    onClick={() => void handleSetGoalStatus('paused')}
-                                    className="thread-composer-chip-button rounded-full border border-stone-700 px-3 py-1.5 text-xs text-stone-300 transition disabled:cursor-not-allowed disabled:opacity-50"
-                                  >
-                                    Pause
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={goalBusy}
-                                    onClick={() => void handleClearGoal()}
-                                    className="rounded-full border border-rose-400/35 px-3 py-1.5 text-xs text-rose-100 transition hover:bg-rose-400/10 disabled:cursor-not-allowed disabled:opacity-50"
-                                  >
-                                    Clear
-                                  </button>
-                                </div>
-                              </div>
-                            ) : (
-                              <p className="rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3 text-sm text-stone-400">
-                                No active goal. Set one to keep Codex focused on a long-running objective.
-                              </p>
-                            )}
-                            <div className="space-y-2 rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3">
-                              <label className="block text-xs text-stone-400">
-                                Goal objective
-                              </label>
-                              <textarea
-                                aria-label="Goal objective"
-                                value={goalObjective}
-                                onChange={(event) => setGoalObjective(event.target.value)}
-                                rows={3}
-                                placeholder="Finish the migration and keep tests green"
-                                className="w-full rounded-lg border border-stone-700 bg-stone-950 px-3 py-2 text-sm text-stone-100 outline-none placeholder:text-stone-500 focus:border-amber-300/50"
-                              />
-                              <label className="block text-xs text-stone-400">
-                                Token budget, optional
-                              </label>
-                              <input
-                                aria-label="Goal token budget"
-                                value={goalTokenBudget}
-                                onChange={(event) => setGoalTokenBudget(event.target.value)}
-                                inputMode="numeric"
-                                placeholder="Optional"
-                                className="w-full rounded-lg border border-stone-700 bg-stone-950 px-3 py-2 text-sm text-stone-100 outline-none placeholder:text-stone-500 focus:border-amber-300/50"
-                              />
-                              <div className="flex items-center justify-between gap-2 pt-1">
-                                <span className="text-[11px] text-stone-500">
-                                  Requires `features.goals = true`.
-                                </span>
-                                <button
-                                  type="button"
-                                  disabled={goalBusy}
-                                  onClick={() => void handleSetGoal()}
-                                  className="rounded-full border border-amber-300/35 px-3 py-1.5 text-xs text-amber-100 transition hover:bg-amber-300/10 disabled:cursor-not-allowed disabled:border-stone-700 disabled:text-stone-500"
-                                >
-                                  {goalBusy ? 'Saving…' : 'Set goal'}
-                                </button>
-                              </div>
-                            </div>
                           </div>
                         ) : slashPanelView === 'skills' ? (
                           <div className="p-2">
@@ -2484,7 +2385,7 @@ export function ThreadComposer({
                                     type="button"
                                     onClick={() => void handleSaveHttpMcp()}
                                     disabled={mcpConfigBusy}
-                                    className="rounded-full border border-sky-300/35 px-3 py-1.5 text-xs text-sky-100 transition hover:bg-sky-300/10 disabled:cursor-not-allowed disabled:border-stone-700 disabled:text-stone-500"
+                                    className="ui-status-info rounded-full px-3 py-1.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-60"
                                   >
                                     {mcpConfigBusy ? 'Saving…' : 'Write HTTP MCP'}
                                   </button>
@@ -2515,7 +2416,7 @@ export function ThreadComposer({
                                     type="button"
                                     onClick={() => void handleSaveRawMcpBlock()}
                                     disabled={mcpConfigBusy}
-                                    className="rounded-full border border-sky-300/35 px-3 py-1.5 text-xs text-sky-100 transition hover:bg-sky-300/10 disabled:cursor-not-allowed disabled:border-stone-700 disabled:text-stone-500"
+                                    className="ui-status-info rounded-full px-3 py-1.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-60"
                                   >
                                     {mcpConfigBusy ? 'Saving…' : 'Write raw block'}
                                   </button>
@@ -2797,6 +2698,35 @@ export function ThreadComposer({
           </div>
         </div>
 
+        {goalComposeMode && !isShellView && (
+          <div className="relative z-20 mb-1.5 flex flex-wrap items-center gap-2 rounded-2xl border border-sky-300/25 bg-sky-300/[0.07] px-3 py-2 text-xs text-sky-50 shadow-sm shadow-stone-950/10">
+            <span className="font-medium uppercase tracking-[0.16em] text-sky-100/90">
+              Goal
+            </span>
+            <label className="flex items-center gap-2 text-stone-300">
+              <span>Max tokens (k)</span>
+              <input
+                aria-label="Goal token budget"
+                value={goalTokenBudget}
+                onChange={(event) => setGoalTokenBudget(event.target.value)}
+                inputMode="numeric"
+                placeholder="Optional"
+                className="h-7 w-24 rounded-full border border-sky-300/25 bg-stone-950/60 px-3 text-xs text-stone-100 outline-none placeholder:text-stone-500 focus:border-sky-300/70"
+              />
+            </label>
+            {goalLocalError ? (
+              <span className="min-w-0 flex-1 text-rose-200">{goalLocalError}</span>
+            ) : null}
+            <button
+              type="button"
+              onClick={exitGoalComposeMode}
+              className="rounded-full border border-stone-700/80 px-2.5 py-1 text-[11px] text-stone-300 transition hover:bg-stone-800"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+
         <div className="relative">
           {isShellView ? (
             <textarea
@@ -2869,7 +2799,13 @@ export function ThreadComposer({
           </button>
           <button
             type="submit"
-            aria-label={isShellView ? 'Send Shell Input' : 'Send Prompt'}
+            aria-label={
+              goalComposeMode && !isShellView
+                ? 'Set goal'
+                : isShellView
+                  ? 'Send Shell Input'
+                  : 'Send Prompt'
+            }
             onMouseDown={(event) => {
               event.preventDefault();
             }}
@@ -2879,7 +2815,11 @@ export function ThreadComposer({
             onTouchStart={(event) => {
               event.preventDefault();
             }}
-            disabled={busy || (activeView === 'chat' ? disabled : false)}
+            disabled={
+              goalBusy ||
+              busy ||
+              (activeView === 'chat' ? disabled : false)
+            }
             className={`absolute bottom-2.5 right-2.5 rounded-full px-3.5 py-1.5 text-sm font-medium shadow-lg shadow-stone-950/30 transition disabled:cursor-not-allowed disabled:bg-stone-700 disabled:text-stone-300 ${sendButtonClassName}`}
           >
             {sendButtonLabel}
@@ -2927,7 +2867,7 @@ export function ThreadComposer({
                           }
                           className={`block w-full rounded-xl px-3 py-2 text-left transition ${
                             entry.model === model
-                              ? 'bg-amber-300/12 text-stone-100'
+                              ? 'ui-status-warning'
                               : 'thread-composer-menu-item text-stone-300'
                           }`}
                         >
@@ -2975,7 +2915,7 @@ export function ThreadComposer({
                           }
                           className={`block w-full rounded-xl px-3 py-2 text-left transition ${
                             entry.reasoningEffort === reasoningEffort
-                              ? 'bg-amber-300/12 text-stone-100'
+                              ? 'ui-status-warning'
                               : 'thread-composer-menu-item text-stone-300'
                           }`}
                         >
