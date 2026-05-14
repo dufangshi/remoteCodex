@@ -6,7 +6,8 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "better-sqlite3",
-      "esbuild"
+      "esbuild",
+      "puppeteer"
     ]
   },
   "engines": {
@@ -25,7 +26,11 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "NODE_ENV=test pnpm -r --if-present test",
     "test:e2e": "playwright test",
-    "db:migrate": "pnpm --filter @remote-codex/db db:migrate"
+    "db:migrate": "pnpm --filter @remote-codex/db db:migrate",
+    "impeccable": "impeccable",
+    "impeccable:detect": "impeccable detect apps/supervisor-web/src",
+    "impeccable:detect:fast": "impeccable detect --fast apps/supervisor-web/src",
+    "impeccable:detect:json": "impeccable detect --fast --json apps/supervisor-web/src"
   },
   "devDependencies": {
     "@eslint/js": "^9.24.0",
@@ -43,8 +48,10 @@
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.19",
     "globals": "^16.0.0",
+    "impeccable": "^2.1.9",
     "jsdom": "^26.0.0",
     "prettier": "^3.5.3",
+    "puppeteer": "^24.43.1",
     "tailwindcss": "^4.1.4",
     "tsup": "^8.4.0",
     "tsx": "^4.19.3",

@@ -6,4 +6,8 @@ coverage
 .env
 *.log
 .temp/
+.tmp/
 .playwright-cli/*
+test-results/
+apps/supervisor-web/test-results/
+apps/supervisor-api/.tmp/
