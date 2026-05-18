@@ -1,6 +1,6 @@
 {
   "name": "remote-codex",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Local web supervisor for Codex workspaces and threads.",
   "license": "MIT",
   "type": "module",
@@ -19,8 +19,7 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "better-sqlite3",
-      "esbuild",
-      "puppeteer"
+      "esbuild"
     ]
   },
   "engines": {
@@ -52,7 +51,7 @@
     "better-sqlite3": "^12.10.0",
     "fastify": "^5.2.1",
     "marked": "^18.0.3",
-    "puppeteer": "^24.43.1",
+    "puppeteer-core": "^24.43.1",
     "zod": "^3.24.2"
   },
   "devDependencies": {

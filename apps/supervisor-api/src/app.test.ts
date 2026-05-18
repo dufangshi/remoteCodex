@@ -9,7 +9,7 @@ import { buildApp } from './app';
 import { JsonRpcClientError } from '../../../packages/codex/src/index';
 import { FakeCodexManager } from './test/fakeCodexManager';
 
-vi.mock('puppeteer', () => ({
+vi.mock('puppeteer-core', () => ({
   default: {
     launch: vi.fn(),
   },

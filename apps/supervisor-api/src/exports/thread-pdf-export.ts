@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 
-import puppeteer from 'puppeteer';
+import puppeteer, { LaunchOptions } from 'puppeteer-core';
 import { marked } from 'marked';
 
 import {
@@ -33,6 +33,7 @@ const EMBEDDED_CJK_FONT_CANDIDATES = [
   { path: '/mnt/c/Windows/Fonts/Deng.ttf', format: 'truetype', weight: 400 },
   { path: '/mnt/c/Windows/Fonts/msyh.ttc', format: 'truetype', weight: 400 },
 ];
+const PUPPETEER_CHANNEL = 'chrome';
 let embeddedCjkFontCss: string | null = null;
 
 function escapeHtml(value: string) {
@@ -1181,10 +1182,7 @@ export async function renderThreadExportPdf(snapshot: ThreadPdfExportSnapshot) {
     );
   }
 
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--font-render-hinting=none'],
-  });
+  const browser = await launchPdfBrowser();
 
   try {
     const page = await browser.newPage();
@@ -1200,5 +1198,27 @@ export async function renderThreadExportPdf(snapshot: ThreadPdfExportSnapshot) {
     );
   } finally {
     await browser.close();
+  }
+}
+
+async function launchPdfBrowser() {
+  const launchOptions: LaunchOptions = {
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--font-render-hinting=none'],
+  };
+
+  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+    launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+  } else {
+    launchOptions.channel = PUPPETEER_CHANNEL;
+  }
+
+  try {
+    return await puppeteer.launch(launchOptions);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `PDF export requires a local Chrome installation. Install Google Chrome, or set PUPPETEER_EXECUTABLE_PATH to a Chromium-compatible browser executable. ${detail}`,
+    );
   }
 }
