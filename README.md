@@ -30,6 +30,34 @@ Defaults:
 - production database: `~/.remote-codex/supervisor.sqlite`
 - workspace root: current user home directory
 
+## Global CLI Install
+
+Remote Codex can also be packaged as an npm global CLI:
+
+```bash
+npm install -g remote-codex
+remote-codex start
+remote-codex status
+remote-codex stop
+```
+
+The global CLI starts the production API and web service:
+
+- API: `http://127.0.0.1:8787`
+- Web: `http://127.0.0.1:4173`
+- service logs/state: `~/.remote-codex/service/`
+- production database: `~/.remote-codex/supervisor.sqlite`
+
+Environment overrides:
+
+- `SERVICE_HOST` and `SERVICE_PORT`
+- `SERVICE_API_HOST` and `SERVICE_API_PORT`
+- `REMOTE_CODEX_SERVICE_DIR`
+- `DATABASE_URL`
+- `WORKSPACE_ROOT`
+- `CODEX_HOME`
+- `CODEX_COMMAND`
+
 ## Development
 
 ```bash
@@ -58,7 +86,7 @@ This starts a quieter long-running stack:
 - API: `http://127.0.0.1:8787`
 - Web: `http://127.0.0.1:4173`
 
-Logs are written to `.local/service/`.
+Logs are written to `~/.remote-codex/service/` by default. Set `REMOTE_CODEX_SERVICE_DIR` to override this.
 
 ## Remote Access via Tailscale
 

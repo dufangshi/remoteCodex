@@ -1,16 +1,22 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, '..');
-const serviceDir = path.join(repoRoot, '.local', 'service');
+const serviceDir = process.env.REMOTE_CODEX_SERVICE_DIR
+  ? path.resolve(process.env.INIT_CWD ?? process.cwd(), process.env.REMOTE_CODEX_SERVICE_DIR)
+  : path.join(os.homedir(), '.remote-codex', 'service');
 const stateFile = path.join(serviceDir, 'service-state.json');
 const apiEntry = path.join(repoRoot, 'apps', 'supervisor-api', 'dist', 'index.js');
 const webEntry = path.join(repoRoot, 'scripts', 'run-web-service.mjs');
 const webIndex = path.join(repoRoot, 'apps', 'supervisor-web', 'dist', 'index.html');
+const supportsSourceRestart =
+  fs.existsSync(path.join(repoRoot, 'pnpm-workspace.yaml')) &&
+  fs.existsSync(path.join(repoRoot, 'scripts', 'service-restart.mjs'));
 
 const serviceHost = process.env.SERVICE_HOST ?? '127.0.0.1';
 const servicePort = parsePort(process.env.SERVICE_PORT, 4173);
@@ -58,6 +64,9 @@ async function startService() {
     PORT: String(apiPort),
     LOG_LEVEL: process.env.LOG_LEVEL ?? 'warn',
     DISABLE_REQUEST_LOGGING: process.env.DISABLE_REQUEST_LOGGING ?? 'true',
+    REMOTE_CODEX_PACKAGE_ROOT: repoRoot,
+    REMOTE_CODEX_DISABLE_BUILD_RESTART:
+      process.env.REMOTE_CODEX_DISABLE_BUILD_RESTART ?? (supportsSourceRestart ? 'false' : 'true'),
   });
 
   try {

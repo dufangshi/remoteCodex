@@ -2,6 +2,7 @@ import Fastify, { FastifyInstance } from 'fastify';
 import multipart from '@fastify/multipart';
 import websocket from '@fastify/websocket';
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { ZodError } from 'zod';
 
@@ -56,10 +57,17 @@ export interface AppServices {
 }
 
 function findRepoRoot(start = process.cwd()) {
+  if (process.env.REMOTE_CODEX_REPO_ROOT) {
+    return path.resolve(process.env.REMOTE_CODEX_REPO_ROOT);
+  }
+
   let current = path.resolve(start);
 
   while (current !== path.dirname(current)) {
-    if (path.basename(current) === 'remoteCodex') {
+    if (
+      fs.existsSync(path.join(current, 'pnpm-workspace.yaml')) &&
+      fs.existsSync(path.join(current, 'scripts', 'service-restart.mjs'))
+    ) {
       return current;
     }
 
@@ -72,8 +80,24 @@ function findRepoRoot(start = process.cwd()) {
 function createServiceLifecycle() {
   return {
     async launchBuildRestart() {
+      if (process.env.REMOTE_CODEX_DISABLE_BUILD_RESTART === 'true') {
+        throw new HttpError(503, {
+          code: 'service_unavailable',
+          message:
+            'Build and restart is not available from the npm-installed package. Upgrade with npm install -g remote-codex@latest, then run remote-codex stop and remote-codex start.',
+        });
+      }
+
       const repoRoot = findRepoRoot();
       const restartScript = path.join(repoRoot, 'scripts', 'service-restart.mjs');
+      if (!fs.existsSync(restartScript) || !fs.existsSync(path.join(repoRoot, 'pnpm-workspace.yaml'))) {
+        throw new HttpError(503, {
+          code: 'service_unavailable',
+          message:
+            'Build and restart requires a Remote Codex source checkout. Set REMOTE_CODEX_REPO_ROOT to the checkout path, or update the npm package with npm install -g remote-codex@latest.',
+        });
+      }
+
       const child = spawn(process.execPath, [restartScript, 'launch'], {
         cwd: repoRoot,
         detached: true,

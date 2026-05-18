@@ -1,7 +1,20 @@
 {
   "name": "remote-codex",
-  "private": true,
   "version": "0.1.0",
+  "description": "Local web supervisor for Codex workspaces and threads.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "bin": {
+    "remote-codex": "./bin/remote-codex.mjs"
+  },
+  "files": [
+    "bin/",
+    "scripts/service-manager.mjs",
+    "scripts/run-web-service.mjs",
+    "apps/supervisor-api/dist/",
+    "apps/supervisor-web/dist/",
+    "README.md"
+  ],
   "packageManager": "pnpm@10.11.1",
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -21,6 +34,7 @@
     "service:stop": "node scripts/service-manager.mjs stop",
     "service:status": "node scripts/service-manager.mjs status",
     "service:restart": "node scripts/service-restart.mjs launch",
+    "prepack": "pnpm build",
     "build": "pnpm -r --if-present build",
     "lint": "pnpm -r --if-present lint",
     "typecheck": "pnpm -r --if-present typecheck",
@@ -31,6 +45,15 @@
     "impeccable:detect": "impeccable detect apps/supervisor-web/src",
     "impeccable:detect:fast": "impeccable detect --fast apps/supervisor-web/src",
     "impeccable:detect:json": "impeccable detect --fast --json apps/supervisor-web/src"
+  },
+  "dependencies": {
+    "@fastify/multipart": "^9.0.3",
+    "@fastify/websocket": "^11.0.2",
+    "better-sqlite3": "^11.9.1",
+    "fastify": "^5.2.1",
+    "marked": "^18.0.3",
+    "puppeteer": "^24.43.1",
+    "zod": "^3.24.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.24.0",
@@ -51,7 +74,6 @@
     "impeccable": "^2.1.9",
     "jsdom": "^26.0.0",
     "prettier": "^3.5.3",
-    "puppeteer": "^24.43.1",
     "tailwindcss": "^4.1.4",
     "tsup": "^8.4.0",
     "tsx": "^4.19.3",

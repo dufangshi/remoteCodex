@@ -7,6 +7,28 @@ settings:
 importers:
 
   .:
+    dependencies:
+      '@fastify/multipart':
+        specifier: ^9.0.3
+        version: 9.4.0
+      '@fastify/websocket':
+        specifier: ^11.0.2
+        version: 11.2.0
+      better-sqlite3:
+        specifier: ^11.9.1
+        version: 11.10.0
+      fastify:
+        specifier: ^5.2.1
+        version: 5.8.4
+      marked:
+        specifier: ^18.0.3
+        version: 18.0.3
+      puppeteer:
+        specifier: ^24.43.1
+        version: 24.43.1(typescript@5.9.3)
+      zod:
+        specifier: ^3.24.2
+        version: 3.25.76
     devDependencies:
       '@eslint/js':
         specifier: ^9.24.0
@@ -62,9 +84,6 @@ importers:
       prettier:
         specifier: ^3.5.3
         version: 3.8.1
-      puppeteer:
-        specifier: ^24.43.1
-        version: 24.43.1(typescript@5.9.3)
       tailwindcss:
         specifier: ^4.1.4
         version: 4.2.2
