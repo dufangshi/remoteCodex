@@ -9,6 +9,11 @@ const binDir = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(binDir, '..');
 const packageJsonPath = path.join(packageRoot, 'package.json');
 const serviceManagerPath = path.join(packageRoot, 'scripts', 'service-manager.mjs');
+const sourceCheckout =
+  fs.existsSync(path.join(packageRoot, 'pnpm-workspace.yaml')) &&
+  fs.existsSync(path.join(packageRoot, 'scripts', 'service-restart.mjs'));
+const defaultServicePort = sourceCheckout ? 4173 : 45673;
+const defaultApiPort = sourceCheckout ? 8787 : 45674;
 
 const aliases = new Map([
   ['service:start', 'start'],
@@ -84,9 +89,9 @@ Usage:
 
 Environment:
   SERVICE_HOST              Web listen host, default 127.0.0.1
-  SERVICE_PORT              Web listen port, default 4173
+  SERVICE_PORT              Web listen port, default ${defaultServicePort}
   SERVICE_API_HOST          API listen host, default 127.0.0.1
-  SERVICE_API_PORT          API listen port, default 8787
+  SERVICE_API_PORT          API listen port, default ${defaultApiPort}
   REMOTE_CODEX_SERVICE_DIR  Service state and log directory, default ~/.remote-codex/service
 `);
 }

@@ -7,11 +7,16 @@ import { fileURLToPath } from 'node:url';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, '..');
+const sourceCheckout =
+  fs.existsSync(path.join(repoRoot, 'pnpm-workspace.yaml')) &&
+  fs.existsSync(path.join(repoRoot, 'scripts', 'service-restart.mjs'));
+const defaultServicePort = sourceCheckout ? 4173 : 45673;
+const defaultApiPort = sourceCheckout ? 8787 : 45674;
 
 const serviceHost = process.env.SERVICE_HOST ?? '127.0.0.1';
-const servicePort = parsePort(process.env.SERVICE_PORT, 4173);
+const servicePort = parsePort(process.env.SERVICE_PORT, defaultServicePort);
 const apiHost = process.env.SERVICE_API_HOST ?? '127.0.0.1';
-const apiPort = parsePort(process.env.SERVICE_API_PORT, 8787);
+const apiPort = parsePort(process.env.SERVICE_API_PORT, defaultApiPort);
 const distDir = path.resolve(
   process.env.SERVICE_WEB_DIST_DIR ?? path.join(repoRoot, 'apps/supervisor-web/dist')
 );

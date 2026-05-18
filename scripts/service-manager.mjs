@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import net from 'node:net';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, '..');
@@ -17,11 +18,13 @@ const webIndex = path.join(repoRoot, 'apps', 'supervisor-web', 'dist', 'index.ht
 const supportsSourceRestart =
   fs.existsSync(path.join(repoRoot, 'pnpm-workspace.yaml')) &&
   fs.existsSync(path.join(repoRoot, 'scripts', 'service-restart.mjs'));
+const defaultServicePort = supportsSourceRestart ? 4173 : 45673;
+const defaultApiPort = supportsSourceRestart ? 8787 : 45674;
 
 const serviceHost = process.env.SERVICE_HOST ?? '127.0.0.1';
-const servicePort = parsePort(process.env.SERVICE_PORT, 4173);
+const servicePort = parsePort(process.env.SERVICE_PORT, defaultServicePort);
 const apiHost = process.env.SERVICE_API_HOST ?? '127.0.0.1';
-const apiPort = parsePort(process.env.SERVICE_API_PORT, 8787);
+const apiPort = parsePort(process.env.SERVICE_API_PORT, defaultApiPort);
 
 const command = process.argv[2];
 
@@ -58,6 +61,10 @@ async function startService() {
   const webLogPath = path.join(serviceDir, 'web.log');
   prepareLogFile(apiLogPath);
   prepareLogFile(webLogPath);
+
+  await assertTcpPortAvailable(apiHost, apiPort, 'API');
+  await assertTcpPortAvailable(serviceHost, servicePort, 'Web');
+
   const apiPid = spawnDetached(process.execPath, [apiEntry], apiLogPath, {
     NODE_ENV: 'production',
     HOST: apiHost,
@@ -73,7 +80,7 @@ async function startService() {
     await waitForHttp(`http://${apiHost}:${apiPort}/healthz`, apiPid, 15_000);
   } catch (error) {
     stopPid(apiPid);
-    throw error;
+    throw appendLogTail(error, apiLogPath, 'API');
   }
 
   const webPid = spawnDetached(process.execPath, [webEntry], webLogPath, {
@@ -89,7 +96,7 @@ async function startService() {
   } catch (error) {
     stopPid(webPid);
     stopPid(apiPid);
-    throw error;
+    throw appendLogTail(error, webLogPath, 'Web');
   }
 
   const state = {
@@ -212,6 +219,54 @@ async function waitForHttp(url, pid, timeoutMs) {
   }
 
   throw new Error(`Timed out waiting for ${url}.`);
+}
+
+async function assertTcpPortAvailable(host, port, label) {
+  await new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+
+    server.once('error', (error) => {
+      const code = typeof error === 'object' && error !== null ? error.code : undefined;
+      if (code === 'EADDRINUSE') {
+        reject(
+          new Error(
+            `${label} port ${host}:${port} is already in use. Set ${label === 'API' ? 'SERVICE_API_PORT' : 'SERVICE_PORT'} to another port, or stop the process currently using it.`
+          )
+        );
+        return;
+      }
+
+      reject(error);
+    });
+
+    server.listen(port, host, () => {
+      server.close(resolve);
+    });
+  });
+}
+
+function appendLogTail(error, logPath, label) {
+  const message = error instanceof Error ? error.message : String(error);
+  const tail = readLogTail(logPath, 80);
+  if (!tail) {
+    return new Error(`${message}\n${label} log: ${logPath}`);
+  }
+
+  return new Error(`${message}\n${label} log: ${logPath}\n\nLast ${label} log lines:\n${tail}`);
+}
+
+function readLogTail(logPath, maxLines) {
+  try {
+    const content = fs.readFileSync(logPath, 'utf8').trimEnd();
+    if (!content) {
+      return '';
+    }
+
+    return content.split(/\r?\n/).slice(-maxLines).join('\n');
+  } catch {
+    return '';
+  }
 }
 
 async function probeHttp(url) {

@@ -43,8 +43,8 @@ remote-codex stop
 
 The global CLI starts the production API and web service:
 
-- API: `http://127.0.0.1:8787`
-- Web: `http://127.0.0.1:4173`
+- API: `http://127.0.0.1:45674`
+- Web: `http://127.0.0.1:45673`
 - service logs/state: `~/.remote-codex/service/`
 - production database: `~/.remote-codex/supervisor.sqlite`
 
