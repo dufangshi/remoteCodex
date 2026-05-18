@@ -9,7 +9,7 @@ export function WorkspaceNewPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function handleSubmit(input: { absPath: string; label?: string }) {
+  async function handleSubmit(input: { absPath: string; label?: string } | { gitUrl: string; label?: string }) {
     setBusy(true);
     setError(null);
 
@@ -31,9 +31,10 @@ export function WorkspaceNewPage() {
     <div className="space-y-6">
       <div>
         <p className="text-xs uppercase tracking-[0.3em] text-stone-500">Add Workspace</p>
-        <h2 className="mt-2 text-3xl font-semibold text-stone-100">Register a local directory</h2>
+        <h2 className="mt-2 text-3xl font-semibold text-stone-100">Create a workspace</h2>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-stone-400">
-          Phase 1 only accepts readable absolute directories within the configured workspace root.
+          Register an existing local directory, create one missing child directory under dev home,
+          or clone a Git repository into dev home.
         </p>
       </div>
       <WorkspaceForm busy={busy} error={error} submitLabel="Create Workspace" onSubmit={handleSubmit} />

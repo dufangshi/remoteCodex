@@ -1,4 +1,6 @@
+import fs from 'node:fs/promises';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -27,11 +29,18 @@ import {
   validateWorkspacePath
 } from '../../../../packages/workspace/src/index';
 import { HttpError } from '../app';
+import { getWorkspaceSettings } from '../workspace-settings';
 
-const createWorkspaceSchema = z.object({
-  absPath: z.string().min(1),
-  label: z.string().min(1).optional()
-});
+const createWorkspaceSchema = z.union([
+  z.object({
+    absPath: z.string().min(1),
+    label: z.string().min(1).optional()
+  }),
+  z.object({
+    gitUrl: z.string().min(1),
+    label: z.string().min(1).optional()
+  })
+]);
 
 const updateFavoriteSchema = z.object({
   isFavorite: z.boolean()
@@ -64,6 +73,79 @@ function toWorkspaceDto(record: {
     createdAt: record.createdAt,
     lastOpenedAt: record.lastOpenedAt
   };
+}
+
+function inferGitRepoName(gitUrl: string) {
+  const trimmed = gitUrl.trim();
+  const withoutQuery = trimmed.split(/[?#]/)[0] ?? trimmed;
+  const normalized = withoutQuery.replace(/[\\/]+$/, '');
+  const rawName = normalized.split(/[/:]/).filter(Boolean).at(-1) ?? '';
+  const repoName = rawName.endsWith('.git') ? rawName.slice(0, -4) : rawName;
+
+  if (!repoName || repoName === '.' || repoName === '..' || repoName.includes(path.sep)) {
+    throw new HttpError(400, {
+      code: 'bad_request',
+      message: 'Unable to infer a target directory from the Git URL.'
+    });
+  }
+
+  return repoName;
+}
+
+async function pathExists(absPath: string) {
+  try {
+    await fs.stat(absPath);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
+function cloneRepository(gitUrl: string, targetPath: string) {
+  return new Promise<void>((resolve, reject) => {
+    const child = spawn('git', ['clone', gitUrl, targetPath], {
+      stdio: ['ignore', 'ignore', 'pipe']
+    });
+    let stderr = '';
+
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on('error', (error) => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        reject(
+          new HttpError(503, {
+            code: 'service_unavailable',
+            message: '`git` is not available on this host.'
+          })
+        );
+        return;
+      }
+
+      reject(error);
+    });
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+
+      reject(
+        new HttpError(400, {
+          code: 'bad_request',
+          message: 'Git clone failed.',
+          details: {
+            stderr: stderr.trim().slice(0, 2000)
+          }
+        })
+      );
+    });
+  });
 }
 
 export async function registerWorkspaceRoutes(app: FastifyInstance) {
@@ -106,7 +188,34 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
 
   app.post('/api/workspaces', async (request) => {
     const body = createWorkspaceSchema.parse(request.body);
-    const validated = await validateWorkspacePath(app.services.config.workspaceRoot, body.absPath);
+    const settings = await getWorkspaceSettings(
+      app.services.database.db,
+      app.services.config.workspaceRoot,
+    );
+    let validated: { absPath: string; label: string };
+
+    if ('gitUrl' in body) {
+      const repoName = inferGitRepoName(body.gitUrl);
+      const targetPath = path.join(settings.devHome, repoName);
+
+      if (await pathExists(targetPath)) {
+        throw new HttpError(409, {
+          code: 'conflict',
+          message: 'The Git clone target directory already exists.',
+          details: {
+            absPath: targetPath
+          }
+        });
+      }
+
+      await cloneRepository(body.gitUrl.trim(), targetPath);
+      validated = await validateWorkspacePath(app.services.config.workspaceRoot, targetPath);
+    } else {
+      validated = await validateWorkspacePath(app.services.config.workspaceRoot, body.absPath, {
+        devHome: settings.devHome,
+        createMissingLeaf: true
+      });
+    }
 
     const existing = getWorkspaceRecordByPath(app.services.database.db, validated.absPath);
 

@@ -101,9 +101,25 @@ export interface WorkspaceDto {
   lastOpenedAt: string | null;
 }
 
-export interface CreateWorkspaceInput {
+export interface CreateWorkspaceFromPathInput {
   absPath: string;
   label?: string;
+}
+
+export interface CreateWorkspaceFromGitInput {
+  gitUrl: string;
+  label?: string;
+}
+
+export type CreateWorkspaceInput = CreateWorkspaceFromPathInput | CreateWorkspaceFromGitInput;
+
+export interface WorkspaceSettingsDto {
+  workspaceRoot: string;
+  devHome: string;
+}
+
+export interface UpdateWorkspaceSettingsInput {
+  devHome: string;
 }
 
 export interface UpdateWorkspaceInput {

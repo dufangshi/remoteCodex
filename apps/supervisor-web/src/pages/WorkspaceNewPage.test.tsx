@@ -41,13 +41,41 @@ describe('WorkspaceNewPage', () => {
       </MemoryRouter>,
     );
 
-    fireEvent.change(screen.getByLabelText(/Absolute path/i), {
+    fireEvent.change(screen.getByLabelText(/path or git url/i), {
       target: { value: '/Users/test/projects/demo-workspace' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Create Workspace' }));
 
     await waitFor(() => {
       expect(screen.getByText('Workspace Threads Target')).toBeInTheDocument();
+    });
+  });
+
+  it('submits git urls through the workspace creation endpoint', async () => {
+    render(
+      <MemoryRouter initialEntries={['/workspaces/new']}>
+        <Routes>
+          <Route path="/workspaces/new" element={<WorkspaceNewPage />} />
+          <Route path="/threads" element={<div>Workspace Threads Target</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.change(screen.getByLabelText(/path or git url/i), {
+      target: { value: 'https://github.com/example/demo-workspace.git' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Create Workspace' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Workspace Threads Target')).toBeInTheDocument();
+    });
+
+    const postCall = vi.mocked(fetch).mock.calls.find(
+      ([url, init]) => String(url).endsWith('/api/workspaces') && init?.method === 'POST',
+    );
+    expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({
+      gitUrl: 'https://github.com/example/demo-workspace.git',
+      label: 'demo-workspace',
     });
   });
 });

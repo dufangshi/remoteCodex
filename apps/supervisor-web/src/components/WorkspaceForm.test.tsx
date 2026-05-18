@@ -10,7 +10,7 @@ describe('WorkspaceForm', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /save workspace/i }));
 
-    expect(await screen.findByText(/absolute path is required/i)).toBeInTheDocument();
+    expect(await screen.findByText(/workspace path or git url is required/i)).toBeInTheDocument();
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
@@ -18,7 +18,7 @@ describe('WorkspaceForm', () => {
     const onSubmit = vi.fn();
     render(<WorkspaceForm submitLabel="Create Workspace" onSubmit={onSubmit} />);
 
-    fireEvent.change(screen.getByLabelText(/absolute path/i), {
+    fireEvent.change(screen.getByLabelText(/path or git url/i), {
       target: { value: '  /tmp/project  ' }
     });
     fireEvent.change(screen.getByLabelText(/display label/i), {
@@ -34,11 +34,29 @@ describe('WorkspaceForm', () => {
     });
   });
 
+  it('submits a git url payload and infers a repo label', async () => {
+    const onSubmit = vi.fn();
+    render(<WorkspaceForm submitLabel="Create Workspace" onSubmit={onSubmit} />);
+
+    fireEvent.change(screen.getByLabelText(/path or git url/i), {
+      target: { value: '  https://github.com/example/demo.git  ' }
+    });
+    expect(screen.getByLabelText(/display label/i)).toHaveValue('demo');
+    fireEvent.click(screen.getByRole('button', { name: /create workspace/i }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({
+        gitUrl: 'https://github.com/example/demo.git',
+        label: 'demo'
+      });
+    });
+  });
+
   it('autofills the label from the last path segment and keeps manual overrides', async () => {
     const onSubmit = vi.fn();
     render(<WorkspaceForm onSubmit={onSubmit} />);
 
-    const pathInput = screen.getByLabelText(/absolute path/i);
+    const pathInput = screen.getByLabelText(/path or git url/i);
     const labelInput = screen.getByLabelText(/display label/i);
 
     fireEvent.change(pathInput, {

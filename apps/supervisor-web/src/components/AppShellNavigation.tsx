@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import type {
   CodexHostConfigArchiveDto,
   CodexHostFileNameDto,
+  WorkspaceSettingsDto,
 } from '../../../../packages/shared/src/index';
 import {
   ApiError,
@@ -12,9 +13,11 @@ import {
   createCodexHostConfigArchive,
   fetchCodexHostFile,
   fetchCodexHostConfigArchives,
+  fetchWorkspaceSettings,
   renameCodexHostConfigArchive,
   restartCodexAppServer,
   updateCodexHostFile,
+  updateWorkspaceSettings,
 } from '../lib/api';
 import { type ThemeMode, useAppShellNav } from './AppShellNavContext';
 
@@ -285,6 +288,20 @@ export function AppShellSettingsDialog() {
     error: null,
   });
   const [archives, setArchives] = useState<CodexHostConfigArchiveDto[]>([]);
+  const [workspaceSettings, setWorkspaceSettings] = useState<WorkspaceSettingsDto | null>(null);
+  const [workspaceSettingsState, setWorkspaceSettingsState] = useState<{
+    devHomeDraft: string;
+    loading: boolean;
+    saving: boolean;
+    message: string | null;
+    error: string | null;
+  }>({
+    devHomeDraft: '',
+    loading: false,
+    saving: false,
+    message: null,
+    error: null,
+  });
   const [archivesState, setArchivesState] = useState<{
     loading: boolean;
     creating: boolean;
@@ -323,6 +340,52 @@ export function AppShellSettingsDialog() {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [shellNav]);
+
+  useEffect(() => {
+    if (!shellNav?.settingsOpen) {
+      return;
+    }
+
+    let cancelled = false;
+    setWorkspaceSettingsState((current) => ({
+      ...current,
+      loading: true,
+      message: null,
+      error: null,
+    }));
+
+    fetchWorkspaceSettings()
+      .then((settings) => {
+        if (cancelled) {
+          return;
+        }
+
+        setWorkspaceSettings(settings);
+        setWorkspaceSettingsState((current) => ({
+          ...current,
+          devHomeDraft: settings.devHome,
+          loading: false,
+        }));
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+
+        setWorkspaceSettingsState((current) => ({
+          ...current,
+          loading: false,
+          error:
+            error instanceof ApiError
+              ? error.message
+              : 'Unable to load workspace settings.',
+        }));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [shellNav?.settingsOpen]);
 
   useEffect(() => {
     if (!shellNav?.settingsOpen) {
@@ -510,6 +573,40 @@ export function AppShellSettingsDialog() {
             ? error.message
             : 'Unable to launch build and restart.',
       });
+    }
+  }
+
+  async function handleSaveWorkspaceSettings() {
+    const devHome = workspaceSettingsState.devHomeDraft.trim();
+    if (!devHome || workspaceSettingsState.saving) {
+      return;
+    }
+
+    setWorkspaceSettingsState((current) => ({
+      ...current,
+      saving: true,
+      message: null,
+      error: null,
+    }));
+
+    try {
+      const updated = await updateWorkspaceSettings({ devHome });
+      setWorkspaceSettings(updated);
+      setWorkspaceSettingsState((current) => ({
+        ...current,
+        devHomeDraft: updated.devHome,
+        saving: false,
+        message: 'Workspace defaults saved.',
+      }));
+    } catch (error) {
+      setWorkspaceSettingsState((current) => ({
+        ...current,
+        saving: false,
+        error:
+          error instanceof ApiError
+            ? error.message
+            : 'Unable to save workspace settings.',
+      }));
     }
   }
 
@@ -749,6 +846,75 @@ export function AppShellSettingsDialog() {
             <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
+                  <p className="text-sm font-medium text-[var(--theme-fg)]">Workspace defaults</p>
+                  <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
+                    Git projects clone into dev home. New workspace directories can create one
+                    missing child under this path.
+                  </p>
+                </div>
+              </div>
+              <div className="mt-3 grid gap-3">
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--theme-fg-muted)]">
+                    Workspace root
+                  </p>
+                  <p
+                    title={workspaceSettings?.workspaceRoot ?? 'Loading workspace root'}
+                    className="mt-1 truncate rounded-[0.9rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-2 font-mono text-xs text-[var(--theme-fg-soft)]"
+                  >
+                    {workspaceSettingsState.loading && !workspaceSettings
+                      ? 'Loading...'
+                      : workspaceSettings?.workspaceRoot ?? 'Unavailable'}
+                  </p>
+                </div>
+                <div>
+                  <label
+                    htmlFor="settings-dev-home"
+                    className="text-[11px] uppercase tracking-[0.18em] text-[var(--theme-fg-muted)]"
+                  >
+                    Dev home
+                  </label>
+                  <div className="mt-1 flex flex-col gap-2 sm:flex-row">
+                    <input
+                      id="settings-dev-home"
+                      value={workspaceSettingsState.devHomeDraft}
+                      onChange={(event) =>
+                        setWorkspaceSettingsState((current) => ({
+                          ...current,
+                          devHomeDraft: event.target.value,
+                          message: null,
+                          error: null,
+                        }))
+                      }
+                      placeholder="/Users/name/dev"
+                      className="min-w-0 flex-1 rounded-full border border-[var(--theme-border)] bg-[var(--theme-panel)] px-3 py-2 text-sm text-[var(--theme-fg)] outline-none focus:border-[var(--theme-accent-border)]"
+                    />
+                    <button
+                      type="button"
+                      aria-label="Save workspace defaults"
+                      onClick={() => void handleSaveWorkspaceSettings()}
+                      disabled={
+                        workspaceSettingsState.loading ||
+                        workspaceSettingsState.saving ||
+                        !workspaceSettingsState.devHomeDraft.trim()
+                      }
+                      className="rounded-full bg-[var(--theme-accent-solid)] px-4 py-2 text-xs font-medium text-[var(--theme-accent-solid-fg)] transition hover:bg-[var(--theme-accent-solid-hover)] disabled:cursor-not-allowed disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
+                    >
+                      {workspaceSettingsState.saving ? 'Saving...' : 'Save'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+              {workspaceSettingsState.error ? (
+                <p className="mt-2 text-xs text-rose-300">{workspaceSettingsState.error}</p>
+              ) : workspaceSettingsState.message ? (
+                <p className="mt-2 text-xs text-emerald-300">{workspaceSettingsState.message}</p>
+              ) : null}
+            </div>
+
+            <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
                   <p className="text-sm font-medium text-[var(--theme-fg)]">Codex app-server</p>
                   <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
                     Restart after editing host configuration to force a fresh reload.
@@ -895,6 +1061,7 @@ export function AppShellSettingsDialog() {
                                 />
                                 <button
                                   type="button"
+                                  aria-label={`Save archive name ${archive.label}`}
                                   onClick={() => void handleRenameArchive(archive)}
                                   className="rounded-full bg-[var(--theme-accent-solid)] px-3 py-1.5 text-xs font-medium text-[var(--theme-accent-solid-fg)] transition hover:bg-[var(--theme-accent-solid-hover)]"
                                 >
@@ -988,6 +1155,7 @@ export function AppShellSettingsDialog() {
                 ) : null}
                 <button
                   type="button"
+                  aria-label={`Save ${selectedFileName}`}
                   onClick={() => void handleSave(selectedFileName)}
                   disabled={
                     selectedFile.loading ||

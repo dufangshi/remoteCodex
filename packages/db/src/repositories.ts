@@ -14,6 +14,7 @@ import {
   threadTurnMetadata,
   threads,
   viewerSessions,
+  policies,
   workspaces,
 } from './schema';
 
@@ -133,6 +134,36 @@ export interface CreateViewerSessionRecordInput {
 export interface UpdateViewerSessionRecordInput {
   lastHeartbeatAt?: string | null;
   activeTab?: string | null;
+}
+
+export function getPolicyRecordByKey(db: DatabaseClient, key: string) {
+  return db.select().from(policies).where(eq(policies.key, key)).get();
+}
+
+export function upsertPolicyRecord(db: DatabaseClient, key: string, valueJson: string) {
+  const now = new Date().toISOString();
+  const existing = getPolicyRecordByKey(db, key);
+
+  if (existing) {
+    db.update(policies)
+      .set({
+        valueJson,
+        updatedAt: now
+      })
+      .where(eq(policies.key, key))
+      .run();
+    return;
+  }
+
+  db.insert(policies)
+    .values({
+      id: `policy-${key.replace(/[^a-zA-Z0-9_-]/g, '-')}`,
+      key,
+      valueJson,
+      createdAt: now,
+      updatedAt: now
+    })
+    .run();
 }
 
 export function listWorkspaceRecords(db: DatabaseClient) {

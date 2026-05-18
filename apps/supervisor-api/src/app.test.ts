@@ -21,6 +21,7 @@ describe('supervisor api', () => {
     codexHome = path.join(tempDir, 'codex-home');
     await fs.mkdir(path.join(tempDir, 'workspace'));
     await fs.writeFile(path.join(tempDir, 'workspace', 'README.md'), '# hello');
+    await fs.mkdir(path.join(tempDir, 'dev'));
     await fs.mkdir(codexHome, { recursive: true });
     fakeCodexManager = new FakeCodexManager();
     launchBuildRestartCalls = 0;
@@ -387,6 +388,153 @@ describe('supervisor api', () => {
 
     expect(listResponse.statusCode).toBe(200);
     expect(listResponse.json()).toHaveLength(1);
+  });
+
+  it('returns and saves workspace settings', async () => {
+    const initialResponse = await app.inject({
+      method: 'GET',
+      url: '/api/config/workspace-settings',
+    });
+
+    expect(initialResponse.statusCode).toBe(200);
+    expect(initialResponse.json()).toMatchObject({
+      workspaceRoot: await fs.realpath(tempDir),
+      devHome: await fs.realpath(tempDir),
+    });
+
+    const updateResponse = await app.inject({
+      method: 'PATCH',
+      url: '/api/config/workspace-settings',
+      payload: {
+        devHome: `${path.join(tempDir, 'dev')}/`,
+      },
+    });
+
+    expect(updateResponse.statusCode).toBe(200);
+    expect(updateResponse.json()).toMatchObject({
+      workspaceRoot: await fs.realpath(tempDir),
+      devHome: await fs.realpath(path.join(tempDir, 'dev')),
+    });
+  });
+
+  it('rejects workspace dev home outside workspace root', async () => {
+    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'remote-codex-dev-home-'));
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/api/config/workspace-settings',
+      payload: {
+        devHome: outsideDir,
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({
+      code: 'forbidden',
+    });
+
+    await fs.rm(outsideDir, { recursive: true, force: true });
+  });
+
+  it('creates one missing workspace directory under dev home', async () => {
+    await app.inject({
+      method: 'PATCH',
+      url: '/api/config/workspace-settings',
+      payload: {
+        devHome: path.join(tempDir, 'dev'),
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'dev', 'new-project'),
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      label: 'new-project',
+      absPath: await fs.realpath(path.join(tempDir, 'dev', 'new-project')),
+    });
+  });
+
+  it('rejects an existing git clone target without overwrite', async () => {
+    await app.inject({
+      method: 'PATCH',
+      url: '/api/config/workspace-settings',
+      payload: {
+        devHome: path.join(tempDir, 'dev'),
+      },
+    });
+    await fs.mkdir(path.join(tempDir, 'dev', 'demo'));
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        gitUrl: 'https://github.com/example/demo.git',
+      },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({
+      code: 'conflict',
+    });
+  });
+
+  it('clones a git repository into dev home and creates a workspace', async () => {
+    const remoteRepo = path.join(tempDir, 'remote.git');
+    const sourceRepo = path.join(tempDir, 'source');
+    await fs.mkdir(sourceRepo);
+    await fs.writeFile(path.join(sourceRepo, 'README.md'), '# cloned');
+
+    async function runGit(args: string[], cwd: string) {
+      const { spawn } = await import('node:child_process');
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn('git', args, { cwd, stdio: 'ignore' });
+        child.on('error', reject);
+        child.on('close', (code) => {
+          if (code === 0) {
+            resolve();
+            return;
+          }
+          reject(new Error(`git ${args.join(' ')} failed with ${code}`));
+        });
+      });
+    }
+
+    await runGit(['init'], sourceRepo);
+    await runGit(['config', 'user.email', 'test@example.com'], sourceRepo);
+    await runGit(['config', 'user.name', 'Test User'], sourceRepo);
+    await runGit(['add', 'README.md'], sourceRepo);
+    await runGit(['commit', '-m', 'initial'], sourceRepo);
+    await runGit(['clone', '--bare', sourceRepo, remoteRepo], tempDir);
+
+    await app.inject({
+      method: 'PATCH',
+      url: '/api/config/workspace-settings',
+      payload: {
+        devHome: path.join(tempDir, 'dev'),
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        gitUrl: remoteRepo,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      label: 'remote',
+      absPath: await fs.realpath(path.join(tempDir, 'dev', 'remote')),
+    });
+    await expect(fs.readFile(path.join(tempDir, 'dev', 'remote', 'README.md'), 'utf8'))
+      .resolves.toBe('# cloned');
   });
 
   it('reads a workspace tree', async () => {

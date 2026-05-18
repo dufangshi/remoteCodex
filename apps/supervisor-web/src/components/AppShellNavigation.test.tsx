@@ -45,6 +45,26 @@ describe('AppShellNavigation', () => {
       vi.fn(async (input: RequestInfo, init?: RequestInit) => {
         const url = String(input);
 
+        if (url === '/api/config/workspace-settings' && !init?.method) {
+          return {
+            ok: true,
+            json: async () => ({
+              workspaceRoot: '/tmp',
+              devHome: '/tmp/dev',
+            }),
+          } satisfies Partial<Response>;
+        }
+
+        if (url === '/api/config/workspace-settings' && init?.method === 'PATCH') {
+          return {
+            ok: true,
+            json: async () => ({
+              workspaceRoot: '/tmp',
+              devHome: JSON.parse(String(init.body)).devHome.replace(/\/+$/, ''),
+            }),
+          } satisfies Partial<Response>;
+        }
+
         if (url === '/api/config/codex-files/config.toml' && !init?.method) {
           return {
             ok: true,
@@ -278,7 +298,7 @@ describe('AppShellNavigation', () => {
       target: { value: 'model = "gpt-5.4"\napproval_policy = "never"\n' },
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save config.toml' }));
 
     await waitFor(() => {
       expect(screen.getByText('Saved')).toBeInTheDocument();
@@ -296,6 +316,38 @@ describe('AppShellNavigation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close File Editor' }));
 
     expect(screen.queryByLabelText('Edit config.toml')).not.toBeInTheDocument();
+  });
+
+  it('loads and saves workspace defaults in settings', async () => {
+    render(
+      <MemoryRouter initialEntries={['/threads?workspaceId=workspace-1']}>
+        <NavigationHarness />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('/tmp')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText(/dev home/i), {
+      target: { value: '/tmp/dev/projects/' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save workspace defaults' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Workspace defaults saved.')).toBeInTheDocument();
+    });
+
+    const patchCall = vi.mocked(fetch).mock.calls.find(
+      ([url, init]) =>
+        String(url) === '/api/config/workspace-settings' && init?.method === 'PATCH',
+    );
+    expect(patchCall).toBeTruthy();
+    expect(JSON.parse(String(patchCall?.[1]?.body))).toEqual({
+      devHome: '/tmp/dev/projects/',
+    });
   });
 
   it('does not render the idle editor area before a file is selected', async () => {
@@ -397,7 +449,7 @@ describe('AppShellNavigation', () => {
     fireEvent.change(screen.getByLabelText('Rename Known good'), {
       target: { value: 'Laptop config' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save archive name Known good' }));
 
     await waitFor(() => {
       expect(screen.getByText('Backup renamed.')).toBeInTheDocument();

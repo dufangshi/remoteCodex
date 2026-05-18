@@ -7,6 +7,7 @@ export class WorkspaceServiceError extends Error {
     public readonly code:
       | 'path_not_absolute'
       | 'path_not_found'
+      | 'path_parent_not_found'
       | 'path_not_directory'
       | 'path_not_readable'
       | 'path_outside_root'
@@ -58,6 +59,25 @@ async function ensureReadableDirectory(absPath: string) {
   }
 }
 
+export async function resolveExistingDirectory(absPath: string) {
+  await ensureReadableDirectory(absPath);
+  return fs.realpath(absPath);
+}
+
+async function resolveComparablePath(absPath: string) {
+  try {
+    return await fs.realpath(absPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+
+    const parentPath = path.dirname(absPath);
+    const resolvedParent = await fs.realpath(parentPath);
+    return path.join(resolvedParent, path.basename(absPath));
+  }
+}
+
 export async function assertPathWithinRoot(rootPath: string, candidatePath: string) {
   if (!path.isAbsolute(rootPath)) {
     throw new WorkspaceServiceError('invalid_root', 'Workspace root must be an absolute path.', {
@@ -73,7 +93,7 @@ export async function assertPathWithinRoot(rootPath: string, candidatePath: stri
 
   const [resolvedRoot, resolvedCandidate] = await Promise.all([
     fs.realpath(rootPath),
-    fs.realpath(candidatePath)
+    resolveComparablePath(candidatePath)
   ]);
   const normalizedRoot = resolvedRoot.endsWith(path.sep) ? resolvedRoot : `${resolvedRoot}${path.sep}`;
 
@@ -91,10 +111,79 @@ export async function assertPathWithinRoot(rootPath: string, candidatePath: stri
   return resolvedCandidate;
 }
 
-export async function validateWorkspacePath(rootPath: string, candidatePath: string) {
+export async function validateExistingDirectoryPath(rootPath: string, candidatePath: string) {
   await ensureReadableDirectory(rootPath);
   await ensureReadableDirectory(candidatePath);
   const realPath = await assertPathWithinRoot(rootPath, candidatePath);
+
+  return {
+    absPath: realPath,
+    label: path.basename(realPath)
+  };
+}
+
+export async function validateWorkspacePath(
+  rootPath: string,
+  candidatePath: string,
+  options: {
+    devHome?: string;
+    createMissingLeaf?: boolean;
+  } = {}
+) {
+  await ensureReadableDirectory(rootPath);
+  const resolvedCandidate = path.resolve(candidatePath);
+
+  try {
+    await ensureReadableDirectory(resolvedCandidate);
+  } catch (error) {
+    if (
+      !(error instanceof WorkspaceServiceError) ||
+      error.code !== 'path_not_found' ||
+      !options.createMissingLeaf ||
+      !options.devHome
+    ) {
+      throw error;
+    }
+
+    const parentPath = path.dirname(resolvedCandidate);
+    try {
+      await ensureReadableDirectory(parentPath);
+    } catch (parentError) {
+      if (parentError instanceof WorkspaceServiceError && parentError.code === 'path_not_found') {
+        throw new WorkspaceServiceError(
+          'path_parent_not_found',
+          'The parent directory for the workspace path does not exist.',
+          {
+            absPath: resolvedCandidate,
+            parentPath
+          }
+        );
+      }
+
+      throw parentError;
+    }
+
+    const resolvedDevHome = await assertPathWithinRoot(rootPath, options.devHome);
+    const resolvedTarget = await assertPathWithinRoot(rootPath, resolvedCandidate);
+    const normalizedDevHome = resolvedDevHome.endsWith(path.sep)
+      ? resolvedDevHome
+      : `${resolvedDevHome}${path.sep}`;
+
+    if (resolvedTarget !== resolvedDevHome && !resolvedTarget.startsWith(normalizedDevHome)) {
+      throw new WorkspaceServiceError(
+        'path_outside_root',
+        'New workspace directories must be created inside the configured dev home.',
+        {
+          devHome: resolvedDevHome,
+          candidatePath: resolvedTarget
+        }
+      );
+    }
+
+    await fs.mkdir(resolvedTarget);
+  }
+
+  const realPath = await assertPathWithinRoot(rootPath, resolvedCandidate);
 
   return {
     absPath: realPath,

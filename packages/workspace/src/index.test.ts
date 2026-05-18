@@ -33,6 +33,50 @@ describe('workspace service', () => {
     expect(result.label).toBe('project');
   });
 
+  it('normalizes a trailing slash workspace path', async () => {
+    const result = await validateWorkspacePath(rootDir, `${path.join(rootDir, 'project')}/`);
+    const expectedPath = await fs.realpath(path.join(rootDir, 'project'));
+
+    expect(result.absPath).toBe(expectedPath);
+    expect(result.label).toBe('project');
+  });
+
+  it('creates one missing leaf directory inside dev home', async () => {
+    const result = await validateWorkspacePath(rootDir, path.join(rootDir, 'new-project'), {
+      devHome: rootDir,
+      createMissingLeaf: true,
+    });
+
+    expect(result.absPath).toBe(await fs.realpath(path.join(rootDir, 'new-project')));
+    await expect(fs.stat(path.join(rootDir, 'new-project'))).resolves.toMatchObject({
+      isDirectory: expect.any(Function),
+    });
+  });
+
+  it('rejects missing parents when creating a workspace leaf', async () => {
+    await expect(
+      validateWorkspacePath(rootDir, path.join(rootDir, 'missing-parent', 'project'), {
+        devHome: rootDir,
+        createMissingLeaf: true,
+      }),
+    ).rejects.toMatchObject({
+      code: 'path_parent_not_found',
+    } satisfies Partial<WorkspaceServiceError>);
+  });
+
+  it('rejects missing leaf creation outside dev home', async () => {
+    const devHome = path.join(rootDir, 'project');
+
+    await expect(
+      validateWorkspacePath(rootDir, path.join(rootDir, 'outside-dev-home'), {
+        devHome,
+        createMissingLeaf: true,
+      }),
+    ).rejects.toMatchObject({
+      code: 'path_outside_root',
+    } satisfies Partial<WorkspaceServiceError>);
+  });
+
   it('rejects paths outside the root', async () => {
     const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'outside-'));
 

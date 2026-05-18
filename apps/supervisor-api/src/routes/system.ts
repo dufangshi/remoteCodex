@@ -16,8 +16,13 @@ import {
   RenameCodexHostConfigArchiveInput,
   RuntimeConfigDto,
   UpdateCodexHostFileInput,
+  UpdateWorkspaceSettingsInput,
   VersionDto
 } from '../../../../packages/shared/src/index';
+import {
+  getWorkspaceSettings,
+  saveWorkspaceDevHome,
+} from '../workspace-settings';
 
 const codexHostFileNameSchema = z.enum(['config.toml', 'auth.json']);
 const codexHostFileNames = codexHostFileNameSchema.options;
@@ -30,6 +35,9 @@ const createCodexHostConfigArchiveSchema = z.object({
 });
 const renameCodexHostConfigArchiveSchema = z.object({
   label: z.string().trim().min(1).max(120),
+});
+const updateWorkspaceSettingsSchema = z.object({
+  devHome: z.string().trim().min(1),
 });
 
 interface ArchiveIndex {
@@ -159,6 +167,25 @@ export async function registerSystemRoutes(app: FastifyInstance) {
       workspaceRoot: app.services.config.workspaceRoot,
       environment: app.services.config.nodeEnv
     } satisfies RuntimeConfigDto;
+  });
+
+  app.get('/api/config/workspace-settings', async () => {
+    return getWorkspaceSettings(
+      app.services.database.db,
+      app.services.config.workspaceRoot,
+    );
+  });
+
+  app.patch('/api/config/workspace-settings', async (request) => {
+    const body = updateWorkspaceSettingsSchema.parse(
+      request.body,
+    ) satisfies UpdateWorkspaceSettingsInput;
+
+    return saveWorkspaceDevHome(
+      app.services.database.db,
+      app.services.config.workspaceRoot,
+      body.devHome,
+    );
   });
 
   app.get('/api/config/codex-files/:name', async (request) => {

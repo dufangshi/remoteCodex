@@ -1,12 +1,28 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 
 function inferWorkspaceLabel(absPath: string) {
-  const normalized = absPath.trim().replace(/[\\/]+$/, '');
+  const trimmed = absPath.trim();
+  const normalized = trimmed.replace(/[\\/]+$/, '');
   if (!normalized) {
     return '';
   }
 
+  if (isGitInput(trimmed)) {
+    const withoutQuery = normalized.split(/[?#]/)[0] ?? normalized;
+    const rawName = withoutQuery.split(/[/:]/).filter(Boolean).at(-1) ?? '';
+    return rawName.endsWith('.git') ? rawName.slice(0, -4) : rawName;
+  }
+
   return normalized.split(/[\\/]/).filter(Boolean).at(-1) ?? '';
+}
+
+function isGitInput(value: string) {
+  const trimmed = value.trim();
+  return (
+    /^https?:\/\/.+/i.test(trimmed) ||
+    /^ssh:\/\/.+/i.test(trimmed) ||
+    /^git@[^:]+:.+/.test(trimmed)
+  );
 }
 
 interface WorkspaceFormProps {
@@ -15,7 +31,7 @@ interface WorkspaceFormProps {
   submitLabel?: string;
   error?: string | null;
   busy?: boolean;
-  onSubmit: (input: { absPath: string; label?: string }) => Promise<void> | void;
+  onSubmit: (input: { absPath: string; label?: string } | { gitUrl: string; label?: string }) => Promise<void> | void;
 }
 
 export function WorkspaceForm({
@@ -47,22 +63,24 @@ export function WorkspaceForm({
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!absPath.trim()) {
-      setLocalError('Absolute path is required.');
+    const rawTarget = absPath.trim();
+    if (!rawTarget) {
+      setLocalError('Workspace path or Git URL is required.');
       return;
     }
 
     setLocalError(null);
     const normalizedLabel = label.trim();
+    const targetKey = isGitInput(rawTarget) ? 'gitUrl' : 'absPath';
     await onSubmit(
       normalizedLabel
         ? {
-            absPath: absPath.trim(),
+            [targetKey]: rawTarget,
             label: normalizedLabel
-          }
+          } as { absPath: string; label: string } | { gitUrl: string; label: string }
         : {
-            absPath: absPath.trim()
-          }
+            [targetKey]: rawTarget
+          } as { absPath: string } | { gitUrl: string }
     );
   }
 
@@ -70,16 +88,19 @@ export function WorkspaceForm({
     <form onSubmit={handleSubmit} className="space-y-5 rounded-3xl border border-stone-800 bg-stone-900 p-6">
       <div>
         <label htmlFor="workspace-path" className="text-sm font-medium text-stone-200">
-          Absolute path
+          Path or Git URL
         </label>
         <input
           id="workspace-path"
           name="absPath"
           value={absPath}
           onChange={(event) => setAbsPath(event.target.value)}
-          placeholder="/Users/name/project"
+          placeholder="/Users/name/project or https://github.com/owner/repo.git"
           className="mt-2 w-full rounded-2xl border border-stone-700 bg-stone-950 px-4 py-3 text-stone-100 outline-none transition focus:border-amber-300"
         />
+        <p className="mt-2 text-xs text-stone-500">
+          Absolute paths register local directories. Git URLs clone into the configured dev home.
+        </p>
       </div>
       <div>
         <label htmlFor="workspace-label" className="text-sm font-medium text-stone-200">
