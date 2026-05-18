@@ -794,6 +794,24 @@ function FileChangeIcon() {
   );
 }
 
+function PlanIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 fill-none stroke-current"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4.25 4.75h7.5" />
+      <path d="M4.25 8h7.5" />
+      <path d="M4.25 11.25h4.5" />
+      <path d="M2.25 4.75h.01M2.25 8h.01M2.25 11.25h.01" />
+    </svg>
+  );
+}
+
 function ExpandIcon() {
   return (
     <svg
@@ -1846,7 +1864,7 @@ function AgentMessageBody({
       text={text}
       scrollRootRef={scrollRootRef}
       streaming={streaming}
-      containerClassName="thread-message-prose pb-7"
+      containerClassName="thread-message-prose"
     />
   );
 }
@@ -2037,8 +2055,8 @@ const CompactMessageItem = memo(function CompactMessageItem({
           <CompactMessageIcon kind={item.kind} />
         </span>
       </span>
-      <div className="timeline-mobile-bubble-content flex min-w-0 items-start gap-0 pt-2 sm:gap-2.5 sm:pt-0">
-        <div className="mt-0.5 flex shrink-0 items-center">
+      <div className="timeline-message-content timeline-mobile-bubble-content flex min-w-0 items-start gap-0 pt-2 sm:gap-2.5 sm:pt-0">
+        <div className="hidden">
           <span
             className={`hidden h-6 w-6 items-center justify-center rounded-full border sm:inline-flex ${iconToneClassName}`}
           >
@@ -2082,7 +2100,7 @@ const CompactMessageItem = memo(function CompactMessageItem({
                 : 'Copy agent reply'
           }
           onClick={() => void handleCopy()}
-          className="timeline-corner-copy absolute bottom-0 right-0 inline-flex h-5 w-5 items-center justify-center transition sm:bottom-2.5 sm:right-2.5 sm:h-7 sm:w-7"
+          className="timeline-corner-copy absolute bottom-0 right-0 inline-flex h-5 w-5 items-center justify-center transition"
         >
           <span
             className={`timeline-corner-copy-visual inline-flex items-center justify-center border shadow-sm shadow-stone-950/25 backdrop-blur transition ${
@@ -2440,8 +2458,15 @@ const PlanHistoryItem = memo(function PlanHistoryItem({
 }) {
   return (
     <div
-      className={`min-w-0 w-full rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
+      className={`timeline-item-frame relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
     >
+      <span
+        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('search')}`}
+      >
+        <span className="scale-[0.78]">
+          <PlanIcon />
+        </span>
+      </span>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="timeline-meta-text text-[11px] uppercase tracking-[0.2em]">
           {historyItemLabel(item.kind)}
@@ -2474,7 +2499,7 @@ const ContextCompactionItem = memo(function ContextCompactionItem({
 
   return (
     <div
-      className={`relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2 sm:rounded-[1.2rem] sm:px-3`}
+      className={`timeline-item-frame relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2 sm:rounded-[1.2rem] sm:px-3`}
     >
       <span
         className="absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border border-teal-300/30 bg-teal-300/12 text-[10px] text-teal-100 shadow-sm shadow-stone-950/20 sm:hidden"
@@ -2848,8 +2873,15 @@ const GenericHistoryItem = memo(function GenericHistoryItem({
 }) {
   return (
     <div
-      className={`min-w-0 w-full rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2 sm:rounded-[1.2rem] sm:px-3`}
+      className={`timeline-item-frame relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2 sm:rounded-[1.2rem] sm:px-3`}
     >
+      <span
+        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('action')}`}
+      >
+        <span className="scale-[0.78]">
+          <ToolCallIcon />
+        </span>
+      </span>
       <div className="flex flex-wrap items-center justify-between gap-1.5 leading-none">
         <span className="timeline-meta-text text-[10px] uppercase tracking-[0.16em]">
           {historyItemLabel(item.kind)}

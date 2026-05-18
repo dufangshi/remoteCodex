@@ -196,6 +196,56 @@ Implementation notes:
 - Impeccable rendered scan was run against `http://127.0.0.1:5173/threads/7ecbb6f0-6e24-4b93-9c00-d99b42906a05`. It still reports the expected broad dense-page warnings (`cramped-padding`, `nested-cards`, `line-length`, single-font/palette warnings), not a new warning specific to the compact toolbar or timeline tail clearance fix.
 - Screenshot artifact: `/tmp/agent-workbench-mobile-composer-tail-final.png`.
 
+## Desktop Corner Bubble Follow-up
+
+Target: apply the successful mobile corner-bubble language to desktop Agent Workbench timeline rows.
+
+- [x] Hide the old desktop left icon columns for message, command, tool, file-change, search, and batch timeline rows.
+- [x] Promote the top-left category badge to the shared desktop treatment: square top-left corner, compact icon visual, and no separate column width.
+- [x] Make agent-message copy controls match the corner-icon language on desktop: bottom-right sharp bubble corner, about `19px` visual glyph, and about `25px` hit area.
+- [x] Add enough first-line/title-row reserve on desktop so text does not run under the top-left badge without reintroducing a full icon column.
+- [x] Make dense command/file/search rows and their inner sections use a sharp top-left corner on desktop too.
+- [x] Keep file delta badges compact and centered on desktop, matching the mobile rectangle treatment instead of large round pills.
+- [x] Re-run Playwright desktop geometry checks, focused tests, typecheck, and Impeccable rendered scan.
+
+Measurement notes:
+
+- Playwright desktop `1440x1000`: horizontal overflow is `0`.
+- Old desktop icon columns report `0` visible samples after the shared CSS pass.
+- Top-left badge and copy visual both measure about `18.9x18.9px`; the copy hit area measures about `24.8x24.8px`.
+- Sampled message and dense tool rows report `border-top-left-radius: 0px`; agent message rows with copy report `border-bottom-right-radius: 0px`.
+- Text/badge overlap audit reports `0` overlaps after adding the desktop title-row reserve.
+- Dense file/command samples measure about `38-39px` tall on desktop; delta badges measure about `18.9px` tall with about `4.5px` radius and centered content.
+- The current audit thread has no visible single command status buttons or web-search rows, but those React branches use the same shared `.timeline-item-inner` / `.timeline-mobile-dense-inner` corner-button rules.
+- Screenshot artifacts:
+  - `/tmp/agent-workbench-desktop-corner-bubbles-final.png`
+  - `/tmp/agent-workbench-desktop-dense-tools-final.png`
+- Impeccable rendered scan against `http://127.0.0.1:5174/threads/7ecbb6f0-6e24-4b93-9c00-d99b42906a05` still reports expected broad dense-page warnings (`cramped-padding`, `nested-cards`, `line-length`, single-font/palette warnings). These are inherited from the intentionally compact operator-console layout and not specific regressions from the desktop corner-bubble sync.
+
+## Desktop Message Density Follow-up
+
+Target: fix the remaining desktop message-bubble wasted space visible in screenshots.
+
+- [x] Remove the desktop `sm:bottom/right` offsets from agent-message copy buttons so the visual glyph sits in the actual bottom-right sharp corner.
+- [x] Remove the agent-message `pb-7` reserve that made the copy button consume an extra logical text row.
+- [x] Remove the desktop `62ch` message and markdown paragraph max-width so message text can use the full bubble width.
+- [x] Replace the desktop whole-row left reserve with a small first-line-only float reserve, just enough to avoid the top-left icon.
+- [x] Keep the old desktop left icon column hidden.
+- [x] Verify with Playwright, Impeccable, typecheck, and focused timeline tests.
+
+Measurement notes:
+
+- Playwright desktop `1440x1000`: horizontal overflow is `0`; visible old icon column count is `0`.
+- Copy icon visual is about `18.9x18.9px` and sits about `1px` from the right and bottom frame edges.
+- Copy button no longer contributes any `::after` text-flow reserve; sampled message prose reports `::after` content `none`.
+- Message prose and markdown paragraph max-width now report `100%` rather than `62ch`.
+- First-line left gap from the bubble frame dropped from about `36px` to about `23px`, while badge/text overlap remained `0`.
+- A sampled one-line long message used about `941px` of the `960px` content width, leaving about `9px` unused on the right.
+- Screenshot artifacts:
+  - `/tmp/agent-workbench-desktop-message-density-final.png`
+  - `/tmp/agent-workbench-desktop-message-density-final-2.png`
+- Impeccable rendered scan now emphasizes `line-length` warnings because full-width desktop text is an intentional density choice for this operator timeline. Remaining `cramped-padding`, `nested-cards`, single-font, and palette warnings are the existing broad dense-page warnings, not a blocker for this targeted fix.
+
 ## Implementation Order
 
 1. `impeccable colorize`: status/action tokens, contrast fixes, semantic palette cleanup.
