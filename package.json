@@ -2,7 +2,7 @@
   "name": "remote-codex",
   "version": "0.1.0",
   "description": "Local web supervisor for Codex workspaces and threads.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "remote-codex": "./bin/remote-codex.mjs"
