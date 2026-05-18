@@ -9,7 +9,11 @@ interface MigrationRecord {
   applied_at: string;
 }
 
-function resolveRepoRoot(start = process.cwd()): string {
+function resolvePackageRoot(start = process.cwd()): string {
+  if (process.env.REMOTE_CODEX_PACKAGE_ROOT) {
+    return path.resolve(process.env.REMOTE_CODEX_PACKAGE_ROOT);
+  }
+
   let current = path.resolve(start);
 
   while (current !== path.dirname(current)) {
@@ -19,11 +23,11 @@ function resolveRepoRoot(start = process.cwd()): string {
     current = path.dirname(current);
   }
 
-  throw new Error('Unable to locate repository root from current working directory.');
+  throw new Error('Unable to locate package root from current working directory.');
 }
 
 export function getMigrationsDir(): string {
-  return path.join(resolveRepoRoot(), 'packages', 'db', 'migrations');
+  return path.join(resolvePackageRoot(), 'packages', 'db', 'migrations');
 }
 
 export function runMigrations(databaseUrl: string) {

@@ -32,7 +32,11 @@ interface PricingConfig {
 const TOKEN_PRICE_DENOMINATOR = 1_000_000;
 let cachedPricingConfig: PricingConfig | null = null;
 
-function resolveRepoRoot(start = process.cwd()) {
+function resolvePackageRoot(start = process.cwd()) {
+  if (process.env.REMOTE_CODEX_PACKAGE_ROOT) {
+    return path.resolve(process.env.REMOTE_CODEX_PACKAGE_ROOT);
+  }
+
   let current = path.resolve(start);
 
   while (current !== path.dirname(current)) {
@@ -42,11 +46,11 @@ function resolveRepoRoot(start = process.cwd()) {
     current = path.dirname(current);
   }
 
-  throw new Error('Unable to locate repository root for Codex pricing config.');
+  throw new Error('Unable to locate package root for Codex pricing config.');
 }
 
 function getPricingConfigPath() {
-  return path.join(resolveRepoRoot(), 'config', 'codex-model-pricing.json');
+  return path.join(resolvePackageRoot(), 'config', 'codex-model-pricing.json');
 }
 
 function isPositiveNumber(value: unknown) {
@@ -169,6 +173,10 @@ function getPricingConfig() {
   const content = fs.readFileSync(configPath, 'utf8');
   cachedPricingConfig = parsePricingConfig(JSON.parse(content) as unknown);
   return cachedPricingConfig;
+}
+
+export function resetPricingConfigCacheForTest() {
+  cachedPricingConfig = null;
 }
 
 export function pricingTierForFastMode(fastMode: boolean): PricingTierKey {

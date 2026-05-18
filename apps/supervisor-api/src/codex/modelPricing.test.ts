@@ -1,8 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   contextWindowForModel,
   estimateTurnPrice,
+  resetPricingConfigCacheForTest,
   supportsFastMode,
 } from './modelPricing';
 
@@ -25,6 +30,11 @@ const sampleUsage = {
 };
 
 describe('modelPricing', () => {
+  afterEach(() => {
+    resetPricingConfigCacheForTest();
+    vi.unstubAllEnvs();
+  });
+
   it('prices gpt-5.5 standard turns from the local pricing config', () => {
     const estimate = estimateTurnPrice(sampleUsage, {
       pricingModelKey: 'gpt-5.5',
@@ -58,5 +68,35 @@ describe('modelPricing', () => {
       outputUsd: 0.1125,
     });
     expect(estimate?.totalUsd).toBeCloseTo(0.125625, 10);
+  });
+
+  it('resolves pricing config from the installed package root when provided', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'remote-codex-pricing-root-'));
+    await fs.mkdir(path.join(tempDir, 'config'), { recursive: true });
+    await fs.writeFile(
+      path.join(tempDir, 'config', 'codex-model-pricing.json'),
+      JSON.stringify({
+        currency: 'USD',
+        tiers: {
+          standard: { multiplier: 1 },
+          fast: { multiplier: 2 },
+        },
+        models: {
+          'package-model': {
+            inputUsdPerMillion: 10,
+            cachedInputUsdPerMillion: 1,
+            outputUsdPerMillion: 20,
+            supportsFastMode: true,
+            contextWindowTokens: 123000,
+          },
+        },
+      }),
+      'utf8',
+    );
+    vi.stubEnv('REMOTE_CODEX_PACKAGE_ROOT', tempDir);
+    resetPricingConfigCacheForTest();
+
+    expect(contextWindowForModel('package-model')).toBe(123000);
+    expect(supportsFastMode('package-model')).toBe(true);
   });
 });
