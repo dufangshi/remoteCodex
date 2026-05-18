@@ -116,6 +116,7 @@ async function startService() {
   console.log(`Web: http://${serviceHost}:${servicePort} (pid ${webPid})`);
   console.log(`API: http://${apiHost}:${apiPort} (pid ${apiPid})`);
   console.log(`Logs: ${serviceDir}`);
+  printTailscaleServeHint();
 }
 
 async function stopService() {
@@ -202,6 +203,21 @@ function prepareLogFile(logPath) {
   if (fs.existsSync(logPath)) {
     fs.renameSync(logPath, rotatedPath);
   }
+}
+
+function printTailscaleServeHint() {
+  const localWebUrl = `http://${serviceHost}:${servicePort}`;
+
+  console.log('');
+  console.log('To access it from another device, expose the web service with Tailscale:');
+  console.log('');
+  console.log(`  tailscale serve --bg ${localWebUrl}`);
+  console.log('');
+  console.log('If Tailscale is not installed yet:');
+  console.log('');
+  console.log('  curl -fsSL https://tailscale.com/install.sh | sh');
+  console.log('  tailscale up');
+  console.log(`  tailscale serve --bg ${localWebUrl}`);
 }
 
 async function waitForHttp(url, pid, timeoutMs) {
