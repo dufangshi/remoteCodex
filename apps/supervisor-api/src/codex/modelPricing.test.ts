@@ -43,7 +43,7 @@ describe('modelPricing', () => {
 
   it('uses the gpt-5.5-specific fast multiplier and marks it fast-capable', () => {
     expect(supportsFastMode('gpt-5.5')).toBe(true);
-    expect(contextWindowForModel('gpt-5.5')).toBe(400000);
+    expect(contextWindowForModel('gpt-5.5')).toBe(272000);
 
     const estimate = estimateTurnPrice(sampleUsage, {
       pricingModelKey: 'gpt-5.5',

@@ -566,6 +566,22 @@ function getThreadGoalRecordForUpsert(
     return active;
   }
 
+  const matchingObjective = db
+    .select()
+    .from(threadGoals)
+    .where(
+      and(
+        eq(threadGoals.threadId, input.threadId),
+        eq(threadGoals.codexThreadId, input.codexThreadId),
+        eq(threadGoals.objective, input.objective),
+      ),
+    )
+    .orderBy(desc(threadGoals.updatedAt))
+    .get();
+  if (matchingObjective) {
+    return matchingObjective;
+  }
+
   return (
     db
       .select()

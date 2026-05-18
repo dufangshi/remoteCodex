@@ -419,6 +419,41 @@ function clampPercent(value: number | null | undefined) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+function formatContextTokenKilocount(value: number) {
+  const thousands = value / 1000;
+  return Number.isInteger(thousands)
+    ? `${thousands}k`
+    : `${Number(thousands.toFixed(1))}k`;
+}
+
+function formatModelContextTitle(
+  model: string | null | undefined,
+  contextUsage: ThreadContextUsageDto | null | undefined,
+) {
+  if (!model) {
+    return 'Select model';
+  }
+
+  if (
+    contextUsage?.availability !== 'available' ||
+    typeof contextUsage.tokensInContextWindow !== 'number' ||
+    typeof contextUsage.modelContextWindow !== 'number'
+  ) {
+    return `${model} · context unavailable`;
+  }
+
+  const usedTokens = Math.max(contextUsage.tokensInContextWindow, 0);
+  const contextTokens = Math.max(contextUsage.modelContextWindow, 0);
+  const remainingTokens = Math.max(contextTokens - usedTokens, 0);
+
+  return [
+    model,
+    `${formatContextTokenKilocount(usedTokens)} used / ${formatContextTokenKilocount(contextTokens)}`,
+    `${formatContextTokenKilocount(remainingTokens)} left`,
+    `${clampPercent(contextUsage.remainingPercent)}% context left`,
+  ].join(' · ');
+}
+
 function ContextRingFrame({
   contextUsage,
 }: {
@@ -944,12 +979,7 @@ export function ThreadComposer({
     () => modelOptions.find((entry) => entry.model === model) ?? null,
     [model, modelOptions],
   );
-  const modelContextTitle =
-    model && contextUsage?.availability === 'available'
-      ? `${model} · ${clampPercent(contextUsage.remainingPercent)}% context left`
-      : model
-        ? `${model} · context unavailable`
-        : 'Select model';
+  const modelContextTitle = formatModelContextTitle(model, contextUsage);
   const supportedEfforts = currentModel?.supportedReasoningEfforts ?? [];
   const promptSegments = useMemo(
     () => tokenizePrompt(prompt, attachments),
@@ -2839,7 +2869,7 @@ export function ThreadComposer({
                   }
                   title={
                     fastMode
-                      ? 'Fast mode is on. Turn it off from the slash toolbox to edit model.'
+                      ? `Fast mode is on. Turn it off from the slash toolbox to edit model. ${modelContextTitle}`
                       : modelContextTitle
                   }
                   className="thread-composer-inline-toggle relative inline-flex min-w-0 max-w-[8.75rem] items-center overflow-hidden rounded-full px-2.5 py-1 text-left text-stone-300 transition disabled:cursor-not-allowed disabled:text-stone-600 sm:max-w-[11rem]"

@@ -4289,7 +4289,11 @@ describe('supervisor api', () => {
     expect(runningDetailResponse.json().goal).toMatchObject({
       objective: 'Keep working until all checklist items are done.',
       status: 'active',
+      localGoalId: expect.any(String),
     });
+    expect(runningDetailResponse.json().goal.createdAt).toBe(
+      runningDetailResponse.json().goalHistory[0].createdAt,
+    );
     expect(runningDetailResponse.json().goalHistory).toEqual([
       expect.objectContaining({
         objective: 'Keep working until all checklist items are done.',
@@ -4341,5 +4345,168 @@ describe('supervisor api', () => {
       })
     ]);
     expect(completedDetailResponse.json().goalHistory[0].completedAt).toMatch(/^20\d\d-/);
+  });
+
+  it('merges a remote goal snapshot with different createdAt into the local goal history', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Remote Goal Merge Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const setResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${createdThread.id}/goal`,
+      payload: {
+        objective: 'Keep the goal monitor deduped.',
+        status: 'active',
+      }
+    });
+    expect(setResponse.statusCode).toBe(200);
+    const localCreatedAt = setResponse.json().goal.createdAt;
+    const localGoalId = setResponse.json().goal.localGoalId;
+
+    fakeCodexManager.goals.set(createdThread.codexThreadId, {
+      threadId: createdThread.codexThreadId,
+      objective: 'Keep the goal monitor deduped.',
+      status: 'complete',
+      tokenBudget: null,
+      tokensUsed: 42000,
+      timeUsedSeconds: 180,
+      createdAt: Date.parse(localCreatedAt) + 60_000,
+      updatedAt: Date.now(),
+    });
+
+    const getResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}/goal`,
+    });
+    expect(getResponse.statusCode).toBe(200);
+    expect(getResponse.json().goal).toMatchObject({
+      localGoalId,
+      createdAt: localCreatedAt,
+      status: 'complete',
+      tokensUsed: 42000,
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+    expect(detailResponse.json().goalHistory).toHaveLength(1);
+    expect(detailResponse.json().goalHistory[0]).toMatchObject({
+      localGoalId,
+      createdAt: localCreatedAt,
+      status: 'complete',
+      tokensUsed: 42000,
+    });
+  });
+
+  it('prices token updates for autonomous goal turns started by app-server events', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5.4',
+        approvalMode: 'yolo',
+        title: 'Goal Pricing Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+    const goalTurnId = '018f0000-0000-7000-8000-000000000123';
+    const remoteThread = fakeCodexManager.threads.get(createdThread.codexThreadId)!;
+    fakeCodexManager.threads.set(createdThread.codexThreadId, {
+      ...remoteThread,
+      status: { type: 'active', activeFlags: [] },
+      turns: [
+        ...remoteThread.turns,
+        {
+          id: goalTurnId,
+          status: 'inProgress',
+          error: null,
+          items: [],
+        } as any,
+      ],
+    });
+
+    fakeCodexManager.emit('notification', {
+      method: 'turn/started',
+      params: {
+        threadId: createdThread.codexThreadId,
+        turn: {
+          id: goalTurnId,
+          status: 'inProgress',
+          error: null,
+          items: [],
+        },
+      },
+    });
+
+    fakeCodexManager.emit('notification', {
+      method: 'thread/tokenUsage/updated',
+      params: {
+        threadId: createdThread.codexThreadId,
+        turnId: goalTurnId,
+        tokenUsage: {
+          total: {
+            totalTokens: 18240,
+            inputTokens: 12000,
+            cachedInputTokens: 2000,
+            outputTokens: 4240,
+            reasoningOutputTokens: 1240,
+          },
+          last: {
+            totalTokens: 2400,
+            inputTokens: 1600,
+            cachedInputTokens: 200,
+            outputTokens: 800,
+            reasoningOutputTokens: 320,
+          },
+          modelContextWindow: 272000,
+        },
+      },
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    const turn = detailResponse.json().turns.find((entry: { id: string }) => entry.id === goalTurnId);
+    expect(turn).toMatchObject({
+      model: 'gpt-5.4',
+      priceEstimate: {
+        pricingModelKey: 'gpt-5.4',
+        pricingTierKey: 'standard',
+        currency: 'USD',
+      },
+    });
+    expect(turn?.priceEstimate?.totalUsd).toBeGreaterThan(0);
   });
 });

@@ -51,6 +51,7 @@ import {
   ApprovalMode,
   CollaborationModeDto,
   CreateThreadInput,
+  ExportThreadPdfInput,
   ForkThreadInput,
   ImportThreadInput,
   ModelOptionDto,
@@ -68,6 +69,7 @@ import {
   ThreadDetailDto,
   ThreadDto,
   ThreadEventEnvelope,
+  ThreadExportTurnOptionsDto,
   ThreadForkResultDto,
   ThreadForkTurnOptionDto,
   ThreadGoalDto,
@@ -90,6 +92,7 @@ import {
 
 type UpstreamThreadGoalStatus = Exclude<ThreadGoalDto['status'], 'terminated'>;
 type NormalizedThreadGoal = ThreadGoalDto;
+import { renderThreadExportPdf } from '../exports/thread-pdf-export';
 import { HttpError } from '../app';
 import {
   readCodexFastModeSync,
@@ -260,6 +263,22 @@ function normalizeThreadGoalStatusForThread(
   }
 
   return goal;
+}
+
+function goalHistoryKey(goal: ThreadGoalDto) {
+  return `${goal.threadId}:${goal.objective}:${goal.createdAt}`;
+}
+
+function mergeGoalHistoryEntry(existing: ThreadGoalDto, incoming: ThreadGoalDto) {
+  const existingUpdatedAt = Date.parse(existing.updatedAt) || 0;
+  const incomingUpdatedAt = Date.parse(incoming.updatedAt) || 0;
+  const latest = incomingUpdatedAt >= existingUpdatedAt ? incoming : existing;
+  const fallback = latest === incoming ? existing : incoming;
+
+  return {
+    ...latest,
+    localGoalId: latest.localGoalId ?? fallback.localGoalId ?? null,
+  };
 }
 
 function mapCodexGoalError(error: unknown): never {
@@ -1718,13 +1737,6 @@ function isAllowOptionLabel(value: string) {
   return /^(allow|approve|yes|continue|proceed|trust)\b/.test(normalized);
 }
 
-function isDenyOptionLabel(value: string) {
-  const normalized = normalizeOptionLabelForApproval(value);
-  return /^(deny|reject|block|cancel|no|abort|disallow|don't allow|do not allow)\b/.test(
-    normalized,
-  );
-}
-
 function isLikelyPositiveApprovalOption(value: string) {
   const normalized = normalizeOptionLabelForApproval(value);
   return (
@@ -2104,6 +2116,39 @@ function sliceTurnsForDetail<T extends { id: string }>(
     turns: turns.slice(Math.max(0, turns.length - limit)),
     totalTurnCount,
   };
+}
+
+function userPromptPreviewFromTurn(turn: ThreadTurnDto) {
+  const prompt = turn.items.find((item) => item.kind === 'userMessage')?.text.trim();
+  if (!prompt) {
+    return 'No user prompt captured';
+  }
+
+  const singleLine = prompt.replace(/\s+/g, ' ').trim();
+  return singleLine.length > 96 ? `${singleLine.slice(0, 95).trimEnd()}...` : singleLine;
+}
+
+function defaultExportOptions(input: ExportThreadPdfInput) {
+  return {
+    includeTokenAndPrice: input.options?.includeTokenAndPrice ?? true,
+    includeCommandOutput: input.options?.includeCommandOutput ?? false,
+    includeAbsolutePaths: input.options?.includeAbsolutePaths ?? false,
+  };
+}
+
+function safeExportFileName(title: string) {
+  const stem = title
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 72);
+  const timestamp = new Date()
+    .toISOString()
+    .replace(/[-:]/g, '')
+    .replace(/\.\d{3}Z$/, 'Z');
+  return `remote-codex-${stem || 'thread'}-${timestamp}.pdf`;
 }
 
 export class ThreadService {
@@ -2517,6 +2562,130 @@ export class ThreadService {
     };
   }
 
+  private async getThreadExportBase(localThreadId: string) {
+    const record = getThreadRecordById(this.db, localThreadId);
+    if (!record) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Thread was not found.',
+      });
+    }
+
+    const workspace = getWorkspaceRecordById(this.db, record.workspaceId);
+    if (!workspace) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Workspace was not found for this thread.',
+      });
+    }
+
+    if (!record.codexThreadId) {
+      throw new HttpError(503, {
+        code: 'service_unavailable',
+        message: 'Thread is missing its Codex session identifier.',
+      });
+    }
+
+    const turnMetadataById = new Map<string, ThreadTurnMetadataRecord>(
+      listThreadTurnMetadataByThreadId(this.db, localThreadId).map((entry) => [
+        entry.turnId,
+        {
+          model: entry.model ?? null,
+          reasoningEffort: entry.reasoningEffort ?? null,
+          reasoningEffortAvailable: entry.reasoningEffortAvailable ?? null,
+          pricingModelKey: entry.pricingModelKey ?? null,
+          pricingTierKey: normalizePricingTier(entry.pricingTierKey),
+          tokenUsageJson: entry.tokenUsageJson ?? null,
+        },
+      ]),
+    );
+    const cachedDetail = await this.buildThreadDetailCacheEntry(
+      localThreadId,
+      record,
+      turnMetadataById,
+    );
+    const updated = getThreadRecordById(this.db, record.id)!;
+    return {
+      record: updated,
+      workspace,
+      turns: cachedDetail.turns,
+    };
+  }
+
+  async listThreadExportTurns(localThreadId: string): Promise<ThreadExportTurnOptionsDto> {
+    const { turns } = await this.getThreadExportBase(localThreadId);
+    return {
+      totalTurnCount: turns.length,
+      turns: turns.map((turn, index) => ({
+        turnId: turn.id,
+        turnNumber: index + 1,
+        startedAt: turn.startedAt,
+        status: turn.status,
+        userPromptPreview: userPromptPreviewFromTurn(turn),
+      })).reverse(),
+    };
+  }
+
+  async exportThreadPdf(
+    localThreadId: string,
+    input: ExportThreadPdfInput,
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    const { record, workspace, turns } = await this.getThreadExportBase(localThreadId);
+    const totalTurnCount = turns.length;
+    const selectedTurnNumbers = new Map(
+      turns.map((turn, index) => [turn.id, index + 1] as const),
+    );
+    const selectedTurns = (() => {
+      if (input.mode === 'selected') {
+        const requestedIds = [...new Set(input.turnIds ?? [])];
+        if (requestedIds.length === 0) {
+          throw new HttpError(400, {
+            code: 'bad_request',
+            message: 'Select at least one turn to export.',
+          });
+        }
+        if (requestedIds.length > 100) {
+          throw new HttpError(400, {
+            code: 'bad_request',
+            message: 'A PDF export can include at most 100 turns.',
+          });
+        }
+
+        const requested = new Set(requestedIds);
+        const matched = turns.filter((turn) => requested.has(turn.id));
+        if (matched.length !== requested.size) {
+          const matchedIds = new Set(matched.map((turn) => turn.id));
+          const missing = requestedIds.filter((turnId) => !matchedIds.has(turnId));
+          throw new HttpError(400, {
+            code: 'bad_request',
+            message: `Some selected turns were not found: ${missing.join(', ')}`,
+          });
+        }
+
+        return matched;
+      }
+
+      const limit = Math.max(1, Math.min(input.limit ?? 10, 100));
+      return turns.slice(Math.max(0, turns.length - limit));
+    })();
+
+    const snapshot = {
+      thread: this.toThreadDto(record, new Set(record.codexThreadId ? [record.codexThreadId] : [])),
+      workspace: toWorkspaceDto(workspace),
+      exportedAt: new Date().toISOString(),
+      totalTurnCount,
+      selectedTurnNumbers,
+      turns: selectedTurns,
+      profile: input.profile ?? 'review',
+      options: defaultExportOptions(input),
+    };
+    const buffer = await renderThreadExportPdf(snapshot);
+    return {
+      buffer,
+      filename: safeExportFileName(record.title),
+    };
+  }
+
   async getThreadGoal(localThreadId: string): Promise<ThreadGoalDto | null> {
     const record = getThreadRecordById(this.db, localThreadId);
     if (!record || !record.codexThreadId) {
@@ -2560,12 +2729,14 @@ export class ThreadService {
         ...(input.tokenBudget !== undefined ? { tokenBudget: input.tokenBudget } : {}),
       });
       const dto = normalizeThreadGoalStatusForThread(toThreadGoalDto(goal), record);
-      this.persistThreadGoalSnapshot(localThreadId, dto);
+      const persistedGoal = toThreadGoalDtoFromRecord(
+        this.persistThreadGoalSnapshot(localThreadId, dto),
+      );
       this.emitThreadEvent('thread.goal.updated', localThreadId, {
-        goal: dto,
+        goal: persistedGoal,
         goalHistory: this.listThreadGoalHistory(localThreadId),
       });
-      return dto;
+      return persistedGoal;
     } catch (error) {
       mapCodexGoalError(error);
     }
@@ -2616,9 +2787,12 @@ export class ThreadService {
         await this.ensureThreadLoadedForCodexOperation(record);
       }
       const goal = await this.codexManager.getThreadGoal(record.codexThreadId);
-      return goal
-        ? normalizeThreadGoalStatusForThread(toThreadGoalDto(goal), record)
-        : null;
+      if (!goal) {
+        return null;
+      }
+
+      const dto = normalizeThreadGoalStatusForThread(toThreadGoalDto(goal), record);
+      return toThreadGoalDtoFromRecord(this.persistThreadGoalSnapshot(record.id, dto));
     } catch (error) {
       if (error instanceof JsonRpcClientError) {
         return null;
@@ -2656,12 +2830,13 @@ export class ThreadService {
     for (const goal of listThreadGoalRecordsByThreadId(this.db, localThreadId).map(
       toThreadGoalDtoFromRecord,
     )) {
-      const key = `${goal.threadId}:${goal.objective}:${goal.createdAt}`;
-      if (!deduped.has(key)) {
-        deduped.set(key, goal);
-      }
+      const key = goalHistoryKey(goal);
+      const existing = deduped.get(key);
+      deduped.set(key, existing ? mergeGoalHistoryEntry(existing, goal) : goal);
     }
-    return [...deduped.values()];
+    return [...deduped.values()].sort(
+      (left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
+    );
   }
 
   private async ensureGoalsFeatureEnabled() {
@@ -3177,7 +3352,7 @@ export class ThreadService {
       input.fastMode !== undefined ? input.fastMode : currentFastMode;
     const currentModel = record.model ?? fallbackModel?.model ?? null;
     const currentReasoning = normalizeReasoningEffort(record.reasoningEffort);
-    let nextModel = input.model ?? currentModel;
+    const nextModel = input.model ?? currentModel;
     let nextReasoning =
       input.reasoningEffort !== undefined
         ? normalizeReasoningEffort(input.reasoningEffort)
@@ -3703,10 +3878,12 @@ export class ThreadService {
         }
 
         const dto = normalizeThreadGoalStatusForThread(toThreadGoalDto(params.goal), record);
-        this.persistThreadGoalSnapshot(record.id, dto);
+        const persistedGoal = toThreadGoalDtoFromRecord(
+          this.persistThreadGoalSnapshot(record.id, dto),
+        );
         this.emitThreadEvent('thread.goal.updated', record.id, {
           turnId: params.turnId,
-          goal: dto,
+          goal: persistedGoal,
           goalHistory: this.listThreadGoalHistory(record.id),
         });
         return;
@@ -3807,9 +3984,17 @@ export class ThreadService {
         this.setLivePlan(record.id, null);
         this.setLiveItems(record.id, null);
         this.resetThreadContextUsage(record.id, true);
+        const pricingSnapshot = buildTurnPricingSnapshot(
+          record.model,
+          normalizeFastMode(record.fastMode),
+        );
         upsertThreadTurnMetadata(this.db, {
           threadId: record.id,
           turnId: params.turn.id,
+          model: record.model ?? null,
+          reasoningEffort: normalizeReasoningEffort(record.reasoningEffort),
+          pricingModelKey: pricingSnapshot?.pricingModelKey ?? null,
+          pricingTierKey: pricingSnapshot?.pricingTierKey ?? null,
           tokenUsageJson: stringifyStoredThreadTurnTokenUsageState({
             baselineTotal:
               this.threadCumulativeTokenUsage.get(record.id) ??

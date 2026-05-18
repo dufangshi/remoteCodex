@@ -15,7 +15,7 @@
       "outputUsdPerMillion": 30,
       "supportsFastMode": true,
       "fastMultiplier": 2.5,
-      "contextWindowTokens": 400000
+      "contextWindowTokens": 272000
     },
     "gpt-5.3-codex": {
       "inputUsdPerMillion": 1.75,

@@ -189,7 +189,7 @@ describe('ThreadComposer', () => {
 
     expect(screen.getByRole('button', { name: 'gpt-5.4' })).toHaveAttribute(
       'title',
-      'gpt-5.4 · 38% context left',
+      'gpt-5.4 · 165.2k used / 258.4k · 93.2k left · 38% context left',
     );
 
     rerender(
