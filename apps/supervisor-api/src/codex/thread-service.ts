@@ -92,7 +92,10 @@ import {
 
 type UpstreamThreadGoalStatus = Exclude<ThreadGoalDto['status'], 'terminated'>;
 type NormalizedThreadGoal = ThreadGoalDto;
-import { renderThreadExportPdf } from '../exports/thread-pdf-export';
+import {
+  renderThreadExportPdf,
+  renderThreadExportStandaloneHtml,
+} from '../exports/thread-pdf-export';
 import { HttpError } from '../app';
 import {
   readCodexFastModeSync,
@@ -2137,6 +2140,10 @@ function defaultExportOptions(input: ExportThreadPdfInput) {
 }
 
 function safeExportFileName(title: string) {
+  return safeTranscriptExportFileName(title, 'pdf');
+}
+
+function safeTranscriptExportFileName(title: string, extension: 'pdf' | 'html') {
   const stem = title
     .trim()
     .toLowerCase()
@@ -2148,7 +2155,7 @@ function safeExportFileName(title: string) {
     .toISOString()
     .replace(/[-:]/g, '')
     .replace(/\.\d{3}Z$/, 'Z');
-  return `remote-codex-${stem || 'thread'}-${timestamp}.pdf`;
+  return `remote-codex-${stem || 'thread'}-${timestamp}.${extension}`;
 }
 
 export class ThreadService {
@@ -2630,6 +2637,16 @@ export class ThreadService {
     localThreadId: string,
     input: ExportThreadPdfInput,
   ): Promise<{ buffer: Buffer; filename: string }> {
+    return this.exportThreadTranscript(localThreadId, {
+      ...input,
+      format: 'pdf',
+    });
+  }
+
+  async exportThreadTranscript(
+    localThreadId: string,
+    input: ExportThreadPdfInput,
+  ): Promise<{ buffer: Buffer; filename: string; contentType: string }> {
     const { record, workspace, turns } = await this.getThreadExportBase(localThreadId);
     const totalTurnCount = turns.length;
     const selectedTurnNumbers = new Map(
@@ -2679,10 +2696,15 @@ export class ThreadService {
       profile: input.profile ?? 'review',
       options: defaultExportOptions(input),
     };
-    const buffer = await renderThreadExportPdf(snapshot);
+    const format = input.format ?? 'pdf';
+    const buffer = format === 'html'
+      ? Buffer.from(renderThreadExportStandaloneHtml(snapshot), 'utf8')
+      : await renderThreadExportPdf(snapshot);
+
     return {
       buffer,
-      filename: safeExportFileName(record.title),
+      filename: safeTranscriptExportFileName(record.title, format),
+      contentType: format === 'html' ? 'text/html; charset=utf-8' : 'application/pdf',
     };
   }
 

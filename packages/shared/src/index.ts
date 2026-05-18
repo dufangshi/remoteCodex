@@ -444,8 +444,10 @@ export interface ThreadExportTurnOptionsDto {
 
 export type ThreadExportPdfModeDto = 'latest' | 'selected';
 export type ThreadExportPdfProfileDto = 'review' | 'technical';
+export type ThreadExportFormatDto = 'pdf' | 'html';
 
 export interface ExportThreadPdfInput {
+  format?: ThreadExportFormatDto;
   mode: ThreadExportPdfModeDto;
   limit?: number;
   turnIds?: string[];

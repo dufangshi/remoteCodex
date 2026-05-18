@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { FastifyInstance, FastifyRequest } from 'fastify';
+import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 
 import {
@@ -106,6 +106,7 @@ const threadDetailQuerySchema = z.object({
 });
 
 const exportThreadPdfSchema = z.object({
+  format: z.enum(['pdf', 'html']).optional(),
   mode: z.enum(['latest', 'selected']),
   limit: z.number().int().positive().max(100).optional(),
   turnIds: z.array(z.string().min(1)).max(100).optional(),
@@ -119,9 +120,50 @@ const exportThreadPdfSchema = z.object({
   message: 'turnIds are required for selected exports.',
 });
 
+const queryBooleanSchema = z.preprocess((value) => {
+  if (value === 'true' || value === '1') {
+    return true;
+  }
+  if (value === 'false' || value === '0') {
+    return false;
+  }
+  return value;
+}, z.boolean());
+
+const exportThreadPdfQuerySchema = z.object({
+  format: z.enum(['pdf', 'html']).optional(),
+  mode: z.enum(['latest', 'selected']),
+  limit: z.coerce.number().int().positive().max(100).optional(),
+  turnIds: z.string().optional(),
+  profile: z.enum(['review', 'technical']).optional(),
+  includeTokenAndPrice: queryBooleanSchema.optional(),
+  includeCommandOutput: queryBooleanSchema.optional(),
+  includeAbsolutePaths: queryBooleanSchema.optional(),
+}).refine((query) => query.mode !== 'selected' || Boolean(query.turnIds?.trim()), {
+  message: 'turnIds are required for selected exports.',
+});
+
 const threadImageQuerySchema = z.object({
   path: z.string().min(1),
 });
+
+async function sendThreadExport(
+  app: FastifyInstance,
+  reply: FastifyReply,
+  threadId: string,
+  input: ExportThreadPdfInput,
+) {
+  const result = await app.services.threadService.exportThreadTranscript(threadId, input);
+  const encodedFilename = encodeURIComponent(result.filename);
+  reply
+    .header('content-type', result.contentType)
+    .header('content-length', String(result.buffer.byteLength))
+    .header(
+      'content-disposition',
+      `attachment; filename="${result.filename}"; filename*=UTF-8''${encodedFilename}`,
+    );
+  return reply.send(result.buffer);
+}
 
 const MAX_PROMPT_ATTACHMENTS = 10;
 const MAX_PROMPT_ATTACHMENT_BYTES = 25 * 1024 * 1024;
@@ -337,10 +379,39 @@ export async function registerThreadRoutes(app: FastifyInstance) {
     return app.services.threadService.listThreadExportTurns(params.id);
   });
 
+  app.get('/api/threads/:id/exports/pdf', async (request, reply) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const query = exportThreadPdfQuerySchema.parse(request.query);
+    const turnIds = query.turnIds
+      ?.split(',')
+      .map((turnId) => turnId.trim())
+      .filter(Boolean);
+    const options: NonNullable<ExportThreadPdfInput['options']> = {};
+    if (query.includeTokenAndPrice !== undefined) {
+      options.includeTokenAndPrice = query.includeTokenAndPrice;
+    }
+    if (query.includeCommandOutput !== undefined) {
+      options.includeCommandOutput = query.includeCommandOutput;
+    }
+    if (query.includeAbsolutePaths !== undefined) {
+      options.includeAbsolutePaths = query.includeAbsolutePaths;
+    }
+    const input: ExportThreadPdfInput = {
+      ...(query.format !== undefined ? { format: query.format } : {}),
+      mode: query.mode,
+      ...(query.limit !== undefined ? { limit: query.limit } : {}),
+      ...(turnIds !== undefined ? { turnIds } : {}),
+      ...(query.profile !== undefined ? { profile: query.profile } : {}),
+      ...(Object.keys(options).length > 0 ? { options } : {}),
+    };
+    return sendThreadExport(app, reply, params.id, input);
+  });
+
   app.post('/api/threads/:id/exports/pdf', async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const parsed = exportThreadPdfSchema.parse(request.body);
     const input: ExportThreadPdfInput = {
+      ...(parsed.format !== undefined ? { format: parsed.format } : {}),
       mode: parsed.mode,
       ...(parsed.limit !== undefined ? { limit: parsed.limit } : {}),
       ...(parsed.turnIds !== undefined ? { turnIds: parsed.turnIds } : {}),
@@ -361,11 +432,7 @@ export async function registerThreadRoutes(app: FastifyInstance) {
           }
         : {}),
     };
-    const result = await app.services.threadService.exportThreadPdf(params.id, input);
-    reply
-      .header('content-type', 'application/pdf')
-      .header('content-disposition', `attachment; filename="${result.filename}"`);
-    return reply.send(result.buffer);
+    return sendThreadExport(app, reply, params.id, input);
   });
 
   app.get('/api/threads/:id/items/:itemId/detail', async (request) => {

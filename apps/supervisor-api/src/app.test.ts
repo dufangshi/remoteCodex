@@ -814,6 +814,27 @@ describe('supervisor api', () => {
     expect(pdfResponse.headers['content-type']).toContain('application/pdf');
     expect(pdfResponse.headers['content-disposition']).toContain('remote-codex-export-thread');
     expect(pdfResponse.rawPayload.toString('utf8')).toContain('%PDF-1.4');
+
+    const downloadResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}/exports/pdf?mode=selected&turnIds=export-turn-11,export-turn-2&includeTokenAndPrice=true&includeCommandOutput=false&includeAbsolutePaths=false`,
+    });
+
+    expect(downloadResponse.statusCode).toBe(200);
+    expect(downloadResponse.headers['content-type']).toContain('application/pdf');
+    expect(downloadResponse.headers['content-disposition']).toContain('attachment');
+    expect(downloadResponse.rawPayload.toString('utf8')).toContain('%PDF-1.4');
+
+    const htmlResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}/exports/pdf?format=html&mode=selected&turnIds=export-turn-11,export-turn-2&includeTokenAndPrice=true`,
+    });
+
+    expect(htmlResponse.statusCode).toBe(200);
+    expect(htmlResponse.headers['content-type']).toContain('text/html');
+    expect(htmlResponse.headers['content-disposition']).toContain('.html');
+    expect(htmlResponse.rawPayload.toString('utf8')).toContain('<main class="share-shell">');
+    expect(htmlResponse.rawPayload.toString('utf8')).toContain('Prompt 2 with enough content');
   });
 
   it('reuses cached thread detail slices and invalidates the cache when turn history changes', async () => {
