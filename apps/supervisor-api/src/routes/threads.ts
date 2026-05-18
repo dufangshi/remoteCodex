@@ -11,6 +11,7 @@ import {
   getWorkspaceRecordById,
 } from '../../../../packages/db/src/index';
 import {
+  ExportThreadPdfInput,
   ImportThreadInput,
   ForkThreadInput,
   PromptAttachmentManifestEntryDto,
@@ -102,6 +103,20 @@ const respondThreadRequestSchema = z.object({
 const threadDetailQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(100).optional(),
   beforeTurnId: z.string().min(1).optional(),
+});
+
+const exportThreadPdfSchema = z.object({
+  mode: z.enum(['latest', 'selected']),
+  limit: z.number().int().positive().max(100).optional(),
+  turnIds: z.array(z.string().min(1)).max(100).optional(),
+  profile: z.enum(['review', 'technical']).optional(),
+  options: z.object({
+    includeTokenAndPrice: z.boolean().optional(),
+    includeCommandOutput: z.boolean().optional(),
+    includeAbsolutePaths: z.boolean().optional(),
+  }).optional(),
+}).refine((body) => body.mode !== 'selected' || (body.turnIds?.length ?? 0) > 0, {
+  message: 'turnIds are required for selected exports.',
 });
 
 const threadImageQuerySchema = z.object({
@@ -315,6 +330,42 @@ export async function registerThreadRoutes(app: FastifyInstance) {
         ? { beforeTurnId: query.beforeTurnId }
         : {}),
     });
+  });
+
+  app.get('/api/threads/:id/export-turns', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    return app.services.threadService.listThreadExportTurns(params.id);
+  });
+
+  app.post('/api/threads/:id/exports/pdf', async (request, reply) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const parsed = exportThreadPdfSchema.parse(request.body);
+    const input: ExportThreadPdfInput = {
+      mode: parsed.mode,
+      ...(parsed.limit !== undefined ? { limit: parsed.limit } : {}),
+      ...(parsed.turnIds !== undefined ? { turnIds: parsed.turnIds } : {}),
+      ...(parsed.profile !== undefined ? { profile: parsed.profile } : {}),
+      ...(parsed.options !== undefined
+        ? {
+            options: {
+              ...(parsed.options.includeTokenAndPrice !== undefined
+                ? { includeTokenAndPrice: parsed.options.includeTokenAndPrice }
+                : {}),
+              ...(parsed.options.includeCommandOutput !== undefined
+                ? { includeCommandOutput: parsed.options.includeCommandOutput }
+                : {}),
+              ...(parsed.options.includeAbsolutePaths !== undefined
+                ? { includeAbsolutePaths: parsed.options.includeAbsolutePaths }
+                : {}),
+            },
+          }
+        : {}),
+    };
+    const result = await app.services.threadService.exportThreadPdf(params.id, input);
+    reply
+      .header('content-type', 'application/pdf')
+      .header('content-disposition', `attachment; filename="${result.filename}"`);
+    return reply.send(result.buffer);
   });
 
   app.get('/api/threads/:id/items/:itemId/detail', async (request) => {

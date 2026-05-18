@@ -3,11 +3,17 @@ import os from 'node:os';
 import path from 'node:path';
 
 import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { buildApp } from './app';
 import { JsonRpcClientError } from '../../../packages/codex/src/index';
 import { FakeCodexManager } from './test/fakeCodexManager';
+
+vi.mock('puppeteer', () => ({
+  default: {
+    launch: vi.fn(),
+  },
+}));
 
 describe('supervisor api', () => {
   let tempDir = '';
@@ -732,6 +738,82 @@ describe('supervisor api', () => {
     expect(earlierDetailResponse.json().turns).toHaveLength(5);
     expect(earlierDetailResponse.json().turns[0].id).toBe('turn-1');
     expect(earlierDetailResponse.json().turns.at(-1).id).toBe('turn-5');
+  });
+
+  it('lists export turn options newest first with prompt previews and exports selected turns as a PDF', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Export Thread'
+      }
+    });
+
+    const createdThread = createResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(createdThread.codexThreadId);
+    expect(remoteThread).toBeTruthy();
+    remoteThread!.status = { type: 'idle' };
+    remoteThread!.turns = Array.from({ length: 12 }, (_, index) => ({
+      id: `export-turn-${index + 1}`,
+      status: 'completed',
+      error: null,
+      items: [
+        {
+          id: `export-user-${index + 1}`,
+          type: 'userMessage',
+          content: [
+            {
+              type: 'text',
+              text: `Prompt ${index + 1} with enough content to identify the requested export row`
+            }
+          ]
+        },
+        {
+          id: `export-agent-${index + 1}`,
+          type: 'agentMessage',
+          content: [{ type: 'text', text: `Answer ${index + 1}` }]
+        }
+      ]
+    })) as any;
+
+    const optionsResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}/export-turns`
+    });
+
+    expect(optionsResponse.statusCode).toBe(200);
+    expect(optionsResponse.json().totalTurnCount).toBe(12);
+    expect(optionsResponse.json().turns[0]).toMatchObject({
+      turnId: 'export-turn-12',
+      turnNumber: 12,
+      userPromptPreview: 'Prompt 12 with enough content to identify the requested export row'
+    });
+
+    const pdfResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/exports/pdf`,
+      payload: {
+        mode: 'selected',
+        turnIds: ['export-turn-11', 'export-turn-2'],
+      }
+    });
+
+    expect(pdfResponse.statusCode).toBe(200);
+    expect(pdfResponse.headers['content-type']).toContain('application/pdf');
+    expect(pdfResponse.headers['content-disposition']).toContain('remote-codex-export-thread');
+    expect(pdfResponse.rawPayload.toString('utf8')).toContain('%PDF-1.4');
   });
 
   it('reuses cached thread detail slices and invalidates the cache when turn history changes', async () => {

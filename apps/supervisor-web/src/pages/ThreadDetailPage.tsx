@@ -7,6 +7,7 @@ import {
   SandboxModeDto,
   SupervisorSocketServerEnvelope,
   ThreadDetailDto,
+  ThreadExportTurnOptionsDto,
   ThreadMcpServersDto,
   ThreadSkillsDto,
   ThreadDto,
@@ -15,6 +16,7 @@ import {
   ThreadTurnPriceEstimateDto,
   ThreadTurnTokenUsageDto,
 } from '../../../../packages/shared/src/index';
+import { ExportTranscriptDialog } from '../components/ExportTranscriptDialog';
 import { ThreadComposer } from '../components/ThreadComposer';
 import {
   ThreadShellPanel,
@@ -33,6 +35,7 @@ import {
   connectSupervisorEvents,
   clearThreadGoal,
   disconnectThread,
+  exportThreadPdf,
   fetchCodexHostFile,
   fetchCodexModels,
   fetchCodexStatus,
@@ -44,6 +47,7 @@ import {
   fetchSupervisorHealth,
   fetchThreads,
   fetchThreadDetail,
+  fetchThreadExportTurns,
   forkThread,
   interruptThread,
   respondToThreadRequest,
@@ -113,7 +117,7 @@ function mergeThreadIntoList(existing: ThreadDto[], thread: ThreadDto) {
 }
 
 function goalKey(goal: NonNullable<ThreadDetailDto['goal']>) {
-  return `${goal.threadId}:${goal.createdAt}:${goal.objective}`;
+  return `${goal.threadId}:${goal.objective}:${goal.createdAt}`;
 }
 
 function mergeGoalEntry(
@@ -277,6 +281,24 @@ function CopyIcon() {
   );
 }
 
+function ExportIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-4 w-4 fill-none stroke-current"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4.25 2.25h5.2l2.3 2.3v9.2h-7.5a2 2 0 0 1-2-2v-7.5a2 2 0 0 1 2-2Z" />
+      <path d="M9.25 2.5v2.25h2.25" />
+      <path d="M7 6.75v4" />
+      <path d="m5.45 9.35 1.55 1.55 1.55-1.55" />
+    </svg>
+  );
+}
+
 function RealtimeConnectionIcon({
   status,
 }: {
@@ -427,6 +449,15 @@ export function ThreadDetailPage() {
   const [expandedGoalIds, setExpandedGoalIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportTurnsState, setExportTurnsState] = useState<
+    SlashPanelState<ThreadExportTurnOptionsDto>
+  >({
+    status: 'idle',
+    data: null,
+    error: null,
+  });
   const [error, setError] = useState<string | null>(null);
 
   const flushBufferedLiveOutput = useCallback(() => {
@@ -484,7 +515,77 @@ export function ThreadDetailPage() {
       data: null,
       error: null,
     });
+    setExportDialogOpen(false);
+    setExportTurnsState({
+      status: 'idle',
+      data: null,
+      error: null,
+    });
   }, [id]);
+
+  const loadExportTurns = useCallback(async () => {
+    if (!id) {
+      return;
+    }
+
+    setExportTurnsState((current) => ({
+      status: 'loading',
+      data: current.data,
+      error: null,
+    }));
+
+    try {
+      const next = await fetchThreadExportTurns(id);
+      setExportTurnsState({
+        status: 'ready',
+        data: next,
+        error: null,
+      });
+    } catch (requestError) {
+      const message =
+        requestError instanceof ApiError
+          ? requestError.payload.message
+          : 'Unable to load export turns.';
+      setExportTurnsState((current) => ({
+        status: 'failed',
+        data: current.data,
+        error: message,
+      }));
+    }
+  }, [id]);
+
+  async function handleExportTranscript(input: Parameters<typeof exportThreadPdf>[1]) {
+    if (!id) {
+      return;
+    }
+
+    setExportBusy(true);
+    setError(null);
+    try {
+      const result = await exportThreadPdf(id, input);
+      const url = URL.createObjectURL(result.blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = result.filename;
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setExportDialogOpen(false);
+    } catch (requestError) {
+      const message =
+        requestError instanceof ApiError
+          ? requestError.payload.message
+          : 'Unable to export transcript.';
+      setExportTurnsState((current) => ({
+        status: current.status === 'idle' ? 'failed' : current.status,
+        data: current.data,
+        error: message,
+      }));
+    } finally {
+      setExportBusy(false);
+    }
+  }
 
   async function handleOpenGoal() {
     if (!id) {
@@ -2773,8 +2874,21 @@ export function ThreadDetailPage() {
       {goalIndicatorIcon}
     </button>
   );
+  const exportTranscriptButton = (
+    <button
+      type="button"
+      aria-label="Export transcript"
+      title="Export transcript"
+      onClick={() => setExportDialogOpen(true)}
+      disabled={!detail}
+      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-stone-700/90 bg-stone-900/85 text-stone-300 shadow-lg shadow-stone-950/20 transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50 lg:h-9 lg:w-9"
+    >
+      <ExportIcon />
+    </button>
+  );
   const mobileSessionConnectionButton = (
     <div className="relative flex items-center justify-end gap-1.5">
+      {exportTranscriptButton}
       {goalMonitorButton}
       {mobileSessionConnectionControl}
     </div>
@@ -2801,6 +2915,7 @@ export function ThreadDetailPage() {
         <div className="pointer-events-none absolute right-4 top-4 z-30 hidden lg:block">
           <div className="pointer-events-auto flex flex-col items-end gap-2">
             <div className="flex items-center justify-end gap-2">
+              {exportTranscriptButton}
               {goalMonitorButton}
               {desktopSessionConnectionIndicator}
             </div>
@@ -3024,6 +3139,18 @@ export function ThreadDetailPage() {
             Unable to resolve this thread.
           </div>
         )}
+        <ExportTranscriptDialog
+          open={exportDialogOpen}
+          busy={exportBusy}
+          turnsState={exportTurnsState}
+          onCancel={() => {
+            if (!exportBusy) {
+              setExportDialogOpen(false);
+            }
+          }}
+          onLoadTurns={loadExportTurns}
+          onExport={handleExportTranscript}
+        />
       </div>
     </ThreadWorkspaceLayout>
   );

@@ -429,6 +429,34 @@ export interface ThreadDetailDto {
   liveItems?: ThreadLiveItemsDto | null;
 }
 
+export interface ThreadExportTurnOptionDto {
+  turnId: string;
+  turnNumber: number;
+  startedAt: string | null;
+  status: ThreadTurnDto['status'];
+  userPromptPreview: string;
+}
+
+export interface ThreadExportTurnOptionsDto {
+  turns: ThreadExportTurnOptionDto[];
+  totalTurnCount: number;
+}
+
+export type ThreadExportPdfModeDto = 'latest' | 'selected';
+export type ThreadExportPdfProfileDto = 'review' | 'technical';
+
+export interface ExportThreadPdfInput {
+  mode: ThreadExportPdfModeDto;
+  limit?: number;
+  turnIds?: string[];
+  profile?: ThreadExportPdfProfileDto;
+  options?: {
+    includeTokenAndPrice?: boolean;
+    includeCommandOutput?: boolean;
+    includeAbsolutePaths?: boolean;
+  };
+}
+
 export interface ThreadForkTurnOptionDto {
   turnId: string;
   turnIndex: number;

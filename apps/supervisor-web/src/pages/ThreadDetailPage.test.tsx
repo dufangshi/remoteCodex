@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const shellPanelMock = vi.hoisted(() => ({
   toggleConnection: vi.fn(async () => undefined),
@@ -131,6 +131,18 @@ function okJsonResponse(payload: unknown) {
   });
 }
 
+function okBlobResponse(blob: Blob, headers: Record<string, string> = {}) {
+  return Promise.resolve({
+    ok: true,
+    blob: async () => blob,
+    headers: {
+      get(name: string) {
+        return headers[name.toLowerCase()] ?? null;
+      },
+    },
+  });
+}
+
 function healthzPayload() {
   return {
     status: 'ok' as const,
@@ -201,6 +213,11 @@ const modelOptionsResponse = [
 ];
 
 describe('ThreadDetailPage', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(() => {
     FakeWebSocket.instances = [];
     shellPanelMock.toggleConnection.mockClear();
@@ -255,6 +272,28 @@ describe('ThreadDetailPage', () => {
             updatedAt: new Date().toISOString(),
             lastTurnStartedAt: new Date().toISOString(),
             lastTurnCompletedAt: null,
+          });
+        }
+
+        if (url.endsWith('/api/threads/thread-1/export-turns')) {
+          return okJsonResponse({
+            totalTurnCount: 2,
+            turns: [
+              {
+                turnId: 'turn-2',
+                turnNumber: 2,
+                startedAt: new Date().toISOString(),
+                status: 'completed',
+                userPromptPreview: 'Second prompt preview'
+              },
+              {
+                turnId: 'turn-1',
+                turnNumber: 1,
+                startedAt: new Date().toISOString(),
+                status: 'completed',
+                userPromptPreview: 'hello'
+              }
+            ]
           });
         }
 
@@ -413,6 +452,166 @@ describe('ThreadDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Thread Meta/i }));
 
     expect(screen.queryByText('/tmp/demo')).not.toBeInTheDocument();
+  });
+
+  it('opens transcript export selection and posts selected turns for PDF download', async () => {
+    const createObjectUrl = vi.fn(() => 'blob:export-pdf');
+    const revokeObjectUrl = vi.fn();
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: createObjectUrl,
+      revokeObjectURL: revokeObjectUrl,
+    });
+    const anchorClicks: string[] = [];
+    const originalCreateElement = document.createElement.bind(document);
+    vi.spyOn(document, 'createElement').mockImplementation((tagName: string) => {
+      const element = originalCreateElement(tagName);
+      if (tagName.toLowerCase() === 'a') {
+        vi.spyOn(element, 'click').mockImplementation(() => {
+          anchorClicks.push((element as HTMLAnchorElement).download);
+        });
+      }
+      return element;
+    });
+
+    vi.stubGlobal(
+      'fetch',
+      withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+
+        if (url.includes('/api/codex/status')) {
+          return okJsonResponse({
+            state: 'ready',
+            transport: 'stdio',
+            lastStartedAt: new Date().toISOString(),
+            lastError: null,
+            restartCount: 0,
+          });
+        }
+        if (url.includes('/api/codex/models')) {
+          return okJsonResponse(modelOptionsResponse);
+        }
+        if (url.endsWith('/api/threads')) {
+          return okJsonResponse([]);
+        }
+        if (url.endsWith('/api/threads/thread-1/export-turns')) {
+          return okJsonResponse({
+            totalTurnCount: 2,
+            turns: [
+              {
+                turnId: 'turn-2',
+                turnNumber: 2,
+                startedAt: '2026-05-17T12:00:00.000Z',
+                status: 'completed',
+                userPromptPreview: 'Second prompt preview',
+              },
+              {
+                turnId: 'turn-1',
+                turnNumber: 1,
+                startedAt: '2026-05-17T11:00:00.000Z',
+                status: 'completed',
+                userPromptPreview: 'hello',
+              },
+            ],
+          });
+        }
+        if (url.endsWith('/api/threads/thread-1/exports/pdf') && init?.method === 'POST') {
+          expect(JSON.parse(String(init.body))).toMatchObject({
+            mode: 'selected',
+            turnIds: ['turn-2'],
+            profile: 'review',
+            options: {
+              includeTokenAndPrice: true,
+              includeCommandOutput: false,
+              includeAbsolutePaths: false,
+            },
+          });
+          return okBlobResponse(new Blob(['pdf'], { type: 'application/pdf' }), {
+            'content-disposition': 'attachment; filename="remote-codex-demo.pdf"',
+          });
+        }
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
+          return okJsonResponse({
+            thread: {
+              id: 'thread-1',
+              workspaceId: 'workspace-1',
+              codexThreadId: 'codex-1',
+              source: 'supervisor',
+              title: 'Demo Thread',
+              model: 'gpt-5',
+              reasoningEffort: 'medium',
+              collaborationMode: 'default',
+              approvalMode: 'yolo',
+              status: 'idle',
+              summaryText: 'Preview',
+              lastError: null,
+              activeTurnId: null,
+              isLoaded: true,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: null,
+              lastTurnCompletedAt: null,
+            },
+            workspace: {
+              id: 'workspace-1',
+              hostId: 'host-1',
+              label: 'Demo Workspace',
+              absPath: '/tmp/demo',
+              isFavorite: false,
+              createdAt: new Date().toISOString(),
+              lastOpenedAt: null,
+            },
+            workspacePathStatus: 'present',
+            pendingRequests: [],
+            pendingSteers: [],
+            turns: [
+              {
+                id: 'turn-1',
+                startedAt: new Date().toISOString(),
+                status: 'completed',
+                error: null,
+                items: [
+                  {
+                    id: 'item-1',
+                    kind: 'userMessage',
+                    text: 'hello',
+                  },
+                ],
+              },
+            ],
+          });
+        }
+
+        return Promise.reject(new Error(`Unexpected request: ${url}`));
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: 'Export transcript' }).length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Export transcript' })[0]!);
+    await screen.findByRole('dialog', { name: 'Export transcript' });
+    fireEvent.click(screen.getByRole('button', { name: 'Custom selection' }));
+    await screen.findByText('Second prompt preview');
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    fireEvent.click(screen.getByText('Second prompt preview'));
+    fireEvent.click(screen.getByRole('button', { name: 'Export PDF' }));
+
+    await waitFor(() => {
+      expect(anchorClicks).toEqual(['remote-codex-demo.pdf']);
+    });
+    expect(createObjectUrl).toHaveBeenCalled();
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:export-pdf');
   });
 
   it('keeps the shell panel mounted across chat and shell view switches', async () => {
@@ -3038,13 +3237,13 @@ describe('ThreadDetailPage', () => {
               threadId: 'codex-1',
               localGoalId: null,
               objective: '现在审查/home/u/dev/EIAgente/references/EI...',
-              status: 'active',
+              status: 'complete',
               tokenBudget: null,
               tokensUsed: 6100,
               timeUsedSeconds: 0,
               createdAt,
-              updatedAt: '2026-05-08T20:12:01.000Z',
-              completedAt: null,
+              updatedAt: '2026-05-08T20:12:00.000Z',
+              completedAt: '2026-05-08T20:12:00.000Z',
             },
             goalHistory: [
               {
@@ -3056,7 +3255,7 @@ describe('ThreadDetailPage', () => {
                 tokensUsed: 6100,
                 timeUsedSeconds: 0,
                 createdAt,
-                updatedAt: '2026-05-08T20:12:00.000Z',
+                updatedAt: '2026-05-08T20:12:01.000Z',
                 completedAt: null,
               },
             ],

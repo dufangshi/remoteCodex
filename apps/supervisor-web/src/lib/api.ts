@@ -7,6 +7,7 @@ import type {
   CodexStatusDto,
   CreateCodexHostConfigArchiveInput,
   CreateThreadInput,
+  ExportThreadPdfInput,
   ForkThreadInput,
   CreateWorkspaceInput,
   HealthDto,
@@ -24,6 +25,7 @@ import type {
   SupervisorSocketClientEnvelope,
   SupervisorSocketServerEnvelope,
   ThreadDetailDto,
+  ThreadExportTurnOptionsDto,
   ThreadHistoryItemDetailDto,
   ThreadGoalDto,
   UpdateThreadGoalInput,
@@ -38,9 +40,11 @@ import type {
   UpdateThreadSettingsInput,
   UpdateCodexHostFileInput,
   UpdateThreadInput,
+  UpdateWorkspaceSettingsInput,
   UpdateWorkspaceInput,
   UpdateWorkspaceFavoriteInput,
   WorkspaceDto,
+  WorkspaceSettingsDto,
 } from '../../../../packages/shared/src/index';
 
 export class ApiError extends Error {
@@ -96,6 +100,19 @@ function normalizedUploadFileName(attachment: PromptAttachmentUpload, index: num
 
 export function fetchRuntimeConfig() {
   return request<RuntimeConfigDto>('/api/config/runtime');
+}
+
+export function fetchWorkspaceSettings() {
+  return request<WorkspaceSettingsDto>('/api/config/workspace-settings', {
+    cache: 'no-store',
+  });
+}
+
+export function updateWorkspaceSettings(input: UpdateWorkspaceSettingsInput) {
+  return request<WorkspaceSettingsDto>('/api/config/workspace-settings', {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
 }
 
 export function fetchCodexHostFile(name: CodexHostFileNameDto) {
@@ -207,6 +224,35 @@ export function fetchThreadHistoryItemDetail(id: string, itemId: string) {
   return request<ThreadHistoryItemDetailDto>(
     `/api/threads/${id}/items/${encodeURIComponent(itemId)}/detail`,
   );
+}
+
+export function fetchThreadExportTurns(id: string) {
+  return request<ThreadExportTurnOptionsDto>(`/api/threads/${id}/export-turns`, {
+    cache: 'no-store',
+  });
+}
+
+export async function exportThreadPdf(id: string, input: ExportThreadPdfInput) {
+  const response = await fetch(`/api/threads/${id}/exports/pdf`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    const payload = (await response.json()) as ApiErrorShape;
+    throw new ApiError(response.status, payload);
+  }
+
+  const blob = await response.blob();
+  const disposition = response.headers.get('content-disposition') ?? '';
+  const filenameMatch = /filename="([^"]+)"/.exec(disposition);
+  return {
+    blob,
+    filename: filenameMatch?.[1] ?? 'remote-codex-transcript.pdf',
+  };
 }
 
 export function fetchThreadShellState(id: string) {
