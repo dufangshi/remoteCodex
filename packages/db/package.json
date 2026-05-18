@@ -12,7 +12,7 @@
     "db:migrate": "tsx src/migrate.ts"
   },
   "dependencies": {
-    "better-sqlite3": "^11.9.1",
+    "better-sqlite3": "^12.10.0",
     "drizzle-orm": "^0.43.1"
   }
 }

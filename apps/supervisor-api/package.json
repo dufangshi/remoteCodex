@@ -13,7 +13,7 @@
   "dependencies": {
     "@fastify/multipart": "^9.0.3",
     "@fastify/websocket": "^11.0.2",
-    "better-sqlite3": "^11.9.1",
+    "better-sqlite3": "^12.10.0",
     "fastify": "^5.2.1",
     "marked": "^18.0.3",
     "zod": "^3.24.2"
