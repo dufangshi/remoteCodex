@@ -127,19 +127,16 @@ function emitSocketEvent(socket: FakeWebSocket, type: string) {
 function okJsonResponse(payload: unknown) {
   return Promise.resolve({
     ok: true,
+    headers: new Headers(),
     json: async () => payload,
   });
 }
 
-function okBlobResponse(blob: Blob, headers: Record<string, string> = {}) {
+function okBlobResponse(payload: Blob, headers: Record<string, string> = {}) {
   return Promise.resolve({
     ok: true,
-    blob: async () => blob,
-    headers: {
-      get(name: string) {
-        return headers[name.toLowerCase()] ?? null;
-      },
-    },
+    headers: new Headers(headers),
+    blob: async () => payload,
   });
 }
 
@@ -454,25 +451,22 @@ describe('ThreadDetailPage', () => {
     expect(screen.queryByText('/tmp/demo')).not.toBeInTheDocument();
   });
 
-  it('opens transcript export selection and posts selected turns for PDF download', async () => {
-    const createObjectUrl = vi.fn(() => 'blob:export-pdf');
-    const revokeObjectUrl = vi.fn();
-    vi.stubGlobal('URL', {
-      ...URL,
-      createObjectURL: createObjectUrl,
-      revokeObjectURL: revokeObjectUrl,
-    });
-    const anchorClicks: string[] = [];
+  it('opens transcript export selection and starts a native PDF download', async () => {
+    const downloads: Array<{ href: string; filename: string }> = [];
     const originalCreateElement = document.createElement.bind(document);
     vi.spyOn(document, 'createElement').mockImplementation((tagName: string) => {
       const element = originalCreateElement(tagName);
       if (tagName.toLowerCase() === 'a') {
         vi.spyOn(element, 'click').mockImplementation(() => {
-          anchorClicks.push((element as HTMLAnchorElement).download);
+          downloads.push({
+            href: (element as HTMLAnchorElement).href,
+            filename: (element as HTMLAnchorElement).download,
+          });
         });
       }
       return element;
     });
+    const exportRequests: string[] = [];
 
     vi.stubGlobal(
       'fetch',
@@ -515,18 +509,9 @@ describe('ThreadDetailPage', () => {
             ],
           });
         }
-        if (url.endsWith('/api/threads/thread-1/exports/pdf') && init?.method === 'POST') {
-          expect(JSON.parse(String(init.body))).toMatchObject({
-            mode: 'selected',
-            turnIds: ['turn-2'],
-            profile: 'review',
-            options: {
-              includeTokenAndPrice: true,
-              includeCommandOutput: false,
-              includeAbsolutePaths: false,
-            },
-          });
-          return okBlobResponse(new Blob(['pdf'], { type: 'application/pdf' }), {
+        if (url.includes('/api/threads/thread-1/exports/pdf?')) {
+          exportRequests.push(url);
+          return okBlobResponse(new Blob(['%PDF-1.4'], { type: 'application/pdf' }), {
             'content-disposition': 'attachment; filename="remote-codex-demo.pdf"',
           });
         }
@@ -608,10 +593,144 @@ describe('ThreadDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Export PDF' }));
 
     await waitFor(() => {
-      expect(anchorClicks).toEqual(['remote-codex-demo.pdf']);
+      expect(downloads).toHaveLength(1);
     });
-    expect(createObjectUrl).toHaveBeenCalled();
-    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:export-pdf');
+    expect(downloads[0]!.href).toContain('blob:');
+    expect(downloads[0]!.filename).toBe('remote-codex-demo.pdf');
+    expect(exportRequests).toHaveLength(1);
+    expect(exportRequests[0]).toContain('/api/threads/thread-1/exports/pdf?');
+    expect(exportRequests[0]).toContain('mode=selected');
+    expect(exportRequests[0]).toContain('turnIds=turn-2');
+    expect(exportRequests[0]).toContain('includeTokenAndPrice=true');
+    expect(exportRequests[0]).not.toContain('includeCommandOutput');
+    expect(exportRequests[0]).not.toContain('includeAbsolutePaths');
+  });
+
+  it('exports selected turns as standalone HTML when requested', async () => {
+    const downloads: Array<{ href: string; filename: string }> = [];
+    const originalCreateElement = document.createElement.bind(document);
+    vi.spyOn(document, 'createElement').mockImplementation((tagName: string) => {
+      const element = originalCreateElement(tagName);
+      if (tagName.toLowerCase() === 'a') {
+        vi.spyOn(element, 'click').mockImplementation(() => {
+          downloads.push({
+            href: (element as HTMLAnchorElement).href,
+            filename: (element as HTMLAnchorElement).download,
+          });
+        });
+      }
+      return element;
+    });
+    const exportRequests: string[] = [];
+
+    vi.stubGlobal(
+      'fetch',
+      withHealthz((input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.includes('/api/codex/status')) {
+          return okJsonResponse({
+            state: 'ready',
+            transport: 'stdio',
+            lastStartedAt: new Date().toISOString(),
+            lastError: null,
+            restartCount: 0,
+          });
+        }
+        if (url.includes('/api/codex/models')) {
+          return okJsonResponse(modelOptionsResponse);
+        }
+        if (url.endsWith('/api/threads')) {
+          return okJsonResponse([]);
+        }
+        if (url.endsWith('/api/threads/thread-1/export-turns')) {
+          return okJsonResponse({
+            totalTurnCount: 1,
+            turns: [
+              {
+                turnId: 'turn-1',
+                turnNumber: 1,
+                startedAt: '2026-05-17T11:00:00.000Z',
+                status: 'completed',
+                userPromptPreview: 'hello',
+              },
+            ],
+          });
+        }
+        if (url.includes('/api/threads/thread-1/exports/pdf?')) {
+          exportRequests.push(url);
+          return okBlobResponse(new Blob(['<!doctype html>'], { type: 'text/html' }), {
+            'content-disposition': 'attachment; filename="remote-codex-demo.html"',
+          });
+        }
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
+          return okJsonResponse({
+            thread: {
+              id: 'thread-1',
+              workspaceId: 'workspace-1',
+              codexThreadId: 'codex-1',
+              source: 'supervisor',
+              title: 'Demo Thread',
+              model: 'gpt-5',
+              reasoningEffort: 'medium',
+              collaborationMode: 'default',
+              approvalMode: 'yolo',
+              status: 'idle',
+              summaryText: 'Preview',
+              lastError: null,
+              activeTurnId: null,
+              isLoaded: true,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: null,
+              lastTurnCompletedAt: null,
+            },
+            workspace: {
+              id: 'workspace-1',
+              hostId: 'host-1',
+              label: 'Demo Workspace',
+              absPath: '/tmp/demo',
+              isFavorite: false,
+              createdAt: new Date().toISOString(),
+              lastOpenedAt: null,
+            },
+            workspacePathStatus: 'present',
+            pendingRequests: [],
+            pendingSteers: [],
+            turns: [],
+          });
+        }
+
+        return Promise.reject(new Error(`Unexpected request: ${url}`));
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: 'Export transcript' }).length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Export transcript' })[0]!);
+    await screen.findByRole('dialog', { name: 'Export transcript' });
+    fireEvent.click(screen.getByRole('button', { name: 'HTML' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Export HTML' }));
+
+    await waitFor(() => {
+      expect(downloads).toHaveLength(1);
+    });
+    expect(downloads[0]!.filename).toBe('remote-codex-demo.html');
+    expect(exportRequests).toHaveLength(1);
+    expect(exportRequests[0]).toContain('format=html');
+    expect(exportRequests[0]).toContain('mode=latest');
+    expect(exportRequests[0]).toContain('limit=10');
   });
 
   it('keeps the shell panel mounted across chat and shell view switches', async () => {

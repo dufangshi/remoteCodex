@@ -31,11 +31,12 @@ import {
 } from '../components/threadPresentation';
 import {
   ApiError,
+  buildThreadPdfExportUrl,
   compactThread,
   connectSupervisorEvents,
   clearThreadGoal,
   disconnectThread,
-  exportThreadPdf,
+  downloadThreadTranscriptExport,
   fetchCodexHostFile,
   fetchCodexModels,
   fetchCodexStatus,
@@ -554,34 +555,31 @@ export function ThreadDetailPage() {
     }
   }, [id]);
 
-  async function handleExportTranscript(input: Parameters<typeof exportThreadPdf>[1]) {
+  async function handleExportTranscript(input: Parameters<typeof buildThreadPdfExportUrl>[1]) {
     if (!id) {
       return;
     }
 
-    setExportBusy(true);
     setError(null);
+    setExportBusy(true);
+
     try {
-      const result = await exportThreadPdf(id, input);
-      const url = URL.createObjectURL(result.blob);
+      const { blob, filename } = await downloadThreadTranscriptExport(id, input);
+      const href = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = result.filename;
+      anchor.href = href;
+      anchor.download = filename;
       document.body.append(anchor);
       anchor.click();
       anchor.remove();
-      URL.revokeObjectURL(url);
+      window.setTimeout(() => URL.revokeObjectURL(href), 30_000);
       setExportDialogOpen(false);
     } catch (requestError) {
       const message =
         requestError instanceof ApiError
           ? requestError.payload.message
           : 'Unable to export transcript.';
-      setExportTurnsState((current) => ({
-        status: current.status === 'idle' ? 'failed' : current.status,
-        data: current.data,
-        error: message,
-      }));
+      setError(message);
     } finally {
       setExportBusy(false);
     }

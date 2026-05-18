@@ -3,11 +3,13 @@ import { createPortal } from 'react-dom';
 
 import type {
   ExportThreadPdfInput,
+  ThreadExportFormatDto,
   ThreadExportTurnOptionDto,
   ThreadExportTurnOptionsDto,
 } from '../../../../packages/shared/src/index';
 
 type ExportMode = 'latest' | 'selected';
+type ExportFormat = ThreadExportFormatDto;
 
 interface ExportTranscriptDialogProps {
   open: boolean;
@@ -69,8 +71,7 @@ export function ExportTranscriptDialog({
     () => new Set(),
   );
   const [includeTokenAndPrice, setIncludeTokenAndPrice] = useState(true);
-  const [includeCommandOutput, setIncludeCommandOutput] = useState(false);
-  const [includeAbsolutePaths, setIncludeAbsolutePaths] = useState(false);
+  const [format, setFormat] = useState<ExportFormat>('pdf');
 
   useEffect(() => {
     if (!open) {
@@ -78,9 +79,8 @@ export function ExportTranscriptDialog({
     }
 
     setMode('latest');
+    setFormat('pdf');
     setIncludeTokenAndPrice(true);
-    setIncludeCommandOutput(false);
-    setIncludeAbsolutePaths(false);
     void onLoadTurns();
   }, [onLoadTurns, open]);
 
@@ -127,6 +127,7 @@ export function ExportTranscriptDialog({
 
   function handleExport() {
     const input: ExportThreadPdfInput = {
+      format,
       mode,
       ...(mode === 'latest'
         ? { limit: 10 }
@@ -134,8 +135,6 @@ export function ExportTranscriptDialog({
       profile: 'review',
       options: {
         includeTokenAndPrice,
-        includeCommandOutput,
-        includeAbsolutePaths,
       },
     };
     void onExport(input);
@@ -188,6 +187,26 @@ export function ExportTranscriptDialog({
                 onClick={() => setMode(entryMode as ExportMode)}
                 className={`rounded-full px-3 py-1.5 text-sm transition ${
                   mode === entryMode
+                    ? 'ui-status-warning'
+                    : 'text-stone-400 hover:text-stone-100'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-4 inline-flex rounded-full border border-stone-700 bg-stone-950/60 p-1">
+            {[
+              ['pdf', 'PDF'],
+              ['html', 'HTML'],
+            ].map(([entryFormat, label]) => (
+              <button
+                key={entryFormat}
+                type="button"
+                onClick={() => setFormat(entryFormat as ExportFormat)}
+                className={`rounded-full px-3 py-1.5 text-sm transition ${
+                  format === entryFormat
                     ? 'ui-status-warning'
                     : 'text-stone-400 hover:text-stone-100'
                 }`}
@@ -260,7 +279,7 @@ export function ExportTranscriptDialog({
             </p>
           )}
 
-          <div className="mt-4 grid gap-2 text-sm text-stone-300 sm:grid-cols-3">
+          <div className="mt-4 grid gap-2 text-sm text-stone-300 sm:grid-cols-2">
             <label className="flex items-center gap-2 rounded-xl border border-stone-800 bg-stone-950/35 px-3 py-2">
               <input
                 type="checkbox"
@@ -270,24 +289,11 @@ export function ExportTranscriptDialog({
               />
               Token and price
             </label>
-            <label className="flex items-center gap-2 rounded-xl border border-stone-800 bg-stone-950/35 px-3 py-2">
-              <input
-                type="checkbox"
-                checked={includeCommandOutput}
-                onChange={(event) => setIncludeCommandOutput(event.target.checked)}
-                className="h-4 w-4 accent-amber-300"
-              />
-              Command output
-            </label>
-            <label className="flex items-center gap-2 rounded-xl border border-stone-800 bg-stone-950/35 px-3 py-2">
-              <input
-                type="checkbox"
-                checked={includeAbsolutePaths}
-                onChange={(event) => setIncludeAbsolutePaths(event.target.checked)}
-                className="h-4 w-4 accent-amber-300"
-              />
-              Absolute paths
-            </label>
+            <p className="flex items-center rounded-xl border border-stone-800 bg-stone-950/35 px-3 py-2 text-xs text-stone-500">
+              {format === 'html'
+                ? 'HTML keeps the chat timeline styling and omits raw command output.'
+                : 'Review exports keep message text readable and omit tool activity.'}
+            </p>
           </div>
         </div>
 
@@ -310,7 +316,7 @@ export function ExportTranscriptDialog({
               disabled={!canExport}
               className="ui-status-warning rounded-full px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {busy ? 'Exporting...' : 'Export PDF'}
+              {busy ? 'Exporting...' : `Export ${format.toUpperCase()}`}
             </button>
           </div>
         </div>

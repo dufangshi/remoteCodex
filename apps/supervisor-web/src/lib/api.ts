@@ -8,6 +8,7 @@ import type {
   CreateCodexHostConfigArchiveInput,
   CreateThreadInput,
   ExportThreadPdfInput,
+  ThreadExportFormatDto,
   ForkThreadInput,
   CreateWorkspaceInput,
   HealthDto,
@@ -56,6 +57,11 @@ export class ApiError extends Error {
   }
 }
 
+export interface FileDownloadResult {
+  blob: Blob;
+  filename: string;
+}
+
 async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (init?.body !== undefined && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
@@ -73,6 +79,67 @@ async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   }
 
   return (await response.json()) as T;
+}
+
+function fallbackDownloadFilename(input: RequestInfo | URL) {
+  const url = String(input);
+  if (!url.includes('/exports/pdf')) {
+    return 'download';
+  }
+
+  return url.includes('format=html')
+    ? 'remote-codex-transcript.html'
+    : 'remote-codex-transcript.pdf';
+}
+
+function parseContentDispositionFilename(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const utf8Match = value.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1].trim());
+    } catch {
+      return utf8Match[1].trim();
+    }
+  }
+
+  const quotedMatch = value.match(/filename="([^"]+)"/i);
+  if (quotedMatch?.[1]) {
+    return quotedMatch[1].trim();
+  }
+
+  const plainMatch = value.match(/filename=([^;]+)/i);
+  return plainMatch?.[1]?.trim() ?? null;
+}
+
+async function downloadFile(input: RequestInfo | URL, init?: RequestInit): Promise<FileDownloadResult> {
+  const response = await fetch(input, init);
+
+  if (!response.ok) {
+    let payload: ApiErrorShape | null = null;
+    try {
+      payload = (await response.json()) as ApiErrorShape;
+    } catch {
+      payload = null;
+    }
+
+    throw new ApiError(response.status, payload ?? {
+      code: 'internal_error',
+      message: 'Unable to download file.',
+    });
+  }
+
+  const filename =
+    parseContentDispositionFilename(response.headers.get('content-disposition')) ??
+    fallbackDownloadFilename(input);
+
+  return {
+    blob: await response.blob(),
+    filename,
+  };
 }
 
 export interface PromptAttachmentUpload
@@ -232,27 +299,47 @@ export function fetchThreadExportTurns(id: string) {
   });
 }
 
-export async function exportThreadPdf(id: string, input: ExportThreadPdfInput) {
-  const response = await fetch(`/api/threads/${id}/exports/pdf`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(input),
-  });
-
-  if (!response.ok) {
-    const payload = (await response.json()) as ApiErrorShape;
-    throw new ApiError(response.status, payload);
+export function buildThreadPdfExportUrl(id: string, input: ExportThreadPdfInput) {
+  const params = new URLSearchParams();
+  if (input.format !== undefined) {
+    params.set('format', input.format);
+  }
+  params.set('mode', input.mode);
+  if (input.limit !== undefined) {
+    params.set('limit', String(input.limit));
+  }
+  if (input.turnIds !== undefined) {
+    params.set('turnIds', input.turnIds.join(','));
+  }
+  if (input.profile !== undefined) {
+    params.set('profile', input.profile);
+  }
+  if (input.options?.includeTokenAndPrice !== undefined) {
+    params.set('includeTokenAndPrice', String(input.options.includeTokenAndPrice));
+  }
+  if (input.options?.includeCommandOutput !== undefined) {
+    params.set('includeCommandOutput', String(input.options.includeCommandOutput));
+  }
+  if (input.options?.includeAbsolutePaths !== undefined) {
+    params.set('includeAbsolutePaths', String(input.options.includeAbsolutePaths));
   }
 
-  const blob = await response.blob();
-  const disposition = response.headers.get('content-disposition') ?? '';
-  const filenameMatch = /filename="([^"]+)"/.exec(disposition);
-  return {
-    blob,
-    filename: filenameMatch?.[1] ?? 'remote-codex-transcript.pdf',
-  };
+  return `/api/threads/${encodeURIComponent(id)}/exports/pdf?${params.toString()}`;
+}
+
+export function downloadThreadPdfExport(id: string, input: ExportThreadPdfInput) {
+  return downloadFile(buildThreadPdfExportUrl(id, input), {
+    cache: 'no-store',
+  });
+}
+
+export function downloadThreadTranscriptExport(
+  id: string,
+  input: ExportThreadPdfInput & { format?: ThreadExportFormatDto },
+) {
+  return downloadFile(buildThreadPdfExportUrl(id, input), {
+    cache: 'no-store',
+  });
 }
 
 export function fetchThreadShellState(id: string) {
