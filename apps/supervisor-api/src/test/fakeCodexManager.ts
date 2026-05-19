@@ -60,6 +60,7 @@ export class FakeCodexManager extends EventEmitter {
   skillsEntries: CodexSkillsListEntry[] = [];
   mcpServers: CodexMcpServerRecord[] = [];
   hooksEntries: CodexHooksListEntry[] = [];
+  hooksListError: JsonRpcClientError | null = null;
   goals = new Map<string, CodexThreadGoalRecord>();
   goalSetCalls: ThreadGoalSetInput[] = [];
   goalClearCalls: string[] = [];
@@ -112,6 +113,10 @@ export class FakeCodexManager extends EventEmitter {
   }
 
   async listHooks(_input: { cwds?: string[] } = {}) {
+    if (this.hooksListError) {
+      throw this.hooksListError;
+    }
+
     return this.hooksEntries;
   }
 

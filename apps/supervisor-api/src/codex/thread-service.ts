@@ -454,6 +454,21 @@ function isRemoteThreadBootstrapError(error: unknown) {
   );
 }
 
+function isUnsupportedHooksListError(error: unknown) {
+  if (!(error instanceof JsonRpcClientError) || error.code !== 'remote_error') {
+    return false;
+  }
+
+  const remoteCode = error.details?.code;
+  const message = error.message.toLowerCase();
+  return (
+    remoteCode === -32601 ||
+    message.includes('endpoint not found') ||
+    message.includes('method not found') ||
+    (message.includes('hooks/list') && message.includes('not found'))
+  );
+}
+
 type TurnSteerRace =
   | { type: 'missing' }
   | { type: 'turnIdMismatch'; actualTurnId: string };
@@ -4423,11 +4438,23 @@ export class ThreadService {
       });
     }
 
-    const [entry] = await this.codexManager.listHooks({
-      cwds: [workspace.absPath],
-    });
+    let entry: Awaited<ReturnType<CodexAppServerManager['listHooks']>>[number] | undefined;
+    let fallbackWarnings: string[] = [];
+    try {
+      [entry] = await this.codexManager.listHooks({
+        cwds: [workspace.absPath],
+      });
+    } catch (error) {
+      if (!isUnsupportedHooksListError(error)) {
+        throw error;
+      }
 
-    return this.toThreadHooksDto(workspace.absPath, entry);
+      fallbackWarnings = [
+        'Codex app-server does not expose hooks/list yet; showing hooks parsed from hooks.json only.',
+      ];
+    }
+
+    return this.toThreadHooksDto(workspace.absPath, entry, fallbackWarnings);
   }
 
   async createThreadHook(
@@ -5366,6 +5393,7 @@ export class ThreadService {
   private async toThreadHooksDto(
     workspacePath: string,
     entry: Awaited<ReturnType<CodexAppServerManager['listHooks']>>[number] | undefined,
+    fallbackWarnings: string[] = [],
   ): Promise<ThreadHooksDto> {
     const globalHooksPath = path.join(this.codexHome, 'hooks.json');
     const projectHooksPath = path.join(workspacePath, '.codex', 'hooks.json');
@@ -5416,7 +5444,7 @@ export class ThreadService {
       hooks: [...hooksBySignature.values()].sort(
         (left, right) => left.displayOrder - right.displayOrder,
       ),
-      warnings: entry?.warnings ?? [],
+      warnings: [...fallbackWarnings, ...(entry?.warnings ?? [])],
       errors: entry?.errors ?? [],
       globalHooksPath,
       projectHooksPath,

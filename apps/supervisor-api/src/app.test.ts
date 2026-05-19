@@ -3102,6 +3102,87 @@ describe('supervisor api', () => {
     );
   });
 
+  it('falls back to hooks.json when the codex app-server has no hooks/list endpoint', async () => {
+    const workspacePath = path.join(tempDir, 'workspace');
+    await fs.mkdir(path.join(workspacePath, '.codex'), { recursive: true });
+    await fs.writeFile(
+      path.join(workspacePath, '.codex/hooks.json'),
+      `${JSON.stringify(
+        {
+          hooks: {
+            PreToolUse: [
+              {
+                matcher: 'Bash',
+                hooks: [
+                  {
+                    type: 'command',
+                    command: 'node project-hook.js',
+                    timeout: 12,
+                    statusMessage: 'Checking Bash',
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+    fakeCodexManager.hooksListError = new JsonRpcClientError(
+      'endpoint not found: hooks/list',
+      'remote_error',
+      {
+        code: -32601,
+      },
+    );
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: workspacePath,
+      },
+    });
+    const workspace = workspaceResponse.json();
+
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Hooks Fallback Thread',
+      },
+    });
+    const createdThread = createResponse.json();
+
+    const hooksResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}/hooks`,
+    });
+
+    expect(hooksResponse.statusCode).toBe(200);
+    expect(hooksResponse.json()).toMatchObject({
+      cwd: workspacePath,
+      warnings: [
+        'Codex app-server does not expose hooks/list yet; showing hooks parsed from hooks.json only.',
+      ],
+      hooks: [
+        {
+          eventName: 'preToolUse',
+          matcher: 'Bash',
+          command: 'node project-hook.js',
+          timeoutSec: 12,
+          statusMessage: 'Checking Bash',
+          source: 'project',
+        },
+      ],
+    });
+  });
+
   it('truncates imported auto-derived thread titles to the first fifteen characters', async () => {
     const importedWorkspace = path.join(tempDir, 'imported-project');
     await fs.mkdir(importedWorkspace);
