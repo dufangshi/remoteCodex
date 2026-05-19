@@ -8,6 +8,7 @@ import {
   SupervisorSocketServerEnvelope,
   ThreadDetailDto,
   ThreadExportTurnOptionsDto,
+  ThreadHooksDto,
   ThreadMcpServersDto,
   ThreadSkillsDto,
   ThreadDto,
@@ -34,6 +35,7 @@ import {
   buildThreadPdfExportUrl,
   compactThread,
   connectSupervisorEvents,
+  createThreadHook,
   clearThreadGoal,
   disconnectThread,
   downloadThreadTranscriptExport,
@@ -42,6 +44,7 @@ import {
   fetchCodexStatus,
   fetchThreadForkTurns,
   fetchThreadGoal,
+  fetchThreadHooks,
   fetchThreadMcpServers,
   fetchThreadHistoryItemDetail,
   fetchThreadSkills,
@@ -59,6 +62,7 @@ import {
   updateThread,
   updateCodexHostFile,
   updateThreadGoal,
+  updateThreadHook,
   updateThreadSettings,
 } from '../lib/api';
 
@@ -431,6 +435,11 @@ export function ThreadDetailPage() {
     data: null,
     error: null,
   });
+  const [hooksState, setHooksState] = useState<SlashPanelState<ThreadHooksDto>>({
+    status: 'idle',
+    data: null,
+    error: null,
+  });
   const [forkTurnOptionsState, setForkTurnOptionsState] = useState<
     SlashPanelState<ThreadForkTurnOptionDto[]>
   >({
@@ -502,6 +511,11 @@ export function ThreadDetailPage() {
       error: null,
     });
     setMcpState({
+      status: 'idle',
+      data: null,
+      error: null,
+    });
+    setHooksState({
       status: 'idle',
       data: null,
       error: null,
@@ -800,6 +814,98 @@ export function ThreadDetailPage() {
             ? requestError.payload.message
             : 'Unable to load MCP servers.',
       }));
+    }
+  }
+
+  async function handleOpenHooks() {
+    if (!id) {
+      return;
+    }
+
+    setHooksState((current) => ({
+      status: 'loading',
+      data: current.data,
+      error: null,
+    }));
+
+    try {
+      const next = await fetchThreadHooks(id);
+      setHooksState({
+        status: 'ready',
+        data: next,
+        error: null,
+      });
+    } catch (requestError) {
+      setHooksState((current) => ({
+        status: 'failed',
+        data: current.data,
+        error:
+          requestError instanceof ApiError
+            ? requestError.payload.message
+            : 'Unable to load hooks.',
+      }));
+    }
+  }
+
+  async function handleCreateHook(input: Parameters<typeof createThreadHook>[1]) {
+    if (!id) {
+      return;
+    }
+
+    setHooksState((current) => ({
+      status: 'loading',
+      data: current.data,
+      error: null,
+    }));
+
+    try {
+      const next = await createThreadHook(id, input);
+      setHooksState({
+        status: 'ready',
+        data: next,
+        error: null,
+      });
+    } catch (requestError) {
+      setHooksState((current) => ({
+        status: 'failed',
+        data: current.data,
+        error:
+          requestError instanceof ApiError
+            ? requestError.payload.message
+            : 'Unable to create hook.',
+      }));
+      throw requestError;
+    }
+  }
+
+  async function handleUpdateHook(input: Parameters<typeof updateThreadHook>[1]) {
+    if (!id) {
+      return;
+    }
+
+    setHooksState((current) => ({
+      status: 'loading',
+      data: current.data,
+      error: null,
+    }));
+
+    try {
+      const next = await updateThreadHook(id, input);
+      setHooksState({
+        status: 'ready',
+        data: next,
+        error: null,
+      });
+    } catch (requestError) {
+      setHooksState((current) => ({
+        status: 'failed',
+        data: current.data,
+        error:
+          requestError instanceof ApiError
+            ? requestError.payload.message
+            : 'Unable to update hook.',
+      }));
+      throw requestError;
     }
   }
 
@@ -1596,7 +1702,17 @@ export function ThreadDetailPage() {
             const nextItems = [
               ...currentItems.filter((item) => item.id !== liveItem.id),
               liveItem,
-            ];
+            ].sort((left, right) => {
+              const leftSequence =
+                typeof left.sequence === 'number' && Number.isFinite(left.sequence)
+                  ? left.sequence
+                  : Number.POSITIVE_INFINITY;
+              const rightSequence =
+                typeof right.sequence === 'number' && Number.isFinite(right.sequence)
+                  ? right.sequence
+                  : Number.POSITIVE_INFINITY;
+              return leftSequence === rightSequence ? 0 : leftSequence - rightSequence;
+            });
             return {
               turnId: eventTurnId,
               items: nextItems,
@@ -3015,6 +3131,9 @@ export function ThreadDetailPage() {
                       onForkTurn={handleForkTurn}
                       onOpenSkills={handleOpenSkills}
                       onOpenMcp={handleOpenMcp}
+                      onOpenHooks={handleOpenHooks}
+                      onCreateHook={handleCreateHook}
+                      onUpdateHook={handleUpdateHook}
                       goalState={goalState}
                       onOpenGoal={handleOpenGoal}
                       onUpdateGoal={handleUpdateGoal}
@@ -3030,6 +3149,7 @@ export function ThreadDetailPage() {
                       compactBusy={compactBusy}
                       skillsState={skillsState}
                       mcpState={mcpState}
+                      hooksState={hooksState}
                       forkTurnOptionsState={forkTurnOptionsState}
                     />
                   </div>
@@ -3063,6 +3183,9 @@ export function ThreadDetailPage() {
                       onForkTurn={handleForkTurn}
                       onOpenSkills={handleOpenSkills}
                       onOpenMcp={handleOpenMcp}
+                      onOpenHooks={handleOpenHooks}
+                      onCreateHook={handleCreateHook}
+                      onUpdateHook={handleUpdateHook}
                       goalState={goalState}
                       onOpenGoal={handleOpenGoal}
                       onUpdateGoal={handleUpdateGoal}
@@ -3078,6 +3201,7 @@ export function ThreadDetailPage() {
                       compactBusy={compactBusy}
                       skillsState={skillsState}
                       mcpState={mcpState}
+                      hooksState={hooksState}
                       forkTurnOptionsState={forkTurnOptionsState}
                     />
                   </div>

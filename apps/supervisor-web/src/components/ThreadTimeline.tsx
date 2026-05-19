@@ -465,7 +465,31 @@ function mergeLiveTurnItems(
     return items;
   }
 
-  return [...items, ...uniqueLiveItems];
+  const mergedItems = [...items, ...uniqueLiveItems];
+  if (
+    !mergedItems.some(
+      (item) => typeof item.sequence === 'number' && Number.isFinite(item.sequence),
+    )
+  ) {
+    return mergedItems;
+  }
+
+  return mergedItems
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => {
+      const leftSequence =
+        typeof left.item.sequence === 'number' && Number.isFinite(left.item.sequence)
+          ? left.item.sequence
+          : Number.POSITIVE_INFINITY;
+      const rightSequence =
+        typeof right.item.sequence === 'number' && Number.isFinite(right.item.sequence)
+          ? right.item.sequence
+          : Number.POSITIVE_INFINITY;
+      return leftSequence === rightSequence
+        ? left.index - right.index
+        : leftSequence - rightSequence;
+    })
+    .map((entry) => entry.item);
 }
 
 function getLiveOutputTailForTurn(

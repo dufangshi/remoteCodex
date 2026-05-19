@@ -16,6 +16,10 @@ import {
 import type {
   CollaborationModeDto,
   CodexHostFileDto,
+  CodexHookEventNameDto,
+  CodexHookDto,
+  CreateThreadHookInput,
+  ThreadHooksDto,
   ThreadMcpServersDto,
   ThreadSkillsDto,
   ThreadForkTurnOptionDto,
@@ -25,6 +29,7 @@ import type {
   PromptAttachmentKindDto,
   ThreadContextUsageDto,
   ReasoningEffortDto,
+  UpdateThreadHookInput,
   UpdateThreadSettingsInput,
 } from '../../../../packages/shared/src/index';
 import type { ThreadShellControlState } from './ThreadShellPanel';
@@ -52,6 +57,7 @@ interface ThreadComposerProps {
   draftAttachments?: PromptAttachmentUpload[] | undefined;
   skillsState?: SlashPanelState<ThreadSkillsDto>;
   mcpState?: SlashPanelState<ThreadMcpServersDto>;
+  hooksState?: SlashPanelState<ThreadHooksDto>;
   forkTurnOptionsState?: SlashPanelState<ThreadForkTurnOptionDto[]>;
   goalState?: SlashPanelState<ThreadGoalDto | null | undefined>;
   onDraftChange?: Dispatch<
@@ -68,6 +74,9 @@ interface ThreadComposerProps {
   onCompact?: () => Promise<void> | void;
   onOpenSkills?: () => Promise<void> | void;
   onOpenMcp?: () => Promise<void> | void;
+  onOpenHooks?: () => Promise<void> | void;
+  onCreateHook?: (input: CreateThreadHookInput) => Promise<void> | void;
+  onUpdateHook?: (input: UpdateThreadHookInput) => Promise<void> | void;
   onOpenGoal?: () => Promise<void> | void;
   onUpdateGoal?: (input: {
     objective?: string | null;
@@ -121,8 +130,20 @@ interface PromptAttachmentSegment {
 
 type PromptSegment = PromptTextSegment | PromptAttachmentSegment;
 type AttachmentPreviewMap = Record<string, string>;
-type SlashPanelView = 'root' | 'skills' | 'mcp' | 'fork' | 'forkTurns';
+type SlashPanelView = 'root' | 'skills' | 'mcp' | 'hooks' | 'fork' | 'forkTurns';
 type McpPanelMode = 'list' | 'add' | 'http' | 'stdio';
+type HooksPanelMode = 'list' | 'add' | 'edit';
+
+const HOOK_EVENT_OPTIONS: Array<{ value: CodexHookEventNameDto; label: string; matcherHint: string }> = [
+  { value: 'preToolUse', label: 'PreToolUse', matcherHint: 'Bash' },
+  { value: 'permissionRequest', label: 'PermissionRequest', matcherHint: 'Bash' },
+  { value: 'postToolUse', label: 'PostToolUse', matcherHint: 'Bash' },
+  { value: 'sessionStart', label: 'SessionStart', matcherHint: 'startup|resume' },
+  { value: 'userPromptSubmit', label: 'UserPromptSubmit', matcherHint: '' },
+  { value: 'stop', label: 'Stop', matcherHint: '' },
+  { value: 'preCompact', label: 'PreCompact', matcherHint: '' },
+  { value: 'postCompact', label: 'PostCompact', matcherHint: '' },
+];
 
 function normalizePromptText(value: string) {
   return value.replace(/\u00a0/g, ' ');
@@ -286,6 +307,83 @@ function skillScopeLabel(
     default:
       return 'User';
   }
+}
+
+function hookEventLabel(value: CodexHookEventNameDto) {
+  return HOOK_EVENT_OPTIONS.find((entry) => entry.value === value)?.label ?? value;
+}
+
+function hookSourceLabel(value: ThreadHooksDto['hooks'][number]['source']) {
+  switch (value) {
+    case 'cloudRequirements':
+      return 'Cloud';
+    case 'legacyManagedConfigFile':
+    case 'legacyManagedConfigMdm':
+      return 'Managed';
+    case 'sessionFlags':
+      return 'Session';
+    default:
+      return value[0]?.toUpperCase() + value.slice(1);
+  }
+}
+
+function hookTrustLabel(value: ThreadHooksDto['hooks'][number]['trustStatus']) {
+  switch (value) {
+    case 'managed':
+      return 'Managed';
+    case 'modified':
+      return 'Modified';
+    case 'trusted':
+      return 'Trusted';
+    case 'untrusted':
+      return 'Review';
+  }
+}
+
+function hookEventJsonKey(value: CodexHookEventNameDto) {
+  switch (value) {
+    case 'preToolUse':
+      return 'PreToolUse';
+    case 'permissionRequest':
+      return 'PermissionRequest';
+    case 'postToolUse':
+      return 'PostToolUse';
+    case 'preCompact':
+      return 'PreCompact';
+    case 'postCompact':
+      return 'PostCompact';
+    case 'sessionStart':
+      return 'SessionStart';
+    case 'userPromptSubmit':
+      return 'UserPromptSubmit';
+    case 'stop':
+      return 'Stop';
+  }
+}
+
+function hookScopeFromRecord(hook: CodexHookDto): CreateThreadHookInput['scope'] | null {
+  if (hook.source === 'user') {
+    return 'global';
+  }
+  if (hook.source === 'project') {
+    return 'project';
+  }
+  return null;
+}
+
+function editableHookTarget(hook: CodexHookDto): UpdateThreadHookInput['target'] | null {
+  const scope = hookScopeFromRecord(hook);
+  if (!scope || hook.handlerType !== 'command' || !hook.command || hook.isManaged) {
+    return null;
+  }
+  return {
+    scope,
+    eventName: hook.eventName,
+    matcher: hook.matcher,
+    command: hook.command,
+    timeoutSec: hook.timeoutSec,
+    statusMessage: hook.statusMessage,
+  };
 }
 
 function goalStatusLabel(value: ThreadGoalStatusDto) {
@@ -683,6 +781,11 @@ export function ThreadComposer({
     data: null,
     error: null,
   },
+  hooksState = {
+    status: 'idle',
+    data: null,
+    error: null,
+  },
   goalState = {
     status: 'idle',
     data: null,
@@ -699,6 +802,9 @@ export function ThreadComposer({
   onCompact,
   onOpenSkills,
   onOpenMcp,
+  onOpenHooks,
+  onCreateHook,
+  onUpdateHook,
   onOpenGoal,
   onUpdateGoal,
   onOpenForkTurns,
@@ -723,6 +829,19 @@ export function ThreadComposer({
   const [openMenu, setOpenMenu] = useState<SettingsMenu>(null);
   const [slashPanelView, setSlashPanelView] = useState<SlashPanelView>('root');
   const [mcpPanelMode, setMcpPanelMode] = useState<McpPanelMode>('list');
+  const [hooksPanelMode, setHooksPanelMode] = useState<HooksPanelMode>('list');
+  const [hookScope, setHookScope] = useState<CreateThreadHookInput['scope']>('project');
+  const [hookEventName, setHookEventName] = useState<CodexHookEventNameDto>('preToolUse');
+  const [hookMatcher, setHookMatcher] = useState('Bash');
+  const [hookCommand, setHookCommand] = useState(
+    'node -e "process.stdin.resume(); process.stdin.on(\'end\', () => console.error(\'remote-codex hook ran\'))"',
+  );
+  const [hookTimeoutSec, setHookTimeoutSec] = useState('30');
+  const [hookStatusMessage, setHookStatusMessage] = useState('Running hook');
+  const [editingHookTarget, setEditingHookTarget] = useState<UpdateThreadHookInput['target'] | null>(null);
+  const [hookConfigBusy, setHookConfigBusy] = useState(false);
+  const [hookConfigError, setHookConfigError] = useState<string | null>(null);
+  const [hookConfigSuccess, setHookConfigSuccess] = useState<string | null>(null);
   const [mcpHttpName, setMcpHttpName] = useState('');
   const [mcpHttpUrl, setMcpHttpUrl] = useState('');
   const [mcpRawBlock, setMcpRawBlock] = useState('');
@@ -768,6 +887,9 @@ export function ThreadComposer({
       setMcpPanelMode('list');
       setMcpConfigError(null);
       setMcpConfigSuccess(null);
+      setHooksPanelMode('list');
+      setHookConfigError(null);
+      setHookConfigSuccess(null);
     }
   }, [openMenu]);
 
@@ -784,6 +906,26 @@ export function ThreadComposer({
       setForkBusy(false);
     }
   }, [slashPanelView]);
+
+  useEffect(() => {
+    if (slashPanelView !== 'hooks') {
+      setHooksPanelMode('list');
+      setHookConfigError(null);
+      setHookConfigSuccess(null);
+    }
+  }, [slashPanelView]);
+
+  useEffect(() => {
+    const selected = HOOK_EVENT_OPTIONS.find((entry) => entry.value === hookEventName);
+    setHookMatcher((current) => {
+      const trimmed = current.trim();
+      const knownHints = new Set(HOOK_EVENT_OPTIONS.map((entry) => entry.matcherHint).filter(Boolean));
+      if (trimmed && !knownHints.has(trimmed)) {
+        return current;
+      }
+      return selected?.matcherHint ?? '';
+    });
+  }, [hookEventName]);
 
   useEffect(() => {
     if (!copiedSkillName) {
@@ -1014,6 +1156,36 @@ export function ThreadComposer({
     return updated;
   }
 
+  function resetHookForm() {
+    setEditingHookTarget(null);
+    setHookScope('project');
+    setHookEventName('preToolUse');
+    setHookMatcher('Bash');
+    setHookCommand(
+      'node -e "process.stdin.resume(); process.stdin.on(\'end\', () => console.error(\'remote-codex hook ran\'))"',
+    );
+    setHookTimeoutSec('30');
+    setHookStatusMessage('Running hook');
+  }
+
+  function startEditingHook(hook: CodexHookDto) {
+    const target = editableHookTarget(hook);
+    if (!target) {
+      setHookConfigError('Only command hooks in global or project hooks.json can be edited here.');
+      return;
+    }
+    setEditingHookTarget(target);
+    setHookScope(target.scope);
+    setHookEventName(target.eventName);
+    setHookMatcher(target.matcher ?? '');
+    setHookCommand(target.command);
+    setHookTimeoutSec(target.timeoutSec ? String(target.timeoutSec) : '');
+    setHookStatusMessage(target.statusMessage ?? '');
+    setHookConfigError(null);
+    setHookConfigSuccess(null);
+    setHooksPanelMode('edit');
+  }
+
   async function handleSaveHttpMcp() {
     const name = parseMcpServerName(mcpHttpName);
     const url = mcpHttpUrl.trim();
@@ -1110,6 +1282,73 @@ export function ThreadComposer({
       );
     } finally {
       setMcpConfigBusy(false);
+    }
+  }
+
+  async function handleSaveHook() {
+    if (hooksPanelMode === 'edit' && !onUpdateHook) {
+      setHookConfigError('Hook editing is unavailable in this view.');
+      return;
+    }
+    if (hooksPanelMode !== 'edit' && !onCreateHook) {
+      setHookConfigError('Hook editing is unavailable in this view.');
+      return;
+    }
+    if (hooksPanelMode === 'edit' && !editingHookTarget) {
+      setHookConfigError('Select a hook to edit first.');
+      return;
+    }
+
+    const command = hookCommand.trim();
+    if (!command) {
+      setHookConfigError('Hook command cannot be empty.');
+      return;
+    }
+
+    const normalizedTimeout = hookTimeoutSec.trim();
+    const timeoutSec = normalizedTimeout ? Number(normalizedTimeout) : null;
+    if (
+      normalizedTimeout &&
+      (timeoutSec === null || !Number.isInteger(timeoutSec) || timeoutSec <= 0)
+    ) {
+      setHookConfigError('Timeout must be a positive number of seconds.');
+      return;
+    }
+
+    setHookConfigBusy(true);
+    setHookConfigError(null);
+    setHookConfigSuccess(null);
+
+    try {
+      const payload = {
+        scope: hookScope,
+        eventName: hookEventName,
+        matcher: hookMatcher.trim() || null,
+        command,
+        timeoutSec,
+        statusMessage: hookStatusMessage.trim() || null,
+      };
+      if (hooksPanelMode === 'edit') {
+        await onUpdateHook?.({
+          ...payload,
+          target: editingHookTarget!,
+        });
+      } else {
+        await onCreateHook?.(payload);
+      }
+      setHookConfigSuccess(
+        `${hookScope === 'project' ? 'Project' : 'Global'} hook ${
+          hooksPanelMode === 'edit' ? 'updated' : 'written'
+        } in hooks.json.`,
+      );
+      setHooksPanelMode('list');
+      setEditingHookTarget(null);
+    } catch (error) {
+      setHookConfigError(
+        error instanceof Error ? error.message : 'Unable to write hooks.json.',
+      );
+    } finally {
+      setHookConfigBusy(false);
     }
   }
 
@@ -2129,6 +2368,22 @@ export function ThreadComposer({
                             </span>
                           </div>
                         </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setSlashPanelView('hooks');
+                            void onOpenHooks?.();
+                          }}
+                          className="thread-composer-menu-item mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm transition"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <span>/hooks</span>
+                            <span className="text-[11px] uppercase tracking-[0.16em] text-stone-400">
+                              View
+                            </span>
+                          </div>
+                        </button>
                       </div>
                     ) : (
                       <div className="max-h-80 overflow-auto">
@@ -2286,6 +2541,257 @@ export function ThreadComposer({
                             (skillsState.data?.errors.length ?? 0) === 0 ? (
                               <p className="rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3 text-sm text-stone-400">
                                 No skills available right now.
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : slashPanelView === 'hooks' ? (
+                          <div className="p-2">
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="text-xs text-stone-400">
+                                  Hook config sources
+                                </p>
+                                <p className="truncate text-[11px] text-stone-500">
+                                  {hooksState.data?.projectHooksPath ?? '<workspace>/.codex/hooks.json'}
+                                </p>
+                              </div>
+                              {hooksPanelMode === 'list' ? (
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    resetHookForm();
+                                    setHooksPanelMode('add');
+                                    setHookConfigError(null);
+                                    setHookConfigSuccess(null);
+                                  }}
+                                  className="shrink-0 rounded-full border border-sky-300/35 px-3 py-1.5 text-xs text-sky-100 transition hover:bg-sky-300/10"
+                                >
+                                  Add Hook
+                                </button>
+                              ) : null}
+                            </div>
+                            {hooksState.status === 'loading' && !hooksState.data ? (
+                              <p className="rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3 text-sm text-stone-400">
+                                Loading hooks…
+                              </p>
+                            ) : null}
+                            {hooksState.error ? (
+                              <p className="mb-2 rounded-xl border border-rose-500/35 bg-rose-500/10 px-3 py-3 text-sm text-rose-100/90">
+                                {hooksState.error}
+                              </p>
+                            ) : null}
+                            {hookConfigError ? (
+                              <p className="mb-2 rounded-xl border border-rose-500/35 bg-rose-500/10 px-3 py-3 text-sm text-rose-100/90">
+                                {hookConfigError}
+                              </p>
+                            ) : null}
+                            {hookConfigSuccess ? (
+                              <p className="mb-2 rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-3 py-3 text-sm text-emerald-100/90">
+                                {hookConfigSuccess}
+                              </p>
+                            ) : null}
+                            {hooksPanelMode === 'add' || hooksPanelMode === 'edit' ? (
+                              <div className="space-y-2 rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3">
+                                {hooksPanelMode === 'edit' ? (
+                                  <p className="rounded-lg border border-stone-800 bg-stone-950 px-3 py-2 text-[11px] text-stone-400">
+                                    Editing {hookEventJsonKey(editingHookTarget?.eventName ?? hookEventName)} in{' '}
+                                    {editingHookTarget?.scope === 'global' ? 'global' : 'project'} hooks.json
+                                  </p>
+                                ) : null}
+                                <div className="grid grid-cols-2 gap-2">
+                                  <label className="block text-xs text-stone-400">
+                                    Scope
+                                    <select
+                                      aria-label="Hook scope"
+                                      value={hookScope}
+                                      onChange={(event) =>
+                                        setHookScope(event.target.value as CreateThreadHookInput['scope'])
+                                      }
+                                      disabled={hooksPanelMode === 'edit'}
+                                      className="mt-1 w-full rounded-lg border border-stone-700 bg-stone-950 px-2.5 py-2 text-sm text-stone-100 outline-none focus:border-sky-300/50"
+                                    >
+                                      <option value="project">Project</option>
+                                      <option value="global">Global</option>
+                                    </select>
+                                  </label>
+                                  <label className="block text-xs text-stone-400">
+                                    Event
+                                    <select
+                                      aria-label="Hook event"
+                                      value={hookEventName}
+                                      onChange={(event) =>
+                                        setHookEventName(event.target.value as CodexHookEventNameDto)
+                                      }
+                                      className="mt-1 w-full rounded-lg border border-stone-700 bg-stone-950 px-2.5 py-2 text-sm text-stone-100 outline-none focus:border-sky-300/50"
+                                    >
+                                      {HOOK_EVENT_OPTIONS.map((eventOption) => (
+                                        <option key={eventOption.value} value={eventOption.value}>
+                                          {eventOption.label}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                </div>
+                                <div>
+                                  <label className="mb-1 block text-xs text-stone-400">
+                                    Matcher
+                                  </label>
+                                  <input
+                                    aria-label="Hook matcher"
+                                    value={hookMatcher}
+                                    onChange={(event) => setHookMatcher(event.target.value)}
+                                    placeholder="Bash"
+                                    className="w-full rounded-lg border border-stone-700 bg-stone-950 px-3 py-2 text-sm text-stone-100 outline-none placeholder:text-stone-500 focus:border-sky-300/50"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="mb-1 block text-xs text-stone-400">
+                                    Command
+                                  </label>
+                                  <textarea
+                                    aria-label="Hook command"
+                                    value={hookCommand}
+                                    onChange={(event) => setHookCommand(event.target.value)}
+                                    rows={3}
+                                    className="w-full rounded-lg border border-stone-700 bg-stone-950 px-3 py-2 font-mono text-xs text-stone-100 outline-none placeholder:text-stone-500 focus:border-sky-300/50"
+                                  />
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <label className="block text-xs text-stone-400">
+                                    Timeout
+                                    <input
+                                      aria-label="Hook timeout seconds"
+                                      value={hookTimeoutSec}
+                                      onChange={(event) => setHookTimeoutSec(event.target.value)}
+                                      inputMode="numeric"
+                                      className="mt-1 w-full rounded-lg border border-stone-700 bg-stone-950 px-3 py-2 text-sm text-stone-100 outline-none focus:border-sky-300/50"
+                                    />
+                                  </label>
+                                  <label className="block text-xs text-stone-400">
+                                    Status message
+                                    <input
+                                      aria-label="Hook status message"
+                                      value={hookStatusMessage}
+                                      onChange={(event) => setHookStatusMessage(event.target.value)}
+                                      className="mt-1 w-full rounded-lg border border-stone-700 bg-stone-950 px-3 py-2 text-sm text-stone-100 outline-none focus:border-sky-300/50"
+                                    />
+                                  </label>
+                                </div>
+                                <div className="flex items-center justify-between gap-2 pt-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setHooksPanelMode('list');
+                                      setEditingHookTarget(null);
+                                    }}
+                                    className="thread-composer-chip-button rounded-full border border-stone-700 px-3 py-1.5 text-xs text-stone-300 transition"
+                                  >
+                                    Back
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleSaveHook()}
+                                    disabled={hookConfigBusy}
+                                    className="ui-status-info rounded-full px-3 py-1.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-60"
+                                  >
+                                    {hookConfigBusy
+                                      ? 'Saving…'
+                                      : hooksPanelMode === 'edit'
+                                        ? 'Update Hook'
+                                        : 'Write Hook'}
+                                  </button>
+                                </div>
+                              </div>
+                            ) : null}
+                            {hooksPanelMode === 'list' && hooksState.data?.warnings.length ? (
+                              <div className="mb-2 space-y-2">
+                                {hooksState.data.warnings.map((warning) => (
+                                  <p
+                                    key={warning}
+                                    className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-100/85"
+                                  >
+                                    {warning}
+                                  </p>
+                                ))}
+                              </div>
+                            ) : null}
+                            {hooksPanelMode === 'list' && hooksState.data?.errors.length ? (
+                              <div className="mb-2 space-y-2">
+                                {hooksState.data.errors.map((entry) => (
+                                  <div
+                                    key={`${entry.path}:${entry.message}`}
+                                    className="rounded-xl border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs text-rose-100/90"
+                                  >
+                                    <p className="font-medium">{entry.message}</p>
+                                    <p className="mt-1 break-all text-rose-100/60">
+                                      {entry.path}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                            {hooksPanelMode === 'list' && hooksState.data?.hooks.length ? (
+                              <div className="space-y-2">
+                                {hooksState.data.hooks.map((hook) => (
+                                  <div
+                                    key={hook.key}
+                                    className="rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-2.5"
+                                  >
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div className="min-w-0">
+                                        <p className="truncate text-sm font-medium text-stone-100">
+                                          {hookEventLabel(hook.eventName)}
+                                          {hook.matcher ? ` · ${hook.matcher}` : ''}
+                                        </p>
+                                        <p className="mt-0.5 truncate font-mono text-[11px] text-stone-400">
+                                          {hook.command ?? hook.handlerType}
+                                        </p>
+                                        {hook.statusMessage ? (
+                                          <p className="mt-1 truncate text-[11px] text-stone-500">
+                                            {hook.statusMessage}
+                                          </p>
+                                        ) : null}
+                                      </div>
+                                      <div className="flex shrink-0 items-center gap-1.5">
+                                        {editableHookTarget(hook) ? (
+                                          <button
+                                            type="button"
+                                            onClick={(event) => {
+                                              event.stopPropagation();
+                                              startEditingHook(hook);
+                                            }}
+                                            className="rounded-full border border-sky-300/30 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-sky-100 transition hover:bg-sky-300/10"
+                                          >
+                                            Edit
+                                          </button>
+                                        ) : null}
+                                        <span className="rounded-full border border-stone-700 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-stone-300">
+                                          {hookTrustLabel(hook.trustStatus)}
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] text-stone-500">
+                                      <span className="rounded-full border border-stone-700 px-2 py-1">
+                                        {hookSourceLabel(hook.source)}
+                                      </span>
+                                      <span className="rounded-full border border-stone-700 px-2 py-1">
+                                        {hook.enabled ? 'Enabled' : 'Disabled'}
+                                      </span>
+                                      <span className="rounded-full border border-stone-700 px-2 py-1">
+                                        {hook.timeoutSec}s
+                                      </span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                            {hooksPanelMode === 'list' &&
+                            hooksState.status !== 'loading' &&
+                            !hooksState.error &&
+                            (hooksState.data?.hooks.length ?? 0) === 0 ? (
+                              <p className="rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3 text-sm text-stone-400">
+                                No hooks configured for this workspace.
                               </p>
                             ) : null}
                           </div>

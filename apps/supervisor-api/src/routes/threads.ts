@@ -13,6 +13,7 @@ import {
 import {
   ExportThreadPdfInput,
   ImportThreadInput,
+  CreateThreadHookInput,
   ForkThreadInput,
   PromptAttachmentManifestEntryDto,
   ReasoningEffortDto,
@@ -21,6 +22,7 @@ import {
   SandboxModeDto,
   SendThreadPromptInput,
   UpdateThreadGoalInput,
+  UpdateThreadHookInput,
   UpdateThreadSettingsInput,
   UpdateThreadInput,
 } from '../../../../packages/shared/src/index';
@@ -93,6 +95,30 @@ const forkThreadSchema = z.discriminatedUnion('mode', [
     turnId: z.string().min(1),
   }),
 ]);
+
+const hookEventNameSchema = z.enum([
+  'preToolUse',
+  'permissionRequest',
+  'postToolUse',
+  'preCompact',
+  'postCompact',
+  'sessionStart',
+  'userPromptSubmit',
+  'stop',
+]);
+
+const createThreadHookSchema = z.object({
+  scope: z.enum(['global', 'project']),
+  eventName: hookEventNameSchema,
+  matcher: z.string().nullable().optional(),
+  command: z.string().trim().min(1),
+  timeoutSec: z.number().int().positive().max(86_400).nullable().optional(),
+  statusMessage: z.string().nullable().optional(),
+});
+
+const updateThreadHookSchema = createThreadHookSchema.extend({
+  target: createThreadHookSchema,
+});
 
 const respondThreadRequestSchema = z.object({
   answers: z.record(z.string(), z.object({
@@ -596,6 +622,57 @@ export async function registerThreadRoutes(app: FastifyInstance) {
   app.get('/api/threads/:id/mcp-servers', async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     return app.services.threadService.listThreadMcpServers(params.id);
+  });
+
+  app.get('/api/threads/:id/hooks', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    return app.services.threadService.listThreadHooks(params.id);
+  });
+
+  app.post('/api/threads/:id/hooks', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const parsedBody = createThreadHookSchema.parse(request.body);
+    const body: CreateThreadHookInput = {
+      scope: parsedBody.scope,
+      eventName: parsedBody.eventName,
+      command: parsedBody.command,
+      ...(parsedBody.matcher !== undefined ? { matcher: parsedBody.matcher } : {}),
+      ...(parsedBody.timeoutSec !== undefined ? { timeoutSec: parsedBody.timeoutSec } : {}),
+      ...(parsedBody.statusMessage !== undefined
+        ? { statusMessage: parsedBody.statusMessage }
+        : {}),
+    };
+    return app.services.threadService.createThreadHook(params.id, body);
+  });
+
+  app.put('/api/threads/:id/hooks', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const parsedBody = updateThreadHookSchema.parse(request.body);
+    const body: UpdateThreadHookInput = {
+      scope: parsedBody.scope,
+      eventName: parsedBody.eventName,
+      command: parsedBody.command,
+      target: {
+        scope: parsedBody.target.scope,
+        eventName: parsedBody.target.eventName,
+        command: parsedBody.target.command,
+        ...(parsedBody.target.matcher !== undefined
+          ? { matcher: parsedBody.target.matcher }
+          : {}),
+        ...(parsedBody.target.timeoutSec !== undefined
+          ? { timeoutSec: parsedBody.target.timeoutSec }
+          : {}),
+        ...(parsedBody.target.statusMessage !== undefined
+          ? { statusMessage: parsedBody.target.statusMessage }
+          : {}),
+      },
+      ...(parsedBody.matcher !== undefined ? { matcher: parsedBody.matcher } : {}),
+      ...(parsedBody.timeoutSec !== undefined ? { timeoutSec: parsedBody.timeoutSec } : {}),
+      ...(parsedBody.statusMessage !== undefined
+        ? { statusMessage: parsedBody.statusMessage }
+        : {}),
+    };
+    return app.services.threadService.updateThreadHook(params.id, body);
   });
 
   app.post('/api/threads/:id/resume', async (request) => {

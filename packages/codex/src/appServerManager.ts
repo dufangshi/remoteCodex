@@ -5,6 +5,8 @@ import { JsonRpcClient, JsonRpcClientError } from './jsonrpc';
 import {
   AppServerStatusSnapshot,
   CodexClientInfo,
+  CodexHooksListEntry,
+  CodexHookRecord,
   CodexMcpServerRecord,
   CodexModelRecord,
   CodexServerRequest,
@@ -124,6 +126,54 @@ function mapMcpServer(record: any): CodexMcpServerRecord {
     resourceTemplateCount: Array.isArray(record.resourceTemplates)
       ? record.resourceTemplates.length
       : 0,
+  };
+}
+
+function numberFromProtocolInteger(value: unknown, fallback = 0) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'bigint') {
+    return Number(value);
+  }
+  if (typeof value === 'string') {
+    const numericValue = Number(value);
+    return Number.isFinite(numericValue) ? numericValue : fallback;
+  }
+  return fallback;
+}
+
+function mapHook(record: any): CodexHookRecord {
+  return {
+    key: record.key,
+    eventName: record.eventName,
+    handlerType: record.handlerType,
+    matcher: record.matcher ?? null,
+    command: record.command ?? null,
+    timeoutSec: numberFromProtocolInteger(record.timeoutSec ?? record.timeout_sec, 600),
+    statusMessage: record.statusMessage ?? record.status_message ?? null,
+    sourcePath: String(record.sourcePath ?? record.source_path ?? ''),
+    source: record.source ?? 'unknown',
+    pluginId: record.pluginId ?? record.plugin_id ?? null,
+    displayOrder: numberFromProtocolInteger(record.displayOrder ?? record.display_order),
+    enabled: record.enabled === true,
+    isManaged: record.isManaged === true || record.is_managed === true,
+    currentHash: record.currentHash ?? record.current_hash ?? '',
+    trustStatus: record.trustStatus ?? record.trust_status ?? 'untrusted',
+  };
+}
+
+function mapHooksListEntry(record: any): CodexHooksListEntry {
+  return {
+    cwd: record.cwd,
+    hooks: Array.isArray(record.hooks) ? record.hooks.map(mapHook) : [],
+    warnings: Array.isArray(record.warnings) ? record.warnings.map(String) : [],
+    errors: Array.isArray(record.errors)
+      ? record.errors.map((error: any) => ({
+          path: String(error.path ?? ''),
+          message: String(error.message ?? ''),
+        }))
+      : [],
   };
 }
 
@@ -295,6 +345,14 @@ export class CodexAppServerManager extends EventEmitter {
     } while (cursor);
 
     return servers;
+  }
+
+  async listHooks(input: { cwds?: string[] } = {}) {
+    await this.ensureReady();
+    const response = await this.client!.request<{ data: any[] }>('hooks/list', {
+      ...(input.cwds && input.cwds.length > 0 ? { cwds: input.cwds } : {}),
+    });
+    return response.data.map(mapHooksListEntry);
   }
 
   async startThread(input: ThreadStartInput) {

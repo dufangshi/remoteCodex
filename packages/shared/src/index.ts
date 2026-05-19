@@ -209,12 +209,14 @@ export interface ThreadHistoryItemDto {
     | 'commandExecution'
     | 'webSearch'
     | 'fileChange'
+    | 'hook'
     | 'toolCall'
     | 'other';
   text: string;
   previewText?: string;
   detailText?: string | null;
   hasDeferredDetail?: boolean | null;
+  sequence?: number | null;
   status?: string | null;
   assetPath?: string | null;
   changedFiles?: number | null;
@@ -364,6 +366,84 @@ export interface CodexMcpServerDto {
 
 export interface ThreadMcpServersDto {
   servers: CodexMcpServerDto[];
+}
+
+export type CodexHookEventNameDto =
+  | 'preToolUse'
+  | 'permissionRequest'
+  | 'postToolUse'
+  | 'preCompact'
+  | 'postCompact'
+  | 'sessionStart'
+  | 'userPromptSubmit'
+  | 'stop';
+
+export type CodexHookHandlerTypeDto = 'command' | 'prompt' | 'agent';
+export type CodexHookSourceDto =
+  | 'system'
+  | 'user'
+  | 'project'
+  | 'mdm'
+  | 'sessionFlags'
+  | 'plugin'
+  | 'cloudRequirements'
+  | 'legacyManagedConfigFile'
+  | 'legacyManagedConfigMdm'
+  | 'unknown';
+export type CodexHookTrustStatusDto = 'managed' | 'untrusted' | 'trusted' | 'modified';
+
+export interface CodexHookDto {
+  key: string;
+  eventName: CodexHookEventNameDto;
+  handlerType: CodexHookHandlerTypeDto;
+  matcher: string | null;
+  command: string | null;
+  timeoutSec: number;
+  statusMessage: string | null;
+  sourcePath: string;
+  source: CodexHookSourceDto;
+  pluginId: string | null;
+  displayOrder: number;
+  enabled: boolean;
+  isManaged: boolean;
+  currentHash: string;
+  trustStatus: CodexHookTrustStatusDto;
+}
+
+export interface CodexHookErrorDto {
+  path: string;
+  message: string;
+}
+
+export interface ThreadHooksDto {
+  cwd: string;
+  hooks: CodexHookDto[];
+  warnings: string[];
+  errors: CodexHookErrorDto[];
+  globalHooksPath: string;
+  projectHooksPath: string;
+}
+
+export interface CreateThreadHookInput {
+  scope: 'global' | 'project';
+  eventName: CodexHookEventNameDto;
+  matcher?: string | null;
+  command: string;
+  timeoutSec?: number | null;
+  statusMessage?: string | null;
+}
+
+export interface ThreadHookTargetInput {
+  scope: 'global' | 'project';
+  eventName: CodexHookEventNameDto;
+  matcher?: string | null;
+  command: string;
+  timeoutSec?: number | null;
+  statusMessage?: string | null;
+}
+
+export interface UpdateThreadHookInput extends CreateThreadHookInput {
+  target: ThreadHookTargetInput;
 }
 
 export type ThreadGoalStatusDto =

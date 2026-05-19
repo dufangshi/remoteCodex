@@ -53,10 +53,13 @@ import {
 import {
   ApprovalMode,
   CollaborationModeDto,
+  CodexHookDto,
+  CodexHookEventNameDto,
   CreateThreadInput,
   ExportThreadPdfInput,
   ForkThreadInput,
   ImportThreadInput,
+  CreateThreadHookInput,
   ModelOptionDto,
   PromptAttachmentManifestEntryDto,
   ReasoningEffortDto,
@@ -76,6 +79,7 @@ import {
   ThreadForkResultDto,
   ThreadForkTurnOptionDto,
   ThreadGoalDto,
+  ThreadHooksDto,
   ThreadHistoryItemDetailDto,
   ThreadHistoryItemDto,
   ThreadLiveItemsDto,
@@ -89,6 +93,7 @@ import {
   ThreadTurnTokenUsageDto,
   ThreadStatusDto,
   UpdateThreadGoalInput,
+  UpdateThreadHookInput,
   UpdateThreadSettingsInput,
   WorkspaceDto
 } from '../../../../packages/shared/src/index';
@@ -126,6 +131,19 @@ const DEFERRED_TOOL_DETAIL_TITLE = 'Tool Call Details';
 const CONTEXT_BASELINE_TOKENS = 12_000;
 const FAST_MODE_NOTE_ON = 'Fast mode on';
 const FAST_MODE_NOTE_OFF = 'Fast mode off';
+const HOOK_EVENT_JSON_KEYS = {
+  preToolUse: 'PreToolUse',
+  permissionRequest: 'PermissionRequest',
+  postToolUse: 'PostToolUse',
+  preCompact: 'PreCompact',
+  postCompact: 'PostCompact',
+  sessionStart: 'SessionStart',
+  userPromptSubmit: 'UserPromptSubmit',
+  stop: 'Stop',
+} as const;
+const HOOK_EVENT_DTO_KEYS = Object.fromEntries(
+  Object.entries(HOOK_EVENT_JSON_KEYS).map(([dtoKey, jsonKey]) => [jsonKey, dtoKey]),
+) as Record<string, CodexHookEventNameDto>;
 
 const GOAL_FEATURE_DISABLED_MESSAGE =
   'Codex /goal is experimental. Enable it by adding `goals = true` under `[features]` in ~/.codex/config.toml, then restart the Codex app-server.';
@@ -957,13 +975,13 @@ function summarizeCommandText(text: string) {
   return lines.find((line) => line.trim().length > 0) ?? lines[0] ?? 'Command output';
 }
 
-function textFromUnknown(value: unknown) {
+function textFromUnknown(value: unknown): string | null {
   if (typeof value === 'string') {
     return value.trim() ? value : null;
   }
 
   if (Array.isArray(value)) {
-    const parts = value
+    const parts: string[] = value
       .map((entry) => textFromUnknown(entry))
       .filter((entry): entry is string => Boolean(entry));
     return parts.length > 0 ? parts.join(' ') : null;
@@ -1199,6 +1217,7 @@ function shouldPersistLiveHistoryItem(item: ThreadHistoryItemDto) {
   return (
     item.kind === 'commandExecution' ||
     item.kind === 'fileChange' ||
+    item.kind === 'hook' ||
     item.kind === 'toolCall' ||
     item.kind === 'webSearch'
   );
@@ -1221,6 +1240,75 @@ function parseStoredHistoryItem(value: string): ThreadHistoryItemDto | null {
   }
 
   return null;
+}
+
+function hasHistoryItemSequence(item: ThreadHistoryItemDto) {
+  return typeof item.sequence === 'number' && Number.isFinite(item.sequence);
+}
+
+function historyItemSequence(item: ThreadHistoryItemDto) {
+  return hasHistoryItemSequence(item) ? item.sequence! : Number.POSITIVE_INFINITY;
+}
+
+function sortHistoryItemsBySequence<T extends ThreadHistoryItemDto>(items: T[]): T[] {
+  if (!items.some(hasHistoryItemSequence)) {
+    return items;
+  }
+
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => {
+      const sequenceDelta =
+        historyItemSequence(left.item) - historyItemSequence(right.item);
+      return sequenceDelta === 0 ? left.index - right.index : sequenceDelta;
+    })
+    .map((entry) => entry.item);
+}
+
+function mergeHistoryItemsBySequence(
+  items: ThreadHistoryItemDto[],
+  missingItems: ThreadHistoryItemDto[],
+) {
+  if (missingItems.length === 0) {
+    return items;
+  }
+
+  if (!missingItems.some(hasHistoryItemSequence)) {
+    return [...items, ...missingItems];
+  }
+
+  const mergedItems = [...items];
+  const orderedMissingItems = sortHistoryItemsBySequence(missingItems);
+  for (const missingItem of orderedMissingItems) {
+    if (!hasHistoryItemSequence(missingItem)) {
+      mergedItems.push(missingItem);
+      continue;
+    }
+
+    const firstGreaterIndex = mergedItems.findIndex(
+      (item) =>
+        hasHistoryItemSequence(item) &&
+        historyItemSequence(item) > historyItemSequence(missingItem),
+    );
+    if (firstGreaterIndex >= 0) {
+      mergedItems.splice(firstGreaterIndex, 0, missingItem);
+      continue;
+    }
+
+    const lastLowerIndex = mergedItems.findLastIndex(
+      (item) =>
+        hasHistoryItemSequence(item) &&
+        historyItemSequence(item) < historyItemSequence(missingItem),
+    );
+    if (lastLowerIndex >= 0) {
+      mergedItems.splice(lastLowerIndex + 1, 0, missingItem);
+      continue;
+    }
+
+    mergedItems.push(missingItem);
+  }
+
+  return mergedItems;
 }
 
 function mergePersistedHistoryItemsIntoTurns(
@@ -1295,7 +1383,7 @@ function mergePersistedHistoryItemsIntoTurns(
 
     return {
       ...turn,
-      items: [...nextItems, ...missingItems],
+      items: mergeHistoryItemsBySequence(nextItems, missingItems),
     };
   });
 }
@@ -1875,6 +1963,385 @@ function liveCodexItemToHistoryItem(
   };
 }
 
+function hookEventLabel(value: string) {
+  switch (value) {
+    case 'preToolUse':
+      return 'PreToolUse';
+    case 'permissionRequest':
+      return 'PermissionRequest';
+    case 'postToolUse':
+      return 'PostToolUse';
+    case 'preCompact':
+      return 'PreCompact';
+    case 'postCompact':
+      return 'PostCompact';
+    case 'sessionStart':
+      return 'SessionStart';
+    case 'userPromptSubmit':
+      return 'UserPromptSubmit';
+    case 'stop':
+      return 'Stop';
+    default:
+      return value;
+  }
+}
+
+function hookStatusLabel(value: string) {
+  switch (value) {
+    case 'running':
+      return 'Running';
+    case 'completed':
+      return 'Completed';
+    case 'failed':
+      return 'Failed';
+    case 'blocked':
+      return 'Blocked';
+    case 'stopped':
+      return 'Stopped';
+    default:
+      return value;
+  }
+}
+
+function hookRunToHistoryItem(run: {
+  id: string;
+  eventName: string;
+  handlerType: string;
+  executionMode: string;
+  scope: string;
+  sourcePath: string;
+  source: string;
+  status: string;
+  statusMessage: string | null;
+  durationMs: number | null;
+  entries: Array<{ kind: string; text: string }>;
+}): ThreadHistoryItemDto {
+  const eventLabel = hookEventLabel(run.eventName);
+  const entryPreview = run.entries
+    .map((entry) => entry.text.trim())
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+  const firstEntryLine = entryPreview.split('\n').find(Boolean) ?? null;
+  const detailLines = [
+    `Event: ${eventLabel}`,
+    `Status: ${hookStatusLabel(run.status)}`,
+    `Handler: ${run.handlerType}`,
+    `Scope: ${run.scope}`,
+    `Source: ${run.source}`,
+    `Path: ${run.sourcePath}`,
+    run.durationMs !== null ? `Duration: ${run.durationMs} ms` : null,
+    run.statusMessage ? `Message: ${run.statusMessage}` : null,
+    entryPreview ? `\n${entryPreview}` : null,
+  ].filter((line): line is string => Boolean(line));
+
+  return {
+    id: `hook:${run.id}`,
+    kind: 'hook',
+    text: `${eventLabel} hook`,
+    previewText: run.statusMessage ?? firstEntryLine ?? `${eventLabel} hook`,
+    detailText: detailLines.join('\n'),
+    status: hookStatusLabel(run.status),
+  };
+}
+
+function normalizeHooksJson(value: unknown): { hooks: Record<string, unknown[]> } & Record<string, unknown> {
+  if (!isRecord(value) || !isRecord(value.hooks)) {
+    return { hooks: {} as Record<string, unknown[]> };
+  }
+
+  const hooks: Record<string, unknown[]> = {};
+  for (const [eventName, groups] of Object.entries(value.hooks)) {
+    hooks[eventName] = Array.isArray(groups) ? groups : [];
+  }
+  return { ...value, hooks };
+}
+
+function readJsonFileOrDefault(
+  filePath: string,
+): Promise<{ hooks: Record<string, unknown[]> } & Record<string, unknown>> {
+  return fs
+    .readFile(filePath, 'utf8')
+    .then((raw) => {
+      if (!raw.trim()) {
+        return { hooks: {} as Record<string, unknown[]> };
+      }
+      return normalizeHooksJson(JSON.parse(raw));
+    })
+    .catch((error) => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return { hooks: {} as Record<string, unknown[]> };
+      }
+      throw error;
+    });
+}
+
+function validateHookInput(input: CreateThreadHookInput) {
+  if (!HOOK_EVENT_JSON_KEYS[input.eventName]) {
+    throw new HttpError(400, {
+      code: 'bad_request',
+      message: 'Unsupported hook event.',
+    });
+  }
+  if (input.scope !== 'global' && input.scope !== 'project') {
+    throw new HttpError(400, {
+      code: 'bad_request',
+      message: 'Hook scope must be global or project.',
+    });
+  }
+  if (!input.command.trim()) {
+    throw new HttpError(400, {
+      code: 'bad_request',
+      message: 'Hook command cannot be empty.',
+    });
+  }
+  if (
+    input.timeoutSec !== undefined &&
+    input.timeoutSec !== null &&
+    (!Number.isInteger(input.timeoutSec) || input.timeoutSec <= 0 || input.timeoutSec > 86_400)
+  ) {
+    throw new HttpError(400, {
+      code: 'bad_request',
+      message: 'Hook timeout must be a positive number of seconds.',
+    });
+  }
+}
+
+async function writeHookJsonEntry({
+  codexHome,
+  workspacePath,
+  input,
+}: {
+  codexHome: string;
+  workspacePath: string;
+  input: CreateThreadHookInput;
+}) {
+  validateHookInput(input);
+
+  const hooksPath =
+    input.scope === 'global'
+      ? path.join(codexHome, 'hooks.json')
+      : path.join(workspacePath, '.codex', 'hooks.json');
+  const config = await readJsonFileOrDefault(hooksPath);
+  const eventKey = HOOK_EVENT_JSON_KEYS[input.eventName];
+  const matcher = input.matcher?.trim() || null;
+  const handler: Record<string, unknown> = {
+    type: 'command',
+    command: input.command.trim(),
+  };
+  if (input.timeoutSec !== undefined && input.timeoutSec !== null) {
+    handler.timeout = input.timeoutSec;
+  }
+  if (input.statusMessage?.trim()) {
+    handler.statusMessage = input.statusMessage.trim();
+  }
+
+  const group: Record<string, unknown> = {
+    hooks: [handler],
+  };
+  if (matcher) {
+    group.matcher = matcher;
+  }
+
+  const currentGroups = Array.isArray(config.hooks[eventKey])
+    ? config.hooks[eventKey]
+    : [];
+  config.hooks[eventKey] = [...currentGroups, group];
+
+  await fs.mkdir(path.dirname(hooksPath), { recursive: true });
+  await fs.writeFile(hooksPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+}
+
+function hookInputMatches(
+  group: unknown,
+  handler: unknown,
+  input: CreateThreadHookInput,
+) {
+  if (!isRecord(group) || !isRecord(handler)) {
+    return false;
+  }
+  const matcher = typeof group.matcher === 'string' ? group.matcher : null;
+  const handlerCommand = typeof handler.command === 'string' ? handler.command : '';
+  const handlerTimeout =
+    typeof handler.timeout === 'number' && Number.isFinite(handler.timeout)
+      ? handler.timeout
+      : null;
+  const handlerStatusMessage =
+    typeof handler.statusMessage === 'string' ? handler.statusMessage : null;
+  return (
+    handler.type === 'command' &&
+    (input.matcher?.trim() || null) === matcher &&
+    input.command.trim() === handlerCommand &&
+    (input.timeoutSec ?? null) === handlerTimeout &&
+    (input.statusMessage?.trim() || null) === handlerStatusMessage
+  );
+}
+
+async function updateHookJsonEntry({
+  codexHome,
+  workspacePath,
+  input,
+}: {
+  codexHome: string;
+  workspacePath: string;
+  input: UpdateThreadHookInput;
+}) {
+  validateHookInput(input);
+  validateHookInput(input.target);
+
+  if (input.scope !== input.target.scope) {
+    throw new HttpError(400, {
+      code: 'bad_request',
+      message: 'Hook scope cannot be changed while editing.',
+    });
+  }
+
+  const hooksPath =
+    input.scope === 'global'
+      ? path.join(codexHome, 'hooks.json')
+      : path.join(workspacePath, '.codex', 'hooks.json');
+  const config = await readJsonFileOrDefault(hooksPath);
+  const targetEventKey = HOOK_EVENT_JSON_KEYS[input.target.eventName];
+  const nextEventKey = HOOK_EVENT_JSON_KEYS[input.eventName];
+  const currentGroups = Array.isArray(config.hooks[targetEventKey])
+    ? config.hooks[targetEventKey]
+    : [];
+  let replacementGroup: Record<string, unknown> | null = null;
+
+  config.hooks[targetEventKey] = currentGroups
+    .map((group) => {
+      if (replacementGroup || !isRecord(group) || !Array.isArray(group.hooks)) {
+        return group;
+      }
+      const hookIndex = group.hooks.findIndex((handler) =>
+        hookInputMatches(group, handler, input.target),
+      );
+      if (hookIndex < 0) {
+        return group;
+      }
+
+      const handler: Record<string, unknown> = {
+        type: 'command',
+        command: input.command.trim(),
+      };
+      if (input.timeoutSec !== undefined && input.timeoutSec !== null) {
+        handler.timeout = input.timeoutSec;
+      }
+      if (input.statusMessage?.trim()) {
+        handler.statusMessage = input.statusMessage.trim();
+      }
+      replacementGroup = {
+        hooks: [handler],
+      };
+      const matcher = input.matcher?.trim() || null;
+      if (matcher) {
+        replacementGroup.matcher = matcher;
+      }
+
+      if (targetEventKey !== nextEventKey) {
+        const remainingHooks = group.hooks.filter((_, index) => index !== hookIndex);
+        return {
+          ...group,
+          hooks: remainingHooks,
+        };
+      }
+
+      return {
+        ...replacementGroup,
+        hooks: group.hooks.map((existing, index) =>
+          index === hookIndex
+            ? (replacementGroup!.hooks as unknown[])[0]
+            : existing,
+        ),
+      };
+    })
+    .filter((group) => {
+      if (!isRecord(group) || !Array.isArray(group.hooks)) {
+        return true;
+      }
+      return group.hooks.length > 0;
+    });
+
+  if (!replacementGroup) {
+    throw new HttpError(404, {
+      code: 'not_found',
+      message: 'Hook was not found in hooks.json.',
+    });
+  }
+
+  if (targetEventKey !== nextEventKey) {
+    if (config.hooks[targetEventKey]?.length === 0) {
+      delete config.hooks[targetEventKey];
+    }
+    const nextGroups = Array.isArray(config.hooks[nextEventKey])
+      ? config.hooks[nextEventKey]
+      : [];
+    config.hooks[nextEventKey] = [...nextGroups, replacementGroup];
+  }
+
+  await fs.mkdir(path.dirname(hooksPath), { recursive: true });
+  await fs.writeFile(hooksPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+}
+
+async function readLocalHookDtos({
+  hooksPath,
+  source,
+  displayOffset,
+}: {
+  hooksPath: string;
+  source: 'user' | 'project';
+  displayOffset: number;
+}): Promise<CodexHookDto[]> {
+  const config = await readJsonFileOrDefault(hooksPath);
+  const hooks: CodexHookDto[] = [];
+  for (const [eventKey, groups] of Object.entries(config.hooks)) {
+    const eventName = HOOK_EVENT_DTO_KEYS[eventKey];
+    if (!eventName || !Array.isArray(groups)) {
+      continue;
+    }
+    groups.forEach((group, groupIndex) => {
+      if (!isRecord(group) || !Array.isArray(group.hooks)) {
+        return;
+      }
+      const matcher = typeof group.matcher === 'string' ? group.matcher : null;
+      group.hooks.forEach((handler, handlerIndex) => {
+        if (!isRecord(handler) || handler.type !== 'command') {
+          return;
+        }
+        const command = typeof handler.command === 'string' ? handler.command : null;
+        if (!command) {
+          return;
+        }
+        const timeoutSec =
+          typeof handler.timeout === 'number' && Number.isFinite(handler.timeout)
+            ? handler.timeout
+            : 600;
+        const statusMessage =
+          typeof handler.statusMessage === 'string' ? handler.statusMessage : null;
+        const key = `${source}:${hooksPath}:${eventKey}:${groupIndex}:${handlerIndex}`;
+        hooks.push({
+          key,
+          eventName,
+          handlerType: 'command',
+          matcher,
+          command,
+          timeoutSec,
+          statusMessage,
+          sourcePath: hooksPath,
+          source,
+          pluginId: null,
+          displayOrder: displayOffset + hooks.length,
+          enabled: true,
+          isManaged: false,
+          currentHash: '',
+          trustStatus: 'untrusted',
+        });
+      });
+    });
+  }
+  return hooks;
+}
+
 function normalizeOptionLabelForApproval(value: string) {
   return value.replace(/\s*\(recommended\)\s*$/i, '').trim().toLowerCase();
 }
@@ -1887,8 +2354,8 @@ function isAllowOptionLabel(value: string) {
 function isLikelyPositiveApprovalOption(value: string) {
   const normalized = normalizeOptionLabelForApproval(value);
   return (
-    isAllowOptionLabel(value) ||
-    /^(yes|continue|proceed|trust|always|once|ok)\b/.test(normalized)
+    isAllowOptionLabel(normalized) ||
+    /\b(allow|approve|yes|continue|proceed|trust)\b/.test(normalized)
   );
 }
 
@@ -2216,6 +2683,45 @@ function turnToDto(
   };
 }
 
+type TurnItemOrderSnapshot = Map<string, Map<string, number>>;
+
+function applyRecordedTurnItemOrder(
+  turn: ThreadTurnDto,
+  turnItemOrder: TurnItemOrderSnapshot,
+): ThreadTurnDto {
+  const itemOrder = turnItemOrder.get(turn.id);
+  if (!itemOrder || itemOrder.size === 0) {
+    return turn;
+  }
+
+  let changed = false;
+  const items = turn.items.map((item) => {
+    const sequence = itemOrder.get(item.id);
+    if (sequence === undefined || item.sequence === sequence) {
+      return item;
+    }
+
+    changed = true;
+    return {
+      ...item,
+      sequence,
+    };
+  });
+
+  return changed ? { ...turn, items } : turn;
+}
+
+function applyRecordedTurnItemOrders(
+  turns: ThreadTurnDto[],
+  turnItemOrder: TurnItemOrderSnapshot,
+): ThreadTurnDto[] {
+  if (turnItemOrder.size === 0) {
+    return turns;
+  }
+
+  return turns.map((turn) => applyRecordedTurnItemOrder(turn, turnItemOrder));
+}
+
 function buildTurnDto(
   turn: ThreadTurnDto,
   metadata: ThreadTurnMetadataRecord | undefined,
@@ -2310,6 +2816,8 @@ export class ThreadService {
   private readonly threadCumulativeTokenUsage = new Map<string, ThreadTurnTokenUsageBreakdown>();
   private readonly threadLivePlans = new Map<string, ThreadLivePlanDto>();
   private readonly threadLiveItems = new Map<string, ThreadLiveItemsDto>();
+  private readonly threadTurnItemOrder = new Map<string, Map<string, Map<string, number>>>();
+  private readonly threadNextTurnItemSequence = new Map<string, Map<string, number>>();
   private readonly answeredRequestNotes = new Map<string, ThreadAnsweredRequestNoteDto[]>();
 
   constructor(
@@ -2464,7 +2972,10 @@ export class ThreadService {
       const deferredDetails = new Map<string, ThreadHistoryItemDetailDto>();
       const persistedItemsByTurnId = this.listPersistedHistoryItemsByTurnId(localThreadId);
       const turns = mergePersistedHistoryItemsIntoTurns(
-        localSession?.turns ?? [],
+        applyRecordedTurnItemOrders(
+          localSession?.turns ?? [],
+          this.turnItemOrderSnapshot(localThreadId),
+        ),
         persistedItemsByTurnId,
         deferredDetails,
       ).map((turn) =>
@@ -2510,7 +3021,10 @@ export class ThreadService {
     const deferredDetails = new Map<string, ThreadHistoryItemDetailDto>();
     const persistedItemsByTurnId = this.listPersistedHistoryItemsByTurnId(localThreadId);
     const turns = mergePersistedHistoryItemsIntoTurns(
-      remoteThread.turns.map((turn) => turnToDto(turn, deferredDetails)),
+      applyRecordedTurnItemOrders(
+        remoteThread.turns.map((turn) => turnToDto(turn, deferredDetails)),
+        this.turnItemOrderSnapshot(localThreadId),
+      ),
       persistedItemsByTurnId,
       deferredDetails,
     ).map((turn) =>
@@ -3892,6 +4406,88 @@ export class ThreadService {
     };
   }
 
+  async listThreadHooks(localThreadId: string): Promise<ThreadHooksDto> {
+    const record = getThreadRecordById(this.db, localThreadId);
+    if (!record) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Thread was not found.',
+      });
+    }
+
+    const workspace = getWorkspaceRecordById(this.db, record.workspaceId);
+    if (!workspace) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Workspace was not found for this thread.',
+      });
+    }
+
+    const [entry] = await this.codexManager.listHooks({
+      cwds: [workspace.absPath],
+    });
+
+    return this.toThreadHooksDto(workspace.absPath, entry);
+  }
+
+  async createThreadHook(
+    localThreadId: string,
+    input: CreateThreadHookInput,
+  ): Promise<ThreadHooksDto> {
+    const record = getThreadRecordById(this.db, localThreadId);
+    if (!record) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Thread was not found.',
+      });
+    }
+
+    const workspace = getWorkspaceRecordById(this.db, record.workspaceId);
+    if (!workspace) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Workspace was not found for this thread.',
+      });
+    }
+
+    await writeHookJsonEntry({
+      codexHome: this.codexHome,
+      workspacePath: workspace.absPath,
+      input,
+    });
+
+    return this.toThreadHooksDto(workspace.absPath, undefined);
+  }
+
+  async updateThreadHook(
+    localThreadId: string,
+    input: UpdateThreadHookInput,
+  ): Promise<ThreadHooksDto> {
+    const record = getThreadRecordById(this.db, localThreadId);
+    if (!record) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Thread was not found.',
+      });
+    }
+
+    const workspace = getWorkspaceRecordById(this.db, record.workspaceId);
+    if (!workspace) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Workspace was not found for this thread.',
+      });
+    }
+
+    await updateHookJsonEntry({
+      codexHome: this.codexHome,
+      workspacePath: workspace.absPath,
+      input,
+    });
+
+    return this.toThreadHooksDto(workspace.absPath, undefined);
+  }
+
   async interruptThread(localThreadId: string, requestedTurnId?: string): Promise<ThreadDto> {
     const record = getThreadRecordById(this.db, localThreadId);
     if (!record || !record.codexThreadId) {
@@ -3947,6 +4543,7 @@ export class ThreadService {
     this.threadContextUsage.delete(localThreadId);
     this.threadLivePlans.delete(localThreadId);
     this.threadLiveItems.delete(localThreadId);
+    this.clearRecordedTurnItemOrders(localThreadId);
     this.answeredRequestNotes.delete(localThreadId);
     deleteViewerSessionsByThreadId(this.db, localThreadId);
     deleteNotificationsByThreadId(this.db, localThreadId);
@@ -4191,6 +4788,10 @@ export class ThreadService {
           lastError: null,
           lastTurnStartedAt: new Date().toISOString()
         });
+        this.resetRecordedTurnItemOrder(record.id, params.turn.id);
+        for (const item of params.turn.items) {
+          this.recordTurnItemOrder(record.id, params.turn.id, item.id);
+        }
         this.setLivePlan(record.id, null);
         this.setLiveItems(record.id, null);
         this.resetThreadContextUsage(record.id, true);
@@ -4222,6 +4823,41 @@ export class ThreadService {
         });
         return;
       }
+      case 'hook/started':
+      case 'hook/completed': {
+        const params = event.params as {
+          threadId: string;
+          turnId: string | null;
+          run: Parameters<typeof hookRunToHistoryItem>[0];
+        };
+        const record = getThreadRecordByCodexThreadId(this.db, params.threadId);
+        if (!record) {
+          return;
+        }
+
+        const turnId = params.turnId ?? record.codexTurnId;
+        if (!turnId) {
+          return;
+        }
+
+        const liveItem = {
+          ...hookRunToHistoryItem(params.run),
+          sequence: this.recordTurnItemOrder(record.id, turnId, `hook:${params.run.id}`),
+        };
+        this.persistLiveHistoryItem(record.id, turnId, liveItem);
+        this.upsertLiveItem(record.id, turnId, liveItem);
+        this.emitThreadEvent(
+          event.method === 'hook/started'
+            ? 'thread.item.started'
+            : 'thread.item.completed',
+          record.id,
+          {
+            turnId,
+            item: liveItem,
+          },
+        );
+        return;
+      }
       case 'item/started':
       case 'item/completed': {
         const params = event.params as {
@@ -4234,6 +4870,11 @@ export class ThreadService {
           return;
         }
 
+        const sequence = this.recordTurnItemOrder(
+          record.id,
+          params.turnId,
+          params.item.id,
+        );
         const liveItem = liveCodexItemToHistoryItem(
           params.item,
           event.method === 'item/started' ? 'started' : 'completed',
@@ -4242,8 +4883,12 @@ export class ThreadService {
           return;
         }
 
-        this.persistLiveHistoryItem(record.id, params.turnId, liveItem);
-        this.upsertLiveItem(record.id, params.turnId, liveItem);
+        const orderedLiveItem = {
+          ...liveItem,
+          sequence,
+        };
+        this.persistLiveHistoryItem(record.id, params.turnId, orderedLiveItem);
+        this.upsertLiveItem(record.id, params.turnId, orderedLiveItem);
         this.emitThreadEvent(
           event.method === 'item/started'
             ? 'thread.item.started'
@@ -4251,7 +4896,7 @@ export class ThreadService {
           record.id,
           {
             turnId: params.turnId,
-            item: liveItem,
+            item: orderedLiveItem,
           },
         );
         return;
@@ -4294,6 +4939,7 @@ export class ThreadService {
           return;
         }
 
+        this.recordTurnItemOrder(record.id, params.turnId, params.itemId);
         this.emitThreadEvent('thread.output.delta', record.id, {
           turnId: params.turnId,
           itemId: params.itemId,
@@ -4634,6 +5280,50 @@ export class ThreadService {
     this.threadLiveItems.delete(localThreadId);
   }
 
+  private resetRecordedTurnItemOrder(localThreadId: string, turnId: string) {
+    this.threadTurnItemOrder.get(localThreadId)?.delete(turnId);
+    this.threadNextTurnItemSequence.get(localThreadId)?.delete(turnId);
+  }
+
+  private clearRecordedTurnItemOrders(localThreadId: string) {
+    this.threadTurnItemOrder.delete(localThreadId);
+    this.threadNextTurnItemSequence.delete(localThreadId);
+  }
+
+  private recordTurnItemOrder(localThreadId: string, turnId: string, itemId: string) {
+    let threadOrders = this.threadTurnItemOrder.get(localThreadId);
+    if (!threadOrders) {
+      threadOrders = new Map();
+      this.threadTurnItemOrder.set(localThreadId, threadOrders);
+    }
+
+    let turnOrder = threadOrders.get(turnId);
+    if (!turnOrder) {
+      turnOrder = new Map();
+      threadOrders.set(turnId, turnOrder);
+    }
+
+    const existing = turnOrder.get(itemId);
+    if (existing !== undefined) {
+      return existing;
+    }
+
+    let threadSequences = this.threadNextTurnItemSequence.get(localThreadId);
+    if (!threadSequences) {
+      threadSequences = new Map();
+      this.threadNextTurnItemSequence.set(localThreadId, threadSequences);
+    }
+
+    const sequence = threadSequences.get(turnId) ?? 0;
+    threadSequences.set(turnId, sequence + 1);
+    turnOrder.set(itemId, sequence);
+    return sequence;
+  }
+
+  private turnItemOrderSnapshot(localThreadId: string): TurnItemOrderSnapshot {
+    return this.threadTurnItemOrder.get(localThreadId) ?? new Map();
+  }
+
   private getLiveItems(
     localThreadId: string,
     allTurns: ThreadTurnDto[],
@@ -4668,9 +5358,69 @@ export class ThreadService {
 
     this.setLiveItems(localThreadId, {
       turnId,
-      items: nextItems,
+      items: sortHistoryItemsBySequence(nextItems),
       updatedAt: new Date().toISOString(),
     });
+  }
+
+  private async toThreadHooksDto(
+    workspacePath: string,
+    entry: Awaited<ReturnType<CodexAppServerManager['listHooks']>>[number] | undefined,
+  ): Promise<ThreadHooksDto> {
+    const globalHooksPath = path.join(this.codexHome, 'hooks.json');
+    const projectHooksPath = path.join(workspacePath, '.codex', 'hooks.json');
+    const officialHooks: CodexHookDto[] = (entry?.hooks ?? []).map((hook) => ({
+      key: hook.key,
+      eventName: hook.eventName,
+      handlerType: hook.handlerType,
+      matcher: hook.matcher,
+      command: hook.command,
+      timeoutSec: hook.timeoutSec,
+      statusMessage: hook.statusMessage,
+      sourcePath: hook.sourcePath,
+      source: hook.source,
+      pluginId: hook.pluginId,
+      displayOrder: hook.displayOrder,
+      enabled: hook.enabled,
+      isManaged: hook.isManaged,
+      currentHash: hook.currentHash,
+      trustStatus: hook.trustStatus,
+    }));
+    const [globalHooks, projectHooks] = await Promise.all([
+      readLocalHookDtos({
+        hooksPath: globalHooksPath,
+        source: 'user',
+        displayOffset: officialHooks.length,
+      }),
+      readLocalHookDtos({
+        hooksPath: projectHooksPath,
+        source: 'project',
+        displayOffset: officialHooks.length + 10_000,
+      }),
+    ]);
+    const hooksBySignature = new Map<string, CodexHookDto>();
+    for (const hook of [...globalHooks, ...projectHooks, ...officialHooks]) {
+      const signature = [
+        hook.sourcePath,
+        hook.eventName,
+        hook.matcher ?? '',
+        hook.command ?? '',
+        hook.timeoutSec,
+        hook.statusMessage ?? '',
+      ].join('\0');
+      hooksBySignature.set(signature, hook);
+    }
+
+    return {
+      cwd: entry?.cwd ?? workspacePath,
+      hooks: [...hooksBySignature.values()].sort(
+        (left, right) => left.displayOrder - right.displayOrder,
+      ),
+      warnings: entry?.warnings ?? [],
+      errors: entry?.errors ?? [],
+      globalHooksPath,
+      projectHooksPath,
+    };
   }
 
   private reconcileLiveItems(

@@ -1415,6 +1415,67 @@ describe('ThreadTimeline', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('inserts sequenced live command items around materialized agent messages', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        liveItems={{
+          turnId: 'turn-1',
+          items: [
+            {
+              id: 'command-before-agent',
+              kind: 'commandExecution',
+              text: 'pnpm lint',
+              status: 'completed',
+              sequence: 1,
+            },
+            {
+              id: 'command-after-agent',
+              kind: 'commandExecution',
+              text: 'pnpm build',
+              status: 'completed',
+              sequence: 3,
+            },
+          ],
+        }}
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'inProgress',
+            error: null,
+            items: [
+              {
+                id: 'user-1',
+                kind: 'userMessage',
+                text: 'Run checks.',
+                sequence: 0,
+              },
+              {
+                id: 'agent-mid',
+                kind: 'agentMessage',
+                text: 'Lint passed, now building.',
+                sequence: 2,
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    const timelineText =
+      screen.getByTestId('thread-scroll-container').textContent ?? '';
+    expect(screen.getByText('pnpm lint')).toBeInTheDocument();
+    expect(screen.getByText('Lint passed, now building.')).toBeInTheDocument();
+    expect(screen.getByText('pnpm build')).toBeInTheDocument();
+    expect(timelineText.indexOf('pnpm lint')).toBeLessThan(
+      timelineText.indexOf('Lint passed, now building.'),
+    );
+    expect(timelineText.indexOf('Lint passed, now building.')).toBeLessThan(
+      timelineText.indexOf('pnpm build'),
+    );
+  });
+
   it('drops already materialized earlier agent messages from the streaming tail', () => {
     render(
       <ThreadTimeline

@@ -768,6 +768,201 @@ describe('ThreadComposer', () => {
     ).toBeInTheDocument();
   });
 
+  it('opens the hooks panel and renders configured hooks', async () => {
+    const onOpenHooks = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={() => undefined}
+        onOpenHooks={onOpenHooks}
+        hooksState={{
+          status: 'ready',
+          error: null,
+          data: {
+            cwd: '/tmp/demo',
+            globalHooksPath: '/home/u/.codex/hooks.json',
+            projectHooksPath: '/tmp/demo/.codex/hooks.json',
+            warnings: [],
+            errors: [],
+            hooks: [
+              {
+                key: 'hook-1',
+                eventName: 'preToolUse',
+                handlerType: 'command',
+                matcher: 'Bash',
+                command: 'node hook.js',
+                timeoutSec: 30,
+                statusMessage: 'Checking command',
+                sourcePath: '/tmp/demo/.codex/hooks.json',
+                source: 'project',
+                pluginId: null,
+                displayOrder: 0,
+                enabled: true,
+                isManaged: false,
+                currentHash: 'hash',
+                trustStatus: 'trusted',
+              },
+            ],
+          },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
+    fireEvent.click(screen.getByRole('button', { name: /\/hooks/i }));
+
+    await waitFor(() => {
+      expect(onOpenHooks).toHaveBeenCalled();
+    });
+    expect(screen.getByText('PreToolUse · Bash')).toBeInTheDocument();
+    expect(screen.getByText('node hook.js')).toBeInTheDocument();
+    expect(screen.getByText('Trusted')).toBeInTheDocument();
+    expect(screen.getByText('30s')).toBeInTheDocument();
+  });
+
+  it('writes a new hook through the hooks panel', async () => {
+    const onOpenHooks = vi.fn().mockResolvedValue(undefined);
+    const onCreateHook = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={() => undefined}
+        onOpenHooks={onOpenHooks}
+        onCreateHook={onCreateHook}
+        hooksState={{
+          status: 'ready',
+          error: null,
+          data: {
+            cwd: '/tmp/demo',
+            globalHooksPath: '/home/u/.codex/hooks.json',
+            projectHooksPath: '/tmp/demo/.codex/hooks.json',
+            warnings: [],
+            errors: [],
+            hooks: [],
+          },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
+    fireEvent.click(screen.getByRole('button', { name: /\/hooks/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add Hook' }));
+
+    fireEvent.change(screen.getByLabelText('Hook command'), {
+      target: { value: 'node -e "console.error(\\"hook ran\\")"' },
+    });
+    fireEvent.change(screen.getByLabelText('Hook status message'), {
+      target: { value: 'Testing hook' },
+    });
+    fireEvent.change(screen.getByLabelText('Hook timeout seconds'), {
+      target: { value: '5' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Write Hook' }));
+
+    await waitFor(() => {
+      expect(onCreateHook).toHaveBeenCalledWith({
+        scope: 'project',
+        eventName: 'preToolUse',
+        matcher: 'Bash',
+        command: 'node -e "console.error(\\"hook ran\\")"',
+        timeoutSec: 5,
+        statusMessage: 'Testing hook',
+      });
+    });
+    expect(
+      screen.getByText(/Project hook written in hooks\.json/i),
+    ).toBeInTheDocument();
+  });
+
+  it('updates an editable hook through the hooks panel', async () => {
+    const onOpenHooks = vi.fn().mockResolvedValue(undefined);
+    const onUpdateHook = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={() => undefined}
+        onOpenHooks={onOpenHooks}
+        onUpdateHook={onUpdateHook}
+        hooksState={{
+          status: 'ready',
+          error: null,
+          data: {
+            cwd: '/tmp/demo',
+            globalHooksPath: '/home/u/.codex/hooks.json',
+            projectHooksPath: '/tmp/demo/.codex/hooks.json',
+            warnings: [],
+            errors: [],
+            hooks: [
+              {
+                key: 'hook-1',
+                eventName: 'preToolUse',
+                handlerType: 'command',
+                matcher: 'Bash',
+                command: 'node hook.js',
+                timeoutSec: 30,
+                statusMessage: 'Checking command',
+                sourcePath: '/tmp/demo/.codex/hooks.json',
+                source: 'project',
+                pluginId: null,
+                displayOrder: 0,
+                enabled: true,
+                isManaged: false,
+                currentHash: 'hash',
+                trustStatus: 'trusted',
+              },
+            ],
+          },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
+    fireEvent.click(screen.getByRole('button', { name: /\/hooks/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+
+    fireEvent.change(screen.getByLabelText('Hook command'), {
+      target: { value: 'node updated-hook.js' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Update Hook' }));
+
+    await waitFor(() => {
+      expect(onUpdateHook).toHaveBeenCalledWith({
+        scope: 'project',
+        eventName: 'preToolUse',
+        matcher: 'Bash',
+        command: 'node updated-hook.js',
+        timeoutSec: 30,
+        statusMessage: 'Checking command',
+        target: {
+          scope: 'project',
+          eventName: 'preToolUse',
+          matcher: 'Bash',
+          command: 'node hook.js',
+          timeoutSec: 30,
+          statusMessage: 'Checking command',
+        },
+      });
+    });
+    expect(
+      screen.getByText(/Project hook updated in hooks\.json/i),
+    ).toBeInTheDocument();
+  });
+
   it('keeps direct model controls available while fast mode is on', () => {
     render(
       <ThreadComposer

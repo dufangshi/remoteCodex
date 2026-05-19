@@ -188,6 +188,85 @@ export interface CodexMcpServerRecord {
   resourceTemplateCount: number;
 }
 
+export type CodexHookEventName =
+  | 'preToolUse'
+  | 'permissionRequest'
+  | 'postToolUse'
+  | 'preCompact'
+  | 'postCompact'
+  | 'sessionStart'
+  | 'userPromptSubmit'
+  | 'stop';
+export type CodexHookHandlerType = 'command' | 'prompt' | 'agent';
+export type CodexHookSource =
+  | 'system'
+  | 'user'
+  | 'project'
+  | 'mdm'
+  | 'sessionFlags'
+  | 'plugin'
+  | 'cloudRequirements'
+  | 'legacyManagedConfigFile'
+  | 'legacyManagedConfigMdm'
+  | 'unknown';
+export type CodexHookTrustStatus = 'managed' | 'untrusted' | 'trusted' | 'modified';
+export type CodexHookRunStatus = 'running' | 'completed' | 'failed' | 'blocked' | 'stopped';
+export type CodexHookExecutionMode = 'sync' | 'async';
+export type CodexHookScope = 'thread' | 'turn';
+export type CodexHookOutputEntryKind = 'warning' | 'stop' | 'feedback' | 'context' | 'error';
+
+export interface CodexHookRecord {
+  key: string;
+  eventName: CodexHookEventName;
+  handlerType: CodexHookHandlerType;
+  matcher: string | null;
+  command: string | null;
+  timeoutSec: number;
+  statusMessage: string | null;
+  sourcePath: string;
+  source: CodexHookSource;
+  pluginId: string | null;
+  displayOrder: number;
+  enabled: boolean;
+  isManaged: boolean;
+  currentHash: string;
+  trustStatus: CodexHookTrustStatus;
+}
+
+export interface CodexHookErrorRecord {
+  path: string;
+  message: string;
+}
+
+export interface CodexHooksListEntry {
+  cwd: string;
+  hooks: CodexHookRecord[];
+  warnings: string[];
+  errors: CodexHookErrorRecord[];
+}
+
+export interface CodexHookOutputEntry {
+  kind: CodexHookOutputEntryKind;
+  text: string;
+}
+
+export interface CodexHookRunSummary {
+  id: string;
+  eventName: CodexHookEventName;
+  handlerType: CodexHookHandlerType;
+  executionMode: CodexHookExecutionMode;
+  scope: CodexHookScope;
+  sourcePath: string;
+  source: CodexHookSource;
+  displayOrder: number;
+  status: CodexHookRunStatus;
+  statusMessage: string | null;
+  startedAt: number;
+  completedAt: number | null;
+  durationMs: number | null;
+  entries: CodexHookOutputEntry[];
+}
+
 export interface CodexThreadGoalRecord {
   threadId: string;
   objective: string;
@@ -301,6 +380,8 @@ export type CodexServerEvent =
   | { method: 'thread/goal/cleared'; params: { threadId: string } }
   | { method: 'thread/tokenUsage/updated'; params: CodexThreadTokenUsageEvent }
   | { method: 'turn/started'; params: { threadId: string; turn: CodexTurnRecord } }
+  | { method: 'hook/started'; params: { threadId: string; turnId: string | null; run: CodexHookRunSummary } }
+  | { method: 'hook/completed'; params: { threadId: string; turnId: string | null; run: CodexHookRunSummary } }
   | { method: 'item/started'; params: { threadId: string; turnId: string; item: CodexTurnItem } }
   | { method: 'item/completed'; params: { threadId: string; turnId: string; item: CodexTurnItem } }
   | { method: 'turn/plan/updated'; params: { threadId: string; turnId: string; explanation: string | null; plan: Array<{ step: string; status: string }> } }

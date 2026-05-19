@@ -110,6 +110,8 @@ export function historyItemAccentClassName(kind: ThreadHistoryItemDto['kind']) {
       return 'timeline-kind-plan';
     case 'fileChange':
       return 'timeline-kind-file';
+    case 'hook':
+      return 'timeline-kind-action';
     case 'other':
       return 'ui-status-neutral';
   }
@@ -137,6 +139,8 @@ export function historyItemLabel(kind: ThreadHistoryItemDto['kind']) {
       return 'Plan';
     case 'fileChange':
       return 'File Change';
+    case 'hook':
+      return 'Hook';
     case 'other':
       return 'Other';
   }

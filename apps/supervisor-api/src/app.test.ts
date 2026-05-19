@@ -2942,6 +2942,166 @@ describe('supervisor api', () => {
     });
   });
 
+  it('lists thread hooks and writes project hooks.json entries', async () => {
+    const workspacePath = path.join(tempDir, 'workspace');
+    fakeCodexManager.hooksEntries = [
+      {
+        cwd: workspacePath,
+        hooks: [
+          {
+            key: 'hook-1',
+            eventName: 'preToolUse',
+            handlerType: 'command',
+            matcher: 'Bash',
+            command: 'node hook.js',
+            timeoutSec: 30,
+            statusMessage: 'Checking command',
+            sourcePath: path.join(workspacePath, '.codex/hooks.json'),
+            source: 'project',
+            pluginId: null,
+            displayOrder: 0,
+            enabled: true,
+            isManaged: false,
+            currentHash: 'hash',
+            trustStatus: 'trusted',
+          },
+        ],
+        warnings: [],
+        errors: [],
+      },
+    ];
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: workspacePath,
+      },
+    });
+    const workspace = workspaceResponse.json();
+
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Hooks Thread',
+      },
+    });
+    const createdThread = createResponse.json();
+
+    const hooksResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}/hooks`,
+    });
+
+    expect(hooksResponse.statusCode).toBe(200);
+    expect(hooksResponse.json()).toMatchObject({
+      cwd: workspacePath,
+      projectHooksPath: path.join(workspacePath, '.codex/hooks.json'),
+      globalHooksPath: path.join(codexHome, 'hooks.json'),
+      hooks: [
+        {
+          eventName: 'preToolUse',
+          matcher: 'Bash',
+          command: 'node hook.js',
+          source: 'project',
+          trustStatus: 'trusted',
+        },
+      ],
+    });
+
+    const createHookResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/hooks`,
+      payload: {
+        scope: 'project',
+        eventName: 'preToolUse',
+        matcher: 'Bash',
+        command: 'node -e "console.error(\\"hook ran\\")"',
+        timeoutSec: 5,
+        statusMessage: 'Testing hook',
+      },
+    });
+
+    expect(createHookResponse.statusCode).toBe(200);
+    await expect(
+      fs.readFile(path.join(workspacePath, '.codex/hooks.json'), 'utf8'),
+    ).resolves.toBe(
+      `${JSON.stringify(
+        {
+          hooks: {
+            PreToolUse: [
+              {
+                hooks: [
+                  {
+                    type: 'command',
+                    command: 'node -e "console.error(\\"hook ran\\")"',
+                    timeout: 5,
+                    statusMessage: 'Testing hook',
+                  },
+                ],
+                matcher: 'Bash',
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const updateHookResponse = await app.inject({
+      method: 'PUT',
+      url: `/api/threads/${createdThread.id}/hooks`,
+      payload: {
+        scope: 'project',
+        eventName: 'postToolUse',
+        matcher: 'Bash',
+        command: 'node -e "console.error(\\"updated hook ran\\")"',
+        timeoutSec: 8,
+        statusMessage: 'Updated hook',
+        target: {
+          scope: 'project',
+          eventName: 'preToolUse',
+          matcher: 'Bash',
+          command: 'node -e "console.error(\\"hook ran\\")"',
+          timeoutSec: 5,
+          statusMessage: 'Testing hook',
+        },
+      },
+    });
+
+    expect(updateHookResponse.statusCode).toBe(200);
+    await expect(
+      fs.readFile(path.join(workspacePath, '.codex/hooks.json'), 'utf8'),
+    ).resolves.toBe(
+      `${JSON.stringify(
+        {
+          hooks: {
+            PostToolUse: [
+              {
+                hooks: [
+                  {
+                    type: 'command',
+                    command: 'node -e "console.error(\\"updated hook ran\\")"',
+                    timeout: 8,
+                    statusMessage: 'Updated hook',
+                  },
+                ],
+                matcher: 'Bash',
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+  });
+
   it('truncates imported auto-derived thread titles to the first fifteen characters', async () => {
     const importedWorkspace = path.join(tempDir, 'imported-project');
     await fs.mkdir(importedWorkspace);
@@ -3594,6 +3754,96 @@ describe('supervisor api', () => {
     expect(commandDetailResponse.json().text).toContain('tests passed');
   });
 
+  it('surfaces hook run notifications as timeline history items', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Hook Run Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Run a command.',
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    const startedThread = promptResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const activeTurn = remoteThread?.turns.at(-1);
+    expect(activeTurn).toBeTruthy();
+
+    fakeCodexManager.emit('notification', {
+      method: 'hook/completed',
+      params: {
+        threadId: startedThread.codexThreadId,
+        turnId: activeTurn!.id,
+        run: {
+          id: 'hook-run-1',
+          eventName: 'preToolUse',
+          handlerType: 'command',
+          executionMode: 'sync',
+          scope: 'turn',
+          sourcePath: path.join(tempDir, 'workspace/.codex/hooks.json'),
+          source: 'project',
+          displayOrder: 0,
+          status: 'completed',
+          statusMessage: 'Checking Bash command',
+          startedAt: Date.now(),
+          completedAt: Date.now(),
+          durationMs: 12,
+          entries: [
+            {
+              kind: 'context',
+              text: 'Hook printed command details.',
+            },
+          ],
+        },
+      },
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json()).toMatchObject({
+      liveItems: {
+        turnId: activeTurn!.id,
+        items: [
+          {
+            id: 'hook:hook-run-1',
+            kind: 'hook',
+            text: 'PreToolUse hook',
+            previewText: 'Checking Bash command',
+            status: 'Completed',
+          },
+        ],
+      },
+    });
+    expect(detailResponse.json().liveItems.items[0].detailText).toContain(
+      'Hook printed command details.',
+    );
+  });
+
   it('uses persisted command snapshots when final history contains only command placeholders', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',
@@ -3726,6 +3976,130 @@ describe('supervisor api', () => {
     expect(firstCommandDetailResponse.json().text).toContain('test suite ok');
     expect(secondCommandDetailResponse.statusCode).toBe(200);
     expect(secondCommandDetailResponse.json().text).toContain('build ok');
+  });
+
+  it('preserves persisted command order around materialized agent messages', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Interleaved Command Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Run commands with commentary.',
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    const startedThread = promptResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const activeTurn = remoteThread?.turns.at(-1);
+    expect(activeTurn).toBeTruthy();
+
+    fakeCodexManager.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: startedThread.codexThreadId,
+        turnId: activeTurn!.id,
+        item: {
+          id: 'command-before-agent',
+          type: 'commandExecution',
+          command: 'pnpm lint',
+          aggregatedOutput: 'lint ok',
+          status: 'completed',
+        },
+      }
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'item/agentMessage/delta',
+      params: {
+        threadId: startedThread.codexThreadId,
+        turnId: activeTurn!.id,
+        itemId: 'agent-mid',
+        delta: 'Lint passed, now building.',
+      }
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: startedThread.codexThreadId,
+        turnId: activeTurn!.id,
+        item: {
+          id: 'command-after-agent',
+          type: 'commandExecution',
+          command: 'pnpm build',
+          aggregatedOutput: 'build ok',
+          status: 'completed',
+        },
+      }
+    });
+
+    const completedTurn = {
+      ...activeTurn!,
+      status: 'completed' as const,
+      items: [
+        ...activeTurn!.items,
+        {
+          id: 'agent-mid',
+          type: 'agentMessage',
+          text: 'Lint passed, now building.',
+        },
+        {
+          id: 'agent-final',
+          type: 'agentMessage',
+          text: 'Done.',
+        },
+      ],
+    };
+    fakeCodexManager.threads.set(startedThread.codexThreadId, {
+      ...remoteThread!,
+      status: { type: 'idle' },
+      turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: startedThread.codexThreadId,
+        turn: completedTurn
+      }
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    const itemIds = detailResponse
+      .json()
+      .turns.at(-1)
+      .items.map((item: any) => item.id);
+
+    expect(itemIds).toEqual([
+      activeTurn!.items[0]!.id,
+      'command-before-agent',
+      'agent-mid',
+      'command-after-agent',
+      'agent-final',
+    ]);
   });
 
   it('persists answered request notes in thread detail for refreshes', async () => {

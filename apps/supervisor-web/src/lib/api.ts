@@ -7,6 +7,7 @@ import type {
   CodexStatusDto,
   CreateCodexHostConfigArchiveInput,
   CreateThreadInput,
+  CreateThreadHookInput,
   ExportThreadPdfInput,
   ThreadExportFormatDto,
   ForkThreadInput,
@@ -29,7 +30,9 @@ import type {
   ThreadExportTurnOptionsDto,
   ThreadHistoryItemDetailDto,
   ThreadGoalDto,
+  ThreadHooksDto,
   UpdateThreadGoalInput,
+  UpdateThreadHookInput,
   ThreadMcpServersDto,
   ThreadSkillsDto,
   ThreadDto,
@@ -511,6 +514,29 @@ export function fetchThreadSkills(id: string) {
 export function fetchThreadMcpServers(id: string) {
   return request<ThreadMcpServersDto>(`/api/threads/${id}/mcp-servers`, {
     cache: 'no-store',
+  });
+}
+
+export function fetchThreadHooks(id: string) {
+  return request<ThreadHooksDto>(`/api/threads/${id}/hooks`, {
+    cache: 'no-store',
+  });
+}
+
+export function createThreadHook(id: string, input: CreateThreadHookInput) {
+  return request<ThreadHooksDto>(`/api/threads/${id}/hooks`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateThreadHook(
+  id: string,
+  input: UpdateThreadHookInput,
+) {
+  return request<ThreadHooksDto>(`/api/threads/${id}/hooks`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
   });
 }
 

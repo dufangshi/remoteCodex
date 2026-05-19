@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 
 import {
   CodexMcpServerRecord,
+  CodexHooksListEntry,
   CodexSkillsListEntry,
   CodexThreadGoalRecord,
   CodexThreadRecord,
@@ -58,6 +59,7 @@ export class FakeCodexManager extends EventEmitter {
   readThreadCallCount = new Map<string, number>();
   skillsEntries: CodexSkillsListEntry[] = [];
   mcpServers: CodexMcpServerRecord[] = [];
+  hooksEntries: CodexHooksListEntry[] = [];
   goals = new Map<string, CodexThreadGoalRecord>();
   goalSetCalls: ThreadGoalSetInput[] = [];
   goalClearCalls: string[] = [];
@@ -107,6 +109,10 @@ export class FakeCodexManager extends EventEmitter {
 
   async listMcpServers() {
     return this.mcpServers;
+  }
+
+  async listHooks(_input: { cwds?: string[] } = {}) {
+    return this.hooksEntries;
   }
 
   async startThread(input: { cwd: string; model: string; sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access' | null; serviceTier?: 'fast' | 'flex' | null }) {
