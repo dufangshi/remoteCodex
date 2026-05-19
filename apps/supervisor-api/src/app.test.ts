@@ -3465,6 +3465,269 @@ describe('supervisor api', () => {
     });
   });
 
+  it('keeps live command and file change items visible after the turn completes', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Persisted Live Items Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Run a command and patch a file.',
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    const startedThread = promptResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const activeTurn = remoteThread?.turns.at(-1);
+    expect(activeTurn).toBeTruthy();
+
+    fakeCodexManager.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: startedThread.codexThreadId,
+        turnId: activeTurn!.id,
+        item: {
+          id: 'command-live-1',
+          type: 'commandExecution',
+          command: 'pnpm test',
+          aggregatedOutput: 'tests passed',
+          status: 'completed',
+        },
+      }
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: startedThread.codexThreadId,
+        turnId: activeTurn!.id,
+        item: {
+          id: 'file-change-live-1',
+          type: 'fileChange',
+          status: 'completed',
+          changes: [
+            {
+              diff: ['--- a/src/app.ts', '+++ b/src/app.ts', '@@', '-old', '+new'].join('\n'),
+            },
+          ],
+        },
+      }
+    });
+
+    const completedTurn = {
+      ...activeTurn!,
+      status: 'completed' as const,
+      items: [
+        ...activeTurn!.items,
+        {
+          id: 'agent-final',
+          type: 'agentMessage',
+          text: 'Done.',
+        },
+      ],
+    };
+    fakeCodexManager.threads.set(startedThread.codexThreadId, {
+      ...remoteThread!,
+      status: { type: 'idle' },
+      turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: startedThread.codexThreadId,
+        turn: completedTurn
+      }
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json().liveItems).toBeNull();
+    expect(detailResponse.json().turns.at(-1)).toMatchObject({
+      status: 'completed',
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          id: 'command-live-1',
+          kind: 'commandExecution',
+          text: 'pnpm test',
+          status: 'completed',
+          hasDeferredDetail: true,
+        }),
+        expect.objectContaining({
+          id: 'file-change-live-1',
+          kind: 'fileChange',
+          previewText: '1 file changed · +1 · -1',
+          text: 'src/app.ts',
+          status: 'completed',
+        }),
+      ]),
+    });
+
+    const commandDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}/items/command-live-1/detail`
+    });
+
+    expect(commandDetailResponse.statusCode).toBe(200);
+    expect(commandDetailResponse.json().text).toContain('tests passed');
+  });
+
+  it('uses persisted command snapshots when final history contains only command placeholders', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Command Placeholder Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Run several commands.',
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    const startedThread = promptResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const activeTurn = remoteThread?.turns.at(-1);
+    expect(activeTurn).toBeTruthy();
+
+    for (const command of [
+      { id: 'command-live-1', command: ['pnpm', 'test'], output: 'test suite ok' },
+      { id: 'command-live-2', command: 'pnpm build', output: 'build ok' },
+    ]) {
+      fakeCodexManager.emit('notification', {
+        method: 'item/completed',
+        params: {
+          threadId: startedThread.codexThreadId,
+          turnId: activeTurn!.id,
+          item: {
+            id: command.id,
+            type: 'commandExecution',
+            command: command.command,
+            aggregated_output: command.output,
+            status: 'completed',
+          },
+        }
+      });
+    }
+
+    const completedTurn = {
+      ...activeTurn!,
+      status: 'completed' as const,
+      items: [
+        ...activeTurn!.items,
+        {
+          id: 'command-live-1',
+          type: 'commandExecution',
+          command: 'Command',
+          aggregatedOutput: null,
+          status: 'completed',
+        },
+        {
+          id: 'command-live-2',
+          type: 'commandExecution',
+          command: 'Command',
+          aggregatedOutput: null,
+          status: 'completed',
+        },
+        {
+          id: 'agent-final',
+          type: 'agentMessage',
+          text: 'Done.',
+        },
+      ],
+    };
+    fakeCodexManager.threads.set(startedThread.codexThreadId, {
+      ...remoteThread!,
+      status: { type: 'idle' },
+      turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: startedThread.codexThreadId,
+        turn: completedTurn
+      }
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    const commandItems = detailResponse
+      .json()
+      .turns.at(-1)
+      .items.filter((item: any) => item.kind === 'commandExecution');
+
+    expect(commandItems).toMatchObject([
+      {
+        id: 'command-live-1',
+        text: 'pnpm test',
+        hasDeferredDetail: true,
+      },
+      {
+        id: 'command-live-2',
+        text: 'pnpm build',
+        hasDeferredDetail: true,
+      },
+    ]);
+
+    const firstCommandDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}/items/command-live-1/detail`
+    });
+    const secondCommandDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}/items/command-live-2/detail`
+    });
+
+    expect(firstCommandDetailResponse.statusCode).toBe(200);
+    expect(firstCommandDetailResponse.json().text).toContain('test suite ok');
+    expect(secondCommandDetailResponse.statusCode).toBe(200);
+    expect(secondCommandDetailResponse.json().text).toContain('build ok');
+  });
+
   it('persists answered request notes in thread detail for refreshes', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',

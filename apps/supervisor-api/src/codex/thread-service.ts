@@ -23,6 +23,7 @@ import {
   deleteThreadForkRecordsByForkedThreadId,
   deleteThreadForkRecordsBySourceThreadId,
   deleteThreadGoalRecordsByThreadId,
+  deleteThreadHistoryItemRecordsByThreadId,
   deleteNotificationsByThreadId,
   deleteThreadPendingSteerRecordById,
   deleteThreadPendingSteerRecordsByThreadId,
@@ -39,11 +40,13 @@ import {
   listThreadForkRecordsByForkedThreadId,
   listThreadForkRecordsBySourceThreadId,
   listThreadGoalRecordsByThreadId,
+  listThreadHistoryItemRecordsByThreadId,
   listThreadPendingSteerRecordsByThreadId,
   listThreadTurnMetadataByThreadId,
   listThreadRecords,
   markActiveThreadGoalRecordTerminated,
   upsertThreadGoalRecord,
+  upsertThreadHistoryItemRecord,
   upsertThreadTurnMetadata,
   updateThreadRecord
 } from '../../../../packages/db/src/index';
@@ -954,6 +957,21 @@ function summarizeCommandText(text: string) {
   return lines.find((line) => line.trim().length > 0) ?? lines[0] ?? 'Command output';
 }
 
+function textFromUnknown(value: unknown) {
+  if (typeof value === 'string') {
+    return value.trim() ? value : null;
+  }
+
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((entry) => textFromUnknown(entry))
+      .filter((entry): entry is string => Boolean(entry));
+    return parts.length > 0 ? parts.join(' ') : null;
+  }
+
+  return null;
+}
+
 function safeJsonStringify(value: unknown) {
   try {
     const serialized = JSON.stringify(value, null, 2);
@@ -986,6 +1004,43 @@ function deferCommandHistoryItem(
     detailText: null,
     hasDeferredDetail: true,
   };
+}
+
+function formatCommandHistoryItem(
+  item: CodexTurnItem,
+  deferredDetails?: Map<string, ThreadHistoryItemDetailDto>,
+): ThreadHistoryItemDto {
+  const nestedRecords = [
+    item,
+    isRecord(item.action) ? item.action : null,
+    isRecord(item.result) ? item.result : null,
+  ].filter((candidate): candidate is Record<string, unknown> => Boolean(candidate));
+  const commandText =
+    textFromUnknown(valueFromNestedRecords(nestedRecords, ['command', 'cmd', 'argv'])) ??
+    stringOrNull(item.text) ??
+    'Command output';
+  const outputText =
+    textFromUnknown(
+      valueFromNestedRecords(nestedRecords, [
+        'aggregatedOutput',
+        'aggregated_output',
+        'output',
+        'stdout',
+        'stderr',
+        'text',
+      ]),
+    ) ?? null;
+  const detailText = [commandText, outputText].filter(Boolean).join('\n\n');
+  const historyItem: ThreadHistoryItemDto & { kind: 'commandExecution' } = {
+    id: item.id,
+    kind: 'commandExecution',
+    text: detailText,
+    status: item.status ?? null,
+  };
+
+  return deferredDetails
+    ? deferCommandHistoryItem(historyItem, deferredDetails)
+    : historyItem;
 }
 
 function deferToolCallHistoryItem(
@@ -1138,6 +1193,111 @@ function deferLargeHistoryItemDetails(
         : item,
     ),
   };
+}
+
+function shouldPersistLiveHistoryItem(item: ThreadHistoryItemDto) {
+  return (
+    item.kind === 'commandExecution' ||
+    item.kind === 'fileChange' ||
+    item.kind === 'toolCall' ||
+    item.kind === 'webSearch'
+  );
+}
+
+function parseStoredHistoryItem(value: string): ThreadHistoryItemDto | null {
+  try {
+    const parsed = JSON.parse(value);
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      typeof parsed.id === 'string' &&
+      typeof parsed.kind === 'string' &&
+      typeof parsed.text === 'string'
+    ) {
+      return parsed as ThreadHistoryItemDto;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function mergePersistedHistoryItemsIntoTurns(
+  turns: ThreadTurnDto[],
+  persistedItemsByTurnId: Map<string, ThreadHistoryItemDto[]>,
+  deferredDetails: Map<string, ThreadHistoryItemDetailDto>,
+): ThreadTurnDto[] {
+  if (persistedItemsByTurnId.size === 0) {
+    return turns;
+  }
+
+  return turns.map((turn) => {
+    if (turn.status === 'inProgress') {
+      return turn;
+    }
+
+    const persistedItems = persistedItemsByTurnId.get(turn.id);
+    if (!persistedItems || persistedItems.length === 0) {
+      return turn;
+    }
+
+    let changed = false;
+    const persistedItemsById = new Map(persistedItems.map((item) => [item.id, item]));
+    const nextItems = turn.items.map((item) => {
+      const persistedItem = persistedItemsById.get(item.id);
+      if (
+        !persistedItem ||
+        item.kind !== persistedItem.kind ||
+        (persistedItem.kind !== 'commandExecution' && persistedItem.kind !== 'toolCall')
+      ) {
+        return item;
+      }
+
+      const existingText = item.detailText?.trim() || item.text.trim();
+      const persistedText = persistedItem.detailText?.trim() || persistedItem.text.trim();
+      if (persistedText.length <= existingText.length) {
+        return item;
+      }
+
+      changed = true;
+      persistedItemsById.delete(item.id);
+      return persistedItem.kind === 'commandExecution'
+        ? deferCommandHistoryItem(
+            persistedItem as ThreadHistoryItemDto & { kind: 'commandExecution' },
+            deferredDetails,
+          )
+        : deferToolCallHistoryItem(
+            persistedItem as ThreadHistoryItemDto & { kind: 'toolCall' },
+            deferredDetails,
+          );
+    });
+
+    const existingItemIds = new Set(nextItems.map((item) => item.id));
+    const missingItems = [...persistedItemsById.values()]
+      .filter((item) => !existingItemIds.has(item.id))
+      .map((item) =>
+        item.kind === 'commandExecution'
+          ? deferCommandHistoryItem(
+              item as ThreadHistoryItemDto & { kind: 'commandExecution' },
+              deferredDetails,
+            )
+          : item.kind === 'toolCall'
+            ? deferToolCallHistoryItem(
+                item as ThreadHistoryItemDto & { kind: 'toolCall' },
+                deferredDetails,
+              )
+            : item,
+      );
+    if (missingItems.length === 0 && !changed) {
+      return turn;
+    }
+
+    return {
+      ...turn,
+      items: [...nextItems, ...missingItems],
+    };
+  });
 }
 
 interface UploadedPromptAttachment {
@@ -1666,24 +1826,7 @@ function itemToHistoryItem(
         text: [item.summary?.join('\n') ?? '', item.text ?? ''].filter(Boolean).join('\n\n')
       };
     case 'commandExecution':
-      return deferredDetails
-        ? deferCommandHistoryItem(
-            {
-              id: item.id,
-              kind: 'commandExecution',
-              text: [item.command ?? '', item.aggregatedOutput ?? '']
-                .filter(Boolean)
-                .join('\n\n'),
-              status: item.status ?? null,
-            },
-            deferredDetails,
-          )
-        : {
-        id: item.id,
-        kind: 'commandExecution',
-        text: [item.command ?? '', item.aggregatedOutput ?? ''].filter(Boolean).join('\n\n'),
-        status: item.status ?? null
-      };
+      return formatCommandHistoryItem(item, deferredDetails);
     case 'webSearch':
     case 'web_search':
     case 'webSearchCall':
@@ -1713,12 +1856,13 @@ function liveCodexItemToHistoryItem(
   item: CodexTurnItem,
   phase: 'started' | 'completed',
 ): ThreadHistoryItemDto | null {
-  const deferredDetails = new Map<string, ThreadHistoryItemDetailDto>();
-  const historyItem = itemToHistoryItem(item, deferredDetails);
+  const historyItem = itemToHistoryItem(item);
 
   if (
     historyItem.kind !== 'commandExecution' &&
-    historyItem.kind !== 'toolCall'
+    historyItem.kind !== 'toolCall' &&
+    historyItem.kind !== 'fileChange' &&
+    historyItem.kind !== 'webSearch'
   ) {
     return null;
   }
@@ -2263,6 +2407,39 @@ export class ThreadService {
     );
   }
 
+  private listPersistedHistoryItemsByTurnId(localThreadId: string) {
+    const itemsByTurnId = new Map<string, ThreadHistoryItemDto[]>();
+    for (const record of listThreadHistoryItemRecordsByThreadId(this.db, localThreadId)) {
+      const item = parseStoredHistoryItem(record.itemJson);
+      if (!item) {
+        continue;
+      }
+
+      const current = itemsByTurnId.get(record.turnId) ?? [];
+      current.push(item);
+      itemsByTurnId.set(record.turnId, current);
+    }
+
+    return itemsByTurnId;
+  }
+
+  private persistLiveHistoryItem(
+    localThreadId: string,
+    turnId: string,
+    item: ThreadHistoryItemDto,
+  ) {
+    if (!shouldPersistLiveHistoryItem(item)) {
+      return;
+    }
+
+    upsertThreadHistoryItemRecord(this.db, {
+      threadId: localThreadId,
+      turnId,
+      itemId: item.id,
+      itemJson: JSON.stringify(item),
+    });
+  }
+
   private async buildThreadDetailCacheEntry(
     localThreadId: string,
     record: { id: string; codexThreadId: string | null; collaborationMode: string | null; model: string | null; reasoningEffort: string | null; },
@@ -2285,7 +2462,12 @@ export class ThreadService {
     if (!remoteThread) {
       const localSession = await this.localSessionStore.findSession(record.codexThreadId!);
       const deferredDetails = new Map<string, ThreadHistoryItemDetailDto>();
-      const turns = (localSession?.turns ?? []).map((turn) =>
+      const persistedItemsByTurnId = this.listPersistedHistoryItemsByTurnId(localThreadId);
+      const turns = mergePersistedHistoryItemsIntoTurns(
+        localSession?.turns ?? [],
+        persistedItemsByTurnId,
+        deferredDetails,
+      ).map((turn) =>
         buildTurnDto(
           deferLargeHistoryItemDetails(turn, deferredDetails),
           turnMetadataById.get(turn.id),
@@ -2326,8 +2508,13 @@ export class ThreadService {
     this.reconcilePendingSteers(updated.id, remoteThread);
 
     const deferredDetails = new Map<string, ThreadHistoryItemDetailDto>();
-    const turns = remoteThread.turns.map((turn) =>
-      buildTurnDto(turnToDto(turn, deferredDetails), turnMetadataById.get(turn.id)),
+    const persistedItemsByTurnId = this.listPersistedHistoryItemsByTurnId(localThreadId);
+    const turns = mergePersistedHistoryItemsIntoTurns(
+      remoteThread.turns.map((turn) => turnToDto(turn, deferredDetails)),
+      persistedItemsByTurnId,
+      deferredDetails,
+    ).map((turn) =>
+      buildTurnDto(turn, turnMetadataById.get(turn.id)),
     );
     const entry = {
       turns,
@@ -3767,6 +3954,7 @@ export class ThreadService {
     deleteThreadForkRecordsByForkedThreadId(this.db, localThreadId);
     deleteThreadActivityNotesByThreadId(this.db, localThreadId);
     deleteThreadGoalRecordsByThreadId(this.db, localThreadId);
+    deleteThreadHistoryItemRecordsByThreadId(this.db, localThreadId);
     deleteThreadPendingSteerRecordsByThreadId(this.db, localThreadId);
     deleteThreadTurnMetadataByThreadId(this.db, localThreadId);
     deleteThreadRecord(this.db, localThreadId);
@@ -4054,6 +4242,7 @@ export class ThreadService {
           return;
         }
 
+        this.persistLiveHistoryItem(record.id, params.turnId, liveItem);
         this.upsertLiveItem(record.id, params.turnId, liveItem);
         this.emitThreadEvent(
           event.method === 'item/started'

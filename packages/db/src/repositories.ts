@@ -10,6 +10,7 @@ import {
   threadActivityNotes,
   threadForks,
   threadGoals,
+  threadHistoryItems,
   threadPendingSteers,
   threadTurnMetadata,
   threads,
@@ -78,6 +79,13 @@ export interface CreateThreadPendingSteerRecordInput {
   clientRequestId?: string | null;
   displayPrompt: string;
   submittedPrompt: string;
+}
+
+export interface UpsertThreadHistoryItemRecordInput {
+  threadId: string;
+  turnId: string;
+  itemId: string;
+  itemJson: string;
 }
 
 export interface CreateThreadActivityNoteRecordInput {
@@ -388,6 +396,66 @@ export function upsertThreadTurnMetadata(
 
 export function deleteThreadTurnMetadataByThreadId(db: DatabaseClient, threadId: string) {
   db.delete(threadTurnMetadata).where(eq(threadTurnMetadata.threadId, threadId)).run();
+}
+
+export function listThreadHistoryItemRecordsByThreadId(
+  db: DatabaseClient,
+  threadId: string,
+) {
+  return db
+    .select()
+    .from(threadHistoryItems)
+    .where(eq(threadHistoryItems.threadId, threadId))
+    .orderBy(threadHistoryItems.createdAt)
+    .all();
+}
+
+export function upsertThreadHistoryItemRecord(
+  db: DatabaseClient,
+  input: UpsertThreadHistoryItemRecordInput,
+) {
+  const now = new Date().toISOString();
+  const existing = db
+    .select()
+    .from(threadHistoryItems)
+    .where(
+      and(
+        eq(threadHistoryItems.threadId, input.threadId),
+        eq(threadHistoryItems.turnId, input.turnId),
+        eq(threadHistoryItems.itemId, input.itemId),
+      ),
+    )
+    .get();
+
+  if (existing) {
+    db.update(threadHistoryItems)
+      .set({
+        itemJson: input.itemJson,
+        updatedAt: now,
+      })
+      .where(eq(threadHistoryItems.id, existing.id))
+      .run();
+    return;
+  }
+
+  db.insert(threadHistoryItems)
+    .values({
+      id: randomUUID(),
+      threadId: input.threadId,
+      turnId: input.turnId,
+      itemId: input.itemId,
+      itemJson: input.itemJson,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .run();
+}
+
+export function deleteThreadHistoryItemRecordsByThreadId(
+  db: DatabaseClient,
+  threadId: string,
+) {
+  db.delete(threadHistoryItems).where(eq(threadHistoryItems.threadId, threadId)).run();
 }
 
 export function listThreadPendingSteerRecordsByThreadId(

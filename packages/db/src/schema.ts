@@ -114,6 +114,26 @@ export const threadPendingSteers = sqliteTable('thread_pending_steers', {
   updatedAt: text('updated_at').notNull(),
 });
 
+export const threadHistoryItems = sqliteTable(
+  'thread_history_items',
+  {
+    id: text('id').primaryKey(),
+    threadId: text('thread_id').notNull(),
+    turnId: text('turn_id').notNull(),
+    itemId: text('item_id').notNull(),
+    itemJson: text('item_json').notNull(),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => ({
+    threadTurnItemUnique: uniqueIndex('thread_history_items_thread_turn_item_idx').on(
+      table.threadId,
+      table.turnId,
+      table.itemId,
+    ),
+  }),
+);
+
 export const threadActivityNotes = sqliteTable('thread_activity_notes', {
   id: text('id').primaryKey(),
   threadId: text('thread_id').notNull(),
