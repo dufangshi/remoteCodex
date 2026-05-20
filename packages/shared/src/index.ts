@@ -120,6 +120,8 @@ export interface AgentBackendManagementSchemaDto {
   hostConfigFiles: AgentBackendConfigFileSchemaDto[];
   toolboxItems: AgentBackendToolboxItemSchemaDto[];
   hookCommandTemplates: AgentBackendHookCommandTemplateDto[];
+  providerConfigFormat: 'toml' | 'json' | 'none';
+  mcpConfigFormat: 'codex-toml' | 'claude-json' | 'none';
   configArchives: boolean;
   buildRestart: boolean;
 }

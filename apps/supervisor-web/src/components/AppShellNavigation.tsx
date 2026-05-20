@@ -81,6 +81,8 @@ const emptyManagementSchema: AgentBackendDto['managementSchema'] = {
   hostConfigFiles: [],
   toolboxItems: [],
   hookCommandTemplates: [],
+  providerConfigFormat: 'none',
+  mcpConfigFormat: 'none',
   configArchives: false,
   buildRestart: false,
 };

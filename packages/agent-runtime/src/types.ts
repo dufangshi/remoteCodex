@@ -129,6 +129,8 @@ export interface AgentRuntimeManagementSchema {
   hostConfigFiles: AgentRuntimeConfigFileSchema[];
   toolboxItems: AgentRuntimeToolboxItemSchema[];
   hookCommandTemplates: AgentRuntimeHookCommandTemplate[];
+  providerConfigFormat: 'toml' | 'json' | 'none';
+  mcpConfigFormat: 'codex-toml' | 'claude-json' | 'none';
   configArchives: boolean;
   buildRestart: boolean;
 }

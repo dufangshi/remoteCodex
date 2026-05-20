@@ -3193,6 +3193,7 @@ export function ThreadDetailPage() {
                       capabilities={backendCapabilities}
                       toolboxItems={backendManagementSchema?.toolboxItems ?? []}
                       hookCommandTemplates={backendManagementSchema?.hookCommandTemplates ?? []}
+                      mcpConfigFormat={backendManagementSchema?.mcpConfigFormat ?? 'none'}
                       followTail={followTail}
                       threadConnected={detail.thread.isLoaded}
                       disabled={Boolean(promptDisabledReason)}
@@ -3265,6 +3266,7 @@ export function ThreadDetailPage() {
                       capabilities={backendCapabilities}
                       toolboxItems={backendManagementSchema?.toolboxItems ?? []}
                       hookCommandTemplates={backendManagementSchema?.hookCommandTemplates ?? []}
+                      mcpConfigFormat={backendManagementSchema?.mcpConfigFormat ?? 'none'}
                       followTail={followTail}
                       threadConnected={detail.thread.isLoaded}
                       disabled={Boolean(promptDisabledReason)}
@@ -3362,6 +3364,7 @@ export function ThreadDetailPage() {
                     capabilities={backendCapabilities}
                     toolboxItems={backendManagementSchema?.toolboxItems ?? []}
                     hookCommandTemplates={backendManagementSchema?.hookCommandTemplates ?? []}
+                    mcpConfigFormat={backendManagementSchema?.mcpConfigFormat ?? 'none'}
                     threadConnected={detail.thread.isLoaded}
                     shellControlState={shellControlState}
                     canInterrupt={Boolean(detail.thread.isLoaded && shellControlState?.isCommandRunning)}

@@ -772,6 +772,7 @@ describe('ThreadComposer', () => {
         onOpenMcp={onOpenMcp}
         onReadProviderConfig={onReadProviderConfig}
         onWriteProviderConfig={onWriteProviderConfig}
+        mcpConfigFormat="codex-toml"
         mcpState={{
           status: 'ready',
           error: null,
@@ -847,6 +848,7 @@ describe('ThreadComposer', () => {
         onSubmit={() => undefined}
         onReadProviderConfig={onReadProviderConfig}
         onWriteProviderConfig={onWriteProviderConfig}
+        mcpConfigFormat="codex-toml"
         mcpState={{
           status: 'ready',
           error: null,

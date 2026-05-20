@@ -15,6 +15,7 @@ import {
 
 import type {
   AgentBackendHookCommandTemplateDto,
+  AgentBackendManagementSchemaDto,
   AgentBackendToolboxItemSchemaDto,
   AgentProviderCapabilitiesDto,
   CollaborationModeDto,
@@ -54,6 +55,7 @@ interface ThreadComposerProps {
   capabilities?: AgentProviderCapabilitiesDto | null | undefined;
   toolboxItems?: AgentBackendToolboxItemSchemaDto[] | null | undefined;
   hookCommandTemplates?: AgentBackendHookCommandTemplateDto[] | null | undefined;
+  mcpConfigFormat?: AgentBackendManagementSchemaDto['mcpConfigFormat'] | null | undefined;
   followTail?: boolean;
   threadConnected?: boolean;
   disabled?: boolean;
@@ -780,6 +782,7 @@ export function ThreadComposer({
   capabilities = null,
   toolboxItems = null,
   hookCommandTemplates = null,
+  mcpConfigFormat = 'none',
   followTail = false,
   threadConnected = true,
   disabled = false,
@@ -860,12 +863,13 @@ export function ThreadComposer({
       hooks: capabilities?.management.hooks ?? false,
       hostConfigFiles: capabilities?.management.hostConfigFiles ?? false,
       mcpConfigEditing:
+        mcpConfigFormat === 'codex-toml' &&
         Boolean(capabilities?.management.hostConfigFiles) &&
         Boolean(onReadProviderConfig) &&
         Boolean(onWriteProviderConfig),
       hookTrust: capabilities?.management.hookTrust ?? false,
     }),
-    [capabilities, onReadProviderConfig, onWriteProviderConfig],
+    [capabilities, mcpConfigFormat, onReadProviderConfig, onWriteProviderConfig],
   );
   const availableToolboxItems = useMemo(
     () =>
