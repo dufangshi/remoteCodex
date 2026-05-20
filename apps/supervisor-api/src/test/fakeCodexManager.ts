@@ -61,6 +61,7 @@ export class FakeCodexManager extends EventEmitter {
   mcpServers: CodexMcpServerRecord[] = [];
   hooksEntries: CodexHooksListEntry[] = [];
   hooksListError: JsonRpcClientError | null = null;
+  hookTrustCalls: Array<{ key: string; trustedHash: string | null }> = [];
   goals = new Map<string, CodexThreadGoalRecord>();
   goalSetCalls: ThreadGoalSetInput[] = [];
   goalClearCalls: string[] = [];
@@ -118,6 +119,21 @@ export class FakeCodexManager extends EventEmitter {
     }
 
     return this.hooksEntries;
+  }
+
+  async setHookTrust(input: { key: string; trustedHash: string | null }) {
+    this.hookTrustCalls.push(input);
+    for (const entry of this.hooksEntries) {
+      for (const hook of entry.hooks) {
+        if (hook.key !== input.key) {
+          continue;
+        }
+        hook.trustStatus =
+          input.trustedHash && input.trustedHash === hook.currentHash
+            ? 'trusted'
+            : 'untrusted';
+      }
+    }
   }
 
   async startThread(input: { cwd: string; model: string; sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access' | null; serviceTier?: 'fast' | 'flex' | null }) {

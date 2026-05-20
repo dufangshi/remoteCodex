@@ -823,6 +823,8 @@ describe('ThreadComposer', () => {
     expect(screen.getByText('node hook.js')).toBeInTheDocument();
     expect(screen.getByText('Trusted')).toBeInTheDocument();
     expect(screen.getByText('30s')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit' })).toHaveClass('py-0.5');
+    expect(screen.getByRole('button', { name: 'Untrust' })).toHaveClass('py-0.5');
   });
 
   it('writes a new hook through the hooks panel', async () => {
@@ -882,6 +884,55 @@ describe('ThreadComposer', () => {
     expect(
       screen.getByText(/Project hook written in hooks\.json/i),
     ).toBeInTheDocument();
+  });
+
+  it('uses the Codex Stop hook JSON output template by default', async () => {
+    const onOpenHooks = vi.fn().mockResolvedValue(undefined);
+    const onCreateHook = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={() => undefined}
+        onOpenHooks={onOpenHooks}
+        onCreateHook={onCreateHook}
+        hooksState={{
+          status: 'ready',
+          error: null,
+          data: {
+            cwd: '/tmp/demo',
+            globalHooksPath: '/home/u/.codex/hooks.json',
+            projectHooksPath: '/tmp/demo/.codex/hooks.json',
+            warnings: [],
+            errors: [],
+            hooks: [],
+          },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
+    fireEvent.click(screen.getByRole('button', { name: /\/hooks/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add Hook' }));
+    fireEvent.change(screen.getByLabelText('Hook event'), {
+      target: { value: 'stop' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Write Hook' }));
+
+    await waitFor(() => {
+      expect(onCreateHook).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventName: 'stop',
+          matcher: null,
+          command:
+            'node -e \'process.stdin.resume(); process.stdin.on("end", () => console.log(JSON.stringify({ systemMessage: "remote-codex hook ran" })))\'',
+        }),
+      );
+    });
   });
 
   it('updates an editable hook through the hooks panel', async () => {

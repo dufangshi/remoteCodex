@@ -2965,6 +2965,40 @@ describe('supervisor api', () => {
             currentHash: 'hash',
             trustStatus: 'trusted',
           },
+          {
+            key: 'hook-created',
+            eventName: 'preToolUse',
+            handlerType: 'command',
+            matcher: 'Bash',
+            command: 'node -e "console.error(\\"hook ran\\")"',
+            timeoutSec: 5,
+            statusMessage: 'Testing hook',
+            sourcePath: path.join(workspacePath, '.codex/hooks.json'),
+            source: 'project',
+            pluginId: null,
+            displayOrder: 1,
+            enabled: true,
+            isManaged: false,
+            currentHash: 'created-hash',
+            trustStatus: 'untrusted',
+          },
+          {
+            key: 'hook-updated',
+            eventName: 'postToolUse',
+            handlerType: 'command',
+            matcher: 'Bash',
+            command: 'node -e "console.error(\\"updated hook ran\\")"',
+            timeoutSec: 8,
+            statusMessage: 'Updated hook',
+            sourcePath: path.join(workspacePath, '.codex/hooks.json'),
+            source: 'project',
+            pluginId: null,
+            displayOrder: 2,
+            enabled: true,
+            isManaged: false,
+            currentHash: 'updated-hash',
+            trustStatus: 'untrusted',
+          },
         ],
         warnings: [],
         errors: [],
@@ -3002,16 +3036,18 @@ describe('supervisor api', () => {
       cwd: workspacePath,
       projectHooksPath: path.join(workspacePath, '.codex/hooks.json'),
       globalHooksPath: path.join(codexHome, 'hooks.json'),
-      hooks: [
-        {
+    });
+    expect(hooksResponse.json().hooks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
           eventName: 'preToolUse',
           matcher: 'Bash',
           command: 'node hook.js',
           source: 'project',
           trustStatus: 'trusted',
-        },
-      ],
-    });
+        }),
+      ]),
+    );
 
     const createHookResponse = await app.inject({
       method: 'POST',
@@ -3027,6 +3063,18 @@ describe('supervisor api', () => {
     });
 
     expect(createHookResponse.statusCode).toBe(200);
+    expect(fakeCodexManager.hookTrustCalls).toContainEqual({
+      key: 'hook-created',
+      trustedHash: 'created-hash',
+    });
+    expect(createHookResponse.json().hooks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'hook-created',
+          trustStatus: 'trusted',
+        }),
+      ]),
+    );
     await expect(
       fs.readFile(path.join(workspacePath, '.codex/hooks.json'), 'utf8'),
     ).resolves.toBe(
@@ -3075,6 +3123,10 @@ describe('supervisor api', () => {
     });
 
     expect(updateHookResponse.statusCode).toBe(200);
+    expect(fakeCodexManager.hookTrustCalls).toContainEqual({
+      key: 'hook-updated',
+      trustedHash: 'updated-hash',
+    });
     await expect(
       fs.readFile(path.join(workspacePath, '.codex/hooks.json'), 'utf8'),
     ).resolves.toBe(
@@ -3099,6 +3151,51 @@ describe('supervisor api', () => {
         null,
         2,
       )}\n`,
+    );
+
+    const untrustHookResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/hooks/untrust`,
+      payload: {
+        key: 'hook-updated',
+      },
+    });
+
+    expect(untrustHookResponse.statusCode).toBe(200);
+    expect(fakeCodexManager.hookTrustCalls.at(-1)).toEqual({
+      key: 'hook-updated',
+      trustedHash: null,
+    });
+    expect(untrustHookResponse.json().hooks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'hook-updated',
+          trustStatus: 'untrusted',
+        }),
+      ]),
+    );
+
+    const trustHookResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/hooks/trust`,
+      payload: {
+        key: 'hook-updated',
+        currentHash: 'updated-hash',
+      },
+    });
+
+    expect(trustHookResponse.statusCode).toBe(200);
+    expect(fakeCodexManager.hookTrustCalls.at(-1)).toEqual({
+      key: 'hook-updated',
+      trustedHash: 'updated-hash',
+    });
+    expect(trustHookResponse.json().hooks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'hook-updated',
+          trustStatus: 'trusted',
+        }),
+      ]),
     );
   });
 
@@ -3896,6 +3993,7 @@ describe('supervisor api', () => {
               text: 'Hook printed command details.',
             },
           ],
+          systemMessage: 'Hook system message.',
         },
       },
     });
@@ -3916,12 +4014,118 @@ describe('supervisor api', () => {
             text: 'PreToolUse hook',
             previewText: 'Checking Bash command',
             status: 'Completed',
+            hookEventName: 'preToolUse',
+            hookEventLabel: 'PreToolUse',
+            hookHandlerType: 'command',
+            hookScope: 'turn',
+            hookSource: 'project',
+            hookStatusMessage: 'Checking Bash command',
+            hookOutputEntries: [
+              {
+                kind: 'context',
+                text: 'Hook printed command details.',
+              },
+              {
+                kind: 'warning',
+                text: 'Hook system message.',
+              },
+            ],
           },
         ],
       },
     });
     expect(detailResponse.json().liveItems.items[0].detailText).toContain(
       'Hook printed command details.',
+    );
+    expect(detailResponse.json().liveItems.items[0].detailText).toContain(
+      'Hook system message.',
+    );
+  });
+
+  it('materializes hook prompt XML as a hook timeline item', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Hook Prompt Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Reply ok.',
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    const startedThread = promptResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const activeTurn = remoteThread?.turns.at(-1);
+    expect(activeTurn).toBeTruthy();
+
+    const completedTurn = {
+      ...activeTurn!,
+      status: 'completed' as const,
+      items: [
+        ...activeTurn!.items,
+        {
+          id: 'hook-prompt-1',
+          type: 'agentMessage',
+          text: '<hook_prompt hook_run_id="stop:0:/tmp/demo/.codex/hooks.json">remote-codex hook ran</hook_prompt>',
+        },
+      ],
+    };
+    fakeCodexManager.threads.set(startedThread.codexThreadId, {
+      ...remoteThread!,
+      status: { type: 'idle' },
+      turns: [...remoteThread!.turns.slice(0, -1), completedTurn],
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: startedThread.codexThreadId,
+        turn: completedTurn,
+      },
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json().turns.at(-1).items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'hook',
+          text: 'Stop hook',
+          hookEventLabel: 'Stop',
+          hookOutputEntries: [
+            {
+              kind: 'warning',
+              text: 'remote-codex hook ran',
+            },
+          ],
+        }),
+      ]),
+    );
+    expect(JSON.stringify(detailResponse.json().turns.at(-1).items)).not.toContain(
+      '<hook_prompt',
     );
   });
 
@@ -4179,6 +4383,169 @@ describe('supervisor api', () => {
       'command-before-agent',
       'agent-mid',
       'command-after-agent',
+      'agent-final',
+    ]);
+  });
+
+  it('restores materialized command order when the final history appends commands after agent text', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Materialized Command Order Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Run commands, explain, then run more.',
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    const startedThread = promptResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const activeTurn = remoteThread?.turns.at(-1);
+    expect(activeTurn).toBeTruthy();
+
+    for (const event of [
+      {
+        method: 'item/completed' as const,
+        item: {
+          id: 'command-1',
+          type: 'commandExecution',
+          command: 'pwd',
+          aggregatedOutput: '/tmp/demo',
+          status: 'completed',
+        },
+      },
+      {
+        method: 'item/completed' as const,
+        item: {
+          id: 'command-2',
+          type: 'commandExecution',
+          command: 'ls',
+          aggregatedOutput: 'package.json',
+          status: 'completed',
+        },
+      },
+    ]) {
+      fakeCodexManager.emit('notification', {
+        method: event.method,
+        params: {
+          threadId: startedThread.codexThreadId,
+          turnId: activeTurn!.id,
+          item: event.item,
+        }
+      });
+    }
+    fakeCodexManager.emit('notification', {
+      method: 'item/agentMessage/delta',
+      params: {
+        threadId: startedThread.codexThreadId,
+        turnId: activeTurn!.id,
+        itemId: 'agent-mid',
+        delta: 'I checked the workspace.',
+      }
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: startedThread.codexThreadId,
+        turnId: activeTurn!.id,
+        item: {
+          id: 'command-3',
+          type: 'commandExecution',
+          command: 'pnpm test',
+          aggregatedOutput: 'tests passed',
+          status: 'completed',
+        },
+      }
+    });
+
+    const completedTurn = {
+      ...activeTurn!,
+      status: 'completed' as const,
+      items: [
+        ...activeTurn!.items,
+        {
+          id: 'agent-mid',
+          type: 'agentMessage',
+          text: 'I checked the workspace.',
+        },
+        {
+          id: 'agent-final',
+          type: 'agentMessage',
+          text: 'Tests passed.',
+        },
+        {
+          id: 'command-1',
+          type: 'commandExecution',
+          command: 'pwd',
+          aggregatedOutput: '/tmp/demo',
+          status: 'completed',
+        },
+        {
+          id: 'command-2',
+          type: 'commandExecution',
+          command: 'ls',
+          aggregatedOutput: 'package.json',
+          status: 'completed',
+        },
+        {
+          id: 'command-3',
+          type: 'commandExecution',
+          command: 'pnpm test',
+          aggregatedOutput: 'tests passed',
+          status: 'completed',
+        },
+      ],
+    };
+    fakeCodexManager.threads.set(startedThread.codexThreadId, {
+      ...remoteThread!,
+      status: { type: 'idle' },
+      turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: startedThread.codexThreadId,
+        turn: completedTurn
+      }
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    const itemIds = detailResponse
+      .json()
+      .turns.at(-1)
+      .items.map((item: any) => item.id);
+
+    expect(itemIds).toEqual([
+      activeTurn!.items[0]!.id,
+      'command-1',
+      'command-2',
+      'agent-mid',
+      'command-3',
       'agent-final',
     ]);
   });

@@ -120,6 +120,15 @@ const updateThreadHookSchema = createThreadHookSchema.extend({
   target: createThreadHookSchema,
 });
 
+const trustThreadHookSchema = z.object({
+  key: z.string().min(1),
+  currentHash: z.string().min(1),
+});
+
+const untrustThreadHookSchema = z.object({
+  key: z.string().min(1),
+});
+
 const respondThreadRequestSchema = z.object({
   answers: z.record(z.string(), z.object({
     answers: z.array(z.string())
@@ -673,6 +682,18 @@ export async function registerThreadRoutes(app: FastifyInstance) {
         : {}),
     };
     return app.services.threadService.updateThreadHook(params.id, body);
+  });
+
+  app.post('/api/threads/:id/hooks/trust', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = trustThreadHookSchema.parse(request.body);
+    return app.services.threadService.trustThreadHook(params.id, body);
+  });
+
+  app.post('/api/threads/:id/hooks/untrust', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = untrustThreadHookSchema.parse(request.body);
+    return app.services.threadService.untrustThreadHook(params.id, body);
   });
 
   app.post('/api/threads/:id/resume', async (request) => {

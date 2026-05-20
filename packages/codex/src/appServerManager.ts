@@ -5,6 +5,7 @@ import { JsonRpcClient, JsonRpcClientError } from './jsonrpc';
 import {
   AppServerStatusSnapshot,
   CodexClientInfo,
+  CodexHookTrustInput,
   CodexHooksListEntry,
   CodexHookRecord,
   CodexMcpServerRecord,
@@ -353,6 +354,25 @@ export class CodexAppServerManager extends EventEmitter {
       ...(input.cwds && input.cwds.length > 0 ? { cwds: input.cwds } : {}),
     });
     return response.data.map(mapHooksListEntry);
+  }
+
+  async setHookTrust(input: CodexHookTrustInput) {
+    await this.ensureReady();
+    await this.client!.request('config/batchWrite', {
+      edits: [
+        {
+          keyPath: 'hooks.state',
+          value: {
+            [input.key]: {
+              trusted_hash: input.trustedHash ?? '',
+              ...(input.trustedHash ? { enabled: true } : {}),
+            },
+          },
+          mergeStrategy: 'upsert',
+        },
+      ],
+      reloadUserConfig: true,
+    });
   }
 
   async startThread(input: ThreadStartInput) {

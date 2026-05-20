@@ -77,6 +77,8 @@ interface ThreadComposerProps {
   onOpenHooks?: () => Promise<void> | void;
   onCreateHook?: (input: CreateThreadHookInput) => Promise<void> | void;
   onUpdateHook?: (input: UpdateThreadHookInput) => Promise<void> | void;
+  onTrustHook?: (input: { key: string; currentHash: string }) => Promise<void> | void;
+  onUntrustHook?: (input: { key: string }) => Promise<void> | void;
   onOpenGoal?: () => Promise<void> | void;
   onUpdateGoal?: (input: {
     objective?: string | null;
@@ -144,6 +146,19 @@ const HOOK_EVENT_OPTIONS: Array<{ value: CodexHookEventNameDto; label: string; m
   { value: 'preCompact', label: 'PreCompact', matcherHint: '' },
   { value: 'postCompact', label: 'PostCompact', matcherHint: '' },
 ];
+
+const DEFAULT_HOOK_COMMAND =
+  'node -e "process.stdin.resume(); process.stdin.on(\'end\', () => console.error(\'remote-codex hook ran\'))"';
+const DEFAULT_STOP_HOOK_COMMAND =
+  'node -e \'process.stdin.resume(); process.stdin.on("end", () => console.log(JSON.stringify({ systemMessage: "remote-codex hook ran" })))\'';
+const DEFAULT_HOOK_COMMANDS = new Set([
+  DEFAULT_HOOK_COMMAND,
+  DEFAULT_STOP_HOOK_COMMAND,
+]);
+
+function defaultHookCommand(eventName: CodexHookEventNameDto) {
+  return eventName === 'stop' ? DEFAULT_STOP_HOOK_COMMAND : DEFAULT_HOOK_COMMAND;
+}
 
 function normalizePromptText(value: string) {
   return value.replace(/\u00a0/g, ' ');
@@ -805,6 +820,8 @@ export function ThreadComposer({
   onOpenHooks,
   onCreateHook,
   onUpdateHook,
+  onTrustHook,
+  onUntrustHook,
   onOpenGoal,
   onUpdateGoal,
   onOpenForkTurns,
@@ -833,9 +850,7 @@ export function ThreadComposer({
   const [hookScope, setHookScope] = useState<CreateThreadHookInput['scope']>('project');
   const [hookEventName, setHookEventName] = useState<CodexHookEventNameDto>('preToolUse');
   const [hookMatcher, setHookMatcher] = useState('Bash');
-  const [hookCommand, setHookCommand] = useState(
-    'node -e "process.stdin.resume(); process.stdin.on(\'end\', () => console.error(\'remote-codex hook ran\'))"',
-  );
+  const [hookCommand, setHookCommand] = useState(defaultHookCommand('preToolUse'));
   const [hookTimeoutSec, setHookTimeoutSec] = useState('30');
   const [hookStatusMessage, setHookStatusMessage] = useState('Running hook');
   const [editingHookTarget, setEditingHookTarget] = useState<UpdateThreadHookInput['target'] | null>(null);
@@ -925,6 +940,9 @@ export function ThreadComposer({
       }
       return selected?.matcherHint ?? '';
     });
+    setHookCommand((current) =>
+      DEFAULT_HOOK_COMMANDS.has(current.trim()) ? defaultHookCommand(hookEventName) : current,
+    );
   }, [hookEventName]);
 
   useEffect(() => {
@@ -1161,9 +1179,7 @@ export function ThreadComposer({
     setHookScope('project');
     setHookEventName('preToolUse');
     setHookMatcher('Bash');
-    setHookCommand(
-      'node -e "process.stdin.resume(); process.stdin.on(\'end\', () => console.error(\'remote-codex hook ran\'))"',
-    );
+    setHookCommand(defaultHookCommand('preToolUse'));
     setHookTimeoutSec('30');
     setHookStatusMessage('Running hook');
   }
@@ -1339,7 +1355,7 @@ export function ThreadComposer({
       setHookConfigSuccess(
         `${hookScope === 'project' ? 'Project' : 'Global'} hook ${
           hooksPanelMode === 'edit' ? 'updated' : 'written'
-        } in hooks.json.`,
+        } in hooks.json and trusted.`,
       );
       setHooksPanelMode('list');
       setEditingHookTarget(null);
@@ -1347,6 +1363,51 @@ export function ThreadComposer({
       setHookConfigError(
         error instanceof Error ? error.message : 'Unable to write hooks.json.',
       );
+    } finally {
+      setHookConfigBusy(false);
+    }
+  }
+
+  async function handleTrustHook(hook: CodexHookDto) {
+    if (!onTrustHook || !hook.currentHash) {
+      setHookConfigError('Hook trust is unavailable in this view.');
+      return;
+    }
+
+    setHookConfigBusy(true);
+    setHookConfigError(null);
+    setHookConfigSuccess(null);
+
+    try {
+      await onTrustHook({
+        key: hook.key,
+        currentHash: hook.currentHash,
+      });
+      setHookConfigSuccess('Hook trusted.');
+    } catch (error) {
+      setHookConfigError(error instanceof Error ? error.message : 'Unable to trust hook.');
+    } finally {
+      setHookConfigBusy(false);
+    }
+  }
+
+  async function handleUntrustHook(hook: CodexHookDto) {
+    if (!onUntrustHook) {
+      setHookConfigError('Hook trust is unavailable in this view.');
+      return;
+    }
+
+    setHookConfigBusy(true);
+    setHookConfigError(null);
+    setHookConfigSuccess(null);
+
+    try {
+      await onUntrustHook({
+        key: hook.key,
+      });
+      setHookConfigSuccess('Hook untrusted.');
+    } catch (error) {
+      setHookConfigError(error instanceof Error ? error.message : 'Unable to untrust hook.');
     } finally {
       setHookConfigBusy(false);
     }
@@ -2738,38 +2799,64 @@ export function ThreadComposer({
                                     key={hook.key}
                                     className="rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-2.5"
                                   >
-                                    <div className="flex items-start justify-between gap-3">
-                                      <div className="min-w-0">
-                                        <p className="truncate text-sm font-medium text-stone-100">
-                                          {hookEventLabel(hook.eventName)}
-                                          {hook.matcher ? ` · ${hook.matcher}` : ''}
+                                    <div className="min-w-0">
+                                      <p className="truncate text-sm font-medium text-stone-100">
+                                        {hookEventLabel(hook.eventName)}
+                                        {hook.matcher ? ` · ${hook.matcher}` : ''}
+                                      </p>
+                                      <p className="mt-0.5 truncate font-mono text-[11px] text-stone-400">
+                                        {hook.command ?? hook.handlerType}
+                                      </p>
+                                      {hook.statusMessage ? (
+                                        <p className="mt-1 truncate text-[11px] text-stone-500">
+                                          {hook.statusMessage}
                                         </p>
-                                        <p className="mt-0.5 truncate font-mono text-[11px] text-stone-400">
-                                          {hook.command ?? hook.handlerType}
-                                        </p>
-                                        {hook.statusMessage ? (
-                                          <p className="mt-1 truncate text-[11px] text-stone-500">
-                                            {hook.statusMessage}
-                                          </p>
-                                        ) : null}
-                                      </div>
-                                      <div className="flex shrink-0 items-center gap-1.5">
-                                        {editableHookTarget(hook) ? (
-                                          <button
-                                            type="button"
-                                            onClick={(event) => {
-                                              event.stopPropagation();
-                                              startEditingHook(hook);
-                                            }}
-                                            className="rounded-full border border-sky-300/30 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-sky-100 transition hover:bg-sky-300/10"
-                                          >
-                                            Edit
-                                          </button>
-                                        ) : null}
-                                        <span className="rounded-full border border-stone-700 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-stone-300">
-                                          {hookTrustLabel(hook.trustStatus)}
-                                        </span>
-                                      </div>
+                                      ) : null}
+                                    </div>
+                                    <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] uppercase tracking-[0.08em] text-stone-500">
+                                      {editableHookTarget(hook) ? (
+                                        <button
+                                          type="button"
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            startEditingHook(hook);
+                                          }}
+                                          className="thread-composer-chip-button rounded-full border border-stone-700 px-2 py-0.5 text-[10px] normal-case tracking-normal text-sky-100 transition hover:border-sky-300/35 hover:bg-sky-300/10"
+                                        >
+                                          Edit
+                                        </button>
+                                      ) : null}
+                                      {hook.trustStatus === 'trusted' && !hook.isManaged ? (
+                                        <button
+                                          type="button"
+                                          disabled={hookConfigBusy}
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            void handleUntrustHook(hook);
+                                          }}
+                                          className="thread-composer-chip-button rounded-full border border-stone-700 px-2 py-0.5 text-[10px] normal-case tracking-normal text-amber-100 transition hover:border-amber-300/35 hover:bg-amber-300/10 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                          Untrust
+                                        </button>
+                                      ) : null}
+                                      {(hook.trustStatus === 'untrusted' ||
+                                        hook.trustStatus === 'modified') &&
+                                      !hook.isManaged ? (
+                                        <button
+                                          type="button"
+                                          disabled={hookConfigBusy || !hook.currentHash}
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            void handleTrustHook(hook);
+                                          }}
+                                          className="thread-composer-chip-button rounded-full border border-stone-700 px-2 py-0.5 text-[10px] normal-case tracking-normal text-emerald-100 transition hover:border-emerald-300/35 hover:bg-emerald-300/10 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                          Trust
+                                        </button>
+                                      ) : null}
+                                      <span className="rounded-full border border-stone-700 px-2 py-0.5 text-stone-300">
+                                        {hookTrustLabel(hook.trustStatus)}
+                                      </span>
                                     </div>
                                     <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] text-stone-500">
                                       <span className="rounded-full border border-stone-700 px-2 py-1">

@@ -6,6 +6,19 @@ import { describe, expect, it } from 'vitest';
 
 import { CodexAppServerManager } from './appServerManager';
 
+async function waitForCondition(
+  condition: () => boolean,
+  timeoutMs = 1000,
+) {
+  const startedAt = Date.now();
+  while (!condition()) {
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error('Timed out waiting for condition.');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 class ScriptedChild extends EventEmitter {
   stdout = new PassThrough();
   stderr = new PassThrough();
@@ -180,6 +193,99 @@ describe('CodexAppServerManager', () => {
       id: 'turn-1',
       status: 'inProgress',
     });
+
+    await manager.stop();
+  });
+
+  it('writes hook trust state through config batch writes', async () => {
+    const requests: any[] = [];
+    const script = [
+      "const readline=require('node:readline');",
+      "const rl=readline.createInterface({input:process.stdin,crlfDelay:Infinity});",
+      "rl.on('line',(line)=>{",
+      " const msg=JSON.parse(line);",
+      " if(msg.method==='initialize'){",
+      "  process.stdout.write(JSON.stringify({id:msg.id,result:{userAgent:'fake',codexHome:'/tmp',platformFamily:'unix',platformOs:'linux'}})+'\\n');",
+      " } else if(msg.method==='config/batchWrite'){",
+      "  process.stderr.write(JSON.stringify(msg)+'\\n');",
+      "  process.stdout.write(JSON.stringify({id:msg.id,result:{status:'ok',version:'v1',filePath:'/tmp/config.toml',overriddenMetadata:null}})+'\\n');",
+      " }",
+      "});"
+    ].join('');
+
+    const manager = new CodexAppServerManager({
+      command: process.execPath,
+      startupTimeoutMs: 1000,
+      clientInfo: {
+        name: 'test',
+        title: 'test',
+        version: '0.1.0'
+      },
+      spawnProcess: (command) => {
+        const child = spawn(command, ['-e', script], { stdio: 'pipe' });
+        let stderr = '';
+        child.stderr.on('data', (chunk) => {
+          stderr += chunk.toString();
+          const lines = stderr.split('\n');
+          stderr = lines.pop() ?? '';
+          for (const line of lines) {
+            if (line.trim()) {
+              requests.push(JSON.parse(line));
+            }
+          }
+        });
+        return child;
+      }
+    });
+
+    await manager.start();
+    await manager.setHookTrust({
+      key: '/tmp/repo/.codex/hooks.json:stop:0:0',
+      trustedHash: 'sha256:abc',
+    });
+    await manager.setHookTrust({
+      key: '/tmp/repo/.codex/hooks.json:stop:0:0',
+      trustedHash: null,
+    });
+    await waitForCondition(() => requests.length === 2);
+
+    expect(requests).toEqual([
+      expect.objectContaining({
+        method: 'config/batchWrite',
+        params: {
+          edits: [
+            {
+              keyPath: 'hooks.state',
+              mergeStrategy: 'upsert',
+              value: {
+                '/tmp/repo/.codex/hooks.json:stop:0:0': {
+                  enabled: true,
+                  trusted_hash: 'sha256:abc',
+                },
+              },
+            },
+          ],
+          reloadUserConfig: true,
+        },
+      }),
+      expect.objectContaining({
+        method: 'config/batchWrite',
+        params: {
+          edits: [
+            {
+              keyPath: 'hooks.state',
+              mergeStrategy: 'upsert',
+              value: {
+                '/tmp/repo/.codex/hooks.json:stop:0:0': {
+                  trusted_hash: '',
+                },
+              },
+            },
+          ],
+          reloadUserConfig: true,
+        },
+      }),
+    ]);
 
     await manager.stop();
   });

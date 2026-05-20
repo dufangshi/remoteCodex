@@ -80,6 +80,7 @@ import {
   ThreadForkTurnOptionDto,
   ThreadGoalDto,
   ThreadHooksDto,
+  TrustThreadHookInput,
   ThreadHistoryItemDetailDto,
   ThreadHistoryItemDto,
   ThreadLiveItemsDto,
@@ -92,6 +93,7 @@ import {
   ThreadTurnPricingTierDto,
   ThreadTurnTokenUsageDto,
   ThreadStatusDto,
+  UntrustThreadHookInput,
   UpdateThreadGoalInput,
   UpdateThreadHookInput,
   UpdateThreadSettingsInput,
@@ -990,6 +992,15 @@ function summarizeCommandText(text: string) {
   return lines.find((line) => line.trim().length > 0) ?? lines[0] ?? 'Command output';
 }
 
+function decodeXmlEntities(value: string) {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&gt;/g, '>')
+    .replace(/&lt;/g, '<')
+    .replace(/&amp;/g, '&');
+}
+
 function textFromUnknown(value: unknown): string | null {
   if (typeof value === 'string') {
     return value.trim() ? value : null;
@@ -1003,6 +1014,31 @@ function textFromUnknown(value: unknown): string | null {
   }
 
   return null;
+}
+
+function parseHookPromptText(text: string) {
+  const match = text
+    .trim()
+    .match(/^<hook_prompt(?:\s+hook_run_id="([^"]+)")?>([\s\S]*)<\/hook_prompt>$/);
+  if (!match) {
+    return null;
+  }
+
+  const hookRunId = match[1] ? decodeXmlEntities(match[1]) : null;
+  const output = decodeXmlEntities(match[2] ?? '').trim();
+  const eventName = hookRunId?.split(':')[0] ?? 'hook';
+  const eventLabel = hookEventLabel(eventName);
+  const sourcePath = hookRunId?.split(':').slice(2).join(':') || null;
+  const outputEntries = output ? [{ kind: 'warning', text: output }] : [];
+
+  return {
+    hookRunId,
+    output,
+    outputEntries,
+    eventName,
+    eventLabel,
+    sourcePath,
+  };
 }
 
 function safeJsonStringify(value: unknown) {
@@ -1278,6 +1314,22 @@ function sortHistoryItemsBySequence<T extends ThreadHistoryItemDto>(items: T[]):
       return sequenceDelta === 0 ? left.index - right.index : sequenceDelta;
     })
     .map((entry) => entry.item);
+}
+
+function sortTurnItemsByRecordedSequence(items: ThreadHistoryItemDto[]) {
+  const leadingItems: ThreadHistoryItemDto[] = [];
+  let index = 0;
+
+  while (
+    index < items.length &&
+    items[index]?.kind === 'userMessage' &&
+    !hasHistoryItemSequence(items[index]!)
+  ) {
+    leadingItems.push(items[index]!);
+    index += 1;
+  }
+
+  return [...leadingItems, ...sortHistoryItemsBySequence(items.slice(index))];
 }
 
 function mergeHistoryItemsBySequence(
@@ -1894,6 +1946,26 @@ function itemToHistoryItem(
   item: CodexTurnItem,
   deferredDetails?: Map<string, ThreadHistoryItemDetailDto>,
 ): ThreadHistoryItemDto {
+  const hookPrompt = parseHookPromptText(codexItemText(item));
+  if (hookPrompt) {
+    return {
+      id: `hook-prompt:${hookPrompt.hookRunId ?? item.id}`,
+      kind: 'hook',
+      text: `${hookPrompt.eventLabel} hook`,
+      previewText: hookPrompt.output || `${hookPrompt.eventLabel} hook`,
+      detailText: hookPrompt.output || null,
+      status: 'Completed',
+      hookEventName: hookPrompt.eventName,
+      hookEventLabel: hookPrompt.eventLabel,
+      hookHandlerType: 'command',
+      hookScope: 'turn',
+      hookSource: hookPrompt.sourcePath ? 'project' : null,
+      hookSourcePath: hookPrompt.sourcePath,
+      hookStatusMessage: null,
+      hookOutputEntries: hookPrompt.outputEntries,
+    };
+  }
+
   switch (item.type) {
     case 'userMessage':
       return {
@@ -2018,6 +2090,76 @@ function hookStatusLabel(value: string) {
   }
 }
 
+function hookRunOutputEntryText(entry: unknown) {
+  if (!isRecord(entry)) {
+    return textFromUnknown(entry);
+  }
+
+  return (
+    textFromUnknown(entry.text) ??
+    textFromUnknown(entry.message) ??
+    textFromUnknown(entry.systemMessage) ??
+    textFromUnknown(entry.stopReason) ??
+    textFromUnknown(entry.reason) ??
+    textFromUnknown(entry.output) ??
+    textFromUnknown(entry.stdout) ??
+    textFromUnknown(entry.stderr)
+  );
+}
+
+function normalizeHookRunOutputEntries(run: {
+  entries?: Array<{ kind?: string; text?: string }>;
+  outputEntries?: Array<{ kind?: string; text?: string }>;
+  output_entries?: Array<{ kind?: string; text?: string }>;
+  stdout?: unknown;
+  stderr?: unknown;
+  output?: unknown;
+  text?: unknown;
+  systemMessage?: unknown;
+  stopReason?: unknown;
+  reason?: unknown;
+}): Array<{ kind: string; text: string }> {
+  const rawEntries = Array.isArray(run.entries)
+    ? run.entries
+    : Array.isArray(run.outputEntries)
+      ? run.outputEntries
+      : Array.isArray(run.output_entries)
+        ? run.output_entries
+        : [];
+  const entries = rawEntries
+    .map((entry) => {
+      const text = hookRunOutputEntryText(entry)?.trim();
+      if (!text) {
+        return null;
+      }
+
+      return {
+        kind: typeof entry.kind === 'string' && entry.kind.trim() ? entry.kind : 'context',
+        text,
+      };
+    })
+    .filter((entry): entry is { kind: string; text: string } => Boolean(entry));
+  const seenTexts = new Set(entries.map((entry) => entry.text));
+
+  for (const [kind, value] of [
+    ['context', run.output],
+    ['context', run.text],
+    ['warning', run.systemMessage],
+    ['warning', run.stopReason],
+    ['warning', run.reason],
+    ['context', run.stdout],
+    ['warning', run.stderr],
+  ] as const) {
+    const text = textFromUnknown(value)?.trim();
+    if (text && !seenTexts.has(text)) {
+      entries.push({ kind, text });
+      seenTexts.add(text);
+    }
+  }
+
+  return entries;
+}
+
 function hookRunToHistoryItem(run: {
   id: string;
   eventName: string;
@@ -2029,10 +2171,20 @@ function hookRunToHistoryItem(run: {
   status: string;
   statusMessage: string | null;
   durationMs: number | null;
-  entries: Array<{ kind: string; text: string }>;
+  entries?: Array<{ kind: string; text: string }>;
+  outputEntries?: Array<{ kind?: string; text?: string }>;
+  output_entries?: Array<{ kind?: string; text?: string }>;
+  stdout?: unknown;
+  stderr?: unknown;
+  output?: unknown;
+  text?: unknown;
+  systemMessage?: unknown;
+  stopReason?: unknown;
+  reason?: unknown;
 }): ThreadHistoryItemDto {
   const eventLabel = hookEventLabel(run.eventName);
-  const entryPreview = run.entries
+  const outputEntries = normalizeHookRunOutputEntries(run);
+  const entryPreview = outputEntries
     .map((entry) => entry.text.trim())
     .filter(Boolean)
     .join('\n')
@@ -2057,6 +2209,14 @@ function hookRunToHistoryItem(run: {
     previewText: run.statusMessage ?? firstEntryLine ?? `${eventLabel} hook`,
     detailText: detailLines.join('\n'),
     status: hookStatusLabel(run.status),
+    hookEventName: run.eventName,
+    hookEventLabel: eventLabel,
+    hookHandlerType: run.handlerType,
+    hookScope: run.scope,
+    hookSource: run.source,
+    hookSourcePath: run.sourcePath,
+    hookStatusMessage: run.statusMessage,
+    hookOutputEntries: outputEntries,
   };
 }
 
@@ -2355,6 +2515,61 @@ async function readLocalHookDtos({
     });
   }
   return hooks;
+}
+
+function hookMatchesInput(hook: CodexHookDto, input: CreateThreadHookInput) {
+  return (
+    hook.source === input.scope &&
+    hook.eventName === input.eventName &&
+    (hook.matcher ?? null) === (input.matcher ?? null) &&
+    hook.command === input.command &&
+    (input.timeoutSec == null || hook.timeoutSec === input.timeoutSec) &&
+    (hook.statusMessage ?? null) === (input.statusMessage ?? null)
+  );
+}
+
+async function findOfficialHookForInput(
+  codexManager: CodexAppServerManager,
+  workspacePath: string,
+  input: CreateThreadHookInput,
+): Promise<CodexHookDto | null> {
+  const [entry] = await codexManager.listHooks({
+    cwds: [workspacePath],
+  });
+  const officialHooks: CodexHookDto[] = (entry?.hooks ?? []).map((hook) => ({
+    key: hook.key,
+    eventName: hook.eventName,
+    handlerType: hook.handlerType,
+    matcher: hook.matcher,
+    command: hook.command,
+    timeoutSec: hook.timeoutSec,
+    statusMessage: hook.statusMessage,
+    sourcePath: hook.sourcePath,
+    source: hook.source,
+    pluginId: hook.pluginId,
+    displayOrder: hook.displayOrder,
+    enabled: hook.enabled,
+    isManaged: hook.isManaged,
+    currentHash: hook.currentHash,
+    trustStatus: hook.trustStatus,
+  }));
+  return officialHooks.find((hook) => hookMatchesInput(hook, input)) ?? null;
+}
+
+async function trustHookForInput(
+  codexManager: CodexAppServerManager,
+  workspacePath: string,
+  input: CreateThreadHookInput,
+) {
+  const hook = await findOfficialHookForInput(codexManager, workspacePath, input);
+  if (!hook || !hook.key || !hook.currentHash || hook.isManaged) {
+    return;
+  }
+
+  await codexManager.setHookTrust({
+    key: hook.key,
+    trustedHash: hook.currentHash,
+  });
 }
 
 function normalizeOptionLabelForApproval(value: string) {
@@ -2723,7 +2938,7 @@ function applyRecordedTurnItemOrder(
     };
   });
 
-  return changed ? { ...turn, items } : turn;
+  return changed ? { ...turn, items: sortTurnItemsByRecordedSequence(items) } : turn;
 }
 
 function applyRecordedTurnItemOrders(
@@ -4483,7 +4698,9 @@ export class ThreadService {
       input,
     });
 
-    return this.toThreadHooksDto(workspace.absPath, undefined);
+    await trustHookForInput(this.codexManager, workspace.absPath, input);
+
+    return this.listThreadHooks(localThreadId);
   }
 
   async updateThreadHook(
@@ -4512,7 +4729,65 @@ export class ThreadService {
       input,
     });
 
-    return this.toThreadHooksDto(workspace.absPath, undefined);
+    await trustHookForInput(this.codexManager, workspace.absPath, input);
+
+    return this.listThreadHooks(localThreadId);
+  }
+
+  async trustThreadHook(
+    localThreadId: string,
+    input: TrustThreadHookInput,
+  ): Promise<ThreadHooksDto> {
+    const record = getThreadRecordById(this.db, localThreadId);
+    if (!record) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Thread was not found.',
+      });
+    }
+
+    const workspace = getWorkspaceRecordById(this.db, record.workspaceId);
+    if (!workspace) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Workspace was not found for this thread.',
+      });
+    }
+
+    await this.codexManager.setHookTrust({
+      key: input.key,
+      trustedHash: input.currentHash,
+    });
+
+    return this.listThreadHooks(localThreadId);
+  }
+
+  async untrustThreadHook(
+    localThreadId: string,
+    input: UntrustThreadHookInput,
+  ): Promise<ThreadHooksDto> {
+    const record = getThreadRecordById(this.db, localThreadId);
+    if (!record) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Thread was not found.',
+      });
+    }
+
+    const workspace = getWorkspaceRecordById(this.db, record.workspaceId);
+    if (!workspace) {
+      throw new HttpError(404, {
+        code: 'not_found',
+        message: 'Workspace was not found for this thread.',
+      });
+    }
+
+    await this.codexManager.setHookTrust({
+      key: input.key,
+      trustedHash: null,
+    });
+
+    return this.listThreadHooks(localThreadId);
   }
 
   async interruptThread(localThreadId: string, requestedTurnId?: string): Promise<ThreadDto> {

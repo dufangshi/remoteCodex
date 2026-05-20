@@ -629,6 +629,104 @@ describe('ThreadTimeline', () => {
     expect(statusButton).not.toHaveTextContent('running');
   });
 
+  it('renders hook output as a compact bubble summary', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'hook-1',
+                kind: 'hook',
+                text: 'Stop hook',
+                status: 'Completed',
+                hookEventName: 'stop',
+                hookEventLabel: 'Stop',
+                hookHandlerType: 'command',
+                hookScope: 'turn',
+                hookSource: 'project',
+                hookStatusMessage: 'Stop hook',
+                hookOutputEntries: [
+                  {
+                    kind: 'context',
+                    text: 'Hook printed stop details.',
+                  },
+                ],
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('Hook · Stop')).toBeInTheDocument();
+    expect(screen.getByText('Stop hook')).toBeInTheDocument();
+    expect(screen.getByText('Hook printed stop details.')).toBeInTheDocument();
+    expect(screen.queryByText('...')).not.toBeInTheDocument();
+    expect(screen.queryByText('command')).not.toBeInTheDocument();
+    expect(screen.queryByText('turn')).not.toBeInTheDocument();
+    expect(screen.queryByText('project')).not.toBeInTheDocument();
+  });
+
+  it('renders live hook prompt output as a hook bubble', () => {
+    render(
+      <ThreadTimeline
+        liveOutput='<hook_prompt hook_run_id="stop:0:/tmp/demo/.codex/hooks.json">remote-codex hook ran</hook_prompt>'
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'inProgress',
+            error: null,
+            items: [],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('Hook · Stop')).toBeInTheDocument();
+    expect(screen.getByText('Stop hook')).toBeInTheDocument();
+    expect(screen.getByText('remote-codex hook ran')).toBeInTheDocument();
+    expect(screen.queryByText(/hook_prompt/)).not.toBeInTheDocument();
+  });
+
+  it('keeps hook identity visible when the hook has no recorded output', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'hook-1',
+                kind: 'hook',
+                text: 'Stop hook',
+                previewText: 'Running hook',
+                status: 'Completed',
+                hookEventName: 'stop',
+                hookEventLabel: 'Stop',
+                hookStatusMessage: 'Running hook',
+                hookOutputEntries: [],
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('Hook · Stop')).toBeInTheDocument();
+    expect(screen.getByText('Stop hook · Running hook')).toBeInTheDocument();
+  });
+
   it('loads deferred command details on demand before opening the dialog', async () => {
     const loadDetail = vi.fn(async () => ({
       id: 'command-1',

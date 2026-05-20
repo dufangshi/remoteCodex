@@ -8,6 +8,7 @@ import type {
   CreateCodexHostConfigArchiveInput,
   CreateThreadInput,
   CreateThreadHookInput,
+  TrustThreadHookInput,
   ExportThreadPdfInput,
   ThreadExportFormatDto,
   ForkThreadInput,
@@ -31,6 +32,7 @@ import type {
   ThreadHistoryItemDetailDto,
   ThreadGoalDto,
   ThreadHooksDto,
+  UntrustThreadHookInput,
   UpdateThreadGoalInput,
   UpdateThreadHookInput,
   ThreadMcpServersDto,
@@ -536,6 +538,20 @@ export function updateThreadHook(
 ) {
   return request<ThreadHooksDto>(`/api/threads/${id}/hooks`, {
     method: 'PUT',
+    body: JSON.stringify(input),
+  });
+}
+
+export function trustThreadHook(id: string, input: TrustThreadHookInput) {
+  return request<ThreadHooksDto>(`/api/threads/${id}/hooks/trust`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function untrustThreadHook(id: string, input: UntrustThreadHookInput) {
+  return request<ThreadHooksDto>(`/api/threads/${id}/hooks/untrust`, {
+    method: 'POST',
     body: JSON.stringify(input),
   });
 }

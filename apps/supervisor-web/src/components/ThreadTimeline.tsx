@@ -173,6 +173,8 @@ function itemSurfaceClassName(kind: ThreadHistoryItemDto['kind']) {
       return 'timeline-plan';
     case 'fileChange':
       return 'timeline-file-change';
+    case 'hook':
+      return 'timeline-action';
     case 'other':
       return 'timeline-other';
   }
@@ -222,6 +224,15 @@ function normalizeLines(text: string) {
   return lines;
 }
 
+function decodeXmlEntities(value: string) {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&gt;/g, '>')
+    .replace(/&lt;/g, '<')
+    .replace(/&amp;/g, '&');
+}
+
 function summarizeInlinePreviewText(text: string) {
   const lines = normalizeLines(text);
 
@@ -237,6 +248,38 @@ function summarizeInlinePreviewText(text: string) {
     firstLine: lines[0] ?? '',
     showGap: true,
     isTruncated: true,
+  };
+}
+
+function parseHookPromptText(text: string): ThreadHistoryItemDto | null {
+  const match = text
+    .trim()
+    .match(/^<hook_prompt(?:\s+hook_run_id="([^"]+)")?>([\s\S]*)<\/hook_prompt>$/);
+  if (!match) {
+    return null;
+  }
+
+  const hookRunId = match[1] ? decodeXmlEntities(match[1]) : null;
+  const output = decodeXmlEntities(match[2] ?? '').trim();
+  const eventName = hookRunId?.split(':')[0] ?? 'hook';
+  const eventLabel = eventName === 'stop' ? 'Stop' : eventName;
+  const sourcePath = hookRunId?.split(':').slice(2).join(':') || null;
+
+  return {
+    id: `live-hook-prompt:${hookRunId ?? 'unknown'}`,
+    kind: 'hook',
+    text: `${eventLabel} hook`,
+    previewText: output || `${eventLabel} hook`,
+    detailText: output || null,
+    status: 'Completed',
+    hookEventName: eventName,
+    hookEventLabel: eventLabel,
+    hookHandlerType: 'command',
+    hookScope: 'turn',
+    hookSource: sourcePath ? 'project' : null,
+    hookSourcePath: sourcePath,
+    hookStatusMessage: null,
+    hookOutputEntries: output ? [{ kind: 'warning', text: output }] : [],
   };
 }
 
@@ -722,6 +765,22 @@ function ToolCallIcon() {
       <path d="M9.75 4.25 12.5 7 9.75 9.75" />
       <path d="M8.9 3.5 7.1 10.5" />
       <path d="M3 12.25h10" />
+    </svg>
+  );
+}
+
+function HookIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 fill-none stroke-current"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M6.25 4.5v4.25a2.75 2.75 0 1 0 2.75 2.75V7.25" />
+      <path d="M9 7.25a2.75 2.75 0 1 0-2.75-2.75" />
     </svg>
   );
 }
@@ -2925,6 +2984,91 @@ const GenericHistoryItem = memo(function GenericHistoryItem({
   );
 });
 
+const HookItem = memo(function HookItem({
+  item,
+}: {
+  item: ThreadHistoryItemDto & { kind: 'hook' };
+}) {
+  const outputText =
+    item.hookOutputEntries
+      ?.map((entry) => entry.text.trim())
+      .filter(Boolean)
+      .join('\n')
+      .trim() ?? '';
+  const hookLabel = item.hookEventLabel ? `${item.hookEventLabel} hook` : item.text;
+  const fallbackText =
+    item.hookStatusMessage?.trim() ||
+    (item.previewText && item.previewText !== item.hookStatusMessage
+      ? item.previewText.trim()
+      : '') ||
+    item.text.trim();
+  const summaryText = outputText || (fallbackText && fallbackText !== hookLabel ? fallbackText : hookLabel);
+  const summary = summarizeInlinePreviewText(summaryText);
+  const showGap = Boolean(outputText && summary.showGap);
+
+  return (
+    <div
+      className={`timeline-item-frame timeline-mobile-dense-event relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
+    >
+      <span
+        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('action')}`}
+      >
+        <span className="scale-[0.78]">
+          <HookIcon />
+        </span>
+      </span>
+      {isRunningHistoryStatus(item.status) && (
+        <span className="absolute left-5 top-0 inline-flex sm:hidden">
+          <RunningDots />
+        </span>
+      )}
+      <div className="flex items-start gap-2.5">
+        <div className="mt-0.5 hidden shrink-0 items-center sm:flex">
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-fuchsia-300/25 bg-fuchsia-300/10 text-fuchsia-200">
+            <HookIcon />
+          </span>
+          {isRunningHistoryStatus(item.status) && <RunningDots />}
+        </div>
+        <div className="timeline-item-inner timeline-mobile-dense-inner timeline-mobile-bubble-content relative min-w-0 w-full flex-1 rounded-[0.9rem] border px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2">
+          <div className="flex flex-wrap items-center justify-between gap-1.5 leading-none">
+            <span className="timeline-meta-text min-w-0 truncate text-[10px] uppercase tracking-[0.16em]">
+              Hook · {item.hookEventLabel ?? item.text}
+            </span>
+            {item.status && (
+              <span className="timeline-meta-text text-[10px]">{item.status}</span>
+            )}
+          </div>
+          <div className="timeline-mobile-dense-line mt-1.5 flex min-w-0 items-center gap-2 text-sm leading-6">
+            <p className="timeline-primary-text min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip">
+              {outputText ? (
+                <>
+                  <span className="timeline-meta-text mr-2 font-sans text-[11px] uppercase tracking-[0.12em]">
+                    {hookLabel}
+                  </span>
+                  <LinkifiedPlainText text={summary.firstLine} />
+                </>
+              ) : (
+                <LinkifiedPlainText
+                  text={
+                    summary.firstLine && summary.firstLine !== hookLabel
+                      ? `${hookLabel} · ${summary.firstLine}`
+                      : hookLabel
+                  }
+                />
+              )}
+            </p>
+            {showGap ? (
+              <span className="timeline-meta-text shrink-0 text-[11px] font-medium tracking-[0.28em]">
+                ...
+              </span>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+});
+
 const HistoryItemRow = memo(function HistoryItemRow({
   threadId,
   item,
@@ -3045,6 +3189,18 @@ const HistoryItemRow = memo(function HistoryItemRow({
         item={
           item as ThreadHistoryItemDto & {
             kind: 'contextCompaction';
+          }
+        }
+      />
+    );
+  }
+
+  if (item.kind === 'hook') {
+    return (
+      <HookItem
+        item={
+          item as ThreadHistoryItemDto & {
+            kind: 'hook';
           }
         }
       />
@@ -3430,6 +3586,10 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
     () => getLiveOutputTailForTurn(liveOutput, mergedItems),
     [liveOutput, mergedItems],
   );
+  const visibleLiveHookPrompt = useMemo(
+    () => parseHookPromptText(visibleLiveOutput),
+    [visibleLiveOutput],
+  );
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
     {},
   );
@@ -3556,7 +3716,16 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
               </div>
             </div>
           )}
-          {visibleLiveOutput && (
+          {visibleLiveHookPrompt ? (
+            <HistoryItemRow
+              threadId={threadId}
+              item={visibleLiveHookPrompt}
+              scrollRootRef={scrollRootRef}
+              onOpenExpandedText={onOpenExpandedText}
+              onOpenCommandDetail={onOpenCommandDetail}
+              onOpenToolCallDetail={onOpenToolCallDetail}
+            />
+          ) : visibleLiveOutput ? (
             <CompactMessageItem
               item={{
                 id: 'live-agent-message',
@@ -3566,7 +3735,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
               scrollRootRef={scrollRootRef}
               streaming
             />
-          )}
+          ) : null}
           {isActiveTurnStatus(turn.status) && (
             <TurnStatusBar turn={turn} variant="footer" />
           )}
@@ -4469,16 +4638,27 @@ export function ThreadTimeline({
 
           {liveOutput && !liveOutputAttachedToTurn && (
             <div className="border-t border-stone-800/80 px-2.5 py-2.5 sm:px-6">
-              <CompactMessageItem
-                threadId={threadId}
-                item={{
-                  id: 'live-agent-message-fallback',
-                  kind: 'agentMessage',
-                  text: liveOutput,
-                }}
-                scrollRootRef={scrollContainerRef}
-                streaming
-              />
+              {parseHookPromptText(liveOutput) ? (
+                <HistoryItemRow
+                  threadId={threadId}
+                  item={parseHookPromptText(liveOutput)!}
+                  scrollRootRef={scrollContainerRef}
+                  onOpenExpandedText={handleOpenExpandedText}
+                  onOpenCommandDetail={handleOpenCommandDetail}
+                  onOpenToolCallDetail={handleOpenToolCallDetail}
+                />
+              ) : (
+                <CompactMessageItem
+                  threadId={threadId}
+                  item={{
+                    id: 'live-agent-message-fallback',
+                    kind: 'agentMessage',
+                    text: liveOutput,
+                  }}
+                  scrollRootRef={scrollContainerRef}
+                  streaming
+                />
+              )}
             </div>
           )}
 

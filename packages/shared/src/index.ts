@@ -222,6 +222,17 @@ export interface ThreadHistoryItemDto {
   changedFiles?: number | null;
   addedLines?: number | null;
   removedLines?: number | null;
+  hookEventName?: string | null;
+  hookEventLabel?: string | null;
+  hookHandlerType?: string | null;
+  hookScope?: string | null;
+  hookSource?: string | null;
+  hookSourcePath?: string | null;
+  hookStatusMessage?: string | null;
+  hookOutputEntries?: Array<{
+    kind: string;
+    text: string;
+  }> | null;
 }
 
 export interface ThreadHistoryItemDetailDto {
@@ -444,6 +455,15 @@ export interface ThreadHookTargetInput {
 
 export interface UpdateThreadHookInput extends CreateThreadHookInput {
   target: ThreadHookTargetInput;
+}
+
+export interface TrustThreadHookInput {
+  key: string;
+  currentHash: string;
+}
+
+export interface UntrustThreadHookInput {
+  key: string;
 }
 
 export type ThreadGoalStatusDto =

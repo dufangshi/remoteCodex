@@ -245,6 +245,11 @@ export interface CodexHooksListEntry {
   errors: CodexHookErrorRecord[];
 }
 
+export interface CodexHookTrustInput {
+  key: string;
+  trustedHash: string | null;
+}
+
 export interface CodexHookOutputEntry {
   kind: CodexHookOutputEntryKind;
   text: string;
@@ -265,6 +270,13 @@ export interface CodexHookRunSummary {
   completedAt: number | null;
   durationMs: number | null;
   entries: CodexHookOutputEntry[];
+  stdout?: string | null;
+  stderr?: string | null;
+  output?: string | null;
+  text?: string | null;
+  systemMessage?: string | null;
+  stopReason?: string | null;
+  reason?: string | null;
 }
 
 export interface CodexThreadGoalRecord {

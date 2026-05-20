@@ -59,11 +59,13 @@ import {
   sendThreadPrompt,
   type PromptAttachmentUpload,
   type SendThreadPromptRequestInput,
+  trustThreadHook,
   updateThread,
   updateCodexHostFile,
   updateThreadGoal,
   updateThreadHook,
   updateThreadSettings,
+  untrustThreadHook,
 } from '../lib/api';
 
 const DETAIL_TURN_PAGE_SIZE = 10;
@@ -904,6 +906,68 @@ export function ThreadDetailPage() {
           requestError instanceof ApiError
             ? requestError.payload.message
             : 'Unable to update hook.',
+      }));
+      throw requestError;
+    }
+  }
+
+  async function handleTrustHook(input: Parameters<typeof trustThreadHook>[1]) {
+    if (!id) {
+      return;
+    }
+
+    setHooksState((current) => ({
+      status: 'loading',
+      data: current.data,
+      error: null,
+    }));
+
+    try {
+      const next = await trustThreadHook(id, input);
+      setHooksState({
+        status: 'ready',
+        data: next,
+        error: null,
+      });
+    } catch (requestError) {
+      setHooksState((current) => ({
+        status: 'failed',
+        data: current.data,
+        error:
+          requestError instanceof ApiError
+            ? requestError.payload.message
+            : 'Unable to trust hook.',
+      }));
+      throw requestError;
+    }
+  }
+
+  async function handleUntrustHook(input: Parameters<typeof untrustThreadHook>[1]) {
+    if (!id) {
+      return;
+    }
+
+    setHooksState((current) => ({
+      status: 'loading',
+      data: current.data,
+      error: null,
+    }));
+
+    try {
+      const next = await untrustThreadHook(id, input);
+      setHooksState({
+        status: 'ready',
+        data: next,
+        error: null,
+      });
+    } catch (requestError) {
+      setHooksState((current) => ({
+        status: 'failed',
+        data: current.data,
+        error:
+          requestError instanceof ApiError
+            ? requestError.payload.message
+            : 'Unable to untrust hook.',
       }));
       throw requestError;
     }
@@ -3134,6 +3198,8 @@ export function ThreadDetailPage() {
                       onOpenHooks={handleOpenHooks}
                       onCreateHook={handleCreateHook}
                       onUpdateHook={handleUpdateHook}
+                      onTrustHook={handleTrustHook}
+                      onUntrustHook={handleUntrustHook}
                       goalState={goalState}
                       onOpenGoal={handleOpenGoal}
                       onUpdateGoal={handleUpdateGoal}
@@ -3186,6 +3252,8 @@ export function ThreadDetailPage() {
                       onOpenHooks={handleOpenHooks}
                       onCreateHook={handleCreateHook}
                       onUpdateHook={handleUpdateHook}
+                      onTrustHook={handleTrustHook}
+                      onUntrustHook={handleUntrustHook}
                       goalState={goalState}
                       onOpenGoal={handleOpenGoal}
                       onUpdateGoal={handleUpdateGoal}
