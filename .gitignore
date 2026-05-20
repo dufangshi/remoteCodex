@@ -4,6 +4,7 @@ coverage
 .DS_Store
 .local
 .env
+.npmrc
 *.log
 .temp/
 .tmp/
