@@ -975,7 +975,7 @@ export class ThreadService {
   }
 
   private runtimeSupportsFastMode(provider: string | null | undefined): boolean {
-    return this.runtimeForProvider(provider).capabilities.controls.fastServiceTier;
+    return this.runtimeForProvider(provider).capabilities.controls.performanceMode;
   }
 
   private fastModeForProvider(provider: string | null | undefined, fastMode: unknown): boolean {

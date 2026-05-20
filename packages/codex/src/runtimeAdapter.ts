@@ -77,7 +77,7 @@ export const codexCapabilities: AgentProviderCapabilities = {
     planMode: true,
     permissionRequests: true,
     sandboxMode: true,
-    fastServiceTier: true,
+    performanceMode: true,
     goals: true,
   },
   management: {

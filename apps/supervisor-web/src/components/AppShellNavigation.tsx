@@ -125,7 +125,7 @@ function unavailableBackend(provider: AgentBackendIdDto, displayName: string): A
         planMode: false,
         permissionRequests: false,
         sandboxMode: false,
-        fastServiceTier: false,
+        performanceMode: false,
         goals: false,
       },
       management: {

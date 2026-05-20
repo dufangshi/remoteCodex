@@ -56,7 +56,7 @@ export interface AgentProviderCapabilities {
     planMode: boolean;
     permissionRequests: boolean;
     sandboxMode: boolean;
-    fastServiceTier: boolean;
+    performanceMode: boolean;
     goals: boolean;
   };
   management: {

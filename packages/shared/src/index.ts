@@ -2,7 +2,7 @@ export type ApiErrorCode =
   | 'bad_request'
   | 'not_found'
   | 'conflict'
-  | 'codex_goal_error'
+  | 'provider_goal_error'
   | 'forbidden'
   | 'goal_feature_disabled'
   | 'internal_error'
@@ -57,7 +57,7 @@ export interface AgentProviderCapabilitiesDto {
     planMode: boolean;
     permissionRequests: boolean;
     sandboxMode: boolean;
-    fastServiceTier: boolean;
+    performanceMode: boolean;
     goals: boolean;
   };
   management: {

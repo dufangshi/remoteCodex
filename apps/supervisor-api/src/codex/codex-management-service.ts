@@ -215,8 +215,11 @@ export class CodexManagementService {
       }
 
       throw new HttpError(502, {
-        code: 'codex_goal_error',
-        message: remoteMessage || 'Codex goal operation failed.',
+        code: 'provider_goal_error',
+        message: remoteMessage || 'Provider goal operation failed.',
+        details: {
+          provider: 'codex',
+        },
       });
     }
 

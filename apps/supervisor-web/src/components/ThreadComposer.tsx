@@ -854,7 +854,7 @@ export function ThreadComposer({
   const [hookScope, setHookScope] = useState<CreateThreadHookInput['scope']>('project');
   const slashCapabilities = useMemo(
     () => ({
-      fast: capabilities?.controls.fastServiceTier ?? false,
+      fast: capabilities?.controls.performanceMode ?? false,
       compact: capabilities?.turns.compact ?? false,
       goal: capabilities?.controls.goals ?? false,
       fork: capabilities?.branching.fork ?? false,
