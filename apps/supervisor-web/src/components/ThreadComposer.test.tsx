@@ -46,6 +46,39 @@ const modelOptions = [
   },
 ];
 
+const codexCapabilities = {
+  sessions: { list: true, read: true, resume: true, importLocal: true },
+  turns: { start: true, streamInput: false, steer: true, interrupt: true, compact: true },
+  branching: { fork: true, hardRollback: true, resumeAt: false, rewindFiles: false },
+  controls: {
+    planMode: true,
+    permissionRequests: true,
+    sandboxMode: true,
+    fastServiceTier: true,
+    goals: true,
+  },
+  management: {
+    models: true,
+    mcpStatus: true,
+    skills: true,
+    hooks: true,
+    hookTrust: true,
+    hostConfigFiles: true,
+    providerSettings: false,
+  },
+  usage: { contextWindow: true, tokenUsage: true, costUsd: false },
+};
+
+const codexToolboxItems = [
+  { action: 'fast' as const, command: '/fast', label: 'Fast mode' },
+  { action: 'compact' as const, command: '/compact', label: 'Compact context' },
+  { action: 'goal' as const, command: '/goal', label: 'Goal' },
+  { action: 'fork' as const, command: '/fork', label: 'Fork', panel: 'fork' as const },
+  { action: 'skills' as const, command: '/skills', label: 'Skills', panel: 'skills' as const },
+  { action: 'mcp' as const, command: '/mcp', label: 'MCP', panel: 'mcp' as const },
+  { action: 'hooks' as const, command: '/hooks', label: 'Hooks', panel: 'hooks' as const },
+];
+
 function setPromptValue(element: HTMLElement, value: string) {
   if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
     fireEvent.change(element, {
@@ -92,6 +125,8 @@ describe('ThreadComposer', () => {
         reasoningEffort="high"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={() => undefined}
         onUpdateSettings={onUpdateSettings}
       />,
@@ -118,6 +153,8 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={() => undefined}
         onUpdateSettings={onUpdateSettings}
       />,
@@ -153,6 +190,8 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={() => undefined}
       />,
     );
@@ -258,6 +297,8 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={() => undefined}
         onUpdateSettings={onUpdateSettings}
         onCompact={onCompact}
@@ -283,6 +324,25 @@ describe('ThreadComposer', () => {
     });
   });
 
+  it('does not expose backend tools before capabilities are available', () => {
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        onSubmit={() => undefined}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
+
+    expect(screen.getByText('No backend tools are available for this thread.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /\/fast/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /\/hooks/i })).not.toBeInTheDocument();
+  });
+
   it('uses the main prompt to set a goal objective', async () => {
     const onOpenGoal = vi.fn().mockResolvedValue(undefined);
     const onUpdateGoal = vi.fn().mockResolvedValue(undefined);
@@ -294,6 +354,8 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={() => undefined}
         onOpenGoal={onOpenGoal}
         onUpdateGoal={onUpdateGoal}
@@ -343,6 +405,8 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={() => undefined}
         onOpenGoal={vi.fn().mockResolvedValue(undefined)}
         onUpdateGoal={vi.fn().mockResolvedValue(undefined)}
@@ -375,6 +439,8 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={() => undefined}
         goalState={{
           status: 'ready',
@@ -409,6 +475,8 @@ describe('ThreadComposer', () => {
         collaborationMode="default"
         fastMode
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={() => undefined}
       />,
     );
@@ -438,6 +506,8 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={() => undefined}
         onForkLatest={onForkLatest}
         onForkTurn={onForkTurn}
@@ -489,6 +559,8 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={() => undefined}
         onOpenSkills={onOpenSkills}
         skillsState={{
@@ -537,6 +609,8 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={() => undefined}
         onOpenSkills={onOpenSkills}
         skillsState={{
@@ -566,6 +640,8 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={() => undefined}
         onOpenMcp={onOpenMcp}
         mcpState={{
@@ -613,6 +689,8 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={() => undefined}
         onOpenMcp={onOpenMcp}
         mcpState={{
@@ -632,15 +710,48 @@ describe('ThreadComposer', () => {
     expect(screen.getByText('No MCP servers available right now.')).toBeInTheDocument();
   });
 
-  it('shows mcp add options and writes an http server block into config.toml', async () => {
+  it('hides mcp config editing when no provider config file is injected', async () => {
     const onOpenMcp = vi.fn().mockResolvedValue(undefined);
-    const onReadCodexConfig = vi.fn().mockResolvedValue({
+
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
+        onSubmit={() => undefined}
+        onOpenMcp={onOpenMcp}
+        mcpState={{
+          status: 'ready',
+          error: null,
+          data: {
+            servers: [],
+          },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open slash toolbox' }));
+    fireEvent.click(screen.getByRole('button', { name: /\/mcp/i }));
+
+    await waitFor(() => {
+      expect(onOpenMcp).toHaveBeenCalled();
+    });
+    expect(screen.queryByRole('button', { name: 'Add MCP' })).not.toBeInTheDocument();
+  });
+
+  it('shows mcp add options and writes an http server block into provider config', async () => {
+    const onOpenMcp = vi.fn().mockResolvedValue(undefined);
+    const onReadProviderConfig = vi.fn().mockResolvedValue({
       name: 'config.toml',
       path: '/home/u/.codex/config.toml',
       content: '[profile.default]\nmodel = "gpt-5.4"\n',
       updatedAt: '2026-04-13T12:00:00.000Z',
     });
-    const onWriteCodexConfig = vi.fn().mockResolvedValue({
+    const onWriteProviderConfig = vi.fn().mockResolvedValue({
       name: 'config.toml',
       path: '/home/u/.codex/config.toml',
       content:
@@ -655,10 +766,12 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={() => undefined}
         onOpenMcp={onOpenMcp}
-        onReadCodexConfig={onReadCodexConfig}
-        onWriteCodexConfig={onWriteCodexConfig}
+        onReadProviderConfig={onReadProviderConfig}
+        onWriteProviderConfig={onWriteProviderConfig}
         mcpState={{
           status: 'ready',
           error: null,
@@ -697,24 +810,24 @@ describe('ThreadComposer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Write HTTP MCP' }));
 
     await waitFor(() => {
-      expect(onReadCodexConfig).toHaveBeenCalled();
-      expect(onWriteCodexConfig).toHaveBeenCalledWith(
+      expect(onReadProviderConfig).toHaveBeenCalled();
+      expect(onWriteProviderConfig).toHaveBeenCalledWith(
         '[profile.default]\nmodel = "gpt-5.4"\n\n[mcp_servers.docs]\nurl = "https://developers.openai.com/mcp"\n',
       );
     });
     expect(
-      screen.getByText(/MCP entry written to config\.toml/i),
+      screen.getByText(/MCP entry written to provider config/i),
     ).toBeInTheDocument();
   });
 
-  it('writes a raw stdio mcp block into config.toml', async () => {
-    const onReadCodexConfig = vi.fn().mockResolvedValue({
+  it('writes a raw stdio mcp block into provider config', async () => {
+    const onReadProviderConfig = vi.fn().mockResolvedValue({
       name: 'config.toml',
       path: '/home/u/.codex/config.toml',
       content: '[profile.default]\nmodel = "gpt-5.4"\n',
       updatedAt: '2026-04-13T12:00:00.000Z',
     });
-    const onWriteCodexConfig = vi.fn().mockResolvedValue({
+    const onWriteProviderConfig = vi.fn().mockResolvedValue({
       name: 'config.toml',
       path: '/home/u/.codex/config.toml',
       content:
@@ -729,9 +842,11 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={() => undefined}
-        onReadCodexConfig={onReadCodexConfig}
-        onWriteCodexConfig={onWriteCodexConfig}
+        onReadProviderConfig={onReadProviderConfig}
+        onWriteProviderConfig={onWriteProviderConfig}
         mcpState={{
           status: 'ready',
           error: null,
@@ -749,7 +864,7 @@ describe('ThreadComposer', () => {
       screen.getByRole('button', { name: /stdio \/ raw block.*TOML/i }),
     );
 
-    const editor = await screen.findByLabelText('MCP block for config.toml');
+    const editor = await screen.findByLabelText('MCP block for provider config');
     fireEvent.change(editor, {
       target: {
         value:
@@ -759,12 +874,12 @@ describe('ThreadComposer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Write raw block' }));
 
     await waitFor(() => {
-      expect(onWriteCodexConfig).toHaveBeenCalledWith(
+      expect(onWriteProviderConfig).toHaveBeenCalledWith(
         '[profile.default]\nmodel = "gpt-5.4"\n\n[mcp_servers.local_docs]\ncommand = "npx"\nargs = ["-y", "@openai/example-mcp"]\n',
       );
     });
     expect(
-      screen.getByText(/MCP entry written to config\.toml/i),
+      screen.getByText(/MCP entry written to provider config/i),
     ).toBeInTheDocument();
   });
 
@@ -778,6 +893,8 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={() => undefined}
         onOpenHooks={onOpenHooks}
         hooksState={{
@@ -838,6 +955,8 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={() => undefined}
         onOpenHooks={onOpenHooks}
         onCreateHook={onCreateHook}
@@ -886,9 +1005,19 @@ describe('ThreadComposer', () => {
     ).toBeInTheDocument();
   });
 
-  it('uses the Codex Stop hook JSON output template by default', async () => {
+  it('uses backend-provided hook command templates', async () => {
     const onOpenHooks = vi.fn().mockResolvedValue(undefined);
     const onCreateHook = vi.fn().mockResolvedValue(undefined);
+    const hookCommandTemplates = [
+      {
+        eventName: 'preToolUse' as const,
+        command: 'provider-hook-default',
+      },
+      {
+        eventName: 'stop' as const,
+        command: 'provider-stop-hook-template',
+      },
+    ];
 
     render(
       <ThreadComposer
@@ -897,6 +1026,9 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
+        hookCommandTemplates={hookCommandTemplates}
         onSubmit={() => undefined}
         onOpenHooks={onOpenHooks}
         onCreateHook={onCreateHook}
@@ -928,8 +1060,7 @@ describe('ThreadComposer', () => {
         expect.objectContaining({
           eventName: 'stop',
           matcher: null,
-          command:
-            'node -e \'process.stdin.resume(); process.stdin.on("end", () => console.log(JSON.stringify({ systemMessage: "remote-codex hook ran" })))\'',
+          command: 'provider-stop-hook-template',
         }),
       );
     });
@@ -946,6 +1077,8 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={() => undefined}
         onOpenHooks={onOpenHooks}
         onUpdateHook={onUpdateHook}
@@ -1023,6 +1156,8 @@ describe('ThreadComposer', () => {
         fastMode
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={() => undefined}
       />,
     );
@@ -1041,6 +1176,8 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={onSubmit}
       />,
     );
@@ -1102,6 +1239,8 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={onSubmit}
       />,
     );
@@ -1155,6 +1294,8 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={onSubmit}
       />,
     );
@@ -1246,6 +1387,8 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={() => undefined}
       />,
     );
@@ -1278,6 +1421,8 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={onSubmit}
       />,
     );
@@ -1327,6 +1472,8 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={onSubmit}
       />,
     );
@@ -1368,6 +1515,8 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={onSubmit}
       />,
     );
@@ -1412,6 +1561,8 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={onSubmit}
       />,
     );
@@ -1445,6 +1596,8 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={onSubmit}
       />,
     );
@@ -1511,6 +1664,8 @@ describe('ThreadComposer', () => {
         reasoningEffort="medium"
         collaborationMode="default"
         modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        toolboxItems={codexToolboxItems}
         onSubmit={() => undefined}
       />,
     );

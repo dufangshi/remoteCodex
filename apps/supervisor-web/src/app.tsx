@@ -7,6 +7,7 @@ import {
 } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 
+import type { AgentBackendIdDto } from '../../../packages/shared/src/index';
 import {
   AppShellNavContext,
   type ThemeMode,
@@ -25,6 +26,7 @@ import { WorkspaceNewPage } from './pages/WorkspaceNewPage';
 import { WorkspacesPage } from './pages/WorkspacesPage';
 
 const THEME_STORAGE_KEY = 'remote-codex-theme-mode';
+const BACKEND_STORAGE_KEY = 'remote-codex-default-backend';
 
 function readInitialThemeMode(): ThemeMode {
   if (typeof window === 'undefined') {
@@ -37,6 +39,15 @@ function readInitialThemeMode(): ThemeMode {
   }
 
   return 'system';
+}
+
+function readInitialBackend(): AgentBackendIdDto {
+  if (typeof window === 'undefined') {
+    return 'codex';
+  }
+
+  const stored = window.localStorage.getItem(BACKEND_STORAGE_KEY);
+  return stored === 'claude' ? 'claude' : 'codex';
 }
 
 function systemThemePreference(): 'light' | 'dark' {
@@ -62,6 +73,7 @@ function AppShell({
 }) {
   const [navOpen, setNavOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [defaultBackend, setDefaultBackendState] = useState<AgentBackendIdDto>(readInitialBackend);
   const location = useLocation();
   const isThreadDetailRoute = /^\/threads\/[^/]+$/.test(location.pathname);
   const isThreadsRoute = location.pathname === '/threads';
@@ -74,6 +86,11 @@ function AppShell({
   useEffect(() => {
     setNavOpen(false);
   }, [location.pathname, location.search]);
+
+  function setDefaultBackend(backend: AgentBackendIdDto) {
+    setDefaultBackendState(backend);
+    window.localStorage.setItem(BACKEND_STORAGE_KEY, backend);
+  }
 
   return (
     <AppShellNavContext.Provider
@@ -91,6 +108,8 @@ function AppShell({
         themeMode,
         setThemeMode,
         effectiveTheme,
+        defaultBackend,
+        setDefaultBackend,
       }}
     >
       <div

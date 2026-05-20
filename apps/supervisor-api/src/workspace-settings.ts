@@ -4,6 +4,7 @@ import {
   upsertPolicyRecord,
 } from '../../../packages/db/src/index';
 import {
+  AgentBackendIdDto,
   WorkspaceSettingsDto,
 } from '../../../packages/shared/src/index';
 import {
@@ -12,6 +13,11 @@ import {
 } from '../../../packages/workspace/src/index';
 
 const DEV_HOME_POLICY_KEY = 'dev_home';
+const DEFAULT_BACKEND_POLICY_KEY = 'default_backend';
+
+function normalizeBackend(value: unknown): AgentBackendIdDto {
+  return value === 'claude' ? 'claude' : 'codex';
+}
 
 function parseDevHomePolicy(valueJson: string | null | undefined) {
   if (!valueJson) {
@@ -33,6 +39,7 @@ export async function getWorkspaceSettings(
   workspaceRoot: string,
 ): Promise<WorkspaceSettingsDto> {
   const policy = getPolicyRecordByKey(db, DEV_HOME_POLICY_KEY);
+  const backendPolicy = getPolicyRecordByKey(db, DEFAULT_BACKEND_POLICY_KEY);
   const policyDevHome = parseDevHomePolicy(policy?.valueJson);
   const root = await validateExistingDirectoryPath(workspaceRoot, workspaceRoot);
   let devHome = root;
@@ -50,15 +57,18 @@ export async function getWorkspaceSettings(
   return {
     workspaceRoot: root.absPath,
     devHome: devHome.absPath,
+    defaultBackend: normalizeBackend(
+      backendPolicy?.valueJson ? JSON.parse(backendPolicy.valueJson).provider : null,
+    ),
   };
 }
 
-export async function saveWorkspaceDevHome(
+export async function saveWorkspaceSettings(
   db: DatabaseClient,
   workspaceRoot: string,
-  devHome: string,
+  input: { devHome: string; defaultBackend?: AgentBackendIdDto },
 ): Promise<WorkspaceSettingsDto> {
-  const validated = await validateExistingDirectoryPath(workspaceRoot, devHome);
+  const validated = await validateExistingDirectoryPath(workspaceRoot, input.devHome);
 
   upsertPolicyRecord(
     db,
@@ -68,8 +78,21 @@ export async function saveWorkspaceDevHome(
     }),
   );
 
-  return {
-    workspaceRoot: (await validateExistingDirectoryPath(workspaceRoot, workspaceRoot)).absPath,
-    devHome: validated.absPath,
-  };
+  if (input.defaultBackend !== undefined) {
+    upsertPolicyRecord(
+      db,
+      DEFAULT_BACKEND_POLICY_KEY,
+      JSON.stringify({
+        provider: normalizeBackend(input.defaultBackend),
+      }),
+    );
+  }
+
+  return getWorkspaceSettings(db, workspaceRoot);
 }
+
+export const saveWorkspaceDevHome = (
+  db: DatabaseClient,
+  workspaceRoot: string,
+  devHome: string,
+) => saveWorkspaceSettings(db, workspaceRoot, { devHome });

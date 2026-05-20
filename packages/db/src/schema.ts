@@ -22,8 +22,9 @@ export const workspaces = sqliteTable('workspaces', {
 export const threads = sqliteTable('threads', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull(),
-  codexThreadId: text('codex_thread_id'),
-  codexTurnId: text('codex_turn_id'),
+  provider: text('provider').notNull().default('codex'),
+  providerSessionId: text('provider_session_id'),
+  providerTurnId: text('provider_turn_id'),
   source: text('source').notNull().default('supervisor'),
   title: text('title').notNull(),
   model: text('model'),
@@ -155,7 +156,7 @@ export const threadForks = sqliteTable('thread_forks', {
 export const threadGoals = sqliteTable('thread_goals', {
   id: text('id').primaryKey(),
   threadId: text('thread_id').notNull(),
-  codexThreadId: text('codex_thread_id').notNull(),
+  providerSessionId: text('provider_session_id').notNull(),
   objective: text('objective').notNull(),
   status: text('status').notNull(),
   tokenBudget: integer('token_budget'),

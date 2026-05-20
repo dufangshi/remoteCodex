@@ -60,7 +60,8 @@ function snapshot(): ThreadPdfExportSnapshot {
     thread: {
       id: 'thread-1',
       workspaceId: 'workspace-1',
-      codexThreadId: 'codex-1',
+      provider: 'codex',
+      providerSessionId: 'codex-1',
       source: 'supervisor',
       title: 'Workspace Improve',
       model: 'gpt-5.5',

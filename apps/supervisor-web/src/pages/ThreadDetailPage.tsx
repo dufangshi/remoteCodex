@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import {
-  CodexStatusDto,
+  AgentProviderCapabilitiesDto,
+  AgentBackendManagementSchemaDto,
+  AgentRuntimeStatusDto,
   ModelOptionDto,
   SandboxModeDto,
   SupervisorSocketServerEnvelope,
@@ -39,9 +41,9 @@ import {
   clearThreadGoal,
   disconnectThread,
   downloadThreadTranscriptExport,
-  fetchCodexHostFile,
-  fetchCodexModels,
-  fetchCodexStatus,
+  fetchAgentBackendModels,
+  fetchAgentBackendStatus,
+  fetchProviderHostFile,
   fetchThreadForkTurns,
   fetchThreadGoal,
   fetchThreadHooks,
@@ -61,7 +63,7 @@ import {
   type SendThreadPromptRequestInput,
   trustThreadHook,
   updateThread,
-  updateCodexHostFile,
+  updateProviderHostFile,
   updateThreadGoal,
   updateThreadHook,
   updateThreadSettings,
@@ -378,7 +380,10 @@ export function ThreadDetailPage() {
   const [detail, setDetail] = useState<ThreadDetailDto | null>(null);
   const [threads, setThreads] = useState<ThreadDto[]>([]);
   const [modelOptions, setModelOptions] = useState<ModelOptionDto[]>([]);
-  const [status, setStatus] = useState<CodexStatusDto | null>(null);
+  const [status, setStatus] = useState<AgentRuntimeStatusDto | null>(null);
+  const [backendCapabilities, setBackendCapabilities] = useState<AgentProviderCapabilitiesDto | null>(null);
+  const [backendManagementSchema, setBackendManagementSchema] =
+    useState<AgentBackendManagementSchemaDto | null>(null);
   const [liveOutput, setLiveOutput] = useState('');
   const [livePlan, setLivePlan] = useState<{
     turnId: string;
@@ -471,6 +476,9 @@ export function ThreadDetailPage() {
     error: null,
   });
   const [error, setError] = useState<string | null>(null);
+  const mcpProviderConfigFileName =
+    backendManagementSchema?.hostConfigFiles.find((file) => file.roles?.includes('mcp'))
+      ?.name ?? null;
 
   const flushBufferedLiveOutput = useCallback(() => {
     const buffered = liveOutputBufferRef.current;
@@ -1140,8 +1148,8 @@ export function ThreadDetailPage() {
 
       const [threadResult, statusResult, modelResult] = await Promise.allSettled([
         fetchThreads(),
-        fetchCodexStatus(),
-        fetchCodexModels(),
+        fetchAgentBackendStatus(seedThread?.provider ?? detailRef.current?.thread.provider ?? 'codex'),
+        fetchAgentBackendModels(seedThread?.provider ?? detailRef.current?.thread.provider ?? 'codex'),
       ]);
 
       if (pageContextRequestIdRef.current !== requestId) {
@@ -1159,7 +1167,9 @@ export function ThreadDetailPage() {
       }
 
       if (statusResult.status === 'fulfilled') {
-        setStatus(statusResult.value);
+        setStatus(statusResult.value.status);
+        setBackendCapabilities(statusResult.value.capabilities);
+        setBackendManagementSchema(statusResult.value.managementSchema);
       }
 
       if (modelResult.status === 'fulfilled') {
@@ -2318,7 +2328,7 @@ export function ThreadDetailPage() {
   }
 
   async function handleCopyMetaSessionId() {
-    const sessionId = detail?.thread.codexThreadId;
+    const sessionId = detail?.thread.providerSessionId;
     if (!sessionId) {
       return;
     }
@@ -2723,18 +2733,18 @@ export function ThreadDetailPage() {
       <div className="relative pr-9">
         <dt className="text-stone-500">Session ID</dt>
         <dd className="mt-1 break-all text-stone-100">
-          {detail.thread.codexThreadId ?? 'Unavailable'}
+          {detail.thread.providerSessionId ?? 'Unavailable'}
         </dd>
-        {detail.thread.codexThreadId && (
+        {(detail.thread.providerSessionId) && (
           <button
             type="button"
-            aria-label="Copy Codex session ID"
+            aria-label="Copy session ID"
             title={
               metaSessionCopyState === 'copied'
                 ? 'Copied'
                 : metaSessionCopyState === 'failed'
                   ? 'Copy failed'
-                  : 'Copy Codex session ID'
+                  : 'Copy session ID'
             }
             onClick={() => void handleCopyMetaSessionId()}
             className={`thread-mobile-hit-target absolute bottom-0 right-0 inline-flex h-5 w-5 items-center justify-center rounded-full border shadow-sm shadow-stone-950/25 backdrop-blur transition ${
@@ -2754,7 +2764,9 @@ export function ThreadDetailPage() {
       <div>
         <dt className="text-stone-500">Source</dt>
         <dd className="mt-1 text-stone-100">
-          {detail.thread.source === 'local_codex_import' ? 'Imported local Codex session' : 'Supervisor thread'}
+          {detail.thread.source === 'local_codex_import'
+            ? `Imported local ${detail.thread.provider} session`
+            : `${detail.thread.provider} supervisor thread`}
         </dd>
       </div>
       <div>
@@ -3178,6 +3190,9 @@ export function ThreadDetailPage() {
                       collaborationMode={detail.thread.collaborationMode}
                       modelOptions={modelOptions}
                       contextUsage={detail.thread.contextUsage}
+                      capabilities={backendCapabilities}
+                      toolboxItems={backendManagementSchema?.toolboxItems ?? []}
+                      hookCommandTemplates={backendManagementSchema?.hookCommandTemplates ?? []}
                       followTail={followTail}
                       threadConnected={detail.thread.isLoaded}
                       disabled={Boolean(promptDisabledReason)}
@@ -3203,9 +3218,24 @@ export function ThreadDetailPage() {
                       goalState={goalState}
                       onOpenGoal={handleOpenGoal}
                       onUpdateGoal={handleUpdateGoal}
-                      onReadCodexConfig={() => fetchCodexHostFile('config.toml')}
-                      onWriteCodexConfig={(content) =>
-                        updateCodexHostFile('config.toml', { content })
+                      onReadProviderConfig={
+                        mcpProviderConfigFileName
+                          ? () =>
+                              fetchProviderHostFile(
+                                detail.thread.provider,
+                                mcpProviderConfigFileName,
+                              )
+                          : undefined
+                      }
+                      onWriteProviderConfig={
+                        mcpProviderConfigFileName
+                          ? (content) =>
+                              updateProviderHostFile(
+                                detail.thread.provider,
+                                mcpProviderConfigFileName,
+                                { content },
+                              )
+                          : undefined
                       }
                       onToggleFollow={() => setScrollRequestKey((current) => current + 1)}
                       onUpdateSettings={handleUpdateThreadSettings}
@@ -3232,6 +3262,9 @@ export function ThreadDetailPage() {
                       collaborationMode={detail.thread.collaborationMode}
                       modelOptions={modelOptions}
                       contextUsage={detail.thread.contextUsage}
+                      capabilities={backendCapabilities}
+                      toolboxItems={backendManagementSchema?.toolboxItems ?? []}
+                      hookCommandTemplates={backendManagementSchema?.hookCommandTemplates ?? []}
                       followTail={followTail}
                       threadConnected={detail.thread.isLoaded}
                       disabled={Boolean(promptDisabledReason)}
@@ -3257,9 +3290,24 @@ export function ThreadDetailPage() {
                       goalState={goalState}
                       onOpenGoal={handleOpenGoal}
                       onUpdateGoal={handleUpdateGoal}
-                      onReadCodexConfig={() => fetchCodexHostFile('config.toml')}
-                      onWriteCodexConfig={(content) =>
-                        updateCodexHostFile('config.toml', { content })
+                      onReadProviderConfig={
+                        mcpProviderConfigFileName
+                          ? () =>
+                              fetchProviderHostFile(
+                                detail.thread.provider,
+                                mcpProviderConfigFileName,
+                              )
+                          : undefined
+                      }
+                      onWriteProviderConfig={
+                        mcpProviderConfigFileName
+                          ? (content) =>
+                              updateProviderHostFile(
+                                detail.thread.provider,
+                                mcpProviderConfigFileName,
+                                { content },
+                              )
+                          : undefined
                       }
                       onToggleFollow={() => setScrollRequestKey((current) => current + 1)}
                       onUpdateSettings={handleUpdateThreadSettings}
@@ -3311,6 +3359,9 @@ export function ThreadDetailPage() {
                     settingsBusy={false}
                     error={detail.thread.isLoaded ? shellControlState?.error ?? null : null}
                     followTail={false}
+                    capabilities={backendCapabilities}
+                    toolboxItems={backendManagementSchema?.toolboxItems ?? []}
+                    hookCommandTemplates={backendManagementSchema?.hookCommandTemplates ?? []}
                     threadConnected={detail.thread.isLoaded}
                     shellControlState={shellControlState}
                     canInterrupt={Boolean(detail.thread.isLoaded && shellControlState?.isCommandRunning)}

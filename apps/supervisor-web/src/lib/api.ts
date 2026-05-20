@@ -1,11 +1,11 @@
 import type {
-  ApplyCodexHostConfigArchiveResultDto,
+  ApplyProviderHostConfigArchiveResultDto,
+  AgentBackendDto,
+  AgentBackendIdDto,
   ApiErrorShape,
-  CodexHostConfigArchiveDto,
-  CodexHostFileDto,
-  CodexHostFileNameDto,
-  CodexStatusDto,
-  CreateCodexHostConfigArchiveInput,
+  ProviderHostConfigArchiveDto,
+  ProviderHostFileDto,
+  CreateProviderHostConfigArchiveInput,
   CreateThreadInput,
   CreateThreadHookInput,
   TrustThreadHookInput,
@@ -42,10 +42,10 @@ import type {
   ThreadForkResultDto,
   ThreadForkTurnOptionDto,
   ThreadShellStateDto,
-  RenameCodexHostConfigArchiveInput,
+  RenameProviderHostConfigArchiveInput,
   UpdateThreadSettingsInput,
-  UpdateCodexHostFileInput,
   UpdateThreadInput,
+  UpdateProviderHostFileInput,
   UpdateWorkspaceSettingsInput,
   UpdateWorkspaceInput,
   UpdateWorkspaceFavoriteInput,
@@ -187,41 +187,55 @@ export function updateWorkspaceSettings(input: UpdateWorkspaceSettingsInput) {
   });
 }
 
-export function fetchCodexHostFile(name: CodexHostFileNameDto) {
-  return request<CodexHostFileDto>(`/api/config/codex-files/${encodeURIComponent(name)}`, {
+export function fetchAgentBackends() {
+  return request<AgentBackendDto[]>('/api/agent-runtimes', {
     cache: 'no-store',
   });
 }
 
-export function updateCodexHostFile(
-  name: CodexHostFileNameDto,
-  input: UpdateCodexHostFileInput,
+export function fetchAgentBackendStatus(provider: AgentBackendIdDto) {
+  return request<AgentBackendDto>(
+    `/api/agent-runtimes/${encodeURIComponent(provider)}/status`,
+    {
+      cache: 'no-store',
+    },
+  );
+}
+
+export function restartAgentBackend(provider: AgentBackendIdDto) {
+  return request<AgentBackendDto>(
+    `/api/agent-runtimes/${encodeURIComponent(provider)}/restart`,
+    {
+      method: 'POST',
+    },
+  );
+}
+
+export function fetchAgentBackendModels(provider: AgentBackendIdDto) {
+  return request<ModelOptionDto[]>(
+    `/api/agent-runtimes/${encodeURIComponent(provider)}/models`,
+    {
+      cache: 'no-store',
+    },
+  );
+}
+
+export function fetchProviderHostFile(provider: AgentBackendIdDto, name: string) {
+  return request<ProviderHostFileDto>(
+    `/api/config/providers/${encodeURIComponent(provider)}/files/${encodeURIComponent(name)}`,
+    {
+      cache: 'no-store',
+    },
+  );
+}
+
+export function updateProviderHostFile(
+  provider: AgentBackendIdDto,
+  name: string,
+  input: UpdateProviderHostFileInput,
 ) {
-  return request<CodexHostFileDto>(`/api/config/codex-files/${encodeURIComponent(name)}`, {
-    method: 'PATCH',
-    body: JSON.stringify(input),
-  });
-}
-
-export function fetchCodexHostConfigArchives() {
-  return request<CodexHostConfigArchiveDto[]>('/api/config/codex-archives', {
-    cache: 'no-store',
-  });
-}
-
-export function createCodexHostConfigArchive(input: CreateCodexHostConfigArchiveInput = {}) {
-  return request<CodexHostConfigArchiveDto>('/api/config/codex-archives', {
-    method: 'POST',
-    body: JSON.stringify(input),
-  });
-}
-
-export function renameCodexHostConfigArchive(
-  id: string,
-  input: RenameCodexHostConfigArchiveInput,
-) {
-  return request<CodexHostConfigArchiveDto>(
-    `/api/config/codex-archives/${encodeURIComponent(id)}`,
+  return request<ProviderHostFileDto>(
+    `/api/config/providers/${encodeURIComponent(provider)}/files/${encodeURIComponent(name)}`,
     {
       method: 'PATCH',
       body: JSON.stringify(input),
@@ -229,36 +243,58 @@ export function renameCodexHostConfigArchive(
   );
 }
 
-export function applyCodexHostConfigArchive(id: string) {
-  return request<ApplyCodexHostConfigArchiveResultDto>(
-    `/api/config/codex-archives/${encodeURIComponent(id)}/apply`,
+export function fetchProviderHostConfigArchives(provider: AgentBackendIdDto) {
+  return request<ProviderHostConfigArchiveDto[]>(
+    `/api/config/providers/${encodeURIComponent(provider)}/archives`,
+    {
+      cache: 'no-store',
+    },
+  );
+}
+
+export function createProviderHostConfigArchive(
+  provider: AgentBackendIdDto,
+  input: CreateProviderHostConfigArchiveInput = {},
+) {
+  return request<ProviderHostConfigArchiveDto>(
+    `/api/config/providers/${encodeURIComponent(provider)}/archives`,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function renameProviderHostConfigArchive(
+  provider: AgentBackendIdDto,
+  id: string,
+  input: RenameProviderHostConfigArchiveInput,
+) {
+  return request<ProviderHostConfigArchiveDto>(
+    `/api/config/providers/${encodeURIComponent(provider)}/archives/${encodeURIComponent(id)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function applyProviderHostConfigArchive(provider: AgentBackendIdDto, id: string) {
+  return request<ApplyProviderHostConfigArchiveResultDto>(
+    `/api/config/providers/${encodeURIComponent(provider)}/archives/${encodeURIComponent(id)}/apply`,
     {
       method: 'POST',
     },
   );
 }
 
-export function fetchCodexStatus() {
-  return request<CodexStatusDto>('/api/codex/status');
-}
-
-export function restartCodexAppServer() {
-  return request<CodexStatusDto>('/api/codex/restart', {
-    method: 'POST',
-  });
-}
-
-export function buildAndRestartService() {
+export function buildAndRestartAgentBackend(provider: AgentBackendIdDto) {
   return request<{ status: 'launched'; pid: number | null; message: string }>(
-    '/api/codex/build-restart',
+    `/api/agent-runtimes/${encodeURIComponent(provider)}/build-restart`,
     {
       method: 'POST',
     },
   );
-}
-
-export function fetchCodexModels() {
-  return request<ModelOptionDto[]>('/api/codex/models');
 }
 
 export function fetchSupervisorHealth() {

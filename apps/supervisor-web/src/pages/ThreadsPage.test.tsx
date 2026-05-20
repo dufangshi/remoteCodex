@@ -5,6 +5,43 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppShellNavContext } from '../components/AppShellNavContext';
 import { ThreadsPage } from './ThreadsPage';
 
+const codexBackendResponse = {
+  provider: 'codex',
+  displayName: 'Codex',
+  description: 'Local Codex app-server runtime.',
+  enabled: true,
+  isDefault: true,
+  status: {
+    state: 'ready',
+    transport: 'stdio',
+    lastStartedAt: new Date().toISOString(),
+    lastError: null,
+    restartCount: 0,
+  },
+  capabilities: {
+    sessions: { list: true, read: true, resume: true, importLocal: true },
+    turns: { start: true, streamInput: false, steer: true, interrupt: true, compact: true },
+    branching: { fork: true, hardRollback: true, resumeAt: false, rewindFiles: false },
+    controls: {
+      planMode: true,
+      permissionRequests: true,
+      sandboxMode: true,
+      fastServiceTier: true,
+      goals: true,
+    },
+    management: {
+      models: true,
+      mcpStatus: true,
+      skills: true,
+      hooks: true,
+      hookTrust: true,
+      hostConfigFiles: true,
+      providerSettings: false,
+    },
+    usage: { contextWindow: true, tokenUsage: true, costUsd: false },
+  },
+};
+
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
   listeners = new Map<string, ((event: MessageEvent) => void)[]>();
@@ -35,7 +72,14 @@ describe('ThreadsPage', () => {
       'fetch',
       vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
-        if (url.includes('/api/codex/status')) {
+        if (url.includes('/api/agent-runtimes/codex/status')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => codexBackendResponse,
+          });
+        }
+
+        if (url.includes('/api/agent-runtimes/codex/status')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({
@@ -80,7 +124,8 @@ describe('ThreadsPage', () => {
             json: async () => ({
               id: 'thread-1',
               workspaceId: 'workspace-1',
-              codexThreadId: 'codex-1',
+              provider: 'codex',
+              providerSessionId: 'codex-1',
               source: 'supervisor',
               title: 'Renamed Thread',
               model: 'gpt-5',
@@ -115,7 +160,8 @@ describe('ThreadsPage', () => {
               {
                 id: 'thread-1',
                 workspaceId: 'workspace-1',
-                codexThreadId: 'codex-1',
+                provider: 'codex',
+                providerSessionId: 'codex-1',
                 source: 'supervisor',
                 title: 'Demo Thread',
                 model: 'gpt-5',
@@ -134,7 +180,8 @@ describe('ThreadsPage', () => {
               {
                 id: 'thread-2',
                 workspaceId: 'workspace-2',
-                codexThreadId: 'codex-2',
+                provider: 'codex',
+                providerSessionId: 'codex-2',
                 source: 'supervisor',
                 title: 'Other Thread',
                 model: 'gpt-5-mini',
@@ -173,6 +220,8 @@ describe('ThreadsPage', () => {
           themeMode: 'dark',
           setThemeMode: vi.fn(),
           effectiveTheme: 'dark',
+          defaultBackend: 'codex',
+          setDefaultBackend: vi.fn(),
         }}
       >
         <MemoryRouter initialEntries={[initialEntry]}>
@@ -244,14 +293,14 @@ describe('ThreadsPage', () => {
     expect(patchCall?.[1]?.body).toBe(JSON.stringify({ title: 'Renamed Thread' }));
   });
 
-  it('copies the codex session id and deletes a recent thread after confirmation', async () => {
+  it('copies the backend session id and deletes a recent thread after confirmation', async () => {
     renderPage('/threads?workspaceId=workspace-1');
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Demo Workspace' })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Copy Codex session ID' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Copy session ID' }));
 
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith('codex-1');

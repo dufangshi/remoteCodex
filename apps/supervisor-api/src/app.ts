@@ -6,8 +6,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ZodError } from 'zod';
 
-import { CodexAppServerManager, JsonRpcClientError } from '../../../packages/codex/src/index';
 import { loadRuntimeConfig, RuntimeConfig } from '../../../packages/config/src/index';
+import {
+  AgentRuntimeError,
+  AgentRuntimeRegistry,
+} from '../../../packages/agent-runtime/src/index';
 import {
   createDatabase,
   DatabaseContext,
@@ -21,14 +24,18 @@ import {
   SupervisorSocketServerEnvelope,
 } from '../../../packages/shared/src/index';
 import { WorkspaceServiceError } from '../../../packages/workspace/src/index';
-import { SupervisorEventBus } from './codex/event-bus';
-import { LocalCodexSessionStore } from './codex/local-session-store';
-import { ThreadService } from './codex/thread-service';
-import { registerCodexRoutes } from './routes/codex';
+import {
+  AgentRuntimeBootstrap,
+  createAgentRuntimeBootstrap,
+} from './agent-runtime-bootstrap';
+import { SupervisorEventBus } from './event-bus';
+import { ThreadService } from './thread-service';
+import { registerAgentRuntimeRoutes } from './routes/agent-runtimes';
 import { registerShellRoutes } from './routes/shells';
 import { registerSystemRoutes } from './routes/system';
 import { registerThreadRoutes } from './routes/threads';
 import { registerWorkspaceRoutes } from './routes/workspaces';
+import { ProviderHostConfigService } from './provider-host-config-service';
 import { ShellServiceError, ShellSessionService } from './shell/shell-session-service';
 import { TmuxManager } from './shell/tmux-manager';
 
@@ -47,13 +54,14 @@ class HttpError extends Error {
 export interface AppServices {
   config: RuntimeConfig;
   database: DatabaseContext;
-  codexManager: CodexAppServerManager;
+  agentRuntimes: AgentRuntimeRegistry;
   serviceLifecycle: {
     launchBuildRestart: () => Promise<{ pid: number | null }>;
   };
   eventBus: SupervisorEventBus;
   threadService: ThreadService;
   shellService: ShellSessionService;
+  providerHostConfigService: ProviderHostConfigService;
 }
 
 function findRepoRoot(start = process.cwd()) {
@@ -120,7 +128,8 @@ declare module 'fastify' {
 export function buildApp(
   options: {
     env?: NodeJS.ProcessEnv;
-    codexManager?: CodexAppServerManager;
+    agentRuntimes?: AgentRuntimeRegistry;
+    runtimeBootstrap?: AgentRuntimeBootstrap;
     shellService?: ShellSessionService;
     serviceLifecycle?: AppServices['serviceLifecycle'];
   } = {}
@@ -131,29 +140,23 @@ export function buildApp(
   const database = createDatabase(config.databaseUrl);
   seedDefaults(database.db);
   const eventBus = new SupervisorEventBus();
-  const localSessionStore = new LocalCodexSessionStore(config.codexHome);
-  const codexManager =
-    options.codexManager ??
-    new CodexAppServerManager({
-      command: config.codexCommand,
-      startupTimeoutMs: config.codexAppServerStartTimeoutMs,
-      clientInfo: {
-        name: 'remote-codex-supervisor',
-        title: config.appName,
-        version: config.appVersion
-      }
-    });
+  const runtimeBootstrap = options.runtimeBootstrap ?? createAgentRuntimeBootstrap(config);
+  const agentRuntimes = options.agentRuntimes ?? runtimeBootstrap.agentRuntimes;
   const threadService = new ThreadService(
     database.db,
-    codexManager,
+    agentRuntimes,
     eventBus,
-    localSessionStore,
+    runtimeBootstrap.localCodexSessionStore,
     config.workspaceRoot,
     config.codexHome,
   );
   const shellService =
     options.shellService ??
     new ShellSessionService(database.db, eventBus, new TmuxManager());
+  const providerHostConfigService = new ProviderHostConfigService(
+    agentRuntimes,
+    runtimeBootstrap.providerHostHomes,
+  );
 
   const app = Fastify({
     logger:
@@ -175,11 +178,12 @@ export function buildApp(
   app.decorate('services', {
     config,
     database,
-    codexManager,
+    agentRuntimes,
     serviceLifecycle: options.serviceLifecycle ?? createServiceLifecycle(),
     eventBus,
     threadService,
-    shellService
+    shellService,
+    providerHostConfigService
   });
 
   app.register(async (realtimeApp) => {
@@ -352,7 +356,7 @@ export function buildApp(
   });
 
   app.register(registerSystemRoutes);
-  app.register(registerCodexRoutes);
+  app.register(registerAgentRuntimeRoutes);
   app.register(registerShellRoutes);
   app.register(registerThreadRoutes);
   app.register(registerWorkspaceRoutes);
@@ -434,14 +438,18 @@ export function buildApp(
       return;
     }
 
-    if (error instanceof JsonRpcClientError) {
+    if (error instanceof AgentRuntimeError) {
       const payload: ApiErrorShape = {
         code: 'service_unavailable',
         message: error.message
       };
 
       if (error.details) {
-        payload.details = error.details;
+        payload.details = {
+          ...error.details,
+          provider: error.provider,
+          runtimeCode: error.code,
+        };
       }
 
       reply.status(503).send(payload);
@@ -494,13 +502,13 @@ export function buildApp(
 
   app.addHook('onClose', async () => {
     await shellService.stop();
-    await codexManager.stop();
+    await Promise.all(agentRuntimes.all().map((runtime) => runtime.stop()));
     database.sqlite.close();
   });
 
   app.addHook('onReady', async () => {
     try {
-      await codexManager.start();
+      await Promise.all(agentRuntimes.all().map((runtime) => runtime.start()));
       await shellService.syncShellStateOnStartup();
     } catch (error) {
       requestLog(app, error);

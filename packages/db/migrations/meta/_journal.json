@@ -25,6 +25,21 @@
       "idx": 4,
       "tag": "0008_thread_fast_mode_and_activity_notes",
       "when": 1740000008000
+    },
+    {
+      "idx": 15,
+      "tag": "0015_agent_provider_fields",
+      "when": 1740000015000
+    },
+    {
+      "idx": 16,
+      "tag": "0016_remove_codex_thread_goal_id",
+      "when": 1740000016000
+    },
+    {
+      "idx": 17,
+      "tag": "0017_remove_codex_thread_columns",
+      "when": 1740000017000
     }
   ]
 }

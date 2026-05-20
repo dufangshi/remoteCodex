@@ -3,15 +3,19 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import {
-  CodexAppServerManager,
-  CodexServerRequest,
-  CodexServerEvent,
   SandboxPolicy,
-  CodexThreadRecord,
-  CodexTurnItem,
-  CodexTurnRecord,
-  JsonRpcClientError
-} from '../../../../packages/codex/src/index';
+} from '../../../packages/codex/src/index';
+import {
+  AgentRuntime,
+  AgentRuntimeRegistry,
+  AgentGoal,
+  AgentProviderId,
+  AgentProviderRequest,
+  AgentRuntimeEvent,
+  AgentSessionDetail,
+  AgentSessionSummary,
+  AgentTurn,
+} from '../../../packages/agent-runtime/src/index';
 import {
   createThreadActivityNoteRecord,
   createThreadForkRecord,
@@ -32,7 +36,7 @@ import {
   deleteViewerSessionsByThreadId,
   getThreadTurnMetadataByThreadAndTurnId,
   getLatestThreadTurnMetadataByThreadId,
-  getThreadRecordByCodexThreadId,
+  getThreadRecordByProviderSessionId,
   getThreadRecordById,
   getWorkspaceRecordByPath,
   getWorkspaceRecordById,
@@ -49,12 +53,13 @@ import {
   upsertThreadHistoryItemRecord,
   upsertThreadTurnMetadata,
   updateThreadRecord
-} from '../../../../packages/db/src/index';
+} from '../../../packages/db/src/index';
 import {
   ApprovalMode,
   CollaborationModeDto,
-  CodexHookDto,
-  CodexHookEventNameDto,
+  AgentHookDto,
+  AgentHookEventNameDto,
+  AgentSkillDto,
   CreateThreadInput,
   ExportThreadPdfInput,
   ForkThreadInput,
@@ -68,7 +73,6 @@ import {
   SandboxModeDto,
   SendThreadPromptInput,
   ThreadAnsweredRequestNoteDto,
-  ThreadActionQuestionDto,
   ThreadActionRequestDto,
   ThreadActivityNoteDto,
   ThreadContextUsageDto,
@@ -98,38 +102,53 @@ import {
   UpdateThreadHookInput,
   UpdateThreadSettingsInput,
   WorkspaceDto
-} from '../../../../packages/shared/src/index';
+} from '../../../packages/shared/src/index';
 
 type UpstreamThreadGoalStatus = Exclude<ThreadGoalDto['status'], 'terminated'>;
 type NormalizedThreadGoal = ThreadGoalDto;
 import {
   renderThreadExportPdf,
   renderThreadExportStandaloneHtml,
-} from '../exports/thread-pdf-export';
-import { HttpError } from '../app';
+} from './exports/thread-pdf-export';
+import { HttpError } from './app';
 import {
   readCodexFastModeSync,
   readCodexFeatureFlag,
   writeCodexFeatureFlag,
   writeCodexFastMode,
-} from './codexHostConfig';
+} from './codex/codexHostConfig';
 import { SupervisorEventBus } from './event-bus';
-import { LocalCodexSessionStore } from './local-session-store';
+import { LocalCodexSessionStore } from './codex/local-session-store';
+import {
+  isCodexRuntimeRequestError,
+  isRemoteThreadBootstrapError,
+  isUnsupportedHooksListError,
+  parseTurnSteerRace,
+  unwrapCodexJsonRpcError,
+} from './codex/runtime-errors';
+import {
+  applyRecordedTurnItemOrders,
+  agentTurnToThreadTurnDto,
+  deferLargeHistoryItemDetails,
+  mergePersistedHistoryItemsIntoTurns,
+  parseStoredHistoryItem,
+  shouldPersistLiveHistoryItem,
+  sortHistoryItemsBySequence,
+  type TurnItemOrderSnapshot,
+} from './thread-history-items';
 import {
   buildTurnPricingSnapshot,
   contextWindowForModel,
   estimateTurnPrice,
   supportsFastMode,
-} from './modelPricing';
-import { truncateAutoThreadTitle } from './thread-title';
+} from './codex/modelPricing';
+import { truncateAutoThreadTitle } from './codex/thread-title';
 
 const DEFAULT_THREAD_TITLE = 'Untitled thread';
 const GENERIC_REMOTE_THREAD_TITLE = 'Thread';
 const LOCAL_PLAN_DECISION_PREFIX = 'plan-decision:';
 const IMPLEMENT_APPROVED_PLAN_PROMPT = 'Implement the approved plan.';
 const THREAD_DETAIL_CACHE_TTL_MS = 5_000;
-const DEFERRED_COMMAND_DETAIL_TITLE = 'Command Output';
-const DEFERRED_TOOL_DETAIL_TITLE = 'Tool Call Details';
 const CONTEXT_BASELINE_TOKENS = 12_000;
 const FAST_MODE_NOTE_ON = 'Fast mode on';
 const FAST_MODE_NOTE_OFF = 'Fast mode off';
@@ -145,7 +164,7 @@ const HOOK_EVENT_JSON_KEYS = {
 } as const;
 const HOOK_EVENT_DTO_KEYS = Object.fromEntries(
   Object.entries(HOOK_EVENT_JSON_KEYS).map(([dtoKey, jsonKey]) => [jsonKey, dtoKey]),
-) as Record<string, CodexHookEventNameDto>;
+) as Record<string, AgentHookEventNameDto>;
 
 const GOAL_FEATURE_DISABLED_MESSAGE =
   'Codex /goal is experimental. Enable it by adding `goals = true` under `[features]` in ~/.codex/config.toml, then restart the Codex app-server.';
@@ -153,17 +172,10 @@ const GOAL_FEATURE_DISABLED_MESSAGE =
 type PendingThreadRequestRecord =
   | {
       source: 'server';
-      serverRequestId: number;
-      responseKind:
-        | 'answers'
-        | 'mcpElicitation'
-        | 'commandExecutionApproval'
-        | 'fileChangeApproval'
-        | 'permissionsApproval'
-        | 'legacyExecApproval'
-        | 'legacyApplyPatchApproval';
+      providerRequestId: string | number;
+      responseKind: string;
       responsePayload?: Record<string, unknown>;
-      request: ThreadActionRequestDto;
+      request: ThreadActionRequestDto & { kind: 'requestUserInput' };
     }
   | {
       source: 'planDecision';
@@ -250,12 +262,25 @@ function toThreadGoalDto(goal: {
   };
 }
 
+function toThreadGoalDtoFromAgentGoal(goal: AgentGoal): ThreadGoalDto {
+  return toThreadGoalDto({
+    threadId: goal.providerSessionId,
+    objective: goal.objective,
+    status: goal.status as ThreadGoalDto['status'],
+    tokenBudget: goal.tokenBudget,
+    tokensUsed: goal.tokensUsed,
+    timeUsedSeconds: goal.timeUsedSeconds,
+    createdAt: goal.createdAt,
+    updatedAt: goal.updatedAt,
+  });
+}
+
 function toThreadGoalDtoFromRecord(record: ReturnType<typeof listThreadGoalRecordsByThreadId>[number]): ThreadGoalDto {
   const terminalCompletedAt =
     record.completedAt ??
     (['complete', 'terminated'].includes(record.status) ? record.updatedAt : null);
   return toThreadGoalDto({
-    threadId: record.codexThreadId,
+    threadId: record.providerSessionId,
     localGoalId: record.id,
     objective: record.objective,
     status: record.status as ThreadGoalDto['status'],
@@ -272,14 +297,14 @@ function normalizeThreadGoalStatusForThread(
   goal: ThreadGoalDto,
   record: {
     id?: string;
-    codexThreadId?: string | null;
-    codexTurnId?: string | null;
+    providerSessionId?: string | null;
+    providerTurnId?: string | null;
     status?: string | null;
   },
 ): NormalizedThreadGoal {
   if (
     goal.status === 'complete' &&
-    (record.codexTurnId || record.status === 'running')
+    (record.providerTurnId || record.status === 'running')
   ) {
     return {
       ...goal,
@@ -308,8 +333,9 @@ function mergeGoalHistoryEntry(existing: ThreadGoalDto, incoming: ThreadGoalDto)
 }
 
 function mapCodexGoalError(error: unknown): never {
-  if (error instanceof JsonRpcClientError) {
-    const remoteMessage = error.message || '';
+  const codexError = unwrapCodexJsonRpcError(error);
+  if (codexError) {
+    const remoteMessage = codexError.message || '';
     if (remoteMessage.toLowerCase().includes('goals feature is disabled')) {
       throw new HttpError(409, {
         code: 'goal_feature_disabled',
@@ -442,78 +468,10 @@ function isAutoGeneratedTitle(title: string | null | undefined) {
   return !normalized || normalized === DEFAULT_THREAD_TITLE || normalized === GENERIC_REMOTE_THREAD_TITLE;
 }
 
-function isRemoteThreadBootstrapError(error: unknown) {
-  if (!(error instanceof JsonRpcClientError) || error.code !== 'remote_error') {
-    return false;
-  }
-
-  return (
-    error.message.includes('includeTurns is unavailable before first user message') ||
-    error.message.includes('is not materialized yet') ||
-    error.message.includes('no rollout found for thread id') ||
-    error.message.includes('failed to load rollout') ||
-    (error.message.includes('rollout at') && error.message.includes('is empty'))
-  );
-}
-
-function isUnsupportedHooksListError(error: unknown) {
-  if (!(error instanceof JsonRpcClientError) || error.code !== 'remote_error') {
-    return false;
-  }
-
-  const remoteCode = error.details?.code;
-  const message = error.message.toLowerCase();
-  return (
-    remoteCode === -32601 ||
-    message.includes('endpoint not found') ||
-    message.includes('method not found') ||
-    (message.includes('hooks/list') && message.includes('not found'))
-  );
-}
-
-type TurnSteerRace =
-  | { type: 'missing' }
-  | { type: 'turnIdMismatch'; actualTurnId: string };
-
-function parseTurnSteerRace(error: unknown): TurnSteerRace | null {
-  if (!(error instanceof JsonRpcClientError) || error.code !== 'remote_error') {
-    return null;
-  }
-
-  if (error.message === 'no active turn to steer') {
-    return { type: 'missing' };
-  }
-
-  const mismatchPrefix = 'expected active turn id `';
-  const mismatchSeparator = '` but found `';
-  if (!error.message.startsWith(mismatchPrefix)) {
-    return null;
-  }
-
-  const actualTurnId = error.message
-    .slice(mismatchPrefix.length)
-    .split(mismatchSeparator)[1]
-    ?.replace(/`$/, '');
-
-  if (!actualTurnId) {
-    return null;
-  }
-
-  return {
-    type: 'turnIdMismatch',
-    actualTurnId,
-  };
-}
-
-function extractTurnUserMessages(turn: CodexTurnRecord) {
+function extractTurnUserMessages(turn: AgentTurn) {
   return turn.items
-    .filter((item) => item.type === 'userMessage')
-    .map((item) =>
-      item.content
-        ?.map((entry) => (entry.type === 'text' ? (entry.text ?? '') : `[${entry.type}]`))
-        .join('\n')
-        .trim() ?? '',
-    )
+    .filter((item) => item.kind === 'userMessage')
+    .map((item) => item.text.trim())
     .filter((text) => text.length > 0);
 }
 
@@ -601,33 +559,6 @@ async function resolveImportedWorkspacePath(
   }
 
   return resolvedCandidate;
-}
-
-function parseUuidV7Timestamp(id: string): string | null {
-  const normalized = id.replace(/-/g, '');
-  if (!/^[0-9a-f]{32}$/i.test(normalized) || normalized[12]?.toLowerCase() !== '7') {
-    return null;
-  }
-
-  const millis = Number.parseInt(normalized.slice(0, 12), 16);
-  if (!Number.isFinite(millis)) {
-    return null;
-  }
-
-  return new Date(millis).toISOString();
-}
-
-function normalizeThreadStatus(record: CodexThreadRecord): ThreadStatusDto {
-  switch (record.status.type) {
-    case 'idle':
-      return 'idle';
-    case 'systemError':
-      return 'system_error';
-    case 'notLoaded':
-      return 'not_loaded';
-    case 'active':
-      return 'running';
-  }
 }
 
 function toWorkspaceDto(record: {
@@ -928,533 +859,6 @@ function parseThreadTurnTokenUsageJson(
   return parseStoredThreadTurnTokenUsageState(value).usage;
 }
 
-function stringArray(value: unknown) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .map((entry) => stringOrNull(entry))
-    .filter((entry): entry is string => Boolean(entry));
-}
-
-function uniqueStrings(values: Array<string | null | undefined>) {
-  return [...new Set(values.filter((value): value is string => Boolean(value?.trim())))];
-}
-
-function normalizeTextLines(text: string) {
-  const lines = text.replace(/\r\n/g, '\n').split('\n');
-
-  while (lines.length > 1 && lines.at(-1)?.trim() === '') {
-    lines.pop();
-  }
-
-  return lines;
-}
-
-function textFromContentEntries(
-  content: CodexTurnItem['content'],
-  fallback: string | null = null,
-) {
-  const text =
-    content
-      ?.map((entry) => {
-        if (typeof entry.text === 'string') {
-          return entry.text;
-        }
-
-        return `[${entry.type}]`;
-      })
-      .join('\n')
-      .trim();
-
-  return text || fallback;
-}
-
-function codexItemText(item: CodexTurnItem, fallback = '') {
-  const contentText = textFromContentEntries(item.content);
-  const directText = typeof item.text === 'string' && item.text.trim() ? item.text : null;
-
-  if (
-    contentText &&
-    (!directText ||
-      contentText.includes('\n') ||
-      (Array.isArray(item.content) && item.content.length > 1))
-  ) {
-    return contentText;
-  }
-
-  return directText ?? contentText ?? fallback;
-}
-
-function summarizeCommandText(text: string) {
-  const lines = normalizeTextLines(text);
-  return lines.find((line) => line.trim().length > 0) ?? lines[0] ?? 'Command output';
-}
-
-function decodeXmlEntities(value: string) {
-  return value
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&gt;/g, '>')
-    .replace(/&lt;/g, '<')
-    .replace(/&amp;/g, '&');
-}
-
-function textFromUnknown(value: unknown): string | null {
-  if (typeof value === 'string') {
-    return value.trim() ? value : null;
-  }
-
-  if (Array.isArray(value)) {
-    const parts: string[] = value
-      .map((entry) => textFromUnknown(entry))
-      .filter((entry): entry is string => Boolean(entry));
-    return parts.length > 0 ? parts.join(' ') : null;
-  }
-
-  return null;
-}
-
-function parseHookPromptText(text: string) {
-  const match = text
-    .trim()
-    .match(/^<hook_prompt(?:\s+hook_run_id="([^"]+)")?>([\s\S]*)<\/hook_prompt>$/);
-  if (!match) {
-    return null;
-  }
-
-  const hookRunId = match[1] ? decodeXmlEntities(match[1]) : null;
-  const output = decodeXmlEntities(match[2] ?? '').trim();
-  const eventName = hookRunId?.split(':')[0] ?? 'hook';
-  const eventLabel = hookEventLabel(eventName);
-  const sourcePath = hookRunId?.split(':').slice(2).join(':') || null;
-  const outputEntries = output ? [{ kind: 'warning', text: output }] : [];
-
-  return {
-    hookRunId,
-    output,
-    outputEntries,
-    eventName,
-    eventLabel,
-    sourcePath,
-  };
-}
-
-function safeJsonStringify(value: unknown) {
-  try {
-    const serialized = JSON.stringify(value, null, 2);
-    return serialized && serialized !== 'null' ? serialized : null;
-  } catch {
-    return String(value);
-  }
-}
-
-function summarizeToolCallText(text: string) {
-  const lines = normalizeTextLines(text);
-  return lines.find((line) => line.trim().length > 0) ?? lines[0] ?? 'Tool call';
-}
-
-function deferCommandHistoryItem(
-  item: ThreadHistoryItemDto & { kind: 'commandExecution' },
-  deferredDetails: Map<string, ThreadHistoryItemDetailDto>,
-): ThreadHistoryItemDto {
-  const fullText = item.detailText?.trim() || item.text || 'Command output';
-  deferredDetails.set(item.id, {
-    id: item.id,
-    kind: item.kind,
-    title: DEFERRED_COMMAND_DETAIL_TITLE,
-    text: fullText,
-  });
-
-  return {
-    ...item,
-    text: summarizeCommandText(fullText),
-    detailText: null,
-    hasDeferredDetail: true,
-  };
-}
-
-function formatCommandHistoryItem(
-  item: CodexTurnItem,
-  deferredDetails?: Map<string, ThreadHistoryItemDetailDto>,
-): ThreadHistoryItemDto {
-  const nestedRecords = [
-    item,
-    isRecord(item.action) ? item.action : null,
-    isRecord(item.result) ? item.result : null,
-  ].filter((candidate): candidate is Record<string, unknown> => Boolean(candidate));
-  const commandText =
-    textFromUnknown(valueFromNestedRecords(nestedRecords, ['command', 'cmd', 'argv'])) ??
-    stringOrNull(item.text) ??
-    'Command output';
-  const outputText =
-    textFromUnknown(
-      valueFromNestedRecords(nestedRecords, [
-        'aggregatedOutput',
-        'aggregated_output',
-        'output',
-        'stdout',
-        'stderr',
-        'text',
-      ]),
-    ) ?? null;
-  const detailText = [commandText, outputText].filter(Boolean).join('\n\n');
-  const historyItem: ThreadHistoryItemDto & { kind: 'commandExecution' } = {
-    id: item.id,
-    kind: 'commandExecution',
-    text: detailText,
-    status: item.status ?? null,
-  };
-
-  return deferredDetails
-    ? deferCommandHistoryItem(historyItem, deferredDetails)
-    : historyItem;
-}
-
-function deferToolCallHistoryItem(
-  item: ThreadHistoryItemDto & { kind: 'toolCall' },
-  deferredDetails: Map<string, ThreadHistoryItemDetailDto>,
-): ThreadHistoryItemDto {
-  const fullText = item.detailText?.trim() || item.text || 'Tool call';
-  deferredDetails.set(item.id, {
-    id: item.id,
-    kind: item.kind,
-    title: DEFERRED_TOOL_DETAIL_TITLE,
-    text: fullText,
-  });
-
-  return {
-    ...item,
-    text: summarizeToolCallText(fullText),
-    detailText: null,
-    hasDeferredDetail: true,
-  };
-}
-
-function extractToolCallRecords(item: CodexTurnItem) {
-  const action = isRecord(item.action) ? item.action : null;
-  const result = isRecord(item.result) ? item.result : null;
-
-  return {
-    action,
-    result,
-    input: action && isRecord(action.input) ? action.input : null,
-    output: result && isRecord(result.output) ? result.output : null,
-  };
-}
-
-function valueFromNestedRecords(
-  records: Array<Record<string, unknown> | null | undefined>,
-  keys: string[],
-) {
-  for (const record of records) {
-    if (!record) {
-      continue;
-    }
-
-    for (const key of keys) {
-      const value = record[key];
-      if (value !== undefined && value !== null) {
-        return value;
-      }
-    }
-  }
-
-  return null;
-}
-
-function formatToolCallHistoryItem(
-  item: CodexTurnItem,
-  deferredDetails?: Map<string, ThreadHistoryItemDetailDto>,
-): ThreadHistoryItemDto {
-  const { action, result, input, output } = extractToolCallRecords(item);
-  const nestedRecords = [item, action, result, input, output];
-  const toolName = uniqueStrings([
-    stringOrNull(valueFromNestedRecords(nestedRecords, [
-      'tool',
-      'toolName',
-      'tool_name',
-      'name',
-      'title',
-      'functionName',
-      'function_name',
-    ])),
-  ])[0] ?? null;
-  const serverName = uniqueStrings([
-    stringOrNull(valueFromNestedRecords(nestedRecords, [
-      'server',
-      'serverName',
-      'server_name',
-      'mcpServer',
-      'mcp_server',
-      'namespace',
-    ])),
-  ])[0] ?? null;
-  const status = stringOrNull(item.status) ?? stringOrNull(item.phase) ?? null;
-  const summaryLine = serverName && toolName
-    ? `${serverName}/${toolName}`
-    : toolName ?? serverName ?? stringOrNull(item.text) ?? item.type;
-
-  const detailLines = [summaryLine];
-  if (status) {
-    detailLines.push(`Status: ${status}`);
-  }
-
-  const text = stringOrNull(item.text);
-  if (text && text !== summaryLine) {
-    detailLines.push('', text);
-  }
-
-  const argumentPayload = input ?? action;
-  const resultPayload = output ?? result;
-  const argumentText = safeJsonStringify(argumentPayload);
-  const resultText = safeJsonStringify(resultPayload);
-
-  if (argumentText) {
-    detailLines.push('', 'Arguments', argumentText);
-  }
-  if (resultText) {
-    detailLines.push('', 'Result', resultText);
-  }
-
-  const historyItem: ThreadHistoryItemDto = {
-    id: item.id,
-    kind: 'toolCall',
-    text: summaryLine,
-    previewText: summaryLine,
-    detailText: detailLines.join('\n'),
-    status,
-  };
-
-  if (
-    deferredDetails &&
-    (Boolean(argumentText) ||
-      Boolean(resultText) ||
-      (historyItem.detailText?.length ?? 0) > 240)
-  ) {
-    return deferToolCallHistoryItem(
-      historyItem as ThreadHistoryItemDto & { kind: 'toolCall' },
-      deferredDetails,
-    );
-  }
-
-  return historyItem;
-}
-
-function deferLargeHistoryItemDetails(
-  turn: ThreadTurnDto,
-  deferredDetails: Map<string, ThreadHistoryItemDetailDto>,
-): ThreadTurnDto {
-  return {
-    ...turn,
-    items: turn.items.map((item) =>
-      item.kind === 'commandExecution'
-        ? deferCommandHistoryItem(
-            item as ThreadHistoryItemDto & { kind: 'commandExecution' },
-            deferredDetails,
-          )
-        : item.kind === 'toolCall'
-          ? deferToolCallHistoryItem(
-              item as ThreadHistoryItemDto & { kind: 'toolCall' },
-              deferredDetails,
-            )
-        : item,
-    ),
-  };
-}
-
-function shouldPersistLiveHistoryItem(item: ThreadHistoryItemDto) {
-  return (
-    item.kind === 'commandExecution' ||
-    item.kind === 'fileChange' ||
-    item.kind === 'hook' ||
-    item.kind === 'toolCall' ||
-    item.kind === 'webSearch'
-  );
-}
-
-function parseStoredHistoryItem(value: string): ThreadHistoryItemDto | null {
-  try {
-    const parsed = JSON.parse(value);
-    if (
-      parsed &&
-      typeof parsed === 'object' &&
-      typeof parsed.id === 'string' &&
-      typeof parsed.kind === 'string' &&
-      typeof parsed.text === 'string'
-    ) {
-      return parsed as ThreadHistoryItemDto;
-    }
-  } catch {
-    return null;
-  }
-
-  return null;
-}
-
-function hasHistoryItemSequence(item: ThreadHistoryItemDto) {
-  return typeof item.sequence === 'number' && Number.isFinite(item.sequence);
-}
-
-function historyItemSequence(item: ThreadHistoryItemDto) {
-  return hasHistoryItemSequence(item) ? item.sequence! : Number.POSITIVE_INFINITY;
-}
-
-function sortHistoryItemsBySequence<T extends ThreadHistoryItemDto>(items: T[]): T[] {
-  if (!items.some(hasHistoryItemSequence)) {
-    return items;
-  }
-
-  return items
-    .map((item, index) => ({ item, index }))
-    .sort((left, right) => {
-      const sequenceDelta =
-        historyItemSequence(left.item) - historyItemSequence(right.item);
-      return sequenceDelta === 0 ? left.index - right.index : sequenceDelta;
-    })
-    .map((entry) => entry.item);
-}
-
-function sortTurnItemsByRecordedSequence(items: ThreadHistoryItemDto[]) {
-  const leadingItems: ThreadHistoryItemDto[] = [];
-  let index = 0;
-
-  while (
-    index < items.length &&
-    items[index]?.kind === 'userMessage' &&
-    !hasHistoryItemSequence(items[index]!)
-  ) {
-    leadingItems.push(items[index]!);
-    index += 1;
-  }
-
-  return [...leadingItems, ...sortHistoryItemsBySequence(items.slice(index))];
-}
-
-function mergeHistoryItemsBySequence(
-  items: ThreadHistoryItemDto[],
-  missingItems: ThreadHistoryItemDto[],
-) {
-  if (missingItems.length === 0) {
-    return items;
-  }
-
-  if (!missingItems.some(hasHistoryItemSequence)) {
-    return [...items, ...missingItems];
-  }
-
-  const mergedItems = [...items];
-  const orderedMissingItems = sortHistoryItemsBySequence(missingItems);
-  for (const missingItem of orderedMissingItems) {
-    if (!hasHistoryItemSequence(missingItem)) {
-      mergedItems.push(missingItem);
-      continue;
-    }
-
-    const firstGreaterIndex = mergedItems.findIndex(
-      (item) =>
-        hasHistoryItemSequence(item) &&
-        historyItemSequence(item) > historyItemSequence(missingItem),
-    );
-    if (firstGreaterIndex >= 0) {
-      mergedItems.splice(firstGreaterIndex, 0, missingItem);
-      continue;
-    }
-
-    const lastLowerIndex = mergedItems.findLastIndex(
-      (item) =>
-        hasHistoryItemSequence(item) &&
-        historyItemSequence(item) < historyItemSequence(missingItem),
-    );
-    if (lastLowerIndex >= 0) {
-      mergedItems.splice(lastLowerIndex + 1, 0, missingItem);
-      continue;
-    }
-
-    mergedItems.push(missingItem);
-  }
-
-  return mergedItems;
-}
-
-function mergePersistedHistoryItemsIntoTurns(
-  turns: ThreadTurnDto[],
-  persistedItemsByTurnId: Map<string, ThreadHistoryItemDto[]>,
-  deferredDetails: Map<string, ThreadHistoryItemDetailDto>,
-): ThreadTurnDto[] {
-  if (persistedItemsByTurnId.size === 0) {
-    return turns;
-  }
-
-  return turns.map((turn) => {
-    if (turn.status === 'inProgress') {
-      return turn;
-    }
-
-    const persistedItems = persistedItemsByTurnId.get(turn.id);
-    if (!persistedItems || persistedItems.length === 0) {
-      return turn;
-    }
-
-    let changed = false;
-    const persistedItemsById = new Map(persistedItems.map((item) => [item.id, item]));
-    const nextItems = turn.items.map((item) => {
-      const persistedItem = persistedItemsById.get(item.id);
-      if (
-        !persistedItem ||
-        item.kind !== persistedItem.kind ||
-        (persistedItem.kind !== 'commandExecution' && persistedItem.kind !== 'toolCall')
-      ) {
-        return item;
-      }
-
-      const existingText = item.detailText?.trim() || item.text.trim();
-      const persistedText = persistedItem.detailText?.trim() || persistedItem.text.trim();
-      if (persistedText.length <= existingText.length) {
-        return item;
-      }
-
-      changed = true;
-      persistedItemsById.delete(item.id);
-      return persistedItem.kind === 'commandExecution'
-        ? deferCommandHistoryItem(
-            persistedItem as ThreadHistoryItemDto & { kind: 'commandExecution' },
-            deferredDetails,
-          )
-        : deferToolCallHistoryItem(
-            persistedItem as ThreadHistoryItemDto & { kind: 'toolCall' },
-            deferredDetails,
-          );
-    });
-
-    const existingItemIds = new Set(nextItems.map((item) => item.id));
-    const missingItems = [...persistedItemsById.values()]
-      .filter((item) => !existingItemIds.has(item.id))
-      .map((item) =>
-        item.kind === 'commandExecution'
-          ? deferCommandHistoryItem(
-              item as ThreadHistoryItemDto & { kind: 'commandExecution' },
-              deferredDetails,
-            )
-          : item.kind === 'toolCall'
-            ? deferToolCallHistoryItem(
-                item as ThreadHistoryItemDto & { kind: 'toolCall' },
-                deferredDetails,
-              )
-            : item,
-      );
-    if (missingItems.length === 0 && !changed) {
-      return turn;
-    }
-
-    return {
-      ...turn,
-      items: mergeHistoryItemsBySequence(nextItems, missingItems),
-    };
-  });
-}
-
 interface UploadedPromptAttachment {
   manifest: PromptAttachmentManifestEntryDto;
   buffer: Buffer;
@@ -1476,748 +880,6 @@ function sanitizeAttachmentFileName(originalName: string) {
 
 function threadTempDirectoryPath(workspacePath: string, localThreadId: string) {
   return path.join(workspacePath, '.temp', 'threads', localThreadId);
-}
-
-interface WebSearchSourceRecord {
-  title: string | null;
-  url: string | null;
-  snippet: string | null;
-}
-
-function extractWebSearchQueries(item: CodexTurnItem) {
-  const action = isRecord(item.action) ? item.action : null;
-  const result = isRecord(item.result) ? item.result : null;
-
-  return uniqueStrings([
-    stringOrNull(item.query),
-    ...stringArray(item.queries),
-    action ? stringOrNull(action.query) : null,
-    ...(action ? stringArray(action.queries) : []),
-    action && isRecord(action.input) ? stringOrNull(action.input.query) : null,
-    result ? stringOrNull(result.query) : null,
-    ...(result ? stringArray(result.queries) : []),
-  ]);
-}
-
-function normalizeWebSearchSource(value: unknown): WebSearchSourceRecord | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-
-  const title = stringOrNull(value.title) ?? stringOrNull(value.name);
-  const url = stringOrNull(value.url) ?? stringOrNull(value.link);
-  const snippet =
-    stringOrNull(value.snippet) ??
-    stringOrNull(value.description) ??
-    stringOrNull(value.text);
-
-  if (!title && !url && !snippet) {
-    return null;
-  }
-
-  return { title, url, snippet };
-}
-
-function extractWebSearchSources(item: CodexTurnItem) {
-  const action = isRecord(item.action) ? item.action : null;
-  const result = isRecord(item.result) ? item.result : null;
-
-  const candidates: unknown[] = [
-    item.sources,
-    action?.sources,
-    result?.sources,
-    result?.results,
-    action?.results,
-    item.results,
-    item.searchResults,
-    item.webResults,
-  ];
-
-  const sources: WebSearchSourceRecord[] = [];
-
-  for (const candidate of candidates) {
-    if (!Array.isArray(candidate)) {
-      continue;
-    }
-
-    for (const entry of candidate) {
-      const normalized = normalizeWebSearchSource(entry);
-      if (normalized) {
-        sources.push(normalized);
-      }
-    }
-  }
-
-  return sources.filter((source, index, allSources) => {
-    return (
-      index ===
-      allSources.findIndex(
-        (entry) =>
-          entry.title === source.title &&
-          entry.url === source.url &&
-          entry.snippet === source.snippet,
-      )
-    );
-  });
-}
-
-function stringifyPayload(value: unknown) {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return null;
-  }
-}
-
-function extractImageAssetPath(item: CodexTurnItem) {
-  const candidates: unknown[] = [
-    item.path,
-    item.imagePath,
-    item.filePath,
-    isRecord(item.action) ? item.action.path : null,
-    isRecord(item.action) ? item.action.imagePath : null,
-    isRecord(item.result) ? item.result.path : null,
-    isRecord(item.result) ? item.result.imagePath : null,
-  ];
-
-  for (const candidate of candidates) {
-    const normalized = stringOrNull(candidate);
-    if (normalized) {
-      return normalized;
-    }
-  }
-
-  return null;
-}
-
-function formatImageHistoryItem(item: CodexTurnItem): ThreadHistoryItemDto {
-  const assetPath = extractImageAssetPath(item);
-  const text =
-    stringOrNull(item.text) ??
-    assetPath ??
-    'Image view';
-
-  return {
-    id: item.id,
-    kind: 'image',
-    text,
-    previewText: text,
-    detailText: assetPath,
-    assetPath,
-    status: item.status ?? null,
-  };
-}
-
-function formatWebSearchHistoryItem(item: CodexTurnItem): ThreadHistoryItemDto {
-  const queries = extractWebSearchQueries(item);
-  const sources = extractWebSearchSources(item);
-  const supplementalText = stringOrNull(item.text);
-  const previewText =
-    queries.length > 0
-      ? queries.length <= 2
-        ? queries.join('\n')
-        : `${queries[0]}\n${queries[1]}\n+${queries.length - 2} more queries`
-      : supplementalText ?? 'Web search';
-
-  const detailLines: string[] = [];
-
-  if (queries.length > 0) {
-    detailLines.push(queries.length === 1 ? 'Search query' : 'Search queries', '');
-    detailLines.push(...queries.map((query) => `- ${query}`), '');
-  }
-
-  if (sources.length > 0) {
-    detailLines.push('Sources', '');
-    for (const source of sources) {
-      detailLines.push(`- ${source.title ?? 'Untitled source'}`);
-      if (source.url) {
-        detailLines.push(`  ${source.url}`);
-      }
-      if (source.snippet) {
-        detailLines.push(`  ${source.snippet}`);
-      }
-    }
-    detailLines.push('');
-  }
-
-  if (supplementalText && !queries.includes(supplementalText)) {
-    detailLines.push('Additional text', '', supplementalText, '');
-  }
-
-  if (sources.length === 0) {
-    const rawPayload = stringifyPayload(item);
-    if (rawPayload) {
-      detailLines.push('Raw payload', '', rawPayload, '');
-    }
-  }
-
-  return {
-    id: item.id,
-    kind: 'webSearch',
-    text: previewText,
-    previewText,
-    detailText: detailLines.join('\n').trim() || null,
-    status: item.status ?? null,
-  };
-}
-
-function isRunningItemStatus(status: string | null | undefined) {
-  if (!status) {
-    return false;
-  }
-
-  const normalized = status.toLowerCase();
-  return (
-    normalized.includes('running') ||
-    normalized.includes('inprogress') ||
-    normalized.includes('in_progress') ||
-    normalized.includes('compacting')
-  );
-}
-
-function formatContextCompactionHistoryItem(item: CodexTurnItem): ThreadHistoryItemDto {
-  const rawText =
-    stringOrNull(item.text) ??
-    (Array.isArray(item.summary) ? item.summary.filter(Boolean).join('\n') : null);
-  const status = stringOrNull(item.status) ?? stringOrNull(item.phase) ?? null;
-  const previewText = isRunningItemStatus(status)
-    ? 'Compacting context'
-    : 'Context compacted';
-  const detailText = rawText && rawText !== previewText ? rawText : null;
-
-  return {
-    id: item.id,
-    kind: 'contextCompaction',
-    text: previewText,
-    previewText,
-    detailText,
-    status,
-  };
-}
-
-function countUnifiedDiffStats(diffText: string) {
-  let additions = 0;
-  let deletions = 0;
-
-  for (const line of diffText.replace(/\r\n/g, '\n').split('\n')) {
-    if (line.startsWith('+++') || line.startsWith('---')) {
-      continue;
-    }
-    if (line.startsWith('+')) {
-      additions += 1;
-      continue;
-    }
-    if (line.startsWith('-')) {
-      deletions += 1;
-    }
-  }
-
-  return { additions, deletions };
-}
-
-function extractPathFromDiffText(diffText: string) {
-  for (const line of diffText.replace(/\r\n/g, '\n').split('\n')) {
-    if (!line.startsWith('+++ ')) {
-      continue;
-    }
-
-    const candidate = line.slice(4).trim();
-    if (!candidate || candidate === '/dev/null') {
-      continue;
-    }
-
-    return candidate.replace(/^b\//, '');
-  }
-
-  return null;
-}
-
-function extractFileChangeEntries(item: CodexTurnItem) {
-  const candidateArrays: unknown[] = [
-    item.changes,
-    item.files,
-    isRecord(item.result) ? item.result.changes : null,
-    isRecord(item.result) ? item.result.files : null,
-    isRecord(item.action) ? item.action.changes : null,
-    isRecord(item.action) ? item.action.files : null,
-  ];
-
-  const normalizedEntries = new Map<
-    string,
-    { path: string | null; additions: number; deletions: number }
-  >();
-
-  function valueFromRecords(
-    records: Array<Record<string, unknown>>,
-    keys: string[],
-  ) {
-    for (const record of records) {
-      for (const key of keys) {
-        const value = record[key];
-        if (value !== undefined && value !== null) {
-          return value;
-        }
-      }
-    }
-
-    return null;
-  }
-
-  function normalizeEntry(entry: unknown) {
-    if (typeof entry === 'string') {
-      return {
-        path: entry.trim() || null,
-        additions: 0,
-        deletions: 0,
-      };
-    }
-
-    if (!isRecord(entry)) {
-      return null;
-    }
-
-    const nestedRecords = [
-      entry,
-      isRecord(entry.result) ? entry.result : null,
-      isRecord(entry.action) ? entry.action : null,
-      isRecord(entry.stats) ? entry.stats : null,
-      isRecord(entry.summary) ? entry.summary : null,
-      isRecord(entry.diff) ? entry.diff : null,
-    ].filter((candidate): candidate is Record<string, unknown> => Boolean(candidate));
-
-    const path = uniqueStrings([
-      stringOrNull(valueFromRecords(nestedRecords, ['path', 'filePath', 'targetPath'])),
-      stringOrNull(
-        valueFromRecords(nestedRecords, [
-          'relativePath',
-          'relative_path',
-          'filename',
-          'file',
-          'newPath',
-          'new_path',
-          'oldPath',
-          'old_path',
-        ]),
-      ),
-    ])[0] ?? null;
-
-    const explicitAdditions =
-      numberOrNull(
-        valueFromRecords(nestedRecords, [
-          'additions',
-          'added',
-          'insertions',
-          'linesAdded',
-          'lines_added',
-          'addedLines',
-          'added_lines',
-          'numAdded',
-          'num_added',
-        ]),
-      ) ?? 0;
-    const explicitDeletions =
-      numberOrNull(
-        valueFromRecords(nestedRecords, [
-          'deletions',
-          'removed',
-          'deleted',
-          'linesRemoved',
-          'lines_removed',
-          'removedLines',
-          'removed_lines',
-          'numRemoved',
-          'num_removed',
-        ]),
-      ) ?? 0;
-    const diffText = stringOrNull(
-      valueFromRecords(nestedRecords, ['diff', 'patch', 'unifiedDiff', 'unified_diff']),
-    );
-    const diffStats =
-      explicitAdditions === 0 && explicitDeletions === 0 && diffText
-        ? countUnifiedDiffStats(diffText)
-        : null;
-    const additions = explicitAdditions || diffStats?.additions || 0;
-    const deletions = explicitDeletions || diffStats?.deletions || 0;
-    const normalizedPath = path ?? (diffText ? extractPathFromDiffText(diffText) : null);
-
-    if (!normalizedPath && additions === 0 && deletions === 0) {
-      return null;
-    }
-
-    return {
-      path: normalizedPath,
-      additions,
-      deletions,
-    };
-  }
-
-  for (const candidateArray of candidateArrays) {
-    if (!Array.isArray(candidateArray)) {
-      continue;
-    }
-
-    for (const entry of candidateArray) {
-      const normalized = normalizeEntry(entry);
-      if (!normalized) {
-        continue;
-      }
-
-      const key = normalized.path ?? `unknown:${normalizedEntries.size}`;
-      const current = normalizedEntries.get(key);
-      if (current) {
-        current.additions += normalized.additions;
-        current.deletions += normalized.deletions;
-        continue;
-      }
-
-      normalizedEntries.set(key, normalized);
-    }
-  }
-
-  return [...normalizedEntries.values()];
-}
-
-function formatFileChangeHistoryItem(item: CodexTurnItem): ThreadHistoryItemDto {
-  const entries = extractFileChangeEntries(item);
-  const fallbackText = stringOrNull(item.text) ?? 'File changes applied.';
-
-  if (entries.length === 0) {
-    return {
-      id: item.id,
-      kind: 'fileChange',
-      text: fallbackText,
-      previewText: fallbackText,
-      status: item.status ?? null,
-    };
-  }
-
-  const additions = entries.reduce((sum, entry) => sum + entry.additions, 0);
-  const deletions = entries.reduce((sum, entry) => sum + entry.deletions, 0);
-  const summaryParts = [
-    `${entries.length} ${entries.length === 1 ? 'file' : 'files'} changed`,
-  ];
-  if (additions > 0) {
-    summaryParts.push(`+${additions}`);
-  }
-  if (deletions > 0) {
-    summaryParts.push(`-${deletions}`);
-  }
-
-  const previewText = summaryParts.join(' · ');
-  const fileNames = entries
-    .map((entry) => entry.path)
-    .filter((entry): entry is string => Boolean(entry));
-  const primaryFileName = fileNames[0] ?? previewText;
-  const compactPathText =
-    fileNames.length === 0
-      ? previewText
-      : fileNames.length === 1
-        ? primaryFileName
-        : `${primaryFileName}, +${fileNames.length - 1} more`;
-  const detailLines = entries.map((entry) => {
-    const counts: string[] = [];
-    if (entry.additions > 0) {
-      counts.push(`+${entry.additions}`);
-    }
-    if (entry.deletions > 0) {
-      counts.push(`-${entry.deletions}`);
-    }
-    return `- ${entry.path ?? 'Unknown file'}${counts.length > 0 ? ` (${counts.join(' ')})` : ''}`;
-  });
-
-  if (fallbackText !== 'File changes applied.' && fallbackText !== previewText) {
-    detailLines.push('', fallbackText);
-  }
-
-  return {
-    id: item.id,
-    kind: 'fileChange',
-    text: compactPathText,
-    previewText,
-    detailText: detailLines.join('\n'),
-    status: item.status ?? null,
-    changedFiles: entries.length,
-    addedLines: additions,
-    removedLines: deletions,
-  };
-}
-
-function itemToHistoryItem(
-  item: CodexTurnItem,
-  deferredDetails?: Map<string, ThreadHistoryItemDetailDto>,
-): ThreadHistoryItemDto {
-  const hookPrompt = parseHookPromptText(codexItemText(item));
-  if (hookPrompt) {
-    return {
-      id: `hook-prompt:${hookPrompt.hookRunId ?? item.id}`,
-      kind: 'hook',
-      text: `${hookPrompt.eventLabel} hook`,
-      previewText: hookPrompt.output || `${hookPrompt.eventLabel} hook`,
-      detailText: hookPrompt.output || null,
-      status: 'Completed',
-      hookEventName: hookPrompt.eventName,
-      hookEventLabel: hookPrompt.eventLabel,
-      hookHandlerType: 'command',
-      hookScope: 'turn',
-      hookSource: hookPrompt.sourcePath ? 'project' : null,
-      hookSourcePath: hookPrompt.sourcePath,
-      hookStatusMessage: null,
-      hookOutputEntries: hookPrompt.outputEntries,
-    };
-  }
-
-  switch (item.type) {
-    case 'userMessage':
-      return {
-        id: item.id,
-        kind: 'userMessage',
-        text: codexItemText(item),
-      };
-    case 'agentMessage':
-      return {
-        id: item.id,
-        kind: 'agentMessage',
-        text: codexItemText(item)
-      };
-    case 'text':
-      return {
-        id: item.id,
-        kind: 'agentMessage',
-        text: codexItemText(item)
-      };
-    case 'plan':
-      return {
-        id: item.id,
-        kind: 'plan',
-        text: codexItemText(item)
-      };
-    case 'contextCompaction':
-    case 'context_compaction':
-      return formatContextCompactionHistoryItem(item);
-    case 'reasoning':
-      return {
-        id: item.id,
-        kind: 'reasoning',
-        text: [item.summary?.join('\n') ?? '', item.text ?? ''].filter(Boolean).join('\n\n')
-      };
-    case 'commandExecution':
-      return formatCommandHistoryItem(item, deferredDetails);
-    case 'webSearch':
-    case 'web_search':
-    case 'webSearchCall':
-    case 'web_search_call':
-      return formatWebSearchHistoryItem(item);
-    case 'imageView':
-    case 'image_view':
-    case 'viewImage':
-    case 'view_image':
-      return formatImageHistoryItem(item);
-    case 'fileChange':
-      return formatFileChangeHistoryItem(item);
-    case 'mcpToolCall':
-    case 'dynamicToolCall':
-    case 'collabAgentToolCall':
-      return formatToolCallHistoryItem(item, deferredDetails);
-    default:
-      return {
-        id: item.id,
-        kind: 'other',
-        text: codexItemText(item, item.type)
-      };
-  }
-}
-
-function liveCodexItemToHistoryItem(
-  item: CodexTurnItem,
-  phase: 'started' | 'completed',
-): ThreadHistoryItemDto | null {
-  const historyItem = itemToHistoryItem(item);
-
-  if (
-    historyItem.kind !== 'commandExecution' &&
-    historyItem.kind !== 'toolCall' &&
-    historyItem.kind !== 'fileChange' &&
-    historyItem.kind !== 'webSearch'
-  ) {
-    return null;
-  }
-
-  return {
-    ...historyItem,
-    status:
-      historyItem.status ??
-      (phase === 'started' ? 'running' : 'completed'),
-  };
-}
-
-function hookEventLabel(value: string) {
-  switch (value) {
-    case 'preToolUse':
-      return 'PreToolUse';
-    case 'permissionRequest':
-      return 'PermissionRequest';
-    case 'postToolUse':
-      return 'PostToolUse';
-    case 'preCompact':
-      return 'PreCompact';
-    case 'postCompact':
-      return 'PostCompact';
-    case 'sessionStart':
-      return 'SessionStart';
-    case 'userPromptSubmit':
-      return 'UserPromptSubmit';
-    case 'stop':
-      return 'Stop';
-    default:
-      return value;
-  }
-}
-
-function hookStatusLabel(value: string) {
-  switch (value) {
-    case 'running':
-      return 'Running';
-    case 'completed':
-      return 'Completed';
-    case 'failed':
-      return 'Failed';
-    case 'blocked':
-      return 'Blocked';
-    case 'stopped':
-      return 'Stopped';
-    default:
-      return value;
-  }
-}
-
-function hookRunOutputEntryText(entry: unknown) {
-  if (!isRecord(entry)) {
-    return textFromUnknown(entry);
-  }
-
-  return (
-    textFromUnknown(entry.text) ??
-    textFromUnknown(entry.message) ??
-    textFromUnknown(entry.systemMessage) ??
-    textFromUnknown(entry.stopReason) ??
-    textFromUnknown(entry.reason) ??
-    textFromUnknown(entry.output) ??
-    textFromUnknown(entry.stdout) ??
-    textFromUnknown(entry.stderr)
-  );
-}
-
-function normalizeHookRunOutputEntries(run: {
-  entries?: Array<{ kind?: string; text?: string }>;
-  outputEntries?: Array<{ kind?: string; text?: string }>;
-  output_entries?: Array<{ kind?: string; text?: string }>;
-  stdout?: unknown;
-  stderr?: unknown;
-  output?: unknown;
-  text?: unknown;
-  systemMessage?: unknown;
-  stopReason?: unknown;
-  reason?: unknown;
-}): Array<{ kind: string; text: string }> {
-  const rawEntries = Array.isArray(run.entries)
-    ? run.entries
-    : Array.isArray(run.outputEntries)
-      ? run.outputEntries
-      : Array.isArray(run.output_entries)
-        ? run.output_entries
-        : [];
-  const entries = rawEntries
-    .map((entry) => {
-      const text = hookRunOutputEntryText(entry)?.trim();
-      if (!text) {
-        return null;
-      }
-
-      return {
-        kind: typeof entry.kind === 'string' && entry.kind.trim() ? entry.kind : 'context',
-        text,
-      };
-    })
-    .filter((entry): entry is { kind: string; text: string } => Boolean(entry));
-  const seenTexts = new Set(entries.map((entry) => entry.text));
-
-  for (const [kind, value] of [
-    ['context', run.output],
-    ['context', run.text],
-    ['warning', run.systemMessage],
-    ['warning', run.stopReason],
-    ['warning', run.reason],
-    ['context', run.stdout],
-    ['warning', run.stderr],
-  ] as const) {
-    const text = textFromUnknown(value)?.trim();
-    if (text && !seenTexts.has(text)) {
-      entries.push({ kind, text });
-      seenTexts.add(text);
-    }
-  }
-
-  return entries;
-}
-
-function hookRunToHistoryItem(run: {
-  id: string;
-  eventName: string;
-  handlerType: string;
-  executionMode: string;
-  scope: string;
-  sourcePath: string;
-  source: string;
-  status: string;
-  statusMessage: string | null;
-  durationMs: number | null;
-  entries?: Array<{ kind: string; text: string }>;
-  outputEntries?: Array<{ kind?: string; text?: string }>;
-  output_entries?: Array<{ kind?: string; text?: string }>;
-  stdout?: unknown;
-  stderr?: unknown;
-  output?: unknown;
-  text?: unknown;
-  systemMessage?: unknown;
-  stopReason?: unknown;
-  reason?: unknown;
-}): ThreadHistoryItemDto {
-  const eventLabel = hookEventLabel(run.eventName);
-  const outputEntries = normalizeHookRunOutputEntries(run);
-  const entryPreview = outputEntries
-    .map((entry) => entry.text.trim())
-    .filter(Boolean)
-    .join('\n')
-    .trim();
-  const firstEntryLine = entryPreview.split('\n').find(Boolean) ?? null;
-  const detailLines = [
-    `Event: ${eventLabel}`,
-    `Status: ${hookStatusLabel(run.status)}`,
-    `Handler: ${run.handlerType}`,
-    `Scope: ${run.scope}`,
-    `Source: ${run.source}`,
-    `Path: ${run.sourcePath}`,
-    run.durationMs !== null ? `Duration: ${run.durationMs} ms` : null,
-    run.statusMessage ? `Message: ${run.statusMessage}` : null,
-    entryPreview ? `\n${entryPreview}` : null,
-  ].filter((line): line is string => Boolean(line));
-
-  return {
-    id: `hook:${run.id}`,
-    kind: 'hook',
-    text: `${eventLabel} hook`,
-    previewText: run.statusMessage ?? firstEntryLine ?? `${eventLabel} hook`,
-    detailText: detailLines.join('\n'),
-    status: hookStatusLabel(run.status),
-    hookEventName: run.eventName,
-    hookEventLabel: eventLabel,
-    hookHandlerType: run.handlerType,
-    hookScope: run.scope,
-    hookSource: run.source,
-    hookSourcePath: run.sourcePath,
-    hookStatusMessage: run.statusMessage,
-    hookOutputEntries: outputEntries,
-  };
 }
 
 function normalizeHooksJson(value: unknown): { hooks: Record<string, unknown[]> } & Record<string, unknown> {
@@ -2466,9 +1128,9 @@ async function readLocalHookDtos({
   hooksPath: string;
   source: 'user' | 'project';
   displayOffset: number;
-}): Promise<CodexHookDto[]> {
+}): Promise<AgentHookDto[]> {
   const config = await readJsonFileOrDefault(hooksPath);
-  const hooks: CodexHookDto[] = [];
+  const hooks: AgentHookDto[] = [];
   for (const [eventKey, groups] of Object.entries(config.hooks)) {
     const eventName = HOOK_EVENT_DTO_KEYS[eventKey];
     if (!eventName || !Array.isArray(groups)) {
@@ -2517,7 +1179,7 @@ async function readLocalHookDtos({
   return hooks;
 }
 
-function hookMatchesInput(hook: CodexHookDto, input: CreateThreadHookInput) {
+function hookMatchesInput(hook: AgentHookDto, input: CreateThreadHookInput) {
   return (
     hook.source === input.scope &&
     hook.eventName === input.eventName &&
@@ -2529,427 +1191,50 @@ function hookMatchesInput(hook: CodexHookDto, input: CreateThreadHookInput) {
 }
 
 async function findOfficialHookForInput(
-  codexManager: CodexAppServerManager,
+  runtime: AgentRuntime,
   workspacePath: string,
   input: CreateThreadHookInput,
-): Promise<CodexHookDto | null> {
-  const [entry] = await codexManager.listHooks({
+): Promise<AgentHookDto | null> {
+  if (!runtime.listHooks) {
+    return null;
+  }
+  const [entry] = await runtime.listHooks({
     cwds: [workspacePath],
-  });
-  const officialHooks: CodexHookDto[] = (entry?.hooks ?? []).map((hook) => ({
+  }) as Awaited<ReturnType<NonNullable<AgentRuntime['listHooks']>>>;
+  const officialHooks: AgentHookDto[] = (entry?.hooks ?? []).map((hook) => ({
     key: hook.key,
-    eventName: hook.eventName,
-    handlerType: hook.handlerType,
+    eventName: hook.eventName as AgentHookDto['eventName'],
+    handlerType: hook.handlerType as AgentHookDto['handlerType'],
     matcher: hook.matcher,
     command: hook.command,
     timeoutSec: hook.timeoutSec,
     statusMessage: hook.statusMessage,
     sourcePath: hook.sourcePath,
-    source: hook.source,
+    source: hook.source as AgentHookDto['source'],
     pluginId: hook.pluginId,
     displayOrder: hook.displayOrder,
     enabled: hook.enabled,
     isManaged: hook.isManaged,
     currentHash: hook.currentHash,
-    trustStatus: hook.trustStatus,
+    trustStatus: hook.trustStatus as AgentHookDto['trustStatus'],
   }));
   return officialHooks.find((hook) => hookMatchesInput(hook, input)) ?? null;
 }
 
 async function trustHookForInput(
-  codexManager: CodexAppServerManager,
+  runtime: AgentRuntime,
   workspacePath: string,
   input: CreateThreadHookInput,
 ) {
-  const hook = await findOfficialHookForInput(codexManager, workspacePath, input);
-  if (!hook || !hook.key || !hook.currentHash || hook.isManaged) {
+  const hook = await findOfficialHookForInput(runtime, workspacePath, input);
+  if (!runtime.setHookTrust || !hook || !hook.key || !hook.currentHash || hook.isManaged) {
     return;
   }
 
-  await codexManager.setHookTrust({
+  await runtime.setHookTrust({
     key: hook.key,
     trustedHash: hook.currentHash,
   });
-}
-
-function normalizeOptionLabelForApproval(value: string) {
-  return value.replace(/\s*\(recommended\)\s*$/i, '').trim().toLowerCase();
-}
-
-function isAllowOptionLabel(value: string) {
-  const normalized = normalizeOptionLabelForApproval(value);
-  return /^(allow|approve|yes|continue|proceed|trust)\b/.test(normalized);
-}
-
-function isLikelyPositiveApprovalOption(value: string) {
-  const normalized = normalizeOptionLabelForApproval(value);
-  return (
-    isAllowOptionLabel(normalized) ||
-    /\b(allow|approve|yes|continue|proceed|trust)\b/.test(normalized)
-  );
-}
-
-function isLikelyApprovalPrompt(
-  requestMethod: string,
-  questions: Array<{
-    header: string;
-    question: string;
-    options: Array<{ label: string; description: string }> | null;
-  }>,
-) {
-  const methodText = requestMethod.toLowerCase();
-  if (
-    methodText.includes('approval') ||
-    methodText.includes('authorize') ||
-    methodText.includes('requestuserinput')
-  ) {
-    return true;
-  }
-
-  const combinedText = questions
-    .flatMap((question) => [
-      question.header,
-      question.question,
-      ...(question.options?.map((option) => option.label) ?? []),
-    ])
-    .join(' ')
-    .toLowerCase();
-
-  return /(allow|approve|permission|authorize|authorization|auth|mcp|tool)/.test(
-    combinedText,
-  );
-}
-
-function buildAutoApprovedAnswersForServerQuestions(
-  requestMethod: string,
-  questions: Array<{
-    id: string;
-    header: string;
-    question: string;
-    isOther: boolean;
-    isSecret: boolean;
-    options: Array<{ label: string; description: string }> | null;
-  }>,
-) {
-  if (!isLikelyApprovalPrompt(requestMethod, questions)) {
-    return null;
-  }
-
-  const answers: Record<string, { answers: string[] }> = {};
-
-  for (const question of questions) {
-    if (!question.options || question.options.length === 0) {
-      return null;
-    }
-
-    const recommendedOption = question.options.find((option) =>
-      /\(recommended\)\s*$/i.test(option.label),
-    );
-    const allowOption =
-      recommendedOption && isLikelyPositiveApprovalOption(recommendedOption.label)
-        ? recommendedOption
-        : question.options.find((option) =>
-            isLikelyPositiveApprovalOption(option.label),
-          );
-
-    if (!allowOption) {
-      return null;
-    }
-
-    answers[question.id] = {
-      answers: [allowOption.label],
-    };
-  }
-
-  return answers;
-}
-
-function isMcpElicitationRequest(
-  request: CodexServerRequest,
-): request is CodexServerRequest & {
-  params: {
-    threadId: string;
-    turnId?: string;
-    serverName?: string;
-    mode?: string;
-    message?: string;
-    requestedSchema?: Record<string, unknown>;
-    _meta?: Record<string, unknown>;
-  };
-} {
-  return request.method === 'mcpServer/elicitation/request';
-}
-
-function buildAutoApprovedMcpElicitationResult(
-  request: CodexServerRequest,
-) {
-  if (!isMcpElicitationRequest(request)) {
-    return null;
-  }
-
-  return {
-    action: 'accept',
-    content: {},
-  } as const;
-}
-
-function stringFromUnknown(value: unknown) {
-  return typeof value === 'string' && value.trim() ? value : null;
-}
-
-function arrayTextFromUnknown(value: unknown) {
-  if (!Array.isArray(value)) {
-    return null;
-  }
-
-  const parts = value
-    .map((entry) => (typeof entry === 'string' ? entry : null))
-    .filter((entry): entry is string => Boolean(entry));
-  return parts.length > 0 ? parts.join(' ') : null;
-}
-
-function commandTextFromApprovalParams(params: Record<string, unknown>) {
-  return stringFromUnknown(params.command) ?? arrayTextFromUnknown(params.command);
-}
-
-function buildApprovalRequestDescription(params: Record<string, unknown>) {
-  return [
-    stringFromUnknown(params.reason),
-    commandTextFromApprovalParams(params)
-      ? `Command: ${commandTextFromApprovalParams(params)}`
-      : null,
-    stringFromUnknown(params.cwd) ? `CWD: ${stringFromUnknown(params.cwd)}` : null,
-  ]
-    .filter(Boolean)
-    .join('\n');
-}
-
-function buildGenericApprovalThreadRequest(
-  request: CodexServerRequest,
-  options: {
-    title: string;
-    descriptionFallback: string;
-  },
-): ThreadActionRequestDto {
-  const params = request.params as {
-    turnId?: string;
-    itemId?: string;
-  };
-  const description = buildApprovalRequestDescription(request.params);
-
-  return {
-    id: String(request.id),
-    kind: 'requestUserInput',
-    title: options.title,
-    description: description || options.descriptionFallback,
-    turnId: params.turnId ?? null,
-    itemId: params.itemId ?? null,
-    createdAt: new Date().toISOString(),
-    questions: [
-      {
-        id: 'approval',
-        header: options.title,
-        question: description || options.descriptionFallback,
-        isOther: false,
-        isSecret: false,
-        options: [
-          {
-            label: 'Allow',
-            description: 'Permit this action and continue the current turn.',
-          },
-          {
-            label: 'Deny',
-            description: 'Decline this action.',
-          },
-        ],
-      },
-    ],
-  };
-}
-
-function yoloApprovalResultForServerRequest(request: CodexServerRequest) {
-  switch (request.method) {
-    case 'item/commandExecution/requestApproval':
-      return { decision: 'accept' };
-    case 'item/fileChange/requestApproval':
-      return { decision: 'accept' };
-    case 'item/permissions/requestApproval': {
-      const params = request.params as { permissions?: unknown };
-      return {
-        permissions: isRecord(params.permissions) ? params.permissions : {},
-        scope: 'turn',
-      };
-    }
-    case 'execCommandApproval':
-      return { decision: 'approved' };
-    case 'applyPatchApproval':
-      return { decision: 'approved' };
-    default:
-      return null;
-  }
-}
-
-function responseKindForApprovalRequest(
-  request: CodexServerRequest,
-): Extract<PendingThreadRequestRecord, { source: 'server' }>['responseKind'] | null {
-  switch (request.method) {
-    case 'item/commandExecution/requestApproval':
-      return 'commandExecutionApproval';
-    case 'item/fileChange/requestApproval':
-      return 'fileChangeApproval';
-    case 'item/permissions/requestApproval':
-      return 'permissionsApproval';
-    case 'execCommandApproval':
-      return 'legacyExecApproval';
-    case 'applyPatchApproval':
-      return 'legacyApplyPatchApproval';
-    default:
-      return null;
-  }
-}
-
-function interactiveApprovalResultForServerRequest(
-  pending: Extract<PendingThreadRequestRecord, { source: 'server' }>,
-  input: RespondThreadActionRequestInput,
-) {
-  const selectedAnswer = Object.values(input.answers)[0]?.answers[0]?.trim().toLowerCase();
-  const allowed = Boolean(selectedAnswer && /^(allow|approve|yes|continue|proceed)\b/.test(selectedAnswer));
-
-  switch (pending.responseKind) {
-    case 'mcpElicitation':
-      return {
-        action: allowed ? 'accept' : 'decline',
-        content: {},
-      };
-    case 'commandExecutionApproval':
-      return { decision: allowed ? 'accept' : 'decline' };
-    case 'fileChangeApproval':
-      return { decision: allowed ? 'accept' : 'decline' };
-    case 'permissionsApproval':
-      return allowed
-        ? {
-            permissions:
-              isRecord(pending.responsePayload?.permissions)
-                ? pending.responsePayload.permissions
-                : {},
-            scope: 'turn',
-          }
-        : {
-            permissions: {},
-            scope: 'turn',
-          };
-    case 'legacyExecApproval':
-    case 'legacyApplyPatchApproval':
-      return { decision: allowed ? 'approved' : 'denied' };
-    case 'answers':
-    default:
-      return {
-        answers: input.answers,
-      };
-  }
-}
-
-function buildThreadRequestFromMcpElicitation(
-  request: CodexServerRequest & {
-    params: {
-      threadId: string;
-      turnId?: string;
-      serverName?: string;
-      mode?: string;
-      message?: string;
-      requestedSchema?: Record<string, unknown>;
-      _meta?: Record<string, unknown>;
-    };
-  },
-): ThreadActionRequestDto {
-  const meta = isRecord(request.params._meta) ? request.params._meta : null;
-  const toolTitle = stringOrNull(meta?.tool_title);
-  const toolDescription = stringOrNull(meta?.tool_description);
-  const serverName = stringOrNull(request.params.serverName) ?? 'MCP';
-  const message =
-    stringOrNull(request.params.message) ??
-    `Allow the ${serverName} MCP server to continue?`;
-
-  return {
-    id: String(request.id),
-    kind: 'requestUserInput',
-    title: toolTitle ?? `${serverName} MCP`,
-    description: toolDescription ?? message,
-    turnId: request.params.turnId ?? null,
-    itemId: null,
-    createdAt: new Date().toISOString(),
-    questions: [
-      {
-        id: 'decision',
-        header: toolTitle ?? `${serverName} MCP`,
-        question: message,
-        isOther: false,
-        isSecret: false,
-        options: [
-          {
-            label: 'Allow',
-            description: 'Permit this MCP tool call.',
-          },
-          {
-            label: 'Deny',
-            description: 'Reject this MCP tool call.',
-          },
-        ],
-      },
-    ],
-  };
-}
-
-function turnToDto(
-  turn: CodexTurnRecord,
-  deferredDetails?: Map<string, ThreadHistoryItemDetailDto>,
-): ThreadTurnDto {
-  return {
-    id: turn.id,
-    startedAt: parseUuidV7Timestamp(turn.id),
-    status: turn.status,
-    error: turn.error?.message ?? null,
-    items: turn.items.map((item) => itemToHistoryItem(item, deferredDetails))
-  };
-}
-
-type TurnItemOrderSnapshot = Map<string, Map<string, number>>;
-
-function applyRecordedTurnItemOrder(
-  turn: ThreadTurnDto,
-  turnItemOrder: TurnItemOrderSnapshot,
-): ThreadTurnDto {
-  const itemOrder = turnItemOrder.get(turn.id);
-  if (!itemOrder || itemOrder.size === 0) {
-    return turn;
-  }
-
-  let changed = false;
-  const items = turn.items.map((item) => {
-    const sequence = itemOrder.get(item.id);
-    if (sequence === undefined || item.sequence === sequence) {
-      return item;
-    }
-
-    changed = true;
-    return {
-      ...item,
-      sequence,
-    };
-  });
-
-  return changed ? { ...turn, items: sortTurnItemsByRecordedSequence(items) } : turn;
-}
-
-function applyRecordedTurnItemOrders(
-  turns: ThreadTurnDto[],
-  turnItemOrder: TurnItemOrderSnapshot,
-): ThreadTurnDto[] {
-  if (turnItemOrder.size === 0) {
-    return turns;
-  }
-
-  return turns.map((turn) => applyRecordedTurnItemOrder(turn, turnItemOrder));
 }
 
 function buildTurnDto(
@@ -3052,18 +1337,110 @@ export class ThreadService {
 
   constructor(
     private readonly db: DatabaseClient,
-    private readonly codexManager: CodexAppServerManager,
+    private readonly agentRuntimes: AgentRuntimeRegistry,
     private readonly eventBus: SupervisorEventBus,
     private readonly localSessionStore: LocalCodexSessionStore,
     private readonly workspaceRoot: string,
     private readonly codexHome: string,
   ) {
-    this.codexManager.on('notification', (event) => {
-      void this.handleNotification(event as CodexServerEvent);
+    for (const runtime of this.agentRuntimes.all()) {
+      runtime.on('event', (event) => {
+        void this.handleRuntimeEvent(event as AgentRuntimeEvent);
+      });
+      runtime.on('provider-request', (request) => {
+        void this.handleProviderRequest(request as AgentProviderRequest);
+      });
+    }
+  }
+
+  private normalizeProvider(provider: string | null | undefined): AgentProviderId {
+    if (!provider || provider === 'codex') {
+      return 'codex';
+    }
+    if (provider === 'claude') {
+      return 'claude';
+    }
+    throw new HttpError(400, {
+      code: 'bad_request',
+      message: `Unsupported agent runtime provider: ${provider}`,
     });
-    this.codexManager.on('request', (request) => {
-      void this.handleServerRequest(request as CodexServerRequest);
-    });
+  }
+
+  private runtimeForProvider(provider: string | null | undefined): AgentRuntime {
+    const normalizedProvider = this.normalizeProvider(provider);
+    const runtime = this.agentRuntimes.getOptional(normalizedProvider);
+    if (!runtime) {
+      throw new HttpError(501, {
+        code: 'service_unavailable',
+        message: `Agent runtime provider is not configured: ${normalizedProvider}`,
+      });
+    }
+    return runtime;
+  }
+
+  private providerForRecord(record: { provider?: string | null | undefined }): AgentProviderId {
+    return this.normalizeProvider(record.provider);
+  }
+
+  private requireProviderSessionId(record: { providerSessionId?: string | null }) {
+    if (!record.providerSessionId) {
+      throw new HttpError(503, {
+        code: 'service_unavailable',
+        message: 'Thread is missing its provider session identifier.',
+      });
+    }
+    return record.providerSessionId;
+  }
+
+  private findRecordByProviderSessionId(provider: string | null | undefined, providerSessionId: string) {
+    return getThreadRecordByProviderSessionId(
+      this.db,
+      this.providerForRecord({ provider }),
+      providerSessionId,
+    );
+  }
+
+  private codexRuntime(): AgentRuntime {
+    return this.agentRuntimes.get('codex');
+  }
+
+  private isCodexProvider(provider: string | null | undefined): boolean {
+    return this.providerForRecord({ provider }) === 'codex';
+  }
+
+  private runtimeSupportsFastMode(provider: string | null | undefined): boolean {
+    return this.runtimeForProvider(provider).capabilities.controls.fastServiceTier;
+  }
+
+  private fastModeForProvider(provider: string | null | undefined, fastMode: unknown): boolean {
+    return this.runtimeSupportsFastMode(provider) ? normalizeFastMode(fastMode) : false;
+  }
+
+  private serviceTierForRecord(record: { provider?: string | null; fastMode?: unknown }) {
+    return serviceTierForFastMode(this.fastModeForProvider(record.provider, record.fastMode));
+  }
+
+  private assertCodexHooksFileManagement(provider: string | null | undefined): void {
+    if (!this.isCodexProvider(provider)) {
+      throw new HttpError(409, {
+        code: 'conflict',
+        message: 'This backend does not support hooks file editing.',
+      });
+    }
+  }
+
+  private async handleProviderRequest(request: AgentProviderRequest) {
+    await this.handleProviderRuntimeRequest(request);
+  }
+
+  private async listLoadedProviderSessionIds(provider: string | null | undefined = 'codex') {
+    return new Set(
+      await this.runtimeForProvider(provider).listLoadedSessions().catch(() => []),
+    );
+  }
+
+  private async listProviderModels(provider: string | null | undefined = 'codex') {
+    return this.runtimeForProvider(provider).listModels().catch(() => []);
   }
 
   private getLatestStoredThreadCumulativeTotal(
@@ -3180,7 +1557,14 @@ export class ThreadService {
 
   private async buildThreadDetailCacheEntry(
     localThreadId: string,
-    record: { id: string; codexThreadId: string | null; collaborationMode: string | null; model: string | null; reasoningEffort: string | null; },
+    record: {
+      id: string;
+      provider?: string | null;
+      providerSessionId: string | null;
+      collaborationMode: string | null;
+      model: string | null;
+      reasoningEffort: string | null;
+    },
     turnMetadataById: Map<string, ThreadTurnMetadataRecord>,
   ): Promise<ThreadDetailCacheEntry> {
     const cached = this.getThreadDetailCache(localThreadId);
@@ -3188,17 +1572,20 @@ export class ThreadService {
       return cached;
     }
 
-    let remoteThread: CodexThreadRecord | null = null;
+    const providerSessionId = this.requireProviderSessionId(record);
+    const runtime = this.runtimeForProvider(record.provider);
+    let remoteSession: AgentSessionDetail | null = null;
     try {
-      remoteThread = await this.codexManager.readThread(record.codexThreadId!);
+      const session = await runtime.readSession(providerSessionId);
+      remoteSession = session;
     } catch (error) {
       if (!isRemoteThreadBootstrapError(error)) {
         throw error;
       }
     }
 
-    if (!remoteThread) {
-      const localSession = await this.localSessionStore.findSession(record.codexThreadId!);
+    if (!remoteSession) {
+      const localSession = await this.localSessionStore.findSession(providerSessionId);
       const deferredDetails = new Map<string, ThreadHistoryItemDetailDto>();
       const persistedItemsByTurnId = this.listPersistedHistoryItemsByTurnId(localThreadId);
       const turns = mergePersistedHistoryItemsIntoTurns(
@@ -3224,35 +1611,34 @@ export class ThreadService {
     }
 
     if (
-      remoteThread.turns.length > 0 &&
-      remoteThread.turns.every((turn) => turn.items.length === 0)
+      remoteSession.turns.length > 0 &&
+      remoteSession.turns.every((turn) => turn.items.length === 0)
     ) {
-      remoteThread = (
-        await this.codexManager.resumeThread({
-          threadId: record.codexThreadId!,
-        })
-      ).thread;
+      const response = await runtime.resumeSession({
+        providerSessionId,
+      });
+      remoteSession = response.session;
     }
 
     updateThreadRecord(
       this.db,
       record.id,
-      this.buildThreadPatch(remoteThread, record.model, record.reasoningEffort),
+      this.buildThreadPatch(remoteSession, record.model, record.reasoningEffort),
     );
 
     const updated = getThreadRecordById(this.db, record.id)!;
     this.syncPendingPlanDecisionRequest(
       updated.id,
       updated.collaborationMode,
-      remoteThread,
+      remoteSession,
     );
-    this.reconcilePendingSteers(updated.id, remoteThread);
+    this.reconcilePendingSteers(updated.id, remoteSession);
 
     const deferredDetails = new Map<string, ThreadHistoryItemDetailDto>();
     const persistedItemsByTurnId = this.listPersistedHistoryItemsByTurnId(localThreadId);
     const turns = mergePersistedHistoryItemsIntoTurns(
       applyRecordedTurnItemOrders(
-        remoteThread.turns.map((turn) => turnToDto(turn, deferredDetails)),
+        remoteSession.turns.map((turn) => agentTurnToThreadTurnDto(turn, deferredDetails)),
         this.turnItemOrderSnapshot(localThreadId),
       ),
       persistedItemsByTurnId,
@@ -3270,7 +1656,7 @@ export class ThreadService {
   }
 
   async listModels(): Promise<ModelOptionDto[]> {
-    const models = await this.codexManager.listModels();
+    const models = await this.runtimeForProvider('codex').listModels();
     return models.map((model) => ({
       id: model.id,
       model: model.model,
@@ -3279,32 +1665,39 @@ export class ThreadService {
       isDefault: model.isDefault,
       hidden: model.hidden,
       supportedReasoningEfforts: model.supportedReasoningEfforts.map((entry) => ({
-        reasoningEffort: entry.reasoningEffort,
+        reasoningEffort: entry.reasoningEffort as ReasoningEffortDto,
         description: entry.description
       })),
-      defaultReasoningEffort: model.defaultReasoningEffort
+      defaultReasoningEffort: (model.defaultReasoningEffort ?? 'none') as ReasoningEffortDto
     }));
   }
 
   async listThreads(): Promise<ThreadDto[]> {
     let loadedIds = new Set<string>();
-    try {
-      loadedIds = new Set(await this.codexManager.listLoadedThreads());
-      const remoteThreads = await this.codexManager.listThreads();
-      for (const remoteThread of remoteThreads) {
-        const local = getThreadRecordByCodexThreadId(this.db, remoteThread.id);
-        if (!local) {
-          continue;
+    for (const runtime of this.agentRuntimes.all()) {
+      try {
+        for (const providerSessionId of await runtime.listLoadedSessions()) {
+          loadedIds.add(providerSessionId);
         }
+        const remoteSessions = await runtime.listSessions();
+        for (const remoteSession of remoteSessions) {
+          const local = this.findRecordByProviderSessionId(
+            runtime.provider,
+            remoteSession.providerSessionId,
+          );
+          if (!local) {
+            continue;
+          }
 
-        updateThreadRecord(
-          this.db,
-          local.id,
-          this.buildThreadPatch(remoteThread, local.model, local.reasoningEffort)
-        );
+          updateThreadRecord(
+            this.db,
+            local.id,
+            this.buildThreadPatch(remoteSession, local.model, local.reasoningEffort)
+          );
+        }
+      } catch {
+        // Keep local state if a provider runtime is unavailable.
       }
-    } catch {
-      // Keep local state if codex is unavailable.
     }
 
     return listThreadRecords(this.db).map((record) => this.toThreadDto(record, loadedIds));
@@ -3319,32 +1712,40 @@ export class ThreadService {
       });
     }
 
+    const provider = this.normalizeProvider(input.provider);
+
     const normalizedTitle = input.title?.trim() || DEFAULT_THREAD_TITLE;
-    const modelRecords = await this.codexManager.listModels().catch(() => []);
+    const runtime = this.runtimeForProvider(provider);
+    const modelRecords = await runtime.listModels().catch(() => []);
     const matchedModel = modelRecords.find((entry) => entry.model === input.model);
     const reasoningEffort =
       normalizeReasoningEffort(matchedModel?.defaultReasoningEffort) ?? 'medium';
     const sandboxMode = defaultSandboxModeForApprovalMode(input.approvalMode);
-    const fastMode = readCodexFastModeSync(this.codexHome);
-    ensureFastModeSupported(input.model, fastMode);
-    const response = await this.codexManager.startThread({
+    const fastMode = this.runtimeSupportsFastMode(provider)
+      ? readCodexFastModeSync(this.codexHome)
+      : false;
+    if (this.runtimeSupportsFastMode(provider)) {
+      ensureFastModeSupported(input.model, fastMode);
+    }
+    const response = await runtime.startSession({
       cwd: workspace.absPath,
       model: input.model,
-      approvalPolicy: approvalModeToPolicy(input.approvalMode),
-      sandbox: sandboxMode,
+      approvalMode: input.approvalMode,
+      sandboxMode,
       serviceTier: serviceTierForFastMode(fastMode),
     });
 
     const created = createThreadRecord(this.db, {
       workspaceId: workspace.id,
+      provider,
+      providerSessionId: response.providerSessionId,
       title: normalizedTitle,
       model: input.model,
       reasoningEffort,
       collaborationMode: 'default',
       approvalMode: input.approvalMode,
-      sandboxMode: normalizeSandboxMode(response.sandbox) ?? sandboxMode,
-      codexThreadId: response.thread.id,
-      summaryText: response.thread.preview,
+      sandboxMode: normalizeSandboxMode(response.sandboxMode) ?? sandboxMode,
+      summaryText: response.session.preview ?? null,
       fastMode,
       source: 'supervisor',
       isConnected: true,
@@ -3352,20 +1753,20 @@ export class ThreadService {
 
     updateThreadRecord(this.db, created.id, {
       ...this.buildThreadPatch(
-        response.thread,
+        response.session,
         input.model,
         response.reasoningEffort ?? reasoningEffort
       ),
       title:
         normalizedTitle === DEFAULT_THREAD_TITLE &&
-        response.thread.name &&
-        response.thread.name.trim() !== GENERIC_REMOTE_THREAD_TITLE
-          ? truncateAutoThreadTitle(response.thread.name)
-          : normalizedTitle
+        response.session.title &&
+        response.session.title.trim() !== GENERIC_REMOTE_THREAD_TITLE
+          ? truncateAutoThreadTitle(response.session.title)
+          : normalizedTitle,
     });
 
     const record = getThreadRecordById(this.db, created.id)!;
-    return this.toThreadDto(record, new Set([response.thread.id]));
+    return this.toThreadDto(record, new Set([response.providerSessionId]));
   }
 
   async importThread(sessionId: ImportThreadInput['sessionId']): Promise<ThreadDetailDto> {
@@ -3377,7 +1778,7 @@ export class ThreadService {
       });
     }
 
-    const existingThread = getThreadRecordByCodexThreadId(this.db, normalizedSessionId);
+    const existingThread = this.findRecordByProviderSessionId("codex", normalizedSessionId);
     if (existingThread) {
       return this.getThreadDetail(existingThread.id);
     }
@@ -3405,6 +1806,8 @@ export class ThreadService {
 
     const created = createThreadRecord(this.db, {
       workspaceId: workspace.id,
+      provider: 'codex',
+      providerSessionId: normalizedSessionId,
       title: truncateAutoThreadTitle(
         localSession.title?.trim() || 'Untitled imported session'
       ),
@@ -3413,7 +1816,6 @@ export class ThreadService {
       collaborationMode: 'default',
       approvalMode: 'yolo',
       sandboxMode: defaultSandboxModeForApprovalMode('yolo'),
-      codexThreadId: normalizedSessionId,
       summaryText:
         localSession.turns
           .flatMap((turn) => turn.items)
@@ -3447,14 +1849,8 @@ export class ThreadService {
       });
     }
 
-    if (!record.codexThreadId) {
-      throw new HttpError(503, {
-        code: 'service_unavailable',
-        message: 'Thread is missing its Codex session identifier.'
-      });
-    }
-
-    const loadedIds = new Set(await this.codexManager.listLoadedThreads().catch(() => []));
+    this.requireProviderSessionId(record);
+    const loadedIds = await this.listLoadedProviderSessionIds(record.provider);
     const workspacePathStatus = (await pathExists(workspace.absPath)) ? 'present' : 'missing';
     const turnMetadataById = new Map<string, ThreadTurnMetadataRecord>(
       listThreadTurnMetadataByThreadId(this.db, localThreadId).map((entry) => [
@@ -3517,12 +1913,7 @@ export class ThreadService {
       });
     }
 
-    if (!record.codexThreadId) {
-      throw new HttpError(503, {
-        code: 'service_unavailable',
-        message: 'Thread is missing its Codex session identifier.',
-      });
-    }
+    this.requireProviderSessionId(record);
 
     const turnMetadataById = new Map<string, ThreadTurnMetadataRecord>(
       listThreadTurnMetadataByThreadId(this.db, localThreadId).map((entry) => [
@@ -3618,7 +2009,7 @@ export class ThreadService {
     })();
 
     const snapshot = {
-      thread: this.toThreadDto(record, new Set(record.codexThreadId ? [record.codexThreadId] : [])),
+      thread: this.toThreadDto(record, new Set(record.providerSessionId ? [record.providerSessionId] : [])),
       workspace: toWorkspaceDto(workspace),
       exportedAt: new Date().toISOString(),
       totalTurnCount,
@@ -3641,12 +2032,13 @@ export class ThreadService {
 
   async getThreadGoal(localThreadId: string): Promise<ThreadGoalDto | null> {
     const record = getThreadRecordById(this.db, localThreadId);
-    if (!record || !record.codexThreadId) {
+    if (!record) {
       throw new HttpError(404, {
         code: 'not_found',
         message: 'Thread was not found.',
       });
     }
+    this.requireProviderSessionId(record);
 
     return this.getThreadGoalForRecord(record, { allowEnableFeature: true });
   }
@@ -3656,12 +2048,13 @@ export class ThreadService {
     input: UpdateThreadGoalInput,
   ): Promise<ThreadGoalDto | null> {
     const record = getThreadRecordById(this.db, localThreadId);
-    if (!record || !record.codexThreadId) {
+    if (!record) {
       throw new HttpError(404, {
         code: 'not_found',
         message: 'Thread was not found.',
       });
     }
+    const providerSessionId = this.requireProviderSessionId(record);
 
     if (record.isConnected === false) {
       throw new HttpError(409, {
@@ -3670,18 +2063,26 @@ export class ThreadService {
       });
     }
 
+    const runtime = this.runtimeForProvider(record.provider);
+    if (!runtime.setGoal || !runtime.capabilities.controls.goals) {
+      throw new HttpError(409, {
+        code: 'conflict',
+        message: 'This backend does not support goals.',
+      });
+    }
+
     try {
-      await this.ensureGoalsFeatureEnabled();
+      await this.ensureGoalsFeatureEnabled(record.provider);
       await this.ensureThreadLoadedForCodexOperation(record);
       const upstreamStatus =
         input.status === 'terminated' ? undefined : (input.status as UpstreamThreadGoalStatus | null | undefined);
-      const goal = await this.codexManager.setThreadGoal({
-        threadId: record.codexThreadId,
+      const goal = await runtime.setGoal({
+        providerSessionId,
         ...(input.objective !== undefined ? { objective: input.objective } : {}),
         ...(upstreamStatus !== undefined ? { status: upstreamStatus } : {}),
         ...(input.tokenBudget !== undefined ? { tokenBudget: input.tokenBudget } : {}),
       });
-      const dto = normalizeThreadGoalStatusForThread(toThreadGoalDto(goal), record);
+      const dto = normalizeThreadGoalStatusForThread(toThreadGoalDtoFromAgentGoal(goal), record);
       const persistedGoal = toThreadGoalDtoFromRecord(
         this.persistThreadGoalSnapshot(localThreadId, dto),
       );
@@ -3699,12 +2100,13 @@ export class ThreadService {
     localThreadId: string,
   ): Promise<{ cleared: boolean; goalHistory: ThreadGoalDto[] }> {
     const record = getThreadRecordById(this.db, localThreadId);
-    if (!record || !record.codexThreadId) {
+    if (!record) {
       throw new HttpError(404, {
         code: 'not_found',
         message: 'Thread was not found.',
       });
     }
+    const providerSessionId = this.requireProviderSessionId(record);
 
     if (record.isConnected === false) {
       throw new HttpError(409, {
@@ -3713,10 +2115,18 @@ export class ThreadService {
       });
     }
 
+    const runtime = this.runtimeForProvider(record.provider);
+    if (!runtime.clearGoal || !runtime.capabilities.controls.goals) {
+      throw new HttpError(409, {
+        code: 'conflict',
+        message: 'This backend does not support goals.',
+      });
+    }
+
     try {
-      await this.ensureGoalsFeatureEnabled();
+      await this.ensureGoalsFeatureEnabled(record.provider);
       await this.ensureThreadLoadedForCodexOperation(record);
-      const cleared = await this.codexManager.clearThreadGoal(record.codexThreadId);
+      const cleared = await runtime.clearGoal(providerSessionId);
       markActiveThreadGoalRecordTerminated(this.db, localThreadId);
       const goalHistory = this.listThreadGoalHistory(localThreadId);
       this.emitThreadEvent('thread.goal.cleared', localThreadId, { goalHistory });
@@ -3728,26 +2138,34 @@ export class ThreadService {
 
   private async getThreadGoalForRecord(record: {
     id: string;
-    codexThreadId: string | null;
+    providerSessionId: string | null;
+    provider?: string | null;
+    model?: string | null;
+    sandboxMode?: string | null;
+    approvalMode?: string | null;
   }, options: { allowEnableFeature?: boolean } = {}): Promise<ThreadGoalDto | null> {
-    if (!record.codexThreadId) {
+    if (!record.providerSessionId) {
       return null;
     }
 
     try {
       if (options.allowEnableFeature) {
-        await this.ensureGoalsFeatureEnabled();
+        await this.ensureGoalsFeatureEnabled(record.provider);
         await this.ensureThreadLoadedForCodexOperation(record);
       }
-      const goal = await this.codexManager.getThreadGoal(record.codexThreadId);
+      const runtime = this.runtimeForProvider(record.provider);
+      if (!runtime.getGoal || !runtime.capabilities.controls.goals) {
+        return null;
+      }
+      const goal = await runtime.getGoal(record.providerSessionId);
       if (!goal) {
         return null;
       }
 
-      const dto = normalizeThreadGoalStatusForThread(toThreadGoalDto(goal), record);
+      const dto = normalizeThreadGoalStatusForThread(toThreadGoalDtoFromAgentGoal(goal), record);
       return toThreadGoalDtoFromRecord(this.persistThreadGoalSnapshot(record.id, dto));
     } catch (error) {
-      if (error instanceof JsonRpcClientError) {
+      if (isCodexRuntimeRequestError(error)) {
         return null;
       }
       throw error;
@@ -3764,7 +2182,7 @@ export class ThreadService {
         : toThreadGoalDto(goal as Parameters<typeof toThreadGoalDto>[0]);
     return upsertThreadGoalRecord(this.db, {
       threadId: localThreadId,
-      codexThreadId: dto.threadId,
+      providerSessionId: dto.threadId,
       localGoalId: dto.localGoalId ?? null,
       objective: dto.objective,
       status: dto.status,
@@ -3792,17 +2210,21 @@ export class ThreadService {
     );
   }
 
-  private async ensureGoalsFeatureEnabled() {
+  private async ensureGoalsFeatureEnabled(provider: string | null | undefined) {
+    if (!this.isCodexProvider(provider)) {
+      return;
+    }
+
     try {
       if (await readCodexFeatureFlag(this.codexHome, 'goals')) {
         return;
       }
 
       await writeCodexFeatureFlag(this.codexHome, 'goals', true);
-      await this.codexManager.stop();
-      await this.codexManager.start();
+      await this.codexRuntime().stop();
+      await this.codexRuntime().start();
     } catch (error) {
-      if (error instanceof JsonRpcClientError) {
+      if (isCodexRuntimeRequestError(error)) {
         throw new HttpError(409, {
           code: 'goal_feature_disabled',
           message: GOAL_FEATURE_DISABLED_MESSAGE,
@@ -3814,17 +2236,18 @@ export class ThreadService {
 
   private async ensureThreadLoadedForCodexOperation(record: {
     id: string;
-    codexThreadId: string | null;
+    providerSessionId: string | null;
+    provider?: string | null;
     model?: string | null;
     sandboxMode?: string | null;
     approvalMode?: string | null;
   }) {
-    if (!record.codexThreadId) {
+    if (!record.providerSessionId) {
       return;
     }
 
-    const loadedIds = new Set(await this.codexManager.listLoadedThreads().catch(() => []));
-    if (loadedIds.has(record.codexThreadId)) {
+    const loadedIds = await this.listLoadedProviderSessionIds(record.provider);
+    if (loadedIds.has(record.providerSessionId)) {
       return;
     }
 
@@ -3851,12 +2274,7 @@ export class ThreadService {
       });
     }
 
-    if (!record.codexThreadId) {
-      throw new HttpError(503, {
-        code: 'service_unavailable',
-        message: 'Thread is missing its Codex session identifier.',
-      });
-    }
+    this.requireProviderSessionId(record);
 
     const turnMetadataById = new Map<string, ThreadTurnMetadataRecord>(
       listThreadTurnMetadataByThreadId(this.db, localThreadId).map((entry) => [
@@ -3949,28 +2367,31 @@ export class ThreadService {
 
   async resumeThread(localThreadId: string, input: ResumeThreadInput = {}): Promise<ThreadDetailDto> {
     const record = getThreadRecordById(this.db, localThreadId);
-    if (!record || !record.codexThreadId) {
+    if (!record) {
       throw new HttpError(404, {
         code: 'not_found',
         message: 'Thread was not found.'
       });
     }
+    const providerSessionId = this.requireProviderSessionId(record);
 
     let response;
+    const runtime = this.runtimeForProvider(record.provider);
     const sandboxMode =
       input.sandboxMode ??
       normalizeSandboxMode(record.sandboxMode) ??
       defaultSandboxModeForApprovalMode((record.approvalMode ?? 'yolo') as ApprovalMode);
+    const fastMode = this.fastModeForProvider(record.provider, record.fastMode);
     try {
       ensureFastModeSupported(
         input.model ?? record.model ?? null,
-        normalizeFastMode(record.fastMode),
+        fastMode,
       );
-      response = await this.codexManager.resumeThread({
-        threadId: record.codexThreadId,
+      response = await runtime.resumeSession({
+        providerSessionId,
         model: input.model ?? record.model ?? null,
-        sandbox: sandboxMode,
-        serviceTier: serviceTierForFastMode(normalizeFastMode(record.fastMode)),
+        sandboxMode,
+        serviceTier: serviceTierForFastMode(fastMode),
       });
     } catch (error) {
       if (!isRemoteThreadBootstrapError(error)) {
@@ -3980,7 +2401,7 @@ export class ThreadService {
       return this.getThreadDetail(localThreadId);
     }
 
-    const modelRecords = await this.codexManager.listModels().catch(() => []);
+    const modelRecords = await runtime.listModels().catch(() => []);
     const effectiveModel =
       input.model ?? record.model ?? response.model ?? null;
     const resumedReasoning = this.normalizeReasoningForModel(
@@ -3994,13 +2415,14 @@ export class ThreadService {
       this.db,
       record.id,
       this.buildThreadPatch(
-        response.thread,
+        response.session,
         effectiveModel,
         resumedReasoning
       ),
     );
     updateThreadRecord(this.db, record.id, {
-      sandboxMode: normalizeSandboxMode(response.sandbox) ?? sandboxMode,
+      sandboxMode: normalizeSandboxMode(response.sandboxMode) ?? sandboxMode,
+      providerSessionId: response.providerSessionId,
     });
 
     updateThreadRecord(this.db, record.id, {
@@ -4016,7 +2438,7 @@ export class ThreadService {
 
   async disconnectThread(localThreadId: string): Promise<ThreadDetailDto> {
     const record = getThreadRecordById(this.db, localThreadId);
-    if (!record || !record.codexThreadId) {
+    if (!record) {
       throw new HttpError(404, {
         code: 'not_found',
         message: 'Thread was not found.'
@@ -4037,16 +2459,17 @@ export class ThreadService {
     options: SendPromptOptions = {},
   ): Promise<ThreadDto> {
     const record = getThreadRecordById(this.db, localThreadId);
-    if (!record || !record.codexThreadId) {
+    if (!record) {
       throw new HttpError(404, {
         code: 'not_found',
         message: 'Thread was not found.'
       });
     }
+    const providerSessionId = this.requireProviderSessionId(record);
 
     if (record.source === 'local_codex_import') {
-      const loadedIds = new Set(await this.codexManager.listLoadedThreads().catch(() => []));
-      if (!loadedIds.has(record.codexThreadId)) {
+      const loadedIds = await this.listLoadedProviderSessionIds(record.provider);
+      if (!loadedIds.has(providerSessionId)) {
         throw new HttpError(409, {
           code: 'conflict',
           message: 'Resume / Connect this imported session before sending a new prompt.'
@@ -4072,7 +2495,8 @@ export class ThreadService {
 
     this.clearPendingPlanDecisionRequests(localThreadId, true);
 
-    const modelRecords = await this.codexManager.listModels().catch(() => []);
+    const runtime = this.runtimeForProvider(record.provider);
+    const modelRecords = await runtime.listModels().catch(() => []);
     const defaultModel = modelRecords.find((entry) => entry.isDefault) ?? modelRecords[0] ?? null;
     const effectiveModel = input.model ?? record.model ?? defaultModel?.model ?? null;
     const collaborationMode =
@@ -4098,17 +2522,18 @@ export class ThreadService {
         ? normalizeSandboxMode(input.sandboxMode)
         : normalizeSandboxMode(record.sandboxMode)) ??
       defaultSandboxModeForApprovalMode((record.approvalMode ?? 'yolo') as ApprovalMode);
-    ensureFastModeSupported(effectiveModel, normalizeFastMode(record.fastMode));
-    const serviceTier = serviceTierForFastMode(normalizeFastMode(record.fastMode));
+    const fastMode = this.fastModeForProvider(record.provider, record.fastMode);
+    ensureFastModeSupported(effectiveModel, fastMode);
+    const serviceTier = serviceTierForFastMode(fastMode);
     const connectedRecord = {
       ...record,
-      codexThreadId: record.codexThreadId,
+      providerSessionId,
     };
 
-    if (record.codexTurnId && record.status === 'running') {
+    if (record.providerTurnId && record.status === 'running') {
       return this.steerOrStartPromptTurn(localThreadId, {
         ...connectedRecord,
-        codexTurnId: record.codexTurnId,
+        providerTurnId: record.providerTurnId,
       }, {
         prompt,
         displayPrompt,
@@ -4135,7 +2560,7 @@ export class ThreadService {
 
   private async startPromptTurn(
     localThreadId: string,
-    record: { id: string; codexThreadId: string; title: string; },
+    record: { id: string; provider?: string | null; providerSessionId: string; title: string; },
     input: {
       prompt: string;
       effectiveModel: string | null;
@@ -4146,24 +2571,25 @@ export class ThreadService {
       workspacePath: string;
     },
   ): Promise<ThreadDto> {
-    const modelRecords = await this.codexManager.listModels().catch(() => []);
+    const runtime = this.runtimeForProvider(record.provider);
+    const modelRecords = await runtime.listModels().catch(() => []);
     ensureFastModeSupported(input.effectiveModel, input.serviceTier === 'fast');
     const pricingSnapshot = buildTurnPricingSnapshot(
       input.effectiveModel,
       input.serviceTier === 'fast',
     );
-    const turn = await this.codexManager.startTurn({
-      threadId: record.codexThreadId,
+    const turn = await runtime.startTurn({
+      providerSessionId: record.providerSessionId,
       prompt: input.prompt,
       model: input.effectiveModel,
       serviceTier: input.serviceTier,
-      effort: input.normalizedReasoning,
+      reasoningEffort: input.normalizedReasoning,
       collaborationMode: input.collaborationMode,
       sandboxPolicy: buildTurnSandboxPolicy(input.sandboxMode, input.workspacePath),
     });
     upsertThreadTurnMetadata(this.db, {
       threadId: localThreadId,
-      turnId: turn.id,
+      turnId: turn.rawTurnId ?? turn.providerTurnId,
       model: input.effectiveModel,
       reasoningEffort: input.normalizedReasoning,
       reasoningEffortAvailable: this.reasoningEffortAvailableForModel(
@@ -4175,7 +2601,7 @@ export class ThreadService {
     });
 
     const patch: Parameters<typeof updateThreadRecord>[2] = {
-      codexTurnId: turn.id,
+      providerTurnId: turn.providerTurnId,
       status: 'running',
       summaryText: input.prompt,
       lastError: null,
@@ -4197,15 +2623,16 @@ export class ThreadService {
     this.invalidateThreadDetailCache(localThreadId);
     const updated = getThreadRecordById(this.db, localThreadId)!;
 
-    return this.toThreadDto(updated, new Set([record.codexThreadId]));
+    return this.toThreadDto(updated, new Set([record.providerSessionId]));
   }
 
   private async steerOrStartPromptTurn(
     localThreadId: string,
     record: {
       id: string;
-      codexThreadId: string;
-      codexTurnId: string;
+      provider?: string | null;
+      providerSessionId: string;
+      providerTurnId: string;
       status: string | null;
       title: string;
     },
@@ -4221,19 +2648,20 @@ export class ThreadService {
       workspacePath: string;
     },
   ): Promise<ThreadDto> {
-    let steerTurnId = record.codexTurnId;
+    const runtime = this.runtimeForProvider(record.provider);
+    let steerTurnId = record.providerTurnId;
     let retriedAfterTurnMismatch = false;
 
     while (steerTurnId) {
       try {
-        await this.codexManager.steerTurn({
-          threadId: record.codexThreadId!,
-          turnId: steerTurnId,
+        await runtime.sendInput?.({
+          providerSessionId: record.providerSessionId,
+          providerTurnId: steerTurnId,
           prompt: input.prompt,
         });
 
         updateThreadRecord(this.db, localThreadId, {
-          codexTurnId: steerTurnId,
+          providerTurnId: steerTurnId,
           status: 'running',
           lastError: null,
         });
@@ -4250,7 +2678,7 @@ export class ThreadService {
         });
 
         const updated = getThreadRecordById(this.db, localThreadId)!;
-        return this.toThreadDto(updated, new Set([record.codexThreadId!]));
+        return this.toThreadDto(updated, new Set([record.providerSessionId]));
       } catch (error) {
         const steerRace = parseTurnSteerRace(error);
         if (
@@ -4261,7 +2689,7 @@ export class ThreadService {
           steerTurnId = steerRace.actualTurnId;
           retriedAfterTurnMismatch = true;
           updateThreadRecord(this.db, localThreadId, {
-            codexTurnId: steerTurnId,
+            providerTurnId: steerTurnId,
             status: 'running',
           });
           continue;
@@ -4298,11 +2726,12 @@ export class ThreadService {
       });
     }
 
-    const modelRecords = await this.codexManager.listModels().catch(() => []);
+    const modelRecords = await this.listProviderModels(record.provider);
     const fallbackModel = modelRecords.find((entry) => entry.isDefault) ?? modelRecords[0] ?? null;
-    const currentFastMode = normalizeFastMode(record.fastMode);
+    const supportsFastMode = this.runtimeSupportsFastMode(record.provider);
+    const currentFastMode = this.fastModeForProvider(record.provider, record.fastMode);
     const requestedFastMode =
-      input.fastMode !== undefined ? input.fastMode : currentFastMode;
+      supportsFastMode && input.fastMode !== undefined ? input.fastMode : currentFastMode;
     const currentModel = record.model ?? fallbackModel?.model ?? null;
     const currentReasoning = normalizeReasoningEffort(record.reasoningEffort);
     const nextModel = input.model ?? currentModel;
@@ -4331,7 +2760,7 @@ export class ThreadService {
       this.clearPendingPlanDecisionRequests(localThreadId, true);
     }
 
-    if (currentFastMode !== nextFastMode) {
+    if (supportsFastMode && currentFastMode !== nextFastMode) {
       await writeCodexFastMode(this.codexHome, nextFastMode);
       this.appendActivityNote(localThreadId, {
         kind: 'fastMode',
@@ -4351,7 +2780,7 @@ export class ThreadService {
     }
 
     const updated = getThreadRecordById(this.db, localThreadId)!;
-    const loadedIds = new Set(await this.codexManager.listLoadedThreads().catch(() => []));
+    const loadedIds = await this.listLoadedProviderSessionIds(record.provider);
     this.emitThreadEvent('thread.updated', updated.id, {
       model: updated.model,
       reasoningEffort: updated.reasoningEffort,
@@ -4385,7 +2814,7 @@ export class ThreadService {
     });
 
     const updated = getThreadRecordById(this.db, localThreadId)!;
-    const loadedIds = new Set(await this.codexManager.listLoadedThreads().catch(() => []));
+    const loadedIds = await this.listLoadedProviderSessionIds(record.provider);
 
     this.emitThreadEvent('thread.updated', updated.id, {
       title: updated.title
@@ -4396,12 +2825,13 @@ export class ThreadService {
 
   async compactThread(localThreadId: string): Promise<ThreadDto> {
     const record = getThreadRecordById(this.db, localThreadId);
-    if (!record || !record.codexThreadId) {
+    if (!record) {
       throw new HttpError(404, {
         code: 'not_found',
         message: 'Thread was not found.',
       });
     }
+    const providerSessionId = this.requireProviderSessionId(record);
 
     if (record.isConnected === false) {
       throw new HttpError(409, {
@@ -4410,8 +2840,8 @@ export class ThreadService {
       });
     }
 
-    const loadedIds = new Set(await this.codexManager.listLoadedThreads().catch(() => []));
-    if (!loadedIds.has(record.codexThreadId)) {
+    const loadedIds = await this.listLoadedProviderSessionIds(record.provider);
+    if (!loadedIds.has(providerSessionId)) {
       const resumeInput: ResumeThreadInput = {};
       if (record.model) {
         resumeInput.model = record.model;
@@ -4423,21 +2853,29 @@ export class ThreadService {
       await this.resumeThread(localThreadId, resumeInput);
     }
 
-    await this.codexManager.compactThread(record.codexThreadId);
+    const runtime = this.runtimeForProvider(record.provider);
+    if (!runtime.compactSession) {
+      throw new HttpError(409, {
+        code: 'conflict',
+        message: 'This backend does not support context compaction.',
+      });
+    }
+    await runtime.compactSession(providerSessionId);
 
     const updated = getThreadRecordById(this.db, localThreadId)!;
-    const refreshedLoadedIds = new Set(await this.codexManager.listLoadedThreads().catch(() => []));
+    const refreshedLoadedIds = await this.listLoadedProviderSessionIds(record.provider);
     return this.toThreadDto(updated, refreshedLoadedIds);
   }
 
   async listForkTurnOptions(localThreadId: string): Promise<ThreadForkTurnOptionDto[]> {
     const record = getThreadRecordById(this.db, localThreadId);
-    if (!record || !record.codexThreadId) {
+    if (!record) {
       throw new HttpError(404, {
         code: 'not_found',
         message: 'Thread was not found.',
       });
     }
+    this.requireProviderSessionId(record);
 
     const turnMetadataById = new Map<string, ThreadTurnMetadataRecord>(
       listThreadTurnMetadataByThreadId(this.db, localThreadId).map((entry) => [
@@ -4471,12 +2909,13 @@ export class ThreadService {
     input: ForkThreadInput,
   ): Promise<ThreadForkResultDto> {
     const record = getThreadRecordById(this.db, localThreadId);
-    if (!record || !record.codexThreadId) {
+    if (!record) {
       throw new HttpError(404, {
         code: 'not_found',
         message: 'Thread was not found.',
       });
     }
+    const providerSessionId = this.requireProviderSessionId(record);
 
     if (record.status === 'running') {
       throw new HttpError(409, {
@@ -4498,14 +2937,29 @@ export class ThreadService {
       });
     }
 
-    const forkedThread = await this.codexManager.forkThread({
-      threadId: record.codexThreadId,
+    const runtime = this.runtimeForProvider(record.provider);
+    if (!runtime.forkSession) {
+      throw new HttpError(409, {
+        code: 'conflict',
+        message: 'This backend does not support session fork.',
+      });
+    }
+
+    let forkedSession = await runtime.forkSession({
+      providerSessionId,
+      atTurnId: selectedTurn?.turnId ?? null,
     });
     const turnsToRollback =
       selectedTurn == null ? 0 : Math.max(0, turnOptions.length - selectedTurn.turnIndex);
     if (turnsToRollback > 0) {
-      await this.codexManager.rollbackThread({
-        threadId: forkedThread.id,
+      if (!runtime.rollbackSession) {
+        throw new HttpError(409, {
+          code: 'conflict',
+          message: 'This backend does not support rollback after fork.',
+        });
+      }
+      forkedSession = await runtime.rollbackSession({
+        providerSessionId: forkedSession.providerSessionId,
         count: turnsToRollback,
       });
     }
@@ -4513,24 +2967,25 @@ export class ThreadService {
     const forkTitleBase = record.title.trim() || DEFAULT_THREAD_TITLE;
     const created = createThreadRecord(this.db, {
       workspaceId: record.workspaceId,
+      provider: record.provider === 'claude' ? 'claude' : 'codex',
+      providerSessionId: forkedSession.providerSessionId,
       title: `${forkTitleBase} / fork`,
       model: record.model,
       reasoningEffort: record.reasoningEffort,
-      fastMode: normalizeFastMode(record.fastMode),
+      fastMode: this.fastModeForProvider(record.provider, record.fastMode),
       fastBaseModel: record.fastBaseModel,
       fastBaseReasoningEffort: record.fastBaseReasoningEffort,
       collaborationMode: normalizeCollaborationMode(record.collaborationMode),
       approvalMode: (record.approvalMode ?? 'yolo') as ApprovalMode,
       sandboxMode: normalizeSandboxMode(record.sandboxMode),
-      codexThreadId: forkedThread.id,
-      summaryText: forkedThread.preview,
+      summaryText: forkedSession.preview,
       source: 'supervisor',
       isConnected: true,
     });
 
     updateThreadRecord(this.db, created.id, {
       ...this.buildThreadPatch(
-        forkedThread,
+        forkedSession,
         record.model,
         normalizeReasoningEffort(record.reasoningEffort),
       ),
@@ -4572,10 +3027,17 @@ export class ThreadService {
       });
     }
 
-    const [entry] = await this.codexManager.listSkills({
+    const runtime = this.runtimeForProvider(record.provider);
+    if (!runtime.listSkills) {
+      throw new HttpError(409, {
+        code: 'conflict',
+        message: 'This backend does not expose skills.',
+      });
+    }
+    const [entry] = await runtime.listSkills({
       cwds: [workspace.absPath],
       forceReload: true,
-    });
+    }) as Awaited<ReturnType<NonNullable<AgentRuntime['listSkills']>>>;
 
     return {
       cwd: workspace.absPath,
@@ -4602,7 +3064,7 @@ export class ThreadService {
             }
           : {}),
         path: skill.path,
-        scope: skill.scope,
+        scope: skill.scope as AgentSkillDto['scope'],
         enabled: skill.enabled,
       })),
       errors: (entry?.errors ?? []).map((error) => ({
@@ -4621,10 +3083,18 @@ export class ThreadService {
       });
     }
 
+    const runtime = this.runtimeForProvider(record.provider);
+    if (!runtime.listMcpServers) {
+      throw new HttpError(409, {
+        code: 'conflict',
+        message: 'This backend does not expose MCP server status.',
+      });
+    }
+
     return {
-      servers: (await this.codexManager.listMcpServers()).map((server) => ({
+      servers: ((await runtime.listMcpServers()) as Awaited<ReturnType<NonNullable<AgentRuntime['listMcpServers']>>>).map((server) => ({
         name: server.name,
-        authStatus: server.authStatus,
+        authStatus: server.authStatus as ThreadMcpServersDto['servers'][number]['authStatus'],
         tools: server.tools.map((tool) => ({
           name: tool.name,
           title: tool.title,
@@ -4653,14 +3123,21 @@ export class ThreadService {
       });
     }
 
-    let entry: Awaited<ReturnType<CodexAppServerManager['listHooks']>>[number] | undefined;
+    let entry: Awaited<ReturnType<NonNullable<AgentRuntime['listHooks']>>>[number] | undefined;
     let fallbackWarnings: string[] = [];
+    const runtime = this.runtimeForProvider(record.provider);
     try {
-      [entry] = await this.codexManager.listHooks({
+      if (!runtime.listHooks) {
+        throw new HttpError(409, {
+          code: 'conflict',
+          message: 'This backend does not expose hooks.',
+        });
+      }
+      [entry] = await runtime.listHooks({
         cwds: [workspace.absPath],
-      });
+      }) as Awaited<ReturnType<NonNullable<AgentRuntime['listHooks']>>>;
     } catch (error) {
-      if (!isUnsupportedHooksListError(error)) {
+      if (!this.isCodexProvider(record.provider) || !isUnsupportedHooksListError(error)) {
         throw error;
       }
 
@@ -4669,7 +3146,7 @@ export class ThreadService {
       ];
     }
 
-    return this.toThreadHooksDto(workspace.absPath, entry, fallbackWarnings);
+    return this.toThreadHooksDto(record.provider, workspace.absPath, entry, fallbackWarnings);
   }
 
   async createThreadHook(
@@ -4692,13 +3169,22 @@ export class ThreadService {
       });
     }
 
+    const runtime = this.runtimeForProvider(record.provider);
+    if (!runtime.capabilities.management.hooks) {
+      throw new HttpError(409, {
+        code: 'conflict',
+        message: 'This backend does not expose hooks.',
+      });
+    }
+    this.assertCodexHooksFileManagement(record.provider);
+
     await writeHookJsonEntry({
       codexHome: this.codexHome,
       workspacePath: workspace.absPath,
       input,
     });
 
-    await trustHookForInput(this.codexManager, workspace.absPath, input);
+    await trustHookForInput(runtime, workspace.absPath, input);
 
     return this.listThreadHooks(localThreadId);
   }
@@ -4723,13 +3209,22 @@ export class ThreadService {
       });
     }
 
+    const runtime = this.runtimeForProvider(record.provider);
+    if (!runtime.capabilities.management.hooks) {
+      throw new HttpError(409, {
+        code: 'conflict',
+        message: 'This backend does not expose hooks.',
+      });
+    }
+    this.assertCodexHooksFileManagement(record.provider);
+
     await updateHookJsonEntry({
       codexHome: this.codexHome,
       workspacePath: workspace.absPath,
       input,
     });
 
-    await trustHookForInput(this.codexManager, workspace.absPath, input);
+    await trustHookForInput(runtime, workspace.absPath, input);
 
     return this.listThreadHooks(localThreadId);
   }
@@ -4754,7 +3249,15 @@ export class ThreadService {
       });
     }
 
-    await this.codexManager.setHookTrust({
+    const runtime = this.runtimeForProvider(record.provider);
+    if (!runtime.setHookTrust) {
+      throw new HttpError(409, {
+        code: 'conflict',
+        message: 'This backend does not support hook trust.',
+      });
+    }
+
+    await runtime.setHookTrust({
       key: input.key,
       trustedHash: input.currentHash,
     });
@@ -4782,7 +3285,15 @@ export class ThreadService {
       });
     }
 
-    await this.codexManager.setHookTrust({
+    const runtime = this.runtimeForProvider(record.provider);
+    if (!runtime.setHookTrust) {
+      throw new HttpError(409, {
+        code: 'conflict',
+        message: 'This backend does not support hook trust.',
+      });
+    }
+
+    await runtime.setHookTrust({
       key: input.key,
       trustedHash: null,
     });
@@ -4792,14 +3303,15 @@ export class ThreadService {
 
   async interruptThread(localThreadId: string, requestedTurnId?: string): Promise<ThreadDto> {
     const record = getThreadRecordById(this.db, localThreadId);
-    if (!record || !record.codexThreadId) {
+    if (!record) {
       throw new HttpError(404, {
         code: 'not_found',
         message: 'Thread was not found.'
       });
     }
+    const providerSessionId = this.requireProviderSessionId(record);
 
-    const turnId = requestedTurnId ?? record.codexTurnId;
+    const turnId = requestedTurnId ?? record.providerTurnId;
     if (!turnId) {
       throw new HttpError(400, {
         code: 'bad_request',
@@ -4807,10 +3319,13 @@ export class ThreadService {
       });
     }
 
-    const interruptedTurn = await this.codexManager.interruptTurn(record.codexThreadId, turnId);
+    const interruptedTurn = await this.runtimeForProvider(record.provider).interruptTurn({
+      providerSessionId,
+      providerTurnId: turnId,
+    });
 
     updateThreadRecord(this.db, localThreadId, {
-      codexTurnId: null,
+      providerTurnId: null,
       status: interruptedTurn?.status === 'failed' ? 'failed' : 'interrupted',
       lastError: interruptedTurn?.error?.message ?? null,
       lastTurnCompletedAt: new Date().toISOString()
@@ -4883,8 +3398,21 @@ export class ThreadService {
     }
 
     if (pending.source === 'server') {
-      const result = interactiveApprovalResultForServerRequest(pending, input);
-      this.codexManager.respondToServerRequest(pending.serverRequestId, result);
+      const runtime = this.runtimeForProvider(record.provider);
+      if (!runtime.buildProviderRequestResponse) {
+        throw new HttpError(409, {
+          code: 'conflict',
+          message: 'This backend cannot build provider request responses.',
+        });
+      }
+      if (!runtime.respondToProviderRequest) {
+        throw new HttpError(409, {
+          code: 'conflict',
+          message: 'This backend cannot respond to provider requests.',
+        });
+      }
+      const result = runtime.buildProviderRequestResponse(pending, input);
+      runtime.respondToProviderRequest(pending.providerRequestId, result);
       this.pendingRequests.get(localThreadId)?.delete(requestId);
       if (this.pendingRequests.get(localThreadId)?.size === 0) {
         this.pendingRequests.delete(localThreadId);
@@ -4898,9 +3426,10 @@ export class ThreadService {
 
       if (selectedAnswer === 'implement') {
         this.dismissedPlanDecisionTurns.delete(localThreadId);
-        if (record.source === 'local_codex_import' && record.codexThreadId) {
-          const loadedIds = new Set(await this.codexManager.listLoadedThreads().catch(() => []));
-          if (!loadedIds.has(record.codexThreadId)) {
+        if (record.source === 'local_codex_import') {
+          const providerSessionId = this.requireProviderSessionId(record);
+          const loadedIds = await this.listLoadedProviderSessionIds(record.provider);
+          if (!loadedIds.has(providerSessionId)) {
             await this.resumeThread(localThreadId, {
               ...(record.model ? { model: record.model } : {})
             });
@@ -4930,26 +3459,19 @@ export class ThreadService {
     return this.getThreadDetail(localThreadId);
   }
 
-  private async handleNotification(event: CodexServerEvent) {
-    switch (event.method) {
-      case 'thread/status/changed': {
-        const params = event.params as { threadId: string; status: CodexThreadRecord['status'] };
-        const record = getThreadRecordByCodexThreadId(this.db, params.threadId);
+  private async handleRuntimeEvent(event: AgentRuntimeEvent) {
+    switch (event.type) {
+      case 'session.status.changed': {
+        const record = this.findRecordByProviderSessionId(
+          event.provider,
+          event.providerSessionId,
+        );
         if (!record) {
           return;
         }
 
         updateThreadRecord(this.db, record.id, {
-          status: normalizeThreadStatus({
-            id: record.codexThreadId ?? '',
-            preview: record.summaryText ?? '',
-            createdAt: Math.floor(new Date(record.createdAt).getTime() / 1000),
-            updatedAt: Math.floor(Date.now() / 1000),
-            status: params.status,
-            cwd: '',
-            name: record.title,
-            turns: []
-          })
+          status: event.status,
         });
 
         this.emitThreadEvent('thread.updated', record.id, {
@@ -4957,16 +3479,18 @@ export class ThreadService {
         });
         return;
       }
-      case 'thread/name/updated': {
-        const params = event.params as { threadId: string; threadName?: string };
-        const record = getThreadRecordByCodexThreadId(this.db, params.threadId);
-        if (!record || !params.threadName) {
+      case 'session.title.updated': {
+        const record = this.findRecordByProviderSessionId(
+          event.provider,
+          event.providerSessionId,
+        );
+        if (!record) {
           return;
         }
 
         if (isAutoGeneratedTitle(record.title)) {
           updateThreadRecord(this.db, record.id, {
-            title: truncateAutoThreadTitle(params.threadName)
+            title: truncateAutoThreadTitle(event.title),
           });
         }
 
@@ -4975,31 +3499,34 @@ export class ThreadService {
         });
         return;
       }
-      case 'thread/goal/updated': {
-        const params = event.params as {
-          threadId: string;
-          turnId: string | null;
-          goal: Parameters<typeof toThreadGoalDto>[0];
-        };
-        const record = getThreadRecordByCodexThreadId(this.db, params.threadId);
+      case 'goal.updated': {
+        const record = this.findRecordByProviderSessionId(
+          event.provider,
+          event.providerSessionId,
+        );
         if (!record) {
           return;
         }
 
-        const dto = normalizeThreadGoalStatusForThread(toThreadGoalDto(params.goal), record);
+        const dto = normalizeThreadGoalStatusForThread(
+          toThreadGoalDtoFromAgentGoal(event.goal),
+          record,
+        );
         const persistedGoal = toThreadGoalDtoFromRecord(
           this.persistThreadGoalSnapshot(record.id, dto),
         );
         this.emitThreadEvent('thread.goal.updated', record.id, {
-          turnId: params.turnId,
+          turnId: event.providerTurnId,
           goal: persistedGoal,
           goalHistory: this.listThreadGoalHistory(record.id),
         });
         return;
       }
-      case 'thread/goal/cleared': {
-        const params = event.params as { threadId: string };
-        const record = getThreadRecordByCodexThreadId(this.db, params.threadId);
+      case 'goal.cleared': {
+        const record = this.findRecordByProviderSessionId(
+          event.provider,
+          event.providerSessionId,
+        );
         if (!record) {
           return;
         }
@@ -5010,33 +3537,34 @@ export class ThreadService {
         });
         return;
       }
-      case 'thread/tokenUsage/updated': {
-        const params = event.params as {
-          threadId: string;
-          turnId: string;
-          tokenUsage?: ThreadContextTokenUsagePayload | null;
-        };
-        const record = getThreadRecordByCodexThreadId(this.db, params.threadId);
+      case 'usage.updated': {
+        const record = this.findRecordByProviderSessionId(
+          event.provider,
+          event.providerSessionId,
+        );
         if (!record) {
           return;
         }
+        const tokenUsage = isRecord(event.usage)
+          ? (event.usage as ThreadContextTokenUsagePayload)
+          : null;
 
         const usage = buildThreadContextUsageFromPayload(
-          params.tokenUsage,
+          tokenUsage,
           record.model,
         );
         this.setThreadContextUsage(record.id, usage, true);
         const existingTurnMetadata = getThreadTurnMetadataByThreadAndTurnId(
           this.db,
           record.id,
-          params.turnId,
+          event.providerTurnId,
         );
         const previousState = parseStoredThreadTurnTokenUsageState(
           existingTurnMetadata?.tokenUsageJson,
         );
         const previousCumulativeTotal = this.threadCumulativeTokenUsage.get(record.id);
         const currentCumulativeTotal = buildTurnTokenBreakdown(
-          isRecord(params.tokenUsage?.total) ? params.tokenUsage.total : null,
+          isRecord(tokenUsage?.total) ? tokenUsage.total : null,
         );
         if (currentCumulativeTotal) {
           this.threadCumulativeTokenUsage.set(record.id, currentCumulativeTotal);
@@ -5045,18 +3573,18 @@ export class ThreadService {
           previousState.baselineTotal ??
           previousCumulativeTotal ??
           this.getLatestStoredThreadCumulativeTotal(record.id, {
-            excludeTurnId: params.turnId,
+            excludeTurnId: event.providerTurnId,
           }) ??
           zeroTurnTokenBreakdown();
         const turnTokenUsage = buildThreadTurnTokenUsage(
-          params.tokenUsage,
+          tokenUsage,
           baselineTotal,
           previousState.usage,
         );
         if (turnTokenUsage) {
           upsertThreadTurnMetadata(this.db, {
             threadId: record.id,
-            turnId: params.turnId,
+            turnId: event.providerTurnId,
             tokenUsageJson: stringifyStoredThreadTurnTokenUsageState({
               baselineTotal,
               usage: turnTokenUsage,
@@ -5064,7 +3592,7 @@ export class ThreadService {
           });
           this.invalidateThreadDetailCache(record.id);
           this.emitThreadEvent('thread.turn.token.updated', record.id, {
-            turnId: params.turnId,
+            turnId: event.providerTurnId,
             tokenUsage: turnTokenUsage,
             priceEstimate: estimateTurnPrice(turnTokenUsage, {
               pricingModelKey: existingTurnMetadata?.pricingModelKey,
@@ -5074,36 +3602,39 @@ export class ThreadService {
         }
         return;
       }
-      case 'turn/started': {
-        const params = event.params as { threadId: string; turn: CodexTurnRecord };
-        const record = getThreadRecordByCodexThreadId(this.db, params.threadId);
+      case 'turn.started': {
+        const record = this.findRecordByProviderSessionId(
+          event.provider,
+          event.providerSessionId,
+        );
         if (!record) {
           return;
         }
+        const turnId = event.turn.providerTurnId;
 
         this.clearPendingPlanDecisionRequests(record.id, true);
         this.dismissedPlanDecisionTurns.delete(record.id);
 
         updateThreadRecord(this.db, record.id, {
-          codexTurnId: params.turn.id,
+          providerTurnId: turnId,
           status: 'running',
           lastError: null,
           lastTurnStartedAt: new Date().toISOString()
         });
-        this.resetRecordedTurnItemOrder(record.id, params.turn.id);
-        for (const item of params.turn.items) {
-          this.recordTurnItemOrder(record.id, params.turn.id, item.id);
+        this.resetRecordedTurnItemOrder(record.id, turnId);
+        for (const item of event.turn.items) {
+          this.recordTurnItemOrder(record.id, turnId, item.id);
         }
         this.setLivePlan(record.id, null);
         this.setLiveItems(record.id, null);
         this.resetThreadContextUsage(record.id, true);
         const pricingSnapshot = buildTurnPricingSnapshot(
           record.model,
-          normalizeFastMode(record.fastMode),
+          this.fastModeForProvider(record.provider, record.fastMode),
         );
         upsertThreadTurnMetadata(this.db, {
           threadId: record.id,
-          turnId: params.turn.id,
+          turnId,
           model: record.model ?? null,
           reasoningEffort: normalizeReasoningEffort(record.reasoningEffort),
           pricingModelKey: pricingSnapshot?.pricingModelKey ?? null,
@@ -5112,7 +3643,7 @@ export class ThreadService {
             baselineTotal:
               this.threadCumulativeTokenUsage.get(record.id) ??
               this.getLatestStoredThreadCumulativeTotal(record.id, {
-                excludeTurnId: params.turn.id,
+                excludeTurnId: turnId,
               }) ??
               zeroTurnTokenBreakdown(),
             usage: null,
@@ -5121,35 +3652,32 @@ export class ThreadService {
         this.invalidateThreadDetailCache(record.id);
 
         this.emitThreadEvent('thread.turn.started', record.id, {
-          turnId: params.turn.id
+          turnId,
         });
         return;
       }
-      case 'hook/started':
-      case 'hook/completed': {
-        const params = event.params as {
-          threadId: string;
-          turnId: string | null;
-          run: Parameters<typeof hookRunToHistoryItem>[0];
-        };
-        const record = getThreadRecordByCodexThreadId(this.db, params.threadId);
+      case 'hook.started':
+      case 'hook.completed': {
+        const record = this.findRecordByProviderSessionId(
+          event.provider,
+          event.providerSessionId,
+        );
         if (!record) {
           return;
         }
 
-        const turnId = params.turnId ?? record.codexTurnId;
+        const turnId = event.providerTurnId ?? record.providerTurnId;
         if (!turnId) {
           return;
         }
-
         const liveItem = {
-          ...hookRunToHistoryItem(params.run),
-          sequence: this.recordTurnItemOrder(record.id, turnId, `hook:${params.run.id}`),
+          ...event.item,
+          sequence: this.recordTurnItemOrder(record.id, turnId, event.item.id),
         };
         this.persistLiveHistoryItem(record.id, turnId, liveItem);
         this.upsertLiveItem(record.id, turnId, liveItem);
         this.emitThreadEvent(
-          event.method === 'hook/started'
+          event.type === 'hook.started'
             ? 'thread.item.started'
             : 'thread.item.completed',
           record.id,
@@ -5160,356 +3688,239 @@ export class ThreadService {
         );
         return;
       }
-      case 'item/started':
-      case 'item/completed': {
-        const params = event.params as {
-          threadId: string;
-          turnId: string;
-          item?: CodexTurnItem;
-        };
-        const record = getThreadRecordByCodexThreadId(this.db, params.threadId);
-        if (!record || !params.item) {
+      case 'item.started':
+      case 'item.completed': {
+        const record = this.findRecordByProviderSessionId(
+          event.provider,
+          event.providerSessionId,
+        );
+        if (!record) {
           return;
         }
 
         const sequence = this.recordTurnItemOrder(
           record.id,
-          params.turnId,
-          params.item.id,
+          event.providerTurnId,
+          event.item.id,
         );
-        const liveItem = liveCodexItemToHistoryItem(
-          params.item,
-          event.method === 'item/started' ? 'started' : 'completed',
-        );
-        if (!liveItem) {
-          return;
-        }
-
         const orderedLiveItem = {
-          ...liveItem,
+          ...event.item,
           sequence,
         };
-        this.persistLiveHistoryItem(record.id, params.turnId, orderedLiveItem);
-        this.upsertLiveItem(record.id, params.turnId, orderedLiveItem);
+        this.persistLiveHistoryItem(record.id, event.providerTurnId, orderedLiveItem);
+        this.upsertLiveItem(record.id, event.providerTurnId, orderedLiveItem);
         this.emitThreadEvent(
-          event.method === 'item/started'
+          event.type === 'item.started'
             ? 'thread.item.started'
             : 'thread.item.completed',
           record.id,
           {
-            turnId: params.turnId,
+            turnId: event.providerTurnId,
             item: orderedLiveItem,
           },
         );
         return;
       }
-      case 'turn/plan/updated': {
-        const params = event.params as {
-          threadId: string;
-          turnId: string;
-          explanation: string | null;
-          plan: Array<{ step: string; status: string }>;
-        };
-        const record = getThreadRecordByCodexThreadId(this.db, params.threadId);
+      case 'plan.updated': {
+        const record = this.findRecordByProviderSessionId(
+          event.provider,
+          event.providerSessionId,
+        );
         if (!record) {
           return;
         }
 
         this.setLivePlan(record.id, {
-          turnId: params.turnId,
-          explanation: params.explanation,
-          plan: params.plan,
+          turnId: event.providerTurnId,
+          explanation: event.explanation,
+          plan: event.plan,
           updatedAt: new Date().toISOString(),
         });
 
         this.emitThreadEvent('thread.plan.updated', record.id, {
-          turnId: params.turnId,
-          explanation: params.explanation,
-          plan: params.plan
+          turnId: event.providerTurnId,
+          explanation: event.explanation,
+          plan: event.plan,
         });
         return;
       }
-      case 'item/agentMessage/delta': {
-        const params = event.params as {
-          threadId: string;
-          turnId: string;
-          itemId: string;
-          delta: string;
-        };
-        const record = getThreadRecordByCodexThreadId(this.db, params.threadId);
+      case 'output.delta': {
+        const record = this.findRecordByProviderSessionId(
+          event.provider,
+          event.providerSessionId,
+        );
         if (!record) {
           return;
         }
 
-        this.recordTurnItemOrder(record.id, params.turnId, params.itemId);
+        this.recordTurnItemOrder(record.id, event.providerTurnId, event.itemId);
         this.emitThreadEvent('thread.output.delta', record.id, {
-          turnId: params.turnId,
-          itemId: params.itemId,
-          delta: params.delta
+          turnId: event.providerTurnId,
+          itemId: event.itemId,
+          delta: event.delta,
         });
         return;
       }
-      case 'turn/completed': {
-        const params = event.params as { threadId: string; turn: CodexTurnRecord };
-        const record = getThreadRecordByCodexThreadId(this.db, params.threadId);
+      case 'turn.completed': {
+        const record = this.findRecordByProviderSessionId(
+          event.provider,
+          event.providerSessionId,
+        );
         if (!record) {
           return;
         }
+        const turnId = event.turn.providerTurnId;
+        const turnItems = event.turn.items;
 
         updateThreadRecord(this.db, record.id, {
-          codexTurnId: null,
+          providerTurnId: null,
           status:
-            params.turn.status === 'failed'
+            event.turn.status === 'failed'
               ? 'failed'
-              : params.turn.status === 'interrupted'
+              : event.turn.status === 'interrupted'
                 ? 'interrupted'
                 : 'idle',
-          lastError: params.turn.error?.message ?? null,
+          lastError: event.turn.error?.message ?? null,
           lastTurnCompletedAt: new Date().toISOString()
         });
         this.setLivePlan(record.id, null);
         this.setLiveItems(record.id, null);
-        this.clearPendingSteersForTurn(record.id, params.turn.id);
+        this.clearPendingSteersForTurn(record.id, turnId);
         this.pendingRequests.delete(record.id);
         if (
-          params.turn.status === 'completed' &&
+          event.turn.status === 'completed' &&
           normalizeCollaborationMode(record.collaborationMode) === 'plan' &&
-          params.turn.items.some((item) => item.type === 'plan')
+          turnItems.some((item) => item.kind === 'plan')
         ) {
-          this.createPendingPlanDecisionRequest(record.id, params.turn.id, true);
+          this.createPendingPlanDecisionRequest(record.id, turnId, true);
         } else {
           this.dismissedPlanDecisionTurns.delete(record.id);
         }
         this.invalidateThreadDetailCache(record.id);
 
         this.emitThreadEvent(
-          params.turn.status === 'failed' ? 'thread.turn.failed' : 'thread.turn.completed',
+          event.turn.status === 'failed' ? 'thread.turn.failed' : 'thread.turn.completed',
           record.id,
           {
-            turnId: params.turn.id,
-            status: params.turn.status,
-            error: params.turn.error?.message ?? null
+            turnId,
+            status: event.turn.status,
+            error: event.turn.error?.message ?? null,
           }
         );
         return;
       }
-      case 'error': {
-        const params = event.params as {
-          threadId: string;
-          turnId: string;
-          error: { message?: string };
-          willRetry: boolean;
-        };
-        const record = getThreadRecordByCodexThreadId(this.db, params.threadId);
+      case 'turn.failed': {
+        const record = this.findRecordByProviderSessionId(
+          event.provider,
+          event.providerSessionId,
+        );
         if (!record) {
           return;
         }
 
         updateThreadRecord(this.db, record.id, {
           status: 'failed',
-          lastError: params.error.message ?? 'Turn failed unexpectedly.'
+          lastError: event.error,
         });
         this.setLivePlan(record.id, null);
         this.setLiveItems(record.id, null);
-        this.clearPendingSteersForTurn(record.id, params.turnId);
+        this.clearPendingSteersForTurn(record.id, event.providerTurnId);
         this.pendingRequests.delete(record.id);
         this.dismissedPlanDecisionTurns.delete(record.id);
         this.invalidateThreadDetailCache(record.id);
 
         this.emitThreadEvent('thread.turn.failed', record.id, {
-          turnId: params.turnId,
-          error: params.error.message ?? 'Turn failed unexpectedly.',
-          willRetry: params.willRetry
+          turnId: event.providerTurnId,
+          error: event.error,
+          willRetry: event.willRetry,
         });
+        return;
       }
     }
   }
 
-  private async handleServerRequest(request: CodexServerRequest) {
-    const approvalResponseKind = responseKindForApprovalRequest(request);
-    if (approvalResponseKind) {
-      const params = request.params as {
-        threadId?: string;
-        conversationId?: string;
-        permissions?: unknown;
-      };
-      const codexThreadId = params.threadId ?? params.conversationId;
-      const record = codexThreadId
-        ? getThreadRecordByCodexThreadId(this.db, codexThreadId)
+  private async handleProviderRuntimeRequest(request: AgentProviderRequest) {
+    const runtime = this.runtimeForProvider(request.provider);
+    const defaultMappedRequest = runtime.mapProviderRequest?.(request, {
+      approvalMode: 'guarded',
+    });
+    const providerSessionIdFromParams =
+      isRecord(request.params)
+        ? request.params.providerSessionId ??
+          request.params.threadId ??
+          request.params.conversationId ??
+          request.params.sessionId
         : null;
-      if (!record) {
-        return;
-      }
-
-      const approvalMode = (record.approvalMode ?? 'yolo') as ApprovalMode;
-      const autoApprovedResult =
-        approvalMode === 'yolo' ? yoloApprovalResultForServerRequest(request) : null;
-      if (autoApprovedResult) {
-        this.codexManager.respondToServerRequest(request.id, autoApprovedResult);
-        return;
-      }
-
-      const title =
-        approvalResponseKind === 'commandExecutionApproval' ||
-        approvalResponseKind === 'legacyExecApproval'
-          ? 'Command approval required'
-          : approvalResponseKind === 'fileChangeApproval' ||
-              approvalResponseKind === 'legacyApplyPatchApproval'
-            ? 'File change approval required'
-            : 'Permissions approval required';
-      const threadRequest = buildGenericApprovalThreadRequest(request, {
-        title,
-        descriptionFallback: 'Codex needs approval before it can continue this action.',
-      });
-      let threadRequests = this.pendingRequests.get(record.id);
-      if (!threadRequests) {
-        threadRequests = new Map();
-        this.pendingRequests.set(record.id, threadRequests);
-      }
-      const pendingRequest: Extract<PendingThreadRequestRecord, { source: 'server' }> = {
-        source: 'server',
-        serverRequestId: request.id,
-        responseKind: approvalResponseKind,
-        request: threadRequest,
-      };
-      if (approvalResponseKind === 'permissionsApproval' && isRecord(params.permissions)) {
-        pendingRequest.responsePayload = { permissions: params.permissions };
-      }
-      threadRequests.set(threadRequest.id, pendingRequest);
-
-      this.emitThreadEvent('thread.request.created', record.id, {
-        request: threadRequest,
-      });
-      return;
-    }
-
-    if (isMcpElicitationRequest(request)) {
-      const record = getThreadRecordByCodexThreadId(this.db, request.params.threadId);
-      if (!record) {
-        return;
-      }
-
-      const approvalMode = (record.approvalMode ?? 'yolo') as ApprovalMode;
-      const autoApprovedResult =
-        approvalMode === 'yolo'
-          ? buildAutoApprovedMcpElicitationResult(request)
-          : null;
-      if (autoApprovedResult) {
-        this.codexManager.respondToServerRequest(request.id, autoApprovedResult);
-        return;
-      }
-
-      const threadRequest = buildThreadRequestFromMcpElicitation(request);
-      let threadRequests = this.pendingRequests.get(record.id);
-      if (!threadRequests) {
-        threadRequests = new Map();
-        this.pendingRequests.set(record.id, threadRequests);
-      }
-      threadRequests.set(threadRequest.id, {
-        source: 'server',
-        serverRequestId: request.id,
-        responseKind: 'mcpElicitation',
-        request: threadRequest,
-      });
-
-      this.emitThreadEvent('thread.request.created', record.id, {
-        request: threadRequest,
-      });
-      return;
-    }
-
-    const params = request.params as {
-      threadId?: string;
-      turnId?: string;
-      itemId?: string;
-      questions?: Array<{
-        id: string;
-        header: string;
-        question: string;
-        isOther: boolean;
-        isSecret: boolean;
-        options: Array<{ label: string; description: string }> | null;
-      }>;
-    };
-
-    if (!params.threadId || !Array.isArray(params.questions)) {
-      return;
-    }
-
-    const record = getThreadRecordByCodexThreadId(this.db, params.threadId);
+    const providerSessionId =
+      defaultMappedRequest?.providerSessionId ??
+      (typeof providerSessionIdFromParams === 'string' ? providerSessionIdFromParams : null);
+    const record = providerSessionId
+      ? this.findRecordByProviderSessionId(request.provider, providerSessionId)
+      : null;
     if (!record) {
       return;
     }
 
-    const questions: ThreadActionQuestionDto[] = params.questions.map((question) => ({
-      id: question.id,
-      header: question.header,
-      question: question.question,
-      isOther: question.isOther,
-      isSecret: question.isSecret,
-      options: question.options?.map((option) => ({
-        label: option.label,
-        description: option.description
-      })) ?? null
-    }));
-
     const approvalMode = (record.approvalMode ?? 'yolo') as ApprovalMode;
-    const autoApprovedAnswers =
-      approvalMode === 'yolo'
-        ? buildAutoApprovedAnswersForServerQuestions(
-            request.method,
-            params.questions,
-          )
-        : null;
-    if (autoApprovedAnswers) {
-      this.codexManager.respondToServerRequest(request.id, {
-        answers: autoApprovedAnswers,
-      });
+    const mappedRequest =
+      approvalMode === 'guarded'
+        ? defaultMappedRequest
+        : runtime.mapProviderRequest?.(request, { approvalMode });
+    if (!mappedRequest) {
       return;
     }
 
-    const threadRequest: ThreadActionRequestDto = {
-      id: String(request.id),
-      kind: 'requestUserInput',
-      title: questions[0]?.header || 'User input required',
-      description: questions[0]?.question ?? null,
-      turnId: params.turnId ?? null,
-      itemId: params.itemId ?? null,
-      createdAt: new Date().toISOString(),
-      questions
-    };
+    if (mappedRequest.autoApprovedResult) {
+      runtime.respondToProviderRequest?.(
+        mappedRequest.providerRequestId,
+        mappedRequest.autoApprovedResult,
+      );
+      return;
+    }
 
+    if (!mappedRequest.pendingRequest) {
+      return;
+    }
     let threadRequests = this.pendingRequests.get(record.id);
     if (!threadRequests) {
       threadRequests = new Map();
       this.pendingRequests.set(record.id, threadRequests);
     }
-    threadRequests.set(threadRequest.id, {
+    const pendingRequest: Extract<PendingThreadRequestRecord, { source: 'server' }> = {
       source: 'server',
-      serverRequestId: request.id,
-      responseKind: 'answers',
-      request: threadRequest
-    });
+      providerRequestId: mappedRequest.pendingRequest.providerRequestId,
+      responseKind: mappedRequest.pendingRequest.responseKind,
+      request: mappedRequest.pendingRequest.request as ThreadActionRequestDto & {
+        kind: 'requestUserInput';
+      },
+    };
+    if (mappedRequest.pendingRequest.responsePayload) {
+      pendingRequest.responsePayload = mappedRequest.pendingRequest.responsePayload;
+    }
+    threadRequests.set(mappedRequest.pendingRequest.request.id, pendingRequest);
 
     this.emitThreadEvent('thread.request.created', record.id, {
-      request: threadRequest
+      request: mappedRequest.pendingRequest.request,
     });
   }
 
   private buildThreadPatch(
-    remoteThread: CodexThreadRecord,
+    remoteSession: AgentSessionSummary | AgentSessionDetail,
     model: string | null | undefined,
     reasoningEffort: string | null | undefined
   ) {
+    const failedTurn = 'turns' in remoteSession
+      ? remoteSession.turns.find((turn) => turn.status === 'failed')
+      : null;
     return {
-      codexThreadId: remoteThread.id,
-      status: normalizeThreadStatus(remoteThread),
-      summaryText: remoteThread.preview || null,
+      provider: remoteSession.provider,
+      providerSessionId: remoteSession.providerSessionId,
+      status: remoteSession.status,
+      summaryText: remoteSession.preview || null,
       model: model ?? null,
       reasoningEffort: normalizeReasoningEffort(reasoningEffort),
-      lastError:
-        remoteThread.turns.find((turn) => turn.status === 'failed')?.error?.message ?? null,
-      updatedAt: toIsoFromUnix(remoteThread.updatedAt)
+      lastError: failedTurn?.error?.message ?? null,
+      updatedAt: remoteSession.updatedAt ?? new Date().toISOString(),
     };
   }
 
@@ -5517,12 +3928,13 @@ export class ThreadService {
     return {
       id: record.id,
       workspaceId: record.workspaceId,
-      codexThreadId: record.codexThreadId ?? null,
+      provider: (record.provider ?? 'codex') as ThreadDto['provider'],
+      providerSessionId: record.providerSessionId ?? null,
       source: (record.source ?? 'supervisor') as ThreadSourceDto,
       title: record.title,
       model: record.model ?? null,
       reasoningEffort: normalizeReasoningEffort(record.reasoningEffort),
-      fastMode: normalizeFastMode(record.fastMode),
+      fastMode: this.fastModeForProvider(record.provider, record.fastMode),
       collaborationMode: normalizeCollaborationMode(record.collaborationMode),
       approvalMode: (record.approvalMode ?? 'yolo') as ApprovalMode,
       sandboxMode:
@@ -5531,10 +3943,10 @@ export class ThreadService {
       status: (record.status ?? 'idle') as ThreadStatusDto,
       summaryText: record.summaryText ?? null,
       lastError: record.lastError ?? null,
-      activeTurnId: record.codexTurnId ?? null,
+      activeTurnId: record.providerTurnId ?? null,
       isLoaded:
         record.isConnected !== false &&
-        (record.codexThreadId ? loadedIds.has(record.codexThreadId) : false),
+        (record.providerSessionId ? loadedIds.has(record.providerSessionId) : false),
       isPinned: record.isPinned,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
@@ -5666,42 +4078,45 @@ export class ThreadService {
   }
 
   private async toThreadHooksDto(
+    provider: string | null | undefined,
     workspacePath: string,
-    entry: Awaited<ReturnType<CodexAppServerManager['listHooks']>>[number] | undefined,
+    entry: Awaited<ReturnType<NonNullable<AgentRuntime['listHooks']>>>[number] | undefined,
     fallbackWarnings: string[] = [],
   ): Promise<ThreadHooksDto> {
     const globalHooksPath = path.join(this.codexHome, 'hooks.json');
     const projectHooksPath = path.join(workspacePath, '.codex', 'hooks.json');
-    const officialHooks: CodexHookDto[] = (entry?.hooks ?? []).map((hook) => ({
+    const officialHooks: AgentHookDto[] = (entry?.hooks ?? []).map((hook) => ({
       key: hook.key,
-      eventName: hook.eventName,
-      handlerType: hook.handlerType,
+      eventName: hook.eventName as AgentHookDto['eventName'],
+      handlerType: hook.handlerType as AgentHookDto['handlerType'],
       matcher: hook.matcher,
       command: hook.command,
       timeoutSec: hook.timeoutSec,
       statusMessage: hook.statusMessage,
       sourcePath: hook.sourcePath,
-      source: hook.source,
+      source: hook.source as AgentHookDto['source'],
       pluginId: hook.pluginId,
       displayOrder: hook.displayOrder,
       enabled: hook.enabled,
       isManaged: hook.isManaged,
       currentHash: hook.currentHash,
-      trustStatus: hook.trustStatus,
+      trustStatus: hook.trustStatus as AgentHookDto['trustStatus'],
     }));
-    const [globalHooks, projectHooks] = await Promise.all([
-      readLocalHookDtos({
-        hooksPath: globalHooksPath,
-        source: 'user',
-        displayOffset: officialHooks.length,
-      }),
-      readLocalHookDtos({
-        hooksPath: projectHooksPath,
-        source: 'project',
-        displayOffset: officialHooks.length + 10_000,
-      }),
-    ]);
-    const hooksBySignature = new Map<string, CodexHookDto>();
+    const [globalHooks, projectHooks] = this.isCodexProvider(provider)
+      ? await Promise.all([
+          readLocalHookDtos({
+            hooksPath: globalHooksPath,
+            source: 'user',
+            displayOffset: officialHooks.length,
+          }),
+          readLocalHookDtos({
+            hooksPath: projectHooksPath,
+            source: 'project',
+            displayOffset: officialHooks.length + 10_000,
+          }),
+        ])
+      : [[], []];
+    const hooksBySignature = new Map<string, AgentHookDto>();
     for (const hook of [...globalHooks, ...projectHooks, ...officialHooks]) {
       const signature = [
         hook.sourcePath,
@@ -5874,13 +4289,15 @@ export class ThreadService {
     });
   }
 
-  private reconcilePendingSteers(localThreadId: string, remoteThread: CodexThreadRecord) {
+  private reconcilePendingSteers(localThreadId: string, remoteSession: AgentSessionDetail) {
     const records = listThreadPendingSteerRecordsByThreadId(this.db, localThreadId);
     if (records.length === 0) {
       return;
     }
 
-    const turnsById = new Map(remoteThread.turns.map((turn) => [turn.id, turn]));
+    const turnsById = new Map(
+      remoteSession.turns.map((turn) => [turn.providerTurnId, turn]),
+    );
     let removed = false;
 
     for (const record of records) {
@@ -6003,13 +4420,13 @@ export class ThreadService {
   private syncPendingPlanDecisionRequest(
     localThreadId: string,
     collaborationMode: string | null | undefined,
-    remoteThread: CodexThreadRecord
+    remoteSession: AgentSessionDetail
   ) {
-    const latestTurn = remoteThread.turns.at(-1) ?? null;
+    const latestTurn = remoteSession.turns.at(-1) ?? null;
     const shouldHavePlanDecision =
       normalizeCollaborationMode(collaborationMode) === 'plan' &&
       latestTurn?.status === 'completed' &&
-      latestTurn.items.some((item) => item.type === 'plan');
+      latestTurn.items.some((item) => item.kind === 'plan');
 
     if (!shouldHavePlanDecision || !latestTurn) {
       this.clearPendingPlanDecisionRequests(localThreadId, false);
@@ -6017,19 +4434,19 @@ export class ThreadService {
       return;
     }
 
-    const expectedRequestId = `${LOCAL_PLAN_DECISION_PREFIX}${latestTurn.id}`;
+    const expectedRequestId = `${LOCAL_PLAN_DECISION_PREFIX}${latestTurn.providerTurnId}`;
     const existingRequest = this.pendingRequests.get(localThreadId)?.get(expectedRequestId);
     if (existingRequest?.source === 'planDecision') {
       return;
     }
 
-    this.createPendingPlanDecisionRequest(localThreadId, latestTurn.id, false);
+    this.createPendingPlanDecisionRequest(localThreadId, latestTurn.providerTurnId, false);
   }
 
   private normalizeReasoningForModel(
     modelRecords: Array<{
       model: string;
-      defaultReasoningEffort: string;
+      defaultReasoningEffort: string | null;
       supportedReasoningEfforts: Array<{ reasoningEffort: string }>;
     }>,
     model: string | null,

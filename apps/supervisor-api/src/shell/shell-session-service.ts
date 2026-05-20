@@ -24,7 +24,7 @@ import type {
   ShellStatusDto,
   ThreadShellStateDto,
 } from '../../../../packages/shared/src/index';
-import { SupervisorEventBus } from '../codex/event-bus';
+import { SupervisorEventBus } from '../event-bus';
 import { TmuxManager } from './tmux-manager';
 
 interface ShellAttachment {

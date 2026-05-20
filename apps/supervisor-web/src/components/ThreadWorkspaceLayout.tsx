@@ -2,7 +2,7 @@ import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import type {
-  CodexStatusDto,
+  AgentRuntimeStatusDto,
   ThreadDto,
 } from '../../../../packages/shared/src/index';
 import { useAppShellNav } from './AppShellNavContext';
@@ -19,7 +19,7 @@ import { RenameDialog } from './RenameDialog';
 
 interface ThreadWorkspaceLayoutProps {
   threads: ThreadDto[];
-  status: CodexStatusDto | null;
+  status: AgentRuntimeStatusDto | null;
   loading?: boolean;
   error?: string | null;
   viewportConstrained?: boolean;
@@ -121,7 +121,7 @@ function SidebarSection({
   );
 }
 
-function supervisorSummary(status: CodexStatusDto | null) {
+function supervisorSummary(status: AgentRuntimeStatusDto | null) {
   if (!status) {
     return 'Checking supervisor';
   }
@@ -175,12 +175,13 @@ function ThreadCard({
   }, []);
 
   async function handleCopySessionId() {
-    if (!thread.codexThreadId) {
+    const sessionId = thread.providerSessionId;
+    if (!sessionId) {
       return;
     }
 
     try {
-      await navigator.clipboard.writeText(thread.codexThreadId);
+      await navigator.clipboard.writeText(sessionId);
       setCopyState('copied');
       if (resetTimerRef.current !== null) {
         window.clearTimeout(resetTimerRef.current);
@@ -210,7 +211,7 @@ function ThreadCard({
         isCurrentThread
           ? 'thread-sidebar-card-active shadow-lg shadow-stone-950/12'
           : ''
-      } ${showSessionCopyButton && thread.codexThreadId ? 'pb-4' : ''}`}
+      } ${showSessionCopyButton && (thread.providerSessionId) ? 'pb-4' : ''}`}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
@@ -264,22 +265,22 @@ function ThreadCard({
           {threadStatusLabel(thread.status)}
         </span>
       </div>
-      <div className={`mt-2 flex items-center justify-between gap-3 text-[11px] text-[var(--theme-fg-muted)] ${showSessionCopyButton && thread.codexThreadId ? 'pr-9' : ''}`}>
+      <div className={`mt-2 flex items-center justify-between gap-3 text-[11px] text-[var(--theme-fg-muted)] ${showSessionCopyButton && (thread.providerSessionId) ? 'pr-9' : ''}`}>
         <time dateTime={thread.lastTurnStartedAt ?? thread.updatedAt}>
           {formatShortTimestamp(thread.lastTurnStartedAt ?? thread.updatedAt)}
         </time>
         <span>{thread.model ?? 'No model'}</span>
       </div>
-      {showSessionCopyButton && thread.codexThreadId && (
+      {showSessionCopyButton && (thread.providerSessionId) && (
         <button
           type="button"
-          aria-label="Copy Codex session ID"
+          aria-label="Copy session ID"
           title={
             copyState === 'copied'
               ? 'Copied'
               : copyState === 'failed'
                 ? 'Copy failed'
-                : 'Copy Codex session ID'
+                : 'Copy session ID'
           }
           onClick={(event) => {
             event.stopPropagation();

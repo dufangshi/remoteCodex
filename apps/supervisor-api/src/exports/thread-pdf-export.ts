@@ -159,7 +159,7 @@ function renderMessageItem(item: ThreadHistoryItemDto) {
   const role = item.kind === 'userMessage' ? 'user' : 'agent';
   return `
     <section class="message message-${role}">
-      <div class="message-label">${role === 'user' ? 'User' : 'Codex'}</div>
+      <div class="message-label">${role === 'user' ? 'User' : 'Agent'}</div>
       <div class="message-body markdown-body">
         ${role === 'agent' ? renderMarkdownText(item.text) : renderPlainText(item.text)}
       </div>
@@ -187,7 +187,7 @@ function historyItemLabel(kind: ThreadHistoryItemDto['kind']) {
     case 'userMessage':
       return 'User';
     case 'agentMessage':
-      return 'Codex';
+      return 'Agent';
     case 'plan':
       return 'Plan';
     case 'commandExecution':
@@ -816,7 +816,7 @@ export function renderThreadExportHtml(snapshot: ThreadPdfExportSnapshot) {
   </head>
   <body>
     <header class="cover">
-      <div class="eyebrow">Remote Codex Transcript</div>
+      <div class="eyebrow">Agent Transcript</div>
       <h1>${escapeHtml(snapshot.thread.title)}</h1>
       <div class="cover-meta">
         <span>${escapeHtml(snapshot.workspace.label)}</span>
@@ -829,7 +829,7 @@ export function renderThreadExportHtml(snapshot: ThreadPdfExportSnapshot) {
         ${snapshot.options.includeTokenAndPrice && tokenCount > 0 ? `<span>${escapeHtml(compactNumber(tokenCount))} tokens</span>` : ''}
         ${snapshot.options.includeTokenAndPrice && price > 0 ? `<span>${escapeHtml(formatUsd(price))} estimated</span>` : ''}
       </div>
-      <div class="notice">Review copy: user and Codex message bubbles are exported with Markdown formatting. Tool calls, plans, goals, and command/file events are omitted unless using the technical profile.</div>
+      <div class="notice">Review copy: user and agent message bubbles are exported with Markdown formatting. Tool calls, plans, goals, and command/file events are omitted unless using the technical profile.</div>
       ${running ? `<div class="notice">Exported while turn ${snapshot.selectedTurnNumbers.get(running.id) ?? ''} was still running.</div>` : ''}
     </header>
     ${snapshot.turns.map((turn) => renderTurn(turn, snapshot)).join('')}
@@ -1131,7 +1131,7 @@ export function renderThreadExportStandaloneHtml(snapshot: ThreadPdfExportSnapsh
     <main class="share-shell">
       <section class="transcript">
         <header class="cover">
-          <div class="eyebrow">Remote Codex Transcript</div>
+          <div class="eyebrow">Agent Transcript</div>
           <h1>${escapeHtml(snapshot.thread.title)}</h1>
           <div class="meta">
             <span>${escapeHtml(snapshot.workspace.label)}</span>
@@ -1178,7 +1178,7 @@ export function renderThreadExportStandaloneHtml(snapshot: ThreadPdfExportSnapsh
 export async function renderThreadExportPdf(snapshot: ThreadPdfExportSnapshot) {
   if (process.env.NODE_ENV === 'test' || process.env.VITEST) {
     return Buffer.from(
-      `%PDF-1.4\n% Remote Codex test PDF\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%% ${snapshot.turns.length} turns\n%%EOF\n`,
+      `%PDF-1.4\n% Agent transcript test PDF\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%% ${snapshot.turns.length} turns\n%%EOF\n`,
     );
   }
 

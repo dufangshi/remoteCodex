@@ -2,14 +2,34 @@ import type { FormEvent } from 'react';
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
-import { ModelOptionDto, WorkspaceDto } from '../../../../packages/shared/src/index';
-import { ApiError, createThread, fetchCodexModels, fetchWorkspaces } from '../lib/api';
+import {
+  AgentBackendDto,
+  AgentBackendIdDto,
+  ModelOptionDto,
+  WorkspaceDto,
+} from '../../../../packages/shared/src/index';
+import { useAppShellNav } from '../components/AppShellNavContext';
+import {
+  ApiError,
+  createThread,
+  fetchAgentBackends,
+  fetchAgentBackendModels,
+  fetchWorkspaces,
+  fetchWorkspaceSettings,
+} from '../lib/api';
+
+function backendCanStartSession(backend: AgentBackendDto) {
+  return backend.enabled && backend.capabilities.sessions.resume && backend.capabilities.turns.start;
+}
 
 export function ThreadNewPage() {
   const navigate = useNavigate();
+  const shellNav = useAppShellNav();
   const [searchParams] = useSearchParams();
   const [workspaces, setWorkspaces] = useState<WorkspaceDto[]>([]);
+  const [backends, setBackends] = useState<AgentBackendDto[]>([]);
   const [models, setModels] = useState<ModelOptionDto[]>([]);
+  const [provider, setProvider] = useState<AgentBackendIdDto>(shellNav?.defaultBackend ?? 'codex');
   const [workspaceId, setWorkspaceId] = useState('');
   const [model, setModel] = useState('');
   const [title, setTitle] = useState('');
@@ -20,8 +40,19 @@ export function ThreadNewPage() {
   const requestedWorkspaceId = searchParams.get('workspaceId');
 
   useEffect(() => {
-    Promise.all([fetchWorkspaces(), fetchCodexModels()])
-      .then(([workspaceRecords, modelRecords]) => {
+    Promise.all([fetchWorkspaces(), fetchWorkspaceSettings(), fetchAgentBackends()])
+      .then(async ([workspaceRecords, settings, backendRecords]) => {
+        const enabledBackends = backendRecords.filter(backendCanStartSession);
+        const fallbackProvider = enabledBackends[0]?.provider ?? 'codex';
+        const initialProvider = enabledBackends.some(
+          (backend) => backend.provider === settings.defaultBackend,
+        )
+          ? settings.defaultBackend
+          : fallbackProvider;
+        shellNav?.setDefaultBackend(initialProvider);
+        setProvider(initialProvider);
+        setBackends(backendRecords);
+        const modelRecords = await fetchAgentBackendModels(initialProvider);
         setWorkspaces(workspaceRecords);
         setModels(modelRecords);
         const initialWorkspaceId =
@@ -37,7 +68,33 @@ export function ThreadNewPage() {
       .finally(() => {
         setLoading(false);
       });
-  }, [searchParams]);
+  }, [requestedWorkspaceId, shellNav]);
+
+  useEffect(() => {
+    if (!provider) {
+      return;
+    }
+
+    let cancelled = false;
+    fetchAgentBackendModels(provider)
+      .then((modelRecords) => {
+        if (cancelled) {
+          return;
+        }
+        setModels(modelRecords);
+        setModel(modelRecords.find((entry) => entry.isDefault)?.model ?? modelRecords[0]?.model ?? '');
+      })
+      .catch((caught) => {
+        if (cancelled) {
+          return;
+        }
+        setError(caught instanceof Error ? caught.message : 'Unable to load backend models.');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [provider]);
 
   function handleCancel() {
     if (window.history.length > 1) {
@@ -63,12 +120,14 @@ export function ThreadNewPage() {
         title.trim()
           ? {
               workspaceId,
+              provider,
               model,
               approvalMode,
               title: title.trim()
             }
           : {
               workspaceId,
+              provider,
               model,
               approvalMode
             }
@@ -89,7 +148,7 @@ export function ThreadNewPage() {
     <div className="space-y-6">
       <div>
         <p className="text-xs uppercase tracking-[0.3em] text-stone-500">New Thread</p>
-        <h2 className="mt-2 text-3xl font-semibold text-stone-100">Start a Codex session</h2>
+        <h2 className="mt-2 text-3xl font-semibold text-stone-100">Start a backend session</h2>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-stone-400">
           Choose the workspace, model, and approval mode that should back the new thread.
         </p>
@@ -101,6 +160,32 @@ export function ThreadNewPage() {
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="space-y-5 rounded-3xl border border-stone-800 bg-stone-900 p-6">
+          <div>
+            <label className="text-sm font-medium text-stone-200" htmlFor="thread-backend">
+              Backend
+            </label>
+            <select
+              id="thread-backend"
+              value={provider}
+              onChange={(event) => {
+                const next = event.target.value as AgentBackendIdDto;
+                setProvider(next);
+                shellNav?.setDefaultBackend(next);
+              }}
+              className="mt-2 w-full rounded-2xl border border-stone-700 bg-stone-950 px-4 py-3 text-stone-100 outline-none transition focus:border-amber-300"
+            >
+              {backends.map((backend) => (
+                <option
+                  key={backend.provider}
+                  value={backend.provider}
+                  disabled={!backendCanStartSession(backend)}
+                >
+                  {backend.displayName}
+                  {backendCanStartSession(backend) ? '' : ' (not available)'}
+                </option>
+              ))}
+            </select>
+          </div>
           <div>
             <label className="text-sm font-medium text-stone-200" htmlFor="thread-workspace">
               Workspace

@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 
 import {
-  CodexStatusDto,
+  AgentRuntimeStatusDto,
   ThreadDto,
   WorkspaceDto,
 } from '../../../../packages/shared/src/index';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { useAppShellNav } from '../components/AppShellNavContext';
 import {
   ThreadCards,
   ThreadWorkspaceLayout,
@@ -15,7 +16,7 @@ import { RenameDialog } from '../components/RenameDialog';
 import {
   connectSupervisorEvents,
   deleteThread,
-  fetchCodexStatus,
+  fetchAgentBackendStatus,
   fetchThreads,
   fetchWorkspaces,
   updateThread,
@@ -34,10 +35,11 @@ function truncateDialogThreadTitle(title: string) {
 export function ThreadsPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const shellNav = useAppShellNav();
   const selectedWorkspaceId = searchParams.get('workspaceId');
   const [threads, setThreads] = useState<ThreadDto[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceDto[]>([]);
-  const [status, setStatus] = useState<CodexStatusDto | null>(null);
+  const [status, setStatus] = useState<AgentRuntimeStatusDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editingRecentThreadId, setEditingRecentThreadId] = useState<string | null>(null);
@@ -53,7 +55,9 @@ export function ThreadsPage() {
     try {
       const [statusResponse, threadResponse, workspaceResponse] =
         await Promise.all([
-          fetchCodexStatus(),
+          fetchAgentBackendStatus(shellNav?.defaultBackend ?? 'codex').then(
+            (backend) => backend.status,
+          ),
           fetchThreads(),
           fetchWorkspaces(),
         ]);
@@ -103,7 +107,7 @@ export function ThreadsPage() {
     return () => {
       socket.close();
     };
-  }, [selectedWorkspaceId]);
+  }, [selectedWorkspaceId, shellNav?.defaultBackend]);
 
   const workspaceLabels = Object.fromEntries(
     workspaces.map((workspace) => [workspace.id, workspace.label]),
@@ -307,7 +311,7 @@ export function ThreadsPage() {
           title="Delete Thread"
           description={
             deletingThread
-              ? `Delete ${truncateDialogThreadTitle(deletingThread.title)} from supervisor. The Codex session id will no longer appear in this workspace list.`
+              ? `Delete ${truncateDialogThreadTitle(deletingThread.title)} from supervisor. The backend session id will no longer appear in this workspace list.`
               : ''
           }
           confirmLabel="Delete Thread"

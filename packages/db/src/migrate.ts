@@ -9,11 +9,7 @@ interface MigrationRecord {
   applied_at: string;
 }
 
-function resolvePackageRoot(start = process.cwd()): string {
-  if (process.env.REMOTE_CODEX_PACKAGE_ROOT) {
-    return path.resolve(process.env.REMOTE_CODEX_PACKAGE_ROOT);
-  }
-
+function findWorkspaceRoot(start = process.cwd()): string | null {
   let current = path.resolve(start);
 
   while (current !== path.dirname(current)) {
@@ -23,11 +19,24 @@ function resolvePackageRoot(start = process.cwd()): string {
     current = path.dirname(current);
   }
 
+  return null;
+}
+
+function resolvePackageRoot(start = process.cwd()): string {
+  const workspaceRoot = findWorkspaceRoot(start);
+  if (workspaceRoot && fs.existsSync(path.join(workspaceRoot, 'packages', 'db', 'migrations'))) {
+    return workspaceRoot;
+  }
+
+  if (process.env.REMOTE_CODEX_PACKAGE_ROOT) {
+    return path.resolve(process.env.REMOTE_CODEX_PACKAGE_ROOT);
+  }
+
   throw new Error('Unable to locate package root from current working directory.');
 }
 
-export function getMigrationsDir(): string {
-  return path.join(resolvePackageRoot(), 'packages', 'db', 'migrations');
+export function getMigrationsDir(start = process.cwd()): string {
+  return path.join(resolvePackageRoot(start), 'packages', 'db', 'migrations');
 }
 
 export function runMigrations(databaseUrl: string) {

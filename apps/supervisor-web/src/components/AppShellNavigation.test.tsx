@@ -9,10 +9,87 @@ import {
   AppShellSettingsDialog,
 } from './AppShellNavigation';
 
+const codexBackendResponse = {
+  provider: 'codex',
+  displayName: 'Codex',
+  description: 'Local Codex app-server runtime.',
+  enabled: true,
+  isDefault: true,
+  status: {
+    state: 'ready',
+    transport: 'stdio',
+    lastStartedAt: '2026-04-11T00:00:00.000Z',
+    lastError: null,
+    restartCount: 0,
+  },
+  capabilities: {
+    sessions: { list: true, read: true, resume: true, importLocal: true },
+    turns: { start: true, streamInput: false, steer: true, interrupt: true, compact: true },
+    branching: { fork: true, hardRollback: true, resumeAt: false, rewindFiles: false },
+    controls: {
+      planMode: true,
+      permissionRequests: true,
+      sandboxMode: true,
+      fastServiceTier: true,
+      goals: true,
+    },
+    management: {
+      models: true,
+      mcpStatus: true,
+      skills: true,
+      hooks: true,
+      hookTrust: true,
+      hostConfigFiles: true,
+      providerSettings: false,
+    },
+    usage: { contextWindow: true, tokenUsage: true, costUsd: false },
+  },
+  managementSchema: {
+    hostConfigFiles: [
+      {
+        name: 'config.toml',
+        label: 'config.toml',
+        description: 'Runtime configuration',
+        roles: ['runtime', 'mcp'],
+      },
+      {
+        name: 'auth.json',
+        label: 'auth.json',
+        description: 'Authentication state',
+        roles: ['auth'],
+      },
+    ],
+    toolboxItems: [
+      { action: 'fast', command: '/fast', label: 'Fast mode' },
+      { action: 'compact', command: '/compact', label: 'Compact context' },
+      { action: 'goal', command: '/goal', label: 'Goal' },
+      { action: 'fork', command: '/fork', label: 'Fork', panel: 'fork' },
+      { action: 'skills', command: '/skills', label: 'Skills', panel: 'skills' },
+      { action: 'mcp', command: '/mcp', label: 'MCP', panel: 'mcp' },
+      { action: 'hooks', command: '/hooks', label: 'Hooks', panel: 'hooks' },
+    ],
+    hookCommandTemplates: [
+      {
+        eventName: 'preToolUse',
+        command:
+          'node -e "process.stdin.resume(); process.stdin.on(\'end\', () => console.error(\'remote-codex hook ran\'))"',
+      },
+      {
+        eventName: 'stop',
+        command:
+          'node -e \'process.stdin.resume(); process.stdin.on("end", () => console.log(JSON.stringify({ systemMessage: "remote-codex hook ran" })))\'',
+      },
+    ],
+    configArchives: true,
+    buildRestart: true,
+  },
+};
+
 function NavigationHarness() {
   const [navOpen, setNavOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [themeMode, setThemeMode] = useState<'system' | 'light' | 'dark'>('system');
+  const [defaultBackend, setDefaultBackend] = useState<'codex' | 'claude'>('codex');
 
   return (
     <AppShellNavContext.Provider
@@ -30,6 +107,8 @@ function NavigationHarness() {
         themeMode,
         setThemeMode,
         effectiveTheme: themeMode === 'system' ? 'dark' : themeMode,
+        defaultBackend,
+        setDefaultBackend,
       }}
     >
       <AppShellNavigationMenu />
@@ -45,12 +124,33 @@ describe('AppShellNavigation', () => {
       vi.fn(async (input: RequestInfo, init?: RequestInit) => {
         const url = String(input);
 
+        if (url === '/api/agent-runtimes' && !init?.method) {
+          return {
+            ok: true,
+            json: async () => [codexBackendResponse],
+          } satisfies Partial<Response>;
+        }
+
+        if (url === '/api/agent-runtimes/codex/restart' && init?.method === 'POST') {
+          return {
+            ok: true,
+            json: async () => ({
+              ...codexBackendResponse,
+              status: {
+                ...codexBackendResponse.status,
+                restartCount: 1,
+              },
+            }),
+          } satisfies Partial<Response>;
+        }
+
         if (url === '/api/config/workspace-settings' && !init?.method) {
           return {
             ok: true,
             json: async () => ({
               workspaceRoot: '/tmp',
               devHome: '/tmp/dev',
+              defaultBackend: 'codex',
             }),
           } satisfies Partial<Response>;
         }
@@ -61,11 +161,12 @@ describe('AppShellNavigation', () => {
             json: async () => ({
               workspaceRoot: '/tmp',
               devHome: JSON.parse(String(init.body)).devHome.replace(/\/+$/, ''),
+              defaultBackend: JSON.parse(String(init.body)).defaultBackend ?? 'codex',
             }),
           } satisfies Partial<Response>;
         }
 
-        if (url === '/api/config/codex-files/config.toml' && !init?.method) {
+        if (url === '/api/config/providers/codex/files/config.toml' && !init?.method) {
           return {
             ok: true,
             json: async () => ({
@@ -77,7 +178,7 @@ describe('AppShellNavigation', () => {
           } satisfies Partial<Response>;
         }
 
-        if (url === '/api/config/codex-files/auth.json' && !init?.method) {
+        if (url === '/api/config/providers/codex/files/auth.json' && !init?.method) {
           return {
             ok: true,
             json: async () => ({
@@ -89,7 +190,7 @@ describe('AppShellNavigation', () => {
           } satisfies Partial<Response>;
         }
 
-        if (url === '/api/config/codex-files/config.toml' && init?.method === 'PATCH') {
+        if (url === '/api/config/providers/codex/files/config.toml' && init?.method === 'PATCH') {
           return {
             ok: true,
             json: async () => ({
@@ -101,7 +202,7 @@ describe('AppShellNavigation', () => {
           } satisfies Partial<Response>;
         }
 
-        if (url === '/api/config/codex-files/auth.json' && init?.method === 'PATCH') {
+        if (url === '/api/config/providers/codex/files/auth.json' && init?.method === 'PATCH') {
           return {
             ok: true,
             json: async () => ({
@@ -113,7 +214,7 @@ describe('AppShellNavigation', () => {
           } satisfies Partial<Response>;
         }
 
-        if (url === '/api/config/codex-archives' && !init?.method) {
+        if (url === '/api/config/providers/codex/archives' && !init?.method) {
           return {
             ok: true,
             json: async () => [
@@ -131,7 +232,7 @@ describe('AppShellNavigation', () => {
           } satisfies Partial<Response>;
         }
 
-        if (url === '/api/config/codex-archives' && init?.method === 'POST') {
+        if (url === '/api/config/providers/codex/archives' && init?.method === 'POST') {
           return {
             ok: true,
             json: async () => ({
@@ -147,7 +248,7 @@ describe('AppShellNavigation', () => {
           } satisfies Partial<Response>;
         }
 
-        if (url === '/api/config/codex-archives/archive-1' && init?.method === 'PATCH') {
+        if (url === '/api/config/providers/codex/archives/archive-1' && init?.method === 'PATCH') {
           return {
             ok: true,
             json: async () => ({
@@ -163,7 +264,7 @@ describe('AppShellNavigation', () => {
           } satisfies Partial<Response>;
         }
 
-        if (url === '/api/config/codex-archives/archive-1/apply' && init?.method === 'POST') {
+        if (url === '/api/config/providers/codex/archives/archive-1/apply' && init?.method === 'POST') {
           return {
             ok: true,
             json: async () => ({
@@ -188,20 +289,7 @@ describe('AppShellNavigation', () => {
           } satisfies Partial<Response>;
         }
 
-        if (url === '/api/codex/restart' && init?.method === 'POST') {
-          return {
-            ok: true,
-            json: async () => ({
-              state: 'ready',
-              transport: 'stdio',
-              lastStartedAt: '2026-04-11T00:00:00.000Z',
-              lastError: null,
-              restartCount: 1,
-            }),
-          } satisfies Partial<Response>;
-        }
-
-        if (url === '/api/codex/build-restart' && init?.method === 'POST') {
+        if (url === '/api/agent-runtimes/codex/build-restart' && init?.method === 'POST') {
           return {
             ok: true,
             json: async () => ({
@@ -264,6 +352,52 @@ describe('AppShellNavigation', () => {
     expect(screen.queryByRole('dialog', { name: 'Settings' })).not.toBeInTheDocument();
   });
 
+  it('does not expose backend tools from frontend fallbacks when runtime descriptors fail', async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url === '/api/agent-runtimes' && !init?.method) {
+        return {
+          ok: false,
+          json: async () => ({
+            code: 'unavailable',
+            message: 'Runtime descriptors unavailable.',
+          }),
+        } as Response;
+      }
+
+      if (url === '/api/config/workspace-settings' && !init?.method) {
+        return {
+          ok: true,
+          json: async () => ({
+            workspaceRoot: '/tmp',
+            devHome: '/tmp/dev',
+            defaultBackend: 'codex',
+          }),
+        } as Response;
+      }
+
+      throw new Error(`Unexpected request in fallback test: ${url}`);
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/threads?workspaceId=workspace-1']}>
+        <NavigationHarness />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Runtime descriptors unavailable.')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('This backend does not expose editable host files.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /config\.toml/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /auth\.json/i })).not.toBeInTheDocument();
+    expect(screen.queryByText('Config archives')).not.toBeInTheDocument();
+  });
+
   it('loads codex host files into the settings editor and saves changes', async () => {
     render(
       <MemoryRouter initialEntries={['/threads?workspaceId=workspace-1']}>
@@ -275,17 +409,17 @@ describe('AppShellNavigation', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByRole('button', { name: /config\.toml.*codex runtime configuration/i }),
+        screen.getByRole('button', { name: /config\.toml.*runtime configuration/i }),
       ).toBeInTheDocument();
     });
 
     expect(screen.queryByLabelText('Edit config.toml')).not.toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: /auth\.json.*codex authentication state/i }),
+      screen.getByRole('button', { name: /auth\.json.*authentication state/i }),
     ).toBeInTheDocument();
 
     fireEvent.click(
-      screen.getByRole('button', { name: /config\.toml.*codex runtime configuration/i }),
+      screen.getByRole('button', { name: /config\.toml.*runtime configuration/i }),
     );
 
     await waitFor(() => {
@@ -306,7 +440,7 @@ describe('AppShellNavigation', () => {
 
     const patchCall = vi.mocked(fetch).mock.calls.find(
       ([url, init]) =>
-        String(url) === '/api/config/codex-files/config.toml' && init?.method === 'PATCH',
+        String(url) === '/api/config/providers/codex/files/config.toml' && init?.method === 'PATCH',
     );
     expect(patchCall).toBeTruthy();
     expect(JSON.parse(String(patchCall?.[1]?.body))).toEqual({
@@ -347,6 +481,7 @@ describe('AppShellNavigation', () => {
     expect(patchCall).toBeTruthy();
     expect(JSON.parse(String(patchCall?.[1]?.body))).toEqual({
       devHome: '/tmp/dev/projects/',
+      defaultBackend: 'codex',
     });
   });
 
@@ -361,7 +496,7 @@ describe('AppShellNavigation', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByRole('button', { name: /config\.toml.*codex runtime configuration/i }),
+        screen.getByRole('button', { name: /config\.toml.*runtime configuration/i }),
       ).toBeInTheDocument();
     });
 
@@ -371,7 +506,7 @@ describe('AppShellNavigation', () => {
     expect(screen.queryByLabelText('Edit config.toml')).not.toBeInTheDocument();
   });
 
-  it('restarts the codex app-server from settings', async () => {
+  it('restarts the selected backend from settings', async () => {
     render(
       <MemoryRouter initialEntries={['/threads?workspaceId=workspace-1']}>
         <NavigationHarness />
@@ -387,11 +522,12 @@ describe('AppShellNavigation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Restart' }));
 
     await waitFor(() => {
-      expect(screen.getByText('App server restarted.')).toBeInTheDocument();
+      expect(screen.getByText('Codex backend restarted.')).toBeInTheDocument();
     });
 
     const restartCall = vi.mocked(fetch).mock.calls.find(
-      ([url, init]) => String(url) === '/api/codex/restart' && init?.method === 'POST',
+      ([url, init]) =>
+        String(url) === '/api/agent-runtimes/codex/restart' && init?.method === 'POST',
     );
     expect(restartCall).toBeTruthy();
   });
@@ -418,7 +554,9 @@ describe('AppShellNavigation', () => {
     });
 
     const restartCall = vi.mocked(fetch).mock.calls.find(
-      ([url, init]) => String(url) === '/api/codex/build-restart' && init?.method === 'POST',
+      ([url, init]) =>
+        String(url) === '/api/agent-runtimes/codex/build-restart' &&
+        init?.method === 'POST',
     );
     expect(restartCall).toBeTruthy();
   });
@@ -459,14 +597,14 @@ describe('AppShellNavigation', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText('Applied "Known good" and restarted app-server.'),
+        screen.getByText('Applied "Known good" and restarted Codex.'),
       ).toBeInTheDocument();
     });
 
     expect(
       vi.mocked(fetch).mock.calls.some(
         ([url, init]) =>
-          String(url) === '/api/config/codex-archives/archive-1/apply' &&
+          String(url) === '/api/config/providers/codex/archives/archive-1/apply' &&
           init?.method === 'POST',
       ),
     ).toBe(true);

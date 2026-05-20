@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import {
   ShellEventEnvelope,
   ThreadEventEnvelope,
-} from '../../../../packages/shared/src/index';
+} from '../../../packages/shared/src/index';
 
 export class SupervisorEventBus extends EventEmitter {
   emitThreadEvent(event: ThreadEventEnvelope) {

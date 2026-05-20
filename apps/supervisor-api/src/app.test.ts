@@ -1,12 +1,15 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { buildApp } from './app';
-import { JsonRpcClientError } from '../../../packages/codex/src/index';
+import { AgentRuntimeRegistry } from '../../../packages/agent-runtime/src/index';
+import { CodexRuntimeAdapter, JsonRpcClientError } from '../../../packages/codex/src/index';
+import { LocalCodexSessionStore } from './codex/local-session-store';
 import { FakeCodexManager } from './test/fakeCodexManager';
 
 vi.mock('puppeteer-core', () => ({
@@ -14,6 +17,8 @@ vi.mock('puppeteer-core', () => ({
     launch: vi.fn(),
   },
 }));
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
 describe('supervisor api', () => {
   let tempDir = '';
@@ -31,6 +36,7 @@ describe('supervisor api', () => {
     await fs.mkdir(codexHome, { recursive: true });
     fakeCodexManager = new FakeCodexManager();
     launchBuildRestartCalls = 0;
+    vi.stubEnv('REMOTE_CODEX_PACKAGE_ROOT', repoRoot);
 
     app = buildApp({
       env: {
@@ -41,7 +47,15 @@ describe('supervisor api', () => {
         WORKSPACE_ROOT: tempDir,
         CODEX_HOME: codexHome
       },
-      codexManager: fakeCodexManager as any,
+      runtimeBootstrap: {
+        agentRuntimes: new AgentRuntimeRegistry([
+          new CodexRuntimeAdapter(fakeCodexManager as any),
+        ]),
+        localCodexSessionStore: new LocalCodexSessionStore(codexHome),
+        providerHostHomes: {
+          codex: codexHome,
+        },
+      },
       serviceLifecycle: {
         async launchBuildRestart() {
           launchBuildRestartCalls += 1;
@@ -55,6 +69,7 @@ describe('supervisor api', () => {
 
   afterEach(async () => {
     await app.close();
+    vi.unstubAllEnvs();
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
@@ -195,23 +210,26 @@ describe('supervisor api', () => {
     });
   });
 
-  it('restarts the codex app-server on demand', async () => {
+  it('restarts the selected agent runtime on demand', async () => {
     const response = await app.inject({
       method: 'POST',
-      url: '/api/codex/restart',
+      url: '/api/agent-runtimes/codex/restart',
     });
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
-      state: 'ready',
-      transport: 'stdio',
+      provider: 'codex',
+      status: {
+        state: 'ready',
+        transport: 'stdio',
+      },
     });
   });
 
-  it('launches detached service build and restart on demand', async () => {
+  it('launches detached provider build and restart on demand', async () => {
     const response = await app.inject({
       method: 'POST',
-      url: '/api/codex/build-restart',
+      url: '/api/agent-runtimes/codex/build-restart',
     });
 
     expect(response.statusCode).toBe(200);
@@ -223,12 +241,12 @@ describe('supervisor api', () => {
     expect(launchBuildRestartCalls).toBe(1);
   });
 
-  it('reads editable codex host files from CODEX_HOME', async () => {
+  it('reads editable provider host files from CODEX_HOME', async () => {
     await fs.writeFile(path.join(codexHome, 'config.toml'), 'model = "gpt-5.4"\n', 'utf8');
 
     const response = await app.inject({
       method: 'GET',
-      url: '/api/config/codex-files/config.toml',
+      url: '/api/config/providers/codex/files/config.toml',
     });
 
     expect(response.statusCode).toBe(200);
@@ -239,10 +257,10 @@ describe('supervisor api', () => {
     });
   });
 
-  it('returns empty content for missing editable codex host files', async () => {
+  it('returns empty content for missing editable provider host files', async () => {
     const response = await app.inject({
       method: 'GET',
-      url: '/api/config/codex-files/auth.json',
+      url: '/api/config/providers/codex/files/auth.json',
     });
 
     expect(response.statusCode).toBe(200);
@@ -253,10 +271,10 @@ describe('supervisor api', () => {
     });
   });
 
-  it('writes editable codex host files under CODEX_HOME', async () => {
+  it('writes editable provider host files under CODEX_HOME', async () => {
     const response = await app.inject({
       method: 'PATCH',
-      url: '/api/config/codex-files/auth.json',
+      url: '/api/config/providers/codex/files/auth.json',
       payload: {
         content: '{\n  "token": "secret"\n}\n',
       },
@@ -273,12 +291,12 @@ describe('supervisor api', () => {
     );
   });
 
-  it('creates and lists codex host config archives', async () => {
+  it('creates and lists provider host config archives', async () => {
     await fs.writeFile(path.join(codexHome, 'config.toml'), 'model = "gpt-5.4"\n', 'utf8');
 
     const createResponse = await app.inject({
       method: 'POST',
-      url: '/api/config/codex-archives',
+      url: '/api/config/providers/codex/archives',
       payload: {
         label: 'Known good config',
       },
@@ -295,7 +313,7 @@ describe('supervisor api', () => {
 
     const listResponse = await app.inject({
       method: 'GET',
-      url: '/api/config/codex-archives',
+      url: '/api/config/providers/codex/archives',
     });
 
     expect(listResponse.statusCode).toBe(200);
@@ -305,10 +323,10 @@ describe('supervisor api', () => {
     });
   });
 
-  it('renames codex host config archives', async () => {
+  it('renames provider host config archives', async () => {
     const createResponse = await app.inject({
       method: 'POST',
-      url: '/api/config/codex-archives',
+      url: '/api/config/providers/codex/archives',
       payload: {
         label: 'Before',
       },
@@ -317,7 +335,7 @@ describe('supervisor api', () => {
 
     const renameResponse = await app.inject({
       method: 'PATCH',
-      url: `/api/config/codex-archives/${archiveId}`,
+      url: `/api/config/providers/codex/archives/${archiveId}`,
       payload: {
         label: 'After',
       },
@@ -330,13 +348,13 @@ describe('supervisor api', () => {
     });
   });
 
-  it('applies codex host config archives and restarts the app-server', async () => {
+  it('applies provider host config archives and restarts the backend', async () => {
     await fs.writeFile(path.join(codexHome, 'config.toml'), 'model = "gpt-5.4"\n', 'utf8');
     await fs.writeFile(path.join(codexHome, 'auth.json'), '{"token":"old"}\n', 'utf8');
 
     const createResponse = await app.inject({
       method: 'POST',
-      url: '/api/config/codex-archives',
+      url: '/api/config/providers/codex/archives',
       payload: {
         label: 'Snapshot',
       },
@@ -350,7 +368,7 @@ describe('supervisor api', () => {
 
     const applyResponse = await app.inject({
       method: 'POST',
-      url: `/api/config/codex-archives/${archiveId}/apply`,
+      url: `/api/config/providers/codex/archives/${archiveId}/apply`,
     });
 
     expect(applyResponse.statusCode).toBe(200);
@@ -637,6 +655,36 @@ describe('supervisor api', () => {
     expect(listResponse.json()).toHaveLength(1);
   });
 
+  it('returns a clear unavailable response for an unconfigured backend', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        provider: 'claude',
+        model: 'claude-sonnet-4-5',
+        approvalMode: 'yolo',
+        title: 'Claude Thread'
+      }
+    });
+
+    expect(createResponse.statusCode).toBe(501);
+    expect(createResponse.json()).toMatchObject({
+      code: 'service_unavailable',
+      message: 'Agent runtime provider is not configured: claude',
+    });
+  });
+
   it('returns empty detail for a newly created thread before the first prompt', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',
@@ -697,7 +745,7 @@ describe('supervisor api', () => {
     });
 
     const createdThread = createResponse.json();
-    const remoteThread = fakeCodexManager.threads.get(createdThread.codexThreadId);
+    const remoteThread = fakeCodexManager.threads.get(createdThread.providerSessionId);
     expect(remoteThread).toBeTruthy();
     remoteThread!.status = { type: 'idle' };
     remoteThread!.turns = Array.from({ length: 15 }, (_, index) => ({
@@ -762,7 +810,7 @@ describe('supervisor api', () => {
     });
 
     const createdThread = createResponse.json();
-    const remoteThread = fakeCodexManager.threads.get(createdThread.codexThreadId);
+    const remoteThread = fakeCodexManager.threads.get(createdThread.providerSessionId);
     expect(remoteThread).toBeTruthy();
     remoteThread!.status = { type: 'idle' };
     remoteThread!.turns = Array.from({ length: 12 }, (_, index) => ({
@@ -859,7 +907,7 @@ describe('supervisor api', () => {
     });
 
     const createdThread = createResponse.json();
-    const remoteThread = fakeCodexManager.threads.get(createdThread.codexThreadId);
+    const remoteThread = fakeCodexManager.threads.get(createdThread.providerSessionId);
     expect(remoteThread).toBeTruthy();
     remoteThread!.status = { type: 'idle' };
     remoteThread!.turns = Array.from({ length: 12 }, (_, index) => ({
@@ -886,7 +934,7 @@ describe('supervisor api', () => {
 
     expect(latestDetailResponse.statusCode).toBe(200);
     expect(earlierDetailResponse.statusCode).toBe(200);
-    expect(fakeCodexManager.readThreadCallCount.get(createdThread.codexThreadId)).toBe(1);
+    expect(fakeCodexManager.readThreadCallCount.get(createdThread.providerSessionId)).toBe(1);
 
     remoteThread!.status = { type: 'active', activeFlags: [] };
     remoteThread!.turns = [
@@ -907,7 +955,7 @@ describe('supervisor api', () => {
     fakeCodexManager.emit('notification', {
       method: 'turn/started',
       params: {
-        threadId: createdThread.codexThreadId,
+        threadId: createdThread.providerSessionId,
         turn: remoteThread!.turns.at(-1),
       }
     });
@@ -918,7 +966,7 @@ describe('supervisor api', () => {
     });
 
     expect(refreshedDetailResponse.statusCode).toBe(200);
-    expect(fakeCodexManager.readThreadCallCount.get(createdThread.codexThreadId)).toBe(2);
+    expect(fakeCodexManager.readThreadCallCount.get(createdThread.providerSessionId)).toBe(2);
     expect(refreshedDetailResponse.json().turns.at(-1).id).toBe('turn-13');
   });
 
@@ -944,7 +992,7 @@ describe('supervisor api', () => {
     });
 
     const createdThread = createResponse.json();
-    const remoteThread = fakeCodexManager.threads.get(createdThread.codexThreadId);
+    const remoteThread = fakeCodexManager.threads.get(createdThread.providerSessionId);
     expect(remoteThread).toBeTruthy();
     remoteThread!.status = { type: 'idle' };
     remoteThread!.turns = [
@@ -1002,7 +1050,7 @@ describe('supervisor api', () => {
     });
 
     const createdThread = createResponse.json();
-    const remoteThread = fakeCodexManager.threads.get(createdThread.codexThreadId);
+    const remoteThread = fakeCodexManager.threads.get(createdThread.providerSessionId);
     expect(remoteThread).toBeTruthy();
     remoteThread!.status = { type: 'idle' };
     remoteThread!.turns = [
@@ -1091,9 +1139,9 @@ describe('supervisor api', () => {
 
     const promptedThread = promptResponse.json();
     fakeCodexManager.readThreadErrors.set(
-      promptedThread.codexThreadId,
+      promptedThread.providerSessionId,
       new JsonRpcClientError(
-        `failed to load rollout \`/Users/fonsh/.codex/sessions/2026/04/10/rollout-2026-04-10T15-50-02-${promptedThread.codexThreadId}.jsonl\` for thread ${promptedThread.codexThreadId}: rollout at /Users/fonsh/.codex/sessions/2026/04/10/rollout-2026-04-10T15-50-02-${promptedThread.codexThreadId}.jsonl is empty`,
+        `failed to load rollout \`/Users/fonsh/.codex/sessions/2026/04/10/rollout-2026-04-10T15-50-02-${promptedThread.providerSessionId}.jsonl\` for thread ${promptedThread.providerSessionId}: rollout at /Users/fonsh/.codex/sessions/2026/04/10/rollout-2026-04-10T15-50-02-${promptedThread.providerSessionId}.jsonl is empty`,
         'remote_error',
         { code: -32600 }
       )
@@ -1147,7 +1195,7 @@ describe('supervisor api', () => {
 
     expect(promptResponse.statusCode).toBe(200);
 
-    const remoteThread = fakeCodexManager.threads.get(createdThread.codexThreadId);
+    const remoteThread = fakeCodexManager.threads.get(createdThread.providerSessionId);
     expect(remoteThread).toBeTruthy();
     remoteThread!.status = { type: 'idle' };
     remoteThread!.turns = remoteThread!.turns.map((turn) => ({
@@ -1190,7 +1238,7 @@ describe('supervisor api', () => {
     });
 
     const createdThread = createResponse.json();
-    const sourceThread = fakeCodexManager.threads.get(createdThread.codexThreadId);
+    const sourceThread = fakeCodexManager.threads.get(createdThread.providerSessionId);
     expect(sourceThread).toBeTruthy();
     sourceThread!.turns = [
       {
@@ -1246,7 +1294,7 @@ describe('supervisor api', () => {
 
     expect(forkResponse.statusCode).toBe(200);
     expect(fakeCodexManager.forkThreadCalls).toEqual([
-      createdThread.codexThreadId,
+      createdThread.providerSessionId,
     ]);
     expect(fakeCodexManager.rollbackThreadCalls).toMatchObject([
       {
@@ -1333,7 +1381,7 @@ describe('supervisor api', () => {
     fakeCodexManager.emit('notification', {
       method: 'thread/tokenUsage/updated',
       params: {
-        threadId: createdThread.codexThreadId,
+        threadId: createdThread.providerSessionId,
         turnId,
         tokenUsage: {
           total: {
@@ -1358,7 +1406,7 @@ describe('supervisor api', () => {
     fakeCodexManager.emit('notification', {
       method: 'thread/tokenUsage/updated',
       params: {
-        threadId: createdThread.codexThreadId,
+        threadId: createdThread.providerSessionId,
         turnId,
         tokenUsage: {
           total: {
@@ -1462,7 +1510,7 @@ describe('supervisor api', () => {
     fakeCodexManager.emit('notification', {
       method: 'thread/tokenUsage/updated',
       params: {
-        threadId: createdThread.codexThreadId,
+        threadId: createdThread.providerSessionId,
         turnId,
         tokenUsage: {
           total: {
@@ -1487,7 +1535,7 @@ describe('supervisor api', () => {
     fakeCodexManager.emit('notification', {
       method: 'thread/tokenUsage/updated',
       params: {
-        threadId: createdThread.codexThreadId,
+        threadId: createdThread.providerSessionId,
         turnId,
         tokenUsage: {
           total: {
@@ -1512,7 +1560,7 @@ describe('supervisor api', () => {
     fakeCodexManager.emit('notification', {
       method: 'thread/tokenUsage/updated',
       params: {
-        threadId: createdThread.codexThreadId,
+        threadId: createdThread.providerSessionId,
         turnId,
         tokenUsage: {
           total: {
@@ -1615,7 +1663,7 @@ describe('supervisor api', () => {
     fakeCodexManager.emit('notification', {
       method: 'thread/tokenUsage/updated',
       params: {
-        threadId: createdThread.codexThreadId,
+        threadId: createdThread.providerSessionId,
         turnId: firstTurnId,
         tokenUsage: {
           total: {
@@ -1640,7 +1688,7 @@ describe('supervisor api', () => {
     fakeCodexManager.emit('notification', {
       method: 'turn/completed',
       params: {
-        threadId: createdThread.codexThreadId,
+        threadId: createdThread.providerSessionId,
         turn: {
           id: firstTurnId,
           status: 'completed',
@@ -1671,7 +1719,7 @@ describe('supervisor api', () => {
     fakeCodexManager.emit('notification', {
       method: 'thread/tokenUsage/updated',
       params: {
-        threadId: createdThread.codexThreadId,
+        threadId: createdThread.providerSessionId,
         turnId: secondTurnId,
         tokenUsage: {
           total: {
@@ -1761,7 +1809,7 @@ describe('supervisor api', () => {
     fakeCodexManager.emit('notification', {
       method: 'thread/tokenUsage/updated',
       params: {
-        threadId: createdThread.codexThreadId,
+        threadId: createdThread.providerSessionId,
         turnId: 'turn-context-1',
         tokenUsage: {
           total: {
@@ -1853,7 +1901,7 @@ describe('supervisor api', () => {
 
     expect(promptResponse.statusCode).toBe(200);
 
-    const remoteThread = fakeCodexManager.threads.get(createdThread.codexThreadId);
+    const remoteThread = fakeCodexManager.threads.get(createdThread.providerSessionId);
     const latestPrompt =
       (remoteThread?.turns.at(-1) as any)?.items?.[0]?.content?.[0]?.text ?? '';
     expect(latestPrompt).toContain('[FILE ./.temp/threads/');
@@ -1922,7 +1970,7 @@ describe('supervisor api', () => {
 
     expect(promptResponse.statusCode).toBe(200);
 
-    const remoteThread = fakeCodexManager.threads.get(createdThread.codexThreadId);
+    const remoteThread = fakeCodexManager.threads.get(createdThread.providerSessionId);
     const latestPrompt =
       (remoteThread?.turns.at(-1) as any)?.items?.[0]?.content?.[0]?.text ?? '';
     expect(latestPrompt).toContain('[PHOTO ./.temp/threads/');
@@ -2024,7 +2072,7 @@ describe('supervisor api', () => {
     await fs.mkdir(path.dirname(absoluteImagePath), { recursive: true });
     await fs.writeFile(absoluteImagePath, imageBytes);
 
-    const remoteThread = fakeCodexManager.threads.get(createdThread.codexThreadId);
+    const remoteThread = fakeCodexManager.threads.get(createdThread.providerSessionId);
     expect(remoteThread).toBeTruthy();
     remoteThread!.status = { type: 'idle' };
     remoteThread!.turns = [
@@ -2363,13 +2411,13 @@ describe('supervisor api', () => {
     expect(steerPromptResponse.statusCode).toBe(200);
     expect(fakeCodexManager.steerTurnCalls).toEqual([
       expect.objectContaining({
-        threadId: createdThread.codexThreadId,
+        threadId: createdThread.providerSessionId,
         turnId: firstPromptResponse.json().activeTurnId,
         prompt: 'Follow up while still running',
       }),
     ]);
 
-    const remoteThread = fakeCodexManager.threads.get(createdThread.codexThreadId);
+    const remoteThread = fakeCodexManager.threads.get(createdThread.providerSessionId);
     expect(remoteThread?.turns).toHaveLength(1);
 
     const detailResponse = await app.inject({
@@ -2464,7 +2512,7 @@ describe('supervisor api', () => {
 
     expect(promptResponse.statusCode).toBe(200);
 
-    const remoteThread = fakeCodexManager.threads.get(createdThread.codexThreadId);
+    const remoteThread = fakeCodexManager.threads.get(createdThread.providerSessionId);
     expect(remoteThread).toBeTruthy();
     remoteThread!.status = { type: 'idle' };
     remoteThread!.turns = remoteThread!.turns.map((turn) => ({
@@ -2550,7 +2598,7 @@ describe('supervisor api', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       thread: {
-        codexThreadId: '019d6fb7-7033-7a30-a2c7-74d0919e87d4',
+        providerSessionId: '019d6fb7-7033-7a30-a2c7-74d0919e87d4',
         source: 'local_codex_import',
         title: 'Imported writer...',
         isLoaded: false
@@ -2806,7 +2854,7 @@ describe('supervisor api', () => {
 
     expect(compactResponse.statusCode).toBe(200);
     expect(fakeCodexManager.compactThreadCalls).toEqual([
-      createdThread.codexThreadId,
+      createdThread.providerSessionId,
     ]);
   });
 
@@ -3471,7 +3519,7 @@ describe('supervisor api', () => {
     expect(promptResponse.statusCode).toBe(200);
 
     const startedThread = promptResponse.json();
-    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const remoteThread = fakeCodexManager.threads.get(startedThread.providerSessionId);
     const activeTurn = remoteThread?.turns.at(-1);
     expect(activeTurn).toBeTruthy();
 
@@ -3488,7 +3536,7 @@ describe('supervisor api', () => {
       ]
     };
 
-    fakeCodexManager.threads.set(startedThread.codexThreadId, {
+    fakeCodexManager.threads.set(startedThread.providerSessionId, {
       ...remoteThread!,
       status: { type: 'idle' },
       turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
@@ -3496,7 +3544,7 @@ describe('supervisor api', () => {
     fakeCodexManager.emit('notification', {
       method: 'turn/completed',
       params: {
-        threadId: startedThread.codexThreadId,
+        threadId: startedThread.providerSessionId,
         turn: completedTurn
       }
     });
@@ -3597,7 +3645,7 @@ describe('supervisor api', () => {
     expect(promptResponse.statusCode).toBe(200);
 
     const startedThread = promptResponse.json();
-    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const remoteThread = fakeCodexManager.threads.get(startedThread.providerSessionId);
     const activeTurn = remoteThread?.turns.at(-1);
     expect(activeTurn).toBeTruthy();
 
@@ -3614,7 +3662,7 @@ describe('supervisor api', () => {
       ]
     };
 
-    fakeCodexManager.threads.set(startedThread.codexThreadId, {
+    fakeCodexManager.threads.set(startedThread.providerSessionId, {
       ...remoteThread!,
       status: { type: 'idle' },
       turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
@@ -3622,7 +3670,7 @@ describe('supervisor api', () => {
     fakeCodexManager.emit('notification', {
       method: 'turn/completed',
       params: {
-        threadId: startedThread.codexThreadId,
+        threadId: startedThread.providerSessionId,
         turn: completedTurn
       }
     });
@@ -3698,14 +3746,14 @@ describe('supervisor api', () => {
 
     expect(promptResponse.statusCode).toBe(200);
     const startedThread = promptResponse.json();
-    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const remoteThread = fakeCodexManager.threads.get(startedThread.providerSessionId);
     const activeTurn = remoteThread?.turns.at(-1);
     expect(activeTurn).toBeTruthy();
 
     fakeCodexManager.emit('notification', {
       method: 'turn/plan/updated',
       params: {
-        threadId: startedThread.codexThreadId,
+        threadId: startedThread.providerSessionId,
         turnId: activeTurn!.id,
         explanation: 'Working plan',
         plan: [
@@ -3765,14 +3813,14 @@ describe('supervisor api', () => {
 
     expect(promptResponse.statusCode).toBe(200);
     const startedThread = promptResponse.json();
-    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const remoteThread = fakeCodexManager.threads.get(startedThread.providerSessionId);
     const activeTurn = remoteThread?.turns.at(-1);
     expect(activeTurn).toBeTruthy();
 
     fakeCodexManager.emit('notification', {
       method: 'item/started',
       params: {
-        threadId: startedThread.codexThreadId,
+        threadId: startedThread.providerSessionId,
         turnId: activeTurn!.id,
         item: {
           id: 'command-live-1',
@@ -3835,14 +3883,14 @@ describe('supervisor api', () => {
 
     expect(promptResponse.statusCode).toBe(200);
     const startedThread = promptResponse.json();
-    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const remoteThread = fakeCodexManager.threads.get(startedThread.providerSessionId);
     const activeTurn = remoteThread?.turns.at(-1);
     expect(activeTurn).toBeTruthy();
 
     fakeCodexManager.emit('notification', {
       method: 'item/completed',
       params: {
-        threadId: startedThread.codexThreadId,
+        threadId: startedThread.providerSessionId,
         turnId: activeTurn!.id,
         item: {
           id: 'command-live-1',
@@ -3856,7 +3904,7 @@ describe('supervisor api', () => {
     fakeCodexManager.emit('notification', {
       method: 'item/completed',
       params: {
-        threadId: startedThread.codexThreadId,
+        threadId: startedThread.providerSessionId,
         turnId: activeTurn!.id,
         item: {
           id: 'file-change-live-1',
@@ -3883,7 +3931,7 @@ describe('supervisor api', () => {
         },
       ],
     };
-    fakeCodexManager.threads.set(startedThread.codexThreadId, {
+    fakeCodexManager.threads.set(startedThread.providerSessionId, {
       ...remoteThread!,
       status: { type: 'idle' },
       turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
@@ -3891,7 +3939,7 @@ describe('supervisor api', () => {
     fakeCodexManager.emit('notification', {
       method: 'turn/completed',
       params: {
-        threadId: startedThread.codexThreadId,
+        threadId: startedThread.providerSessionId,
         turn: completedTurn
       }
     });
@@ -3964,14 +4012,14 @@ describe('supervisor api', () => {
 
     expect(promptResponse.statusCode).toBe(200);
     const startedThread = promptResponse.json();
-    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const remoteThread = fakeCodexManager.threads.get(startedThread.providerSessionId);
     const activeTurn = remoteThread?.turns.at(-1);
     expect(activeTurn).toBeTruthy();
 
     fakeCodexManager.emit('notification', {
       method: 'hook/completed',
       params: {
-        threadId: startedThread.codexThreadId,
+        threadId: startedThread.providerSessionId,
         turnId: activeTurn!.id,
         run: {
           id: 'hook-run-1',
@@ -4074,7 +4122,7 @@ describe('supervisor api', () => {
 
     expect(promptResponse.statusCode).toBe(200);
     const startedThread = promptResponse.json();
-    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const remoteThread = fakeCodexManager.threads.get(startedThread.providerSessionId);
     const activeTurn = remoteThread?.turns.at(-1);
     expect(activeTurn).toBeTruthy();
 
@@ -4090,7 +4138,7 @@ describe('supervisor api', () => {
         },
       ],
     };
-    fakeCodexManager.threads.set(startedThread.codexThreadId, {
+    fakeCodexManager.threads.set(startedThread.providerSessionId, {
       ...remoteThread!,
       status: { type: 'idle' },
       turns: [...remoteThread!.turns.slice(0, -1), completedTurn],
@@ -4098,7 +4146,7 @@ describe('supervisor api', () => {
     fakeCodexManager.emit('notification', {
       method: 'turn/completed',
       params: {
-        threadId: startedThread.codexThreadId,
+        threadId: startedThread.providerSessionId,
         turn: completedTurn,
       },
     });
@@ -4161,7 +4209,7 @@ describe('supervisor api', () => {
 
     expect(promptResponse.statusCode).toBe(200);
     const startedThread = promptResponse.json();
-    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const remoteThread = fakeCodexManager.threads.get(startedThread.providerSessionId);
     const activeTurn = remoteThread?.turns.at(-1);
     expect(activeTurn).toBeTruthy();
 
@@ -4172,7 +4220,7 @@ describe('supervisor api', () => {
       fakeCodexManager.emit('notification', {
         method: 'item/completed',
         params: {
-          threadId: startedThread.codexThreadId,
+          threadId: startedThread.providerSessionId,
           turnId: activeTurn!.id,
           item: {
             id: command.id,
@@ -4211,7 +4259,7 @@ describe('supervisor api', () => {
         },
       ],
     };
-    fakeCodexManager.threads.set(startedThread.codexThreadId, {
+    fakeCodexManager.threads.set(startedThread.providerSessionId, {
       ...remoteThread!,
       status: { type: 'idle' },
       turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
@@ -4219,7 +4267,7 @@ describe('supervisor api', () => {
     fakeCodexManager.emit('notification', {
       method: 'turn/completed',
       params: {
-        threadId: startedThread.codexThreadId,
+        threadId: startedThread.providerSessionId,
         turn: completedTurn
       }
     });
@@ -4295,14 +4343,14 @@ describe('supervisor api', () => {
 
     expect(promptResponse.statusCode).toBe(200);
     const startedThread = promptResponse.json();
-    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const remoteThread = fakeCodexManager.threads.get(startedThread.providerSessionId);
     const activeTurn = remoteThread?.turns.at(-1);
     expect(activeTurn).toBeTruthy();
 
     fakeCodexManager.emit('notification', {
       method: 'item/completed',
       params: {
-        threadId: startedThread.codexThreadId,
+        threadId: startedThread.providerSessionId,
         turnId: activeTurn!.id,
         item: {
           id: 'command-before-agent',
@@ -4316,7 +4364,7 @@ describe('supervisor api', () => {
     fakeCodexManager.emit('notification', {
       method: 'item/agentMessage/delta',
       params: {
-        threadId: startedThread.codexThreadId,
+        threadId: startedThread.providerSessionId,
         turnId: activeTurn!.id,
         itemId: 'agent-mid',
         delta: 'Lint passed, now building.',
@@ -4325,7 +4373,7 @@ describe('supervisor api', () => {
     fakeCodexManager.emit('notification', {
       method: 'item/completed',
       params: {
-        threadId: startedThread.codexThreadId,
+        threadId: startedThread.providerSessionId,
         turnId: activeTurn!.id,
         item: {
           id: 'command-after-agent',
@@ -4354,7 +4402,7 @@ describe('supervisor api', () => {
         },
       ],
     };
-    fakeCodexManager.threads.set(startedThread.codexThreadId, {
+    fakeCodexManager.threads.set(startedThread.providerSessionId, {
       ...remoteThread!,
       status: { type: 'idle' },
       turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
@@ -4362,7 +4410,7 @@ describe('supervisor api', () => {
     fakeCodexManager.emit('notification', {
       method: 'turn/completed',
       params: {
-        threadId: startedThread.codexThreadId,
+        threadId: startedThread.providerSessionId,
         turn: completedTurn
       }
     });
@@ -4419,7 +4467,7 @@ describe('supervisor api', () => {
 
     expect(promptResponse.statusCode).toBe(200);
     const startedThread = promptResponse.json();
-    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const remoteThread = fakeCodexManager.threads.get(startedThread.providerSessionId);
     const activeTurn = remoteThread?.turns.at(-1);
     expect(activeTurn).toBeTruthy();
 
@@ -4448,7 +4496,7 @@ describe('supervisor api', () => {
       fakeCodexManager.emit('notification', {
         method: event.method,
         params: {
-          threadId: startedThread.codexThreadId,
+          threadId: startedThread.providerSessionId,
           turnId: activeTurn!.id,
           item: event.item,
         }
@@ -4457,7 +4505,7 @@ describe('supervisor api', () => {
     fakeCodexManager.emit('notification', {
       method: 'item/agentMessage/delta',
       params: {
-        threadId: startedThread.codexThreadId,
+        threadId: startedThread.providerSessionId,
         turnId: activeTurn!.id,
         itemId: 'agent-mid',
         delta: 'I checked the workspace.',
@@ -4466,7 +4514,7 @@ describe('supervisor api', () => {
     fakeCodexManager.emit('notification', {
       method: 'item/completed',
       params: {
-        threadId: startedThread.codexThreadId,
+        threadId: startedThread.providerSessionId,
         turnId: activeTurn!.id,
         item: {
           id: 'command-3',
@@ -4516,7 +4564,7 @@ describe('supervisor api', () => {
         },
       ],
     };
-    fakeCodexManager.threads.set(startedThread.codexThreadId, {
+    fakeCodexManager.threads.set(startedThread.providerSessionId, {
       ...remoteThread!,
       status: { type: 'idle' },
       turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
@@ -4524,7 +4572,7 @@ describe('supervisor api', () => {
     fakeCodexManager.emit('notification', {
       method: 'turn/completed',
       params: {
-        threadId: startedThread.codexThreadId,
+        threadId: startedThread.providerSessionId,
         turn: completedTurn
       }
     });
@@ -4584,7 +4632,7 @@ describe('supervisor api', () => {
     expect(promptResponse.statusCode).toBe(200);
 
     const startedThread = promptResponse.json();
-    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const remoteThread = fakeCodexManager.threads.get(startedThread.providerSessionId);
     const activeTurn = remoteThread?.turns.at(-1);
     expect(activeTurn).toBeTruthy();
 
@@ -4601,7 +4649,7 @@ describe('supervisor api', () => {
       ]
     };
 
-    fakeCodexManager.threads.set(startedThread.codexThreadId, {
+    fakeCodexManager.threads.set(startedThread.providerSessionId, {
       ...remoteThread!,
       status: { type: 'idle' },
       turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
@@ -4609,7 +4657,7 @@ describe('supervisor api', () => {
     fakeCodexManager.emit('notification', {
       method: 'turn/completed',
       params: {
-        threadId: startedThread.codexThreadId,
+        threadId: startedThread.providerSessionId,
         turn: completedTurn
       }
     });
@@ -4689,7 +4737,7 @@ describe('supervisor api', () => {
       id: 77,
       method: 'item/tool/requestUserInput',
       params: {
-        threadId: createdThread.codexThreadId,
+        threadId: createdThread.providerSessionId,
         turnId: 'turn-1',
         itemId: 'mcp-1',
         questions: [
@@ -4758,7 +4806,7 @@ describe('supervisor api', () => {
       id: 80,
       method: 'item/commandExecution/requestApproval',
       params: {
-        threadId: createdThread.codexThreadId,
+        threadId: createdThread.providerSessionId,
         turnId: 'turn-1',
         itemId: 'command-1',
         reason: 'Command requires approval by policy.',
@@ -4811,7 +4859,7 @@ describe('supervisor api', () => {
       id: 81,
       method: 'item/commandExecution/requestApproval',
       params: {
-        threadId: createdThread.codexThreadId,
+        threadId: createdThread.providerSessionId,
         turnId: 'turn-1',
         itemId: 'command-1',
         reason: 'Command requires approval by policy.',
@@ -4883,7 +4931,7 @@ describe('supervisor api', () => {
       id: 78,
       method: 'item/mcp/requestAuthorization',
       params: {
-        threadId: createdThread.codexThreadId,
+        threadId: createdThread.providerSessionId,
         turnId: 'turn-1',
         itemId: 'mcp-2',
         questions: [
@@ -4940,7 +4988,7 @@ describe('supervisor api', () => {
       id: 79,
       method: 'mcpServer/elicitation/request',
       params: {
-        threadId: createdThread.codexThreadId,
+        threadId: createdThread.providerSessionId,
         turnId: 'turn-1',
         serverName: 'openaiDeveloperDocs',
         mode: 'form',
@@ -4999,7 +5047,7 @@ describe('supervisor api', () => {
     expect(promptResponse.statusCode).toBe(200);
 
     const startedThread = promptResponse.json();
-    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const remoteThread = fakeCodexManager.threads.get(startedThread.providerSessionId);
     const activeTurn = remoteThread?.turns.at(-1);
     expect(activeTurn).toBeTruthy();
 
@@ -5025,7 +5073,7 @@ describe('supervisor api', () => {
       ]
     };
 
-    fakeCodexManager.threads.set(startedThread.codexThreadId, {
+    fakeCodexManager.threads.set(startedThread.providerSessionId, {
       ...remoteThread!,
       status: { type: 'idle' },
       turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
@@ -5089,7 +5137,7 @@ describe('supervisor api', () => {
     expect(promptResponse.statusCode).toBe(200);
 
     const startedThread = promptResponse.json();
-    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const remoteThread = fakeCodexManager.threads.get(startedThread.providerSessionId);
     const activeTurn = remoteThread?.turns.at(-1);
     expect(activeTurn).toBeTruthy();
 
@@ -5123,7 +5171,7 @@ describe('supervisor api', () => {
       ]
     };
 
-    fakeCodexManager.threads.set(startedThread.codexThreadId, {
+    fakeCodexManager.threads.set(startedThread.providerSessionId, {
       ...remoteThread!,
       status: { type: 'idle' },
       turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
@@ -5186,7 +5234,7 @@ describe('supervisor api', () => {
     expect(promptResponse.statusCode).toBe(200);
 
     const startedThread = promptResponse.json();
-    const remoteThread = fakeCodexManager.threads.get(startedThread.codexThreadId);
+    const remoteThread = fakeCodexManager.threads.get(startedThread.providerSessionId);
     const activeTurn = remoteThread?.turns.at(-1);
     expect(activeTurn).toBeTruthy();
 
@@ -5204,7 +5252,7 @@ describe('supervisor api', () => {
       ]
     };
 
-    fakeCodexManager.threads.set(startedThread.codexThreadId, {
+    fakeCodexManager.threads.set(startedThread.providerSessionId, {
       ...remoteThread!,
       status: { type: 'idle' },
       turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
@@ -5274,7 +5322,7 @@ describe('supervisor api', () => {
       'goals = true',
     );
     expect(fakeCodexManager.goalSetCalls.at(-1)).toMatchObject({
-      threadId: createdThread.codexThreadId,
+      threadId: createdThread.providerSessionId,
       objective: 'Finish the migration and keep tests green.',
       status: 'active',
       tokenBudget: 12000,
@@ -5316,7 +5364,7 @@ describe('supervisor api', () => {
         })
       ],
     });
-    expect(fakeCodexManager.goalClearCalls).toContain(createdThread.codexThreadId);
+    expect(fakeCodexManager.goalClearCalls).toContain(createdThread.providerSessionId);
     const detailAfterClearResponse = await app.inject({
       method: 'GET',
       url: `/api/threads/${createdThread.id}`
@@ -5369,16 +5417,16 @@ describe('supervisor api', () => {
       }
     });
 
-    const runningRecord = fakeCodexManager.threads.get(createdThread.codexThreadId);
+    const runningRecord = fakeCodexManager.threads.get(createdThread.providerSessionId);
     const activeTurnId = runningRecord?.turns.at(-1)?.id;
     if (!activeTurnId) {
       throw new Error('Expected fake Codex manager to start a turn.');
     }
-    const activeGoal = fakeCodexManager.goals.get(createdThread.codexThreadId)!;
+    const activeGoal = fakeCodexManager.goals.get(createdThread.providerSessionId)!;
     fakeCodexManager.emitServerEvent({
       method: 'thread/goal/updated',
       params: {
-        threadId: createdThread.codexThreadId,
+        threadId: createdThread.providerSessionId,
         turnId: activeTurnId,
         goal: {
           ...activeGoal,
@@ -5408,8 +5456,8 @@ describe('supervisor api', () => {
       })
     ]);
 
-    fakeCodexManager.completeTurn(createdThread.codexThreadId, activeTurnId, 'completed');
-    fakeCodexManager.goals.set(createdThread.codexThreadId, {
+    fakeCodexManager.completeTurn(createdThread.providerSessionId, activeTurnId, 'completed');
+    fakeCodexManager.goals.set(createdThread.providerSessionId, {
       ...activeGoal,
       status: 'complete',
       updatedAt: Date.now(),
@@ -5426,7 +5474,7 @@ describe('supervisor api', () => {
     const completedCreatedAt = completeGoalResponse.json().goal.createdAt;
 
     const duplicateCompleteGoal = {
-      ...fakeCodexManager.goals.get(createdThread.codexThreadId)!,
+      ...fakeCodexManager.goals.get(createdThread.providerSessionId)!,
       status: 'complete',
       createdAt: Date.parse(completedCreatedAt),
       updatedAt: Date.now(),
@@ -5434,7 +5482,7 @@ describe('supervisor api', () => {
     fakeCodexManager.emitServerEvent({
       method: 'thread/goal/updated',
       params: {
-        threadId: createdThread.codexThreadId,
+        threadId: createdThread.providerSessionId,
         turnId: null,
         goal: duplicateCompleteGoal,
       },
@@ -5487,8 +5535,8 @@ describe('supervisor api', () => {
     const localCreatedAt = setResponse.json().goal.createdAt;
     const localGoalId = setResponse.json().goal.localGoalId;
 
-    fakeCodexManager.goals.set(createdThread.codexThreadId, {
-      threadId: createdThread.codexThreadId,
+    fakeCodexManager.goals.set(createdThread.providerSessionId, {
+      threadId: createdThread.providerSessionId,
       objective: 'Keep the goal monitor deduped.',
       status: 'complete',
       tokenBudget: null,
@@ -5545,8 +5593,8 @@ describe('supervisor api', () => {
     });
     const createdThread = createResponse.json();
     const goalTurnId = '018f0000-0000-7000-8000-000000000123';
-    const remoteThread = fakeCodexManager.threads.get(createdThread.codexThreadId)!;
-    fakeCodexManager.threads.set(createdThread.codexThreadId, {
+    const remoteThread = fakeCodexManager.threads.get(createdThread.providerSessionId)!;
+    fakeCodexManager.threads.set(createdThread.providerSessionId, {
       ...remoteThread,
       status: { type: 'active', activeFlags: [] },
       turns: [
@@ -5563,7 +5611,7 @@ describe('supervisor api', () => {
     fakeCodexManager.emit('notification', {
       method: 'turn/started',
       params: {
-        threadId: createdThread.codexThreadId,
+        threadId: createdThread.providerSessionId,
         turn: {
           id: goalTurnId,
           status: 'inProgress',
@@ -5576,7 +5624,7 @@ describe('supervisor api', () => {
     fakeCodexManager.emit('notification', {
       method: 'thread/tokenUsage/updated',
       params: {
-        threadId: createdThread.codexThreadId,
+        threadId: createdThread.providerSessionId,
         turnId: goalTurnId,
         tokenUsage: {
           total: {

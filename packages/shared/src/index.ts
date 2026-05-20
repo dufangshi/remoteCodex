@@ -23,12 +23,105 @@ export interface RuntimeConfigDto {
   environment: string;
 }
 
-export interface CodexStatusDto {
+export type AgentBackendIdDto = 'codex' | 'claude';
+
+export interface AgentRuntimeStatusDto {
   state: 'starting' | 'ready' | 'degraded' | 'stopped' | 'failed';
-  transport: 'stdio';
+  transport: 'stdio' | 'sdk' | 'none';
   lastStartedAt: string | null;
   lastError: string | null;
   restartCount: number;
+}
+
+export interface AgentProviderCapabilitiesDto {
+  sessions: {
+    list: boolean;
+    read: boolean;
+    resume: boolean;
+    importLocal: boolean;
+  };
+  turns: {
+    start: boolean;
+    streamInput: boolean;
+    steer: boolean;
+    interrupt: boolean;
+    compact: boolean;
+  };
+  branching: {
+    fork: boolean;
+    hardRollback: boolean;
+    resumeAt: boolean;
+    rewindFiles: boolean;
+  };
+  controls: {
+    planMode: boolean;
+    permissionRequests: boolean;
+    sandboxMode: boolean;
+    fastServiceTier: boolean;
+    goals: boolean;
+  };
+  management: {
+    models: boolean;
+    mcpStatus: boolean;
+    skills: boolean;
+    hooks: boolean;
+    hookTrust: boolean;
+    hostConfigFiles: boolean;
+    providerSettings: boolean;
+  };
+  usage: {
+    contextWindow: boolean;
+    tokenUsage: boolean;
+    costUsd: boolean;
+  };
+}
+
+export interface AgentBackendDto {
+  provider: AgentBackendIdDto;
+  displayName: string;
+  description: string;
+  enabled: boolean;
+  isDefault: boolean;
+  status: AgentRuntimeStatusDto;
+  capabilities: AgentProviderCapabilitiesDto;
+  managementSchema: AgentBackendManagementSchemaDto;
+}
+
+export interface AgentBackendConfigFileSchemaDto {
+  name: string;
+  label: string;
+  description: string;
+  roles?: Array<'runtime' | 'auth' | 'mcp' | 'hooks' | 'providerSettings'>;
+}
+
+export type AgentBackendToolboxActionDto =
+  | 'fast'
+  | 'compact'
+  | 'goal'
+  | 'fork'
+  | 'skills'
+  | 'mcp'
+  | 'hooks';
+
+export interface AgentBackendToolboxItemSchemaDto {
+  action: AgentBackendToolboxActionDto;
+  command: string;
+  label: string;
+  description?: string | null;
+  panel?: 'fork' | 'skills' | 'mcp' | 'hooks' | null;
+}
+
+export interface AgentBackendHookCommandTemplateDto {
+  eventName: AgentHookEventNameDto;
+  command: string;
+}
+
+export interface AgentBackendManagementSchemaDto {
+  hostConfigFiles: AgentBackendConfigFileSchemaDto[];
+  toolboxItems: AgentBackendToolboxItemSchemaDto[];
+  hookCommandTemplates: AgentBackendHookCommandTemplateDto[];
+  configArchives: boolean;
+  buildRestart: boolean;
 }
 
 export interface ModelOptionDto {
@@ -52,43 +145,43 @@ export interface HealthDto {
   timestamp: string;
 }
 
-export type CodexHostFileNameDto = 'config.toml' | 'auth.json';
+export type ProviderHostFileNameDto = string;
 
-export interface CodexHostFileDto {
-  name: CodexHostFileNameDto;
+export interface ProviderHostFileDto {
+  name: ProviderHostFileNameDto;
   path: string;
   exists: boolean;
   content: string;
 }
 
-export interface UpdateCodexHostFileInput {
+export interface UpdateProviderHostFileInput {
   content: string;
 }
 
-export interface CodexHostConfigArchiveFileDto {
-  name: CodexHostFileNameDto;
+export interface ProviderHostConfigArchiveFileDto {
+  name: ProviderHostFileNameDto;
   exists: boolean;
 }
 
-export interface CodexHostConfigArchiveDto {
+export interface ProviderHostConfigArchiveDto {
   id: string;
   label: string;
   createdAt: string;
   updatedAt: string;
-  files: Record<CodexHostFileNameDto, CodexHostConfigArchiveFileDto>;
+  files: Record<string, ProviderHostConfigArchiveFileDto>;
 }
 
-export interface CreateCodexHostConfigArchiveInput {
+export interface CreateProviderHostConfigArchiveInput {
   label?: string;
 }
 
-export interface RenameCodexHostConfigArchiveInput {
+export interface RenameProviderHostConfigArchiveInput {
   label: string;
 }
 
-export interface ApplyCodexHostConfigArchiveResultDto {
-  archive: CodexHostConfigArchiveDto;
-  status: CodexStatusDto;
+export interface ApplyProviderHostConfigArchiveResultDto {
+  archive: ProviderHostConfigArchiveDto;
+  status: AgentRuntimeStatusDto;
 }
 
 export interface WorkspaceDto {
@@ -116,10 +209,12 @@ export type CreateWorkspaceInput = CreateWorkspaceFromPathInput | CreateWorkspac
 export interface WorkspaceSettingsDto {
   workspaceRoot: string;
   devHome: string;
+  defaultBackend: AgentBackendIdDto;
 }
 
 export interface UpdateWorkspaceSettingsInput {
   devHome: string;
+  defaultBackend?: AgentBackendIdDto;
 }
 
 export interface UpdateWorkspaceInput {
@@ -175,7 +270,8 @@ export interface ThreadContextUsageDto {
 export interface ThreadDto {
   id: string;
   workspaceId: string;
-  codexThreadId: string | null;
+  provider: AgentBackendIdDto;
+  providerSessionId: string | null;
   source: ThreadSourceDto;
   title: string;
   model: string | null;
@@ -325,61 +421,61 @@ export interface ThreadActivityNoteDto {
   turnIndex?: number | null;
 }
 
-export type CodexSkillScopeDto = 'user' | 'repo' | 'system' | 'admin';
+export type AgentSkillScopeDto = 'user' | 'repo' | 'system' | 'admin';
 
-export interface CodexSkillInterfaceDto {
+export interface AgentSkillInterfaceDto {
   displayName?: string;
   shortDescription?: string;
   brandColor?: string;
   defaultPrompt?: string;
 }
 
-export interface CodexSkillDto {
+export interface AgentSkillDto {
   name: string;
   description: string;
   shortDescription?: string;
-  interface?: CodexSkillInterfaceDto;
+  interface?: AgentSkillInterfaceDto;
   path: string;
-  scope: CodexSkillScopeDto;
+  scope: AgentSkillScopeDto;
   enabled: boolean;
 }
 
-export interface CodexSkillErrorDto {
+export interface AgentSkillErrorDto {
   path: string;
   message: string;
 }
 
 export interface ThreadSkillsDto {
   cwd: string;
-  skills: CodexSkillDto[];
-  errors: CodexSkillErrorDto[];
+  skills: AgentSkillDto[];
+  errors: AgentSkillErrorDto[];
 }
 
-export type CodexMcpAuthStatusDto =
+export type AgentMcpAuthStatusDto =
   | 'unsupported'
   | 'notLoggedIn'
   | 'bearerToken'
   | 'oAuth';
 
-export interface CodexMcpToolDto {
+export interface AgentMcpToolDto {
   name: string;
   title: string | null;
   description: string | null;
 }
 
-export interface CodexMcpServerDto {
+export interface AgentMcpServerDto {
   name: string;
-  authStatus: CodexMcpAuthStatusDto;
-  tools: CodexMcpToolDto[];
+  authStatus: AgentMcpAuthStatusDto;
+  tools: AgentMcpToolDto[];
   resourceCount: number;
   resourceTemplateCount: number;
 }
 
 export interface ThreadMcpServersDto {
-  servers: CodexMcpServerDto[];
+  servers: AgentMcpServerDto[];
 }
 
-export type CodexHookEventNameDto =
+export type AgentHookEventNameDto =
   | 'preToolUse'
   | 'permissionRequest'
   | 'postToolUse'
@@ -389,8 +485,8 @@ export type CodexHookEventNameDto =
   | 'userPromptSubmit'
   | 'stop';
 
-export type CodexHookHandlerTypeDto = 'command' | 'prompt' | 'agent';
-export type CodexHookSourceDto =
+export type AgentHookHandlerTypeDto = 'command' | 'prompt' | 'agent';
+export type AgentHookSourceDto =
   | 'system'
   | 'user'
   | 'project'
@@ -401,43 +497,43 @@ export type CodexHookSourceDto =
   | 'legacyManagedConfigFile'
   | 'legacyManagedConfigMdm'
   | 'unknown';
-export type CodexHookTrustStatusDto = 'managed' | 'untrusted' | 'trusted' | 'modified';
+export type AgentHookTrustStatusDto = 'managed' | 'untrusted' | 'trusted' | 'modified';
 
-export interface CodexHookDto {
+export interface AgentHookDto {
   key: string;
-  eventName: CodexHookEventNameDto;
-  handlerType: CodexHookHandlerTypeDto;
+  eventName: AgentHookEventNameDto;
+  handlerType: AgentHookHandlerTypeDto;
   matcher: string | null;
   command: string | null;
   timeoutSec: number;
   statusMessage: string | null;
   sourcePath: string;
-  source: CodexHookSourceDto;
+  source: AgentHookSourceDto;
   pluginId: string | null;
   displayOrder: number;
   enabled: boolean;
   isManaged: boolean;
   currentHash: string;
-  trustStatus: CodexHookTrustStatusDto;
+  trustStatus: AgentHookTrustStatusDto;
 }
 
-export interface CodexHookErrorDto {
+export interface AgentHookErrorDto {
   path: string;
   message: string;
 }
 
 export interface ThreadHooksDto {
   cwd: string;
-  hooks: CodexHookDto[];
+  hooks: AgentHookDto[];
   warnings: string[];
-  errors: CodexHookErrorDto[];
+  errors: AgentHookErrorDto[];
   globalHooksPath: string;
   projectHooksPath: string;
 }
 
 export interface CreateThreadHookInput {
   scope: 'global' | 'project';
-  eventName: CodexHookEventNameDto;
+  eventName: AgentHookEventNameDto;
   matcher?: string | null;
   command: string;
   timeoutSec?: number | null;
@@ -446,7 +542,7 @@ export interface CreateThreadHookInput {
 
 export interface ThreadHookTargetInput {
   scope: 'global' | 'project';
-  eventName: CodexHookEventNameDto;
+  eventName: AgentHookEventNameDto;
   matcher?: string | null;
   command: string;
   timeoutSec?: number | null;
@@ -637,6 +733,7 @@ export interface ShellResizeInput {
 export interface CreateThreadInput {
   workspaceId: string;
   title?: string;
+  provider?: AgentBackendIdDto;
   model: string;
   approvalMode: ApprovalMode;
 }

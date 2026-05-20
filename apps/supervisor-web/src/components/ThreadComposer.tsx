@@ -14,10 +14,13 @@ import {
 } from 'react';
 
 import type {
+  AgentBackendHookCommandTemplateDto,
+  AgentBackendToolboxItemSchemaDto,
+  AgentProviderCapabilitiesDto,
   CollaborationModeDto,
-  CodexHostFileDto,
-  CodexHookEventNameDto,
-  CodexHookDto,
+  ProviderHostFileDto,
+  AgentHookEventNameDto,
+  AgentHookDto,
   CreateThreadHookInput,
   ThreadHooksDto,
   ThreadMcpServersDto,
@@ -48,6 +51,9 @@ interface ThreadComposerProps {
   collaborationMode?: CollaborationModeDto;
   modelOptions?: ModelOptionDto[];
   contextUsage?: ThreadContextUsageDto | null | undefined;
+  capabilities?: AgentProviderCapabilitiesDto | null | undefined;
+  toolboxItems?: AgentBackendToolboxItemSchemaDto[] | null | undefined;
+  hookCommandTemplates?: AgentBackendHookCommandTemplateDto[] | null | undefined;
   followTail?: boolean;
   threadConnected?: boolean;
   disabled?: boolean;
@@ -88,10 +94,12 @@ interface ThreadComposerProps {
   onOpenForkTurns?: () => Promise<void> | void;
   onForkLatest?: () => Promise<void> | void;
   onForkTurn?: (turnId: string) => Promise<void> | void;
-  onReadCodexConfig?: () => Promise<CodexHostFileDto> | CodexHostFileDto;
-  onWriteCodexConfig?: (
-    content: string,
-  ) => Promise<CodexHostFileDto> | CodexHostFileDto;
+  onReadProviderConfig?:
+    | (() => Promise<ProviderHostFileDto> | ProviderHostFileDto)
+    | undefined;
+  onWriteProviderConfig?:
+    | ((content: string) => Promise<ProviderHostFileDto> | ProviderHostFileDto)
+    | undefined;
   onToggleFollow?: () => void;
   onUpdateSettings?: (input: UpdateThreadSettingsInput) => Promise<void> | void;
   onToggleView?: () => void;
@@ -136,7 +144,7 @@ type SlashPanelView = 'root' | 'skills' | 'mcp' | 'hooks' | 'fork' | 'forkTurns'
 type McpPanelMode = 'list' | 'add' | 'http' | 'stdio';
 type HooksPanelMode = 'list' | 'add' | 'edit';
 
-const HOOK_EVENT_OPTIONS: Array<{ value: CodexHookEventNameDto; label: string; matcherHint: string }> = [
+const HOOK_EVENT_OPTIONS: Array<{ value: AgentHookEventNameDto; label: string; matcherHint: string }> = [
   { value: 'preToolUse', label: 'PreToolUse', matcherHint: 'Bash' },
   { value: 'permissionRequest', label: 'PermissionRequest', matcherHint: 'Bash' },
   { value: 'postToolUse', label: 'PostToolUse', matcherHint: 'Bash' },
@@ -147,18 +155,8 @@ const HOOK_EVENT_OPTIONS: Array<{ value: CodexHookEventNameDto; label: string; m
   { value: 'postCompact', label: 'PostCompact', matcherHint: '' },
 ];
 
-const DEFAULT_HOOK_COMMAND =
-  'node -e "process.stdin.resume(); process.stdin.on(\'end\', () => console.error(\'remote-codex hook ran\'))"';
-const DEFAULT_STOP_HOOK_COMMAND =
-  'node -e \'process.stdin.resume(); process.stdin.on("end", () => console.log(JSON.stringify({ systemMessage: "remote-codex hook ran" })))\'';
-const DEFAULT_HOOK_COMMANDS = new Set([
-  DEFAULT_HOOK_COMMAND,
-  DEFAULT_STOP_HOOK_COMMAND,
-]);
-
-function defaultHookCommand(eventName: CodexHookEventNameDto) {
-  return eventName === 'stop' ? DEFAULT_STOP_HOOK_COMMAND : DEFAULT_HOOK_COMMAND;
-}
+const FALLBACK_HOOK_COMMAND =
+  'node -e "process.stdin.resume(); process.stdin.on(\'end\', () => console.error(\'hook ran\'))"';
 
 function normalizePromptText(value: string) {
   return value.replace(/\u00a0/g, ' ');
@@ -324,7 +322,7 @@ function skillScopeLabel(
   }
 }
 
-function hookEventLabel(value: CodexHookEventNameDto) {
+function hookEventLabel(value: AgentHookEventNameDto) {
   return HOOK_EVENT_OPTIONS.find((entry) => entry.value === value)?.label ?? value;
 }
 
@@ -355,7 +353,7 @@ function hookTrustLabel(value: ThreadHooksDto['hooks'][number]['trustStatus']) {
   }
 }
 
-function hookEventJsonKey(value: CodexHookEventNameDto) {
+function hookEventJsonKey(value: AgentHookEventNameDto) {
   switch (value) {
     case 'preToolUse':
       return 'PreToolUse';
@@ -376,7 +374,7 @@ function hookEventJsonKey(value: CodexHookEventNameDto) {
   }
 }
 
-function hookScopeFromRecord(hook: CodexHookDto): CreateThreadHookInput['scope'] | null {
+function hookScopeFromRecord(hook: AgentHookDto): CreateThreadHookInput['scope'] | null {
   if (hook.source === 'user') {
     return 'global';
   }
@@ -386,7 +384,7 @@ function hookScopeFromRecord(hook: CodexHookDto): CreateThreadHookInput['scope']
   return null;
 }
 
-function editableHookTarget(hook: CodexHookDto): UpdateThreadHookInput['target'] | null {
+function editableHookTarget(hook: AgentHookDto): UpdateThreadHookInput['target'] | null {
   const scope = hookScopeFromRecord(hook);
   if (!scope || hook.handlerType !== 'command' || !hook.command || hook.isManaged) {
     return null;
@@ -779,6 +777,9 @@ export function ThreadComposer({
   collaborationMode = 'default',
   modelOptions = [],
   contextUsage = null,
+  capabilities = null,
+  toolboxItems = null,
+  hookCommandTemplates = null,
   followTail = false,
   threadConnected = true,
   disabled = false,
@@ -827,8 +828,8 @@ export function ThreadComposer({
   onOpenForkTurns,
   onForkLatest,
   onForkTurn,
-  onReadCodexConfig,
-  onWriteCodexConfig,
+  onReadProviderConfig,
+  onWriteProviderConfig,
   onToggleFollow,
   onUpdateSettings,
   onToggleView,
@@ -848,9 +849,66 @@ export function ThreadComposer({
   const [mcpPanelMode, setMcpPanelMode] = useState<McpPanelMode>('list');
   const [hooksPanelMode, setHooksPanelMode] = useState<HooksPanelMode>('list');
   const [hookScope, setHookScope] = useState<CreateThreadHookInput['scope']>('project');
-  const [hookEventName, setHookEventName] = useState<CodexHookEventNameDto>('preToolUse');
+  const slashCapabilities = useMemo(
+    () => ({
+      fast: capabilities?.controls.fastServiceTier ?? false,
+      compact: capabilities?.turns.compact ?? false,
+      goal: capabilities?.controls.goals ?? false,
+      fork: capabilities?.branching.fork ?? false,
+      skills: capabilities?.management.skills ?? false,
+      mcp: capabilities?.management.mcpStatus ?? false,
+      hooks: capabilities?.management.hooks ?? false,
+      hostConfigFiles: capabilities?.management.hostConfigFiles ?? false,
+      mcpConfigEditing:
+        Boolean(capabilities?.management.hostConfigFiles) &&
+        Boolean(onReadProviderConfig) &&
+        Boolean(onWriteProviderConfig),
+      hookTrust: capabilities?.management.hookTrust ?? false,
+    }),
+    [capabilities, onReadProviderConfig, onWriteProviderConfig],
+  );
+  const availableToolboxItems = useMemo(
+    () =>
+      (toolboxItems ?? []).filter((item) => {
+        switch (item.action) {
+          case 'fast':
+            return slashCapabilities.fast;
+          case 'compact':
+            return slashCapabilities.compact;
+          case 'goal':
+            return slashCapabilities.goal;
+          case 'fork':
+            return slashCapabilities.fork;
+          case 'skills':
+            return slashCapabilities.skills;
+          case 'mcp':
+            return slashCapabilities.mcp;
+          case 'hooks':
+            return slashCapabilities.hooks;
+          default:
+            return false;
+        }
+      }),
+    [slashCapabilities, toolboxItems],
+  );
+  const hookCommandTemplateByEvent = useMemo(() => {
+    const templates = new Map<AgentHookEventNameDto, string>();
+    for (const template of hookCommandTemplates ?? []) {
+      templates.set(template.eventName, template.command);
+    }
+    return templates;
+  }, [hookCommandTemplates]);
+  const defaultHookCommand = (eventName: AgentHookEventNameDto) =>
+    hookCommandTemplateByEvent.get(eventName) ??
+    hookCommandTemplateByEvent.get('preToolUse') ??
+    FALLBACK_HOOK_COMMAND;
+  const defaultHookCommands = useMemo(
+    () => new Set([FALLBACK_HOOK_COMMAND, ...hookCommandTemplateByEvent.values()]),
+    [hookCommandTemplateByEvent],
+  );
+  const [hookEventName, setHookEventName] = useState<AgentHookEventNameDto>('preToolUse');
   const [hookMatcher, setHookMatcher] = useState('Bash');
-  const [hookCommand, setHookCommand] = useState(defaultHookCommand('preToolUse'));
+  const [hookCommand, setHookCommand] = useState(FALLBACK_HOOK_COMMAND);
   const [hookTimeoutSec, setHookTimeoutSec] = useState('30');
   const [hookStatusMessage, setHookStatusMessage] = useState('Running hook');
   const [editingHookTarget, setEditingHookTarget] = useState<UpdateThreadHookInput['target'] | null>(null);
@@ -941,9 +999,9 @@ export function ThreadComposer({
       return selected?.matcherHint ?? '';
     });
     setHookCommand((current) =>
-      DEFAULT_HOOK_COMMANDS.has(current.trim()) ? defaultHookCommand(hookEventName) : current,
+      defaultHookCommands.has(current.trim()) ? defaultHookCommand(hookEventName) : current,
     );
-  }, [hookEventName]);
+  }, [defaultHookCommands, hookEventName, hookCommandTemplateByEvent]);
 
   useEffect(() => {
     if (!copiedSkillName) {
@@ -1154,24 +1212,111 @@ export function ThreadComposer({
     [attachmentPreviewUrls],
   );
 
-  async function loadCodexConfig() {
-    if (!onReadCodexConfig) {
-      throw new Error('config.toml editing is unavailable in this view.');
+  async function loadProviderConfig() {
+    if (!slashCapabilities.hostConfigFiles || !onReadProviderConfig) {
+      throw new Error('Provider config editing is unavailable for this thread.');
     }
 
-    const file = await onReadCodexConfig();
+    const file = await onReadProviderConfig();
     setMcpConfigPath(file.path);
     return file;
   }
 
   async function writeMcpConfig(nextContent: string) {
-    if (!onWriteCodexConfig) {
-      throw new Error('config.toml editing is unavailable in this view.');
+    if (!slashCapabilities.hostConfigFiles || !onWriteProviderConfig) {
+      throw new Error('Provider config editing is unavailable for this thread.');
     }
 
-    const updated = await onWriteCodexConfig(nextContent);
+    const updated = await onWriteProviderConfig(nextContent);
     setMcpConfigPath(updated.path);
     return updated;
+  }
+
+  function toolboxItemStatus(item: AgentBackendToolboxItemSchemaDto) {
+    switch (item.action) {
+      case 'fast':
+        return fastMode ? 'On' : 'Off';
+      case 'compact':
+        return compactBusy ? 'Busy' : 'Run';
+      case 'goal':
+        return goalComposeMode
+          ? 'Composing'
+          : goalState.data
+            ? goalStatusLabel(goalState.data.status)
+            : 'Open';
+      case 'fork':
+        return busy ? 'Idle only' : 'Open';
+      case 'skills':
+      case 'mcp':
+      case 'hooks':
+        return 'View';
+      default:
+        return '';
+    }
+  }
+
+  function toolboxItemDisabled(item: AgentBackendToolboxItemSchemaDto) {
+    switch (item.action) {
+      case 'fast':
+        return settingsBusy;
+      case 'compact':
+        return compactBusy || busy;
+      case 'fork':
+        return busy || forkBusy;
+      default:
+        return false;
+    }
+  }
+
+  function toolboxItemClassName(item: AgentBackendToolboxItemSchemaDto) {
+    const active =
+      (item.action === 'fast' && fastMode) ||
+      (item.action === 'goal' &&
+        (goalComposeMode || goalState.data?.status === 'active'));
+    return `${active ? 'ui-status-warning' : 'thread-composer-menu-item'} mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-60`;
+  }
+
+  function handleToolboxItemClick(
+    item: AgentBackendToolboxItemSchemaDto,
+    event: React.MouseEvent<HTMLButtonElement>,
+  ) {
+    event.stopPropagation();
+    switch (item.action) {
+      case 'fast':
+        void handleUpdateSettings({
+          fastMode: !fastMode,
+        });
+        break;
+      case 'compact':
+        setOpenMenu(null);
+        void onCompact?.();
+        break;
+      case 'goal':
+        if (goalComposeMode) {
+          exitGoalComposeMode();
+          setOpenMenu(null);
+        } else {
+          enterGoalComposeMode();
+        }
+        break;
+      case 'fork':
+        setSlashPanelView('fork');
+        break;
+      case 'skills':
+        setSlashPanelView('skills');
+        void onOpenSkills?.();
+        break;
+      case 'mcp':
+        setSlashPanelView('mcp');
+        void onOpenMcp?.();
+        break;
+      case 'hooks':
+        setSlashPanelView('hooks');
+        void onOpenHooks?.();
+        break;
+      default:
+        break;
+    }
   }
 
   function resetHookForm() {
@@ -1184,7 +1329,7 @@ export function ThreadComposer({
     setHookStatusMessage('Running hook');
   }
 
-  function startEditingHook(hook: CodexHookDto) {
+  function startEditingHook(hook: AgentHookDto) {
     const target = editableHookTarget(hook);
     if (!target) {
       setHookConfigError('Only command hooks in global or project hooks.json can be edited here.');
@@ -1221,7 +1366,7 @@ export function ThreadComposer({
     setMcpConfigSuccess(null);
 
     try {
-      const file = await loadCodexConfig();
+      const file = await loadProviderConfig();
       const nextContent = upsertMcpServerBlock(
         file.content,
         name,
@@ -1229,7 +1374,7 @@ export function ThreadComposer({
       );
       await writeMcpConfig(nextContent);
       setMcpConfigSuccess(
-        'MCP entry written to config.toml. Restart Codex service if it does not appear immediately.',
+        'MCP entry written to provider config. Restart the backend if it does not appear immediately.',
       );
       setMcpPanelMode('list');
       setMcpHttpName('');
@@ -1237,7 +1382,7 @@ export function ThreadComposer({
       void onOpenMcp?.();
     } catch (error) {
       setMcpConfigError(
-        error instanceof Error ? error.message : 'Unable to update config.toml.',
+        error instanceof Error ? error.message : 'Unable to update provider config.',
       );
     } finally {
       setMcpConfigBusy(false);
@@ -1250,7 +1395,7 @@ export function ThreadComposer({
     setMcpConfigSuccess(null);
 
     try {
-      await loadCodexConfig();
+      await loadProviderConfig();
       if (!mcpRawBlock.trim()) {
         setMcpRawBlock(
           '[mcp_servers.example_stdio]\ncommand = "npx"\nargs = ["-y", "your-mcp-server"]\n',
@@ -1259,7 +1404,7 @@ export function ThreadComposer({
       setMcpPanelMode('stdio');
     } catch (error) {
       setMcpConfigError(
-        error instanceof Error ? error.message : 'Unable to load config.toml.',
+        error instanceof Error ? error.message : 'Unable to load provider config.',
       );
     } finally {
       setMcpConfigBusy(false);
@@ -1280,7 +1425,7 @@ export function ThreadComposer({
     setMcpConfigSuccess(null);
 
     try {
-      const file = await loadCodexConfig();
+      const file = await loadProviderConfig();
       const nextContent = upsertMcpServerBlock(
         file.content,
         serverName,
@@ -1288,13 +1433,13 @@ export function ThreadComposer({
       );
       await writeMcpConfig(nextContent);
       setMcpConfigSuccess(
-        'MCP entry written to config.toml. Restart Codex service if it does not appear immediately.',
+        'MCP entry written to provider config. Restart the backend if it does not appear immediately.',
       );
       setMcpPanelMode('list');
       void onOpenMcp?.();
     } catch (error) {
       setMcpConfigError(
-        error instanceof Error ? error.message : 'Unable to update config.toml.',
+        error instanceof Error ? error.message : 'Unable to update provider config.',
       );
     } finally {
       setMcpConfigBusy(false);
@@ -1368,7 +1513,7 @@ export function ThreadComposer({
     }
   }
 
-  async function handleTrustHook(hook: CodexHookDto) {
+  async function handleTrustHook(hook: AgentHookDto) {
     if (!onTrustHook || !hook.currentHash) {
       setHookConfigError('Hook trust is unavailable in this view.');
       return;
@@ -1391,7 +1536,7 @@ export function ThreadComposer({
     }
   }
 
-  async function handleUntrustHook(hook: CodexHookDto) {
+  async function handleUntrustHook(hook: AgentHookDto) {
     if (!onUntrustHook) {
       setHookConfigError('Hook trust is unavailable in this view.');
       return;
@@ -2182,11 +2327,11 @@ export function ThreadComposer({
 
   const promptPlaceholder =
     goalComposeMode
-      ? 'Describe the goal Codex should continue working toward...'
+      ? 'Describe the goal the backend should continue working toward...'
       : disabledPlaceholder ??
     (isShellView
       ? 'Send shell input to the attached terminal...'
-      : 'Ask Codex to inspect, modify, or explain code...');
+      : 'Ask the backend to inspect, modify, or explain code...');
   const interruptLabel = isShellView ? 'Send Ctrl-C' : 'Stop Current Turn';
   const sendButtonLabel =
     goalComposeMode
@@ -2316,135 +2461,28 @@ export function ThreadComposer({
                   >
                     {slashPanelView === 'root' ? (
                       <div className="p-2">
-                        <button
-                          type="button"
-                          disabled={settingsBusy}
-                          onClick={() => {
-                            void handleUpdateSettings({
-                              fastMode: !fastMode,
-                            });
-                          }}
-                          className={`block w-full rounded-xl px-3 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                            fastMode
-                              ? 'ui-status-warning'
-                              : 'thread-composer-menu-item'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <span>/fast</span>
-                            <span className="text-[11px] uppercase tracking-[0.16em] text-stone-400">
-                              {fastMode ? 'On' : 'Off'}
-                            </span>
-                          </div>
-                        </button>
-                        <button
-                          type="button"
-                          disabled={compactBusy || busy}
-                          onClick={() => {
-                            setOpenMenu(null);
-                            void onCompact?.();
-                          }}
-                          className="thread-composer-menu-item mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <span>/compact</span>
-                            <span className="text-[11px] uppercase tracking-[0.16em] text-stone-400">
-                              {compactBusy ? 'Busy' : 'Run'}
-                            </span>
-                          </div>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            if (goalComposeMode) {
-                              exitGoalComposeMode();
-                              setOpenMenu(null);
-                            } else {
-                              enterGoalComposeMode();
-                            }
-                          }}
-                          className={`mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm transition ${
-                            goalComposeMode || goalState.data?.status === 'active'
-                              ? 'ui-status-warning'
-                              : 'thread-composer-menu-item'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <span>/goal</span>
-                            <span className="text-[11px] uppercase tracking-[0.16em] text-stone-400">
-                              {goalComposeMode
-                                ? 'Composing'
-                                : goalState.data
-                                  ? goalStatusLabel(goalState.data.status)
-                                  : 'Open'}
-                            </span>
-                          </div>
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busy || forkBusy}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setSlashPanelView('fork');
-                          }}
-                          className="thread-composer-menu-item mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <span>/fork</span>
-                            <span className="text-[11px] uppercase tracking-[0.16em] text-stone-400">
-                              {busy ? 'Idle only' : 'Open'}
-                            </span>
-                          </div>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setSlashPanelView('skills');
-                            void onOpenSkills?.();
-                          }}
-                          className="thread-composer-menu-item mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm transition"
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <span>/skills</span>
-                            <span className="text-[11px] uppercase tracking-[0.16em] text-stone-400">
-                              View
-                            </span>
-                          </div>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setSlashPanelView('mcp');
-                            void onOpenMcp?.();
-                          }}
-                          className="thread-composer-menu-item mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm transition"
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <span>/mcp</span>
-                            <span className="text-[11px] uppercase tracking-[0.16em] text-stone-400">
-                              View
-                            </span>
-                          </div>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setSlashPanelView('hooks');
-                            void onOpenHooks?.();
-                          }}
-                          className="thread-composer-menu-item mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm transition"
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <span>/hooks</span>
-                            <span className="text-[11px] uppercase tracking-[0.16em] text-stone-400">
-                              View
-                            </span>
-                          </div>
-                        </button>
+                        {availableToolboxItems.map((item, index) => (
+                          <button
+                            key={`${item.action}:${item.command}`}
+                            type="button"
+                            disabled={toolboxItemDisabled(item)}
+                            onClick={(event) => handleToolboxItemClick(item, event)}
+                            className={`${toolboxItemClassName(item)} ${index === 0 ? 'mt-0' : ''}`}
+                            title={item.description ?? item.label}
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <span>{item.command}</span>
+                              <span className="text-[11px] uppercase tracking-[0.16em] text-stone-400">
+                                {toolboxItemStatus(item)}
+                              </span>
+                            </div>
+                          </button>
+                        ))}
+                        {availableToolboxItems.length === 0 ? (
+                            <p className="px-3 py-2 text-sm text-stone-400">
+                              No backend tools are available for this thread.
+                            </p>
+                        ) : null}
                       </div>
                     ) : (
                       <div className="max-h-80 overflow-auto">
@@ -2613,10 +2651,10 @@ export function ThreadComposer({
                                   Hook config sources
                                 </p>
                                 <p className="truncate text-[11px] text-stone-500">
-                                  {hooksState.data?.projectHooksPath ?? '<workspace>/.codex/hooks.json'}
+                                  {hooksState.data?.projectHooksPath ?? '<workspace hooks config>'}
                                 </p>
                               </div>
-                              {hooksPanelMode === 'list' ? (
+                              {hooksPanelMode === 'list' && slashCapabilities.hostConfigFiles ? (
                                 <button
                                   type="button"
                                   onClick={(event) => {
@@ -2682,7 +2720,7 @@ export function ThreadComposer({
                                       aria-label="Hook event"
                                       value={hookEventName}
                                       onChange={(event) =>
-                                        setHookEventName(event.target.value as CodexHookEventNameDto)
+                                        setHookEventName(event.target.value as AgentHookEventNameDto)
                                       }
                                       className="mt-1 w-full rounded-lg border border-stone-700 bg-stone-950 px-2.5 py-2 text-sm text-stone-100 outline-none focus:border-sky-300/50"
                                     >
@@ -2826,7 +2864,9 @@ export function ThreadComposer({
                                           Edit
                                         </button>
                                       ) : null}
-                                      {hook.trustStatus === 'trusted' && !hook.isManaged ? (
+                                      {slashCapabilities.hookTrust &&
+                                      hook.trustStatus === 'trusted' &&
+                                      !hook.isManaged ? (
                                         <button
                                           type="button"
                                           disabled={hookConfigBusy}
@@ -2841,7 +2881,8 @@ export function ThreadComposer({
                                       ) : null}
                                       {(hook.trustStatus === 'untrusted' ||
                                         hook.trustStatus === 'modified') &&
-                                      !hook.isManaged ? (
+                                      !hook.isManaged &&
+                                      slashCapabilities.hookTrust ? (
                                         <button
                                           type="button"
                                           disabled={hookConfigBusy || !hook.currentHash}
@@ -2890,10 +2931,10 @@ export function ThreadComposer({
                                   MCP config source
                                 </p>
                                 <p className="truncate text-[11px] text-stone-500">
-                                  {mcpConfigPath ?? '~/.codex/config.toml'}
+                                  {mcpConfigPath ?? '<provider config>'}
                                 </p>
                               </div>
-                              {mcpPanelMode === 'list' ? (
+                              {mcpPanelMode === 'list' && slashCapabilities.mcpConfigEditing ? (
                                 <button
                                   type="button"
                                   onClick={(event) => {
@@ -2947,7 +2988,7 @@ export function ThreadComposer({
                                     </span>
                                   </div>
                                   <p className="mt-1 text-xs text-stone-400">
-                                    Add an MCP server with a name and URL, then write the matching block into config.toml.
+                                    Add an MCP server with a name and URL, then write the matching block into provider config.
                                   </p>
                                 </button>
                                 <button
@@ -2965,7 +3006,7 @@ export function ThreadComposer({
                                     </span>
                                   </div>
                                   <p className="mt-1 text-xs text-stone-400">
-                                    Write a single `[mcp_servers.name]` block, then save it back into config.toml.
+                                    Write a single `[mcp_servers.name]` block, then save it back into provider config.
                                   </p>
                                 </button>
                               </div>
@@ -3018,10 +3059,10 @@ export function ThreadComposer({
                             {mcpPanelMode === 'stdio' ? (
                               <div className="space-y-2 rounded-xl border border-stone-800 bg-stone-950/70 px-3 py-3">
                                 <label className="block text-xs text-stone-400">
-                                  MCP block for config.toml
+                                  MCP block for provider config
                                 </label>
                                 <textarea
-                                  aria-label="MCP block for config.toml"
+                                  aria-label="MCP block for provider config"
                                   value={mcpRawBlock}
                                   onChange={(event) => setMcpRawBlock(event.target.value)}
                                   rows={8}

@@ -31,6 +31,7 @@ import { HttpError } from '../app';
 const createThreadSchema = z.object({
   workspaceId: z.string().uuid(),
   title: z.string().optional(),
+  provider: z.enum(['codex', 'claude']).optional(),
   model: z.string().min(1),
   approvalMode: z.enum(['yolo', 'guarded']).default('yolo')
 });
@@ -377,20 +378,14 @@ export async function registerThreadRoutes(app: FastifyInstance) {
 
   app.post('/api/threads/start', async (request) => {
     const body = createThreadSchema.parse(request.body);
-    return app.services.threadService.createThread(
-      body.title
-        ? {
-            workspaceId: body.workspaceId,
-            model: body.model,
-            approvalMode: body.approvalMode,
-            title: body.title
-          }
-        : {
-            workspaceId: body.workspaceId,
-            model: body.model,
-            approvalMode: body.approvalMode
-          }
-    );
+    const input = {
+      workspaceId: body.workspaceId,
+      model: body.model,
+      approvalMode: body.approvalMode,
+      ...(body.provider !== undefined ? { provider: body.provider } : {}),
+      ...(body.title ? { title: body.title } : {}),
+    };
+    return app.services.threadService.createThread(input);
   });
 
   app.post('/api/threads/import', async (request) => {

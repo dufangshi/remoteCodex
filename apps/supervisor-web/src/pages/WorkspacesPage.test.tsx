@@ -110,6 +110,8 @@ describe('WorkspacesPage', () => {
           themeMode: 'dark',
           setThemeMode: vi.fn(),
           effectiveTheme: 'dark',
+          defaultBackend: 'codex',
+          setDefaultBackend: vi.fn(),
         }}
       >
         <MemoryRouter initialEntries={['/workspaces']}>

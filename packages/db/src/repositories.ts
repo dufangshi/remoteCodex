@@ -27,6 +27,9 @@ export interface CreateWorkspaceRecordInput {
 export interface CreateThreadRecordInput {
   workspaceId: string;
   title: string;
+  provider?: string;
+  providerSessionId: string | null;
+  providerTurnId?: string | null;
   model?: string | null;
   reasoningEffort?: string | null;
   fastMode?: boolean;
@@ -35,15 +38,15 @@ export interface CreateThreadRecordInput {
   collaborationMode?: string;
   approvalMode: string;
   sandboxMode?: string | null;
-  codexThreadId?: string | null;
   summaryText?: string | null;
   source?: 'supervisor' | 'local_codex_import';
   isConnected?: boolean;
 }
 
 export interface UpdateThreadRecordInput {
-  codexThreadId?: string | null;
-  codexTurnId?: string | null;
+  provider?: string;
+  providerSessionId?: string | null;
+  providerTurnId?: string | null;
   title?: string;
   model?: string | null;
   reasoningEffort?: string | null;
@@ -104,7 +107,7 @@ export interface CreateThreadForkRecordInput {
 
 export interface UpsertThreadGoalRecordInput {
   threadId: string;
-  codexThreadId: string;
+  providerSessionId: string;
   localGoalId?: string | null;
   objective: string;
   status: string;
@@ -243,8 +246,21 @@ export function getThreadRecordById(db: DatabaseClient, id: string) {
   return db.select().from(threads).where(eq(threads.id, id)).get();
 }
 
-export function getThreadRecordByCodexThreadId(db: DatabaseClient, codexThreadId: string) {
-  return db.select().from(threads).where(eq(threads.codexThreadId, codexThreadId)).get();
+export function getThreadRecordByProviderSessionId(
+  db: DatabaseClient,
+  provider: string,
+  providerSessionId: string,
+) {
+  return db
+    .select()
+    .from(threads)
+    .where(
+      and(
+        eq(threads.provider, provider),
+        eq(threads.providerSessionId, providerSessionId),
+      ),
+    )
+    .get();
 }
 
 export function createThreadRecord(db: DatabaseClient, input: CreateThreadRecordInput) {
@@ -252,8 +268,9 @@ export function createThreadRecord(db: DatabaseClient, input: CreateThreadRecord
   const record = {
     id: randomUUID(),
     workspaceId: input.workspaceId,
-    codexThreadId: input.codexThreadId ?? null,
-    codexTurnId: null as string | null,
+    provider: input.provider ?? 'codex',
+    providerSessionId: input.providerSessionId,
+    providerTurnId: input.providerTurnId ?? null,
     source: input.source ?? 'supervisor',
     title: input.title,
     model: input.model ?? null,
@@ -640,7 +657,7 @@ function getThreadGoalRecordForUpsert(
     .where(
       and(
         eq(threadGoals.threadId, input.threadId),
-        eq(threadGoals.codexThreadId, input.codexThreadId),
+        eq(threadGoals.providerSessionId, input.providerSessionId),
         eq(threadGoals.objective, input.objective),
       ),
     )
@@ -657,7 +674,7 @@ function getThreadGoalRecordForUpsert(
       .where(
         and(
           eq(threadGoals.threadId, input.threadId),
-          eq(threadGoals.codexThreadId, input.codexThreadId),
+          eq(threadGoals.providerSessionId, input.providerSessionId),
           eq(threadGoals.objective, input.objective),
           eq(threadGoals.createdAt, input.createdAt ?? input.startedAt),
         ),
@@ -686,7 +703,7 @@ export function upsertThreadGoalRecord(
       tokenBudget: input.tokenBudget ?? null,
       tokensUsed: input.tokensUsed ?? existing.tokensUsed,
       timeUsedSeconds: input.timeUsedSeconds ?? existing.timeUsedSeconds,
-      codexThreadId: input.codexThreadId,
+      providerSessionId: input.providerSessionId,
       startedAt: input.startedAt,
       completedAt: terminalCompletedAt,
       updatedAt: input.updatedAt ?? now,
@@ -698,7 +715,7 @@ export function upsertThreadGoalRecord(
   const record = {
     id: randomUUID(),
     threadId: input.threadId,
-    codexThreadId: input.codexThreadId,
+    providerSessionId: input.providerSessionId,
     objective: input.objective,
     status: input.status,
     tokenBudget: input.tokenBudget ?? null,

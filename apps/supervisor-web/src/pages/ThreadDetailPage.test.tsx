@@ -209,6 +209,43 @@ const modelOptionsResponse = [
   }
 ];
 
+const codexBackendResponse = {
+  provider: 'codex',
+  displayName: 'Codex',
+  description: 'Local Codex app-server runtime.',
+  enabled: true,
+  isDefault: true,
+  status: {
+    state: 'ready',
+    transport: 'stdio',
+    lastStartedAt: new Date().toISOString(),
+    lastError: null,
+    restartCount: 0,
+  },
+  capabilities: {
+    sessions: { list: true, read: true, resume: true, importLocal: true },
+    turns: { start: true, streamInput: false, steer: true, interrupt: true, compact: true },
+    branching: { fork: true, hardRollback: true, resumeAt: false, rewindFiles: false },
+    controls: {
+      planMode: true,
+      permissionRequests: true,
+      sandboxMode: true,
+      fastServiceTier: true,
+      goals: true,
+    },
+    management: {
+      models: true,
+      mcpStatus: true,
+      skills: true,
+      hooks: true,
+      hookTrust: true,
+      hostConfigFiles: true,
+      providerSettings: false,
+    },
+    usage: { contextWindow: true, tokenUsage: true, costUsd: false },
+  },
+};
+
 describe('ThreadDetailPage', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -234,7 +271,15 @@ describe('ThreadDetailPage', () => {
       withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
 
-        if (url.includes('/api/codex/status')) {
+        if (url.includes('/api/agent-runtimes/codex/status')) {
+          return okJsonResponse(codexBackendResponse);
+        }
+
+        if (url.includes('/api/agent-runtimes/codex/models')) {
+          return okJsonResponse(modelOptionsResponse);
+        }
+
+        if (url.includes('/api/agent-runtimes/codex/status')) {
           return okJsonResponse({
             state: 'ready',
             transport: 'stdio',
@@ -244,7 +289,7 @@ describe('ThreadDetailPage', () => {
           });
         }
 
-        if (url.includes('/api/codex/models')) {
+        if (url.includes('/api/agent-runtimes/codex/models')) {
           return okJsonResponse(modelOptionsResponse);
         }
 
@@ -252,7 +297,7 @@ describe('ThreadDetailPage', () => {
           return okJsonResponse({
             id: 'thread-1',
             workspaceId: 'workspace-1',
-            codexThreadId: 'codex-1',
+            providerSessionId: 'codex-1',
             source: 'supervisor',
             title: 'Demo Thread',
             model: 'gpt-5',
@@ -299,7 +344,7 @@ describe('ThreadDetailPage', () => {
             thread: {
               id: 'thread-1',
               workspaceId: 'workspace-1',
-              codexThreadId: 'codex-1',
+              providerSessionId: 'codex-1',
               source: 'supervisor',
               title: 'Demo Thread',
               model: 'gpt-5',
@@ -353,7 +398,7 @@ describe('ThreadDetailPage', () => {
               {
                 id: 'thread-1',
                 workspaceId: 'workspace-1',
-                codexThreadId: 'codex-1',
+                providerSessionId: 'codex-1',
                 source: 'supervisor',
                 title: 'Demo Thread',
                 model: 'gpt-5',
@@ -374,7 +419,7 @@ describe('ThreadDetailPage', () => {
               {
                 id: 'thread-2',
                 workspaceId: 'workspace-1',
-                codexThreadId: 'codex-2',
+                providerSessionId: 'codex-2',
                 source: 'supervisor',
                 title: 'Sibling Thread',
                 model: 'gpt-5-mini',
@@ -395,7 +440,7 @@ describe('ThreadDetailPage', () => {
               {
                 id: 'thread-3',
                 workspaceId: 'workspace-2',
-                codexThreadId: 'codex-3',
+                providerSessionId: 'codex-3',
                 source: 'supervisor',
                 title: 'Other Workspace Thread',
                 model: 'gpt-5-nano',
@@ -443,7 +488,7 @@ describe('ThreadDetailPage', () => {
     ).not.toBeInTheDocument();
     expect(screen.getByText('/tmp/demo')).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Copy Codex session ID' }),
+      screen.getByRole('button', { name: 'Copy session ID' }),
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Thread Meta/i }));
@@ -473,7 +518,15 @@ describe('ThreadDetailPage', () => {
       withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
 
-        if (url.includes('/api/codex/status')) {
+        if (url.includes('/api/agent-runtimes/codex/status')) {
+          return okJsonResponse(codexBackendResponse);
+        }
+
+        if (url.includes('/api/agent-runtimes/codex/models')) {
+          return okJsonResponse(modelOptionsResponse);
+        }
+
+        if (url.includes('/api/agent-runtimes/codex/status')) {
           return okJsonResponse({
             state: 'ready',
             transport: 'stdio',
@@ -482,7 +535,7 @@ describe('ThreadDetailPage', () => {
             restartCount: 0,
           });
         }
-        if (url.includes('/api/codex/models')) {
+        if (url.includes('/api/agent-runtimes/codex/models')) {
           return okJsonResponse(modelOptionsResponse);
         }
         if (url.endsWith('/api/threads')) {
@@ -520,7 +573,7 @@ describe('ThreadDetailPage', () => {
             thread: {
               id: 'thread-1',
               workspaceId: 'workspace-1',
-              codexThreadId: 'codex-1',
+              providerSessionId: 'codex-1',
               source: 'supervisor',
               title: 'Demo Thread',
               model: 'gpt-5',
@@ -628,7 +681,15 @@ describe('ThreadDetailPage', () => {
       withHealthz((input: RequestInfo | URL) => {
         const url = String(input);
 
-        if (url.includes('/api/codex/status')) {
+        if (url.includes('/api/agent-runtimes/codex/status')) {
+          return okJsonResponse(codexBackendResponse);
+        }
+
+        if (url.includes('/api/agent-runtimes/codex/models')) {
+          return okJsonResponse(modelOptionsResponse);
+        }
+
+        if (url.includes('/api/agent-runtimes/codex/status')) {
           return okJsonResponse({
             state: 'ready',
             transport: 'stdio',
@@ -637,7 +698,7 @@ describe('ThreadDetailPage', () => {
             restartCount: 0,
           });
         }
-        if (url.includes('/api/codex/models')) {
+        if (url.includes('/api/agent-runtimes/codex/models')) {
           return okJsonResponse(modelOptionsResponse);
         }
         if (url.endsWith('/api/threads')) {
@@ -668,7 +729,7 @@ describe('ThreadDetailPage', () => {
             thread: {
               id: 'thread-1',
               workspaceId: 'workspace-1',
-              codexThreadId: 'codex-1',
+              providerSessionId: 'codex-1',
               source: 'supervisor',
               title: 'Demo Thread',
               model: 'gpt-5',
@@ -780,8 +841,8 @@ describe('ThreadDetailPage', () => {
 
         if (
           url.endsWith('/api/threads') ||
-          url.includes('/api/codex/status') ||
-          url.includes('/api/codex/models')
+          url.includes('/api/agent-runtimes/codex/status') ||
+          url.includes('/api/agent-runtimes/codex/models')
         ) {
           return new Promise(() => undefined);
         }
@@ -791,7 +852,7 @@ describe('ThreadDetailPage', () => {
             thread: {
               id: 'thread-1',
               workspaceId: 'workspace-1',
-              codexThreadId: 'codex-1',
+              providerSessionId: 'codex-1',
               source: 'supervisor',
               title: 'Demo Thread',
               model: 'gpt-5',
@@ -880,7 +941,7 @@ describe('ThreadDetailPage', () => {
       withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
 
-        if (url.includes('/api/codex/status')) {
+        if (url.includes('/api/agent-runtimes/codex/status')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({
@@ -893,7 +954,7 @@ describe('ThreadDetailPage', () => {
           });
         }
 
-        if (url.includes('/api/codex/models')) {
+        if (url.includes('/api/agent-runtimes/codex/models')) {
           return Promise.resolve({
             ok: true,
             json: async () => modelOptionsResponse,
@@ -916,7 +977,7 @@ describe('ThreadDetailPage', () => {
               thread: {
                 id: 'thread-1',
                 workspaceId: 'workspace-1',
-                codexThreadId: 'codex-1',
+                providerSessionId: 'codex-1',
                 source: 'supervisor',
                 title: 'Demo Thread',
                 model: 'gpt-5',
@@ -958,7 +1019,7 @@ describe('ThreadDetailPage', () => {
               {
                 id: 'thread-1',
                 workspaceId: 'workspace-1',
-                codexThreadId: 'codex-1',
+                providerSessionId: 'codex-1',
                 source: 'supervisor',
                 title: 'Demo Thread',
                 model: 'gpt-5',
@@ -1019,7 +1080,7 @@ describe('ThreadDetailPage', () => {
       withHealthz((input: RequestInfo | URL) => {
         const url = String(input);
 
-        if (url.includes('/api/codex/status')) {
+        if (url.includes('/api/agent-runtimes/codex/status')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({
@@ -1032,7 +1093,7 @@ describe('ThreadDetailPage', () => {
           });
         }
 
-        if (url.includes('/api/codex/models')) {
+        if (url.includes('/api/agent-runtimes/codex/models')) {
           return Promise.resolve({
             ok: true,
             json: async () => modelOptionsResponse,
@@ -1046,7 +1107,7 @@ describe('ThreadDetailPage', () => {
               thread: {
                 id: 'imported-thread',
                 workspaceId: 'workspace-1',
-                codexThreadId: '019d6fb7-7033-7a30-a2c7-74d0919e87d4',
+                providerSessionId: '019d6fb7-7033-7a30-a2c7-74d0919e87d4',
                 source: 'local_codex_import',
                 title: 'Imported Thread',
                 model: 'gpt-5.4',
@@ -1087,7 +1148,7 @@ describe('ThreadDetailPage', () => {
               {
                 id: 'imported-thread',
                 workspaceId: 'workspace-1',
-                codexThreadId: '019d6fb7-7033-7a30-a2c7-74d0919e87d4',
+                providerSessionId: '019d6fb7-7033-7a30-a2c7-74d0919e87d4',
                 source: 'local_codex_import',
                 title: 'Imported Thread',
                 model: 'gpt-5.4',
@@ -1198,7 +1259,15 @@ describe('ThreadDetailPage', () => {
       withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
 
-        if (url.includes('/api/codex/status')) {
+        if (url.includes('/api/agent-runtimes/codex/status')) {
+          return okJsonResponse(codexBackendResponse);
+        }
+
+        if (url.includes('/api/agent-runtimes/codex/models')) {
+          return okJsonResponse(modelOptionsResponse);
+        }
+
+        if (url.includes('/api/agent-runtimes/codex/status')) {
           return okJsonResponse({
             state: 'ready',
             transport: 'stdio',
@@ -1208,7 +1277,7 @@ describe('ThreadDetailPage', () => {
           });
         }
 
-        if (url.includes('/api/codex/models')) {
+        if (url.includes('/api/agent-runtimes/codex/models')) {
           return okJsonResponse(modelOptionsResponse);
         }
 
@@ -1217,7 +1286,7 @@ describe('ThreadDetailPage', () => {
             {
               id: 'thread-1',
               workspaceId: 'workspace-1',
-              codexThreadId: 'codex-1',
+              providerSessionId: 'codex-1',
               source: 'supervisor',
               title: 'Demo Thread',
               model: 'gpt-5.4',
@@ -1249,7 +1318,7 @@ describe('ThreadDetailPage', () => {
           return okJsonResponse({
             id: 'thread-1',
             workspaceId: 'workspace-1',
-            codexThreadId: 'codex-1',
+            providerSessionId: 'codex-1',
             source: 'supervisor',
             title: 'Demo Thread',
             model: 'gpt-5.4',
@@ -1274,7 +1343,7 @@ describe('ThreadDetailPage', () => {
             thread: {
               id: 'thread-1',
               workspaceId: 'workspace-1',
-              codexThreadId: 'codex-1',
+              providerSessionId: 'codex-1',
               source: 'supervisor',
               title: 'Demo Thread',
               model: 'gpt-5.4',
@@ -1353,7 +1422,7 @@ describe('ThreadDetailPage', () => {
       json: async () => ({
         id: 'thread-1',
         workspaceId: 'workspace-1',
-        codexThreadId: 'codex-1',
+        providerSessionId: 'codex-1',
         source: 'supervisor',
         title: 'Demo Thread',
         model: 'gpt-5.4',
@@ -1382,7 +1451,15 @@ describe('ThreadDetailPage', () => {
       withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
 
-        if (url.includes('/api/codex/status')) {
+        if (url.includes('/api/agent-runtimes/codex/status')) {
+          return okJsonResponse(codexBackendResponse);
+        }
+
+        if (url.includes('/api/agent-runtimes/codex/models')) {
+          return okJsonResponse(modelOptionsResponse);
+        }
+
+        if (url.includes('/api/agent-runtimes/codex/status')) {
           return okJsonResponse({
             state: 'ready',
             transport: 'stdio',
@@ -1392,7 +1469,7 @@ describe('ThreadDetailPage', () => {
           });
         }
 
-        if (url.includes('/api/codex/models')) {
+        if (url.includes('/api/agent-runtimes/codex/models')) {
           return okJsonResponse(modelOptionsResponse);
         }
 
@@ -1401,7 +1478,7 @@ describe('ThreadDetailPage', () => {
             {
               id: 'thread-1',
               workspaceId: 'workspace-1',
-              codexThreadId: 'codex-1',
+              providerSessionId: 'codex-1',
               source: 'supervisor',
               title: 'Demo Thread',
               model: 'gpt-5.4',
@@ -1426,7 +1503,7 @@ describe('ThreadDetailPage', () => {
           return okJsonResponse({
             id: 'thread-1',
             workspaceId: 'workspace-1',
-            codexThreadId: 'codex-1',
+            providerSessionId: 'codex-1',
             source: 'supervisor',
             title: 'Demo Thread',
             model: 'gpt-5.4',
@@ -1451,7 +1528,7 @@ describe('ThreadDetailPage', () => {
             thread: {
               id: 'thread-1',
               workspaceId: 'workspace-1',
-              codexThreadId: 'codex-1',
+              providerSessionId: 'codex-1',
               source: 'supervisor',
               title: 'Demo Thread',
               model: 'gpt-5.4',
@@ -1489,7 +1566,7 @@ describe('ThreadDetailPage', () => {
           return okJsonResponse({
             id: 'thread-1',
             workspaceId: 'workspace-1',
-            codexThreadId: 'codex-1',
+            providerSessionId: 'codex-1',
             source: 'supervisor',
             title: 'Demo Thread',
             model: 'gpt-5.4',
@@ -1514,7 +1591,7 @@ describe('ThreadDetailPage', () => {
             thread: {
               id: 'thread-1',
               workspaceId: 'workspace-1',
-              codexThreadId: 'codex-1',
+              providerSessionId: 'codex-1',
               source: 'supervisor',
               title: 'Demo Thread',
               model: 'gpt-5.4',
@@ -1588,7 +1665,7 @@ describe('ThreadDetailPage', () => {
       withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
 
-        if (url.includes('/api/codex/status')) {
+        if (url.includes('/api/agent-runtimes/codex/status')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({
@@ -1601,7 +1678,7 @@ describe('ThreadDetailPage', () => {
           });
         }
 
-        if (url.includes('/api/codex/models')) {
+        if (url.includes('/api/agent-runtimes/codex/models')) {
           return Promise.resolve({
             ok: true,
             json: async () => modelOptionsResponse,
@@ -1615,7 +1692,7 @@ describe('ThreadDetailPage', () => {
               thread: {
                 id: 'thread-1',
                 workspaceId: 'workspace-1',
-                codexThreadId: 'codex-1',
+                providerSessionId: 'codex-1',
                 source: 'supervisor',
                 title: 'Demo Thread',
                 model: 'gpt-5',
@@ -1664,7 +1741,7 @@ describe('ThreadDetailPage', () => {
             json: async () => ({
               id: 'thread-1',
               workspaceId: 'workspace-1',
-              codexThreadId: 'codex-1',
+              providerSessionId: 'codex-1',
               source: 'supervisor',
               title: 'Demo Thread',
               model: 'gpt-5',
@@ -1692,7 +1769,7 @@ describe('ThreadDetailPage', () => {
               thread: {
                 id: 'thread-1',
                 workspaceId: 'workspace-1',
-                codexThreadId: 'codex-1',
+                providerSessionId: 'codex-1',
                 source: 'supervisor',
                 title: 'Demo Thread',
                 model: 'gpt-5',
@@ -1742,7 +1819,7 @@ describe('ThreadDetailPage', () => {
               {
                 id: 'thread-1',
                 workspaceId: 'workspace-1',
-                codexThreadId: 'codex-1',
+                providerSessionId: 'codex-1',
                 source: 'supervisor',
                 title: 'Demo Thread',
                 model: 'gpt-5',
@@ -1803,7 +1880,7 @@ describe('ThreadDetailPage', () => {
       withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
 
-        if (url.includes('/api/codex/status')) {
+        if (url.includes('/api/agent-runtimes/codex/status')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({
@@ -1816,7 +1893,7 @@ describe('ThreadDetailPage', () => {
           });
         }
 
-        if (url.includes('/api/codex/models')) {
+        if (url.includes('/api/agent-runtimes/codex/models')) {
           return Promise.resolve({
             ok: true,
             json: async () => modelOptionsResponse,
@@ -1841,7 +1918,7 @@ describe('ThreadDetailPage', () => {
               thread: {
                 id: 'thread-1',
                 workspaceId: 'workspace-1',
-                codexThreadId: 'codex-1',
+                providerSessionId: 'codex-1',
                 source: 'supervisor',
                 title: 'Demo Thread',
                 model: 'gpt-5',
@@ -1926,7 +2003,7 @@ describe('ThreadDetailPage', () => {
       withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
 
-        if (url.includes('/api/codex/status')) {
+        if (url.includes('/api/agent-runtimes/codex/status')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({
@@ -1939,7 +2016,7 @@ describe('ThreadDetailPage', () => {
           });
         }
 
-        if (url.includes('/api/codex/models')) {
+        if (url.includes('/api/agent-runtimes/codex/models')) {
           return Promise.resolve({
             ok: true,
             json: async () => modelOptionsResponse,
@@ -1964,7 +2041,7 @@ describe('ThreadDetailPage', () => {
               thread: {
                 id: 'thread-1',
                 workspaceId: 'workspace-1',
-                codexThreadId: 'codex-1',
+                providerSessionId: 'codex-1',
                 source: 'supervisor',
                 title: 'Demo Thread',
                 model: 'gpt-5',
@@ -2050,7 +2127,7 @@ describe('ThreadDetailPage', () => {
       withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
 
-        if (url.includes('/api/codex/status')) {
+        if (url.includes('/api/agent-runtimes/codex/status')) {
           return okJsonResponse({
             state: 'ready',
             transport: 'stdio',
@@ -2060,7 +2137,7 @@ describe('ThreadDetailPage', () => {
           });
         }
 
-        if (url.includes('/api/codex/models')) {
+        if (url.includes('/api/agent-runtimes/codex/models')) {
           return okJsonResponse(modelOptionsResponse);
         }
 
@@ -2069,7 +2146,7 @@ describe('ThreadDetailPage', () => {
             {
               id: 'thread-1',
               workspaceId: 'workspace-1',
-              codexThreadId: 'codex-1',
+              providerSessionId: 'codex-1',
               source: 'supervisor',
               title: 'Demo Thread',
               model: 'gpt-5',
@@ -2102,7 +2179,7 @@ describe('ThreadDetailPage', () => {
             thread: {
               id: 'thread-1',
               workspaceId: 'workspace-1',
-              codexThreadId: 'codex-1',
+              providerSessionId: 'codex-1',
               source: 'supervisor',
               title: 'Demo Thread',
               model: 'gpt-5',
@@ -2181,7 +2258,7 @@ describe('ThreadDetailPage', () => {
       json: async () => ({
         id: 'thread-1',
         workspaceId: 'workspace-1',
-        codexThreadId: 'codex-1',
+        providerSessionId: 'codex-1',
         source: 'supervisor',
         title: 'Demo Thread',
         model: 'gpt-5',
@@ -2239,7 +2316,7 @@ describe('ThreadDetailPage', () => {
       withHealthz((input: RequestInfo | URL) => {
         const url = String(input);
 
-        if (url.includes('/api/codex/status')) {
+        if (url.includes('/api/agent-runtimes/codex/status')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({
@@ -2252,7 +2329,7 @@ describe('ThreadDetailPage', () => {
           });
         }
 
-        if (url.includes('/api/codex/models')) {
+        if (url.includes('/api/agent-runtimes/codex/models')) {
           return Promise.resolve({
             ok: true,
             json: async () => modelOptionsResponse,
@@ -2266,7 +2343,7 @@ describe('ThreadDetailPage', () => {
               thread: {
                 id: 'thread-1',
                 workspaceId: 'workspace-1',
-                codexThreadId: 'codex-1',
+                providerSessionId: 'codex-1',
                 source: 'supervisor',
                 title: 'Demo Thread',
                 model: 'gpt-5',
@@ -2307,7 +2384,7 @@ describe('ThreadDetailPage', () => {
               {
                 id: 'thread-1',
                 workspaceId: 'workspace-1',
-                codexThreadId: 'codex-1',
+                providerSessionId: 'codex-1',
                 source: 'supervisor',
                 title: 'Demo Thread',
                 model: 'gpt-5',
@@ -2364,7 +2441,7 @@ describe('ThreadDetailPage', () => {
       withHealthz((input: RequestInfo | URL) => {
         const url = String(input);
 
-        if (url.includes('/api/codex/status')) {
+        if (url.includes('/api/agent-runtimes/codex/status')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({
@@ -2377,7 +2454,7 @@ describe('ThreadDetailPage', () => {
           });
         }
 
-        if (url.includes('/api/codex/models')) {
+        if (url.includes('/api/agent-runtimes/codex/models')) {
           return Promise.resolve({
             ok: true,
             json: async () => modelOptionsResponse,
@@ -2394,7 +2471,7 @@ describe('ThreadDetailPage', () => {
               thread: {
                 id: 'connected-imported-thread',
                 workspaceId: 'workspace-1',
-                codexThreadId: '019d6fb7-7033-7a30-a2c7-74d0919e87d4',
+                providerSessionId: '019d6fb7-7033-7a30-a2c7-74d0919e87d4',
                 source: 'local_codex_import',
                 title: 'Connected Imported Thread',
                 model: 'gpt-5.4',
@@ -2435,7 +2512,7 @@ describe('ThreadDetailPage', () => {
               {
                 id: 'connected-imported-thread',
                 workspaceId: 'workspace-1',
-                codexThreadId: '019d6fb7-7033-7a30-a2c7-74d0919e87d4',
+                providerSessionId: '019d6fb7-7033-7a30-a2c7-74d0919e87d4',
                 source: 'local_codex_import',
                 title: 'Connected Imported Thread',
                 model: 'gpt-5.4',
@@ -2486,7 +2563,7 @@ describe('ThreadDetailPage', () => {
       withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
 
-        if (url.includes('/api/codex/status')) {
+        if (url.includes('/api/agent-runtimes/codex/status')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({
@@ -2499,7 +2576,7 @@ describe('ThreadDetailPage', () => {
           });
         }
 
-        if (url.includes('/api/codex/models')) {
+        if (url.includes('/api/agent-runtimes/codex/models')) {
           return Promise.resolve({
             ok: true,
             json: async () => modelOptionsResponse,
@@ -2516,7 +2593,7 @@ describe('ThreadDetailPage', () => {
               thread: {
                 id: 'thread-1',
                 workspaceId: 'workspace-1',
-                codexThreadId: 'codex-1',
+                providerSessionId: 'codex-1',
                 source: 'supervisor',
                 title: 'Demo Thread',
                 model: 'gpt-5',
@@ -2557,7 +2634,7 @@ describe('ThreadDetailPage', () => {
               thread: {
                 id: 'thread-1',
                 workspaceId: 'workspace-1',
-                codexThreadId: 'codex-1',
+                providerSessionId: 'codex-1',
                 source: 'supervisor',
                 title: 'Demo Thread',
                 model: 'gpt-5',
@@ -2655,14 +2732,14 @@ describe('ThreadDetailPage', () => {
     vi.spyOn(global, 'fetch').mockImplementation((input, init) => {
       const url = String(input);
 
-      if (url.endsWith('/api/codex/models')) {
+      if (url.endsWith('/api/agent-runtimes/codex/models')) {
         return Promise.resolve({
           ok: true,
           json: async () => modelOptionsResponse,
         } as Response);
       }
 
-      if (url.endsWith('/api/codex/status')) {
+      if (url.endsWith('/api/agent-runtimes/codex/status')) {
         return Promise.resolve({
           ok: true,
           json: async () => ({
@@ -2684,7 +2761,7 @@ describe('ThreadDetailPage', () => {
             thread: {
               id: 'thread-1',
               workspaceId: 'workspace-1',
-              codexThreadId: 'codex-1',
+              providerSessionId: 'codex-1',
               source: 'supervisor',
               title: 'Demo Thread',
               model: 'gpt-5',
@@ -2755,7 +2832,7 @@ describe('ThreadDetailPage', () => {
             thread: {
               id: 'thread-1',
               workspaceId: 'workspace-1',
-              codexThreadId: 'codex-1',
+              providerSessionId: 'codex-1',
               source: 'supervisor',
               title: 'Demo Thread',
               model: 'gpt-5',
@@ -2846,7 +2923,7 @@ describe('ThreadDetailPage', () => {
       withHealthz((input: RequestInfo | URL) => {
         const url = String(input);
 
-        if (url.includes('/api/codex/status')) {
+        if (url.includes('/api/agent-runtimes/codex/status')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({
@@ -2859,7 +2936,7 @@ describe('ThreadDetailPage', () => {
           });
         }
 
-        if (url.includes('/api/codex/models')) {
+        if (url.includes('/api/agent-runtimes/codex/models')) {
           return Promise.resolve({
             ok: true,
             json: async () => modelOptionsResponse,
@@ -2873,7 +2950,7 @@ describe('ThreadDetailPage', () => {
               {
                 id: 'thread-1',
                 workspaceId: 'workspace-1',
-                codexThreadId: 'codex-1',
+                providerSessionId: 'codex-1',
                 source: 'supervisor',
                 title: 'Demo Thread',
                 model: 'gpt-5',
@@ -2910,7 +2987,7 @@ describe('ThreadDetailPage', () => {
               thread: {
                 id: 'thread-1',
                 workspaceId: 'workspace-1',
-                codexThreadId: 'codex-1',
+                providerSessionId: 'codex-1',
                 source: 'supervisor',
                 title: 'Demo Thread',
                 model: 'gpt-5',
@@ -3006,7 +3083,7 @@ describe('ThreadDetailPage', () => {
           thread: {
             id: 'thread-1',
             workspaceId: 'workspace-1',
-            codexThreadId: 'codex-1',
+            providerSessionId: 'codex-1',
             source: 'supervisor',
             title: 'Demo Thread',
             model: 'gpt-5',
@@ -3077,7 +3154,7 @@ describe('ThreadDetailPage', () => {
               {
                 id: 'thread-1',
                 workspaceId: 'workspace-1',
-                codexThreadId: 'codex-1',
+                providerSessionId: 'codex-1',
                 source: 'supervisor',
                 title: 'Demo Thread',
                 model: 'gpt-5',
@@ -3099,7 +3176,7 @@ describe('ThreadDetailPage', () => {
           };
         }
 
-        if (url.endsWith('/api/codex/status')) {
+        if (url.endsWith('/api/agent-runtimes/codex/status')) {
           return {
             ok: true,
             json: async () => ({
@@ -3111,7 +3188,7 @@ describe('ThreadDetailPage', () => {
           };
         }
 
-        if (url.endsWith('/api/codex/models')) {
+        if (url.endsWith('/api/agent-runtimes/codex/models')) {
           return {
             ok: true,
             json: async () => modelOptionsResponse,
@@ -3128,7 +3205,7 @@ describe('ThreadDetailPage', () => {
               thread: {
                 id: 'thread-1',
                 workspaceId: 'workspace-1',
-                codexThreadId: 'codex-1',
+                providerSessionId: 'codex-1',
                 source: 'supervisor',
                 title: 'Demo Thread',
                 model: 'gpt-5',
@@ -3288,7 +3365,7 @@ describe('ThreadDetailPage', () => {
       withHealthz((input: RequestInfo | URL) => {
         const url = String(input);
 
-        if (url.includes('/api/codex/status')) {
+        if (url.includes('/api/agent-runtimes/codex/status')) {
           return okJsonResponse({
             state: 'ready',
             transport: 'stdio',
@@ -3298,7 +3375,7 @@ describe('ThreadDetailPage', () => {
           });
         }
 
-        if (url.includes('/api/codex/models')) {
+        if (url.includes('/api/agent-runtimes/codex/models')) {
           return okJsonResponse(modelOptionsResponse);
         }
 
@@ -3322,7 +3399,7 @@ describe('ThreadDetailPage', () => {
             thread: {
               id: 'thread-1',
               workspaceId: 'workspace-1',
-              codexThreadId: 'codex-1',
+              providerSessionId: 'codex-1',
               source: 'supervisor',
               title: 'Demo Thread',
               model: 'gpt-5',
@@ -3417,7 +3494,7 @@ describe('ThreadDetailPage', () => {
       withHealthz((input: RequestInfo | URL) => {
         const url = String(input);
 
-        if (url.includes('/api/codex/status')) {
+        if (url.includes('/api/agent-runtimes/codex/status')) {
           return okJsonResponse({
             state: 'ready',
             transport: 'stdio',
@@ -3427,7 +3504,7 @@ describe('ThreadDetailPage', () => {
           });
         }
 
-        if (url.includes('/api/codex/models')) {
+        if (url.includes('/api/agent-runtimes/codex/models')) {
           return okJsonResponse(modelOptionsResponse);
         }
 
@@ -3436,7 +3513,7 @@ describe('ThreadDetailPage', () => {
             thread: {
               id: 'thread-1',
               workspaceId: 'workspace-1',
-              codexThreadId: 'codex-1',
+              providerSessionId: 'codex-1',
               source: 'supervisor',
               title: 'Demo Thread',
               model: 'gpt-5.4',
@@ -3491,7 +3568,7 @@ describe('ThreadDetailPage', () => {
             {
               id: 'thread-1',
               workspaceId: 'workspace-1',
-              codexThreadId: 'codex-1',
+              providerSessionId: 'codex-1',
               source: 'supervisor',
               title: 'Demo Thread',
               model: 'gpt-5.4',
@@ -3578,7 +3655,7 @@ describe('ThreadDetailPage', () => {
       withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
 
-        if (url.includes('/api/codex/status')) {
+        if (url.includes('/api/agent-runtimes/codex/status')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({
@@ -3591,7 +3668,7 @@ describe('ThreadDetailPage', () => {
           });
         }
 
-        if (url.includes('/api/codex/models')) {
+        if (url.includes('/api/agent-runtimes/codex/models')) {
           return Promise.resolve({
             ok: true,
             json: async () => modelOptionsResponse,
@@ -3605,7 +3682,7 @@ describe('ThreadDetailPage', () => {
               thread: {
                 id: 'thread-1',
                 workspaceId: 'workspace-1',
-                codexThreadId: 'codex-1',
+                providerSessionId: 'codex-1',
                 source: 'supervisor',
                 title: 'Demo Thread',
                 model: 'gpt-5',
@@ -3646,7 +3723,7 @@ describe('ThreadDetailPage', () => {
               thread: {
                 id: 'thread-1',
                 workspaceId: 'workspace-1',
-                codexThreadId: 'codex-1',
+                providerSessionId: 'codex-1',
                 source: 'supervisor',
                 title: 'Demo Thread',
                 model: 'gpt-5',
@@ -3687,7 +3764,7 @@ describe('ThreadDetailPage', () => {
               {
                 id: 'thread-1',
                 workspaceId: 'workspace-1',
-                codexThreadId: 'codex-1',
+                providerSessionId: 'codex-1',
                 source: 'supervisor',
                 title: 'Demo Thread',
                 model: 'gpt-5',
@@ -3754,7 +3831,7 @@ describe('ThreadDetailPage', () => {
               {
                 id: 'thread-1',
                 workspaceId: 'workspace-1',
-                codexThreadId: 'codex-1',
+                providerSessionId: 'codex-1',
                 source: 'supervisor',
                 title: 'Demo Thread',
                 model: 'gpt-5',
@@ -3776,7 +3853,7 @@ describe('ThreadDetailPage', () => {
           };
         }
 
-        if (url.endsWith('/api/codex/status')) {
+        if (url.endsWith('/api/agent-runtimes/codex/status')) {
           return {
             ok: true,
             json: async () => ({
@@ -3788,7 +3865,7 @@ describe('ThreadDetailPage', () => {
           };
         }
 
-        if (url.endsWith('/api/codex/models')) {
+        if (url.endsWith('/api/agent-runtimes/codex/models')) {
           return {
             ok: true,
             json: async () => modelOptionsResponse,
@@ -3805,7 +3882,7 @@ describe('ThreadDetailPage', () => {
               thread: {
                 id: 'thread-1',
                 workspaceId: 'workspace-1',
-                codexThreadId: 'codex-1',
+                providerSessionId: 'codex-1',
                 source: 'supervisor',
                 title: 'Demo Thread',
                 model: 'gpt-5',

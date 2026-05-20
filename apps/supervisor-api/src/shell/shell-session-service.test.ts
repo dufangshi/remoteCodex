@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -11,8 +12,10 @@ import {
   runMigrations,
   seedDefaults,
 } from '../../../../packages/db/src/index';
-import { SupervisorEventBus } from '../codex/event-bus';
+import { SupervisorEventBus } from '../event-bus';
 import { ShellServiceError, ShellSessionService } from './shell-session-service';
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 
 describe('ShellSessionService', () => {
   let tempDir = '';
@@ -33,6 +36,7 @@ describe('ShellSessionService', () => {
     databasePath = path.join(tempDir, 'test.sqlite');
     workspacePath = path.join(tempDir, 'workspace');
     await fs.mkdir(workspacePath, { recursive: true });
+    vi.stubEnv('REMOTE_CODEX_PACKAGE_ROOT', repoRoot);
 
     runMigrations(databasePath);
     context = createDatabase(databasePath);
@@ -50,6 +54,8 @@ describe('ShellSessionService', () => {
     const thread = createThreadRecord(context.db, {
       workspaceId: workspace.id,
       title: 'Shell thread',
+      provider: 'codex',
+      providerSessionId: 'codex-shell-thread',
       model: 'gpt-5',
       approvalMode: 'yolo',
     });
@@ -114,6 +120,7 @@ describe('ShellSessionService', () => {
   afterEach(async () => {
     await service.stop();
     vi.useRealTimers();
+    vi.unstubAllEnvs();
     context.sqlite.close();
     await fs.rm(tempDir, { recursive: true, force: true });
   });

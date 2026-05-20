@@ -2,24 +2,26 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import type {
-  CodexHostConfigArchiveDto,
-  CodexHostFileNameDto,
+  AgentBackendDto,
+  AgentBackendIdDto,
+  ProviderHostConfigArchiveDto,
   WorkspaceSettingsDto,
 } from '../../../../packages/shared/src/index';
 import {
   ApiError,
-  applyCodexHostConfigArchive,
-  buildAndRestartService,
-  createCodexHostConfigArchive,
-  fetchCodexHostFile,
-  fetchCodexHostConfigArchives,
+  applyProviderHostConfigArchive,
+  buildAndRestartAgentBackend,
+  createProviderHostConfigArchive,
+  fetchAgentBackends,
+  fetchProviderHostFile,
+  fetchProviderHostConfigArchives,
   fetchWorkspaceSettings,
-  renameCodexHostConfigArchive,
-  restartCodexAppServer,
-  updateCodexHostFile,
+  renameProviderHostConfigArchive,
+  restartAgentBackend,
+  updateProviderHostFile,
   updateWorkspaceSettings,
 } from '../lib/api';
-import { type ThemeMode, useAppShellNav } from './AppShellNavContext';
+import { type AgentBackendId, type ThemeMode, useAppShellNav } from './AppShellNavContext';
 
 function MenuIcon() {
   return (
@@ -75,7 +77,100 @@ const themeOptions: Array<{
   },
 ];
 
-const codexHostFileNames: CodexHostFileNameDto[] = ['config.toml', 'auth.json'];
+const emptyManagementSchema: AgentBackendDto['managementSchema'] = {
+  hostConfigFiles: [],
+  toolboxItems: [],
+  hookCommandTemplates: [],
+  configArchives: false,
+  buildRestart: false,
+};
+
+function unavailableBackend(provider: AgentBackendIdDto, displayName: string): AgentBackendDto {
+  return {
+    provider,
+    displayName,
+    description: `${displayName} backend descriptor is not available.`,
+    enabled: false,
+    isDefault: provider === 'codex',
+    status: {
+      state: 'stopped',
+      transport: provider === 'claude' ? 'sdk' : 'none',
+      lastStartedAt: null,
+      lastError: 'Backend descriptor is not available.',
+      restartCount: 0,
+    },
+    capabilities: {
+      sessions: {
+        list: false,
+        read: false,
+        resume: false,
+        importLocal: false,
+      },
+      turns: {
+        start: false,
+        streamInput: false,
+        steer: false,
+        interrupt: false,
+        compact: false,
+      },
+      branching: {
+        fork: false,
+        hardRollback: false,
+        resumeAt: false,
+        rewindFiles: false,
+      },
+      controls: {
+        planMode: false,
+        permissionRequests: false,
+        sandboxMode: false,
+        fastServiceTier: false,
+        goals: false,
+      },
+      management: {
+        models: false,
+        mcpStatus: false,
+        skills: false,
+        hooks: false,
+        hookTrust: false,
+        hostConfigFiles: false,
+        providerSettings: false,
+      },
+      usage: {
+        contextWindow: false,
+        tokenUsage: false,
+        costUsd: false,
+      },
+    },
+    managementSchema: emptyManagementSchema,
+  };
+}
+
+const fallbackBackends: AgentBackendDto[] = [
+  unavailableBackend('codex', 'Codex'),
+  unavailableBackend('claude', 'Claude'),
+];
+
+function fallbackManagementSchema(provider: AgentBackendId) {
+  return (
+    fallbackBackends.find((backend) => backend.provider === provider)?.managementSchema ??
+    emptyManagementSchema
+  );
+}
+
+function backendSelectionDescription(backends: AgentBackendDto[]) {
+  const enabledCount = backends.filter((backend) => backend.enabled).length;
+  const totalCount = backends.length;
+
+  if (enabledCount > 1) {
+    return 'New threads use the selected backend. Each backend exposes its own tools and settings.';
+  }
+
+  if (totalCount > enabledCount) {
+    return 'New threads use the selected backend. Additional backends appear here when configured.';
+  }
+
+  return 'New threads use the selected backend.';
+}
 
 function formatArchiveDate(value: string) {
   const date = new Date(value);
@@ -89,6 +184,19 @@ function formatArchiveDate(value: string) {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function defaultProviderHostFileState(name: string) {
+  return {
+    path: name,
+    exists: false,
+    originalContent: '',
+    draftContent: '',
+    loading: false,
+    saving: false,
+    error: null as string | null,
+    saveMessage: null as string | null,
+  };
 }
 
 export function AppShellMenuButton({
@@ -220,30 +328,10 @@ export function AppShellNavigationMenu({
 
 export function AppShellSettingsDialog() {
   const shellNav = useAppShellNav();
-  const editableFiles = useMemo(
-    () =>
-      [
-        {
-          name: 'config.toml' as const,
-          label: 'config.toml',
-          description: 'Codex runtime configuration',
-        },
-        {
-          name: 'auth.json' as const,
-          label: 'auth.json',
-          description: 'Codex authentication state',
-        },
-      ] satisfies Array<{
-        name: CodexHostFileNameDto;
-        label: string;
-        description: string;
-      }>,
-    [],
-  );
-  const [selectedFileName, setSelectedFileName] = useState<CodexHostFileNameDto | null>(null);
+  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [files, setFiles] = useState<
     Record<
-      CodexHostFileNameDto,
+      string,
       {
         path: string;
         exists: boolean;
@@ -255,28 +343,7 @@ export function AppShellSettingsDialog() {
         saveMessage: string | null;
       }
     >
-  >({
-    'config.toml': {
-      path: '~/.codex/config.toml',
-      exists: false,
-      originalContent: '',
-      draftContent: '',
-      loading: false,
-      saving: false,
-      error: null,
-      saveMessage: null,
-    },
-    'auth.json': {
-      path: '~/.codex/auth.json',
-      exists: false,
-      originalContent: '',
-      draftContent: '',
-      loading: false,
-      saving: false,
-      error: null,
-      saveMessage: null,
-    },
-  });
+  >({});
   const selectedFile = selectedFileName ? files[selectedFileName] : null;
   const [restartState, setRestartState] = useState<{
     busy: boolean;
@@ -287,16 +354,28 @@ export function AppShellSettingsDialog() {
     message: null,
     error: null,
   });
-  const [archives, setArchives] = useState<CodexHostConfigArchiveDto[]>([]);
+  const [archives, setArchives] = useState<ProviderHostConfigArchiveDto[]>([]);
+  const [backends, setBackends] = useState<AgentBackendDto[]>(fallbackBackends);
+  const [backendState, setBackendState] = useState<{
+    loading: boolean;
+    saving: boolean;
+    error: string | null;
+  }>({
+    loading: false,
+    saving: false,
+    error: null,
+  });
   const [workspaceSettings, setWorkspaceSettings] = useState<WorkspaceSettingsDto | null>(null);
   const [workspaceSettingsState, setWorkspaceSettingsState] = useState<{
     devHomeDraft: string;
+    backendDraft: AgentBackendIdDto;
     loading: boolean;
     saving: boolean;
     message: string | null;
     error: string | null;
   }>({
     devHomeDraft: '',
+    backendDraft: 'codex',
     loading: false,
     saving: false,
     message: null,
@@ -321,9 +400,17 @@ export function AppShellSettingsDialog() {
   });
   const selectedThemeMode = shellNav?.themeMode ?? 'system';
   const effectiveTheme = shellNav?.effectiveTheme ?? 'dark';
+  const selectedBackend = shellNav?.defaultBackend ?? 'codex';
+  const activeBackend =
+    backends.find((backend) => backend.provider === selectedBackend) ??
+    fallbackBackends.find((backend) => backend.provider === selectedBackend) ??
+    fallbackBackends[0]!;
+  const activeManagementSchema =
+    activeBackend.managementSchema ?? fallbackManagementSchema(activeBackend.provider);
+  const editableFiles = activeManagementSchema.hostConfigFiles;
 
   useEffect(() => {
-    if (!shellNav?.settingsOpen) {
+    if (!shellNav?.settingsOpen || !activeManagementSchema.configArchives) {
       return;
     }
 
@@ -347,6 +434,56 @@ export function AppShellSettingsDialog() {
     }
 
     let cancelled = false;
+    setBackendState((current) => ({
+      ...current,
+      loading: true,
+      error: null,
+    }));
+
+    fetchAgentBackends()
+      .then((records) => {
+        if (cancelled) {
+          return;
+        }
+        const merged = [
+          ...records,
+          ...fallbackBackends.filter(
+            (fallback) =>
+              !records.some((record) => record.provider === fallback.provider),
+          ),
+        ];
+        setBackends(merged);
+        setBackendState((current) => ({
+          ...current,
+          loading: false,
+        }));
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        setBackends(fallbackBackends);
+        setBackendState((current) => ({
+          ...current,
+          loading: false,
+          error:
+            error instanceof ApiError
+              ? error.message
+              : 'Unable to load backend settings.',
+        }));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [shellNav?.settingsOpen]);
+
+  useEffect(() => {
+    if (!shellNav?.settingsOpen) {
+      return;
+    }
+
+    let cancelled = false;
     setWorkspaceSettingsState((current) => ({
       ...current,
       loading: true,
@@ -361,9 +498,11 @@ export function AppShellSettingsDialog() {
         }
 
         setWorkspaceSettings(settings);
+        shellNav.setDefaultBackend(settings.defaultBackend);
         setWorkspaceSettingsState((current) => ({
           ...current,
           devHomeDraft: settings.devHome,
+          backendDraft: settings.defaultBackend,
           loading: false,
         }));
       })
@@ -385,35 +524,35 @@ export function AppShellSettingsDialog() {
     return () => {
       cancelled = true;
     };
-  }, [shellNav?.settingsOpen]);
+  }, [shellNav]);
 
   useEffect(() => {
-    if (!shellNav?.settingsOpen) {
+    if (!shellNav?.settingsOpen || !activeBackend.capabilities.management.hostConfigFiles) {
       return;
     }
 
     let cancelled = false;
 
     async function loadFiles() {
-      setFiles((current) => ({
-        'config.toml': {
-          ...current['config.toml'],
-          loading: true,
-          error: null,
-          saveMessage: null,
-        },
-        'auth.json': {
-          ...current['auth.json'],
-          loading: true,
-          error: null,
-          saveMessage: null,
-        },
-      }));
+      setFiles((current) => {
+        const next = { ...current };
+        for (const file of editableFiles) {
+          next[file.name] = {
+            ...defaultProviderHostFileState(file.name),
+            ...current[file.name],
+            loading: true,
+            saving: false,
+            error: null,
+            saveMessage: null,
+          };
+        }
+        return next;
+      });
 
       const results = await Promise.allSettled(
         editableFiles.map(async (file) => ({
           name: file.name,
-          result: await fetchCodexHostFile(file.name),
+          result: await fetchProviderHostFile(activeBackend.provider, file.name),
         })),
       );
 
@@ -448,8 +587,12 @@ export function AppShellSettingsDialog() {
               ? result.reason.message
               : 'Unable to load the file.';
           const failedName =
-            editableFiles[results.indexOf(result)]?.name ?? 'config.toml';
+            editableFiles[results.indexOf(result)]?.name ?? editableFiles[0]?.name;
+          if (!failedName) {
+            continue;
+          }
           next[failedName] = {
+            ...defaultProviderHostFileState(failedName),
             ...next[failedName],
             loading: false,
             saving: false,
@@ -467,7 +610,12 @@ export function AppShellSettingsDialog() {
     return () => {
       cancelled = true;
     };
-  }, [editableFiles, shellNav?.settingsOpen]);
+  }, [
+    activeBackend.capabilities.management.hostConfigFiles,
+    activeBackend.provider,
+    editableFiles,
+    shellNav?.settingsOpen,
+  ]);
 
   useEffect(() => {
     if (!shellNav?.settingsOpen) {
@@ -485,7 +633,7 @@ export function AppShellSettingsDialog() {
       }));
 
       try {
-        const results = await fetchCodexHostConfigArchives();
+        const results = await fetchProviderHostConfigArchives(activeBackend.provider);
         if (cancelled) {
           return;
         }
@@ -516,7 +664,7 @@ export function AppShellSettingsDialog() {
     return () => {
       cancelled = true;
     };
-  }, [shellNav?.settingsOpen]);
+  }, [activeBackend.provider, activeManagementSchema.configArchives, shellNav?.settingsOpen]);
 
   async function handleRestartAppServer() {
     if (restartState.busy) {
@@ -530,12 +678,20 @@ export function AppShellSettingsDialog() {
     });
 
     try {
-      const status = await restartCodexAppServer();
+      const runtime = await restartAgentBackend(activeBackend.provider);
       setRestartState({
         busy: false,
-        message: status.state === 'ready' ? 'App server restarted.' : `App server state: ${status.state}`,
+        message:
+          runtime.status.state === 'ready'
+            ? `${runtime.displayName} backend restarted.`
+            : `${runtime.displayName} backend state: ${runtime.status.state}`,
         error: null,
       });
+      setBackends((current) =>
+        current.map((backend) =>
+          backend.provider === runtime.provider ? runtime : backend,
+        ),
+      );
     } catch (error) {
       setRestartState({
         busy: false,
@@ -558,7 +714,7 @@ export function AppShellSettingsDialog() {
     });
 
     try {
-      await buildAndRestartService();
+      await buildAndRestartAgentBackend(activeBackend.provider);
       setRestartState({
         busy: false,
         message: 'Build and restart launched. The page may disconnect briefly.',
@@ -590,11 +746,16 @@ export function AppShellSettingsDialog() {
     }));
 
     try {
-      const updated = await updateWorkspaceSettings({ devHome });
+      const updated = await updateWorkspaceSettings({
+        devHome,
+        defaultBackend: workspaceSettingsState.backendDraft,
+      });
       setWorkspaceSettings(updated);
+      shellNav?.setDefaultBackend(updated.defaultBackend);
       setWorkspaceSettingsState((current) => ({
         ...current,
         devHomeDraft: updated.devHome,
+        backendDraft: updated.defaultBackend,
         saving: false,
         message: 'Workspace defaults saved.',
       }));
@@ -610,7 +771,7 @@ export function AppShellSettingsDialog() {
     }
   }
 
-  async function handleSave(name: CodexHostFileNameDto) {
+  async function handleSave(name: string) {
     const fileState = files[name];
     if (!fileState || fileState.saving) {
       return;
@@ -619,6 +780,7 @@ export function AppShellSettingsDialog() {
     setFiles((current) => ({
       ...current,
       [name]: {
+        ...defaultProviderHostFileState(name),
         ...current[name],
         saving: true,
         error: null,
@@ -627,7 +789,7 @@ export function AppShellSettingsDialog() {
     }));
 
     try {
-      const updated = await updateCodexHostFile(name, {
+      const updated = await updateProviderHostFile(activeBackend.provider, name, {
         content: fileState.draftContent,
       });
 
@@ -646,8 +808,9 @@ export function AppShellSettingsDialog() {
       }));
     } catch (error) {
       setFiles((current) => ({
-        ...current,
-        [name]: {
+      ...current,
+      [name]: {
+          ...defaultProviderHostFileState(name),
           ...current[name],
           saving: false,
           error:
@@ -671,7 +834,7 @@ export function AppShellSettingsDialog() {
     }));
 
     try {
-      const archive = await createCodexHostConfigArchive();
+      const archive = await createProviderHostConfigArchive(activeBackend.provider);
       setArchives((current) => [archive, ...current]);
       setArchivesState((current) => ({
         ...current,
@@ -690,7 +853,7 @@ export function AppShellSettingsDialog() {
     }
   }
 
-  async function handleApplyArchive(archive: CodexHostConfigArchiveDto) {
+  async function handleApplyArchive(archive: ProviderHostConfigArchiveDto) {
     if (archivesState.applyingId) {
       return;
     }
@@ -703,14 +866,14 @@ export function AppShellSettingsDialog() {
     }));
 
     try {
-      const result = await applyCodexHostConfigArchive(archive.id);
+      const result = await applyProviderHostConfigArchive(activeBackend.provider, archive.id);
       setArchivesState((current) => ({
         ...current,
         applyingId: null,
         message:
           result.status.state === 'ready'
-            ? `Applied "${result.archive.label}" and restarted app-server.`
-            : `Applied "${result.archive.label}". App-server state: ${result.status.state}.`,
+            ? `Applied "${result.archive.label}" and restarted ${activeBackend.displayName}.`
+            : `Applied "${result.archive.label}". ${activeBackend.displayName} state: ${result.status.state}.`,
       }));
     } catch (error) {
       setArchivesState((current) => ({
@@ -724,7 +887,7 @@ export function AppShellSettingsDialog() {
     }
   }
 
-  async function handleRenameArchive(archive: CodexHostConfigArchiveDto) {
+  async function handleRenameArchive(archive: ProviderHostConfigArchiveDto) {
     const label = archivesState.renameDraft.trim();
     if (!label || archivesState.renamingId !== archive.id) {
       return;
@@ -737,7 +900,7 @@ export function AppShellSettingsDialog() {
     }));
 
     try {
-      const updated = await renameCodexHostConfigArchive(archive.id, { label });
+      const updated = await renameProviderHostConfigArchive(activeBackend.provider, archive.id, { label });
       setArchives((current) =>
         current.map((entry) => (entry.id === archive.id ? updated : entry)),
       );
@@ -786,7 +949,7 @@ export function AppShellSettingsDialog() {
                 Settings
               </h2>
               <p className="mt-2 text-sm leading-6 text-[var(--theme-fg-soft)]">
-                Edit host-side Codex configuration files through supervisor.
+                Choose the default backend and manage host-side runtime files.
               </p>
             </div>
             <button
@@ -846,6 +1009,62 @@ export function AppShellSettingsDialog() {
             <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
+                  <p className="text-sm font-medium text-[var(--theme-fg)]">Backend</p>
+                  <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
+                    {backendSelectionDescription(backends)}
+                  </p>
+                </div>
+                {backendState.loading ? (
+                  <span className="text-[11px] uppercase tracking-[0.18em] text-[var(--theme-fg-muted)]">
+                    Loading
+                  </span>
+                ) : null}
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {backends.map((backend) => {
+                  const active = workspaceSettingsState.backendDraft === backend.provider;
+                  return (
+                    <button
+                      key={backend.provider}
+                      type="button"
+                      disabled={!backend.enabled}
+                      onClick={() => {
+                        setWorkspaceSettingsState((current) => ({
+                          ...current,
+                          backendDraft: backend.provider,
+                          message: null,
+                          error: null,
+                        }));
+                      }}
+                      className={`block rounded-[1rem] border px-3 py-2.5 text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                        active
+                          ? 'border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)]'
+                          : 'border-[var(--theme-border)] bg-[var(--theme-surface-strong)] hover:bg-[var(--theme-hover)]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-medium text-[var(--theme-fg)]">
+                          {backend.displayName}
+                        </span>
+                        <span className="rounded-full border border-[var(--theme-border)] bg-[var(--theme-panel)] px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-[var(--theme-fg-muted)]">
+                          {backend.enabled ? backend.status.state : 'Unavailable'}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
+                        {backend.description}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+              {backendState.error ? (
+                <p className="mt-2 text-xs text-rose-300">{backendState.error}</p>
+              ) : null}
+            </div>
+
+            <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
                   <p className="text-sm font-medium text-[var(--theme-fg)]">Workspace defaults</p>
                   <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
                     Git projects clone into dev home. New workspace directories can create one
@@ -889,6 +1108,11 @@ export function AppShellSettingsDialog() {
                       placeholder="/Users/name/dev"
                       className="min-w-0 flex-1 rounded-full border border-[var(--theme-border)] bg-[var(--theme-panel)] px-3 py-2 text-sm text-[var(--theme-fg)] outline-none focus:border-[var(--theme-accent-border)]"
                     />
+                    <input
+                      type="hidden"
+                      value={workspaceSettingsState.backendDraft}
+                      readOnly
+                    />
                     <button
                       type="button"
                       aria-label="Save workspace defaults"
@@ -915,9 +1139,11 @@ export function AppShellSettingsDialog() {
             <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-[var(--theme-fg)]">Codex app-server</p>
+                  <p className="text-sm font-medium text-[var(--theme-fg)]">
+                    {activeBackend.displayName} runtime
+                  </p>
                   <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                    Restart after editing host configuration to force a fresh reload.
+                    Restart the selected backend after editing host configuration to force a fresh reload.
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-wrap justify-end gap-2">
@@ -929,14 +1155,16 @@ export function AppShellSettingsDialog() {
                   >
                     {restartState.busy ? 'Restarting...' : 'Restart'}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleBuildAndRestartService()}
-                    disabled={restartState.busy}
-                    className="rounded-full border border-amber-400/35 bg-amber-400/10 px-3 py-1.5 text-xs font-medium text-amber-500 transition hover:bg-amber-400/16 disabled:cursor-not-allowed disabled:border-[var(--theme-border)] disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
-                  >
-                    {restartState.busy ? 'Working...' : 'Build and restart'}
-                  </button>
+                  {activeManagementSchema.buildRestart ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleBuildAndRestartService()}
+                      disabled={restartState.busy}
+                      className="rounded-full border border-amber-400/35 bg-amber-400/10 px-3 py-1.5 text-xs font-medium text-amber-500 transition hover:bg-amber-400/16 disabled:cursor-not-allowed disabled:border-[var(--theme-border)] disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
+                    >
+                      {restartState.busy ? 'Working...' : 'Build and restart'}
+                    </button>
+                  ) : null}
                 </div>
               </div>
               {restartState.error ? (
@@ -949,15 +1177,24 @@ export function AppShellSettingsDialog() {
             <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-[var(--theme-fg)]">Host files</p>
+                  <p className="text-sm font-medium text-[var(--theme-fg)]">Provider host files</p>
                   <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                    Open `config.toml` or `auth.json` in a secondary editor dialog when needed.
+                    {activeBackend.displayName} exposes these editable files through its backend schema.
                   </p>
                 </div>
               </div>
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 {editableFiles.map((file) => {
-                  const state = files[file.name];
+                  const state = files[file.name] ?? {
+                    path: file.name,
+                    exists: false,
+                    originalContent: '',
+                    draftContent: '',
+                    loading: false,
+                    saving: false,
+                    error: null,
+                    saveMessage: null,
+                  };
                   const dirty = state.draftContent !== state.originalContent;
 
                   return (
@@ -999,16 +1236,21 @@ export function AppShellSettingsDialog() {
                     </button>
                   );
                 })}
+                {editableFiles.length === 0 ? (
+                  <p className="rounded-[1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-3 text-xs text-[var(--theme-fg-muted)]">
+                    This backend does not expose editable host files.
+                  </p>
+                ) : null}
               </div>
             </div>
 
+            {activeManagementSchema.configArchives ? (
             <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-[var(--theme-fg)]">Config archives</p>
                   <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                    Backup `config.toml` and `auth.json`, then apply a saved archive with an
-                    app-server restart so Codex reloads the selected files.
+                    Backup the selected backend host files, then apply a saved archive with a backend restart.
                   </p>
                 </div>
                 <button
@@ -1088,12 +1330,12 @@ export function AppShellSettingsDialog() {
                             )}
                             <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-[var(--theme-fg-muted)]">
                               <span>Created {formatArchiveDate(archive.createdAt)}</span>
-                              {codexHostFileNames.map((name) => (
+                              {editableFiles.map((file) => (
                                 <span
-                                  key={name}
+                                  key={file.name}
                                   className="rounded-full border border-[var(--theme-border)] bg-[var(--theme-panel)] px-2 py-0.5 font-mono"
                                 >
-                                  {name}: {archive.files[name]?.exists ? 'saved' : 'missing'}
+                                  {file.name}: {archive.files[file.name as keyof typeof archive.files]?.exists ? 'saved' : 'missing'}
                                 </span>
                               ))}
                             </div>
@@ -1133,6 +1375,7 @@ export function AppShellSettingsDialog() {
                 )}
               </div>
             </div>
+            ) : null}
           </div>
         </div>
       </section>
@@ -1184,6 +1427,7 @@ export function AppShellSettingsDialog() {
                   setFiles((current) => ({
                     ...current,
                     [selectedFileName]: {
+                      ...defaultProviderHostFileState(selectedFileName),
                       ...current[selectedFileName],
                       draftContent: event.target.value,
                       error: null,

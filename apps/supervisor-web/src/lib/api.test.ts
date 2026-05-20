@@ -1,22 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  applyCodexHostConfigArchive,
+  applyProviderHostConfigArchive,
   createThreadShell,
-  createCodexHostConfigArchive,
+  createProviderHostConfigArchive,
   createWorkspace,
   disconnectThread,
-  fetchCodexHostConfigArchives,
-  fetchCodexHostFile,
-  fetchCodexStatus,
+  fetchAgentBackendModels,
+  fetchAgentBackendStatus,
+  fetchProviderHostConfigArchives,
+  fetchProviderHostFile,
   importThread,
-  buildAndRestartService,
-  renameCodexHostConfigArchive,
-  restartCodexAppServer,
+  buildAndRestartAgentBackend,
+  renameProviderHostConfigArchive,
+  restartAgentBackend,
   resumeThread,
   sendThreadPrompt,
   terminateShell,
-  updateCodexHostFile,
+  updateProviderHostFile,
 } from './api';
 
 describe('api request helper', () => {
@@ -94,53 +95,55 @@ describe('api request helper', () => {
     expect(headers.has('Content-Type')).toBe(false);
   });
 
-  it('uses the expected codex host file endpoints', async () => {
-    await fetchCodexHostFile('config.toml');
-    await updateCodexHostFile('auth.json', {
+  it('uses the expected provider host file endpoints', async () => {
+    await fetchProviderHostFile('codex', 'config.toml');
+    await updateProviderHostFile('codex', 'auth.json', {
       content: '{\n  "token": "abc"\n}\n',
     });
 
     const calls = vi.mocked(fetch).mock.calls;
-    expect(calls[0]?.[0]).toBe('/api/config/codex-files/config.toml');
-    expect(calls[1]?.[0]).toBe('/api/config/codex-files/auth.json');
+    expect(calls[0]?.[0]).toBe('/api/config/providers/codex/files/config.toml');
+    expect(calls[1]?.[0]).toBe('/api/config/providers/codex/files/auth.json');
     expect(calls[1]?.[1]?.method).toBe('PATCH');
     expect(JSON.parse(String(calls[1]?.[1]?.body))).toEqual({
       content: '{\n  "token": "abc"\n}\n',
     });
   });
 
-  it('uses the expected codex config archive endpoints', async () => {
-    await fetchCodexHostConfigArchives();
-    await createCodexHostConfigArchive({ label: 'Known good' });
-    await renameCodexHostConfigArchive('archive-1', { label: 'Renamed' });
-    await applyCodexHostConfigArchive('archive-1');
+  it('uses the expected provider config archive endpoints', async () => {
+    await fetchProviderHostConfigArchives('codex');
+    await createProviderHostConfigArchive('codex', { label: 'Known good' });
+    await renameProviderHostConfigArchive('codex', 'archive-1', { label: 'Renamed' });
+    await applyProviderHostConfigArchive('codex', 'archive-1');
 
     const calls = vi.mocked(fetch).mock.calls;
-    expect(calls[0]?.[0]).toBe('/api/config/codex-archives');
-    expect(calls[1]?.[0]).toBe('/api/config/codex-archives');
+    expect(calls[0]?.[0]).toBe('/api/config/providers/codex/archives');
+    expect(calls[1]?.[0]).toBe('/api/config/providers/codex/archives');
     expect(calls[1]?.[1]?.method).toBe('POST');
     expect(JSON.parse(String(calls[1]?.[1]?.body))).toEqual({
       label: 'Known good',
     });
-    expect(calls[2]?.[0]).toBe('/api/config/codex-archives/archive-1');
+    expect(calls[2]?.[0]).toBe('/api/config/providers/codex/archives/archive-1');
     expect(calls[2]?.[1]?.method).toBe('PATCH');
     expect(JSON.parse(String(calls[2]?.[1]?.body))).toEqual({
       label: 'Renamed',
     });
-    expect(calls[3]?.[0]).toBe('/api/config/codex-archives/archive-1/apply');
+    expect(calls[3]?.[0]).toBe('/api/config/providers/codex/archives/archive-1/apply');
     expect(calls[3]?.[1]?.method).toBe('POST');
   });
 
-  it('uses the expected codex status endpoints', async () => {
-    await fetchCodexStatus();
-    await restartCodexAppServer();
-    await buildAndRestartService();
+  it('uses the expected agent runtime endpoints for status, restart, and models', async () => {
+    await fetchAgentBackendStatus('codex');
+    await restartAgentBackend('codex');
+    await fetchAgentBackendModels('codex');
+    await buildAndRestartAgentBackend('codex');
 
     const calls = vi.mocked(fetch).mock.calls;
-    expect(calls[0]?.[0]).toBe('/api/codex/status');
-    expect(calls[1]?.[0]).toBe('/api/codex/restart');
+    expect(calls[0]?.[0]).toBe('/api/agent-runtimes/codex/status');
+    expect(calls[1]?.[0]).toBe('/api/agent-runtimes/codex/restart');
     expect(calls[1]?.[1]?.method).toBe('POST');
-    expect(calls[2]?.[0]).toBe('/api/codex/build-restart');
-    expect(calls[2]?.[1]?.method).toBe('POST');
+    expect(calls[2]?.[0]).toBe('/api/agent-runtimes/codex/models');
+    expect(calls[3]?.[0]).toBe('/api/agent-runtimes/codex/build-restart');
+    expect(calls[3]?.[1]?.method).toBe('POST');
   });
 });
