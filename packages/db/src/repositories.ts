@@ -109,6 +109,7 @@ export interface UpsertThreadGoalRecordInput {
   threadId: string;
   providerSessionId: string;
   localGoalId?: string | null;
+  createNew?: boolean;
   objective: string;
   status: string;
   tokenBudget?: number | null;
@@ -635,6 +636,10 @@ function getThreadGoalRecordForUpsert(
   db: DatabaseClient,
   input: UpsertThreadGoalRecordInput,
 ) {
+  if (input.createNew) {
+    return null;
+  }
+
   if (input.localGoalId) {
     const byId = db
       .select()
@@ -647,7 +652,7 @@ function getThreadGoalRecordForUpsert(
   }
 
   const active = getActiveThreadGoalRecord(db, input.threadId);
-  if (active) {
+  if (active && active.objective === input.objective) {
     return active;
   }
 

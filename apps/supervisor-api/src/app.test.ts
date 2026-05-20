@@ -5725,6 +5725,158 @@ describe('supervisor api', () => {
     });
   });
 
+  it('starts a new goal with fresh progress when replacing an active goal', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Fresh Goal Progress Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const firstGoalResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${createdThread.id}/goal`,
+      payload: {
+        objective: 'Finish the first task.',
+        status: 'active',
+      }
+    });
+    expect(firstGoalResponse.statusCode).toBe(200);
+    const firstGoalId = firstGoalResponse.json().goal.localGoalId;
+    fakeCodexManager.goals.set(createdThread.providerSessionId, {
+      ...fakeCodexManager.goals.get(createdThread.providerSessionId)!,
+      tokensUsed: 5_400_000,
+      timeUsedSeconds: 15_300,
+    });
+
+    const secondGoalResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${createdThread.id}/goal`,
+      payload: {
+        objective: 'Start a clean follow-up task.',
+        status: 'active',
+      }
+    });
+
+    expect(secondGoalResponse.statusCode).toBe(200);
+    expect(secondGoalResponse.json().goal).toMatchObject({
+      objective: 'Start a clean follow-up task.',
+      status: 'active',
+      tokensUsed: 0,
+      timeUsedSeconds: 0,
+    });
+    expect(secondGoalResponse.json().goal.localGoalId).not.toBe(firstGoalId);
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+
+    expect(detailResponse.json().goalHistory).toEqual([
+      expect.objectContaining({
+        objective: 'Start a clean follow-up task.',
+        status: 'active',
+        tokensUsed: 0,
+        timeUsedSeconds: 0,
+      }),
+      expect.objectContaining({
+        objective: 'Finish the first task.',
+        status: 'terminated',
+      }),
+    ]);
+
+    const fetchGoalResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}/goal`,
+    });
+
+    expect(fetchGoalResponse.json().goal).toMatchObject({
+      objective: 'Start a clean follow-up task.',
+      status: 'active',
+      tokensUsed: 0,
+      timeUsedSeconds: 0,
+    });
+  });
+
+  it('terminates the active goal locally without inheriting remote completed state', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Terminate Goal Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${createdThread.id}/goal`,
+      payload: {
+        objective: 'Stop when asked.',
+        status: 'active',
+      }
+    });
+    fakeCodexManager.goals.set(createdThread.providerSessionId, {
+      ...fakeCodexManager.goals.get(createdThread.providerSessionId)!,
+      status: 'complete',
+      tokensUsed: 1000,
+      timeUsedSeconds: 60,
+    });
+
+    const terminateResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${createdThread.id}/goal`,
+      payload: {
+        status: 'terminated',
+      }
+    });
+
+    expect(terminateResponse.statusCode).toBe(200);
+    expect(terminateResponse.json().goal).toMatchObject({
+      objective: 'Stop when asked.',
+      status: 'terminated',
+    });
+    expect(fakeCodexManager.goalSetCalls.at(-1)).not.toMatchObject({
+      status: 'terminated',
+    });
+
+    const fetchGoalResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}/goal`,
+    });
+
+    expect(fetchGoalResponse.json().goal).toMatchObject({
+      objective: 'Stop when asked.',
+      status: 'terminated',
+    });
+  });
+
   it('prices token updates for autonomous goal turns started by app-server events', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',

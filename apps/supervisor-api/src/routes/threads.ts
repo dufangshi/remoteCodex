@@ -68,7 +68,7 @@ const updateThreadSettingsSchema = z.object({
 
 const updateThreadGoalSchema = z.object({
   objective: z.string().min(1).nullable().optional(),
-  status: z.enum(['active', 'paused', 'budgetLimited', 'complete']).nullable().optional(),
+  status: z.enum(['active', 'paused', 'budgetLimited', 'complete', 'terminated']).nullable().optional(),
   tokenBudget: z.number().int().positive().nullable().optional(),
 }).refine((body) => Object.keys(body).length > 0, {
   message: 'At least one goal field must be provided.'

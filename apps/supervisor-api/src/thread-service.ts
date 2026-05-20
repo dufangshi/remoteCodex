@@ -305,6 +305,63 @@ function mergeGoalHistoryEntry(existing: ThreadGoalDto, incoming: ThreadGoalDto)
   };
 }
 
+function goalHistoryStatusRank(status: ThreadGoalDto['status']) {
+  return ['active', 'paused', 'budgetLimited'].includes(status) ? 0 : 1;
+}
+
+function resetGoalProgress(goal: ThreadGoalDto): ThreadGoalDto {
+  return {
+    ...goal,
+    tokensUsed: 0,
+    timeUsedSeconds: 0,
+  };
+}
+
+function goalObjectiveChanged(
+  existing: ThreadGoalDto | null,
+  nextObjective: string | null | undefined,
+) {
+  return (
+    existing !== null &&
+    typeof nextObjective === 'string' &&
+    nextObjective.trim().length > 0 &&
+    nextObjective !== existing.objective
+  );
+}
+
+function isLocalGoalStatus(status: ThreadGoalDto['status']) {
+  return ['active', 'paused', 'budgetLimited'].includes(status);
+}
+
+function localGoalSnapshotForFallback(goalHistory: ThreadGoalDto[]) {
+  const activeGoal = goalHistory.find((entry) => isLocalGoalStatus(entry.status)) ?? null;
+  if (activeGoal) {
+    return activeGoal;
+  }
+  return goalHistory.find((entry) => entry.status === 'terminated') ?? null;
+}
+
+function localGoalSnapshotToPreserve(
+  goalHistory: ThreadGoalDto[],
+  remoteGoal: ThreadGoalDto,
+) {
+  const activeGoal = goalHistory.find((entry) => isLocalGoalStatus(entry.status)) ?? null;
+  const hasTerminatedHistory = goalHistory.some((entry) => entry.status === 'terminated');
+  if (
+    activeGoal &&
+    hasTerminatedHistory &&
+    isLocalGoalStatus(remoteGoal.status) &&
+    activeGoal.objective === remoteGoal.objective &&
+    activeGoal.tokensUsed === 0 &&
+    activeGoal.timeUsedSeconds === 0 &&
+    (remoteGoal.tokensUsed > 0 || remoteGoal.timeUsedSeconds > 0)
+  ) {
+    return activeGoal;
+  }
+
+  return activeGoal ? null : goalHistory.find((entry) => entry.status === 'terminated') ?? null;
+}
+
 function approvalModeToPolicy(approvalMode: ApprovalMode): 'never' | 'on-request' {
   return approvalMode === 'guarded' ? 'on-request' : 'never';
 }
@@ -1443,8 +1500,10 @@ export class ThreadService {
       cachedDetail.turns,
       pagedTurns.turns,
     );
-    const goal = await this.getThreadGoalForRecord(updated).catch(() => null);
     const goalHistory = this.listThreadGoalHistory(updated.id);
+    const goal =
+      await this.getThreadGoalForRecord(updated).catch(() => null) ??
+      localGoalSnapshotForFallback(goalHistory);
     return {
       thread: this.toThreadDto(updated, loadedIds),
       workspace: toWorkspaceDto(workspace),
@@ -1606,7 +1665,8 @@ export class ThreadService {
     }
     this.requireProviderSessionId(record);
 
-    return this.getThreadGoalForRecord(record, { allowEnableFeature: true });
+    return await this.getThreadGoalForRecord(record, { allowEnableFeature: true }) ??
+      localGoalSnapshotForFallback(this.listThreadGoalHistory(localThreadId));
   }
 
   async updateThreadGoal(
@@ -1640,15 +1700,33 @@ export class ThreadService {
     try {
       await this.ensureGoalsFeatureEnabled(record.provider);
       await this.ensureThreadLoadedForCodexOperation(record);
+      const activeGoal = this.listThreadGoalHistory(localThreadId).find((goal) =>
+        ['active', 'paused', 'budgetLimited'].includes(goal.status),
+      ) ?? null;
+      const creatingNewGoal = goalObjectiveChanged(activeGoal, input.objective);
+      if (creatingNewGoal) {
+        markActiveThreadGoalRecordTerminated(this.db, localThreadId);
+      }
+      if (input.status === 'terminated') {
+        const terminatedGoal = markActiveThreadGoalRecordTerminated(this.db, localThreadId);
+        const goalHistory = this.listThreadGoalHistory(localThreadId);
+        const goal = terminatedGoal ? toThreadGoalDtoFromRecord(terminatedGoal) : goalHistory[0] ?? null;
+        this.emitThreadEvent('thread.goal.updated', localThreadId, {
+          goal,
+          goalHistory,
+        });
+        return goal;
+      }
       const upstreamStatus =
-        input.status === 'terminated' ? undefined : (input.status as UpstreamThreadGoalStatus | null | undefined);
+        input.status as UpstreamThreadGoalStatus | null | undefined;
       const goal = await runtime.setGoal({
         providerSessionId,
         ...(input.objective !== undefined ? { objective: input.objective } : {}),
         ...(upstreamStatus !== undefined ? { status: upstreamStatus } : {}),
         ...(input.tokenBudget !== undefined ? { tokenBudget: input.tokenBudget } : {}),
       });
-      const dto = normalizeThreadGoalStatusForThread(toThreadGoalDtoFromAgentGoal(goal), record);
+      const upstreamDto = normalizeThreadGoalStatusForThread(toThreadGoalDtoFromAgentGoal(goal), record);
+      const dto = creatingNewGoal ? resetGoalProgress(upstreamDto) : upstreamDto;
       const persistedGoal = toThreadGoalDtoFromRecord(
         this.persistThreadGoalSnapshot(localThreadId, dto),
       );
@@ -1729,6 +1807,13 @@ export class ThreadService {
       }
 
       const dto = normalizeThreadGoalStatusForThread(toThreadGoalDtoFromAgentGoal(goal), record);
+      const localGoal = localGoalSnapshotToPreserve(
+        this.listThreadGoalHistory(record.id),
+        dto,
+      );
+      if (localGoal) {
+        return localGoal;
+      }
       return toThreadGoalDtoFromRecord(this.persistThreadGoalSnapshot(record.id, dto));
     } catch (error) {
       if (this.codexManagement.isRuntimeRequestError(error)) {
@@ -1772,7 +1857,13 @@ export class ThreadService {
       deduped.set(key, existing ? mergeGoalHistoryEntry(existing, goal) : goal);
     }
     return [...deduped.values()].sort(
-      (left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
+      (left, right) => {
+        const updatedDelta = Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+        if (updatedDelta !== 0) {
+          return updatedDelta;
+        }
+        return goalHistoryStatusRank(left.status) - goalHistoryStatusRank(right.status);
+      },
     );
   }
 
