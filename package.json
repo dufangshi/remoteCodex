@@ -1,6 +1,6 @@
 {
   "name": "remote-codex",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Local web supervisor for Codex workspaces and threads.",
   "license": "MIT",
   "type": "module",
@@ -14,7 +14,11 @@
     "apps/supervisor-api/dist/",
     "apps/supervisor-web/dist/",
     "config/codex-model-pricing.json",
+    "packages/agent-runtime/src/",
+    "packages/codex/src/",
+    "packages/db/src/",
     "packages/db/migrations/*.sql",
+    "packages/shared/src/",
     "README.md"
   ],
   "packageManager": "pnpm@10.11.1",
