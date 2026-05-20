@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from './app';
 import { AgentRuntimeRegistry } from '../../../packages/agent-runtime/src/index';
 import { CodexRuntimeAdapter, JsonRpcClientError } from '../../../packages/codex/src/index';
+import { CodexManagementService } from './codex/codex-management-service';
 import { LocalCodexSessionStore } from './codex/local-session-store';
 import { FakeCodexManager } from './test/fakeCodexManager';
 
@@ -52,6 +53,7 @@ describe('supervisor api', () => {
           new CodexRuntimeAdapter(fakeCodexManager as any),
         ]),
         localCodexSessionStore: new LocalCodexSessionStore(codexHome),
+        codexManagement: new CodexManagementService(codexHome),
         providerHostHomes: {
           codex: codexHome,
         },
