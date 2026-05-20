@@ -8,6 +8,8 @@
 > - `docs/phases/phase-3-durable-shell.md`
 > - `docs/phases/phase-4-admin-governance.md`
 > - `docs/phases/phase-5-interaction-notifications.md`
+>
+> Claude 兼容的后续架构路线见 `docs/agent-runtime-provider-abstraction.md`。该路线要求先建立 provider-neutral `AgentRuntime` 抽象，并先用 Codex adapter 验证现有 Codex 行为不回归，再接入 Claude adapter。
 
 ## 文档定位
 
@@ -27,6 +29,14 @@
 - 只考虑 `macOS` 和 `WSL Ubuntu`
 - `Codex` 优先，暂不做 `Claude Code`
 - 默认 `YOLO`，但架构必须兼容后续审批和 plan mode 交互
+
+后续如果要兼容 Claude，实施顺序应调整为：
+
+1. 先把现有 Codex 控制链路迁移到 provider-neutral `AgentRuntime`。
+2. 先实现并验证 `CodexRuntimeAdapter`，确保 Codex 创建、恢复、发送、停止、streaming、goal、fast、skills、MCP、hooks trust 等能力不回归。
+3. 再新增 Claude adapter。
+
+这一步的详细设计见 [Agent Runtime Provider Abstraction](./agent-runtime-provider-abstraction.md)。
 
 ---
 

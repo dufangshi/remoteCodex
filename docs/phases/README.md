@@ -23,6 +23,17 @@
 | 4 | [phase-4-admin-governance.md](./phase-4-admin-governance.md) | 管理界面与资源治理 | 可以查看、限制、清理 thread / shell 资源 |
 | 5 | [phase-5-interaction-notifications.md](./phase-5-interaction-notifications.md) | 交互补全与通知体系 | 可以处理 plan mode 问题并获得完整状态提醒 |
 
+## 后续架构重构
+
+完成 Codex 主链路后，后续如需兼容 Claude，不应直接把 Claude 接进现有 `ThreadService`。应先执行 [Agent Runtime Provider Abstraction](../agent-runtime-provider-abstraction.md)：
+
+- 先建立 provider-neutral `AgentRuntime` 抽象。
+- 先让 Codex 通过 `CodexRuntimeAdapter` 接入该抽象，并保持现有 Codex 行为不变。
+- 确认 Codex 创建、恢复、发送、停止、streaming、goal、fast、skills、MCP、hooks trust 等能力未回归。
+- 之后再接 Claude adapter。
+
+这一步的目标是把当前系统从 `CodexAppServerManager -> ThreadService -> DTO/UI` 的直接耦合，迁移为 `AgentRuntime -> Codex adapter -> CodexAppServerManager`。Claude 兼容应在这个边界稳定后再启动。
+
 ## 推荐交付节奏
 
 1. Phase 1 完成后，先冻结基础目录结构、脚本约定、数据库迁移方式。
