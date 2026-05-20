@@ -3,9 +3,6 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import {
-  SandboxPolicy,
-} from '../../../packages/codex/src/index';
-import {
   AgentRuntime,
   AgentRuntimeRegistry,
   AgentGoal,
@@ -375,38 +372,6 @@ function normalizeSandboxMode(
   }
 }
 
-function buildTurnSandboxPolicy(
-  sandboxMode: SandboxModeDto,
-  writableRoot: string,
-): SandboxPolicy {
-  switch (sandboxMode) {
-    case 'danger-full-access':
-      return {
-        type: 'dangerFullAccess',
-      };
-    case 'read-only':
-      return {
-        type: 'readOnly',
-        access: {
-          type: 'fullAccess',
-        },
-        networkAccess: false,
-      };
-    case 'workspace-write':
-    default:
-      return {
-        type: 'workspaceWrite',
-        writableRoots: [writableRoot],
-        readOnlyAccess: {
-          type: 'fullAccess',
-        },
-        networkAccess: false,
-        excludeTmpdirEnvVar: false,
-        excludeSlashTmp: false,
-      };
-  }
-}
-
 function normalizeReasoningEffort(
   value: string | null | undefined
 ): ReasoningEffortDto | null {
@@ -433,10 +398,10 @@ function normalizeFastMode(value: unknown): boolean {
   return value === true || value === 1;
 }
 
-function serviceTierForFastMode(
+function performanceModeForFastMode(
   fastMode: boolean,
-): 'fast' | null {
-  return fastMode ? 'fast' : null;
+): 'fast' | 'standard' {
+  return fastMode ? 'fast' : 'standard';
 }
 
 function normalizePricingTier(
@@ -1416,8 +1381,8 @@ export class ThreadService {
     return this.runtimeSupportsFastMode(provider) ? normalizeFastMode(fastMode) : false;
   }
 
-  private serviceTierForRecord(record: { provider?: string | null; fastMode?: unknown }) {
-    return serviceTierForFastMode(this.fastModeForProvider(record.provider, record.fastMode));
+  private performanceModeForRecord(record: { provider?: string | null; fastMode?: unknown }) {
+    return performanceModeForFastMode(this.fastModeForProvider(record.provider, record.fastMode));
   }
 
   private assertCodexHooksFileManagement(provider: string | null | undefined): void {
@@ -1732,7 +1697,7 @@ export class ThreadService {
       model: input.model,
       approvalMode: input.approvalMode,
       sandboxMode,
-      serviceTier: serviceTierForFastMode(fastMode),
+      performanceMode: performanceModeForFastMode(fastMode),
     });
 
     const created = createThreadRecord(this.db, {
@@ -2391,7 +2356,7 @@ export class ThreadService {
         providerSessionId,
         model: input.model ?? record.model ?? null,
         sandboxMode,
-        serviceTier: serviceTierForFastMode(fastMode),
+        performanceMode: performanceModeForFastMode(fastMode),
       });
     } catch (error) {
       if (!isRemoteThreadBootstrapError(error)) {
@@ -2524,7 +2489,7 @@ export class ThreadService {
       defaultSandboxModeForApprovalMode((record.approvalMode ?? 'yolo') as ApprovalMode);
     const fastMode = this.fastModeForProvider(record.provider, record.fastMode);
     ensureFastModeSupported(effectiveModel, fastMode);
-    const serviceTier = serviceTierForFastMode(fastMode);
+    const performanceMode = performanceModeForFastMode(fastMode);
     const connectedRecord = {
       ...record,
       providerSessionId,
@@ -2542,7 +2507,7 @@ export class ThreadService {
         normalizedReasoning,
         collaborationMode,
         sandboxMode,
-        serviceTier,
+        performanceMode,
         workspacePath: workspace.absPath,
       });
     }
@@ -2553,7 +2518,7 @@ export class ThreadService {
       normalizedReasoning,
       collaborationMode,
       sandboxMode,
-      serviceTier,
+      performanceMode,
       workspacePath: workspace.absPath,
     });
   }
@@ -2567,25 +2532,26 @@ export class ThreadService {
       normalizedReasoning: ReasoningEffortDto | null;
       collaborationMode: CollaborationModeDto;
       sandboxMode: SandboxModeDto;
-      serviceTier: 'fast' | null;
+      performanceMode: 'fast' | 'standard';
       workspacePath: string;
     },
   ): Promise<ThreadDto> {
     const runtime = this.runtimeForProvider(record.provider);
     const modelRecords = await runtime.listModels().catch(() => []);
-    ensureFastModeSupported(input.effectiveModel, input.serviceTier === 'fast');
+    ensureFastModeSupported(input.effectiveModel, input.performanceMode === 'fast');
     const pricingSnapshot = buildTurnPricingSnapshot(
       input.effectiveModel,
-      input.serviceTier === 'fast',
+      input.performanceMode === 'fast',
     );
     const turn = await runtime.startTurn({
       providerSessionId: record.providerSessionId,
       prompt: input.prompt,
       model: input.effectiveModel,
-      serviceTier: input.serviceTier,
+      performanceMode: input.performanceMode,
       reasoningEffort: input.normalizedReasoning,
       collaborationMode: input.collaborationMode,
-      sandboxPolicy: buildTurnSandboxPolicy(input.sandboxMode, input.workspacePath),
+      sandboxMode: input.sandboxMode,
+      workspacePath: input.workspacePath,
     });
     upsertThreadTurnMetadata(this.db, {
       threadId: localThreadId,
@@ -2644,7 +2610,7 @@ export class ThreadService {
       normalizedReasoning: ReasoningEffortDto | null;
       collaborationMode: CollaborationModeDto;
       sandboxMode: SandboxModeDto;
-      serviceTier: 'fast' | null;
+      performanceMode: 'fast' | 'standard';
       workspacePath: string;
     },
   ): Promise<ThreadDto> {
@@ -2709,7 +2675,7 @@ export class ThreadService {
       normalizedReasoning: input.normalizedReasoning,
       collaborationMode: input.collaborationMode,
       sandboxMode: input.sandboxMode,
-      serviceTier: input.serviceTier,
+      performanceMode: input.performanceMode,
       workspacePath: input.workspacePath,
     });
   }

@@ -189,7 +189,7 @@ export interface StartAgentSessionInput {
   model: string;
   approvalMode: 'yolo' | 'guarded';
   sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access' | null;
-  serviceTier?: 'fast' | 'flex' | null;
+  performanceMode?: 'standard' | 'fast' | null;
 }
 
 export interface StartAgentSessionResult {
@@ -206,7 +206,7 @@ export interface ResumeAgentSessionInput {
   providerSessionId: string;
   model?: string | null;
   sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access' | null;
-  serviceTier?: 'fast' | 'flex' | null;
+  performanceMode?: 'standard' | 'fast' | null;
 }
 
 export interface StartAgentTurnInput {
@@ -215,8 +215,9 @@ export interface StartAgentTurnInput {
   model?: string | null;
   reasoningEffort?: string | null;
   collaborationMode?: 'default' | 'plan' | null;
-  sandboxPolicy?: unknown;
-  serviceTier?: 'fast' | 'flex' | null;
+  sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access' | null;
+  workspacePath?: string | null;
+  performanceMode?: 'standard' | 'fast' | null;
 }
 
 export interface SendAgentInputInput {

@@ -163,6 +163,51 @@ function mapGoal(goal: CodexThreadGoalRecord): AgentGoal {
   };
 }
 
+function serviceTierForPerformanceMode(
+  performanceMode: StartAgentSessionInput['performanceMode'],
+): 'fast' | null | undefined {
+  if (performanceMode === undefined) {
+    return undefined;
+  }
+  return performanceMode === 'fast' ? 'fast' : null;
+}
+
+function buildSandboxPolicy(
+  sandboxMode: StartAgentTurnInput['sandboxMode'],
+  workspacePath: StartAgentTurnInput['workspacePath'],
+): SandboxPolicy | null | undefined {
+  if (sandboxMode === undefined) {
+    return undefined;
+  }
+
+  switch (sandboxMode) {
+    case 'danger-full-access':
+      return {
+        type: 'dangerFullAccess',
+      };
+    case 'read-only':
+      return {
+        type: 'readOnly',
+        access: {
+          type: 'fullAccess',
+        },
+        networkAccess: false,
+      };
+    case 'workspace-write':
+    default:
+      return {
+        type: 'workspaceWrite',
+        writableRoots: workspacePath ? [workspacePath] : [],
+        readOnlyAccess: {
+          type: 'fullAccess',
+        },
+        networkAccess: false,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
+      };
+  }
+}
+
 function mapSession(thread: CodexThreadRecord): AgentSessionDetail {
   return {
     provider: 'codex',
@@ -539,8 +584,9 @@ export class CodexRuntimeAdapter extends EventEmitter implements AgentRuntime {
     if (input.sandboxMode !== undefined) {
       startInput.sandbox = input.sandboxMode as SandboxMode | null;
     }
-    if (input.serviceTier !== undefined) {
-      startInput.serviceTier = input.serviceTier;
+    const serviceTier = serviceTierForPerformanceMode(input.performanceMode);
+    if (serviceTier !== undefined) {
+      startInput.serviceTier = serviceTier;
     }
 
     const response = await codexRuntimeCall(() => this.manager.startThread(startInput));
@@ -565,8 +611,9 @@ export class CodexRuntimeAdapter extends EventEmitter implements AgentRuntime {
     if (input.sandboxMode !== undefined) {
       resumeInput.sandbox = input.sandboxMode as SandboxMode | null;
     }
-    if (input.serviceTier !== undefined) {
-      resumeInput.serviceTier = input.serviceTier;
+    const serviceTier = serviceTierForPerformanceMode(input.performanceMode);
+    if (serviceTier !== undefined) {
+      resumeInput.serviceTier = serviceTier;
     }
 
     const response = await codexRuntimeCall(() => this.manager.resumeThread(resumeInput));
@@ -595,11 +642,13 @@ export class CodexRuntimeAdapter extends EventEmitter implements AgentRuntime {
     if (input.collaborationMode !== undefined) {
       turnInput.collaborationMode = input.collaborationMode;
     }
-    if (input.sandboxPolicy !== undefined) {
-      turnInput.sandboxPolicy = input.sandboxPolicy as SandboxPolicy | null;
+    const sandboxPolicy = buildSandboxPolicy(input.sandboxMode, input.workspacePath);
+    if (sandboxPolicy !== undefined) {
+      turnInput.sandboxPolicy = sandboxPolicy;
     }
-    if (input.serviceTier !== undefined) {
-      turnInput.serviceTier = input.serviceTier;
+    const serviceTier = serviceTierForPerformanceMode(input.performanceMode);
+    if (serviceTier !== undefined) {
+      turnInput.serviceTier = serviceTier;
     }
 
     return mapTurn(await codexRuntimeCall(() => this.manager.startTurn(turnInput)));
