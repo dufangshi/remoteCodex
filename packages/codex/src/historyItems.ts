@@ -429,7 +429,78 @@ function sortTurnItemsByRecordedSequence(items: ThreadHistoryItemDto[]) {
     index += 1;
   }
 
-  return [...leadingItems, ...sortHistoryItemsBySequence(items.slice(index))];
+  const trailingItems = items.slice(index);
+  if (!trailingItems.some(hasHistoryItemSequence)) {
+    return items;
+  }
+
+  const sequenceValues = trailingItems
+    .map((item) => historyItemSequence(item))
+    .filter(Number.isFinite);
+  const maxSequence = sequenceValues.length > 0 ? Math.max(...sequenceValues) : 0;
+  const orderedItems: Array<{
+    item: ThreadHistoryItemDto;
+    index: number;
+    order: number;
+  }> = [];
+
+  let cursor = 0;
+  while (cursor < trailingItems.length) {
+    const item = trailingItems[cursor]!;
+    if (hasHistoryItemSequence(item)) {
+      orderedItems.push({ item, index: cursor, order: historyItemSequence(item) });
+      cursor += 1;
+      continue;
+    }
+
+    const blockStart = cursor;
+    while (
+      cursor < trailingItems.length &&
+      !hasHistoryItemSequence(trailingItems[cursor]!)
+    ) {
+      cursor += 1;
+    }
+
+    const block = trailingItems.slice(blockStart, cursor);
+    const previousSequenced = [...trailingItems.slice(0, blockStart)]
+      .reverse()
+      .find(hasHistoryItemSequence);
+    const nextSequenced = trailingItems.slice(cursor).find(hasHistoryItemSequence);
+    const previousSequence = previousSequenced
+      ? historyItemSequence(previousSequenced)
+      : null;
+    const nextSequence = nextSequenced ? historyItemSequence(nextSequenced) : null;
+
+    block.forEach((blockItem, blockIndex) => {
+      let order: number;
+      if (previousSequence === null && nextSequence !== null) {
+        order = nextSequence - (block.length - blockIndex) / (block.length + 1);
+      } else if (
+        previousSequence !== null &&
+        nextSequence !== null &&
+        nextSequence > previousSequence
+      ) {
+        const span = nextSequence - previousSequence;
+        order = previousSequence + ((blockIndex + 1) / (block.length + 1)) * span;
+      } else {
+        order = maxSequence + 1 + blockIndex / (block.length + 1);
+      }
+      orderedItems.push({
+        item: blockItem,
+        index: blockStart + blockIndex,
+        order,
+      });
+    });
+  }
+
+  const sortedTrailingItems = orderedItems
+    .sort((left, right) => {
+      const orderDelta = left.order - right.order;
+      return orderDelta === 0 ? left.index - right.index : orderDelta;
+    })
+    .map((entry) => entry.item);
+
+  return [...leadingItems, ...sortedTrailingItems];
 }
 
 function mergeHistoryItemsBySequence(

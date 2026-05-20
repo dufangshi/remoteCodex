@@ -4600,6 +4600,158 @@ describe('supervisor api', () => {
     ]);
   });
 
+  it('preserves final-history messages between recorded live command batches', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Interleaved Final History Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Run a batch, explain, then run another batch.',
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    const startedThread = promptResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(startedThread.providerSessionId);
+    const activeTurn = remoteThread?.turns.at(-1);
+    expect(activeTurn).toBeTruthy();
+
+    for (const item of [
+      {
+        id: 'command-a',
+        type: 'commandExecution',
+        command: 'pnpm typecheck',
+        aggregatedOutput: 'typecheck ok',
+        status: 'completed',
+      },
+      {
+        id: 'command-b',
+        type: 'commandExecution',
+        command: 'pnpm test',
+        aggregatedOutput: 'test ok',
+        status: 'completed',
+      },
+      {
+        id: 'command-c',
+        type: 'commandExecution',
+        command: 'pnpm build',
+        aggregatedOutput: 'build ok',
+        status: 'completed',
+      },
+    ]) {
+      fakeCodexManager.emit('notification', {
+        method: 'item/completed',
+        params: {
+          threadId: startedThread.providerSessionId,
+          turnId: activeTurn!.id,
+          item,
+        }
+      });
+      if (item.id === 'command-b') {
+        fakeCodexManager.emit('notification', {
+          method: 'item/agentMessage/delta',
+          params: {
+            threadId: startedThread.providerSessionId,
+            turnId: activeTurn!.id,
+            itemId: 'agent-between',
+            delta: 'First batch is done. I am running the final check.',
+          }
+        });
+      }
+    }
+
+    const completedTurn = {
+      ...activeTurn!,
+      status: 'completed' as const,
+      items: [
+        ...activeTurn!.items,
+        {
+          id: 'command-a',
+          type: 'commandExecution',
+          command: 'pnpm typecheck',
+          aggregatedOutput: 'typecheck ok',
+          status: 'completed',
+        },
+        {
+          id: 'command-b',
+          type: 'commandExecution',
+          command: 'pnpm test',
+          aggregatedOutput: 'test ok',
+          status: 'completed',
+        },
+        {
+          id: 'agent-between',
+          type: 'agentMessage',
+          text: 'First batch is done. I am running the final check.',
+        },
+        {
+          id: 'command-c',
+          type: 'commandExecution',
+          command: 'pnpm build',
+          aggregatedOutput: 'build ok',
+          status: 'completed',
+        },
+        {
+          id: 'agent-final',
+          type: 'agentMessage',
+          text: 'All checks passed.',
+        },
+      ],
+    };
+    fakeCodexManager.threads.set(startedThread.providerSessionId, {
+      ...remoteThread!,
+      status: { type: 'idle' },
+      turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turn: completedTurn
+      }
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(
+      detailResponse
+        .json()
+        .turns.at(-1)
+        .items.map((item: any) => item.id),
+    ).toEqual([
+      activeTurn!.items[0]!.id,
+      'command-a',
+      'command-b',
+      'agent-between',
+      'command-c',
+      'agent-final',
+    ]);
+  });
+
   it('persists answered request notes in thread detail for refreshes', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',
