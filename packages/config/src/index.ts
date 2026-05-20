@@ -2,6 +2,29 @@ import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 
+export type AgentProviderId = 'codex' | 'claude';
+
+export interface CodexProviderConfig {
+  provider: 'codex';
+  enabled: boolean;
+  home: string;
+  command: string;
+  appServerStartTimeoutMs: number;
+}
+
+export interface ClaudeProviderConfig {
+  provider: 'claude';
+  enabled: boolean;
+  home: string;
+  command: string;
+}
+
+export type AgentProviderConfig = CodexProviderConfig | ClaudeProviderConfig;
+export interface AgentProviderConfigMap {
+  codex: CodexProviderConfig;
+  claude: ClaudeProviderConfig;
+}
+
 export interface RuntimeConfig {
   nodeEnv: 'development' | 'test' | 'production';
   host: string;
@@ -12,9 +35,7 @@ export interface RuntimeConfig {
   appVersion: string;
   workspaceRoot: string;
   databaseUrl: string;
-  codexHome: string;
-  codexCommand: string;
-  codexAppServerStartTimeoutMs: number;
+  agentProviders: AgentProviderConfigMap;
 }
 
 const envSchema = z.object({
@@ -29,7 +50,10 @@ const envSchema = z.object({
   DATABASE_URL: z.string().optional(),
   CODEX_HOME: z.string().optional(),
   CODEX_COMMAND: z.string().min(1).optional(),
-  CODEX_APP_SERVER_START_TIMEOUT_MS: z.coerce.number().int().positive().optional()
+  CODEX_APP_SERVER_START_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
+  CLAUDE_HOME: z.string().optional(),
+  CLAUDE_COMMAND: z.string().min(1).optional(),
+  REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: z.string().optional()
 });
 
 export function resolveDatabaseUrl(
@@ -57,6 +81,18 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
     parsed.DISABLE_REQUEST_LOGGING === undefined
       ? nodeEnv === 'production'
       : ['1', 'true', 'yes', 'on'].includes(parsed.DISABLE_REQUEST_LOGGING.toLowerCase());
+  const enabledProviders = new Set(
+    (parsed.REMOTE_CODEX_ENABLED_AGENT_PROVIDERS ?? 'codex')
+      .split(',')
+      .map((provider) => provider.trim().toLowerCase())
+      .filter(Boolean)
+  );
+  const codexHome = parsed.CODEX_HOME?.trim()
+    ? path.resolve(parsed.CODEX_HOME)
+    : path.join(os.homedir(), '.codex');
+  const claudeHome = parsed.CLAUDE_HOME?.trim()
+    ? path.resolve(parsed.CLAUDE_HOME)
+    : path.join(os.homedir(), '.claude');
 
   return {
     nodeEnv,
@@ -68,10 +104,20 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
     appVersion: parsed.APP_VERSION ?? '0.1.0',
     workspaceRoot,
     databaseUrl: resolveDatabaseUrl(nodeEnv, parsed.DATABASE_URL),
-    codexHome: parsed.CODEX_HOME?.trim()
-      ? path.resolve(parsed.CODEX_HOME)
-      : path.join(os.homedir(), '.codex'),
-    codexCommand: parsed.CODEX_COMMAND ?? 'codex',
-    codexAppServerStartTimeoutMs: parsed.CODEX_APP_SERVER_START_TIMEOUT_MS ?? 10_000
+    agentProviders: {
+      codex: {
+        provider: 'codex',
+        enabled: enabledProviders.has('codex'),
+        home: codexHome,
+        command: parsed.CODEX_COMMAND ?? 'codex',
+        appServerStartTimeoutMs: parsed.CODEX_APP_SERVER_START_TIMEOUT_MS ?? 10_000,
+      },
+      claude: {
+        provider: 'claude',
+        enabled: enabledProviders.has('claude'),
+        home: claudeHome,
+        command: parsed.CLAUDE_COMMAND ?? 'claude',
+      },
+    },
   };
 }

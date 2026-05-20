@@ -1,4 +1,8 @@
-import { AgentProviderId, AgentRuntimeRegistry } from '../../../packages/agent-runtime/src/index';
+import {
+  AgentProviderId,
+  AgentRuntime,
+  AgentRuntimeRegistry,
+} from '../../../packages/agent-runtime/src/index';
 import {
   CodexAppServerManager,
   CodexRuntimeAdapter,
@@ -17,24 +21,38 @@ export interface AgentRuntimeBootstrap {
 }
 
 export function createAgentRuntimeBootstrap(config: RuntimeConfig): AgentRuntimeBootstrap {
-  const codexRuntime = new CodexRuntimeAdapter(
-    new CodexAppServerManager({
-      command: config.codexCommand,
-      startupTimeoutMs: config.codexAppServerStartTimeoutMs,
-      clientInfo: {
-        name: 'remote-codex-supervisor',
-        title: config.appName,
-        version: config.appVersion,
-      },
-    }),
-  );
+  const runtimes: AgentRuntime[] = [];
+  const providerHostHomes: ProviderHostHomes = {};
+  const codexConfig = config.agentProviders.codex;
+  const codexRuntime = codexConfig.enabled
+    ? new CodexRuntimeAdapter(
+      new CodexAppServerManager({
+        command: codexConfig.command,
+        startupTimeoutMs: codexConfig.appServerStartTimeoutMs,
+        clientInfo: {
+          name: 'remote-codex-supervisor',
+          title: config.appName,
+          version: config.appVersion,
+        },
+      }),
+    )
+    : null;
+
+  if (codexRuntime) {
+    runtimes.push(codexRuntime);
+    providerHostHomes.codex = codexConfig.home;
+  }
+
+  const claudeConfig = config.agentProviders.claude;
+  if (claudeConfig.enabled) {
+    providerHostHomes.claude = claudeConfig.home;
+    // Claude is intentionally config-only until the Claude runtime adapter is added.
+  }
 
   return {
-    agentRuntimes: new AgentRuntimeRegistry([codexRuntime]),
-    localCodexSessionStore: new LocalCodexSessionStore(config.codexHome),
-    codexManagement: new CodexManagementService(config.codexHome),
-    providerHostHomes: {
-      codex: config.codexHome,
-    },
+    agentRuntimes: new AgentRuntimeRegistry(runtimes),
+    localCodexSessionStore: new LocalCodexSessionStore(codexConfig.home),
+    codexManagement: new CodexManagementService(codexConfig.home),
+    providerHostHomes,
   };
 }

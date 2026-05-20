@@ -15,9 +15,19 @@ describe('loadRuntimeConfig', () => {
     expect(config.disableRequestLogging).toBe(false);
     expect(config.workspaceRoot).toBe(os.homedir());
     expect(config.databaseUrl).toBe(path.resolve('.local', 'supervisor-dev.sqlite'));
-    expect(config.codexHome).toBe(path.join(os.homedir(), '.codex'));
-    expect(config.codexCommand).toBe('codex');
-    expect(config.codexAppServerStartTimeoutMs).toBe(10_000);
+    expect(config.agentProviders.codex).toEqual({
+      provider: 'codex',
+      enabled: true,
+      home: path.join(os.homedir(), '.codex'),
+      command: 'codex',
+      appServerStartTimeoutMs: 10_000,
+    });
+    expect(config.agentProviders.claude).toEqual({
+      provider: 'claude',
+      enabled: false,
+      home: path.join(os.homedir(), '.claude'),
+      command: 'claude',
+    });
   });
 
   it('resolves production database to user home', () => {
@@ -46,7 +56,10 @@ describe('loadRuntimeConfig', () => {
       DATABASE_URL: '/tmp/db.sqlite',
       CODEX_HOME: '/tmp/codex-home',
       CODEX_COMMAND: 'codex-custom',
-      CODEX_APP_SERVER_START_TIMEOUT_MS: '15000'
+      CODEX_APP_SERVER_START_TIMEOUT_MS: '15000',
+      CLAUDE_HOME: '/tmp/claude-home',
+      CLAUDE_COMMAND: 'claude-custom',
+      REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: 'codex,claude'
     });
 
     expect(config.nodeEnv).toBe('test');
@@ -56,8 +69,18 @@ describe('loadRuntimeConfig', () => {
     expect(config.disableRequestLogging).toBe(true);
     expect(config.workspaceRoot).toBe('/tmp/workspaces');
     expect(config.databaseUrl).toBe('/tmp/db.sqlite');
-    expect(config.codexHome).toBe('/tmp/codex-home');
-    expect(config.codexCommand).toBe('codex-custom');
-    expect(config.codexAppServerStartTimeoutMs).toBe(15_000);
+    expect(config.agentProviders.codex).toEqual({
+      provider: 'codex',
+      enabled: true,
+      home: '/tmp/codex-home',
+      command: 'codex-custom',
+      appServerStartTimeoutMs: 15_000,
+    });
+    expect(config.agentProviders.claude).toEqual({
+      provider: 'claude',
+      enabled: true,
+      home: '/tmp/claude-home',
+      command: 'claude-custom',
+    });
   });
 });
