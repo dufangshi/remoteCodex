@@ -8,16 +8,18 @@ import net from 'node:net';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, '..');
+const supportsSourceRestart =
+  fs.existsSync(path.join(repoRoot, 'pnpm-workspace.yaml')) &&
+  fs.existsSync(path.join(repoRoot, 'scripts', 'service-restart.mjs'));
 const serviceDir = process.env.REMOTE_CODEX_SERVICE_DIR
   ? path.resolve(process.env.INIT_CWD ?? process.cwd(), process.env.REMOTE_CODEX_SERVICE_DIR)
-  : path.join(os.homedir(), '.remote-codex', 'service');
+  : supportsSourceRestart
+    ? path.join(repoRoot, '.local', 'service')
+    : path.join(os.homedir(), '.remote-codex', 'service');
 const stateFile = path.join(serviceDir, 'service-state.json');
 const apiEntry = path.join(repoRoot, 'apps', 'supervisor-api', 'dist', 'index.js');
 const webEntry = path.join(repoRoot, 'scripts', 'run-web-service.mjs');
 const webIndex = path.join(repoRoot, 'apps', 'supervisor-web', 'dist', 'index.html');
-const supportsSourceRestart =
-  fs.existsSync(path.join(repoRoot, 'pnpm-workspace.yaml')) &&
-  fs.existsSync(path.join(repoRoot, 'scripts', 'service-restart.mjs'));
 const defaultServicePort = supportsSourceRestart ? 4173 : 45673;
 const defaultApiPort = supportsSourceRestart ? 8787 : 45674;
 
