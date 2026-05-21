@@ -421,6 +421,7 @@ function normalizeClaudeAskUserQuestions(input: unknown): AgentActionQuestion[] 
         id: `question-${index + 1}`,
         header,
         question,
+        multiSelect: entry.multiSelect === true,
         isOther: true,
         isSecret: false,
         options: normalizeClaudeQuestionOptions(entry.options),
@@ -475,6 +476,9 @@ function mapClaudeAskUserQuestionRequest(request: AgentProviderRequest): AgentPr
     pendingRequest: {
       providerRequestId: request.id,
       responseKind: 'askUserQuestion',
+      responsePayload: {
+        continueAsPrompt: true,
+      },
       request: {
         id: requestId,
         kind: 'requestUserInput',
@@ -515,7 +519,7 @@ function buildClaudeProviderRequestResponse(
         question: question.question,
         header: question.header,
         options: question.options ?? [],
-        multiSelect: false,
+        multiSelect: question.multiSelect === true,
       })),
       answers,
       annotations: {},
@@ -850,13 +854,14 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     const userItem = userMessageToHistoryItem(`${providerTurnId}:user`, {
       content: input.prompt,
     });
+    const initialItems = input.hidden ? [] : [userItem];
     const state: ActiveClaudeTurn = {
       providerSessionId: input.providerSessionId,
       providerTurnId,
       startedAt,
       query,
-      items: new Map([[userItem.id, userItem]]),
-      itemOrder: [userItem.id],
+      items: new Map(initialItems.map((item) => [item.id, item])),
+      itemOrder: initialItems.map((item) => item.id),
       emittedItems: new Set(),
       currentStreamMessageId: null,
       interrupted: false,
@@ -869,11 +874,11 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       type: 'turn.started',
       provider: 'claude',
       providerSessionId: input.providerSessionId,
-            turn: buildAgentTurn({
-              providerTurnId,
-              startedAt,
-              status: 'inProgress',
-              items: [userItem],
+      turn: buildAgentTurn({
+        providerTurnId,
+        startedAt,
+        status: 'inProgress',
+        items: initialItems,
       }),
     });
     void this.consumeQuery(state);
@@ -881,7 +886,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       providerTurnId,
       startedAt,
       status: 'inProgress',
-      items: [userItem],
+      items: initialItems,
     });
   }
 

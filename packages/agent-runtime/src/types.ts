@@ -227,6 +227,7 @@ export interface StartAgentTurnInput {
   sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access' | null;
   workspacePath?: string | null;
   performanceMode?: 'standard' | 'fast' | null;
+  hidden?: boolean;
 }
 
 export interface SendAgentInputInput {
@@ -462,6 +463,7 @@ export interface AgentActionQuestion {
   id: string;
   header: string;
   question: string;
+  multiSelect?: boolean;
   isOther: boolean;
   isSecret: boolean;
   options: AgentActionQuestionOption[] | null;

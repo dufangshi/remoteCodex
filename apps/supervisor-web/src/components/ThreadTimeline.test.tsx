@@ -3245,6 +3245,61 @@ describe('ThreadTimeline', () => {
     });
   });
 
+  it('supports requestUserInput multi-select answers', () => {
+    const onRespond = vi.fn();
+
+    render(
+      <ThreadTimeline
+        turns={[]}
+        liveOutput=""
+        pendingRequests={[
+          {
+            id: 'user-input-1',
+            kind: 'requestUserInput',
+            title: 'Features',
+            description: 'Pick features.',
+            turnId: 'turn-1',
+            itemId: 'item-1',
+            createdAt: new Date().toISOString(),
+            questions: [
+              {
+                id: 'features',
+                header: 'Features',
+                question: 'Which features do you want?',
+                multiSelect: true,
+                isOther: false,
+                isSecret: false,
+                options: [
+                  {
+                    label: 'Calculation history',
+                    description: 'Show previous calculations.',
+                  },
+                  {
+                    label: 'Keyboard support',
+                    description: 'Allow keyboard input.',
+                  },
+                ],
+              },
+            ],
+          },
+        ]}
+        onRespondToRequest={onRespond}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Calculation history' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Keyboard support' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+
+    expect(onRespond).toHaveBeenCalledWith('user-input-1', {
+      answers: {
+        features: {
+          answers: ['Calculation history', 'Keyboard support'],
+        },
+      },
+    });
+  });
+
   it('renders image history items through the thread image proxy route', () => {
     render(
       <ThreadTimeline

@@ -168,7 +168,7 @@ class FakeClaudeRuntime extends EventEmitter implements AgentRuntime {
       providerTurnId,
       status: 'inProgress' as const,
       error: null,
-      items: [userItem],
+      items: input.hidden ? [] : [userItem],
       rawTurn: null,
     };
     session.turns.push(turn);
@@ -239,6 +239,9 @@ class FakeClaudeRuntime extends EventEmitter implements AgentRuntime {
       pendingRequest: {
         providerRequestId: request.id,
         responseKind: 'askUserQuestion',
+        responsePayload: {
+          continueAsPrompt: true,
+        },
         request: {
           id: String(request.id),
           kind: 'requestUserInput',
@@ -1232,6 +1235,17 @@ describe('supervisor api', () => {
           },
         },
       },
+    ]);
+    const session = fakeClaudeRuntime.sessions.get(thread.providerSessionId);
+    expect(session.turns.at(-1)).toMatchObject({
+      providerTurnId: 'claude-turn-2',
+      status: 'inProgress',
+    });
+    expect(session.turns.at(-1).items).toEqual([
+      expect.objectContaining({
+        kind: 'agentMessage',
+        text: 'Hello from Claude',
+      }),
     ]);
     expect(response.json()).toMatchObject({
       pendingRequests: [],

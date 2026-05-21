@@ -3445,7 +3445,7 @@ function PendingRequestCard({
     input: RespondThreadActionRequestInput,
   ) => Promise<void> | void) | undefined;
 }) {
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
   const [customAnswers, setCustomAnswers] = useState<Record<string, string>>({});
   const [selectedPlanDecision, setSelectedPlanDecision] = useState<string | null>(null);
   const primaryQuestion = request.questions[0] ?? null;
@@ -3483,11 +3483,54 @@ function PendingRequestCard({
 
   function currentAnswerForQuestion(question: ThreadActionRequestDto['questions'][number]) {
     const selected = answers[question.id] ?? '';
+    if (Array.isArray(selected)) {
+      return selected
+        .map((answer) =>
+          answer === OTHER_SENTINEL
+            ? (customAnswers[question.id] ?? '').trim()
+            : answer.trim(),
+        )
+        .filter(Boolean)
+        .join(', ');
+    }
     if (selected === OTHER_SENTINEL) {
       return (customAnswers[question.id] ?? '').trim();
     }
 
     return selected.trim();
+  }
+
+  function currentAnswersForQuestion(question: ThreadActionRequestDto['questions'][number]) {
+    const selected = answers[question.id] ?? '';
+    if (Array.isArray(selected)) {
+      return selected
+        .map((answer) =>
+          answer === OTHER_SENTINEL
+            ? (customAnswers[question.id] ?? '').trim()
+            : answer.trim(),
+        )
+        .filter(Boolean);
+    }
+    if (selected === OTHER_SENTINEL) {
+      const customAnswer = (customAnswers[question.id] ?? '').trim();
+      return customAnswer ? [customAnswer] : [];
+    }
+    const singleAnswer = selected.trim();
+    return singleAnswer ? [singleAnswer] : [];
+  }
+
+  function toggleMultiSelectAnswer(questionId: string, label: string) {
+    setAnswers((current) => {
+      const currentAnswers = current[questionId];
+      const selectedAnswers = Array.isArray(currentAnswers) ? currentAnswers : [];
+      const nextAnswers = selectedAnswers.includes(label)
+        ? selectedAnswers.filter((entry) => entry !== label)
+        : [...selectedAnswers, label];
+      return {
+        ...current,
+        [questionId]: nextAnswers,
+      };
+    });
   }
 
   return (
@@ -3553,19 +3596,25 @@ function PendingRequestCard({
                 <div className="mt-3 flex flex-wrap gap-2">
                   {question.options.map((option) => {
                     const presentation = getOptionPresentation(option.label);
+                    const selectedAnswer = answers[question.id];
                     return (
                       <button
                         key={option.label}
                         type="button"
                         disabled={busy}
                         onClick={() =>
-                          setAnswers((current) => ({
-                            ...current,
-                            [question.id]: option.label,
-                          }))
+                          question.multiSelect
+                            ? toggleMultiSelectAnswer(question.id, option.label)
+                            : setAnswers((current) => ({
+                                ...current,
+                                [question.id]: option.label,
+                              }))
                         }
                         className={`relative rounded-2xl border px-3 py-1.5 pr-6 text-[12px] leading-4 transition sm:text-[13px] ${
-                          answers[question.id] === option.label
+                          (question.multiSelect
+                            ? Array.isArray(selectedAnswer) &&
+                              selectedAnswer.includes(option.label)
+                            : selectedAnswer === option.label)
                             ? 'ui-status-warning'
                             : 'border-stone-700 text-stone-300 hover:bg-stone-800'
                         } disabled:cursor-not-allowed disabled:opacity-60`}
@@ -3584,39 +3633,57 @@ function PendingRequestCard({
                     );
                   })}
                   {question.isOther && (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        setAnswers((current) => ({
-                          ...current,
-                          [question.id]: OTHER_SENTINEL,
-                        }))
-                      }
-                      className={`rounded-2xl border px-3 py-1.5 text-[12px] leading-4 transition sm:text-[13px] ${
-                        answers[question.id] === OTHER_SENTINEL
-                          ? 'ui-status-info'
-                          : 'border-stone-700 text-stone-300 hover:bg-stone-800'
-                      } disabled:cursor-not-allowed disabled:opacity-60`}
-                    >
-                      Not from above
-                    </button>
+                    (() => {
+                      const selectedAnswer = answers[question.id];
+                      return (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() =>
+                            question.multiSelect
+                              ? toggleMultiSelectAnswer(question.id, OTHER_SENTINEL)
+                              : setAnswers((current) => ({
+                                  ...current,
+                                  [question.id]: OTHER_SENTINEL,
+                                }))
+                          }
+                          className={`rounded-2xl border px-3 py-1.5 text-[12px] leading-4 transition sm:text-[13px] ${
+                            (question.multiSelect
+                              ? Array.isArray(selectedAnswer) &&
+                                selectedAnswer.includes(OTHER_SENTINEL)
+                              : selectedAnswer === OTHER_SENTINEL)
+                              ? 'ui-status-info'
+                              : 'border-stone-700 text-stone-300 hover:bg-stone-800'
+                          } disabled:cursor-not-allowed disabled:opacity-60`}
+                        >
+                          Not from above
+                        </button>
+                      );
+                    })()
                   )}
                 </div>
-                {question.isOther && answers[question.id] === OTHER_SENTINEL && (
-                  <input
-                    aria-label={`${question.header} custom answer`}
-                    value={customAnswers[question.id] ?? ''}
-                    onChange={(event) =>
-                      setCustomAnswers((current) => ({
-                        ...current,
-                        [question.id]: event.target.value,
-                      }))
-                    }
-                    placeholder="Enter a custom answer"
-                    className="mt-3 w-full rounded-xl border border-stone-700 bg-stone-900 px-3 py-2 text-sm text-stone-100 outline-none transition focus:border-sky-300"
-                  />
-                )}
+                {question.isOther &&
+                  (() => {
+                    const selectedAnswer = answers[question.id];
+                    const showOtherInput = question.multiSelect
+                      ? Array.isArray(selectedAnswer) &&
+                        selectedAnswer.includes(OTHER_SENTINEL)
+                      : selectedAnswer === OTHER_SENTINEL;
+                    return showOtherInput ? (
+                      <input
+                        aria-label={`${question.header} custom answer`}
+                        value={customAnswers[question.id] ?? ''}
+                        onChange={(event) =>
+                          setCustomAnswers((current) => ({
+                            ...current,
+                            [question.id]: event.target.value,
+                          }))
+                        }
+                        placeholder="Enter a custom answer"
+                        className="mt-3 w-full rounded-xl border border-stone-700 bg-stone-900 px-3 py-2 text-sm text-stone-100 outline-none transition focus:border-sky-300"
+                      />
+                    ) : null;
+                  })()}
               </>
             ) : (
               <input
@@ -3648,7 +3715,7 @@ function PendingRequestCard({
                   request.questions.map((question) => [
                     question.id,
                     {
-                      answers: [currentAnswerForQuestion(question)],
+                      answers: currentAnswersForQuestion(question),
                     },
                   ]),
                 ),
