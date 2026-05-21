@@ -693,6 +693,154 @@ describe('ClaudeRuntimeAdapter', () => {
     });
   });
 
+  it('maps Claude AskUserQuestion tool use to a provider request', async () => {
+    const adapter = makeAdapter((_prompt, _options) => [
+      systemInit(),
+      {
+        type: 'assistant',
+        message: {
+          id: 'msg_question',
+          type: 'message',
+          role: 'assistant',
+          model: 'sonnet',
+          content: [
+            {
+              type: 'text',
+              text: 'I need one choice before continuing.',
+              citations: null,
+            },
+            {
+              type: 'tool_use',
+              id: 'toolu_question',
+              name: 'AskUserQuestion',
+              input: {
+                questions: [
+                  {
+                    header: 'Mode',
+                    question: 'Which plan style should I use?',
+                    multiSelect: false,
+                    options: [
+                      {
+                        label: 'Short',
+                        description: 'Keep the plan concise.',
+                      },
+                      {
+                        label: 'Detailed',
+                        description: 'Include more context.',
+                      },
+                    ],
+                  },
+                ],
+              },
+              caller: { type: 'direct' },
+            },
+          ],
+          stop_reason: null,
+          stop_sequence: null,
+          stop_details: null,
+          usage: {} as any,
+          container: null,
+          context_management: null,
+          diagnostics: null,
+        },
+        parent_tool_use_id: null,
+        uuid: '00000000-0000-4000-8000-000000000031' as any,
+        session_id: 'claude-session-1',
+      },
+      result(),
+    ]);
+    const events: AgentRuntimeEvent[] = [];
+    const providerRequests: unknown[] = [];
+    adapter.on('event', (event) => events.push(event));
+    adapter.on('provider-request', (request) => providerRequests.push(request));
+
+    await adapter.startTurn({
+      providerSessionId: 'claude-session-1',
+      prompt: 'Ask me a plan question',
+      model: 'sonnet',
+      collaborationMode: 'plan',
+      workspacePath: '/tmp/workspace',
+    });
+    await wait();
+
+    expect(providerRequests).toEqual([
+      expect.objectContaining({
+        provider: 'claude',
+        id: 'toolu_question',
+        method: 'tool/AskUserQuestion',
+        params: expect.objectContaining({
+          providerSessionId: 'claude-session-1',
+          toolUseId: 'toolu_question',
+          input: expect.objectContaining({
+            questions: expect.any(Array),
+          }),
+        }),
+      }),
+    ]);
+    const mapping = adapter.mapProviderRequest?.(providerRequests[0] as any, {
+      approvalMode: 'guarded',
+    });
+    expect(mapping).toMatchObject({
+      providerSessionId: 'claude-session-1',
+      pendingRequest: {
+        responseKind: 'askUserQuestion',
+        request: {
+          kind: 'requestUserInput',
+          title: 'Mode',
+          description: 'Which plan style should I use?',
+          itemId: 'toolu_question',
+          questions: [
+            {
+              id: 'question-1',
+              header: 'Mode',
+              question: 'Which plan style should I use?',
+              isOther: true,
+              options: [
+                {
+                  label: 'Short',
+                  description: 'Keep the plan concise.',
+                },
+                {
+                  label: 'Detailed',
+                  description: 'Include more context.',
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    expect(
+      adapter.buildProviderRequestResponse?.(mapping!.pendingRequest!, {
+        answers: {
+          'question-1': {
+            answers: ['Short'],
+          },
+        },
+      }),
+    ).toMatchObject({
+      answers: {
+        'Which plan style should I use?': 'Short',
+      },
+      toolResult: {
+        answers: {
+          'Which plan style should I use?': 'Short',
+        },
+      },
+    });
+    expect(events.at(-1)).toMatchObject({
+      type: 'turn.completed',
+      turn: {
+        items: expect.not.arrayContaining([
+          expect.objectContaining({
+            kind: 'toolCall',
+            text: expect.stringContaining('AskUserQuestion'),
+          }),
+        ]),
+      },
+    });
+  });
+
   it('interrupts an active query', async () => {
     let activeQuery: FakeQuery | null = null;
     const adapter = makeAdapter(() => {
@@ -809,6 +957,93 @@ describe('ClaudeRuntimeAdapter', () => {
       expect.objectContaining({ kind: 'userMessage', text: 'Real prompt' }),
       expect.objectContaining({ kind: 'commandExecution', text: 'pwd', status: 'completed' }),
       expect.objectContaining({ kind: 'agentMessage', text: 'Real answer' }),
+    ]);
+  });
+
+  it('omits Claude AskUserQuestion tool results from historical turns', async () => {
+    const adapter = new ClaudeRuntimeAdapter({
+      home: '/tmp/claude-home',
+      query: (() => new FakeQuery([])) as any,
+      getSessionInfo: (async () => ({
+        sessionId: 'claude-session-1',
+        summary: 'Existing session',
+        lastModified: 1_772_000_000_000,
+        createdAt: 1_771_000_000_000,
+        cwd: '/tmp/workspace',
+      })) as any,
+      listSessions: (async () => []) as any,
+      getSessionMessages: (async () => [
+        {
+          type: 'user',
+          uuid: '019e4657-bd3c-72d1-b59d-324ed8a4b1ec',
+          session_id: 'claude-session-1',
+          message: { role: 'user', content: 'Ask me something.' },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'assistant',
+          uuid: 'assistant-question',
+          session_id: 'claude-session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'toolu_question',
+                name: 'AskUserQuestion',
+                input: {
+                  questions: [
+                    {
+                      header: 'Mode',
+                      question: 'Which plan style should I use?',
+                      multiSelect: false,
+                      options: [
+                        { label: 'Short', description: 'Keep the plan concise.' },
+                        { label: 'Detailed', description: 'Include more context.' },
+                      ],
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'user',
+          uuid: 'question-result',
+          session_id: 'claude-session-1',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'toolu_question',
+                content: {
+                  answers: {
+                    'Which plan style should I use?': 'Short',
+                  },
+                },
+                is_error: false,
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'assistant',
+          uuid: 'assistant-answer',
+          session_id: 'claude-session-1',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'Continuing.' }] },
+          parent_tool_use_id: null,
+        },
+      ] satisfies SessionMessage[]) as any,
+    });
+
+    const session = await adapter.readSession('claude-session-1');
+    expect(session.turns[0]?.items).toEqual([
+      expect.objectContaining({ kind: 'userMessage', text: 'Ask me something.' }),
+      expect.objectContaining({ kind: 'agentMessage', text: 'Continuing.' }),
     ]);
   });
 });

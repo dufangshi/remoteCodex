@@ -23,9 +23,14 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk';
 
 import type {
+  AgentActionQuestion,
+  AgentActionRequestResponseInput,
   AgentHistoryItem,
   AgentMcpServer,
   AgentModel,
+  AgentPendingProviderRequest,
+  AgentProviderRequest,
+  AgentProviderRequestMapping,
   AgentProviderCapabilities,
   AgentRuntime,
   AgentRuntimeEvent,
@@ -42,6 +47,7 @@ import type {
 } from '../../agent-runtime/src/index';
 import { AgentRuntimeError } from '../../agent-runtime/src/index';
 import {
+  askUserQuestionToolUseIds,
   assistantMessageToHistoryItems,
   buildAgentTurn,
   hiddenInitPrompt,
@@ -86,6 +92,7 @@ interface ActiveClaudeTurn {
   currentStreamMessageId: string | null;
   interrupted: boolean;
   completed: boolean;
+  suppressedToolUseIds: Set<string>;
 }
 
 export const claudeCapabilities: AgentProviderCapabilities = {
@@ -365,6 +372,155 @@ function orderedItems(state: ActiveClaudeTurn) {
   return state.itemOrder
     .map((id) => state.items.get(id))
     .filter((item): item is AgentHistoryItem => Boolean(item));
+}
+
+function stringFromRecord(value: Record<string, unknown>, key: string) {
+  const raw = value[key];
+  return typeof raw === 'string' && raw.trim() ? raw : null;
+}
+
+function normalizeClaudeQuestionOptions(value: unknown): AgentActionQuestion['options'] {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const options = value
+    .map((entry) => {
+      if (!isRecord(entry)) {
+        return null;
+      }
+      const label = stringFromRecord(entry, 'label');
+      if (!label) {
+        return null;
+      }
+      return {
+        label,
+        description: stringFromRecord(entry, 'description') ?? label,
+      };
+    })
+    .filter((entry): entry is NonNullable<AgentActionQuestion['options']>[number] =>
+      Boolean(entry),
+    );
+  return options.length > 0 ? options : null;
+}
+
+function normalizeClaudeAskUserQuestions(input: unknown): AgentActionQuestion[] {
+  if (!isRecord(input) || !Array.isArray(input.questions)) {
+    return [];
+  }
+  return input.questions
+    .map((entry, index): AgentActionQuestion | null => {
+      if (!isRecord(entry)) {
+        return null;
+      }
+      const question = stringFromRecord(entry, 'question');
+      if (!question) {
+        return null;
+      }
+      const header = stringFromRecord(entry, 'header') ?? `Question ${index + 1}`;
+      return {
+        id: `question-${index + 1}`,
+        header,
+        question,
+        isOther: true,
+        isSecret: false,
+        options: normalizeClaudeQuestionOptions(entry.options),
+      };
+    })
+    .filter((entry): entry is AgentActionQuestion => Boolean(entry));
+}
+
+function claudeAskUserToolUseFromAssistantMessage(message: unknown) {
+  if (!isRecord(message) || !Array.isArray(message.content)) {
+    return null;
+  }
+  for (const [index, block] of message.content.entries()) {
+    if (!isRecord(block) || block.type !== 'tool_use') {
+      continue;
+    }
+    const name = stringFromRecord(block, 'name');
+    if (name !== 'AskUserQuestion') {
+      continue;
+    }
+    const id = stringFromRecord(block, 'id') ?? `ask-user-question-${index}`;
+    return {
+      id,
+      input: block.input,
+    };
+  }
+  return null;
+}
+
+function mapClaudeAskUserQuestionRequest(request: AgentProviderRequest): AgentProviderRequestMapping | null {
+  if (request.method !== 'tool/AskUserQuestion') {
+    return null;
+  }
+  if (!isRecord(request.params)) {
+    return null;
+  }
+  const providerSessionId = stringFromRecord(request.params, 'providerSessionId');
+  if (!providerSessionId) {
+    return null;
+  }
+  const questions = normalizeClaudeAskUserQuestions(request.params.input);
+  if (questions.length === 0) {
+    return null;
+  }
+  const requestId = String(request.id);
+  const turnId = stringFromRecord(request.params, 'providerTurnId');
+  const firstQuestion = questions[0] ?? null;
+  return {
+    providerRequestId: request.id,
+    providerSessionId,
+    autoApprovedResult: null,
+    pendingRequest: {
+      providerRequestId: request.id,
+      responseKind: 'askUserQuestion',
+      request: {
+        id: requestId,
+        kind: 'requestUserInput',
+        title: firstQuestion?.header ?? 'User input required',
+        description: firstQuestion?.question ?? null,
+        turnId,
+        itemId: stringFromRecord(request.params, 'toolUseId'),
+        createdAt: new Date().toISOString(),
+        questions,
+      },
+    },
+  };
+}
+
+function buildClaudeProviderRequestResponse(
+  pending: AgentPendingProviderRequest,
+  input: AgentActionRequestResponseInput,
+) {
+  if (pending.responseKind !== 'askUserQuestion') {
+    return input;
+  }
+  const answers = Object.fromEntries(
+    pending.request.questions.map((question) => [
+      question.question,
+      input.answers[question.id]?.answers.join(', ') ?? '',
+    ]),
+  );
+  return {
+    questions: pending.request.questions.map((question) => ({
+      question: question.question,
+      header: question.header,
+      answer: input.answers[question.id]?.answers ?? [],
+    })),
+    answers,
+    annotations: {},
+    toolResult: {
+      questions: pending.request.questions.map((question) => ({
+        question: question.question,
+        header: question.header,
+        options: question.options ?? [],
+        multiSelect: false,
+      })),
+      answers,
+      annotations: {},
+    },
+  };
 }
 
 function queryOptionsForRuntime(
@@ -705,6 +861,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       currentStreamMessageId: null,
       interrupted: false,
       completed: false,
+      suppressedToolUseIds: new Set(),
     };
     this.knownSessionIds.add(input.providerSessionId);
     this.activeTurns.set(providerTurnId, state);
@@ -764,6 +921,27 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     }
     const servers = await active.query.mcpServerStatus();
     return servers.map((server) => this.mapMcpServer(server));
+  }
+
+  mapProviderRequest(
+    request: AgentProviderRequest,
+    _options: { approvalMode: 'yolo' | 'guarded' },
+  ): AgentProviderRequestMapping | null {
+    return mapClaudeAskUserQuestionRequest(request);
+  }
+
+  buildProviderRequestResponse(
+    pending: AgentPendingProviderRequest,
+    input: AgentActionRequestResponseInput,
+  ) {
+    return buildClaudeProviderRequestResponse(pending, input);
+  }
+
+  respondToProviderRequest(_id: string | number, _result: unknown) {
+    // Claude Code's built-in AskUserQuestion arrives as transcripted tool use in
+    // this SDK mode. The supervisor records the user's answer locally so the
+    // interaction matches other backends, but there is no live JSON-RPC request
+    // to resolve back into the Claude process.
   }
 
   private async consumeQuery(state: ActiveClaudeTurn) {
@@ -899,7 +1077,10 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     }
 
     if (message.type === 'user') {
-      const toolResults = toolResultBlocks(message.message);
+      const rawToolResults = toolResultBlocks(message.message);
+      const toolResults = rawToolResults.filter(
+        (toolResult) => !state.suppressedToolUseIds.has(toolResult.toolUseId),
+      );
       if (toolResults.length > 0) {
         for (const toolResult of toolResults) {
           const item = resultForToolUse({
@@ -912,11 +1093,30 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
         }
         return;
       }
+      if (rawToolResults.length > 0) {
+        return;
+      }
     }
 
     if (message.type === 'assistant') {
       const payload = assistantMessagePayload(message);
       const assistantMessageId = messageIdFromPayload(payload) ?? messageUuid(message, state.providerTurnId);
+      const askUserQuestion = claudeAskUserToolUseFromAssistantMessage(payload);
+      if (askUserQuestion) {
+        state.suppressedToolUseIds.add(askUserQuestion.id);
+        this.emit('provider-request', {
+          provider: 'claude',
+          id: askUserQuestion.id,
+          method: 'tool/AskUserQuestion',
+          params: {
+            providerSessionId: state.providerSessionId,
+            providerTurnId: state.providerTurnId,
+            toolUseId: askUserQuestion.id,
+            input: askUserQuestion.input,
+          },
+          rawRequest: message,
+        } satisfies AgentProviderRequest);
+      }
       for (const item of assistantMessageToHistoryItems({
         messageId: assistantMessageId,
         message: payload,
@@ -933,6 +1133,9 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     }
 
     if (message.type === 'user' && message.parent_tool_use_id) {
+      if (state.suppressedToolUseIds.has(message.parent_tool_use_id)) {
+        return;
+      }
       const item = resultForToolUse({
         toolUseId: message.parent_tool_use_id,
         result: message.tool_use_result ?? message.message,
@@ -1027,6 +1230,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       itemsById: Map<string, AgentHistoryItem>;
     } | null = null;
     let skippingHiddenInit = false;
+    const suppressedToolUseIds = new Set<string>();
 
     const upsertCurrentItem = (item: AgentHistoryItem) => {
       if (!current) {
@@ -1048,7 +1252,10 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
 
     for (const message of messages) {
       if (message.type === 'user') {
-        const toolResults = toolResultBlocks(message.message);
+        const rawToolResults = toolResultBlocks(message.message);
+        const toolResults = rawToolResults.filter(
+          (toolResult) => !suppressedToolUseIds.has(toolResult.toolUseId),
+        );
         if (toolResults.length > 0) {
           for (const toolResult of toolResults) {
             const previous = current?.itemsById.get(toolResult.toolUseId) ?? null;
@@ -1058,6 +1265,9 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
               previous,
             }));
           }
+          continue;
+        }
+        if (rawToolResults.length > 0) {
           continue;
         }
       }
@@ -1092,6 +1302,10 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       }
 
       if (message.type === 'assistant') {
+        for (const toolUseId of askUserQuestionToolUseIds(message.message)) {
+          suppressedToolUseIds.add(toolUseId);
+          current?.itemsById.delete(toolUseId);
+        }
         for (const item of assistantMessageToHistoryItems({
           messageId: message.uuid,
           message: message.message,
@@ -1102,6 +1316,9 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       }
 
       if (message.type === 'user' && message.parent_tool_use_id) {
+        if (suppressedToolUseIds.has(message.parent_tool_use_id)) {
+          continue;
+        }
         const previous = current?.itemsById.get(message.parent_tool_use_id) ?? null;
         upsertCurrentItem(resultForToolUse({
           toolUseId: message.parent_tool_use_id,

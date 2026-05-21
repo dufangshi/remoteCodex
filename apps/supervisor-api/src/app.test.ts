@@ -12,6 +12,7 @@ import {
   AgentRuntime,
   AgentRuntimeEvent,
   AgentHistoryItem,
+  AgentProviderRequestMapping,
   AgentRuntimeRegistry,
 } from '../../../packages/agent-runtime/src/index';
 import { CodexRuntimeAdapter, JsonRpcClientError } from '../../../packages/codex/src/index';
@@ -218,6 +219,63 @@ class FakeClaudeRuntime extends EventEmitter implements AgentRuntime {
         resourceTemplateCount: 0,
       },
     ];
+  }
+  mapProviderRequest(
+    request: Parameters<NonNullable<AgentRuntime['mapProviderRequest']>>[0],
+    _options: Parameters<NonNullable<AgentRuntime['mapProviderRequest']>>[1],
+  ): AgentProviderRequestMapping | null {
+    if (request.method !== 'tool/AskUserQuestion') {
+      return null;
+    }
+    const params = request.params as {
+      providerSessionId: string;
+      providerTurnId: string;
+      toolUseId: string;
+    };
+    return {
+      providerRequestId: request.id,
+      providerSessionId: params.providerSessionId,
+      autoApprovedResult: null,
+      pendingRequest: {
+        providerRequestId: request.id,
+        responseKind: 'askUserQuestion',
+        request: {
+          id: String(request.id),
+          kind: 'requestUserInput',
+          title: 'Mode',
+          description: 'Which plan style should I use?',
+          turnId: params.providerTurnId,
+          itemId: params.toolUseId,
+          createdAt: new Date().toISOString(),
+          questions: [
+            {
+              id: 'question-1',
+              header: 'Mode',
+              question: 'Which plan style should I use?',
+              isOther: true,
+              isSecret: false,
+              options: [
+                { label: 'Short', description: 'Keep the plan concise.' },
+                { label: 'Detailed', description: 'Include more context.' },
+              ],
+            },
+          ],
+        },
+      },
+    };
+  }
+  buildProviderRequestResponse(
+    pending: Parameters<NonNullable<AgentRuntime['buildProviderRequestResponse']>>[0],
+    input: Parameters<NonNullable<AgentRuntime['buildProviderRequestResponse']>>[1],
+  ) {
+    return {
+      kind: pending.responseKind,
+      answers: input.answers,
+    };
+  }
+  providerRequestResponses: Array<{ id: string | number; result: unknown }> = [];
+  respondToProviderRequest(id: string | number, result: unknown) {
+    this.providerRequestResponses.push({ id, result });
   }
   completeTurn(providerSessionId: string, providerTurnId: string) {
     const session = this.sessions.get(providerSessionId);
@@ -1072,6 +1130,118 @@ describe('supervisor api', () => {
       items: expect.arrayContaining([
         expect.objectContaining({ kind: 'agentMessage', text: 'Hello from Claude' }),
       ]),
+    });
+  });
+
+  it('maps Claude plan questions to interactive pending requests', async () => {
+    await app.close();
+    fakeClaudeRuntime = new FakeClaudeRuntime();
+    app = buildTestApp(fakeCodexManager, { claudeRuntime: fakeClaudeRuntime });
+    await app.ready();
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspaceResponse.json().id,
+        provider: 'claude',
+        model: 'sonnet',
+        approvalMode: 'guarded',
+        collaborationMode: 'plan',
+        title: 'Claude Plan Question Thread'
+      }
+    });
+    const thread = createResponse.json();
+
+    await app.inject({
+      method: 'POST',
+      url: `/api/threads/${thread.id}/prompt`,
+      payload: {
+        prompt: 'Ask a plan question.',
+      }
+    });
+    fakeClaudeRuntime.emit('provider-request', {
+      provider: 'claude',
+      id: 'toolu_question',
+      method: 'tool/AskUserQuestion',
+      params: {
+        providerSessionId: thread.providerSessionId,
+        providerTurnId: 'claude-turn-1',
+        toolUseId: 'toolu_question',
+      },
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${thread.id}`,
+    });
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json().pendingRequests).toEqual([
+      expect.objectContaining({
+        id: 'toolu_question',
+        kind: 'requestUserInput',
+        title: 'Mode',
+        description: 'Which plan style should I use?',
+        turnId: 'claude-turn-1',
+        itemId: 'toolu_question',
+        questions: [
+          expect.objectContaining({
+            id: 'question-1',
+            header: 'Mode',
+            question: 'Which plan style should I use?',
+            isOther: true,
+            options: [
+              { label: 'Short', description: 'Keep the plan concise.' },
+              { label: 'Detailed', description: 'Include more context.' },
+            ],
+          }),
+        ],
+      }),
+    ]);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${thread.id}/requests/toolu_question/respond`,
+      payload: {
+        answers: {
+          'question-1': {
+            answers: ['Short'],
+          },
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(fakeClaudeRuntime.providerRequestResponses).toEqual([
+      {
+        id: 'toolu_question',
+        result: {
+          kind: 'askUserQuestion',
+          answers: {
+            'question-1': {
+              answers: ['Short'],
+            },
+          },
+        },
+      },
+    ]);
+    expect(response.json()).toMatchObject({
+      pendingRequests: [],
+      answeredRequestNotes: [
+        {
+          id: 'toolu_question',
+          turnId: 'claude-turn-1',
+          title: 'Mode',
+          summaryLines: ['Mode: Short'],
+        },
+      ],
     });
   });
 

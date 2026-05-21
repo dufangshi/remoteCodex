@@ -255,6 +255,21 @@ export function toolResultBlocks(message: unknown): Array<{ toolUseId: string; r
     .filter((block): block is { toolUseId: string; result: unknown } => Boolean(block));
 }
 
+export function askUserQuestionToolUseIds(message: unknown): Set<string> {
+  const ids = new Set<string>();
+  for (const block of contentBlocks(message)) {
+    if (!isRecord(block) || block.type !== 'tool_use') {
+      continue;
+    }
+    const id = stringValue(block.id);
+    const name = stringValue(block.name);
+    if (id && name === 'AskUserQuestion') {
+      ids.add(id);
+    }
+  }
+  return ids;
+}
+
 export function assistantMessageToHistoryItems(
   input: {
     messageId: string;
@@ -297,6 +312,9 @@ export function assistantMessageToHistoryItems(
     if (type === 'tool_use') {
       const id = stringValue(block.id) ?? `${input.messageId}:tool:${index}`;
       const name = stringValue(block.name) ?? 'Tool';
+      if (name === 'AskUserQuestion') {
+        continue;
+      }
       items.push(toolUseToHistoryItem({
         id,
         name,
@@ -421,9 +439,13 @@ export function toolUseFromPartialStart(input: {
     return null;
   }
   if (block.type === 'tool_use') {
+    const name = stringValue(block.name) ?? 'Tool';
+    if (name === 'AskUserQuestion') {
+      return null;
+    }
     return toolUseToHistoryItem({
       id: stringValue(block.id) ?? `${input.messageId}:tool:${index}`,
-      name: stringValue(block.name) ?? 'Tool',
+      name,
       toolInput: block.input,
       status: 'running',
     });
