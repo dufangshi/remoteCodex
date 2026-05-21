@@ -605,6 +605,102 @@ describe('ClaudeRuntimeAdapter', () => {
     });
   });
 
+  it('emits Claude token usage before completing a turn', async () => {
+    const adapter = makeAdapter((prompt) => {
+      if (prompt === hiddenInitPrompt()) {
+        return [systemInit(), result()];
+      }
+      return [
+        systemInit(),
+        {
+          type: 'assistant',
+          message: {
+            id: 'msg_usage',
+            type: 'message',
+            role: 'assistant',
+            model: 'sonnet',
+            content: [{ type: 'text', text: 'Done', citations: null }],
+            stop_reason: null,
+            stop_sequence: null,
+            stop_details: null,
+            usage: {
+              input_tokens: 3,
+              cache_creation_input_tokens: 10,
+              cache_read_input_tokens: 100,
+              output_tokens: 20,
+            } as any,
+            container: null,
+            context_management: null,
+            diagnostics: null,
+          },
+          parent_tool_use_id: null,
+          uuid: '00000000-0000-4000-8000-000000000040' as any,
+          session_id: 'claude-session-1',
+        },
+        {
+          ...result(),
+          usage: {
+            input_tokens: 4,
+            cache_creation_input_tokens: 11,
+            cache_read_input_tokens: 101,
+            output_tokens: 21,
+          } as any,
+          modelUsage: {
+            sonnet: {
+              inputTokens: 4,
+              outputTokens: 21,
+              cacheReadInputTokens: 101,
+              cacheCreationInputTokens: 11,
+              webSearchRequests: 0,
+              costUSD: 0.001,
+              contextWindow: 200000,
+              maxOutputTokens: 32000,
+            },
+          },
+        } as SDKMessage,
+      ];
+    });
+    const events: AgentRuntimeEvent[] = [];
+    adapter.on('event', (event) => events.push(event));
+
+    await adapter.startTurn({
+      providerSessionId: 'claude-session-1',
+      prompt: 'Measure usage',
+      model: 'sonnet',
+      workspacePath: '/tmp/workspace',
+    });
+    await wait();
+
+    const usageEvent = events.find((event) => event.type === 'usage.updated');
+    expect(usageEvent).toMatchObject({
+      type: 'usage.updated',
+      provider: 'claude',
+      providerSessionId: 'claude-session-1',
+      usage: {
+        total: {
+          totalTokens: 137,
+          inputTokens: 116,
+          cachedInputTokens: 101,
+          outputTokens: 21,
+          reasoningOutputTokens: 0,
+        },
+        last: {
+          totalTokens: 137,
+          inputTokens: 116,
+          cachedInputTokens: 101,
+          outputTokens: 21,
+          reasoningOutputTokens: 0,
+        },
+        modelContextWindow: 200000,
+        cumulative: false,
+      },
+    });
+    expect(events.map((event) => event.type).slice(-2)).toEqual([
+      'usage.updated',
+      'turn.completed',
+    ]);
+  });
+
   it('uses Claude plan permission mode and maps ExitPlanMode to a plan item', async () => {
     const turnOptions: Record<string, unknown>[] = [];
     const adapter = makeAdapter((_prompt, options) => {

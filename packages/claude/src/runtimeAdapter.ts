@@ -94,6 +94,17 @@ interface ActiveClaudeTurn {
   interrupted: boolean;
   completed: boolean;
   suppressedToolUseIds: Set<string>;
+  assistantUsage: ClaudeTokenUsageBreakdown | null;
+  resultUsage: ClaudeTokenUsageBreakdown | null;
+  modelContextWindow: number | null;
+}
+
+interface ClaudeTokenUsageBreakdown {
+  totalTokens: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens: number;
 }
 
 export const claudeCapabilities: AgentProviderCapabilities = {
@@ -133,9 +144,9 @@ export const claudeCapabilities: AgentProviderCapabilities = {
     providerSettings: false,
   },
   usage: {
-    contextWindow: false,
-    tokenUsage: false,
-    costUsd: false,
+    contextWindow: true,
+    tokenUsage: true,
+    costUsd: true,
   },
 };
 
@@ -352,6 +363,99 @@ function messageIdFromPayload(message: unknown) {
 
 function messageUuid(message: SDKMessage | SessionMessage, fallback: string) {
   return typeof message.uuid === 'string' && message.uuid ? message.uuid : fallback;
+}
+
+function finiteNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? value
+    : 0;
+}
+
+function nullableFiniteNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? value
+    : null;
+}
+
+function addClaudeUsage(
+  left: ClaudeTokenUsageBreakdown,
+  right: ClaudeTokenUsageBreakdown,
+): ClaudeTokenUsageBreakdown {
+  return {
+    totalTokens: left.totalTokens + right.totalTokens,
+    inputTokens: left.inputTokens + right.inputTokens,
+    cachedInputTokens: left.cachedInputTokens + right.cachedInputTokens,
+    outputTokens: left.outputTokens + right.outputTokens,
+    reasoningOutputTokens: left.reasoningOutputTokens + right.reasoningOutputTokens,
+  };
+}
+
+function normalizeClaudeUsage(value: unknown): ClaudeTokenUsageBreakdown | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const baseInputTokens = finiteNumber(value.input_tokens ?? value.inputTokens);
+  const cacheCreationInputTokens = finiteNumber(
+    value.cache_creation_input_tokens ?? value.cacheCreationInputTokens,
+  );
+  const cacheReadInputTokens = finiteNumber(
+    value.cache_read_input_tokens ?? value.cacheReadInputTokens,
+  );
+  const outputTokens = finiteNumber(value.output_tokens ?? value.outputTokens);
+  const inputTokens = baseInputTokens + cacheCreationInputTokens + cacheReadInputTokens;
+  const totalTokens = inputTokens + outputTokens;
+
+  if (totalTokens <= 0) {
+    return null;
+  }
+
+  return {
+    totalTokens,
+    inputTokens,
+    cachedInputTokens: cacheReadInputTokens,
+    outputTokens,
+    reasoningOutputTokens: 0,
+  };
+}
+
+function usageFromAssistantMessage(message: SDKMessage) {
+  if (message.type !== 'assistant' || !isRecord(message.message)) {
+    return null;
+  }
+  return normalizeClaudeUsage(message.message.usage);
+}
+
+function usageFromResultMessage(message: SDKMessage) {
+  return message.type === 'result' ? normalizeClaudeUsage(message.usage) : null;
+}
+
+function contextWindowFromResultMessage(message: SDKMessage) {
+  if (message.type !== 'result' || !isRecord(message.modelUsage)) {
+    return null;
+  }
+  for (const usage of Object.values(message.modelUsage)) {
+    if (!isRecord(usage)) {
+      continue;
+    }
+    const contextWindow = nullableFiniteNumber(usage.contextWindow);
+    if (contextWindow && contextWindow > 0) {
+      return contextWindow;
+    }
+  }
+  return null;
+}
+
+function claudeUsagePayload(
+  usage: ClaudeTokenUsageBreakdown,
+  modelContextWindow: number | null,
+) {
+  return {
+    total: usage,
+    last: usage,
+    modelContextWindow,
+    cumulative: false,
+  };
 }
 
 function streamMessageId(event: unknown) {
@@ -868,6 +972,9 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       interrupted: false,
       completed: false,
       suppressedToolUseIds: new Set(),
+      assistantUsage: null,
+      resultUsage: null,
+      modelContextWindow: null,
     };
     this.knownSessionIds.add(input.providerSessionId);
     this.activeTurns.set(providerTurnId, state);
@@ -963,6 +1070,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
         if (status) {
           state.completed = true;
           this.activeTurns.delete(state.providerTurnId);
+          this.emitUsage(state);
           this.emitRuntimeEvent({
             type: 'turn.completed',
             provider: 'claude',
@@ -982,6 +1090,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       if (!state.completed) {
         state.completed = true;
         this.activeTurns.delete(state.providerTurnId);
+        this.emitUsage(state);
         this.emitRuntimeEvent({
           type: 'turn.completed',
           provider: 'claude',
@@ -1011,6 +1120,8 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
   }
 
   private consumeMessage(state: ActiveClaudeTurn, message: SDKMessage) {
+    this.captureUsage(state, message);
+
     if (message.type === 'system' && message.subtype === 'init') {
       this.sessionCwds.set(message.session_id, message.cwd);
       this.sessionModels.set(message.session_id, message.model);
@@ -1190,6 +1301,39 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       addOrUpdateItem(state, item);
       this.emitItem(state, item, 'item.completed');
     }
+  }
+
+  private captureUsage(state: ActiveClaudeTurn, message: SDKMessage) {
+    const assistantUsage = usageFromAssistantMessage(message);
+    if (assistantUsage) {
+      state.assistantUsage = state.assistantUsage
+        ? addClaudeUsage(state.assistantUsage, assistantUsage)
+        : assistantUsage;
+    }
+
+    const resultUsage = usageFromResultMessage(message);
+    if (resultUsage) {
+      state.resultUsage = resultUsage;
+    }
+
+    const modelContextWindow = contextWindowFromResultMessage(message);
+    if (modelContextWindow) {
+      state.modelContextWindow = modelContextWindow;
+    }
+  }
+
+  private emitUsage(state: ActiveClaudeTurn) {
+    const usage = state.resultUsage ?? state.assistantUsage;
+    if (!usage) {
+      return;
+    }
+    this.emitRuntimeEvent({
+      type: 'usage.updated',
+      provider: 'claude',
+      providerSessionId: state.providerSessionId,
+      providerTurnId: state.providerTurnId,
+      usage: claudeUsagePayload(usage, state.modelContextWindow),
+    });
   }
 
   private emitItem(

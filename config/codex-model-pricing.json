@@ -68,9 +68,9 @@
       "contextWindowTokens": 1000000
     },
     "opus": {
-      "inputUsdPerMillion": 15,
-      "cachedInputUsdPerMillion": 1.5,
-      "outputUsdPerMillion": 75,
+      "inputUsdPerMillion": 5,
+      "cachedInputUsdPerMillion": 0.5,
+      "outputUsdPerMillion": 25,
       "supportsFastMode": false,
       "contextWindowTokens": 200000
     },
@@ -96,16 +96,16 @@
       "contextWindowTokens": 200000
     },
     "claude-opus-4-5": {
-      "inputUsdPerMillion": 15,
-      "cachedInputUsdPerMillion": 1.5,
-      "outputUsdPerMillion": 75,
+      "inputUsdPerMillion": 5,
+      "cachedInputUsdPerMillion": 0.5,
+      "outputUsdPerMillion": 25,
       "supportsFastMode": false,
       "contextWindowTokens": 200000
     },
     "claude-opus-4-7": {
-      "inputUsdPerMillion": 15,
-      "cachedInputUsdPerMillion": 1.5,
-      "outputUsdPerMillion": 75,
+      "inputUsdPerMillion": 5,
+      "cachedInputUsdPerMillion": 0.5,
+      "outputUsdPerMillion": 25,
       "supportsFastMode": false,
       "contextWindowTokens": 200000
     },

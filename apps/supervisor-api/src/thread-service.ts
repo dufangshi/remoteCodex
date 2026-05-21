@@ -850,6 +850,7 @@ function buildThreadTurnTokenUsage(
   const modelContextWindow = numberOrNull(
     tokenUsage?.modelContextWindow ?? tokenUsage?.model_context_window,
   );
+  const isCumulative = tokenUsage?.cumulative !== false;
 
   if (!last) {
     return null;
@@ -857,7 +858,7 @@ function buildThreadTurnTokenUsage(
 
   return {
     total:
-      cumulativeTotal
+      cumulativeTotal && isCumulative
         ? subtractTurnTokenBreakdowns(cumulativeTotal, baselineTotal)
         : previous?.total ?? last,
     last,

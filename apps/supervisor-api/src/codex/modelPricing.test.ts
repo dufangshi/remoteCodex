@@ -100,6 +100,35 @@ describe('modelPricing', () => {
     });
   });
 
+  it('prices current Claude Opus and Haiku aliases from the local pricing config', () => {
+    expect(contextWindowForModel('claude-opus-4-7')).toBe(200000);
+    expect(contextWindowForModel('claude-haiku-4-5')).toBe(200000);
+
+    const opusEstimate = estimateTurnPrice(sampleUsage, {
+      pricingModelKey: 'claude-opus-4-7',
+      pricingTierKey: 'standard',
+    });
+    expect(opusEstimate).toMatchObject({
+      pricingModelKey: 'claude-opus-4-7',
+      pricingTierKey: 'standard',
+      inputUsd: 0.005,
+      cachedInputUsd: 0.00025,
+      outputUsd: 0.0375,
+    });
+
+    const haikuEstimate = estimateTurnPrice(sampleUsage, {
+      pricingModelKey: 'claude-haiku-4-5',
+      pricingTierKey: 'standard',
+    });
+    expect(haikuEstimate).toMatchObject({
+      pricingModelKey: 'claude-haiku-4-5',
+      pricingTierKey: 'standard',
+      inputUsd: 0.001,
+      cachedInputUsd: 0.00005,
+      outputUsd: 0.0075,
+    });
+  });
+
   it('resolves pricing config from the installed package root when provided', async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'remote-codex-pricing-root-'));
     await fs.mkdir(path.join(tempDir, 'config'), { recursive: true });

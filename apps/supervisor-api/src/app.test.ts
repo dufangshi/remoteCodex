@@ -52,7 +52,7 @@ class FakeClaudeRuntime extends EventEmitter implements AgentRuntime {
       hostConfigFiles: false,
       providerSettings: false,
     },
-    usage: { contextWindow: false, tokenUsage: false, costUsd: false },
+    usage: { contextWindow: true, tokenUsage: true, costUsd: true },
   };
   readonly managementSchema: AgentRuntime['managementSchema'] = {
     hostConfigFiles: [],
@@ -289,6 +289,30 @@ class FakeClaudeRuntime extends EventEmitter implements AgentRuntime {
     turn.status = 'completed';
     session.status = 'idle';
     this.activeTurnId = null;
+    this.emitRuntimeEvent({
+      type: 'usage.updated',
+      provider: 'claude',
+      providerSessionId,
+      providerTurnId,
+      usage: {
+        total: {
+          totalTokens: 17348,
+          inputTokens: 16248,
+          cachedInputTokens: 15796,
+          outputTokens: 1100,
+          reasoningOutputTokens: 0,
+        },
+        last: {
+          totalTokens: 17348,
+          inputTokens: 16248,
+          cachedInputTokens: 15796,
+          outputTokens: 1100,
+          reasoningOutputTokens: 0,
+        },
+        modelContextWindow: 200000,
+        cumulative: false,
+      },
+    });
     this.emitRuntimeEvent({
       type: 'turn.completed',
       provider: 'claude',
@@ -1130,9 +1154,41 @@ describe('supervisor api', () => {
       model: 'sonnet',
       reasoningEffort: 'medium',
       reasoningEffortAvailable: true,
+      tokenUsage: {
+        total: {
+          totalTokens: 17348,
+          inputTokens: 16248,
+          cachedInputTokens: 15796,
+          outputTokens: 1100,
+          reasoningOutputTokens: 0,
+        },
+        last: {
+          totalTokens: 17348,
+          inputTokens: 16248,
+          cachedInputTokens: 15796,
+          outputTokens: 1100,
+          reasoningOutputTokens: 0,
+        },
+        modelContextWindow: 200000,
+      },
+      priceEstimate: {
+        pricingModelKey: 'sonnet',
+        pricingTierKey: 'standard',
+        currency: 'USD',
+      },
       items: expect.arrayContaining([
         expect.objectContaining({ kind: 'agentMessage', text: 'Hello from Claude' }),
       ]),
+    });
+    const completedTurn = completedDetailResponse.json().turns.at(-1);
+    expect(completedTurn.priceEstimate.inputUsd).toBeCloseTo(0.001356, 10);
+    expect(completedTurn.priceEstimate.cachedInputUsd).toBeCloseTo(0.0047388, 10);
+    expect(completedTurn.priceEstimate.outputUsd).toBeCloseTo(0.0165, 10);
+    expect(completedTurn.priceEstimate.totalUsd).toBeCloseTo(0.0225948, 10);
+    expect(completedDetailResponse.json().thread.contextUsage).toMatchObject({
+      availability: 'available',
+      modelContextWindow: 200000,
+      tokensInContextWindow: 17348,
     });
   });
 
