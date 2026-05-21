@@ -24,10 +24,19 @@ describe('loadRuntimeConfig', () => {
     });
     expect(config.agentProviders.claude).toEqual({
       provider: 'claude',
-      enabled: false,
+      enabled: true,
       home: path.join(os.homedir(), '.claude'),
       command: 'claude',
     });
+  });
+
+  it('allows Claude to be explicitly disabled', () => {
+    const config = loadRuntimeConfig({
+      REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: 'codex',
+    });
+
+    expect(config.agentProviders.codex.enabled).toBe(true);
+    expect(config.agentProviders.claude.enabled).toBe(false);
   });
 
   it('resolves production database to user home', () => {

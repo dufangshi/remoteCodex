@@ -82,7 +82,7 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
       ? nodeEnv === 'production'
       : ['1', 'true', 'yes', 'on'].includes(parsed.DISABLE_REQUEST_LOGGING.toLowerCase());
   const enabledProviders = new Set(
-    (parsed.REMOTE_CODEX_ENABLED_AGENT_PROVIDERS ?? 'codex')
+    (parsed.REMOTE_CODEX_ENABLED_AGENT_PROVIDERS ?? 'codex,claude')
       .split(',')
       .map((provider) => provider.trim().toLowerCase())
       .filter(Boolean)
