@@ -17,6 +17,11 @@ const CLAUDE_TOOL_LABELS: Record<string, string> = {
   WebFetch: 'Web fetch',
   TodoWrite: 'Update todos',
 };
+const HIDDEN_ASK_USER_QUESTION_CONTINUATION_PREFIX =
+  'The user answered the clarification questions below. Continue from the same plan-mode task using these answers.';
+const SUPPRESSED_ASSISTANT_TEXTS = new Set([
+  'No response requested.',
+]);
 
 function normalizedToolName(toolName: string) {
   return toolName.replace(/[\s_-]+/g, '').toLowerCase();
@@ -153,6 +158,16 @@ export function hiddenInitPrompt() {
 
 export function isHiddenInitMessage(message: unknown) {
   return messageContentText(message).trim() === hiddenInitPrompt();
+}
+
+export function isHiddenContinuationMessage(message: unknown) {
+  return messageContentText(message)
+    .trim()
+    .startsWith(HIDDEN_ASK_USER_QUESTION_CONTINUATION_PREFIX);
+}
+
+function shouldSuppressAssistantText(text: string) {
+  return SUPPRESSED_ASSISTANT_TEXTS.has(text.trim());
 }
 
 export function userMessageToHistoryItem(id: string, message: unknown): AgentHistoryItem {
@@ -330,6 +345,9 @@ export function assistantMessageToHistoryItems(
       }
       const text = stringValue(block.text);
       if (text) {
+        if (shouldSuppressAssistantText(text)) {
+          continue;
+        }
         items.push({
           id: itemId,
           kind: 'agentMessage',

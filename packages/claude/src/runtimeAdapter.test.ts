@@ -1322,4 +1322,74 @@ describe('ClaudeRuntimeAdapter', () => {
       }),
     ]);
   });
+
+  it('hides supervisor question continuation prompts from historical turns', async () => {
+    const adapter = new ClaudeRuntimeAdapter({
+      home: '/tmp/claude-home',
+      query: (() => new FakeQuery([])) as any,
+      getSessionInfo: (async () => ({
+        sessionId: 'claude-session-1',
+        summary: 'Existing session',
+        lastModified: 1_772_000_000_000,
+        createdAt: 1_771_000_000_000,
+        cwd: '/tmp/workspace',
+      })) as any,
+      listSessions: (async () => []) as any,
+      getSessionMessages: (async () => [
+        {
+          type: 'user',
+          uuid: '019e4657-bd3c-72d1-b59d-324ed8a4b1ec',
+          session_id: 'claude-session-1',
+          message: { role: 'user', content: 'Plan a calculator.' },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'assistant',
+          uuid: 'assistant-question',
+          session_id: 'claude-session-1',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'Which features?' }] },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'user',
+          uuid: 'continuation-user',
+          session_id: 'claude-session-1',
+          message: {
+            role: 'user',
+            content:
+              'The user answered the clarification questions below. Continue from the same plan-mode task using these answers. If you have enough information, produce the concrete plan for approval.\n\n- Which features?: History, Keyboard support',
+          },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'assistant',
+          uuid: 'assistant-plan',
+          session_id: 'claude-session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'toolu_plan',
+                name: 'ExitPlanMode',
+                input: { plan: 'Build a basic calculator with history.' },
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      ] satisfies SessionMessage[]) as any,
+    });
+
+    const session = await adapter.readSession('claude-session-1');
+    expect(session.turns).toHaveLength(1);
+    expect(session.turns[0]?.items).toEqual([
+      expect.objectContaining({ kind: 'userMessage', text: 'Plan a calculator.' }),
+      expect.objectContaining({ kind: 'agentMessage', text: 'Which features?' }),
+      expect.objectContaining({
+        kind: 'plan',
+        text: 'Build a basic calculator with history.',
+      }),
+    ]);
+  });
 });

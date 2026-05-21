@@ -50,6 +50,7 @@ import {
   assistantMessageToHistoryItems,
   buildAgentTurn,
   hiddenInitPrompt,
+  isHiddenContinuationMessage,
   isHiddenInitMessage,
   messageContentText,
   partialReasoningDelta,
@@ -1285,6 +1286,9 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
         if (isHiddenInitMessage(message.message)) {
           skippingHiddenInit = true;
           current = null;
+          continue;
+        }
+        if (isHiddenContinuationMessage(message.message)) {
           continue;
         }
         skippingHiddenInit = false;

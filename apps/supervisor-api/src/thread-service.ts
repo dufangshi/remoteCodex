@@ -1593,13 +1593,22 @@ export class ThreadService {
     const goal =
       await this.getThreadGoalForRecord(updated).catch(() => null) ??
       localGoalSnapshotForFallback(goalHistory);
+    const terminalTurnWithPlan = [...cachedDetail.turns]
+      .reverse()
+      .find((turn) =>
+        turn.status === 'completed' &&
+        turn.items.some((item) => item.kind === 'plan'),
+      );
+    const pendingRequests = this.listPendingRequests(updated.id, {
+      hideAnsweredProviderQuestions: Boolean(terminalTurnWithPlan),
+    });
     return {
       thread: this.toThreadDto(updated, loadedIds),
       workspace: toWorkspaceDto(workspace),
       workspacePathStatus,
       turns: pagedTurns.turns,
       totalTurnCount: cachedDetail.totalTurnCount,
-      pendingRequests: this.listPendingRequests(updated.id),
+      pendingRequests,
       pendingSteers: this.listPendingSteers(updated.id),
       answeredRequestNotes: this.listAnsweredRequestNotes(updated.id),
       activityNotes: this.listActivityNotes(updated.id),
@@ -3771,8 +3780,18 @@ export class ThreadService {
     });
   }
 
-  private listPendingRequests(localThreadId: string): ThreadActionRequestDto[] {
-    return [...(this.pendingRequests.get(localThreadId)?.values() ?? [])].map((entry) => entry.request);
+  private listPendingRequests(
+    localThreadId: string,
+    options: { hideAnsweredProviderQuestions?: boolean } = {},
+  ): ThreadActionRequestDto[] {
+    return [...(this.pendingRequests.get(localThreadId)?.values() ?? [])]
+      .filter((entry) => {
+        if (!options.hideAnsweredProviderQuestions) {
+          return true;
+        }
+        return !(entry.source === 'server' && entry.responseKind === 'askUserQuestion');
+      })
+      .map((entry) => entry.request);
   }
 
   private getLivePlan(localThreadId: string): ThreadLivePlanDto | null {
