@@ -1133,6 +1133,82 @@ describe('supervisor api', () => {
     });
   });
 
+  it('uses local turn metadata time when Claude history lacks a parseable timestamp', async () => {
+    await app.close();
+    fakeClaudeRuntime = new FakeClaudeRuntime();
+    app = buildTestApp(fakeCodexManager, { claudeRuntime: fakeClaudeRuntime });
+    await app.ready();
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspaceResponse.json().id,
+        provider: 'claude',
+        model: 'sonnet',
+        approvalMode: 'guarded',
+        title: 'Claude Timestamp Thread'
+      }
+    });
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createResponse.json().id}/prompt`,
+      payload: {
+        prompt: 'Say hello.',
+      }
+    });
+    expect(promptResponse.statusCode).toBe(200);
+
+    const liveDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createResponse.json().id}`,
+    });
+    const liveStartedAt = liveDetailResponse.json().turns.at(-1).startedAt;
+    expect(liveStartedAt).toEqual(expect.any(String));
+
+    fakeClaudeRuntime.completeTurn('claude-session-1', 'claude-turn-1');
+    const session = fakeClaudeRuntime.sessions.get('claude-session-1');
+    session.turns = [
+      {
+        providerTurnId: 'claude-turn-not-a-v7-id',
+        startedAt: null,
+        status: 'completed',
+        error: null,
+        items: [
+          {
+            id: 'user-not-a-v7-id',
+            kind: 'userMessage',
+            text: 'Say hello.',
+          },
+          {
+            id: 'assistant-historical',
+            kind: 'agentMessage',
+            text: 'Hello from Claude history',
+          },
+        ],
+      },
+    ];
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createResponse.json().id}`,
+    });
+    expect(detailResponse.json().turns.at(-1)).toMatchObject({
+      id: 'claude-turn-not-a-v7-id',
+      startedAt: liveStartedAt,
+      status: 'completed',
+      model: 'sonnet',
+      reasoningEffort: 'medium',
+    });
+  });
+
   it('interrupts an active Claude turn', async () => {
     await app.close();
     fakeClaudeRuntime = new FakeClaudeRuntime();

@@ -40,8 +40,12 @@ export function ThreadNewPage() {
   const requestedWorkspaceId = searchParams.get('workspaceId');
 
   useEffect(() => {
+    let cancelled = false;
     Promise.all([fetchWorkspaces(), fetchWorkspaceSettings(), fetchAgentBackends()])
       .then(async ([workspaceRecords, settings, backendRecords]) => {
+        if (cancelled) {
+          return;
+        }
         const enabledBackends = backendRecords.filter(backendCanStartSession);
         const fallbackProvider = enabledBackends[0]?.provider ?? 'codex';
         const initialProvider = enabledBackends.some(
@@ -53,6 +57,9 @@ export function ThreadNewPage() {
         setProvider(initialProvider);
         setBackends(backendRecords);
         const modelRecords = await fetchAgentBackendModels(initialProvider);
+        if (cancelled) {
+          return;
+        }
         setWorkspaces(workspaceRecords);
         setModels(modelRecords);
         const initialWorkspaceId =
@@ -63,12 +70,22 @@ export function ThreadNewPage() {
         setModel(modelRecords.find((entry) => entry.isDefault)?.model ?? modelRecords[0]?.model ?? '');
       })
       .catch((caught) => {
+        if (cancelled) {
+          return;
+        }
         setError(caught instanceof Error ? caught.message : 'Unable to load creation form data.');
       })
       .finally(() => {
+        if (cancelled) {
+          return;
+        }
         setLoading(false);
       });
-  }, [requestedWorkspaceId, shellNav]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [requestedWorkspaceId]);
 
   useEffect(() => {
     if (!provider) {

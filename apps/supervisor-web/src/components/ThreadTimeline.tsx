@@ -748,6 +748,7 @@ function groupTimelineHistoryItems(items: ThreadHistoryItemDto[]) {
   const entries: TimelineHistoryEntry[] = [];
   let index = 0;
   const attachedReasoningIds = new Set<string>();
+  const pendingReasoningItems: Array<ThreadHistoryItemDto & { kind: 'reasoning' }> = [];
 
   while (index < items.length) {
     const current = items[index];
@@ -761,36 +762,29 @@ function groupTimelineHistoryItems(items: ThreadHistoryItemDto[]) {
     }
 
     if (current.kind === 'reasoning') {
-      const reasoningItems: Array<ThreadHistoryItemDto & { kind: 'reasoning' }> = [];
       let cursor = index;
       while (cursor < items.length && items[cursor]?.kind === 'reasoning') {
-        reasoningItems.push(items[cursor] as ThreadHistoryItemDto & { kind: 'reasoning' });
+        pendingReasoningItems.push(items[cursor] as ThreadHistoryItemDto & { kind: 'reasoning' });
         cursor += 1;
       }
-
-      const nextItem = items[cursor];
-      if (nextItem?.kind === 'agentMessage') {
-        for (const reasoningItem of reasoningItems) {
-          attachedReasoningIds.add(reasoningItem.id);
-        }
-        entries.push({
-          kind: 'item',
-          key: nextItem.id,
-          item: {
-            ...nextItem,
-            reasoningItems,
-          } as AgentMessageHistoryItemWithReasoning,
-        });
-        index = cursor + 1;
-        continue;
-      }
+      index = cursor;
+      continue;
     }
 
     if (current.kind === 'agentMessage') {
+      const reasoningItems = pendingReasoningItems.splice(0);
+      for (const reasoningItem of reasoningItems) {
+        attachedReasoningIds.add(reasoningItem.id);
+      }
       entries.push({
         kind: 'item',
         key: current.id,
-        item: current,
+        item: reasoningItems.length > 0
+          ? ({
+              ...current,
+              reasoningItems,
+            } as AgentMessageHistoryItemWithReasoning)
+          : current,
       });
       index += 1;
       continue;

@@ -193,6 +193,7 @@ interface ThreadTurnMetadataRecord {
   pricingModelKey: string | null;
   pricingTierKey: ThreadTurnPricingTierDto | null;
   tokenUsageJson: string | null;
+  createdAt?: string | null;
 }
 
 function toIsoFromEpoch(value: number | null | undefined) {
@@ -868,6 +869,7 @@ function buildTurnDto(
 
   return {
     ...turn,
+    startedAt: turn.startedAt ?? metadata?.createdAt ?? null,
     model: metadata?.model ?? null,
     reasoningEffort: normalizeReasoningEffort(metadata?.reasoningEffort),
     reasoningEffortAvailable: metadata?.reasoningEffortAvailable ?? null,
@@ -882,8 +884,8 @@ function buildTurnDto(
 function fallbackTurnMetadataForRecord(record: {
   model: string | null;
   reasoningEffort: string | null;
-}): ThreadTurnMetadataRecord | undefined {
-  if (!record.model && !record.reasoningEffort) {
+}, latestMetadata?: ThreadTurnMetadataRecord | undefined): ThreadTurnMetadataRecord | undefined {
+  if (!record.model && !record.reasoningEffort && !latestMetadata?.createdAt) {
     return undefined;
   }
 
@@ -895,7 +897,18 @@ function fallbackTurnMetadataForRecord(record: {
     pricingModelKey: pricingSnapshot?.pricingModelKey ?? null,
     pricingTierKey: pricingSnapshot?.pricingTierKey ?? null,
     tokenUsageJson: null,
+    createdAt: latestMetadata?.createdAt ?? null,
   };
+}
+
+function latestThreadTurnMetadata(
+  metadataById: Map<string, ThreadTurnMetadataRecord>,
+) {
+  return [...metadataById.values()]
+    .filter((metadata) => metadata.createdAt)
+    .sort((left, right) =>
+      (right.createdAt ?? '').localeCompare(left.createdAt ?? ''),
+    )[0];
 }
 
 function sliceTurnsForDetail<T extends { id: string }>(
@@ -1233,7 +1246,10 @@ export class ThreadService {
       const localSession = await this.localSessionStore.findSession(providerSessionId);
       const deferredDetails = new Map<string, ThreadHistoryItemDetailDto>();
       const persistedItemsByTurnId = this.listPersistedHistoryItemsByTurnId(localThreadId);
-      const fallbackMetadata = fallbackTurnMetadataForRecord(record);
+      const fallbackMetadata = fallbackTurnMetadataForRecord(
+        record,
+        latestThreadTurnMetadata(turnMetadataById),
+      );
       const turns = mergePersistedHistoryItemsIntoTurns(
         applyRecordedTurnItemOrders(
           localSession?.turns ?? [],
@@ -1286,7 +1302,10 @@ export class ThreadService {
 
     const deferredDetails = new Map<string, ThreadHistoryItemDetailDto>();
     const persistedItemsByTurnId = this.listPersistedHistoryItemsByTurnId(localThreadId);
-    const fallbackMetadata = fallbackTurnMetadataForRecord(updated);
+    const fallbackMetadata = fallbackTurnMetadataForRecord(
+      updated,
+      latestThreadTurnMetadata(turnMetadataById),
+    );
     const turns = mergePersistedHistoryItemsIntoTurns(
       applyRecordedTurnItemOrders(
         remoteSession.turns.map((turn) => agentTurnToThreadTurnDto(turn, deferredDetails)),
@@ -1519,6 +1538,7 @@ export class ThreadService {
           pricingModelKey: entry.pricingModelKey ?? null,
           pricingTierKey: normalizePricingTier(entry.pricingTierKey),
           tokenUsageJson: entry.tokenUsageJson ?? null,
+          createdAt: entry.createdAt ?? null,
         },
       ]),
     );
@@ -1585,6 +1605,7 @@ export class ThreadService {
           pricingModelKey: entry.pricingModelKey ?? null,
           pricingTierKey: normalizePricingTier(entry.pricingTierKey),
           tokenUsageJson: entry.tokenUsageJson ?? null,
+          createdAt: entry.createdAt ?? null,
         },
       ]),
     );
@@ -1962,6 +1983,7 @@ export class ThreadService {
           pricingModelKey: entry.pricingModelKey ?? null,
           pricingTierKey: normalizePricingTier(entry.pricingTierKey),
           tokenUsageJson: entry.tokenUsageJson ?? null,
+          createdAt: entry.createdAt ?? null,
         },
       ]),
     );
@@ -2576,6 +2598,7 @@ export class ThreadService {
           pricingModelKey: entry.pricingModelKey ?? null,
           pricingTierKey: normalizePricingTier(entry.pricingTierKey),
           tokenUsageJson: entry.tokenUsageJson ?? null,
+          createdAt: entry.createdAt ?? null,
         },
       ]),
     );

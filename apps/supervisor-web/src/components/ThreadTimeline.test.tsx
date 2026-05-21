@@ -322,6 +322,56 @@ describe('ThreadTimeline', () => {
     expect(screen.getByText('I should inspect the failing command first.')).toBeInTheDocument();
   });
 
+  it('attaches Claude reasoning to the eventual agent message even when tool items intervene', async () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'reasoning-1',
+                kind: 'reasoning',
+                text: 'I should produce a plan and avoid code edits.',
+              },
+              {
+                id: 'file-1',
+                kind: 'fileChange',
+                text: '/home/u/.claude/plans/example.md',
+                previewText: 'Plan file',
+                changedFiles: 1,
+              },
+              {
+                id: 'plan-1',
+                kind: 'plan',
+                text: '# Plan\n\n- Inspect files.',
+              },
+              {
+                id: 'agent-1',
+                kind: 'agentMessage',
+                text: 'Here is the plan.',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    FakeIntersectionObserver.triggerAll();
+
+    await screen.findByText('Here is the plan.');
+    expect(screen.queryByText('I should produce a plan and avoid code edits.')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Thinking/i }));
+
+    expect(screen.getByText('I should produce a plan and avoid code edits.')).toBeInTheDocument();
+    expect(screen.queryByText('Reasoning')).not.toBeInTheDocument();
+  });
+
   it('renders inline photo and file attachments inside user messages', () => {
     render(
       <ThreadTimeline
