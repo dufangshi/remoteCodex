@@ -366,6 +366,7 @@ export function deferLargeHistoryItemDetails(
 
 export function shouldPersistLiveHistoryItem(item: ThreadHistoryItemDto) {
   return (
+    item.kind === 'agentMessage' ||
     item.kind === 'commandExecution' ||
     item.kind === 'fileChange' ||
     item.kind === 'hook' ||
@@ -508,11 +509,11 @@ function mergeHistoryItemsBySequence(
   missingItems: ThreadHistoryItemDto[],
 ) {
   if (missingItems.length === 0) {
-    return items;
+    return sortTurnItemsByRecordedSequence(items);
   }
 
   if (!missingItems.some(hasHistoryItemSequence)) {
-    return [...items, ...missingItems];
+    return sortTurnItemsByRecordedSequence([...items, ...missingItems]);
   }
 
   const mergedItems = [...items];
@@ -546,7 +547,19 @@ function mergeHistoryItemsBySequence(
     mergedItems.push(missingItem);
   }
 
-  return mergedItems;
+  return sortTurnItemsByRecordedSequence(mergedItems);
+}
+
+function copyPersistedSequence(
+  item: ThreadHistoryItemDto,
+  persistedItem: ThreadHistoryItemDto,
+) {
+  if (!hasHistoryItemSequence(persistedItem)) {
+    return item;
+  }
+
+  const sequence = historyItemSequence(persistedItem);
+  return item.sequence === sequence ? item : { ...item, sequence };
 }
 
 export function mergePersistedHistoryItemsIntoTurns(
@@ -559,10 +572,6 @@ export function mergePersistedHistoryItemsIntoTurns(
   }
 
   return turns.map((turn) => {
-    if (turn.status === 'inProgress') {
-      return turn;
-    }
-
     const persistedItems = persistedItemsByTurnId.get(turn.id);
     if (!persistedItems || persistedItems.length === 0) {
       return turn;
@@ -572,31 +581,39 @@ export function mergePersistedHistoryItemsIntoTurns(
     const persistedItemsById = new Map(persistedItems.map((item) => [item.id, item]));
     const nextItems = turn.items.map((item) => {
       const persistedItem = persistedItemsById.get(item.id);
-      if (
-        !persistedItem ||
-        item.kind !== persistedItem.kind ||
-        (persistedItem.kind !== 'commandExecution' && persistedItem.kind !== 'toolCall')
-      ) {
+      if (!persistedItem) {
         return item;
       }
 
-      const existingText = item.detailText?.trim() || item.text.trim();
-      const persistedText = persistedItem.detailText?.trim() || persistedItem.text.trim();
-      if (persistedText.length <= existingText.length) {
-        return item;
-      }
-
-      changed = true;
       persistedItemsById.delete(item.id);
-      return persistedItem.kind === 'commandExecution'
-        ? deferCommandHistoryItem(
-            persistedItem as ThreadHistoryItemDto & { kind: 'commandExecution' },
-            deferredDetails,
-          )
-        : deferToolCallHistoryItem(
-            persistedItem as ThreadHistoryItemDto & { kind: 'toolCall' },
-            deferredDetails,
-          );
+
+      if (item.kind !== persistedItem.kind) {
+        return item;
+      }
+
+      const sequencedItem = copyPersistedSequence(item, persistedItem);
+      if (sequencedItem !== item) {
+        changed = true;
+      }
+
+      if (persistedItem.kind === 'commandExecution' || persistedItem.kind === 'toolCall') {
+        const existingText = item.detailText?.trim() || item.text.trim();
+        const persistedText = persistedItem.detailText?.trim() || persistedItem.text.trim();
+        if (persistedText.length > existingText.length) {
+          changed = true;
+          return persistedItem.kind === 'commandExecution'
+            ? deferCommandHistoryItem(
+                persistedItem as ThreadHistoryItemDto & { kind: 'commandExecution' },
+                deferredDetails,
+              )
+            : deferToolCallHistoryItem(
+                persistedItem as ThreadHistoryItemDto & { kind: 'toolCall' },
+                deferredDetails,
+              );
+        }
+      }
+
+      return sequencedItem;
     });
 
     const existingItemIds = new Set(nextItems.map((item) => item.id));

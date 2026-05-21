@@ -1574,6 +1574,248 @@ describe('ThreadTimeline', () => {
     );
   });
 
+  it('keeps live command groups interleaved with live agent messages', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        liveItems={{
+          turnId: 'turn-1',
+          items: [
+            {
+              id: 'agent-before',
+              kind: 'agentMessage',
+              text: 'I will run the first batch.',
+              sequence: 1,
+            },
+            {
+              id: 'command-1',
+              kind: 'commandExecution',
+              text: 'pnpm lint',
+              status: 'completed',
+              sequence: 2,
+            },
+            {
+              id: 'command-2',
+              kind: 'commandExecution',
+              text: 'pnpm test',
+              status: 'completed',
+              sequence: 3,
+            },
+            {
+              id: 'agent-between',
+              kind: 'agentMessage',
+              text: 'The first batch passed. I will build next.',
+              sequence: 4,
+            },
+            {
+              id: 'command-3',
+              kind: 'commandExecution',
+              text: 'pnpm build',
+              status: 'completed',
+              sequence: 5,
+            },
+          ],
+        }}
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'inProgress',
+            error: null,
+            items: [
+              {
+                id: 'user-1',
+                kind: 'userMessage',
+                text: 'Run the full check sequence.',
+                sequence: 0,
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    const timelineText =
+      screen.getByTestId('thread-scroll-container').textContent ?? '';
+    expect(screen.getByText('I will run the first batch.')).toBeInTheDocument();
+    expect(screen.getByText('2 commands')).toBeInTheDocument();
+    expect(
+      screen.getByText('The first batch passed. I will build next.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('pnpm build')).toBeInTheDocument();
+    expect(timelineText.indexOf('I will run the first batch.')).toBeLessThan(
+      timelineText.indexOf('2 commands'),
+    );
+    expect(timelineText.indexOf('2 commands')).toBeLessThan(
+      timelineText.indexOf('The first batch passed. I will build next.'),
+    );
+    expect(
+      timelineText.indexOf('The first batch passed. I will build next.'),
+    ).toBeLessThan(timelineText.indexOf('pnpm build'));
+  });
+
+  it('uses live item sequence when refreshed turn items already contain the same command ids', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        liveItems={{
+          turnId: 'turn-1',
+          items: [
+            {
+              id: 'command-1',
+              kind: 'commandExecution',
+              text: 'pnpm lint',
+              status: 'completed',
+              sequence: 1,
+            },
+            {
+              id: 'command-2',
+              kind: 'commandExecution',
+              text: 'pnpm test',
+              status: 'completed',
+              sequence: 2,
+            },
+            {
+              id: 'agent-between',
+              kind: 'agentMessage',
+              text: 'The first batch passed. I will build next.',
+              sequence: 3,
+            },
+            {
+              id: 'command-3',
+              kind: 'commandExecution',
+              text: 'pnpm build',
+              status: 'completed',
+              sequence: 4,
+            },
+          ],
+        }}
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'inProgress',
+            error: null,
+            items: [
+              {
+                id: 'user-1',
+                kind: 'userMessage',
+                text: 'Run the full check sequence.',
+              },
+              {
+                id: 'command-1',
+                kind: 'commandExecution',
+                text: 'pnpm lint',
+                status: 'completed',
+              },
+              {
+                id: 'command-2',
+                kind: 'commandExecution',
+                text: 'pnpm test',
+                status: 'completed',
+              },
+              {
+                id: 'command-3',
+                kind: 'commandExecution',
+                text: 'pnpm build',
+                status: 'completed',
+              },
+              {
+                id: 'agent-between',
+                kind: 'agentMessage',
+                text: 'The first batch passed. I will build next.',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    const timelineText =
+      screen.getByTestId('thread-scroll-container').textContent ?? '';
+    expect(screen.getByText('2 commands')).toBeInTheDocument();
+    expect(
+      screen.getByText('The first batch passed. I will build next.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('pnpm build')).toBeInTheDocument();
+    expect(timelineText.indexOf('2 commands')).toBeLessThan(
+      timelineText.indexOf('The first batch passed. I will build next.'),
+    );
+    expect(
+      timelineText.indexOf('The first batch passed. I will build next.'),
+    ).toBeLessThan(timelineText.indexOf('pnpm build'));
+  });
+
+  it('sorts completed turn items by recorded sequence without live items', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'user-1',
+                kind: 'userMessage',
+                text: 'Run the full check sequence.',
+              },
+              {
+                id: 'command-1',
+                kind: 'commandExecution',
+                text: 'pnpm lint',
+                status: 'completed',
+                sequence: 1,
+              },
+              {
+                id: 'command-2',
+                kind: 'commandExecution',
+                text: 'pnpm test',
+                status: 'completed',
+                sequence: 2,
+              },
+              {
+                id: 'command-3',
+                kind: 'commandExecution',
+                text: 'pnpm build',
+                status: 'completed',
+                sequence: 4,
+              },
+              {
+                id: 'agent-between',
+                kind: 'agentMessage',
+                text: 'The first batch passed. I will build next.',
+                sequence: 3,
+              },
+              {
+                id: 'agent-after',
+                kind: 'agentMessage',
+                text: 'All checks passed.',
+                sequence: 5,
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    const timelineText =
+      screen.getByTestId('thread-scroll-container').textContent ?? '';
+    expect(screen.getByText('2 commands')).toBeInTheDocument();
+    expect(
+      screen.getByText('The first batch passed. I will build next.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('pnpm build')).toBeInTheDocument();
+    expect(timelineText.indexOf('2 commands')).toBeLessThan(
+      timelineText.indexOf('The first batch passed. I will build next.'),
+    );
+    expect(
+      timelineText.indexOf('The first batch passed. I will build next.'),
+    ).toBeLessThan(timelineText.indexOf('pnpm build'));
+  });
+
   it('drops already materialized earlier agent messages from the streaming tail', () => {
     render(
       <ThreadTimeline

@@ -494,21 +494,146 @@ function prepareTurnItemsForRendering(
   });
 }
 
+function hasHistoryItemSequence(item: ThreadHistoryItemDto) {
+  return typeof item.sequence === 'number' && Number.isFinite(item.sequence);
+}
+
+function historyItemSequence(item: ThreadHistoryItemDto) {
+  return hasHistoryItemSequence(item) ? item.sequence! : Number.POSITIVE_INFINITY;
+}
+
+function sortTurnItemsByRecordedSequence(items: ThreadHistoryItemDto[]) {
+  const leadingItems: ThreadHistoryItemDto[] = [];
+  let index = 0;
+
+  while (
+    index < items.length &&
+    items[index]?.kind === 'userMessage' &&
+    !hasHistoryItemSequence(items[index]!)
+  ) {
+    leadingItems.push(items[index]!);
+    index += 1;
+  }
+
+  const trailingItems = items.slice(index);
+  if (!trailingItems.some(hasHistoryItemSequence)) {
+    return items;
+  }
+
+  const sequenceValues = trailingItems
+    .map((item) => historyItemSequence(item))
+    .filter(Number.isFinite);
+  const maxSequence = sequenceValues.length > 0 ? Math.max(...sequenceValues) : 0;
+  const orderedItems: Array<{
+    item: ThreadHistoryItemDto;
+    index: number;
+    order: number;
+  }> = [];
+
+  let cursor = 0;
+  while (cursor < trailingItems.length) {
+    const item = trailingItems[cursor]!;
+    if (hasHistoryItemSequence(item)) {
+      orderedItems.push({ item, index: cursor, order: historyItemSequence(item) });
+      cursor += 1;
+      continue;
+    }
+
+    const blockStart = cursor;
+    while (
+      cursor < trailingItems.length &&
+      !hasHistoryItemSequence(trailingItems[cursor]!)
+    ) {
+      cursor += 1;
+    }
+
+    const block = trailingItems.slice(blockStart, cursor);
+    const previousSequenced = [...trailingItems.slice(0, blockStart)]
+      .reverse()
+      .find(hasHistoryItemSequence);
+    const nextSequenced = trailingItems.slice(cursor).find(hasHistoryItemSequence);
+    const previousSequence = previousSequenced
+      ? historyItemSequence(previousSequenced)
+      : null;
+    const nextSequence = nextSequenced ? historyItemSequence(nextSequenced) : null;
+
+    block.forEach((blockItem, blockIndex) => {
+      let order: number;
+      if (previousSequence === null && nextSequence !== null) {
+        order = nextSequence - (block.length - blockIndex) / (block.length + 1);
+      } else if (
+        previousSequence !== null &&
+        nextSequence !== null &&
+        nextSequence > previousSequence
+      ) {
+        const span = nextSequence - previousSequence;
+        order = previousSequence + ((blockIndex + 1) / (block.length + 1)) * span;
+      } else {
+        order = maxSequence + 1 + blockIndex / (block.length + 1);
+      }
+      orderedItems.push({
+        item: blockItem,
+        index: blockStart + blockIndex,
+        order,
+      });
+    });
+  }
+
+  const sortedTrailingItems = orderedItems
+    .sort((left, right) => {
+      const orderDelta = left.order - right.order;
+      return orderDelta === 0 ? left.index - right.index : orderDelta;
+    })
+    .map((entry) => entry.item);
+
+  return [...leadingItems, ...sortedTrailingItems];
+}
+
 function mergeLiveTurnItems(
   items: ThreadHistoryItemDto[],
   liveItems: ThreadHistoryItemDto[] | null | undefined,
 ) {
   if (!liveItems || liveItems.length === 0) {
-    return items;
+    return sortTurnItemsByRecordedSequence(items);
   }
 
-  const existingIds = new Set(items.map((item) => item.id));
-  const uniqueLiveItems = liveItems.filter((item) => !existingIds.has(item.id));
-  if (uniqueLiveItems.length === 0) {
-    return items;
+  const liveItemsById = new Map(liveItems.map((item) => [item.id, item]));
+  const mergedItems: ThreadHistoryItemDto[] = items.map((item) => {
+    const liveItem = liveItemsById.get(item.id);
+    if (!liveItem) {
+      return item;
+    }
+
+    liveItemsById.delete(item.id);
+    const mergedItem: ThreadHistoryItemDto = {
+      ...item,
+      ...liveItem,
+      text: liveItem.text || item.text,
+    };
+    const detailText = liveItem.detailText ?? item.detailText;
+    const previewText = liveItem.previewText ?? item.previewText;
+    const status = liveItem.status ?? item.status;
+    const sequence = liveItem.sequence ?? item.sequence;
+    if (detailText !== undefined) {
+      mergedItem.detailText = detailText;
+    }
+    if (previewText !== undefined) {
+      mergedItem.previewText = previewText;
+    }
+    if (status !== undefined) {
+      mergedItem.status = status;
+    }
+    if (sequence !== undefined) {
+      mergedItem.sequence = sequence;
+    }
+    return mergedItem;
+  });
+  const uniqueLiveItems = [...liveItemsById.values()];
+  if (uniqueLiveItems.length === 0 && !mergedItems.some(hasHistoryItemSequence)) {
+    return mergedItems;
   }
 
-  const mergedItems = [...items, ...uniqueLiveItems];
+  mergedItems.push(...uniqueLiveItems);
   if (
     !mergedItems.some(
       (item) => typeof item.sequence === 'number' && Number.isFinite(item.sequence),
@@ -517,22 +642,7 @@ function mergeLiveTurnItems(
     return mergedItems;
   }
 
-  return mergedItems
-    .map((item, index) => ({ item, index }))
-    .sort((left, right) => {
-      const leftSequence =
-        typeof left.item.sequence === 'number' && Number.isFinite(left.item.sequence)
-          ? left.item.sequence
-          : Number.POSITIVE_INFINITY;
-      const rightSequence =
-        typeof right.item.sequence === 'number' && Number.isFinite(right.item.sequence)
-          ? right.item.sequence
-          : Number.POSITIVE_INFINITY;
-      return leftSequence === rightSequence
-        ? left.index - right.index
-        : leftSequence - rightSequence;
-    })
-    .map((entry) => entry.item);
+  return sortTurnItemsByRecordedSequence(mergedItems);
 }
 
 function getLiveOutputTailForTurn(

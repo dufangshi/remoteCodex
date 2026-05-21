@@ -3383,10 +3383,22 @@ export class ThreadService {
           return;
         }
 
-        this.recordTurnItemOrder(record.id, event.providerTurnId, event.itemId);
+        const sequence = this.recordTurnItemOrder(
+          record.id,
+          event.providerTurnId,
+          event.itemId,
+        );
+        this.appendLiveAgentMessageDelta(
+          record.id,
+          event.providerTurnId,
+          event.itemId,
+          event.delta,
+          sequence,
+        );
         this.emitThreadEvent('thread.output.delta', record.id, {
           turnId: event.providerTurnId,
           itemId: event.itemId,
+          sequence,
           delta: event.delta,
         });
         return;
@@ -3707,6 +3719,42 @@ export class ThreadService {
     });
   }
 
+  private appendLiveAgentMessageDelta(
+    localThreadId: string,
+    turnId: string,
+    itemId: string,
+    delta: string,
+    sequence: number,
+  ) {
+    const current = this.threadLiveItems.get(localThreadId);
+    const currentItems =
+      current?.turnId === turnId ? current.items : [];
+    const existing = currentItems.find((entry) => entry.id === itemId);
+    const nextItem: ThreadHistoryItemDto =
+      existing?.kind === 'agentMessage'
+        ? {
+            ...existing,
+            text: `${existing.text}${delta}`,
+            sequence,
+          }
+        : {
+            id: itemId,
+            kind: 'agentMessage',
+            text: delta,
+            sequence,
+          };
+
+    this.persistLiveHistoryItem(localThreadId, turnId, nextItem);
+    this.setLiveItems(localThreadId, {
+      turnId,
+      items: sortHistoryItemsBySequence([
+        ...currentItems.filter((entry) => entry.id !== itemId),
+        nextItem,
+      ]),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
   private async toThreadHooksDto(
     provider: string | null | undefined,
     workspacePath: string,
@@ -3780,11 +3828,22 @@ export class ThreadService {
     }
 
     const matchingTurn = turns.find((turn) => turn.id === current.turnId);
-    const materializedItemIds = new Set(
-      matchingTurn?.items.map((item) => item.id) ?? [],
+    const materializedItemsById = new Map(
+      matchingTurn?.items.map((item) => [item.id, item]) ?? [],
     );
     const nextItems = current.items.filter(
-      (item) => !materializedItemIds.has(item.id),
+      (item) => {
+        const materializedItem = materializedItemsById.get(item.id);
+        if (!materializedItem) {
+          return true;
+        }
+
+        return (
+          typeof item.sequence === 'number' &&
+          Number.isFinite(item.sequence) &&
+          materializedItem.sequence !== item.sequence
+        );
+      },
     );
 
     if (nextItems.length === current.items.length) {

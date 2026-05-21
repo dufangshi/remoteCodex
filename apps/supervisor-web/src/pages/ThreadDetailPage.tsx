@@ -11,6 +11,7 @@ import {
   ThreadDetailDto,
   ThreadExportTurnOptionsDto,
   ThreadHooksDto,
+  ThreadHistoryItemDto,
   ThreadMcpServersDto,
   ThreadSkillsDto,
   ThreadDto,
@@ -504,6 +505,57 @@ export function ThreadDetailPage() {
       });
     },
     [flushBufferedLiveOutput],
+  );
+
+  const upsertLiveTimelineItem = useCallback(
+    (turnId: string, item: ThreadHistoryItemDto) => {
+      setLiveItems((current) => {
+        const currentItems =
+          current?.turnId === turnId ? current.items : [];
+        const nextItems = [
+          ...currentItems.filter((entry) => entry.id !== item.id),
+          item,
+        ];
+        return {
+          turnId,
+          items: nextItems,
+          updatedAt: new Date().toISOString(),
+        };
+      });
+    },
+    [],
+  );
+
+  const appendLiveAgentDelta = useCallback(
+    (turnId: string, itemId: string, delta: string, sequence: number | null) => {
+      setLiveItems((current) => {
+        const currentItems =
+          current?.turnId === turnId ? current.items : [];
+        const existing = currentItems.find((item) => item.id === itemId);
+        const nextItem: ThreadHistoryItemDto =
+          existing?.kind === 'agentMessage'
+            ? {
+                ...existing,
+                text: `${existing.text}${delta}`,
+                sequence: sequence ?? existing.sequence ?? null,
+              }
+            : {
+                id: itemId,
+                kind: 'agentMessage',
+                text: delta,
+                sequence,
+              };
+        return {
+          turnId,
+          items: [
+            ...currentItems.filter((item) => item.id !== itemId),
+            nextItem,
+          ],
+          updatedAt: new Date().toISOString(),
+        };
+      });
+    },
+    [],
   );
 
   const clearBufferedLiveOutput = useCallback(() => {
@@ -1541,7 +1593,22 @@ export function ThreadDetailPage() {
       ) {
         const eventTurnId =
           typeof event.payload.turnId === 'string' ? event.payload.turnId : null;
+        const itemId =
+          typeof event.payload.itemId === 'string' ? event.payload.itemId : null;
+        const sequence =
+          typeof event.payload.sequence === 'number' &&
+          Number.isFinite(event.payload.sequence)
+            ? event.payload.sequence
+            : null;
         queueLiveOutputDelta(event.payload.delta);
+        if (eventTurnId && itemId) {
+          appendLiveAgentDelta(
+            eventTurnId,
+            itemId,
+            event.payload.delta,
+            sequence,
+          );
+        }
         if (eventTurnId) {
           setOptimisticTurn((current) =>
             current &&
@@ -1553,7 +1620,7 @@ export function ThreadDetailPage() {
                   status: current.status === 'failed' ? current.status : 'inProgress',
                   tokenUsage: current.tokenUsage,
                 }
-              : current,
+            : current,
           );
         }
       }
@@ -1770,29 +1837,7 @@ export function ThreadDetailPage() {
         const eventTurnId = event.payload.turnId;
         const liveItem = event.payload.item as ThreadDetailDto['turns'][number]['items'][number];
         if (typeof liveItem.id === 'string' && typeof liveItem.text === 'string') {
-          setLiveItems((current) => {
-            const currentItems =
-              current?.turnId === eventTurnId ? current.items : [];
-            const nextItems = [
-              ...currentItems.filter((item) => item.id !== liveItem.id),
-              liveItem,
-            ].sort((left, right) => {
-              const leftSequence =
-                typeof left.sequence === 'number' && Number.isFinite(left.sequence)
-                  ? left.sequence
-                  : Number.POSITIVE_INFINITY;
-              const rightSequence =
-                typeof right.sequence === 'number' && Number.isFinite(right.sequence)
-                  ? right.sequence
-                  : Number.POSITIVE_INFINITY;
-              return leftSequence === rightSequence ? 0 : leftSequence - rightSequence;
-            });
-            return {
-              turnId: eventTurnId,
-              items: nextItems,
-              updatedAt: new Date().toISOString(),
-            };
-          });
+          upsertLiveTimelineItem(eventTurnId, liveItem);
         }
       }
 
@@ -2001,11 +2046,13 @@ export function ThreadDetailPage() {
       closeSupervisorSocket();
     };
   }, [
+    appendLiveAgentDelta,
     clearBufferedLiveOutput,
     id,
     loadThreadDetail,
     queueLiveOutputDelta,
     syncRealtimeConnectionState,
+    upsertLiveTimelineItem,
   ]);
 
   useEffect(() => {
