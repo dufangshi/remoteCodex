@@ -3498,7 +3498,7 @@ export class ThreadService {
         this.setLivePlan(record.id, null);
         this.setLiveItems(record.id, null);
         this.clearPendingSteersForTurn(record.id, turnId);
-        this.pendingRequests.delete(record.id);
+        this.clearTerminalPendingRequests(record.id, true);
         if (
           event.turn.status === 'completed' &&
           normalizeCollaborationMode(record.collaborationMode) === 'plan' &&
@@ -3537,7 +3537,7 @@ export class ThreadService {
         this.setLivePlan(record.id, null);
         this.setLiveItems(record.id, null);
         this.clearPendingSteersForTurn(record.id, event.providerTurnId);
-        this.pendingRequests.delete(record.id);
+        this.clearTerminalPendingRequests(record.id, true);
         this.dismissedPlanDecisionTurns.delete(record.id);
         this.invalidateThreadDetailCache(record.id);
 
@@ -4171,6 +4171,37 @@ export class ThreadService {
     removedIds.forEach((requestId) => {
       this.emitThreadEvent('thread.request.resolved', localThreadId, {
         requestId
+      });
+    });
+  }
+
+  private clearTerminalPendingRequests(localThreadId: string, emitEvents: boolean) {
+    const threadRequests = this.pendingRequests.get(localThreadId);
+    if (!threadRequests) {
+      return;
+    }
+
+    const removedIds: string[] = [];
+    for (const [requestId, request] of threadRequests.entries()) {
+      if (request.source === 'server' && request.responseKind === 'askUserQuestion') {
+        continue;
+      }
+
+      threadRequests.delete(requestId);
+      removedIds.push(requestId);
+    }
+
+    if (threadRequests.size === 0) {
+      this.pendingRequests.delete(localThreadId);
+    }
+
+    if (!emitEvents) {
+      return;
+    }
+
+    removedIds.forEach((requestId) => {
+      this.emitThreadEvent('thread.request.resolved', localThreadId, {
+        requestId,
       });
     });
   }

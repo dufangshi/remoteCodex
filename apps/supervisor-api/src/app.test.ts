@@ -1177,6 +1177,7 @@ describe('supervisor api', () => {
         toolUseId: 'toolu_question',
       },
     });
+    fakeClaudeRuntime.completeTurn(thread.providerSessionId, 'claude-turn-1');
 
     const detailResponse = await app.inject({
       method: 'GET',
