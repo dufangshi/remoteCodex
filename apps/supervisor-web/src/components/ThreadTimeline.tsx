@@ -1052,6 +1052,26 @@ function PlanIcon() {
   );
 }
 
+function BrainIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 fill-none stroke-current"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M6.55 3.05a2.15 2.15 0 0 0-3.3 1.8 2.05 2.05 0 0 0 .28 1.03A2.25 2.25 0 0 0 3 9.77a2.2 2.2 0 0 0 2.14 2.73h1.41V3.05Z" />
+      <path d="M9.45 3.05a2.15 2.15 0 0 1 3.3 1.8 2.05 2.05 0 0 1-.28 1.03A2.25 2.25 0 0 1 13 9.77a2.2 2.2 0 0 1-2.14 2.73H9.45V3.05Z" />
+      <path d="M5.1 6.55h1.45" />
+      <path d="M9.45 6.55h1.45" />
+      <path d="M6.55 9.15H5.1" />
+      <path d="M9.45 9.15h1.45" />
+    </svg>
+  );
+}
+
 function ExpandIcon() {
   return (
     <svg
@@ -2317,45 +2337,55 @@ const CompactMessageItem = memo(function CompactMessageItem({
         <div className="min-w-0 flex-1">
           {item.kind === 'agentMessage' ? (
             <>
-              <AgentMessageBody
-                text={item.text}
-                scrollRootRef={scrollRootRef}
-                streaming={streaming}
-              />
               {reasoningText ? (
-                <div className="timeline-attached-reasoning mt-2 rounded-[0.85rem] border px-2.5 py-2">
+                <div className="timeline-attached-reasoning mb-2">
                   <button
                     type="button"
                     aria-expanded={reasoningOpen}
                     onClick={() => setReasoningOpen((current) => !current)}
-                    className="timeline-attached-reasoning-toggle flex w-full items-center justify-between gap-3 text-left text-[11px] font-medium uppercase tracking-[0.14em]"
+                    className="timeline-attached-reasoning-toggle"
                   >
-                    <span>Reasoning</span>
-                    <span className="inline-flex items-center gap-1.5 normal-case tracking-normal">
-                      {reasoningItems.some((entry) => isRunningHistoryStatus(entry.status)) ? (
-                        <RunningDots tone="sky" />
-                      ) : null}
+                    <span
+                      aria-hidden="true"
+                      className="timeline-attached-reasoning-chevron inline-flex h-5 w-5 items-center justify-center rounded-full"
+                    >
                       <svg
-                        aria-hidden="true"
                         viewBox="0 0 16 16"
                         className={`h-3.5 w-3.5 fill-none stroke-current transition ${
-                          reasoningOpen ? 'rotate-180' : ''
+                          reasoningOpen ? 'rotate-90' : ''
                         }`}
-                        strokeWidth="1.6"
+                        strokeWidth="1.65"
                         strokeLinecap="round"
                         strokeLinejoin="round"
                       >
-                        <path d="m4.5 6 3.5 3.5L11.5 6" />
+                        <path d="m6 4.75 3.25 3.25L6 11.25" />
                       </svg>
                     </span>
+                    <span
+                      aria-hidden="true"
+                      className="timeline-attached-reasoning-icon inline-flex h-5 w-5 items-center justify-center rounded-full"
+                    >
+                      <BrainIcon />
+                    </span>
+                    <span className="timeline-attached-reasoning-label">
+                      Thinking
+                    </span>
+                    {reasoningItems.some((entry) => isRunningHistoryStatus(entry.status)) ? (
+                      <RunningDots tone="sky" />
+                    ) : null}
                   </button>
                   {reasoningOpen ? (
-                    <pre className="timeline-attached-reasoning-body mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words text-[12px] leading-5">
+                    <pre className="timeline-attached-reasoning-body mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-[0.7rem] px-3 py-2 text-[12px] leading-5">
                       <LinkifiedPlainText text={reasoningText} />
                     </pre>
                   ) : null}
                 </div>
               ) : null}
+              <AgentMessageBody
+                text={item.text}
+                scrollRootRef={scrollRootRef}
+                streaming={streaming}
+              />
             </>
           ) : (
             <UserMessageBody threadId={threadId} text={item.text} />

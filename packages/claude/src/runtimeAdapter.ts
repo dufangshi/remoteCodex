@@ -78,6 +78,7 @@ export interface ClaudeRuntimeAdapterOptions {
 interface ActiveClaudeTurn {
   providerSessionId: string;
   providerTurnId: string;
+  startedAt: string;
   query: Query;
   items: Map<string, AgentHistoryItem>;
   itemOrder: string[];
@@ -108,7 +109,7 @@ export const claudeCapabilities: AgentProviderCapabilities = {
     rewindFiles: false,
   },
   controls: {
-    planMode: false,
+    planMode: true,
     permissionRequests: false,
     sandboxMode: false,
     performanceMode: false,
@@ -591,6 +592,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
 
   async startTurn(input: StartAgentTurnInput): Promise<AgentTurn> {
     const providerTurnId = randomUUID();
+    const startedAt = new Date().toISOString();
     const cwd = input.workspacePath ?? this.sessionCwds.get(input.providerSessionId) ?? undefined;
     const approvalMode = this.sessionApprovalModes.get(input.providerSessionId) ?? 'guarded';
     const query = this.queryFactory({
@@ -615,6 +617,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     const state: ActiveClaudeTurn = {
       providerSessionId: input.providerSessionId,
       providerTurnId,
+      startedAt,
       query,
       items: new Map([[userItem.id, userItem]]),
       itemOrder: [userItem.id],
@@ -629,15 +632,17 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       type: 'turn.started',
       provider: 'claude',
       providerSessionId: input.providerSessionId,
-      turn: buildAgentTurn({
-        providerTurnId,
-        status: 'inProgress',
-        items: [userItem],
+            turn: buildAgentTurn({
+              providerTurnId,
+              startedAt,
+              status: 'inProgress',
+              items: [userItem],
       }),
     });
     void this.consumeQuery(state);
     return buildAgentTurn({
       providerTurnId,
+      startedAt,
       status: 'inProgress',
       items: [userItem],
     });
@@ -666,6 +671,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     this.knownSessionIds.add(state.providerSessionId);
     return buildAgentTurn({
       providerTurnId: state.providerTurnId,
+      startedAt: state.startedAt,
       status: 'interrupted',
       items: orderedItems(state),
     });
@@ -699,6 +705,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
             providerSessionId: state.providerSessionId,
             turn: buildAgentTurn({
               providerTurnId: state.providerTurnId,
+              startedAt: state.startedAt,
               status: state.interrupted ? 'interrupted' : status,
               error: queryResultError(message),
               items: orderedItems(state),
@@ -717,6 +724,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
           providerSessionId: state.providerSessionId,
           turn: buildAgentTurn({
             providerTurnId: state.providerTurnId,
+            startedAt: state.startedAt,
             status: state.interrupted ? 'interrupted' : 'completed',
             items: orderedItems(state),
             rawTurn: rawMessages,

@@ -317,7 +317,7 @@ describe('ThreadTimeline', () => {
     expect(screen.queryByText('Reasoning', { selector: '.timeline-meta-text' })).not.toBeInTheDocument();
     expect(screen.queryByText('I should inspect the failing command first.')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Reasoning/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Thinking/i }));
 
     expect(screen.getByText('I should inspect the failing command first.')).toBeInTheDocument();
   });

@@ -999,20 +999,43 @@ body.thread-detail-scroll-locked {
 }
 
 .timeline-attached-reasoning {
-  border-color: color-mix(in srgb, rgb(139 92 246) 28%, var(--theme-border));
-  background: color-mix(in srgb, rgb(139 92 246) 7%, var(--theme-surface-strong));
   color: var(--theme-fg-soft);
 }
 
 .timeline-attached-reasoning-toggle {
-  color: color-mix(in srgb, rgb(196 181 253) 74%, var(--theme-fg-muted));
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  color: color-mix(in srgb, rgb(196 181 253) 68%, var(--theme-fg-muted));
+  font-size: 0.72rem;
+  line-height: 1rem;
+  transition: color 160ms ease, background-color 160ms ease;
 }
 
 .timeline-attached-reasoning-toggle:hover {
   color: var(--theme-fg);
 }
 
+.timeline-attached-reasoning-chevron {
+  background: color-mix(in srgb, rgb(139 92 246) 12%, transparent);
+  color: color-mix(in srgb, rgb(196 181 253) 72%, var(--theme-fg-muted));
+}
+
+.timeline-attached-reasoning-icon {
+  background: color-mix(in srgb, rgb(139 92 246) 9%, transparent);
+  color: color-mix(in srgb, rgb(196 181 253) 80%, var(--theme-fg-muted));
+}
+
+.timeline-attached-reasoning-label {
+  color: color-mix(in srgb, var(--theme-fg-soft) 88%, rgb(196 181 253));
+  font-weight: 500;
+}
+
 .timeline-attached-reasoning-body {
+  border: 1px solid color-mix(in srgb, rgb(139 92 246) 18%, var(--theme-border));
+  background: color-mix(in srgb, rgb(139 92 246) 5%, var(--theme-surface-strong));
   color: var(--theme-fg-soft);
 }
 
@@ -1076,12 +1099,26 @@ body.thread-detail-scroll-locked {
 }
 
 :root[data-theme-effective='light'] .timeline-attached-reasoning {
-  border-color: rgb(124 58 237 / 0.2);
-  background: rgb(239 234 226 / 0.7);
+  color: rgb(87 83 78);
 }
 
 :root[data-theme-effective='light'] .timeline-attached-reasoning-toggle {
-  color: rgb(91 33 182 / 0.82);
+  color: rgb(91 33 182 / 0.76);
+}
+
+:root[data-theme-effective='light'] .timeline-attached-reasoning-chevron,
+:root[data-theme-effective='light'] .timeline-attached-reasoning-icon {
+  background: rgb(124 58 237 / 0.08);
+  color: rgb(91 33 182 / 0.78);
+}
+
+:root[data-theme-effective='light'] .timeline-attached-reasoning-label {
+  color: rgb(87 83 78 / 0.94);
+}
+
+:root[data-theme-effective='light'] .timeline-attached-reasoning-body {
+  border-color: rgb(124 58 237 / 0.14);
+  background: rgb(239 234 226 / 0.56);
 }
 
 :root[data-theme-effective='light'] .timeline-special-warning {

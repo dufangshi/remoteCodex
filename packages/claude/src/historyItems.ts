@@ -177,6 +177,18 @@ export function toolUseToHistoryItem(
     };
   }
 
+  if (input.name === 'ExitPlanMode') {
+    const plan = isRecord(input.toolInput) ? stringValue(input.toolInput.plan) : null;
+    return {
+      id: input.id,
+      kind: 'plan',
+      text: plan ?? summary ?? 'Plan ready for review.',
+      previewText: 'Plan ready',
+      detailText: detailParts.join('\n'),
+      status,
+    };
+  }
+
   if (['Edit', 'MultiEdit', 'Write', 'NotebookEdit'].includes(input.name)) {
     const filePath = pathFromInput(input.toolInput);
     return {
@@ -444,6 +456,21 @@ export function resultForToolUse(
   },
 ): AgentHistoryItem {
   if (input.previous) {
+    if (input.previous.kind === 'plan') {
+      const plan = isRecord(input.result) ? stringValue(input.result.plan) : null;
+      return {
+        ...input.previous,
+        text: plan ?? input.previous.text,
+        detailText: [
+          input.previous.detailText?.trim() || input.previous.text,
+          '',
+          'Result:',
+          compactJson(input.result),
+        ].join('\n'),
+        status: 'completed',
+      };
+    }
+
     return {
       ...input.previous,
       detailText: [
@@ -468,6 +495,7 @@ export function resultForToolUse(
 
 export function buildAgentTurn(input: {
   providerTurnId: string;
+  startedAt?: string | null;
   status: AgentTurn['status'];
   error?: string | null;
   items: AgentHistoryItem[];
@@ -475,6 +503,7 @@ export function buildAgentTurn(input: {
 }): AgentTurn {
   const turn: AgentTurn = {
     providerTurnId: input.providerTurnId,
+    startedAt: input.startedAt ?? null,
     status: input.status,
     error: input.error ? { message: input.error } : null,
     items: input.items,

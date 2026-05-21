@@ -1215,7 +1215,7 @@ export function agentTurnToThreadTurnDto(
 ): ThreadTurnDto {
   const baseTurn: ThreadTurnDto = {
     id: turn.providerTurnId,
-    startedAt: parseUuidV7Timestamp(turn.providerTurnId),
+    startedAt: turn.startedAt ?? parseUuidV7Timestamp(turn.providerTurnId),
     status: turn.status,
     error: turn.error?.message ?? null,
     items: turn.items,

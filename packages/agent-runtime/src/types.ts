@@ -176,6 +176,7 @@ export type AgentTurnItem = AgentHistoryItem;
 export interface AgentTurn {
   providerTurnId: string;
   rawTurnId?: string;
+  startedAt?: string | null;
   status: 'completed' | 'interrupted' | 'failed' | 'inProgress';
   error: { message?: string } | null;
   items: AgentHistoryItem[];

@@ -506,6 +506,7 @@ describe('ClaudeRuntimeAdapter', () => {
       workspacePath: '/tmp/workspace',
     });
     expect(started.status).toBe('inProgress');
+    expect(started.startedAt).toEqual(expect.any(String));
     await wait();
 
     expect(events.map((event) => event.type)).toContain('turn.started');
@@ -551,12 +552,101 @@ describe('ClaudeRuntimeAdapter', () => {
     expect(events.at(-1)).toMatchObject({
       type: 'turn.completed',
       turn: {
+        startedAt: started.startedAt,
         status: 'completed',
         items: expect.arrayContaining([
           expect.objectContaining({ kind: 'userMessage' }),
           expect.objectContaining({ kind: 'reasoning', text: 'Plan carefully' }),
           expect.objectContaining({ kind: 'agentMessage', text: 'Hello' }),
           expect.objectContaining({ kind: 'commandExecution', status: 'completed' }),
+        ]),
+      },
+    });
+  });
+
+  it('uses Claude plan permission mode and maps ExitPlanMode to a plan item', async () => {
+    const turnOptions: Record<string, unknown>[] = [];
+    const adapter = makeAdapter((_prompt, options) => {
+      turnOptions.push(options);
+      return [
+        systemInit(),
+        {
+          type: 'assistant',
+          message: {
+            id: 'msg_plan',
+            type: 'message',
+            role: 'assistant',
+            model: 'sonnet',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'toolu_plan',
+                name: 'ExitPlanMode',
+                input: { plan: '# Plan\n\n- Inspect.\n- Patch.\n- Verify.' },
+                caller: { type: 'direct' },
+              },
+            ],
+            stop_reason: null,
+            stop_sequence: null,
+            stop_details: null,
+            usage: {} as any,
+            container: null,
+            context_management: null,
+            diagnostics: null,
+          },
+          parent_tool_use_id: null,
+          uuid: '00000000-0000-4000-8000-000000000021' as any,
+          session_id: 'claude-session-1',
+        },
+        {
+          type: 'user',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'toolu_plan',
+                content: '# Plan\n\n- Inspect.\n- Patch.\n- Verify.',
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+          tool_use_result: {
+            plan: '# Plan\n\n- Inspect.\n- Patch.\n- Verify.',
+            isAgent: false,
+          },
+          uuid: '00000000-0000-4000-8000-000000000022' as any,
+          session_id: 'claude-session-1',
+        } satisfies SDKMessage,
+        result(),
+      ];
+    });
+    const events: AgentRuntimeEvent[] = [];
+    adapter.on('event', (event) => events.push(event));
+
+    const started = await adapter.startTurn({
+      providerSessionId: 'claude-session-1',
+      prompt: 'Plan the next change',
+      model: 'sonnet',
+      collaborationMode: 'plan',
+      workspacePath: '/tmp/workspace',
+    });
+    await wait();
+
+    expect(started.startedAt).toEqual(expect.any(String));
+    expect(turnOptions.at(-1)?.permissionMode).toBe('plan');
+    expect(events.at(-1)).toMatchObject({
+      type: 'turn.completed',
+      turn: {
+        startedAt: started.startedAt,
+        status: 'completed',
+        items: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'toolu_plan',
+            kind: 'plan',
+            text: '# Plan\n\n- Inspect.\n- Patch.\n- Verify.',
+            status: 'completed',
+          }),
         ]),
       },
     });
