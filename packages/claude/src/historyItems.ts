@@ -26,6 +26,14 @@ function stringValue(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null;
 }
 
+function thinkingTextFromBlock(block: Record<string, unknown>): string | null {
+  return (
+    stringValue(block.thinking) ??
+    stringValue(block.text) ??
+    stringValue(block.content)
+  );
+}
+
 function compactJson(value: unknown): string {
   try {
     return JSON.stringify(value, null, 2);
@@ -264,7 +272,7 @@ export function assistantMessageToHistoryItems(
       continue;
     }
     if (type === 'thinking') {
-      const thinking = stringValue(block.thinking);
+      const thinking = thinkingTextFromBlock(block);
       if (thinking) {
         items.push({
           id: `${input.messageId}:content:${index}`,
@@ -340,6 +348,51 @@ export function partialTextDelta(input: {
   return {
     itemId: `${input.messageId}:content:${index}`,
     delta: delta.text,
+  };
+}
+
+export function partialReasoningDelta(input: {
+  messageId: string;
+  event: unknown;
+}): AgentHistoryItem | null {
+  if (!isRecord(input.event)) {
+    return null;
+  }
+  const index = typeof input.event.index === 'number' ? input.event.index : 0;
+  const itemId = `${input.messageId}:content:${index}`;
+
+  if (input.event.type === 'content_block_start') {
+    const block = input.event.content_block;
+    if (!isRecord(block) || block.type !== 'thinking') {
+      return null;
+    }
+    const text = thinkingTextFromBlock(block) ?? '';
+    return {
+      id: itemId,
+      kind: 'reasoning',
+      text,
+      status: 'running',
+    };
+  }
+
+  if (input.event.type !== 'content_block_delta') {
+    return null;
+  }
+
+  const delta = input.event.delta;
+  if (!isRecord(delta) || delta.type !== 'thinking_delta') {
+    return null;
+  }
+  const text = stringValue(delta.thinking) ?? stringValue(delta.text);
+  if (!text) {
+    return null;
+  }
+
+  return {
+    id: itemId,
+    kind: 'reasoning',
+    text,
+    status: 'running',
   };
 }
 

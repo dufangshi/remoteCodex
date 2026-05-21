@@ -998,6 +998,24 @@ body.thread-detail-scroll-locked {
   color: var(--theme-fg-soft);
 }
 
+.timeline-attached-reasoning {
+  border-color: color-mix(in srgb, rgb(139 92 246) 28%, var(--theme-border));
+  background: color-mix(in srgb, rgb(139 92 246) 7%, var(--theme-surface-strong));
+  color: var(--theme-fg-soft);
+}
+
+.timeline-attached-reasoning-toggle {
+  color: color-mix(in srgb, rgb(196 181 253) 74%, var(--theme-fg-muted));
+}
+
+.timeline-attached-reasoning-toggle:hover {
+  color: var(--theme-fg);
+}
+
+.timeline-attached-reasoning-body {
+  color: var(--theme-fg-soft);
+}
+
 .timeline-other {
   background: color-mix(in srgb, var(--theme-surface-strong) 92%, transparent);
   color: var(--theme-fg-soft);
@@ -1055,6 +1073,15 @@ body.thread-detail-scroll-locked {
 :root[data-theme-effective='light'] .timeline-reasoning,
 :root[data-theme-effective='light'] .timeline-other {
   background: rgb(239 234 226 / 0.68);
+}
+
+:root[data-theme-effective='light'] .timeline-attached-reasoning {
+  border-color: rgb(124 58 237 / 0.2);
+  background: rgb(239 234 226 / 0.7);
+}
+
+:root[data-theme-effective='light'] .timeline-attached-reasoning-toggle {
+  color: rgb(91 33 182 / 0.82);
 }
 
 :root[data-theme-effective='light'] .timeline-special-warning {

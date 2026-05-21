@@ -284,6 +284,44 @@ describe('ThreadTimeline', () => {
     expect(screen.queryByText('Agent')).not.toBeInTheDocument();
   });
 
+  it('attaches reasoning to the following agent message behind an expander', async () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'reasoning-1',
+                kind: 'reasoning',
+                text: 'I should inspect the failing command first.',
+              },
+              {
+                id: 'agent-1',
+                kind: 'agentMessage',
+                text: 'The failing command is npm test.',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    FakeIntersectionObserver.triggerAll();
+
+    await screen.findByText('The failing command is npm test.');
+    expect(screen.queryByText('Reasoning', { selector: '.timeline-meta-text' })).not.toBeInTheDocument();
+    expect(screen.queryByText('I should inspect the failing command first.')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Reasoning/i }));
+
+    expect(screen.getByText('I should inspect the failing command first.')).toBeInTheDocument();
+  });
+
   it('renders inline photo and file attachments inside user messages', () => {
     render(
       <ThreadTimeline

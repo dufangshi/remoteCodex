@@ -105,6 +105,11 @@ interface ContextCompactionHistoryItem extends ThreadHistoryItemDto {
   kind: 'contextCompaction';
 }
 
+interface AgentMessageHistoryItemWithReasoning extends ThreadHistoryItemDto {
+  kind: 'agentMessage';
+  reasoningItems?: Array<ThreadHistoryItemDto & { kind: 'reasoning' }>;
+}
+
 type UserMessageSegment =
   | { type: 'text'; key: string; text: string }
   | { type: 'photo'; key: string; path: string }
@@ -742,11 +747,53 @@ function isElementVisible(container: HTMLDivElement, element: HTMLElement) {
 function groupTimelineHistoryItems(items: ThreadHistoryItemDto[]) {
   const entries: TimelineHistoryEntry[] = [];
   let index = 0;
+  const attachedReasoningIds = new Set<string>();
 
   while (index < items.length) {
     const current = items[index];
     if (!current) {
       break;
+    }
+
+    if (attachedReasoningIds.has(current.id)) {
+      index += 1;
+      continue;
+    }
+
+    if (current.kind === 'reasoning') {
+      const reasoningItems: Array<ThreadHistoryItemDto & { kind: 'reasoning' }> = [];
+      let cursor = index;
+      while (cursor < items.length && items[cursor]?.kind === 'reasoning') {
+        reasoningItems.push(items[cursor] as ThreadHistoryItemDto & { kind: 'reasoning' });
+        cursor += 1;
+      }
+
+      const nextItem = items[cursor];
+      if (nextItem?.kind === 'agentMessage') {
+        for (const reasoningItem of reasoningItems) {
+          attachedReasoningIds.add(reasoningItem.id);
+        }
+        entries.push({
+          kind: 'item',
+          key: nextItem.id,
+          item: {
+            ...nextItem,
+            reasoningItems,
+          } as AgentMessageHistoryItemWithReasoning,
+        });
+        index = cursor + 1;
+        continue;
+      }
+    }
+
+    if (current.kind === 'agentMessage') {
+      entries.push({
+        kind: 'item',
+        key: current.id,
+        item: current,
+      });
+      index += 1;
+      continue;
     }
 
     if (
@@ -2170,12 +2217,18 @@ const CompactMessageItem = memo(function CompactMessageItem({
   threadId?: string | undefined;
   item: ThreadHistoryItemDto & {
     kind: Extract<ThreadHistoryItemDto['kind'], 'userMessage' | 'agentMessage'>;
-  };
+  } & Partial<Pick<AgentMessageHistoryItemWithReasoning, 'reasoningItems'>>;
   scrollRootRef: RefObject<HTMLDivElement | null>;
   streaming?: boolean;
 }) {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const [reasoningOpen, setReasoningOpen] = useState(false);
   const resetTimerRef = useRef<number | null>(null);
+  const reasoningItems = item.kind === 'agentMessage' ? item.reasoningItems ?? [] : [];
+  const reasoningText = reasoningItems
+    .map((entry) => entry.text.trim())
+    .filter(Boolean)
+    .join('\n\n');
   const iconToneClassName =
     item.kind === 'userMessage'
       ? 'thread-message-icon thread-message-icon-user'
@@ -2263,11 +2316,47 @@ const CompactMessageItem = memo(function CompactMessageItem({
         </div>
         <div className="min-w-0 flex-1">
           {item.kind === 'agentMessage' ? (
-            <AgentMessageBody
-              text={item.text}
-              scrollRootRef={scrollRootRef}
-              streaming={streaming}
-            />
+            <>
+              <AgentMessageBody
+                text={item.text}
+                scrollRootRef={scrollRootRef}
+                streaming={streaming}
+              />
+              {reasoningText ? (
+                <div className="timeline-attached-reasoning mt-2 rounded-[0.85rem] border px-2.5 py-2">
+                  <button
+                    type="button"
+                    aria-expanded={reasoningOpen}
+                    onClick={() => setReasoningOpen((current) => !current)}
+                    className="timeline-attached-reasoning-toggle flex w-full items-center justify-between gap-3 text-left text-[11px] font-medium uppercase tracking-[0.14em]"
+                  >
+                    <span>Reasoning</span>
+                    <span className="inline-flex items-center gap-1.5 normal-case tracking-normal">
+                      {reasoningItems.some((entry) => isRunningHistoryStatus(entry.status)) ? (
+                        <RunningDots tone="sky" />
+                      ) : null}
+                      <svg
+                        aria-hidden="true"
+                        viewBox="0 0 16 16"
+                        className={`h-3.5 w-3.5 fill-none stroke-current transition ${
+                          reasoningOpen ? 'rotate-180' : ''
+                        }`}
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="m4.5 6 3.5 3.5L11.5 6" />
+                      </svg>
+                    </span>
+                  </button>
+                  {reasoningOpen ? (
+                    <pre className="timeline-attached-reasoning-body mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words text-[12px] leading-5">
+                      <LinkifiedPlainText text={reasoningText} />
+                    </pre>
+                  ) : null}
+                </div>
+              ) : null}
+            </>
           ) : (
             <UserMessageBody threadId={threadId} text={item.text} />
           )}

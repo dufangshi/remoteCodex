@@ -163,7 +163,12 @@ function result(sessionId = 'claude-session-1'): SDKMessage {
   };
 }
 
-function makeAdapter(messagesForPrompt: (prompt: string) => SDKMessage[] | FakeQuery) {
+function makeAdapter(
+  messagesForPrompt: (
+    prompt: string,
+    options: Record<string, unknown>,
+  ) => SDKMessage[] | FakeQuery,
+) {
   return new ClaudeRuntimeAdapter({
     home: '/tmp/claude-home',
     command: 'claude',
@@ -171,8 +176,8 @@ function makeAdapter(messagesForPrompt: (prompt: string) => SDKMessage[] | FakeQ
       name: 'test',
       version: '0.1.0',
     },
-    query: ((params: { prompt: string }) => {
-      const messages = messagesForPrompt(params.prompt);
+    query: ((params: { prompt: string; options: Record<string, unknown> }) => {
+      const messages = messagesForPrompt(params.prompt, params.options);
       return Array.isArray(messages) ? new FakeQuery(messages) : messages;
     }) as any,
     listSessions: (async () => [
@@ -199,12 +204,12 @@ function makeAdapter(messagesForPrompt: (prompt: string) => SDKMessage[] | FakeQ
 
 describe('ClaudeRuntimeAdapter', () => {
   it('passes the configured Claude executable to the SDK', async () => {
-    let sdkOptions: Record<string, unknown> | null = null;
+    const sdkOptions: Record<string, unknown>[] = [];
     const adapter = new ClaudeRuntimeAdapter({
       home: '/tmp/claude-home',
       command: 'claude',
       query: ((params: { prompt: string; options: Record<string, unknown> }) => {
-        sdkOptions = params.options;
+        sdkOptions.push(params.options);
         return new FakeQuery([systemInit(), result()]);
       }) as any,
       listSessions: (async () => [] satisfies SDKSessionInfo[]) as any,
@@ -220,7 +225,7 @@ describe('ClaudeRuntimeAdapter', () => {
       sandboxMode: 'workspace-write',
     });
 
-    expect(sdkOptions?.pathToClaudeCodeExecutable).toBe('claude');
+    expect(sdkOptions[0]?.pathToClaudeCodeExecutable).toBe('claude');
   });
 
   it('starts a session from the Claude init message and hides the synthetic prompt', async () => {
@@ -324,10 +329,12 @@ describe('ClaudeRuntimeAdapter', () => {
   });
 
   it('emits streamed assistant output and tool events for a turn', async () => {
-    const adapter = makeAdapter((prompt) => {
+    const turnOptions: Record<string, unknown>[] = [];
+    const adapter = makeAdapter((prompt, options) => {
       if (prompt === hiddenInitPrompt()) {
         return [systemInit(), result()];
       }
+      turnOptions.push(options);
       return [
         systemInit(),
         {
@@ -356,8 +363,34 @@ describe('ClaudeRuntimeAdapter', () => {
         {
           type: 'stream_event',
           event: {
+            type: 'content_block_start',
+            index: 0,
+            content_block: {
+              type: 'thinking',
+              thinking: 'Plan',
+              signature: 'sig',
+            },
+          },
+          parent_tool_use_id: null,
+          uuid: '00000000-0000-4000-8000-000000000008' as any,
+          session_id: 'claude-session-1',
+        },
+        {
+          type: 'stream_event',
+          event: {
             type: 'content_block_delta',
             index: 0,
+            delta: { type: 'thinking_delta', thinking: ' carefully' },
+          },
+          parent_tool_use_id: null,
+          uuid: '00000000-0000-4000-8000-000000000018' as any,
+          session_id: 'claude-session-1',
+        },
+        {
+          type: 'stream_event',
+          event: {
+            type: 'content_block_delta',
+            index: 1,
             delta: { type: 'text_delta', text: 'Hel' },
           },
           parent_tool_use_id: null,
@@ -368,7 +401,7 @@ describe('ClaudeRuntimeAdapter', () => {
           type: 'stream_event',
           event: {
             type: 'content_block_delta',
-            index: 0,
+            index: 1,
             delta: { type: 'text_delta', text: 'lo' },
           },
           parent_tool_use_id: null,
@@ -469,6 +502,7 @@ describe('ClaudeRuntimeAdapter', () => {
       providerSessionId: 'claude-session-1',
       prompt: 'Say hello and run pwd',
       model: 'sonnet',
+      reasoningEffort: 'xhigh',
       workspacePath: '/tmp/workspace',
     });
     expect(started.status).toBe('inProgress');
@@ -479,13 +513,23 @@ describe('ClaudeRuntimeAdapter', () => {
       events
         .filter((event) => event.type === 'output.delta')
         .map((event) => event.itemId),
-    ).toEqual(['msg_1:content:0', 'msg_1:content:0']);
+    ).toEqual(['msg_1:content:1', 'msg_1:content:1']);
     expect(
       events
         .filter((event) => event.type === 'output.delta')
         .map((event) => event.delta)
         .join(''),
     ).toBe('Hello');
+    expect(turnOptions.at(-1)?.effort).toBe('max');
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'item.completed',
+        item: expect.objectContaining({
+          kind: 'reasoning',
+          text: 'Plan carefully',
+        }),
+      }),
+    );
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'item.started',
@@ -510,6 +554,7 @@ describe('ClaudeRuntimeAdapter', () => {
         status: 'completed',
         items: expect.arrayContaining([
           expect.objectContaining({ kind: 'userMessage' }),
+          expect.objectContaining({ kind: 'reasoning', text: 'Plan carefully' }),
           expect.objectContaining({ kind: 'agentMessage', text: 'Hello' }),
           expect.objectContaining({ kind: 'commandExecution', status: 'completed' }),
         ]),

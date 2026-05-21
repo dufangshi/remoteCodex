@@ -47,6 +47,7 @@ import {
   hiddenInitPrompt,
   isHiddenInitMessage,
   messageContentText,
+  partialReasoningDelta,
   partialTextDelta,
   resultForToolUse,
   toolUseFromPartialStart,
@@ -304,6 +305,7 @@ function queryOptionsForRuntime(
     clientApp: string;
     cwd?: string | null | undefined;
     model?: string | null | undefined;
+    reasoningEffort?: string | null | undefined;
     resume?: string | null | undefined;
     approvalMode: StartAgentSessionInput['approvalMode'];
     collaborationMode?: StartAgentTurnInput['collaborationMode'] | undefined;
@@ -328,6 +330,12 @@ function queryOptionsForRuntime(
   }
   if (input.model) {
     options.model = input.model;
+  }
+  if (input.reasoningEffort) {
+    const effort = input.reasoningEffort === 'xhigh' ? 'max' : input.reasoningEffort;
+    if (['low', 'medium', 'high', 'xhigh', 'max'].includes(effort)) {
+      options.effort = effort as NonNullable<ClaudeQueryOptions['effort']>;
+    }
   }
   if (input.resume) {
     options.resume = input.resume;
@@ -593,6 +601,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
         clientApp: this.clientApp,
         cwd,
         model: input.model ?? this.sessionModels.get(input.providerSessionId) ?? undefined,
+        reasoningEffort: input.reasoningEffort,
         resume: input.providerSessionId,
         approvalMode,
         collaborationMode: input.collaborationMode,
@@ -749,6 +758,26 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       if (toolItem) {
         addOrUpdateItem(state, toolItem);
         this.emitItem(state, toolItem, 'item.started');
+        return;
+      }
+
+      const reasoningItem = partialReasoningDelta({
+        messageId: activeMessageId,
+        event: message.event,
+      });
+      if (reasoningItem) {
+        const existing = state.items.get(reasoningItem.id);
+        const nextItem: AgentHistoryItem = existing?.kind === 'reasoning'
+          ? {
+              ...existing,
+              text: `${existing.text}${reasoningItem.text}`,
+              status: reasoningItem.status ?? existing.status ?? null,
+            }
+          : reasoningItem;
+        addOrUpdateItem(state, nextItem);
+        this.emitItem(state, nextItem, existing ? 'item.completed' : 'item.started', {
+          force: Boolean(existing),
+        });
         return;
       }
 

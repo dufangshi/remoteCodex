@@ -2356,6 +2356,12 @@ export function ThreadComposer({
       ? 'ui-action-info'
       : 'ui-action-primary';
   const modelControlsDisabled = settingsBusy;
+  const effortControlsDisabled = modelControlsDisabled || supportedEfforts.length === 0;
+  const effortControlTitle = fastMode
+    ? 'Fast mode is on. Turn it off from the slash toolbox to edit reasoning.'
+    : supportedEfforts.length === 0
+      ? 'The selected model does not expose adjustable reasoning effort.'
+      : 'Select reasoning effort';
   const formClassName = edgeToEdgeMobile || isMobileShell
     ? 'relative z-20 shrink-0 bg-transparent px-3 pb-0 pt-3 sm:p-4'
     : 'relative z-20 shrink-0 bg-transparent px-3 pb-3 pt-0 sm:px-4 sm:pb-4 sm:pt-0';
@@ -3554,16 +3560,14 @@ export function ThreadComposer({
                   data-composer-menu-trigger="true"
                   aria-haspopup="menu"
                   aria-expanded={openMenu === 'effort'}
-                  disabled={modelControlsDisabled || supportedEfforts.length === 0}
+                  disabled={effortControlsDisabled}
                   onClick={() =>
                     setOpenMenu((current) => (current === 'effort' ? null : 'effort'))
                   }
-                  title={
-                    fastMode
-                      ? 'Fast mode is on. Turn it off from the slash toolbox to edit reasoning.'
-                      : undefined
-                  }
-                  className="thread-composer-inline-toggle rounded-full px-2 py-1 text-stone-500 transition disabled:cursor-not-allowed disabled:text-stone-700"
+                  title={effortControlTitle}
+                  className={`thread-composer-inline-toggle rounded-full px-2 py-1 transition disabled:cursor-not-allowed disabled:text-stone-700 ${
+                    effortControlsDisabled ? 'text-stone-500' : 'text-stone-300 hover:text-stone-100'
+                  }`}
                 >
                   {formatReasoningEffortLabel(reasoningEffort)}
                 </button>
