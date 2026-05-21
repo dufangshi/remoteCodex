@@ -51,6 +51,7 @@ import {
   resultForToolUse,
   toolUseFromPartialStart,
   toolUseToHistoryItem,
+  toolResultBlocks,
   userMessageToHistoryItem,
 } from './historyItems';
 
@@ -80,6 +81,7 @@ interface ActiveClaudeTurn {
   items: Map<string, AgentHistoryItem>;
   itemOrder: string[];
   emittedItems: Set<string>;
+  currentStreamMessageId: string | null;
   interrupted: boolean;
   completed: boolean;
 }
@@ -218,13 +220,27 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function isHiddenInitSessionText(value: string | null | undefined) {
+  const normalized = value?.trim().toLowerCase();
+  return (
+    normalized === hiddenInitPrompt().toLowerCase() ||
+    normalized === 'initialize remote codex session'
+  );
+}
+
 function sessionSummaryFromInfo(info: SDKSessionInfo): AgentSessionSummary {
+  const firstPrompt = info.firstPrompt && !isHiddenInitSessionText(info.firstPrompt)
+    ? info.firstPrompt
+    : null;
+  const summary = info.summary && !isHiddenInitSessionText(info.summary)
+    ? info.summary
+    : null;
   return {
     provider: 'claude',
     providerSessionId: info.sessionId,
     cwd: info.cwd ?? '',
-    title: info.customTitle ?? info.summary ?? null,
-    preview: info.firstPrompt ?? info.summary ?? null,
+    title: info.customTitle ?? summary,
+    preview: firstPrompt ?? summary,
     createdAt: toIsoFromMs(info.createdAt),
     updatedAt: toIsoFromMs(info.lastModified),
     status: 'idle',
@@ -250,8 +266,22 @@ function assistantMessagePayload(message: SDKMessage) {
   return message.type === 'assistant' ? message.message : null;
 }
 
+function messageIdFromPayload(message: unknown) {
+  return isRecord(message) && typeof message.id === 'string' && message.id
+    ? message.id
+    : null;
+}
+
 function messageUuid(message: SDKMessage | SessionMessage, fallback: string) {
   return typeof message.uuid === 'string' && message.uuid ? message.uuid : fallback;
+}
+
+function streamMessageId(event: unknown) {
+  if (!isRecord(event) || event.type !== 'message_start') {
+    return null;
+  }
+  const message = event.message;
+  return messageIdFromPayload(message);
 }
 
 function addOrUpdateItem(state: ActiveClaudeTurn, item: AgentHistoryItem) {
@@ -349,6 +379,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
   private readonly getSessionMessagesFn: ClaudeGetSessionMessagesFunction;
   private readonly getSessionInfoFn: ClaudeGetSessionInfoFunction;
   private readonly activeTurns = new Map<string, ActiveClaudeTurn>();
+  private readonly knownSessionIds = new Set<string>();
   private readonly sessionCwds = new Map<string, string>();
   private readonly sessionModels = new Map<string, string | null>();
   private readonly sessionApprovalModes = new Map<string, StartAgentSessionInput['approvalMode']>();
@@ -412,11 +443,25 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
 
   async listSessions(): Promise<AgentSessionSummary[]> {
     const sessions = await this.withClaudeConfigEnv(() => this.listSessionsFn({} as ListSessionsOptions));
-    return sessions.map(sessionSummaryFromInfo);
+    return sessions.map((session) => {
+      this.knownSessionIds.add(session.sessionId);
+      return sessionSummaryFromInfo(session);
+    });
   }
 
   async listLoadedSessions(): Promise<string[]> {
-    return [...new Set([...this.activeTurns.values()].map((state) => state.providerSessionId))];
+    for (const state of this.activeTurns.values()) {
+      this.knownSessionIds.add(state.providerSessionId);
+    }
+    try {
+      const sessions = await this.listSessions();
+      for (const session of sessions) {
+        this.knownSessionIds.add(session.providerSessionId);
+      }
+    } catch {
+      // Keep in-memory known sessions if Claude's local history cannot be read.
+    }
+    return [...this.knownSessionIds];
   }
 
   async readSession(providerSessionId: string): Promise<AgentSessionDetail> {
@@ -426,6 +471,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
         includeSystemMessages: true,
       } as GetSessionMessagesOptions),
     ]));
+    this.knownSessionIds.add(providerSessionId);
     const summary = info
       ? sessionSummaryFromInfo(info)
       : {
@@ -494,6 +540,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     }
 
     this.sessionCwds.set(providerSessionId, input.cwd);
+    this.knownSessionIds.add(providerSessionId);
     this.sessionModels.set(providerSessionId, model);
     this.sessionApprovalModes.set(providerSessionId, input.approvalMode);
     const session: AgentSessionDetail = {
@@ -521,6 +568,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
 
   async resumeSession(input: ResumeAgentSessionInput): Promise<StartAgentSessionResult> {
     const session = await this.readSession(input.providerSessionId);
+    this.knownSessionIds.add(input.providerSessionId);
     if (input.model !== undefined) {
       this.sessionModels.set(input.providerSessionId, input.model);
     }
@@ -564,9 +612,11 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       items: new Map([[userItem.id, userItem]]),
       itemOrder: [userItem.id],
       emittedItems: new Set(),
+      currentStreamMessageId: null,
       interrupted: false,
       completed: false,
     };
+    this.knownSessionIds.add(input.providerSessionId);
     this.activeTurns.set(providerTurnId, state);
     this.emitRuntimeEvent({
       type: 'turn.started',
@@ -606,6 +656,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     state.query.close();
     state.completed = true;
     this.activeTurns.delete(state.providerTurnId);
+    this.knownSessionIds.add(state.providerSessionId);
     return buildAgentTurn({
       providerTurnId: state.providerTurnId,
       status: 'interrupted',
@@ -688,8 +739,13 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     }
 
     if (message.type === 'stream_event') {
+      const nextStreamMessageId = streamMessageId(message.event);
+      if (nextStreamMessageId) {
+        state.currentStreamMessageId = nextStreamMessageId;
+      }
+      const activeMessageId = state.currentStreamMessageId ?? messageUuid(message, state.providerTurnId);
       const toolItem = toolUseFromPartialStart({
-        messageId: messageUuid(message, state.providerTurnId),
+        messageId: activeMessageId,
         event: message.event,
       });
       if (toolItem) {
@@ -699,7 +755,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       }
 
       const delta = partialTextDelta({
-        messageId: messageUuid(message, state.providerTurnId),
+        messageId: activeMessageId,
         event: message.event,
       });
       if (delta) {
@@ -727,15 +783,35 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       return;
     }
 
+    if (message.type === 'user') {
+      const toolResults = toolResultBlocks(message.message);
+      if (toolResults.length > 0) {
+        for (const toolResult of toolResults) {
+          const item = resultForToolUse({
+            toolUseId: toolResult.toolUseId,
+            result: message.tool_use_result ?? toolResult.result,
+            previous: state.items.get(toolResult.toolUseId) ?? null,
+          });
+          addOrUpdateItem(state, item);
+          this.emitItem(state, item, 'item.completed');
+        }
+        return;
+      }
+    }
+
     if (message.type === 'assistant') {
+      const payload = assistantMessagePayload(message);
+      const assistantMessageId = messageIdFromPayload(payload) ?? messageUuid(message, state.providerTurnId);
       for (const item of assistantMessageToHistoryItems({
-        messageId: messageUuid(message, state.providerTurnId),
-        message: assistantMessagePayload(message),
+        messageId: assistantMessageId,
+        message: payload,
       })) {
         const existing = state.items.get(item.id);
         addOrUpdateItem(state, item);
         if (item.kind !== 'agentMessage' && !existing) {
           this.emitItem(state, item, 'item.started');
+        } else if (item.kind !== 'agentMessage' && existing) {
+          this.emitItem(state, item, 'item.started', { force: true });
         }
       }
       return;
@@ -792,9 +868,10 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     state: ActiveClaudeTurn,
     item: AgentHistoryItem,
     type: 'item.started' | 'item.completed',
+    options: { force?: boolean } = {},
   ) {
     if (type === 'item.started') {
-      if (state.emittedItems.has(item.id)) {
+      if (state.emittedItems.has(item.id) && !options.force) {
         return;
       }
       state.emittedItems.add(item.id);
@@ -853,6 +930,21 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     };
 
     for (const message of messages) {
+      if (message.type === 'user') {
+        const toolResults = toolResultBlocks(message.message);
+        if (toolResults.length > 0) {
+          for (const toolResult of toolResults) {
+            const previous = current?.itemsById.get(toolResult.toolUseId) ?? null;
+            upsertCurrentItem(resultForToolUse({
+              toolUseId: toolResult.toolUseId,
+              result: toolResult.result,
+              previous,
+            }));
+          }
+          continue;
+        }
+      }
+
       if (message.type === 'user' && !message.parent_tool_use_id) {
         if (isHiddenInitMessage(message.message)) {
           skippingHiddenInit = true;

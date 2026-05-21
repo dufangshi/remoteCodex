@@ -220,6 +220,82 @@ describe('ClaudeRuntimeAdapter', () => {
         turns: [],
       },
     });
+    await expect(adapter.listLoadedSessions()).resolves.toEqual(['claude-session-1']);
+  });
+
+  it('does not expose the synthetic init prompt as a session summary', async () => {
+    const adapter = new ClaudeRuntimeAdapter({
+      home: '/tmp/claude-home',
+      query: (() => new FakeQuery([])) as any,
+      listSessions: (async () => [
+        {
+          sessionId: 'claude-session-1',
+          summary: hiddenInitPrompt(),
+          firstPrompt: hiddenInitPrompt(),
+          lastModified: 1_772_000_000_000,
+          createdAt: 1_771_000_000_000,
+          cwd: '/tmp/workspace',
+        } satisfies SDKSessionInfo,
+      ]) as any,
+      getSessionInfo: (async () => ({
+        sessionId: 'claude-session-1',
+        summary: hiddenInitPrompt(),
+        firstPrompt: hiddenInitPrompt(),
+        lastModified: 1_772_000_000_000,
+        createdAt: 1_771_000_000_000,
+        cwd: '/tmp/workspace',
+      })) as any,
+      getSessionMessages: (async () => [] satisfies SessionMessage[]) as any,
+    });
+
+    await expect(adapter.listSessions()).resolves.toEqual([
+      expect.objectContaining({
+        providerSessionId: 'claude-session-1',
+        title: null,
+        preview: null,
+      }),
+    ]);
+
+    await expect(adapter.readSession('claude-session-1')).resolves.toMatchObject({
+      providerSessionId: 'claude-session-1',
+      title: null,
+      preview: null,
+    });
+    await expect(adapter.listLoadedSessions()).resolves.toEqual(['claude-session-1']);
+  });
+
+  it('filters Claude generated titles derived from the synthetic init prompt', async () => {
+    const adapter = new ClaudeRuntimeAdapter({
+      home: '/tmp/claude-home',
+      query: (() => new FakeQuery([])) as any,
+      listSessions: (async () => [
+        {
+          sessionId: 'claude-session-1',
+          summary: 'Initialize Remote Codex session',
+          firstPrompt: hiddenInitPrompt(),
+          lastModified: 1_772_000_000_000,
+          createdAt: 1_771_000_000_000,
+          cwd: '/tmp/workspace',
+        } satisfies SDKSessionInfo,
+      ]) as any,
+      getSessionInfo: (async () => ({
+        sessionId: 'claude-session-1',
+        summary: 'Initialize Remote Codex session',
+        firstPrompt: hiddenInitPrompt(),
+        lastModified: 1_772_000_000_000,
+        createdAt: 1_771_000_000_000,
+        cwd: '/tmp/workspace',
+      })) as any,
+      getSessionMessages: (async () => [] satisfies SessionMessage[]) as any,
+    });
+
+    await expect(adapter.listSessions()).resolves.toEqual([
+      expect.objectContaining({
+        providerSessionId: 'claude-session-1',
+        title: null,
+        preview: null,
+      }),
+    ]);
   });
 
   it('emits streamed assistant output and tool events for a turn', async () => {
@@ -229,6 +305,29 @@ describe('ClaudeRuntimeAdapter', () => {
       }
       return [
         systemInit(),
+        {
+          type: 'stream_event',
+          event: {
+            type: 'message_start',
+            message: {
+              id: 'msg_1',
+              type: 'message',
+              role: 'assistant',
+              model: 'sonnet',
+              content: [],
+              stop_reason: null,
+              stop_sequence: null,
+              stop_details: null,
+              usage: {} as any,
+              container: null,
+              context_management: null,
+              diagnostics: null,
+            },
+          },
+          parent_tool_use_id: null,
+          uuid: '00000000-0000-4000-8000-000000000009' as any,
+          session_id: 'claude-session-1',
+        },
         {
           type: 'stream_event',
           event: {
@@ -248,7 +347,30 @@ describe('ClaudeRuntimeAdapter', () => {
             delta: { type: 'text_delta', text: 'lo' },
           },
           parent_tool_use_id: null,
-          uuid: '00000000-0000-4000-8000-000000000010' as any,
+          uuid: '00000000-0000-4000-8000-000000000011' as any,
+          session_id: 'claude-session-1',
+        },
+        {
+          type: 'stream_event',
+          event: {
+            type: 'message_start',
+            message: {
+              id: 'msg_2',
+              type: 'message',
+              role: 'assistant',
+              model: 'sonnet',
+              content: [],
+              stop_reason: null,
+              stop_sequence: null,
+              stop_details: null,
+              usage: {} as any,
+              container: null,
+              context_management: null,
+              diagnostics: null,
+            },
+          },
+          parent_tool_use_id: null,
+          uuid: '00000000-0000-4000-8000-000000000012' as any,
           session_id: 'claude-session-1',
         },
         {
@@ -260,19 +382,56 @@ describe('ClaudeRuntimeAdapter', () => {
               type: 'tool_use',
               id: 'toolu_1',
               name: 'Bash',
-              input: { command: 'pwd' },
+              input: {},
             },
           },
           parent_tool_use_id: null,
-          uuid: '00000000-0000-4000-8000-000000000010' as any,
+          uuid: '00000000-0000-4000-8000-000000000013' as any,
+          session_id: 'claude-session-1',
+        },
+        {
+          type: 'assistant',
+          message: {
+            id: 'msg_2',
+            type: 'message',
+            role: 'assistant',
+            model: 'sonnet',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'toolu_1',
+                name: 'Bash',
+                input: { command: 'pwd' },
+                caller: { type: 'direct' },
+              },
+            ],
+            stop_reason: null,
+            stop_sequence: null,
+            stop_details: null,
+            usage: {} as any,
+            container: null,
+            context_management: null,
+            diagnostics: null,
+          },
+          parent_tool_use_id: null,
+          uuid: '00000000-0000-4000-8000-000000000014' as any,
           session_id: 'claude-session-1',
         },
         {
           type: 'user',
-          message: { role: 'user', content: [] },
-          parent_tool_use_id: 'toolu_1',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'toolu_1',
+                content: '/tmp/workspace\n',
+              },
+            ],
+          },
+          parent_tool_use_id: null,
           tool_use_result: { stdout: '/tmp/workspace\n' },
-          uuid: '00000000-0000-4000-8000-000000000011' as any,
+          uuid: '00000000-0000-4000-8000-000000000015' as any,
           session_id: 'claude-session-1',
         },
         result(),
@@ -291,6 +450,11 @@ describe('ClaudeRuntimeAdapter', () => {
     await wait();
 
     expect(events.map((event) => event.type)).toContain('turn.started');
+    expect(
+      events
+        .filter((event) => event.type === 'output.delta')
+        .map((event) => event.itemId),
+    ).toEqual(['msg_1:content:0', 'msg_1:content:0']);
     expect(
       events
         .filter((event) => event.type === 'output.delta')
@@ -394,6 +558,40 @@ describe('ClaudeRuntimeAdapter', () => {
           type: 'assistant',
           uuid: 'assistant-1',
           session_id: 'claude-session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'toolu_1',
+                name: 'Bash',
+                input: { command: 'pwd' },
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'user',
+          uuid: 'tool-result-1',
+          session_id: 'claude-session-1',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'toolu_1',
+                content: '/tmp/workspace',
+                is_error: false,
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'assistant',
+          uuid: 'assistant-2',
+          session_id: 'claude-session-1',
           message: { role: 'assistant', content: [{ type: 'text', text: 'Real answer' }] },
           parent_tool_use_id: null,
         },
@@ -404,6 +602,7 @@ describe('ClaudeRuntimeAdapter', () => {
     expect(session.turns).toHaveLength(1);
     expect(session.turns[0]?.items).toEqual([
       expect.objectContaining({ kind: 'userMessage', text: 'Real prompt' }),
+      expect.objectContaining({ kind: 'commandExecution', text: 'pwd', status: 'completed' }),
       expect.objectContaining({ kind: 'agentMessage', text: 'Real answer' }),
     ]);
   });

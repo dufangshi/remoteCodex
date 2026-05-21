@@ -217,6 +217,24 @@ function contentBlocks(message: unknown): unknown[] {
   return message.content;
 }
 
+export function toolResultBlocks(message: unknown): Array<{ toolUseId: string; result: unknown }> {
+  return contentBlocks(message)
+    .map((block) => {
+      if (!isRecord(block) || block.type !== 'tool_result') {
+        return null;
+      }
+      const toolUseId = stringValue(block.tool_use_id);
+      if (!toolUseId) {
+        return null;
+      }
+      return {
+        toolUseId,
+        result: block.content,
+      };
+    })
+    .filter((block): block is { toolUseId: string; result: unknown } => Boolean(block));
+}
+
 export function assistantMessageToHistoryItems(
   input: {
     messageId: string;

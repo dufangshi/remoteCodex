@@ -2978,7 +2978,7 @@ export class ThreadService {
     this.invalidateThreadDetailCache(localThreadId);
 
     const updated = getThreadRecordById(this.db, localThreadId)!;
-    return this.toThreadDto(updated, new Set());
+    return this.toThreadDto(updated, new Set([providerSessionId]));
   }
 
   async deleteThread(localThreadId: string): Promise<{ id: string }> {

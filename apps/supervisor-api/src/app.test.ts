@@ -1101,6 +1101,7 @@ describe('supervisor api', () => {
       provider: 'claude',
       status: 'interrupted',
       activeTurnId: null,
+      isLoaded: true,
     });
   });
 
