@@ -11,7 +11,7 @@ import {
   fetchProviderHostConfigArchives,
   fetchProviderHostFile,
   importThread,
-  buildAndRestartAgentBackend,
+  buildAndRestartService,
   renameProviderHostConfigArchive,
   restartAgentBackend,
   resumeThread,
@@ -136,14 +136,14 @@ describe('api request helper', () => {
     await fetchAgentBackendStatus('codex');
     await restartAgentBackend('codex');
     await fetchAgentBackendModels('codex');
-    await buildAndRestartAgentBackend('codex');
+    await buildAndRestartService();
 
     const calls = vi.mocked(fetch).mock.calls;
     expect(calls[0]?.[0]).toBe('/api/agent-runtimes/codex/status');
     expect(calls[1]?.[0]).toBe('/api/agent-runtimes/codex/restart');
     expect(calls[1]?.[1]?.method).toBe('POST');
     expect(calls[2]?.[0]).toBe('/api/agent-runtimes/codex/models');
-    expect(calls[3]?.[0]).toBe('/api/agent-runtimes/codex/build-restart');
+    expect(calls[3]?.[0]).toBe('/api/service/build-restart');
     expect(calls[3]?.[1]?.method).toBe('POST');
   });
 });

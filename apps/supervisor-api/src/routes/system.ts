@@ -57,6 +57,16 @@ export async function registerSystemRoutes(app: FastifyInstance) {
     } satisfies VersionDto;
   });
 
+  app.post('/api/service/build-restart', async () => {
+    const launched = await app.services.serviceLifecycle.launchBuildRestart();
+
+    return {
+      status: 'launched',
+      pid: launched.pid,
+      message: 'Build and restart launched.',
+    };
+  });
+
   app.get('/api/config/runtime', async () => {
     return {
       appName: app.services.config.appName,

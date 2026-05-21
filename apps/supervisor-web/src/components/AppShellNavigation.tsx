@@ -10,7 +10,7 @@ import type {
 import {
   ApiError,
   applyProviderHostConfigArchive,
-  buildAndRestartAgentBackend,
+  buildAndRestartService,
   createProviderHostConfigArchive,
   fetchAgentBackends,
   fetchProviderHostFile,
@@ -716,7 +716,7 @@ export function AppShellSettingsDialog() {
     });
 
     try {
-      await buildAndRestartAgentBackend(activeBackend.provider);
+      await buildAndRestartService();
       setRestartState({
         busy: false,
         message: 'Build and restart launched. The page may disconnect briefly.',
@@ -1142,10 +1142,10 @@ export function AppShellSettingsDialog() {
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-[var(--theme-fg)]">
-                    {activeBackend.displayName} runtime
+                    Runtime controls
                   </p>
                   <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                    Restart the selected backend after editing host configuration to force a fresh reload.
+                    Restart the selected backend, or rebuild and restart the supervisor service from this checkout.
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-wrap justify-end gap-2">
@@ -1157,16 +1157,14 @@ export function AppShellSettingsDialog() {
                   >
                     {restartState.busy ? 'Restarting...' : 'Restart'}
                   </button>
-                  {activeManagementSchema.buildRestart ? (
-                    <button
-                      type="button"
-                      onClick={() => void handleBuildAndRestartService()}
-                      disabled={restartState.busy}
-                      className="rounded-full border border-amber-400/35 bg-amber-400/10 px-3 py-1.5 text-xs font-medium text-amber-500 transition hover:bg-amber-400/16 disabled:cursor-not-allowed disabled:border-[var(--theme-border)] disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
-                    >
-                      {restartState.busy ? 'Working...' : 'Build and restart'}
-                    </button>
-                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => void handleBuildAndRestartService()}
+                    disabled={restartState.busy}
+                    className="rounded-full border border-amber-400/35 bg-amber-400/10 px-3 py-1.5 text-xs font-medium text-amber-500 transition hover:bg-amber-400/16 disabled:cursor-not-allowed disabled:border-[var(--theme-border)] disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
+                  >
+                    {restartState.busy ? 'Working...' : 'Build and restart'}
+                  </button>
                 </div>
               </div>
               {restartState.error ? (

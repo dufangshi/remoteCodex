@@ -87,6 +87,50 @@ const codexBackendResponse = {
   },
 };
 
+const claudeBackendResponse = {
+  ...codexBackendResponse,
+  provider: 'claude',
+  displayName: 'Claude',
+  description: 'Claude Code SDK runtime.',
+  isDefault: false,
+  status: {
+    ...codexBackendResponse.status,
+    transport: 'sdk',
+  },
+  capabilities: {
+    ...codexBackendResponse.capabilities,
+    sessions: { list: true, read: true, resume: true, importLocal: false },
+    turns: { start: true, streamInput: false, steer: false, interrupt: true, compact: false },
+    branching: { fork: false, hardRollback: false, resumeAt: false, rewindFiles: false },
+    controls: {
+      planMode: true,
+      permissionRequests: true,
+      sandboxMode: false,
+      performanceMode: false,
+      goals: false,
+    },
+    management: {
+      models: true,
+      mcpStatus: true,
+      skills: false,
+      hooks: false,
+      hookTrust: false,
+      hostConfigFiles: false,
+      providerSettings: false,
+    },
+    usage: { contextWindow: true, tokenUsage: true, costUsd: true },
+  },
+  managementSchema: {
+    hostConfigFiles: [],
+    toolboxItems: [],
+    hookCommandTemplates: [],
+    providerConfigFormat: 'none',
+    mcpConfigFormat: 'none',
+    configArchives: false,
+    buildRestart: false,
+  },
+} as typeof codexBackendResponse;
+
 function NavigationHarness() {
   const [navOpen, setNavOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -129,7 +173,7 @@ describe('AppShellNavigation', () => {
         if (url === '/api/agent-runtimes' && !init?.method) {
           return {
             ok: true,
-            json: async () => [codexBackendResponse],
+            json: async () => [codexBackendResponse, claudeBackendResponse],
           } satisfies Partial<Response>;
         }
 
@@ -291,7 +335,7 @@ describe('AppShellNavigation', () => {
           } satisfies Partial<Response>;
         }
 
-        if (url === '/api/agent-runtimes/codex/build-restart' && init?.method === 'POST') {
+        if (url === '/api/service/build-restart' && init?.method === 'POST') {
           return {
             ok: true,
             json: async () => ({
@@ -557,8 +601,38 @@ describe('AppShellNavigation', () => {
 
     const restartCall = vi.mocked(fetch).mock.calls.find(
       ([url, init]) =>
-        String(url) === '/api/agent-runtimes/codex/build-restart' &&
-        init?.method === 'POST',
+        String(url) === '/api/service/build-restart' && init?.method === 'POST',
+    );
+    expect(restartCall).toBeTruthy();
+  });
+
+  it('shows service build and restart when Claude is the selected backend', async () => {
+    render(
+      <MemoryRouter initialEntries={['/threads?workspaceId=workspace-1']}>
+        <NavigationHarness />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Claude/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Claude/i }));
+    expect(screen.getByRole('button', { name: 'Build and restart' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Build and restart' }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('Build and restart launched. The page may disconnect briefly.'),
+      ).toBeInTheDocument();
+    });
+
+    const restartCall = vi.mocked(fetch).mock.calls.find(
+      ([url, init]) =>
+        String(url) === '/api/service/build-restart' && init?.method === 'POST',
     );
     expect(restartCall).toBeTruthy();
   });

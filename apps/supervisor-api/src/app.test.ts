@@ -457,7 +457,22 @@ describe('supervisor api', () => {
     });
   });
 
-  it('launches detached provider build and restart on demand', async () => {
+  it('launches detached service build and restart on demand', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/service/build-restart',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      status: 'launched',
+      pid: 12345,
+      message: 'Build and restart launched.',
+    });
+    expect(launchBuildRestartCalls).toBe(1);
+  });
+
+  it('keeps the legacy provider build and restart endpoint compatible', async () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/agent-runtimes/codex/build-restart',

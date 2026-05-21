@@ -288,9 +288,9 @@ export function applyProviderHostConfigArchive(provider: AgentBackendIdDto, id: 
   );
 }
 
-export function buildAndRestartAgentBackend(provider: AgentBackendIdDto) {
+export function buildAndRestartService() {
   return request<{ status: 'launched'; pid: number | null; message: string }>(
-    `/api/agent-runtimes/${encodeURIComponent(provider)}/build-restart`,
+    '/api/service/build-restart',
     {
       method: 'POST',
     },
