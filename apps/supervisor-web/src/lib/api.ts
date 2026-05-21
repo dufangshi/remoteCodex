@@ -632,11 +632,7 @@ export function updateWorkspaceFavorite(id: string, input: UpdateWorkspaceFavori
 
 export function connectSupervisorEvents(onEvent: (event: ThreadEventEnvelope) => void) {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const isLocalViteSession =
-    import.meta.env.DEV &&
-    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-  const socketHost = isLocalViteSession ? '127.0.0.1:8787' : window.location.host;
-  const socket = new WebSocket(`${protocol}//${socketHost}/ws`);
+  const socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
 
   socket.addEventListener('message', (message) => {
     try {
@@ -659,11 +655,7 @@ export function connectShellSocket(
   } = {}
 ) {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const isLocalViteSession =
-    import.meta.env.DEV &&
-    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-  const socketHost = isLocalViteSession ? '127.0.0.1:8787' : window.location.host;
-  const socket = new WebSocket(`${protocol}//${socketHost}/ws`);
+  const socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
 
   socket.addEventListener('message', (message) => {
     try {

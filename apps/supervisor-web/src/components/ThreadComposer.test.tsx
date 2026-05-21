@@ -269,6 +269,7 @@ describe('ThreadComposer', () => {
             model: 'gpt-5.4-super-long-mobile-label',
           },
         ]}
+        capabilities={codexCapabilities}
         onSubmit={() => undefined}
       />,
     );

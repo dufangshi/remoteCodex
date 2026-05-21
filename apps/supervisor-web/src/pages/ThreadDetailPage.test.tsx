@@ -246,6 +246,72 @@ const codexBackendResponse = {
   },
 };
 
+const claudeBackendResponse = {
+  provider: 'claude',
+  displayName: 'Claude',
+  description: 'Local Claude Code Agent SDK runtime.',
+  enabled: true,
+  isDefault: false,
+  status: {
+    state: 'ready',
+    transport: 'sdk',
+    lastStartedAt: new Date().toISOString(),
+    lastError: null,
+    restartCount: 0,
+  },
+  capabilities: {
+    sessions: { list: true, read: true, resume: true, importLocal: false },
+    turns: { start: true, streamInput: false, steer: false, interrupt: true, compact: false },
+    branching: { fork: false, hardRollback: false, resumeAt: false, rewindFiles: false },
+    controls: {
+      planMode: false,
+      permissionRequests: false,
+      sandboxMode: false,
+      performanceMode: false,
+      goals: false,
+    },
+    management: {
+      models: true,
+      mcpStatus: true,
+      skills: false,
+      hooks: false,
+      hookTrust: false,
+      hostConfigFiles: false,
+      providerSettings: false,
+    },
+    usage: { contextWindow: false, tokenUsage: false, costUsd: false },
+  },
+  managementSchema: {
+    hostConfigFiles: [],
+    toolboxItems: [
+      { action: 'mcp', command: '/mcp', label: 'MCP', panel: 'mcp' },
+    ],
+    hookCommandTemplates: [],
+    providerConfigFormat: 'none',
+    mcpConfigFormat: 'none',
+    configArchives: false,
+    buildRestart: false,
+  },
+};
+
+const claudeModelOptionsResponse = [
+  {
+    id: 'sonnet',
+    model: 'sonnet',
+    displayName: 'Claude Sonnet',
+    description: 'Claude Code default Sonnet model alias.',
+    hidden: false,
+    isDefault: true,
+    supportedReasoningEfforts: [
+      {
+        reasoningEffort: 'medium',
+        description: 'Balanced',
+      },
+    ],
+    defaultReasoningEffort: 'medium',
+  },
+];
+
 describe('ThreadDetailPage', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -494,6 +560,146 @@ describe('ThreadDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Thread Meta/i }));
 
     expect(screen.queryByText('/tmp/demo')).not.toBeInTheDocument();
+  });
+
+  it('reloads backend controls for a directly opened Claude thread', async () => {
+    const backendRequests: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      withHealthz((input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.includes('/api/agent-runtimes/')) {
+          backendRequests.push(url);
+        }
+
+        if (url.includes('/api/agent-runtimes/codex/status')) {
+          return okJsonResponse(codexBackendResponse);
+        }
+
+        if (url.includes('/api/agent-runtimes/codex/models')) {
+          return okJsonResponse(modelOptionsResponse);
+        }
+
+        if (url.includes('/api/agent-runtimes/claude/status')) {
+          return okJsonResponse(claudeBackendResponse);
+        }
+
+        if (url.includes('/api/agent-runtimes/claude/models')) {
+          return okJsonResponse(claudeModelOptionsResponse);
+        }
+
+        if (url.endsWith('/api/threads')) {
+          return okJsonResponse([
+            {
+              id: 'claude-thread-1',
+              workspaceId: 'workspace-1',
+              provider: 'claude',
+              providerSessionId: 'claude-session-1',
+              source: 'supervisor',
+              title: 'Claude Thread',
+              model: 'sonnet',
+              reasoningEffort: 'medium',
+              collaborationMode: 'default',
+              approvalMode: 'yolo',
+              status: 'idle',
+              summaryText: 'Claude preview',
+              lastError: null,
+              activeTurnId: null,
+              isLoaded: true,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: null,
+              lastTurnCompletedAt: null,
+            },
+          ]);
+        }
+
+        if (
+          url.startsWith('/api/threads/claude-thread-1?') ||
+          url.endsWith('/api/threads/claude-thread-1')
+        ) {
+          return okJsonResponse({
+            thread: {
+              id: 'claude-thread-1',
+              workspaceId: 'workspace-1',
+              provider: 'claude',
+              providerSessionId: 'claude-session-1',
+              source: 'supervisor',
+              title: 'Claude Thread',
+              model: 'sonnet',
+              reasoningEffort: 'medium',
+              collaborationMode: 'default',
+              approvalMode: 'yolo',
+              status: 'idle',
+              summaryText: 'Claude preview',
+              lastError: null,
+              activeTurnId: null,
+              isLoaded: true,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: null,
+              lastTurnCompletedAt: null,
+            },
+            workspace: {
+              id: 'workspace-1',
+              hostId: 'host-1',
+              label: 'Demo Workspace',
+              absPath: '/tmp/demo',
+              isFavorite: false,
+              createdAt: new Date().toISOString(),
+              lastOpenedAt: null,
+            },
+            workspacePathStatus: 'present',
+            pendingRequests: [],
+            turns: [
+              {
+                id: 'turn-1',
+                startedAt: new Date().toISOString(),
+                status: 'completed',
+                error: null,
+                items: [
+                  {
+                    id: 'item-1',
+                    kind: 'agentMessage',
+                    text: 'Hello from Claude',
+                  },
+                ],
+              },
+            ],
+          });
+        }
+
+        return Promise.reject(new Error(`Unexpected request: ${url}`));
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/claude-thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText('Hello from Claude');
+
+    await waitFor(() => {
+      expect(
+        backendRequests.some((url) => url.includes('/api/agent-runtimes/claude/status')),
+      ).toBe(true);
+      expect(
+        backendRequests.some((url) => url.includes('/api/agent-runtimes/claude/models')),
+      ).toBe(true);
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Plan' })).not.toBeInTheDocument();
+      expect(screen.queryByText('Sandbox Mode')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /\/fast/i })).not.toBeInTheDocument();
+    });
   });
 
   it('opens transcript export selection and starts a native PDF download', async () => {
@@ -2113,6 +2319,150 @@ describe('ThreadDetailPage', () => {
     });
   });
 
+  it('clears optimistic turns when completed provider history uses a different turn id', async () => {
+    const prompt = 'Reply with exactly: HISTORY_TURN_OK';
+    let detailRequestCount = 0;
+
+    vi.stubGlobal(
+      'fetch',
+      withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+
+        if (url.includes('/api/agent-runtimes/claude/status')) {
+          return okJsonResponse(claudeBackendResponse);
+        }
+
+        if (url.includes('/api/agent-runtimes/claude/models')) {
+          return okJsonResponse(claudeModelOptionsResponse);
+        }
+
+        if (url.endsWith('/api/threads/thread-1/prompt') && init?.method === 'POST') {
+          return okJsonResponse({
+            id: 'thread-1',
+            workspaceId: 'workspace-1',
+            provider: 'claude',
+            providerSessionId: 'claude-session-1',
+            source: 'supervisor',
+            title: 'Claude Thread',
+            model: 'sonnet',
+            reasoningEffort: 'medium',
+            collaborationMode: 'default',
+            approvalMode: 'yolo',
+            status: 'running',
+            summaryText: prompt,
+            lastError: null,
+            activeTurnId: 'live-turn-1',
+            isLoaded: true,
+            isPinned: false,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            lastTurnStartedAt: new Date().toISOString(),
+            lastTurnCompletedAt: null,
+          });
+        }
+
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
+          detailRequestCount += 1;
+          const hasCompletedTurn = detailRequestCount > 1;
+          return okJsonResponse({
+            thread: {
+              id: 'thread-1',
+              workspaceId: 'workspace-1',
+              provider: 'claude',
+              providerSessionId: 'claude-session-1',
+              source: 'supervisor',
+              title: 'Claude Thread',
+              model: 'sonnet',
+              reasoningEffort: 'medium',
+              collaborationMode: 'default',
+              approvalMode: 'yolo',
+              status: hasCompletedTurn ? 'idle' : 'running',
+              summaryText: hasCompletedTurn ? prompt : 'Preview',
+              lastError: null,
+              activeTurnId: hasCompletedTurn ? null : 'live-turn-1',
+              isLoaded: true,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: new Date().toISOString(),
+              lastTurnCompletedAt: hasCompletedTurn ? new Date().toISOString() : null,
+            },
+            workspace: {
+              id: 'workspace-1',
+              hostId: 'host-1',
+              label: 'Demo Workspace',
+              absPath: '/tmp/demo',
+              isFavorite: false,
+              createdAt: new Date().toISOString(),
+              lastOpenedAt: null,
+            },
+            workspacePathStatus: 'present',
+            pendingRequests: [],
+            turns: hasCompletedTurn
+              ? [
+                  {
+                    id: 'history-turn-1',
+                    startedAt: new Date().toISOString(),
+                    status: 'completed',
+                    error: null,
+                    items: [
+                      {
+                        id: 'history-user-1',
+                        kind: 'userMessage',
+                        text: prompt,
+                      },
+                      {
+                        id: 'history-agent-1',
+                        kind: 'agentMessage',
+                        text: 'HISTORY_TURN_OK',
+                      },
+                    ],
+                  },
+                ]
+              : [],
+          });
+        }
+
+        if (url.endsWith('/api/threads')) {
+          return okJsonResponse([]);
+        }
+
+        return Promise.reject(new Error(`Unexpected request: ${url}`));
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Claude Thread').length).toBeGreaterThan(0);
+    });
+
+    const editor = screen.getByLabelText('Prompt');
+    setPromptValue(editor, prompt);
+    fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
+    emitSocketMessage(FakeWebSocket.instances[0]!, {
+      type: 'thread.turn.completed',
+      threadId: 'thread-1',
+      timestamp: new Date().toISOString(),
+      payload: {
+        turnId: 'live-turn-1',
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('HISTORY_TURN_OK')).toBeInTheDocument();
+    });
+
+    expect(screen.getAllByText(prompt)).toHaveLength(1);
+    expect(screen.queryByLabelText('Running')).not.toBeInTheDocument();
+  });
+
   it('shows a steering bubble for prompts sent while the current turn is running', async () => {
     const startedAt = new Date(Date.UTC(2026, 3, 10, 0, 0, 0)).toISOString();
     const promptBodies: Array<Record<string, unknown>> = [];
@@ -2128,13 +2478,7 @@ describe('ThreadDetailPage', () => {
         const url = String(input);
 
         if (url.includes('/api/agent-runtimes/codex/status')) {
-          return okJsonResponse({
-            state: 'ready',
-            transport: 'stdio',
-            lastStartedAt: new Date().toISOString(),
-            lastError: null,
-            restartCount: 0,
-          });
+          return okJsonResponse(codexBackendResponse);
         }
 
         if (url.includes('/api/agent-runtimes/codex/models')) {
@@ -3366,13 +3710,7 @@ describe('ThreadDetailPage', () => {
         const url = String(input);
 
         if (url.includes('/api/agent-runtimes/codex/status')) {
-          return okJsonResponse({
-            state: 'ready',
-            transport: 'stdio',
-            lastStartedAt: new Date().toISOString(),
-            lastError: null,
-            restartCount: 0,
-          });
+          return okJsonResponse(codexBackendResponse);
         }
 
         if (url.includes('/api/agent-runtimes/codex/models')) {

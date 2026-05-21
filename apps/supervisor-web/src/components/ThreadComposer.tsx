@@ -868,6 +868,7 @@ export function ThreadComposer({
         Boolean(onReadProviderConfig) &&
         Boolean(onWriteProviderConfig),
       hookTrust: capabilities?.management.hookTrust ?? false,
+      planMode: capabilities?.controls.planMode ?? false,
     }),
     [capabilities, mcpConfigFormat, onReadProviderConfig, onWriteProviderConfig],
   );
@@ -3597,24 +3598,26 @@ export function ThreadComposer({
                 )}
               </div>
 
-              <button
-                type="button"
-                aria-pressed={collaborationMode === 'plan'}
-                disabled={settingsBusy}
-                onClick={() =>
-                  void handleUpdateSettings({
-                    collaborationMode:
-                      collaborationMode === 'plan' ? 'default' : 'plan',
-                  })
-                }
-                className={`thread-composer-inline-toggle rounded-full px-2.5 py-1 transition ${
-                  collaborationMode === 'plan'
-                    ? 'bg-sky-300/18 text-sky-100'
-                    : 'text-stone-500'
-                } disabled:cursor-not-allowed disabled:opacity-60`}
-              >
-                Plan
-              </button>
+              {slashCapabilities.planMode && (
+                <button
+                  type="button"
+                  aria-pressed={collaborationMode === 'plan'}
+                  disabled={settingsBusy}
+                  onClick={() =>
+                    void handleUpdateSettings({
+                      collaborationMode:
+                        collaborationMode === 'plan' ? 'default' : 'plan',
+                    })
+                  }
+                  className={`thread-composer-inline-toggle rounded-full px-2.5 py-1 transition ${
+                    collaborationMode === 'plan'
+                      ? 'bg-sky-300/18 text-sky-100'
+                      : 'text-stone-500'
+                  } disabled:cursor-not-allowed disabled:opacity-60`}
+                >
+                  Plan
+                </button>
+              )}
             </div>
           )}
         </div>

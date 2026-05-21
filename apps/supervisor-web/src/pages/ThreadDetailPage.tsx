@@ -375,6 +375,7 @@ export function ThreadDetailPage() {
   const composerHostRef = useRef<HTMLDivElement | null>(null);
   const loadRequestIdRef = useRef(0);
   const pageContextRequestIdRef = useRef(0);
+  const pageContextProviderRef = useRef<ThreadDto['provider'] | null>(null);
   const terminalTurnPendingRef = useRef<string | null>(null);
   const detailRef = useRef<ThreadDetailDto | null>(null);
   const pendingThreadSettingsRef = useRef<PendingThreadSettings | null>(null);
@@ -1170,7 +1171,12 @@ export function ThreadDetailPage() {
         const hasMaterializedTurn = nextDetail.turns.some(
           (turn) => turn.id === resolvedTurnId,
         );
-        return hasMaterializedTurn ? null : current;
+        const hasMaterializedPrompt = nextDetail.turns.some((turn) =>
+          turnHasUserMessage(turn, current.prompt),
+        );
+        return hasMaterializedTurn || (threadHasEnded && hasMaterializedPrompt)
+          ? null
+          : current;
       });
       if (
         threadHasEnded ||
@@ -1197,11 +1203,13 @@ export function ThreadDetailPage() {
     async ({ seedThread }: { seedThread?: ThreadDto | null } = {}) => {
       const requestId = pageContextRequestIdRef.current + 1;
       pageContextRequestIdRef.current = requestId;
+      const provider =
+        seedThread?.provider ?? detailRef.current?.thread.provider ?? 'codex';
 
       const [threadResult, statusResult, modelResult] = await Promise.allSettled([
         fetchThreads(),
-        fetchAgentBackendStatus(seedThread?.provider ?? detailRef.current?.thread.provider ?? 'codex'),
-        fetchAgentBackendModels(seedThread?.provider ?? detailRef.current?.thread.provider ?? 'codex'),
+        fetchAgentBackendStatus(provider),
+        fetchAgentBackendModels(provider),
       ]);
 
       if (pageContextRequestIdRef.current !== requestId) {
@@ -1219,12 +1227,14 @@ export function ThreadDetailPage() {
       }
 
       if (statusResult.status === 'fulfilled') {
+        pageContextProviderRef.current = provider;
         setStatus(statusResult.value.status);
         setBackendCapabilities(statusResult.value.capabilities);
         setBackendManagementSchema(statusResult.value.managementSchema);
       }
 
       if (modelResult.status === 'fulfilled') {
+        pageContextProviderRef.current = provider;
         setModelOptions(modelResult.value);
       }
     },
@@ -1259,6 +1269,9 @@ export function ThreadDetailPage() {
         }
 
         applyDetailResponse(detailResponse);
+        if (pageContextProviderRef.current !== detailResponse.thread.provider) {
+          void loadPageContext({ seedThread: detailResponse.thread });
+        }
       } catch (caught) {
         if (loadRequestIdRef.current !== requestId || !reportError) {
           return;
@@ -2849,7 +2862,7 @@ export function ThreadDetailPage() {
     </dl>
   ) : null;
 
-  const settingsContent = detail ? (
+  const settingsContent = detail && backendCapabilities?.controls.sandboxMode ? (
     <div className="space-y-3">
       <div>
         <p className="text-xs uppercase tracking-[0.2em] text-stone-500">
@@ -2974,6 +2987,7 @@ export function ThreadDetailPage() {
   const monitorGoals = currentGoal
     ? mergeGoalHistory(goalHistory, currentGoal)
     : normalizeGoalHistory(goalHistory);
+  const supportsGoals = backendCapabilities?.controls.goals ?? false;
   const goalIndicatorIcon = (
     <svg
       aria-hidden="true"
@@ -2988,7 +3002,7 @@ export function ThreadDetailPage() {
       <path d="M8 1.7v2M8 12.3v2M1.7 8h2M12.3 8h2" />
     </svg>
   );
-  const goalMonitorPanel = goalMonitorOpen ? (
+  const goalMonitorPanel = goalMonitorOpen && supportsGoals ? (
     <div className="w-96 max-w-[calc(100vw-1.5rem)] rounded-3xl border border-stone-700/80 bg-stone-950/92 p-3 text-left text-stone-100 shadow-2xl shadow-stone-950/35 backdrop-blur-xl">
       <div className="flex items-center justify-between gap-3">
         <div>
@@ -3097,7 +3111,7 @@ export function ThreadDetailPage() {
       </div>
     </div>
   ) : null;
-  const goalMonitorButton = (
+  const goalMonitorButton = supportsGoals ? (
     <button
       type="button"
       aria-label="Open goal monitor"
@@ -3110,7 +3124,7 @@ export function ThreadDetailPage() {
     >
       {goalIndicatorIcon}
     </button>
-  );
+  ) : null;
   const exportTranscriptButton = (
     <button
       type="button"
