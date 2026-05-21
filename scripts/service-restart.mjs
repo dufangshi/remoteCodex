@@ -61,7 +61,6 @@ async function runRestart() {
   });
 
   try {
-    await runGitUpdate();
     await runPnpmCommand(['build']);
     await runPnpmCommand(['service:stop']);
     await runPnpmCommand(['service:start']);
@@ -85,72 +84,6 @@ async function runRestart() {
     });
     process.exit(1);
   }
-}
-
-async function runGitUpdate() {
-  await runGitCommand(['fetch', 'origin']);
-
-  const branch = await readGitCommand(['rev-parse', '--abbrev-ref', 'HEAD']);
-  const trimmedBranch = branch.trim();
-
-  if (trimmedBranch && trimmedBranch !== 'HEAD') {
-    await runGitCommand(['pull', '--ff-only', 'origin', trimmedBranch]);
-    return;
-  }
-
-  await runGitCommand(['pull', '--ff-only', 'origin']);
-}
-
-async function runGitCommand(args) {
-  await new Promise((resolve, reject) => {
-    const child = spawn('git', args, {
-      cwd: repoRoot,
-      env: process.env,
-      stdio: 'inherit',
-    });
-
-    child.on('error', reject);
-    child.on('exit', (code, signal) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-
-      reject(
-        new Error(
-          `Command failed: git ${args.join(' ')} (${signal ? `signal ${signal}` : `exit ${String(code)}`})`,
-        ),
-      );
-    });
-  });
-}
-
-async function readGitCommand(args) {
-  return await new Promise((resolve, reject) => {
-    const child = spawn('git', args, {
-      cwd: repoRoot,
-      env: process.env,
-      stdio: ['ignore', 'pipe', 'inherit'],
-    });
-    const chunks = [];
-
-    child.stdout.on('data', (chunk) => {
-      chunks.push(Buffer.from(chunk));
-    });
-    child.on('error', reject);
-    child.on('exit', (code, signal) => {
-      if (code === 0) {
-        resolve(Buffer.concat(chunks).toString('utf8'));
-        return;
-      }
-
-      reject(
-        new Error(
-          `Command failed: git ${args.join(' ')} (${signal ? `signal ${signal}` : `exit ${String(code)}`})`,
-        ),
-      );
-    });
-  });
 }
 
 async function runPnpmCommand(args) {
