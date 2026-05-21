@@ -173,7 +173,13 @@ describe('ThreadComposer', () => {
       });
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Plan' }));
+    const planToggle = screen.getByRole('button', { name: 'Plan' });
+    expect(planToggle).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(planToggle);
+
+    expect(planToggle).toHaveAttribute('aria-pressed', 'true');
+    expect(planToggle.className).toContain('thread-composer-plan-toggle-active');
 
     await waitFor(() => {
       expect(onUpdateSettings).toHaveBeenCalledWith({

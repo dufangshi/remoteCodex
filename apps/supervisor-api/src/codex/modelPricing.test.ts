@@ -70,6 +70,36 @@ describe('modelPricing', () => {
     expect(estimate?.totalUsd).toBeCloseTo(0.125625, 10);
   });
 
+  it('prices Claude Sonnet and its 1M context option from the local pricing config', () => {
+    expect(supportsFastMode('sonnet')).toBe(false);
+    expect(contextWindowForModel('sonnet')).toBe(200000);
+    expect(contextWindowForModel('sonnet[1m]')).toBe(1000000);
+
+    const standardEstimate = estimateTurnPrice(sampleUsage, {
+      pricingModelKey: 'sonnet',
+      pricingTierKey: 'standard',
+    });
+    expect(standardEstimate).toMatchObject({
+      pricingModelKey: 'sonnet',
+      pricingTierKey: 'standard',
+      inputUsd: 0.003,
+      cachedInputUsd: 0.00015,
+      outputUsd: 0.0225,
+    });
+
+    const oneMillionEstimate = estimateTurnPrice(sampleUsage, {
+      pricingModelKey: 'sonnet[1m]',
+      pricingTierKey: 'standard',
+    });
+    expect(oneMillionEstimate).toMatchObject({
+      pricingModelKey: 'sonnet[1m]',
+      pricingTierKey: 'standard',
+      inputUsd: 0.006,
+      cachedInputUsd: 0.0003,
+      outputUsd: 0.03375,
+    });
+  });
+
   it('resolves pricing config from the installed package root when provided', async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'remote-codex-pricing-root-'));
     await fs.mkdir(path.join(tempDir, 'config'), { recursive: true });

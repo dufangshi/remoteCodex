@@ -153,7 +153,7 @@ export class FakeCodexManager extends EventEmitter {
     };
   }
 
-  async readThread(threadId: string) {
+  async readThread(threadId: string, input: { limit?: number; beforeTurnId?: string | null } = {}) {
     this.readThreadCallCount.set(
       threadId,
       (this.readThreadCallCount.get(threadId) ?? 0) + 1,
@@ -172,7 +172,20 @@ export class FakeCodexManager extends EventEmitter {
       );
     }
 
-    return thread;
+    if (input.limit === undefined && !input.beforeTurnId) {
+      return thread;
+    }
+
+    const beforeIndex = input.beforeTurnId
+      ? thread.turns.findIndex((turn: { id: string }) => turn.id === input.beforeTurnId)
+      : thread.turns.length;
+    const exclusiveEnd = beforeIndex >= 0 ? beforeIndex : thread.turns.length;
+    const limit = input.limit ?? thread.turns.length;
+    return {
+      ...thread,
+      totalTurnCount: thread.turns.length,
+      turns: thread.turns.slice(Math.max(0, exclusiveEnd - limit), exclusiveEnd),
+    };
   }
 
   async resumeThread(input: { threadId: string; model?: string | null; sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access' | null; serviceTier?: 'fast' | 'flex' | null }) {

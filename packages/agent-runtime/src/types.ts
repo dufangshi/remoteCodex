@@ -185,6 +185,12 @@ export interface AgentTurn {
 
 export interface AgentSessionDetail extends AgentSessionSummary {
   turns: AgentTurn[];
+  totalTurnCount?: number | null;
+}
+
+export interface ReadAgentSessionOptions {
+  limit?: number;
+  beforeTurnId?: string | null;
 }
 
 export interface StartAgentSessionInput {
@@ -504,7 +510,10 @@ export interface AgentRuntime extends EventEmitter {
   listModels(): Promise<AgentModel[]>;
   listSessions(): Promise<AgentSessionSummary[]>;
   listLoadedSessions(): Promise<string[]>;
-  readSession(providerSessionId: string): Promise<AgentSessionDetail>;
+  readSession(
+    providerSessionId: string,
+    options?: ReadAgentSessionOptions,
+  ): Promise<AgentSessionDetail>;
   startSession(input: StartAgentSessionInput): Promise<StartAgentSessionResult>;
   resumeSession(input: ResumeAgentSessionInput): Promise<StartAgentSessionResult>;
 

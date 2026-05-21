@@ -933,6 +933,8 @@ export function ThreadComposer({
   const [goalTokenBudget, setGoalTokenBudget] = useState('');
   const [goalBusy, setGoalBusy] = useState(false);
   const [goalLocalError, setGoalLocalError] = useState<string | null>(null);
+  const [optimisticCollaborationMode, setOptimisticCollaborationMode] =
+    useState<CollaborationModeDto | null>(null);
   const menuRef = useRef<HTMLFormElement | null>(null);
   const promptRef = useRef<HTMLDivElement | null>(null);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
@@ -958,6 +960,12 @@ export function ThreadComposer({
   const attachments = (isDraftControlled
     ? draftAttachments
     : internalDraft.attachments) as ComposerAttachmentDraft[];
+  const displayedCollaborationMode =
+    optimisticCollaborationMode ?? collaborationMode;
+
+  useEffect(() => {
+    setOptimisticCollaborationMode(null);
+  }, [collaborationMode]);
 
   useEffect(() => {
     if (openMenu !== 'slash') {
@@ -2326,8 +2334,19 @@ export function ThreadComposer({
   }
 
   async function handleUpdateSettings(input: UpdateThreadSettingsInput) {
-    await onUpdateSettings?.(input);
-    setOpenMenu(null);
+    const previousOptimisticMode = optimisticCollaborationMode;
+    if (input.collaborationMode) {
+      setOptimisticCollaborationMode(input.collaborationMode);
+    }
+    try {
+      await onUpdateSettings?.(input);
+      setOpenMenu(null);
+    } catch (error) {
+      if (input.collaborationMode) {
+        setOptimisticCollaborationMode(previousOptimisticMode);
+      }
+      throw error;
+    }
   }
 
   const promptPlaceholder =
@@ -3605,17 +3624,17 @@ export function ThreadComposer({
               {slashCapabilities.planMode && (
                 <button
                   type="button"
-                  aria-pressed={collaborationMode === 'plan'}
+                  aria-pressed={displayedCollaborationMode === 'plan'}
                   disabled={settingsBusy}
                   onClick={() =>
                     void handleUpdateSettings({
                       collaborationMode:
-                        collaborationMode === 'plan' ? 'default' : 'plan',
+                        displayedCollaborationMode === 'plan' ? 'default' : 'plan',
                     })
                   }
                   className={`thread-composer-inline-toggle rounded-full px-2.5 py-1 transition ${
-                    collaborationMode === 'plan'
-                      ? 'bg-sky-300/18 text-sky-100'
+                    displayedCollaborationMode === 'plan'
+                      ? 'thread-composer-plan-toggle-active'
                       : 'text-stone-500'
                   } disabled:cursor-not-allowed disabled:opacity-60`}
                 >

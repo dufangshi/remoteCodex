@@ -148,6 +148,21 @@ const DEFAULT_CLAUDE_MODELS: AgentModel[] = [
     defaultReasoningEffort: 'medium',
   },
   {
+    id: 'sonnet-1m',
+    model: 'sonnet[1m]',
+    displayName: 'Claude Sonnet 1M',
+    description: 'Claude Code Sonnet with the 1M token context beta enabled.',
+    isDefault: false,
+    hidden: false,
+    supportedReasoningEfforts: [
+      { reasoningEffort: 'low', description: 'Low effort' },
+      { reasoningEffort: 'medium', description: 'Medium effort' },
+      { reasoningEffort: 'high', description: 'High effort' },
+      { reasoningEffort: 'xhigh', description: 'Extra high effort' },
+    ],
+    defaultReasoningEffort: 'medium',
+  },
+  {
     id: 'opus',
     model: 'opus',
     displayName: 'Claude Opus',
@@ -185,6 +200,25 @@ function toIsoFromMs(value: number | null | undefined) {
   return new Date(value).toISOString();
 }
 
+function isoFromUuidV7(value: string | null | undefined) {
+  const normalized = value?.replace(/-/g, '').trim();
+  if (!normalized || normalized.length !== 32 || normalized[12] !== '7') {
+    return null;
+  }
+
+  const timestampHex = normalized.slice(0, 12);
+  const timestamp = Number.parseInt(timestampHex, 16);
+  if (!Number.isFinite(timestamp)) {
+    return null;
+  }
+
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return date.toISOString();
+}
+
 function mapModelInfo(model: ModelInfo, index: number): AgentModel {
   return {
     id: model.value,
@@ -199,6 +233,40 @@ function mapModelInfo(model: ModelInfo, index: number): AgentModel {
     })),
     defaultReasoningEffort: model.supportsEffort ? 'medium' : null,
   };
+}
+
+function withClaudeCodeModelAliases(models: AgentModel[]) {
+  const output = [...models];
+  const defaultSonnet = DEFAULT_CLAUDE_MODELS[0]!;
+  const oneMillionSonnet = DEFAULT_CLAUDE_MODELS[1]!;
+  const hasSonnetAlias = output.some((model) => model.model === 'sonnet');
+  if (!hasSonnetAlias) {
+    output.unshift(defaultSonnet);
+  }
+  if (!output.some((model) => model.model === 'sonnet[1m]')) {
+    output.splice(1, 0, oneMillionSonnet);
+  }
+  return output.map((model, index) => ({
+    ...model,
+    isDefault: index === 0,
+  }));
+}
+
+function normalizeClaudeModelForQuery(model: string | null | undefined) {
+  return model === 'sonnet[1m]' ? 'sonnet' : model;
+}
+
+function shouldEnableOneMillionContext(model: string | null | undefined) {
+  return model === 'sonnet[1m]';
+}
+
+function displayClaudeModel(
+  requestedModel: string | null | undefined,
+  runtimeModel: string | null | undefined,
+) {
+  return shouldEnableOneMillionContext(requestedModel)
+    ? requestedModel!
+    : runtimeModel ?? requestedModel ?? null;
 }
 
 function permissionModeForInput(
@@ -330,7 +398,13 @@ function queryOptionsForRuntime(
     options.cwd = input.cwd;
   }
   if (input.model) {
-    options.model = input.model;
+    const model = normalizeClaudeModelForQuery(input.model);
+    if (model) {
+      options.model = model;
+    }
+  }
+  if (shouldEnableOneMillionContext(input.model)) {
+    options.betas = ['context-1m-2025-08-07'];
   }
   if (input.reasoningEffort) {
     const effort = input.reasoningEffort === 'xhigh' ? 'max' : input.reasoningEffort;
@@ -442,7 +516,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
 
     try {
       const models = await active.query.supportedModels();
-      return models.map(mapModelInfo);
+      return withClaudeCodeModelAliases(models.map(mapModelInfo));
     } catch {
       return DEFAULT_CLAUDE_MODELS;
     }
@@ -471,7 +545,10 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     return [...this.knownSessionIds];
   }
 
-  async readSession(providerSessionId: string): Promise<AgentSessionDetail> {
+  async readSession(
+    providerSessionId: string,
+    _options: { limit?: number; beforeTurnId?: string | null } = {},
+  ): Promise<AgentSessionDetail> {
     const [info, messages] = await this.withClaudeConfigEnv(async () => Promise.all([
       this.getSessionInfoFn(providerSessionId, {} as GetSessionInfoOptions),
       this.getSessionMessagesFn(providerSessionId, {
@@ -525,7 +602,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
         rawMessages.push(message);
         if (message.type === 'system' && message.subtype === 'init') {
           providerSessionId = message.session_id;
-          model = message.model ?? model;
+          model = displayClaudeModel(input.model, message.model ?? model);
           this.sessionCwds.set(providerSessionId, message.cwd);
         } else if ('session_id' in message && typeof message.session_id === 'string') {
           providerSessionId ??= message.session_id;
@@ -548,7 +625,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
 
     this.sessionCwds.set(providerSessionId, input.cwd);
     this.knownSessionIds.add(providerSessionId);
-    this.sessionModels.set(providerSessionId, model);
+    this.sessionModels.set(providerSessionId, displayClaudeModel(input.model, model));
     this.sessionApprovalModes.set(providerSessionId, input.approvalMode);
     const session: AgentSessionDetail = {
       provider: 'claude',
@@ -565,7 +642,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     return {
       provider: 'claude',
       providerSessionId,
-      model,
+      model: displayClaudeModel(input.model, model),
       reasoningEffort: null,
       sandboxMode: input.sandboxMode ?? null,
       session,
@@ -577,12 +654,15 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     const session = await this.readSession(input.providerSessionId);
     this.knownSessionIds.add(input.providerSessionId);
     if (input.model !== undefined) {
-      this.sessionModels.set(input.providerSessionId, input.model);
+      this.sessionModels.set(input.providerSessionId, displayClaudeModel(input.model, input.model));
     }
     return {
       provider: 'claude',
       providerSessionId: input.providerSessionId,
-      model: input.model ?? this.sessionModels.get(input.providerSessionId) ?? null,
+      model: displayClaudeModel(
+        input.model,
+        input.model ?? this.sessionModels.get(input.providerSessionId) ?? null,
+      ),
       reasoningEffort: null,
       sandboxMode: input.sandboxMode ?? null,
       session,
@@ -942,6 +1022,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     const turns: AgentTurn[] = [];
     let current: {
       providerTurnId: string;
+      startedAt: string | null;
       items: AgentHistoryItem[];
       itemsById: Map<string, AgentHistoryItem>;
     } | null = null;
@@ -951,6 +1032,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       if (!current) {
         current = {
           providerTurnId: randomUUID(),
+          startedAt: null,
           items: [],
           itemsById: new Map(),
         };
@@ -990,14 +1072,17 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
         if (current && current.items.length > 0) {
           turns.push(buildAgentTurn({
             providerTurnId: current.providerTurnId,
+            startedAt: current.startedAt,
             status: 'completed',
             items: current.items,
           }));
         }
+        const userItem = userMessageToHistoryItem(message.uuid, message.message);
         current = {
           providerTurnId: `claude-turn-${message.uuid}`,
-          items: [userMessageToHistoryItem(message.uuid, message.message)],
-          itemsById: new Map([[message.uuid, userMessageToHistoryItem(message.uuid, message.message)]]),
+          startedAt: isoFromUuidV7(message.uuid),
+          items: [userItem],
+          itemsById: new Map([[message.uuid, userItem]]),
         };
         continue;
       }
@@ -1031,6 +1116,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     if (current && current.items.length > 0) {
       turns.push(buildAgentTurn({
         providerTurnId: current.providerTurnId,
+        startedAt: current.startedAt,
         status: 'completed',
         items: current.items,
       }));

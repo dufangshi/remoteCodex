@@ -52,8 +52,15 @@ function mapThread(record: any): CodexThreadRecord {
     status: record.status,
     cwd: record.cwd,
     name: record.name ?? null,
+    totalTurnCount: typeof record.totalTurnCount === 'number'
+      ? record.totalTurnCount
+      : typeof record.total_turn_count === 'number'
+        ? record.total_turn_count
+        : typeof record.turnsTotal === 'number'
+          ? record.turnsTotal
+          : null,
     turns: Array.isArray(record.turns) ? record.turns.map(mapTurn) : []
-  };
+  } as CodexThreadRecord;
 }
 
 function mapTurn(record: any): CodexTurnRecord {
@@ -395,11 +402,13 @@ export class CodexAppServerManager extends EventEmitter {
     };
   }
 
-  async readThread(threadId: string) {
+  async readThread(threadId: string, input: { limit?: number; beforeTurnId?: string | null } = {}) {
     await this.ensureReady();
     const response = await this.client!.request<{ thread: any }>('thread/read', {
       threadId,
-      includeTurns: true
+      includeTurns: true,
+      ...(input.limit !== undefined ? { limit: input.limit } : {}),
+      ...(input.beforeTurnId ? { beforeTurnId: input.beforeTurnId } : {}),
     });
     return mapThread(response.thread);
   }

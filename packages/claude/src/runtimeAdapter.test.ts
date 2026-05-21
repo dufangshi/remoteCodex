@@ -253,6 +253,47 @@ describe('ClaudeRuntimeAdapter', () => {
     await expect(adapter.listLoadedSessions()).resolves.toEqual(['claude-session-1']);
   });
 
+  it('exposes the Claude Code Sonnet 1M option and enables the 1M context beta', async () => {
+    const sdkOptions: Record<string, unknown>[] = [];
+    const adapter = new ClaudeRuntimeAdapter({
+      home: '/tmp/claude-home',
+      command: 'claude',
+      query: ((params: { prompt: string; options: Record<string, unknown> }) => {
+        sdkOptions.push(params.options);
+        return new FakeQuery([systemInit(), result()]);
+      }) as any,
+      listSessions: (async () => [] satisfies SDKSessionInfo[]) as any,
+      getSessionInfo: (async () => null) as any,
+      getSessionMessages: (async () => [] satisfies SessionMessage[]) as any,
+    });
+
+    await expect(adapter.listModels()).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          model: 'sonnet',
+          displayName: 'Claude Sonnet',
+          isDefault: true,
+        }),
+        expect.objectContaining({
+          model: 'sonnet[1m]',
+          displayName: 'Claude Sonnet 1M',
+        }),
+      ]),
+    );
+
+    await adapter.startSession({
+      cwd: '/tmp/workspace',
+      model: 'sonnet[1m]',
+      approvalMode: 'guarded',
+      sandboxMode: 'workspace-write',
+    });
+
+    expect(sdkOptions[0]).toMatchObject({
+      model: 'sonnet',
+      betas: ['context-1m-2025-08-07'],
+    });
+  });
+
   it('does not expose the synthetic init prompt as a session summary', async () => {
     const adapter = new ClaudeRuntimeAdapter({
       home: '/tmp/claude-home',
@@ -709,7 +750,7 @@ describe('ClaudeRuntimeAdapter', () => {
         },
         {
           type: 'user',
-          uuid: 'user-1',
+          uuid: '019e4657-bd3c-72d1-b59d-324ed8a4b1ec',
           session_id: 'claude-session-1',
           message: { role: 'user', content: 'Real prompt' },
           parent_tool_use_id: null,
@@ -760,6 +801,10 @@ describe('ClaudeRuntimeAdapter', () => {
 
     const session = await adapter.readSession('claude-session-1');
     expect(session.turns).toHaveLength(1);
+    expect(session.turns[0]?.providerTurnId).toBe(
+      'claude-turn-019e4657-bd3c-72d1-b59d-324ed8a4b1ec',
+    );
+    expect(session.turns[0]?.startedAt).toBe('2026-05-20T17:03:35.740Z');
     expect(session.turns[0]?.items).toEqual([
       expect.objectContaining({ kind: 'userMessage', text: 'Real prompt' }),
       expect.objectContaining({ kind: 'commandExecution', text: 'pwd', status: 'completed' }),

@@ -879,6 +879,25 @@ function buildTurnDto(
   };
 }
 
+function fallbackTurnMetadataForRecord(record: {
+  model: string | null;
+  reasoningEffort: string | null;
+}): ThreadTurnMetadataRecord | undefined {
+  if (!record.model && !record.reasoningEffort) {
+    return undefined;
+  }
+
+  const pricingSnapshot = buildTurnPricingSnapshot(record.model, false);
+  return {
+    model: record.model ?? null,
+    reasoningEffort: normalizeReasoningEffort(record.reasoningEffort),
+    reasoningEffortAvailable: record.reasoningEffort ? true : null,
+    pricingModelKey: pricingSnapshot?.pricingModelKey ?? null,
+    pricingTierKey: pricingSnapshot?.pricingTierKey ?? null,
+    tokenUsageJson: null,
+  };
+}
+
 function sliceTurnsForDetail<T extends { id: string }>(
   turns: T[],
   options: { limit?: number; beforeTurnId?: string } = {},
@@ -1189,9 +1208,12 @@ export class ThreadService {
       reasoningEffort: string | null;
     },
     turnMetadataById: Map<string, ThreadTurnMetadataRecord>,
+    options: { limit?: number; beforeTurnId?: string } = {},
   ): Promise<ThreadDetailCacheEntry> {
+    const shouldCacheFullDetail =
+      options.limit === undefined && options.beforeTurnId === undefined;
     const cached = this.getThreadDetailCache(localThreadId);
-    if (cached) {
+    if (cached && shouldCacheFullDetail) {
       return cached;
     }
 
@@ -1199,7 +1221,7 @@ export class ThreadService {
     const runtime = this.runtimeForProvider(record.provider);
     let remoteSession: AgentSessionDetail | null = null;
     try {
-      const session = await runtime.readSession(providerSessionId);
+      const session = await runtime.readSession(providerSessionId, options);
       remoteSession = session;
     } catch (error) {
       if (!isRemoteThreadBootstrapError(error)) {
@@ -1211,6 +1233,7 @@ export class ThreadService {
       const localSession = await this.localSessionStore.findSession(providerSessionId);
       const deferredDetails = new Map<string, ThreadHistoryItemDetailDto>();
       const persistedItemsByTurnId = this.listPersistedHistoryItemsByTurnId(localThreadId);
+      const fallbackMetadata = fallbackTurnMetadataForRecord(record);
       const turns = mergePersistedHistoryItemsIntoTurns(
         applyRecordedTurnItemOrders(
           localSession?.turns ?? [],
@@ -1221,16 +1244,20 @@ export class ThreadService {
       ).map((turn) =>
         buildTurnDto(
           deferLargeHistoryItemDetails(turn, deferredDetails),
-          turnMetadataById.get(turn.id),
+          turnMetadataById.get(turn.id) ?? fallbackMetadata,
         ),
       );
       const entry = {
+        cachedAt: Date.now(),
         turns,
         totalTurnCount: turns.length,
         deferredDetails,
       };
-      this.setThreadDetailCache(localThreadId, entry);
-      return this.threadDetailCache.get(localThreadId)!;
+      if (shouldCacheFullDetail) {
+        this.setThreadDetailCache(localThreadId, entry);
+        return this.threadDetailCache.get(localThreadId)!;
+      }
+      return entry;
     }
 
     if (
@@ -1259,6 +1286,7 @@ export class ThreadService {
 
     const deferredDetails = new Map<string, ThreadHistoryItemDetailDto>();
     const persistedItemsByTurnId = this.listPersistedHistoryItemsByTurnId(localThreadId);
+    const fallbackMetadata = fallbackTurnMetadataForRecord(updated);
     const turns = mergePersistedHistoryItemsIntoTurns(
       applyRecordedTurnItemOrders(
         remoteSession.turns.map((turn) => agentTurnToThreadTurnDto(turn, deferredDetails)),
@@ -1267,15 +1295,21 @@ export class ThreadService {
       persistedItemsByTurnId,
       deferredDetails,
     ).map((turn) =>
-      buildTurnDto(turn, turnMetadataById.get(turn.id)),
+      buildTurnDto(turn, turnMetadataById.get(turn.id) ?? fallbackMetadata),
     );
     const entry = {
+      cachedAt: Date.now(),
       turns,
-      totalTurnCount: turns.length,
+      totalTurnCount: shouldCacheFullDetail
+        ? turns.length
+        : remoteSession.totalTurnCount ?? Math.max(cached?.totalTurnCount ?? 0, turns.length),
       deferredDetails,
     };
-    this.setThreadDetailCache(localThreadId, entry);
-    return this.threadDetailCache.get(localThreadId)!;
+    if (shouldCacheFullDetail) {
+      this.setThreadDetailCache(localThreadId, entry);
+      return this.threadDetailCache.get(localThreadId)!;
+    }
+    return entry;
   }
 
   async listModels(): Promise<ModelOptionDto[]> {
@@ -1492,6 +1526,7 @@ export class ThreadService {
       localThreadId,
       record,
       turnMetadataById,
+      options,
     );
     const updated = getThreadRecordById(this.db, record.id)!;
     const pagedTurns = sliceTurnsForDetail(cachedDetail.turns, options);
@@ -1509,7 +1544,7 @@ export class ThreadService {
       workspace: toWorkspaceDto(workspace),
       workspacePathStatus,
       turns: pagedTurns.turns,
-      totalTurnCount: pagedTurns.totalTurnCount,
+      totalTurnCount: cachedDetail.totalTurnCount,
       pendingRequests: this.listPendingRequests(updated.id),
       pendingSteers: this.listPendingSteers(updated.id),
       answeredRequestNotes: this.listAnsweredRequestNotes(updated.id),

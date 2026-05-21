@@ -209,6 +209,7 @@ function buildSandboxPolicy(
 }
 
 function mapSession(thread: CodexThreadRecord): AgentSessionDetail {
+  const threadWithTotal = thread as CodexThreadRecord & { totalTurnCount?: unknown };
   return {
     provider: 'codex',
     providerSessionId: thread.id,
@@ -219,6 +220,10 @@ function mapSession(thread: CodexThreadRecord): AgentSessionDetail {
     updatedAt: toIsoFromEpoch(thread.updatedAt),
     status: normalizeStatus(thread.status),
     turns: thread.turns.map(mapTurn),
+    totalTurnCount:
+      typeof threadWithTotal.totalTurnCount === 'number'
+        ? threadWithTotal.totalTurnCount
+        : null,
     rawSession: thread,
   };
 }
@@ -573,8 +578,11 @@ export class CodexRuntimeAdapter extends EventEmitter implements AgentRuntime {
     return codexRuntimeCall(() => this.manager.listLoadedThreads());
   }
 
-  async readSession(providerSessionId: string): Promise<AgentSessionDetail> {
-    return mapSession(await codexRuntimeCall(() => this.manager.readThread(providerSessionId)));
+  async readSession(
+    providerSessionId: string,
+    options: { limit?: number; beforeTurnId?: string | null } = {},
+  ): Promise<AgentSessionDetail> {
+    return mapSession(await codexRuntimeCall(() => this.manager.readThread(providerSessionId, options)));
   }
 
   async startSession(input: StartAgentSessionInput): Promise<StartAgentSessionResult> {

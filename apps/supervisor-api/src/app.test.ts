@@ -1051,9 +1051,85 @@ describe('supervisor api', () => {
     });
     expect(completedDetailResponse.json().turns.at(-1)).toMatchObject({
       status: 'completed',
+      model: 'sonnet',
+      reasoningEffort: 'medium',
+      reasoningEffortAvailable: true,
       items: expect.arrayContaining([
         expect.objectContaining({ kind: 'agentMessage', text: 'Hello from Claude' }),
       ]),
+    });
+  });
+
+  it('uses thread settings as display metadata when a Claude historical turn id differs from the live id', async () => {
+    await app.close();
+    fakeClaudeRuntime = new FakeClaudeRuntime();
+    app = buildTestApp(fakeCodexManager, { claudeRuntime: fakeClaudeRuntime });
+    await app.ready();
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspaceResponse.json().id,
+        provider: 'claude',
+        model: 'sonnet',
+        reasoningEffort: 'high',
+        approvalMode: 'guarded',
+        title: 'Claude Historical Thread'
+      }
+    });
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createResponse.json().id}/prompt`,
+      payload: {
+        prompt: 'Say hello.',
+      }
+    });
+    expect(promptResponse.statusCode).toBe(200);
+
+    const session = fakeClaudeRuntime.sessions.get('claude-session-1');
+    session.turns = [
+      {
+        providerTurnId: 'claude-turn-019e4657-bd3c-72d1-b59d-324ed8a4b1ec',
+        startedAt: '2026-05-20T17:03:35.740Z',
+        status: 'completed',
+        error: null,
+        items: [
+          {
+            id: '019e4657-bd3c-72d1-b59d-324ed8a4b1ec',
+            kind: 'userMessage',
+            text: 'Say hello.',
+          },
+          {
+            id: 'assistant-historical',
+            kind: 'agentMessage',
+            text: 'Hello from Claude history',
+          },
+        ],
+      },
+    ];
+    fakeClaudeRuntime.completeTurn('claude-session-1', 'claude-turn-1');
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createResponse.json().id}`,
+    });
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json().turns.at(-1)).toMatchObject({
+      id: 'claude-turn-019e4657-bd3c-72d1-b59d-324ed8a4b1ec',
+      startedAt: '2026-05-20T17:03:35.740Z',
+      status: 'completed',
+      model: 'sonnet',
+      reasoningEffort: 'medium',
+      reasoningEffortAvailable: true,
     });
   });
 
@@ -1193,6 +1269,7 @@ describe('supervisor api', () => {
     expect(latestDetailResponse.json().turns).toHaveLength(10);
     expect(latestDetailResponse.json().turns[0].id).toBe('turn-6');
     expect(latestDetailResponse.json().turns.at(-1).id).toBe('turn-15');
+    expect(fakeCodexManager.readThreadCallCount.get(createdThread.providerSessionId)).toBe(1);
 
     const earlierDetailResponse = await app.inject({
       method: 'GET',
@@ -1206,6 +1283,7 @@ describe('supervisor api', () => {
     expect(earlierDetailResponse.json().turns).toHaveLength(5);
     expect(earlierDetailResponse.json().turns[0].id).toBe('turn-1');
     expect(earlierDetailResponse.json().turns.at(-1).id).toBe('turn-5');
+    expect(fakeCodexManager.readThreadCallCount.get(createdThread.providerSessionId)).toBe(2);
   });
 
   it('lists export turn options newest first with prompt previews and exports selected turns as a PDF', async () => {
@@ -1354,7 +1432,7 @@ describe('supervisor api', () => {
 
     expect(latestDetailResponse.statusCode).toBe(200);
     expect(earlierDetailResponse.statusCode).toBe(200);
-    expect(fakeCodexManager.readThreadCallCount.get(createdThread.providerSessionId)).toBe(1);
+    expect(fakeCodexManager.readThreadCallCount.get(createdThread.providerSessionId)).toBe(2);
 
     remoteThread!.status = { type: 'active', activeFlags: [] };
     remoteThread!.turns = [
@@ -1386,7 +1464,7 @@ describe('supervisor api', () => {
     });
 
     expect(refreshedDetailResponse.statusCode).toBe(200);
-    expect(fakeCodexManager.readThreadCallCount.get(createdThread.providerSessionId)).toBe(2);
+    expect(fakeCodexManager.readThreadCallCount.get(createdThread.providerSessionId)).toBe(3);
     expect(refreshedDetailResponse.json().turns.at(-1).id).toBe('turn-13');
   });
 
