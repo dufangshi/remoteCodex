@@ -47,7 +47,6 @@ import type {
 } from '../../agent-runtime/src/index';
 import { AgentRuntimeError } from '../../agent-runtime/src/index';
 import {
-  askUserQuestionToolUseIds,
   assistantMessageToHistoryItems,
   buildAgentTurn,
   hiddenInitPrompt,
@@ -56,6 +55,7 @@ import {
   partialReasoningDelta,
   partialTextDelta,
   resultForToolUse,
+  suppressedClaudeToolUseIds,
   toolUseFromPartialStart,
   toolUseToHistoryItem,
   toolResultBlocks,
@@ -1156,8 +1156,12 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
           },
           status: 'running',
         });
-        addOrUpdateItem(state, item);
-        this.emitItem(state, item, 'item.started');
+        if (item) {
+          addOrUpdateItem(state, item);
+          this.emitItem(state, item, 'item.started');
+        } else {
+          state.suppressedToolUseIds.add(message.tool_use_id);
+        }
       }
       return;
     }
@@ -1302,7 +1306,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       }
 
       if (message.type === 'assistant') {
-        for (const toolUseId of askUserQuestionToolUseIds(message.message)) {
+        for (const toolUseId of suppressedClaudeToolUseIds(message.message)) {
           suppressedToolUseIds.add(toolUseId);
           current?.itemsById.delete(toolUseId);
         }

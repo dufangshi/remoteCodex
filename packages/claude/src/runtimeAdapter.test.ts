@@ -693,6 +693,165 @@ describe('ClaudeRuntimeAdapter', () => {
     });
   });
 
+  it('suppresses Claude Code plan control tool plumbing from timeline items', async () => {
+    const adapter = makeAdapter((_prompt, _options) => [
+      systemInit(),
+      {
+        type: 'assistant',
+        message: {
+          id: 'msg_plan_tools',
+          type: 'message',
+          role: 'assistant',
+          model: 'sonnet',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'toolu_search',
+              name: 'ToolSearch',
+              input: { query: 'select:EnterPlanMode', max_results: 1 },
+              caller: { type: 'direct' },
+            },
+          ],
+          stop_reason: null,
+          stop_sequence: null,
+          stop_details: null,
+          usage: {} as any,
+          container: null,
+          context_management: null,
+          diagnostics: null,
+        },
+        parent_tool_use_id: null,
+        uuid: '00000000-0000-4000-8000-000000000041' as any,
+        session_id: 'claude-session-1',
+      },
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'toolu_search',
+              content: [{ type: 'tool_reference', tool_name: 'EnterPlanMode' }],
+            },
+          ],
+        },
+        parent_tool_use_id: null,
+        tool_use_result: {
+          matches: ['EnterPlanMode'],
+          query: 'select:EnterPlanMode',
+        },
+        uuid: '00000000-0000-4000-8000-000000000042' as any,
+        session_id: 'claude-session-1',
+      } satisfies SDKMessage,
+      {
+        type: 'assistant',
+        message: {
+          id: 'msg_enter_plan',
+          type: 'message',
+          role: 'assistant',
+          model: 'sonnet',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'toolu_enter',
+              name: 'EnterPlanMode',
+              input: {},
+              caller: { type: 'direct' },
+            },
+          ],
+          stop_reason: null,
+          stop_sequence: null,
+          stop_details: null,
+          usage: {} as any,
+          container: null,
+          context_management: null,
+          diagnostics: null,
+        },
+        parent_tool_use_id: null,
+        uuid: '00000000-0000-4000-8000-000000000043' as any,
+        session_id: 'claude-session-1',
+      },
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'toolu_enter',
+              content: 'Entered plan mode.',
+            },
+          ],
+        },
+        parent_tool_use_id: null,
+        tool_use_result: { message: 'Entered plan mode.' },
+        uuid: '00000000-0000-4000-8000-000000000044' as any,
+        session_id: 'claude-session-1',
+      } satisfies SDKMessage,
+      {
+        type: 'assistant',
+        message: {
+          id: 'msg_plan',
+          type: 'message',
+          role: 'assistant',
+          model: 'sonnet',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'toolu_plan',
+              name: 'ExitPlanMode',
+              input: { plan: 'Build a calculator.' },
+              caller: { type: 'direct' },
+            },
+          ],
+          stop_reason: null,
+          stop_sequence: null,
+          stop_details: null,
+          usage: {} as any,
+          container: null,
+          context_management: null,
+          diagnostics: null,
+        },
+        parent_tool_use_id: null,
+        uuid: '00000000-0000-4000-8000-000000000045' as any,
+        session_id: 'claude-session-1',
+      },
+      result(),
+    ]);
+    const events: AgentRuntimeEvent[] = [];
+    adapter.on('event', (event) => events.push(event));
+
+    await adapter.startTurn({
+      providerSessionId: 'claude-session-1',
+      prompt: 'Plan a calculator',
+      model: 'sonnet',
+      collaborationMode: 'plan',
+      workspacePath: '/tmp/workspace',
+    });
+    await wait();
+
+    const completed = events.at(-1);
+    expect(completed).toMatchObject({ type: 'turn.completed' });
+    expect(completed && 'turn' in completed ? completed.turn.items : []).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'toolu_plan',
+          kind: 'plan',
+          text: 'Build a calculator.',
+        }),
+      ]),
+    );
+    expect(completed && 'turn' in completed ? completed.turn.items : []).toEqual(
+      expect.not.arrayContaining([
+        expect.objectContaining({ id: 'toolu_search' }),
+        expect.objectContaining({ id: 'toolu_enter' }),
+        expect.objectContaining({ text: expect.stringContaining('ToolSearch') }),
+        expect.objectContaining({ text: expect.stringContaining('EnterPlanMode') }),
+      ]),
+    );
+  });
+
   it('maps Claude AskUserQuestion tool use to a provider request', async () => {
     const adapter = makeAdapter((_prompt, _options) => [
       systemInit(),
@@ -1044,6 +1203,123 @@ describe('ClaudeRuntimeAdapter', () => {
     expect(session.turns[0]?.items).toEqual([
       expect.objectContaining({ kind: 'userMessage', text: 'Ask me something.' }),
       expect.objectContaining({ kind: 'agentMessage', text: 'Continuing.' }),
+    ]);
+  });
+
+  it('omits Claude Code plan control tool plumbing from historical turns', async () => {
+    const adapter = new ClaudeRuntimeAdapter({
+      home: '/tmp/claude-home',
+      query: (() => new FakeQuery([])) as any,
+      getSessionInfo: (async () => ({
+        sessionId: 'claude-session-1',
+        summary: 'Existing session',
+        lastModified: 1_772_000_000_000,
+        createdAt: 1_771_000_000_000,
+        cwd: '/tmp/workspace',
+      })) as any,
+      listSessions: (async () => []) as any,
+      getSessionMessages: (async () => [
+        {
+          type: 'user',
+          uuid: '019e4657-bd3c-72d1-b59d-324ed8a4b1ec',
+          session_id: 'claude-session-1',
+          message: { role: 'user', content: 'Plan a calculator.' },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'assistant',
+          uuid: 'assistant-search',
+          session_id: 'claude-session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'toolu_search',
+                name: 'ToolSearch',
+                input: { query: 'select:EnterPlanMode', max_results: 1 },
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'user',
+          uuid: 'search-result',
+          session_id: 'claude-session-1',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'toolu_search',
+                content: [{ type: 'tool_reference', tool_name: 'EnterPlanMode' }],
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'assistant',
+          uuid: 'assistant-enter-plan',
+          session_id: 'claude-session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'toolu_enter',
+                name: 'EnterPlanMode',
+                input: {},
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'user',
+          uuid: 'enter-result',
+          session_id: 'claude-session-1',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'toolu_enter',
+                content: 'Entered plan mode.',
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'assistant',
+          uuid: 'assistant-exit-plan',
+          session_id: 'claude-session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'toolu_plan',
+                name: 'ExitPlanMode',
+                input: { plan: 'Build a calculator.' },
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      ] satisfies SessionMessage[]) as any,
+    });
+
+    const session = await adapter.readSession('claude-session-1');
+    expect(session.turns[0]?.items).toEqual([
+      expect.objectContaining({ kind: 'userMessage', text: 'Plan a calculator.' }),
+      expect.objectContaining({
+        id: 'toolu_plan',
+        kind: 'plan',
+        text: 'Build a calculator.',
+      }),
     ]);
   });
 });

@@ -18,6 +18,28 @@ const CLAUDE_TOOL_LABELS: Record<string, string> = {
   TodoWrite: 'Update todos',
 };
 
+function normalizedToolName(toolName: string) {
+  return toolName.replace(/[\s_-]+/g, '').toLowerCase();
+}
+
+function isSuppressedClaudeToolName(toolName: string) {
+  const normalized = normalizedToolName(toolName);
+  return (
+    normalized === 'askuserquestion' ||
+    normalized === 'toolsearch' ||
+    normalized === 'enterplanmode'
+  );
+}
+
+function isExitPlanModeToolName(toolName: string) {
+  return normalizedToolName(toolName) === 'exitplanmode';
+}
+
+function isWebToolName(toolName: string) {
+  const normalized = normalizedToolName(toolName);
+  return normalized === 'websearch' || normalized === 'webfetch';
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -150,7 +172,11 @@ export function toolUseToHistoryItem(
     result?: unknown;
     serverName?: string | null;
   },
-): AgentHistoryItem {
+): AgentHistoryItem | null {
+  if (isSuppressedClaudeToolName(input.name)) {
+    return null;
+  }
+
   const detailParts = [
     `Tool: ${input.serverName ? `${input.serverName}/${input.name}` : input.name}`,
     '',
@@ -177,7 +203,7 @@ export function toolUseToHistoryItem(
     };
   }
 
-  if (input.name === 'ExitPlanMode') {
+  if (isExitPlanModeToolName(input.name)) {
     const plan = isRecord(input.toolInput) ? stringValue(input.toolInput.plan) : null;
     return {
       id: input.id,
@@ -204,12 +230,7 @@ export function toolUseToHistoryItem(
     };
   }
 
-  if (
-    input.name === 'WebSearch' ||
-    input.name === 'WebFetch' ||
-    input.name === 'web_search' ||
-    input.name === 'web_fetch'
-  ) {
+  if (isWebToolName(input.name)) {
     return {
       id: input.id,
       kind: 'webSearch',
@@ -270,6 +291,25 @@ export function askUserQuestionToolUseIds(message: unknown): Set<string> {
   return ids;
 }
 
+export function suppressedClaudeToolUseIds(message: unknown): Set<string> {
+  const ids = new Set<string>();
+  for (const block of contentBlocks(message)) {
+    if (!isRecord(block) || block.type !== 'tool_use') {
+      continue;
+    }
+    const id = stringValue(block.id);
+    const name = stringValue(block.name);
+    if (id && name && isSuppressedClaudeToolName(name)) {
+      ids.add(id);
+    }
+  }
+  return ids;
+}
+
+export function shouldSuppressClaudeToolUse(toolName: string) {
+  return isSuppressedClaudeToolName(toolName);
+}
+
 export function assistantMessageToHistoryItems(
   input: {
     messageId: string;
@@ -312,38 +352,47 @@ export function assistantMessageToHistoryItems(
     if (type === 'tool_use') {
       const id = stringValue(block.id) ?? `${input.messageId}:tool:${index}`;
       const name = stringValue(block.name) ?? 'Tool';
-      if (name === 'AskUserQuestion') {
+      if (isSuppressedClaudeToolName(name)) {
         continue;
       }
-      items.push(toolUseToHistoryItem({
+      const item = toolUseToHistoryItem({
         id,
         name,
         toolInput: block.input,
         status: 'running',
-      }));
+      });
+      if (item) {
+        items.push(item);
+      }
       continue;
     }
     if (type === 'mcp_tool_use') {
       const id = stringValue(block.id) ?? `${input.messageId}:mcp:${index}`;
       const name = stringValue(block.name) ?? 'MCP tool';
-      items.push(toolUseToHistoryItem({
+      const item = toolUseToHistoryItem({
         id,
         name,
         serverName: stringValue(block.server_name),
         toolInput: block.input,
         status: 'running',
-      }));
+      });
+      if (item) {
+        items.push(item);
+      }
       continue;
     }
     if (type === 'server_tool_use') {
       const id = stringValue(block.id) ?? `${input.messageId}:server:${index}`;
       const name = stringValue(block.name) ?? 'Server tool';
-      items.push(toolUseToHistoryItem({
+      const item = toolUseToHistoryItem({
         id,
         name,
         toolInput: block.input,
         status: 'running',
-      }));
+      });
+      if (item) {
+        items.push(item);
+      }
     }
   }
   return items;
@@ -440,7 +489,7 @@ export function toolUseFromPartialStart(input: {
   }
   if (block.type === 'tool_use') {
     const name = stringValue(block.name) ?? 'Tool';
-    if (name === 'AskUserQuestion') {
+    if (isSuppressedClaudeToolName(name)) {
       return null;
     }
     return toolUseToHistoryItem({
