@@ -101,6 +101,10 @@ interface SearchHistoryItem extends ThreadHistoryItemDto {
   kind: 'webSearch';
 }
 
+interface FileReadHistoryItem extends ThreadHistoryItemDto {
+  kind: 'fileRead';
+}
+
 interface ContextCompactionHistoryItem extends ThreadHistoryItemDto {
   kind: 'contextCompaction';
 }
@@ -135,6 +139,11 @@ type TimelineHistoryEntry =
       kind: 'searchGroup';
       key: string;
       items: SearchHistoryItem[];
+    }
+  | {
+      kind: 'fileReadGroup';
+      key: string;
+      items: FileReadHistoryItem[];
     };
 
 type TimelineTurn = Omit<ThreadTurnDto, 'status'> & {
@@ -170,8 +179,14 @@ function itemSurfaceClassName(kind: ThreadHistoryItemDto['kind']) {
       return 'timeline-command';
     case 'webSearch':
       return 'timeline-search';
+    case 'fileRead':
+      return 'timeline-file-read';
     case 'reasoning':
       return 'timeline-reasoning';
+    case 'agentToolCall':
+      return 'timeline-agent-tool';
+    case 'skillToolCall':
+      return 'timeline-skill-tool';
     case 'toolCall':
       return 'timeline-action';
     case 'plan':
@@ -186,7 +201,15 @@ function itemSurfaceClassName(kind: ThreadHistoryItemDto['kind']) {
 }
 
 function overlayBadgeClassName(
-  tone: 'user' | 'agent' | 'command' | 'search' | 'action',
+  tone:
+    | 'user'
+    | 'agent'
+    | 'command'
+    | 'search'
+    | 'fileRead'
+    | 'agentTool'
+    | 'skillTool'
+    | 'action',
 ) {
   switch (tone) {
     case 'user':
@@ -197,6 +220,12 @@ function overlayBadgeClassName(
       return 'timeline-overlay-badge timeline-overlay-badge-command';
     case 'search':
       return 'timeline-overlay-badge timeline-overlay-badge-search';
+    case 'fileRead':
+      return 'timeline-overlay-badge timeline-overlay-badge-file-read';
+    case 'agentTool':
+      return 'timeline-overlay-badge timeline-overlay-badge-agent-tool';
+    case 'skillTool':
+      return 'timeline-overlay-badge timeline-overlay-badge-skill-tool';
     case 'action':
       return 'timeline-overlay-badge timeline-overlay-badge-action';
   }
@@ -421,6 +450,7 @@ function isSteerTailHistoryItem(kind: ThreadHistoryItemDto['kind']) {
   return (
     kind === 'commandExecution' ||
     kind === 'webSearch' ||
+    kind === 'fileRead' ||
     kind === 'fileChange' ||
     kind === 'image' ||
     kind === 'contextCompaction'
@@ -431,6 +461,8 @@ function isSteerConsumptionHistoryItem(kind: ThreadHistoryItemDto['kind']) {
   return (
     kind === 'agentMessage' ||
     kind === 'reasoning' ||
+    kind === 'agentToolCall' ||
+    kind === 'skillToolCall' ||
     kind === 'toolCall' ||
     kind === 'plan'
   );
@@ -750,6 +782,17 @@ function groupTimelineHistoryItems(items: ThreadHistoryItemDto[]) {
   const attachedReasoningIds = new Set<string>();
   const pendingReasoningItems: Array<ThreadHistoryItemDto & { kind: 'reasoning' }> = [];
 
+  function flushPendingReasoningItems() {
+    const reasoningItems = pendingReasoningItems.splice(0);
+    for (const reasoningItem of reasoningItems) {
+      entries.push({
+        kind: 'item',
+        key: reasoningItem.id,
+        item: reasoningItem,
+      });
+    }
+  }
+
   while (index < items.length) {
     const current = items[index];
     if (!current) {
@@ -793,7 +836,8 @@ function groupTimelineHistoryItems(items: ThreadHistoryItemDto[]) {
     if (
       current.kind !== 'commandExecution' &&
       current.kind !== 'fileChange' &&
-      current.kind !== 'webSearch'
+      current.kind !== 'webSearch' &&
+      current.kind !== 'fileRead'
     ) {
       entries.push({
         kind: 'item',
@@ -839,12 +883,23 @@ function groupTimelineHistoryItems(items: ThreadHistoryItemDto[]) {
       continue;
     }
 
+    if (current.kind === 'fileRead') {
+      entries.push({
+        kind: 'fileReadGroup',
+        key: groupKey,
+        items: groupedItems as FileReadHistoryItem[],
+      });
+      continue;
+    }
+
     entries.push({
       kind: 'searchGroup',
       key: groupKey,
       items: groupedItems as SearchHistoryItem[],
     });
   }
+
+  flushPendingReasoningItems();
 
   return entries;
 }
@@ -916,6 +971,44 @@ function ToolCallIcon() {
       <path d="M9.75 4.25 12.5 7 9.75 9.75" />
       <path d="M8.9 3.5 7.1 10.5" />
       <path d="M3 12.25h10" />
+    </svg>
+  );
+}
+
+function AgentToolIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 fill-none stroke-current"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3.25" y="3" width="9.5" height="6.5" rx="2" />
+      <path d="M5.5 6.25h.01M10.5 6.25h.01" />
+      <path d="M6.25 11.25h3.5" />
+      <path d="M6 13h4" />
+      <path d="M5.25 9.5v1.75M10.75 9.5v1.75" />
+    </svg>
+  );
+}
+
+function SkillToolIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 fill-none stroke-current"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M5 3.25h6a1.5 1.5 0 0 1 1.5 1.5v6.5a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5v-6.5A1.5 1.5 0 0 1 5 3.25Z" />
+      <path d="M6.25 6.25h3.5" />
+      <path d="M6.25 8.25h2.25" />
+      <path d="M10.75 8.5v2.25" />
+      <path d="M9.62 9.62h2.26" />
     </svg>
   );
 }
@@ -1024,6 +1117,26 @@ function FileChangeIcon() {
       <path d="M9 2.75v2h2" />
       <path d="M6.2 8h3.6" />
       <path d="M6.2 10h1.7" />
+    </svg>
+  );
+}
+
+function FileReadIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 fill-none stroke-current"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M5 2.75h4l2 2v6.5a1.5 1.5 0 0 1-1.5 1.5h-4A1.5 1.5 0 0 1 4 11.25v-7A1.5 1.5 0 0 1 5.5 2.75Z" />
+      <path d="M9 2.75v2h2" />
+      <path d="M6.15 7.25h3.7" />
+      <path d="M6.15 9.25h2.8" />
+      <path d="m10.4 10.7 1.2 1.2" />
+      <circle cx="9.25" cy="9.55" r="1.45" />
     </svg>
   );
 }
@@ -2565,6 +2678,146 @@ const ToolCallItem = memo(function ToolCallItem({
   );
 });
 
+const AgentToolCallItem = memo(function AgentToolCallItem({
+  item,
+  onOpen,
+}: {
+  item: ThreadHistoryItemDto & { kind: 'agentToolCall' };
+  onOpen: (
+    item: ThreadHistoryItemDto & { kind: 'agentToolCall' },
+    title: string,
+  ) => void;
+}) {
+  const summary = summarizeInlinePreviewText(item.text);
+
+  return (
+    <div
+      className={`timeline-item-frame timeline-mobile-dense-event relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
+    >
+      <span
+        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('agentTool')}`}
+      >
+        <span className="scale-[0.78]">
+          <AgentToolIcon />
+        </span>
+      </span>
+      {isRunningHistoryStatus(item.status) && (
+        <span className="absolute left-5 top-0 inline-flex sm:hidden">
+          <RunningDots tone="emerald" />
+        </span>
+      )}
+      <div className="flex items-start gap-2.5">
+        <div className="mt-0.5 hidden shrink-0 items-center sm:flex">
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-teal-300/25 bg-teal-300/10 text-teal-100">
+            <AgentToolIcon />
+          </span>
+          {isRunningHistoryStatus(item.status) && <RunningDots tone="emerald" />}
+        </div>
+        <div className="timeline-item-inner timeline-mobile-dense-inner timeline-mobile-bubble-content relative min-w-0 w-full flex-1 rounded-[0.9rem] border px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2">
+          <button
+            type="button"
+            aria-label={item.status ? `Agent status: ${item.status}` : 'Agent status'}
+            title={item.status ?? 'Agent status'}
+            onClick={() => onOpen(item, 'Agent Details')}
+            className={`absolute right-0 top-0 inline-flex h-5 w-5 items-center justify-center rounded-bl-[0.7rem] rounded-tr-[0.9rem] border shadow-sm shadow-stone-950/25 transition sm:right-2 sm:top-2 sm:h-7 sm:w-7 sm:rounded-full ${commandStatusBadgeClassName(item.status)} hover:brightness-110`}
+          >
+            <span className="scale-[0.72] sm:scale-100">
+              <CommandStatusIcon status={item.status} />
+            </span>
+          </button>
+          <button
+            type="button"
+            aria-label="Open agent details"
+            onClick={() => onOpen(item, 'Agent Details')}
+            className="block w-full text-left"
+          >
+            <div className="timeline-mobile-dense-line flex min-w-0 items-center gap-2 text-sm leading-6">
+              <p className="timeline-primary-text min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip">
+                {summary.firstLine}
+              </p>
+              {summary.showGap ? (
+                <span className="timeline-meta-text shrink-0 text-[11px] font-medium tracking-[0.28em]">
+                  ...
+                </span>
+              ) : null}
+            </div>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+const SkillToolCallItem = memo(function SkillToolCallItem({
+  item,
+  onOpen,
+}: {
+  item: ThreadHistoryItemDto & { kind: 'skillToolCall' };
+  onOpen: (
+    item: ThreadHistoryItemDto & { kind: 'skillToolCall' },
+    title: string,
+  ) => void;
+}) {
+  const summary = summarizeInlinePreviewText(item.text);
+
+  return (
+    <div
+      className={`timeline-item-frame timeline-mobile-dense-event relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
+    >
+      <span
+        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('skillTool')}`}
+      >
+        <span className="scale-[0.78]">
+          <SkillToolIcon />
+        </span>
+      </span>
+      {isRunningHistoryStatus(item.status) && (
+        <span className="absolute left-5 top-0 inline-flex sm:hidden">
+          <RunningDots tone="sky" />
+        </span>
+      )}
+      <div className="flex items-start gap-2.5">
+        <div className="mt-0.5 hidden shrink-0 items-center sm:flex">
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-indigo-300/25 bg-indigo-300/10 text-indigo-100">
+            <SkillToolIcon />
+          </span>
+          {isRunningHistoryStatus(item.status) && <RunningDots tone="sky" />}
+        </div>
+        <div className="timeline-item-inner timeline-mobile-dense-inner timeline-mobile-bubble-content relative min-w-0 w-full flex-1 rounded-[0.9rem] border px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2">
+          <button
+            type="button"
+            aria-label={item.status ? `Skill status: ${item.status}` : 'Skill status'}
+            title={item.status ?? 'Skill status'}
+            onClick={() => onOpen(item, 'Skill Details')}
+            className={`absolute right-0 top-0 inline-flex h-5 w-5 items-center justify-center rounded-bl-[0.7rem] rounded-tr-[0.9rem] border shadow-sm shadow-stone-950/25 transition sm:right-2 sm:top-2 sm:h-7 sm:w-7 sm:rounded-full ${commandStatusBadgeClassName(item.status)} hover:brightness-110`}
+          >
+            <span className="scale-[0.72] sm:scale-100">
+              <CommandStatusIcon status={item.status} />
+            </span>
+          </button>
+          <button
+            type="button"
+            aria-label="Open skill details"
+            onClick={() => onOpen(item, 'Skill Details')}
+            className="block w-full text-left"
+          >
+            <div className="timeline-mobile-dense-line flex min-w-0 items-center gap-2 text-sm leading-6">
+              <p className="timeline-primary-text min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip">
+                {summary.firstLine}
+              </p>
+              {summary.showGap ? (
+                <span className="timeline-meta-text shrink-0 text-[11px] font-medium tracking-[0.28em]">
+                  ...
+                </span>
+              ) : null}
+            </div>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+});
+
 const CommandGroupItem = memo(function CommandGroupItem({
   items,
   expanded,
@@ -2755,6 +3008,99 @@ const SearchGroupItem = memo(function SearchGroupItem({
   );
 });
 
+const FileReadGroupItem = memo(function FileReadGroupItem({
+  items,
+  expanded,
+  onToggleExpanded,
+  onOpen,
+}: {
+  items: FileReadHistoryItem[];
+  expanded: boolean;
+  onToggleExpanded: () => void;
+  onOpen: (title: string, text: string) => void;
+}) {
+  const countLabel = items.length === 1 ? '1 file read' : `${items.length} file reads`;
+
+  return (
+    <div className="timeline-mobile-dense-event timeline-mobile-dense-file-read relative min-w-0 w-full overflow-hidden rounded-[1rem] border timeline-special-file-read px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3">
+      <span
+        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('fileRead')}`}
+      >
+        <span className="scale-[0.78]">
+          <FileReadIcon />
+        </span>
+      </span>
+      <div className="flex items-start gap-2.5">
+        <div className="mt-0.5 hidden shrink-0 items-center sm:flex">
+          <span className="relative inline-flex h-8 w-8 items-center justify-center rounded-[0.9rem] border border-cyan-300/30 bg-cyan-300/[0.14] text-cyan-100 shadow-sm shadow-stone-950/20">
+            <FileReadIcon />
+            <span className="absolute -right-1 -top-1 inline-flex min-w-[1.1rem] items-center justify-center rounded-full border border-cyan-200/35 bg-stone-950/90 px-1 text-[9px] font-semibold leading-4 text-cyan-100">
+              {items.length}
+            </span>
+          </span>
+        </div>
+        <div className="timeline-batch-inner timeline-mobile-dense-batch timeline-mobile-bubble-content min-w-0 flex-1 rounded-[0.9rem] border px-2 py-1.5 sm:rounded-xl sm:px-3 sm:py-2">
+          <button
+            type="button"
+            aria-expanded={expanded}
+            aria-label={`${expanded ? 'Collapse' : 'Expand'} ${items.length} file read entries`}
+            onClick={onToggleExpanded}
+            className="timeline-mobile-dense-toggle flex w-full min-w-0 items-center justify-between gap-3 text-left"
+          >
+            <div className="timeline-mobile-dense-summary min-w-0 flex flex-1 flex-wrap items-center gap-2 pr-1">
+              <span className="rounded-full border border-cyan-300/28 bg-cyan-300/12 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.24em] text-cyan-100">
+                Batch
+              </span>
+              <span className="rounded-full border border-stone-700/90 bg-stone-900/80 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-stone-300">
+                {countLabel}
+              </span>
+            </div>
+          </button>
+
+          {expanded && (
+            <div className="timeline-mobile-section-list mt-3 space-y-0 border-t border-cyan-300/12 pt-3 sm:space-y-2">
+              {items.map((item, index) => {
+                const previewText = item.previewText?.trim() || item.text || 'File read';
+                const summary = summarizeInlinePreviewText(previewText);
+                const detailText = item.detailText?.trim() || item.text || 'File read';
+
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    aria-label={`Open grouped file read ${index + 1}`}
+                    onClick={() => onOpen(`File Read ${index + 1}`, detailText)}
+                    className="timeline-detail-row block w-full rounded-xl border px-3 py-2 text-left transition"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full border border-cyan-300/18 bg-cyan-300/[0.07] px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-cyan-100">
+                        Read {index + 1}
+                      </span>
+                      {item.status && (
+                        <span className="timeline-meta-text text-xs">{item.status}</span>
+                      )}
+                    </div>
+                    <div className="mt-1 flex min-w-0 items-center gap-2 text-sm leading-6">
+                      <p className="timeline-primary-text min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip">
+                        {summary.firstLine}
+                      </p>
+                      {summary.showGap ? (
+                        <span className="timeline-meta-text shrink-0 text-[11px] font-medium tracking-[0.28em]">
+                          ...
+                        </span>
+                      ) : null}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+});
+
 const PlanHistoryItem = memo(function PlanHistoryItem({
   item,
   scrollRootRef,
@@ -2888,6 +3234,72 @@ const WebSearchItem = memo(function WebSearchItem({
             type="button"
             aria-label="Open full web search"
             onClick={() => onOpen('Web Search Details', detailText)}
+            className="block w-full text-left"
+          >
+            <div className="timeline-mobile-dense-line flex min-w-0 items-center gap-2 text-sm leading-6">
+              <p className="timeline-primary-text min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip">
+                {summary.firstLine}
+              </p>
+              {summary.showGap ? (
+                <span className="timeline-meta-text shrink-0 text-[11px] font-medium tracking-[0.28em]">
+                  ...
+                </span>
+              ) : null}
+            </div>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+const FileReadItem = memo(function FileReadItem({
+  item,
+  onOpen,
+}: {
+  item: ThreadHistoryItemDto & { kind: 'fileRead' };
+  onOpen: (title: string, text: string) => void;
+}) {
+  const previewText = item.previewText?.trim() || item.text || 'File read';
+  const detailText = item.detailText?.trim() || item.text || 'File read';
+  const summary = summarizeInlinePreviewText(previewText);
+
+  return (
+    <div
+      className={`timeline-item-frame timeline-mobile-dense-event timeline-mobile-dense-file-read relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
+    >
+      <span
+        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('fileRead')}`}
+      >
+        <span className="scale-[0.78]">
+          <FileReadIcon />
+        </span>
+      </span>
+      <div className="flex items-start gap-2.5">
+        <div className="mt-0.5 hidden shrink-0 items-center sm:flex">
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-cyan-300/25 bg-cyan-300/10 text-cyan-100">
+            <FileReadIcon />
+          </span>
+        </div>
+        <div className="timeline-item-inner timeline-mobile-dense-inner timeline-mobile-bubble-content relative min-w-0 w-full flex-1 rounded-[0.9rem] border px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2">
+          <button
+            type="button"
+            aria-label="Expand file read"
+            title="Expand file read"
+            onClick={() => onOpen('File Read Details', detailText)}
+            className={`absolute right-0 top-0 inline-flex h-5 w-5 items-center justify-center rounded-bl-[0.7rem] rounded-tr-[0.9rem] border shadow-sm shadow-stone-950/25 transition sm:right-2 sm:top-2 sm:h-7 sm:w-7 sm:rounded-full ${overlayBadgeClassName('action')} hover:bg-stone-800`}
+          >
+            <span className="scale-[0.72] sm:scale-100">
+              <ExpandIcon />
+            </span>
+          </button>
+          {item.status && (
+            <p className="timeline-meta-text pr-8 text-xs sm:pr-10">{item.status}</p>
+          )}
+          <button
+            type="button"
+            aria-label="Open full file read"
+            onClick={() => onOpen('File Read Details', detailText)}
             className="block w-full text-left"
           >
             <div className="timeline-mobile-dense-line flex min-w-0 items-center gap-2 text-sm leading-6">
@@ -3309,7 +3721,9 @@ const HistoryItemRow = memo(function HistoryItemRow({
     title: string,
   ) => void;
   onOpenToolCallDetail: (
-    item: ThreadHistoryItemDto & { kind: 'toolCall' },
+    item: ThreadHistoryItemDto & {
+      kind: 'toolCall' | 'agentToolCall' | 'skillToolCall';
+    },
     title: string,
   ) => void;
 }) {
@@ -3353,12 +3767,51 @@ const HistoryItemRow = memo(function HistoryItemRow({
     );
   }
 
+  if (item.kind === 'agentToolCall') {
+    return (
+      <AgentToolCallItem
+        item={
+          item as ThreadHistoryItemDto & {
+            kind: 'agentToolCall';
+          }
+        }
+        onOpen={onOpenToolCallDetail}
+      />
+    );
+  }
+
+  if (item.kind === 'skillToolCall') {
+    return (
+      <SkillToolCallItem
+        item={
+          item as ThreadHistoryItemDto & {
+            kind: 'skillToolCall';
+          }
+        }
+        onOpen={onOpenToolCallDetail}
+      />
+    );
+  }
+
   if (item.kind === 'webSearch') {
     return (
       <WebSearchItem
         item={
           item as ThreadHistoryItemDto & {
             kind: 'webSearch';
+          }
+        }
+        onOpen={onOpenExpandedText}
+      />
+    );
+  }
+
+  if (item.kind === 'fileRead') {
+    return (
+      <FileReadItem
+        item={
+          item as ThreadHistoryItemDto & {
+            kind: 'fileRead';
           }
         }
         onOpen={onOpenExpandedText}
@@ -3853,7 +4306,9 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
     title: string,
   ) => void;
   onOpenToolCallDetail: (
-    item: ThreadHistoryItemDto & { kind: 'toolCall' },
+    item: ThreadHistoryItemDto & {
+      kind: 'toolCall' | 'agentToolCall' | 'skillToolCall';
+    },
     title: string,
   ) => void;
   scrollRootRef: RefObject<HTMLDivElement | null>;
@@ -3964,6 +4419,14 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
               />
             ) : entry.kind === 'searchGroup' ? (
               <SearchGroupItem
+                key={entry.key}
+                items={entry.items}
+                expanded={expandedGroups[entry.key] ?? false}
+                onToggleExpanded={() => toggleGroupedItem(entry.key)}
+                onOpen={onOpenExpandedText}
+              />
+            ) : entry.kind === 'fileReadGroup' ? (
+              <FileReadGroupItem
                 key={entry.key}
                 items={entry.items}
                 expanded={expandedGroups[entry.key] ?? false}
@@ -4238,7 +4701,9 @@ export function ThreadTimeline({
 
   const handleOpenToolCallDetail = useCallback(
     async (
-      item: ThreadHistoryItemDto & { kind: 'toolCall' },
+      item: ThreadHistoryItemDto & {
+        kind: 'toolCall' | 'agentToolCall' | 'skillToolCall';
+      },
       fallbackTitle: string,
     ) => {
       const inlineText = item.detailText?.trim() || item.text || 'Tool call';
@@ -4585,7 +5050,6 @@ export function ThreadTimeline({
     };
   }, [
     optimisticTurn,
-    pendingRequests,
     unanchoredAnsweredNotes,
     unanchoredPendingRequests,
     visibleTurns,
@@ -4808,7 +5272,7 @@ export function ThreadTimeline({
                   ) : null}
                 </div>
               ))}
-              {optimisticTurn && (
+              {optimisticTurn && visibleTurns.every((turn) => turn.id !== optimisticTurn.id) && (
                 <>
                   {(activityNoteAnchors.beforeTurnId.get(optimisticTurn.id)?.length ?? 0) > 0 ? (
                     <div className="space-y-3 border-b border-stone-800/80 px-2.5 py-4 sm:px-6">

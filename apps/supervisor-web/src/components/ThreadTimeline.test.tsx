@@ -372,6 +372,46 @@ describe('ThreadTimeline', () => {
     expect(screen.queryByText('Reasoning')).not.toBeInTheDocument();
   });
 
+  it('renders pending live reasoning before Claude emits assistant text', async () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        liveItems={{
+          turnId: 'turn-1',
+          items: [
+            {
+              id: 'reasoning-1',
+              kind: 'reasoning',
+              text: 'I am checking the image contents.',
+              status: 'running',
+            },
+          ],
+        }}
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'inProgress',
+            error: null,
+            items: [
+              {
+                id: 'user-1',
+                kind: 'userMessage',
+                text: '图中数字是多少？',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    FakeIntersectionObserver.triggerAll();
+
+    await screen.findByText('I am checking the image contents.');
+    expect(screen.getByText('Reasoning')).toBeInTheDocument();
+    expect(screen.queryByText('Agent')).not.toBeInTheDocument();
+  });
+
   it('renders inline photo and file attachments inside user messages', () => {
     render(
       <ThreadTimeline
@@ -1228,6 +1268,123 @@ describe('ThreadTimeline', () => {
     expect(
       screen.queryByText('monorepo search tips'),
     ).not.toBeInTheDocument();
+  });
+
+  it('renders Claude file inspection items separately from web search', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'read-1',
+                kind: 'fileRead',
+                text: 'Search files: AgentRuntime in apps/supervisor-api/src',
+                previewText: 'Search files: AgentRuntime in apps/supervisor-api/src',
+                detailText: 'Tool: Grep\n\nInput:\n{"pattern":"AgentRuntime"}',
+                status: 'completed',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('button', { name: 'Open full web search' }),
+    ).not.toBeInTheDocument();
+
+    const openButton = screen.getByRole('button', { name: 'Open full file read' });
+    expect(openButton).toHaveTextContent('Search files: AgentRuntime');
+
+    fireEvent.click(openButton);
+
+    expect(
+      screen.getByRole('dialog', { name: 'File Read Details' }),
+    ).toHaveTextContent('Tool: Grep');
+  });
+
+  it('renders Claude agent tool calls as dedicated agent bubbles', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'agent-tool-1',
+                kind: 'agentToolCall',
+                text: 'Agent: Inspect backend runtime boundaries',
+                previewText: 'Agent',
+                detailText: 'Tool: Agent\n\nInput:\n{"description":"Inspect backend runtime boundaries"}',
+                status: 'completed',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('button', { name: 'Open full tool call' }),
+    ).not.toBeInTheDocument();
+
+    const openButton = screen.getByRole('button', { name: 'Open agent details' });
+    expect(openButton).toHaveTextContent('Agent: Inspect backend runtime boundaries');
+
+    fireEvent.click(openButton);
+
+    expect(
+      screen.getByRole('dialog', { name: 'Agent Details' }),
+    ).toHaveTextContent('Tool: Agent');
+  });
+
+  it('renders Claude skill tool calls as dedicated skill bubbles', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'skill-tool-1',
+                kind: 'skillToolCall',
+                text: 'Skill: update-config',
+                previewText: 'update-config',
+                detailText: 'Tool: Skill\n\nInput:\n{"skill":"update-config"}',
+                status: 'completed',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('button', { name: 'Open full tool call' }),
+    ).not.toBeInTheDocument();
+
+    const openButton = screen.getByRole('button', { name: 'Open skill details' });
+    expect(openButton).toHaveTextContent('Skill: update-config');
+
+    fireEvent.click(openButton);
+
+    expect(
+      screen.getByRole('dialog', { name: 'Skill Details' }),
+    ).toHaveTextContent('Tool: Skill');
   });
 
   it('renders context compaction items as compact dedicated cards', () => {

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs/promises';
+import path from 'node:path';
 
 import {
   getSessionInfo as sdkGetSessionInfo,
@@ -17,7 +18,9 @@ import type {
   Options as ClaudeQueryOptions,
   PermissionMode,
   Query,
+  SandboxSettings,
   SDKMessage,
+  SDKUserMessage,
   SDKSessionInfo,
   SessionMessage,
 } from '@anthropic-ai/claude-agent-sdk';
@@ -60,6 +63,7 @@ import {
   toolUseFromPartialStart,
   toolUseToHistoryItem,
   toolResultBlocks,
+  userMessageHistoryItem,
   userMessageToHistoryItem,
 } from './historyItems';
 
@@ -67,6 +71,9 @@ type ClaudeQueryFunction = typeof sdkQuery;
 type ClaudeListSessionsFunction = typeof sdkListSessions;
 type ClaudeGetSessionMessagesFunction = typeof sdkGetSessionMessages;
 type ClaudeGetSessionInfoFunction = typeof sdkGetSessionInfo;
+type ClaudePromptInput = Parameters<ClaudeQueryFunction>[0]['prompt'];
+type ClaudeMessageContent = SDKUserMessage['message']['content'];
+type ClaudeMessageContentBlock = Exclude<ClaudeMessageContent, string>[number];
 
 export interface ClaudeRuntimeAdapterOptions {
   home: string;
@@ -97,6 +104,126 @@ interface ActiveClaudeTurn {
   assistantUsage: ClaudeTokenUsageBreakdown | null;
   resultUsage: ClaudeTokenUsageBreakdown | null;
   modelContextWindow: number | null;
+}
+
+const promptPhotoTokenPattern = /\[PHOTO\s+([^\]]+)\]/g;
+
+function mimeTypeForImagePath(filePath: string) {
+  const extension = path.extname(filePath).toLowerCase();
+  switch (extension) {
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg' as const;
+    case '.png':
+      return 'image/png' as const;
+    case '.gif':
+      return 'image/gif' as const;
+    case '.webp':
+      return 'image/webp' as const;
+    default:
+      return null;
+  }
+}
+
+function resolvePromptAssetPath(assetPath: string, cwd: string | null | undefined) {
+  if (!cwd) {
+    return null;
+  }
+  const resolvedPath = path.isAbsolute(assetPath)
+    ? path.normalize(assetPath)
+    : path.resolve(cwd, assetPath);
+  const relativePath = path.relative(cwd, resolvedPath);
+  if (relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath))) {
+    return resolvedPath;
+  }
+  return null;
+}
+
+async function* singleUserMessage(content: ClaudeMessageContent): AsyncIterable<SDKUserMessage> {
+  yield {
+    type: 'user',
+    message: {
+      role: 'user',
+      content,
+    },
+    parent_tool_use_id: null,
+  };
+}
+
+async function promptWithImageBlocks(
+  prompt: string,
+  cwd: string | null | undefined,
+): Promise<ClaudePromptInput> {
+  const matches = [...prompt.matchAll(promptPhotoTokenPattern)];
+  if (matches.length === 0) {
+    return prompt;
+  }
+
+  const blocks: ClaudeMessageContentBlock[] = [];
+  let cursor = 0;
+  let includedImage = false;
+
+  for (const match of matches) {
+    const token = match[0];
+    const assetPath = match[1]?.trim() ?? '';
+    const start = match.index ?? 0;
+    const precedingText = prompt.slice(cursor, start);
+    if (precedingText) {
+      blocks.push({ type: 'text', text: precedingText });
+    }
+
+    const resolvedPath = resolvePromptAssetPath(assetPath, cwd);
+    const mediaType = resolvedPath ? mimeTypeForImagePath(resolvedPath) : null;
+    if (!resolvedPath || !mediaType) {
+      blocks.push({ type: 'text', text: token });
+      cursor = start + token.length;
+      continue;
+    }
+
+    try {
+      const data = await fs.readFile(resolvedPath, 'base64');
+      blocks.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: mediaType,
+          data,
+        },
+      });
+      includedImage = true;
+    } catch {
+      blocks.push({ type: 'text', text: token });
+    }
+
+    cursor = start + token.length;
+  }
+
+  const trailingText = prompt.slice(cursor);
+  if (trailingText) {
+    blocks.push({ type: 'text', text: trailingText });
+  }
+
+  if (!includedImage) {
+    return prompt;
+  }
+
+  return singleUserMessage(blocks);
+}
+
+function mergeActiveTranscriptItems(
+  transcriptItems: AgentHistoryItem[],
+  activeItems: AgentHistoryItem[],
+) {
+  const mergedItems = [...transcriptItems];
+  const itemIds = new Set(mergedItems.map((item) => item.id));
+  for (const item of activeItems) {
+    if (item.kind === 'userMessage' || itemIds.has(item.id)) {
+      continue;
+    }
+    mergedItems.push(item);
+    itemIds.add(item.id);
+  }
+  return mergedItems;
 }
 
 interface ClaudeTokenUsageBreakdown {
@@ -130,7 +257,7 @@ export const claudeCapabilities: AgentProviderCapabilities = {
   controls: {
     planMode: true,
     permissionRequests: false,
-    sandboxMode: false,
+    sandboxMode: true,
     performanceMode: false,
     goals: false,
   },
@@ -291,18 +418,61 @@ function displayClaudeModel(
 function permissionModeForInput(
   input: Pick<StartAgentSessionInput, 'approvalMode'> & {
     collaborationMode?: StartAgentTurnInput['collaborationMode'];
+    sandboxMode?: StartAgentTurnInput['sandboxMode'];
   },
 ): { permissionMode: PermissionMode; allowDangerouslySkipPermissions?: boolean } {
   if (input.collaborationMode === 'plan') {
     return { permissionMode: 'plan' };
   }
-  if (input.approvalMode === 'yolo') {
+  if (input.approvalMode === 'yolo' || input.sandboxMode === 'danger-full-access') {
     return {
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
     };
   }
-  return { permissionMode: 'dontAsk' };
+  if (input.sandboxMode === 'workspace-write') {
+    return { permissionMode: 'acceptEdits' };
+  }
+  return { permissionMode: 'default' };
+}
+
+function sandboxSettingsForInput(
+  input: {
+    cwd?: string | null | undefined;
+    sandboxMode?: StartAgentTurnInput['sandboxMode'];
+  },
+): SandboxSettings | undefined {
+  if (!input.sandboxMode || input.sandboxMode === 'danger-full-access') {
+    return undefined;
+  }
+
+  if (input.sandboxMode === 'read-only') {
+    return {
+      enabled: true,
+      autoAllowBashIfSandboxed: true,
+      allowUnsandboxedCommands: false,
+      ...(input.cwd
+        ? {
+            filesystem: {
+              denyWrite: [input.cwd],
+            },
+          }
+        : {}),
+    };
+  }
+
+  return {
+    enabled: true,
+    autoAllowBashIfSandboxed: true,
+    allowUnsandboxedCommands: false,
+    ...(input.cwd
+      ? {
+          filesystem: {
+            allowWrite: [input.cwd],
+          },
+        }
+      : {}),
+  };
 }
 
 function errorMessage(error: unknown) {
@@ -643,6 +813,7 @@ function queryOptionsForRuntime(
     resume?: string | null | undefined;
     approvalMode: StartAgentSessionInput['approvalMode'];
     collaborationMode?: StartAgentTurnInput['collaborationMode'] | undefined;
+    sandboxMode?: StartAgentTurnInput['sandboxMode'] | undefined;
     includePartialMessages?: boolean | undefined;
     tools?: ClaudeQueryOptions['tools'] | undefined;
     maxTurns?: number | undefined;
@@ -652,6 +823,10 @@ function queryOptionsForRuntime(
   const options: ClaudeQueryOptions = {
     includeHookEvents: false,
     permissionMode: permission.permissionMode,
+    thinking: {
+      type: 'adaptive',
+      display: 'summarized',
+    },
     env: {
       ...process.env,
       CLAUDE_CONFIG_DIR: input.home,
@@ -661,6 +836,10 @@ function queryOptionsForRuntime(
   };
   if (input.cwd) {
     options.cwd = input.cwd;
+  }
+  const sandbox = sandboxSettingsForInput(input);
+  if (sandbox) {
+    options.sandbox = sandbox;
   }
   if (input.model) {
     const model = normalizeClaudeModelForQuery(input.model);
@@ -729,6 +908,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
   private readonly sessionCwds = new Map<string, string>();
   private readonly sessionModels = new Map<string, string | null>();
   private readonly sessionApprovalModes = new Map<string, StartAgentSessionInput['approvalMode']>();
+  private readonly liveUserPrompts = new Map<string, Map<string, string>>();
   private readonly clientApp: string;
 
   constructor(private readonly options: ClaudeRuntimeAdapterOptions) {
@@ -835,10 +1015,15 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
           rawSession: null,
         };
 
+    const turns = this.sessionMessagesToTurns(messages);
+    const activeTurn = [...this.activeTurns.values()].find(
+      (turn) => turn.providerSessionId === providerSessionId,
+    );
+
     return {
       ...summary,
       cwd: summary.cwd || this.sessionCwds.get(providerSessionId) || '',
-      turns: this.sessionMessagesToTurns(messages),
+      turns: this.reconcileActiveTranscriptTurn(providerSessionId, turns, activeTurn),
     };
   }
 
@@ -853,6 +1038,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
         cwd: input.cwd,
         model: input.model,
         approvalMode: input.approvalMode,
+        sandboxMode: input.sandboxMode,
         includePartialMessages: false,
         tools: [],
         maxTurns: 1,
@@ -936,12 +1122,14 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
   }
 
   async startTurn(input: StartAgentTurnInput): Promise<AgentTurn> {
-    const providerTurnId = randomUUID();
+    const providerTurnId = input.displayTurnId ?? randomUUID();
+    const runtimeTurnId = providerTurnId === input.displayTurnId ? randomUUID() : providerTurnId;
     const startedAt = new Date().toISOString();
     const cwd = input.workspacePath ?? this.sessionCwds.get(input.providerSessionId) ?? undefined;
     const approvalMode = this.sessionApprovalModes.get(input.providerSessionId) ?? 'guarded';
+    const queryPrompt = await promptWithImageBlocks(input.prompt, cwd);
     const query = this.queryFactory({
-      prompt: input.prompt,
+      prompt: queryPrompt,
       options: queryOptionsForRuntime({
         home: this.options.home,
         command: this.options.command,
@@ -952,6 +1140,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
         resume: input.providerSessionId,
         approvalMode,
         collaborationMode: input.collaborationMode,
+        sandboxMode: input.sandboxMode,
         includePartialMessages: true,
         tools: { type: 'preset', preset: 'claude_code' },
       }),
@@ -977,7 +1166,16 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       modelContextWindow: null,
     };
     this.knownSessionIds.add(input.providerSessionId);
+    let sessionPrompts = this.liveUserPrompts.get(input.providerSessionId);
+    if (!sessionPrompts) {
+      sessionPrompts = new Map();
+      this.liveUserPrompts.set(input.providerSessionId, sessionPrompts);
+    }
+    sessionPrompts.set(providerTurnId, input.prompt);
     this.activeTurns.set(providerTurnId, state);
+    if (runtimeTurnId !== providerTurnId) {
+      this.activeTurns.set(runtimeTurnId, state);
+    }
     this.emitRuntimeEvent({
       type: 'turn.started',
       provider: 'claude',
@@ -1017,13 +1215,74 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     }
     state.query.close();
     state.completed = true;
-    this.activeTurns.delete(state.providerTurnId);
+    this.deleteActiveTurn(state);
     this.knownSessionIds.add(state.providerSessionId);
     return buildAgentTurn({
       providerTurnId: state.providerTurnId,
       startedAt: state.startedAt,
       status: 'interrupted',
       items: orderedItems(state),
+    });
+  }
+
+  private deleteActiveTurn(state: ActiveClaudeTurn) {
+    for (const [turnId, active] of this.activeTurns.entries()) {
+      if (active === state || turnId === state.providerTurnId) {
+        this.activeTurns.delete(turnId);
+      }
+    }
+    const sessionPrompts = this.liveUserPrompts.get(state.providerSessionId);
+    sessionPrompts?.delete(state.providerTurnId);
+    if (sessionPrompts?.size === 0) {
+      this.liveUserPrompts.delete(state.providerSessionId);
+    }
+  }
+
+  private reconcileActiveTranscriptTurn(
+    providerSessionId: string,
+    turns: AgentTurn[],
+    activeTurn: ActiveClaudeTurn | undefined,
+  ) {
+    if (!activeTurn || turns.length === 0) {
+      return turns;
+    }
+
+    const prompt = this.liveUserPrompts
+      .get(providerSessionId)
+      ?.get(activeTurn.providerTurnId);
+    if (!prompt) {
+      return turns;
+    }
+
+    const activeUserItem = userMessageHistoryItem(`${activeTurn.providerTurnId}:user`, prompt);
+    const activeItems = [...activeTurn.itemOrder]
+      .map((itemId) => activeTurn.items.get(itemId))
+      .filter((item): item is AgentHistoryItem => Boolean(item));
+    const transcriptTurnIndex = turns.findLastIndex(
+      (turn) =>
+        turn.status === 'completed' &&
+        turn.items.some((item) => item.kind === 'userMessage') &&
+        !turn.items.some((item) => item.kind === 'agentMessage'),
+    );
+
+    if (transcriptTurnIndex < 0) {
+      return turns;
+    }
+
+    return turns.map((turn, index) => {
+      if (index !== transcriptTurnIndex) {
+        return turn;
+      }
+
+      return buildAgentTurn({
+        providerTurnId: activeTurn.providerTurnId,
+        startedAt: activeTurn.startedAt,
+        status: 'inProgress',
+        items: mergeActiveTranscriptItems(
+          [activeUserItem, ...turn.items.filter((item) => item.kind !== 'userMessage')],
+          activeItems,
+        ),
+      });
     });
   }
 
@@ -1069,7 +1328,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
         const status = queryResultStatus(message);
         if (status) {
           state.completed = true;
-          this.activeTurns.delete(state.providerTurnId);
+          this.deleteActiveTurn(state);
           this.emitUsage(state);
           this.emitRuntimeEvent({
             type: 'turn.completed',
@@ -1089,7 +1348,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
 
       if (!state.completed) {
         state.completed = true;
-        this.activeTurns.delete(state.providerTurnId);
+        this.deleteActiveTurn(state);
         this.emitUsage(state);
         this.emitRuntimeEvent({
           type: 'turn.completed',
@@ -1105,7 +1364,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
         });
       }
     } catch (error) {
-      this.activeTurns.delete(state.providerTurnId);
+      this.deleteActiveTurn(state);
       if (state.interrupted) {
         return;
       }

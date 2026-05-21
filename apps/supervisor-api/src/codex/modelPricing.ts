@@ -183,20 +183,41 @@ export function pricingTierForFastMode(fastMode: boolean): PricingTierKey {
   return fastMode ? 'fast' : 'standard';
 }
 
-export function supportsFastMode(model: string | null | undefined) {
-  if (!model) {
-    return false;
-  }
-
-  return getPricingConfig().models[model]?.supportsFastMode === true;
-}
-
-export function contextWindowForModel(model: string | null | undefined) {
-  if (!model) {
+function pricingModelKeyForModel(model: string | null | undefined) {
+  const modelKey = model?.trim();
+  if (!modelKey) {
     return null;
   }
 
-  const contextWindow = getPricingConfig().models[model]?.contextWindowTokens;
+  const models = getPricingConfig().models;
+  if (models[modelKey]) {
+    return modelKey;
+  }
+
+  const claudeDateSuffixMatch = modelKey.match(/^(claude-[a-z]+-\d+(?:-\d+)?)-20\d{6}$/);
+  if (claudeDateSuffixMatch?.[1] && models[claudeDateSuffixMatch[1]]) {
+    return claudeDateSuffixMatch[1];
+  }
+
+  return modelKey;
+}
+
+export function supportsFastMode(model: string | null | undefined) {
+  const pricingModelKey = pricingModelKeyForModel(model);
+  if (!pricingModelKey) {
+    return false;
+  }
+
+  return getPricingConfig().models[pricingModelKey]?.supportsFastMode === true;
+}
+
+export function contextWindowForModel(model: string | null | undefined) {
+  const pricingModelKey = pricingModelKeyForModel(model);
+  if (!pricingModelKey) {
+    return null;
+  }
+
+  const contextWindow = getPricingConfig().models[pricingModelKey]?.contextWindowTokens;
   return typeof contextWindow === 'number' && contextWindow > 0
     ? contextWindow
     : null;
@@ -206,7 +227,7 @@ export function buildTurnPricingSnapshot(
   model: string | null | undefined,
   fastMode: boolean,
 ): TurnPricingSnapshot | null {
-  const pricingModelKey = model?.trim();
+  const pricingModelKey = pricingModelKeyForModel(model);
   if (!pricingModelKey) {
     return null;
   }
@@ -231,7 +252,7 @@ export function estimateTurnPrice(
     return null;
   }
 
-  const pricingModelKey = snapshot?.pricingModelKey?.trim();
+  const pricingModelKey = pricingModelKeyForModel(snapshot?.pricingModelKey);
   if (!pricingModelKey) {
     return null;
   }

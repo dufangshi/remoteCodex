@@ -4,6 +4,7 @@ import type {
 } from '../../agent-runtime/src/index';
 
 const CLAUDE_TOOL_LABELS: Record<string, string> = {
+  Agent: 'Agent',
   Bash: 'Bash',
   Edit: 'Edit file',
   MultiEdit: 'Edit files',
@@ -15,6 +16,11 @@ const CLAUDE_TOOL_LABELS: Record<string, string> = {
   LS: 'List files',
   WebSearch: 'Web search',
   WebFetch: 'Web fetch',
+  Skill: 'Skill',
+  Task: 'Agent',
+  ToolSearch: 'Tool search',
+  EnterPlanMode: 'Enter plan mode',
+  ExitPlanMode: 'Exit plan mode',
   TodoWrite: 'Update todos',
 };
 const HIDDEN_ASK_USER_QUESTION_CONTINUATION_PREFIX =
@@ -43,6 +49,25 @@ function isExitPlanModeToolName(toolName: string) {
 function isWebToolName(toolName: string) {
   const normalized = normalizedToolName(toolName);
   return normalized === 'websearch' || normalized === 'webfetch';
+}
+
+function isFileInspectionToolName(toolName: string) {
+  const normalized = normalizedToolName(toolName);
+  return (
+    normalized === 'read' ||
+    normalized === 'grep' ||
+    normalized === 'glob' ||
+    normalized === 'ls'
+  );
+}
+
+function isAgentToolName(toolName: string) {
+  const normalized = normalizedToolName(toolName);
+  return normalized === 'agent' || normalized === 'task';
+}
+
+function isSkillToolName(toolName: string) {
+  return normalizedToolName(toolName) === 'skill';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -103,19 +128,37 @@ function summarizeToolInput(input: unknown) {
     return compactJson(input);
   }
 
+  const description = stringValue(input.description);
+  if (description) {
+    return description;
+  }
+
   const command = commandFromInput(input);
   if (command) {
     return command;
   }
 
   const filePath = pathFromInput(input);
+  const pattern = stringValue(input.pattern);
+  if (filePath && pattern) {
+    return `${pattern} in ${filePath}`;
+  }
+  if (pattern) {
+    return pattern;
+  }
   if (filePath) {
     return filePath;
   }
 
-  const query = stringValue(input.query) ?? stringValue(input.url);
+  const query = stringValue(input.query) ?? stringValue(input.url) ?? stringValue(input.prompt);
   if (query) {
     return query;
+  }
+
+  const skill = stringValue(input.skill);
+  if (skill) {
+    const args = stringValue(input.args);
+    return args ? `${skill}: ${args}` : skill;
   }
 
   return compactJson(input);
@@ -178,6 +221,14 @@ export function userMessageToHistoryItem(id: string, message: unknown): AgentHis
   };
 }
 
+export function userMessageHistoryItem(id: string, text: string): AgentHistoryItem {
+  return {
+    id,
+    kind: 'userMessage',
+    text,
+  };
+}
+
 export function toolUseToHistoryItem(
   input: {
     id: string;
@@ -226,7 +277,7 @@ export function toolUseToHistoryItem(
       text: plan ?? summary ?? 'Plan ready for review.',
       previewText: 'Plan ready',
       detailText: detailParts.join('\n'),
-      status,
+      status: input.status ?? 'completed',
     };
   }
 
@@ -249,8 +300,48 @@ export function toolUseToHistoryItem(
     return {
       id: input.id,
       kind: 'webSearch',
-      text: summary || displayName,
-      previewText: summary || displayName,
+      text: summary ? `${displayName}: ${summary}` : displayName,
+      previewText: summary ? `${displayName}: ${summary}` : displayName,
+      detailText: detailParts.join('\n'),
+      status,
+    };
+  }
+
+  if (isFileInspectionToolName(input.name)) {
+    return {
+      id: input.id,
+      kind: 'fileRead',
+      text: summary ? `${displayName}: ${summary}` : displayName,
+      previewText: summary ? `${displayName}: ${summary}` : displayName,
+      detailText: detailParts.join('\n'),
+      status,
+    };
+  }
+
+  if (isAgentToolName(input.name)) {
+    const summaryText = summary || displayName;
+    return {
+      id: input.id,
+      kind: 'agentToolCall',
+      text: summaryText === displayName ? displayName : `${displayName}: ${summaryText}`,
+      previewText: displayName,
+      detailText: detailParts.join('\n'),
+      status,
+    };
+  }
+
+  if (isSkillToolName(input.name)) {
+    const skill = isRecord(input.toolInput) ? stringValue(input.toolInput.skill) : null;
+    const summaryText = skill
+      ? `Skill: ${skill}`
+      : summary
+        ? `${displayName}: ${summary}`
+        : displayName;
+    return {
+      id: input.id,
+      kind: 'skillToolCall',
+      text: summaryText,
+      previewText: skill ?? displayName,
       detailText: detailParts.join('\n'),
       status,
     };
@@ -547,17 +638,15 @@ export function resultForToolUse(
   if (input.previous) {
     if (input.previous.kind === 'plan') {
       const plan = isRecord(input.result) ? stringValue(input.result.plan) : null;
-      return {
+      const nextItem: AgentHistoryItem = {
         ...input.previous,
         text: plan ?? input.previous.text,
-        detailText: [
-          input.previous.detailText?.trim() || input.previous.text,
-          '',
-          'Result:',
-          compactJson(input.result),
-        ].join('\n'),
         status: 'completed',
       };
+      if (input.previous.detailText !== undefined) {
+        nextItem.detailText = input.previous.detailText;
+      }
+      return nextItem;
     }
 
     return {

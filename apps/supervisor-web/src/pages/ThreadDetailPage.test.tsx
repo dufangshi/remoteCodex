@@ -266,7 +266,7 @@ const claudeBackendResponse = {
     controls: {
       planMode: false,
       permissionRequests: false,
-      sandboxMode: false,
+      sandboxMode: true,
       performanceMode: false,
       goals: false,
     },
@@ -697,9 +697,12 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Plan' })).not.toBeInTheDocument();
-      expect(screen.queryByText('Sandbox Mode')).not.toBeInTheDocument();
+      expect(screen.getByText('Settings')).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /\/fast/i })).not.toBeInTheDocument();
     });
+
+    fireEvent.click(screen.getByText('Settings').closest('button')!);
+    expect(screen.getByText('Sandbox Mode')).toBeInTheDocument();
   });
 
   it('opens transcript export selection and starts a native PDF download', async () => {
@@ -2461,6 +2464,167 @@ describe('ThreadDetailPage', () => {
 
     expect(screen.getAllByText(prompt)).toHaveLength(1);
     expect(screen.queryByLabelText('Running')).not.toBeInTheDocument();
+  });
+
+  it('does not render a duplicate optimistic turn once the live provider turn is materialized', async () => {
+    const prompt = 'What number is in the screenshot? [PHOTO ./.temp/threads/thread-1/image.png]';
+    let detailRequestCount = 0;
+
+    vi.stubGlobal(
+      'fetch',
+      withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+
+        if (url.includes('/api/agent-runtimes/claude/status')) {
+          return okJsonResponse(claudeBackendResponse);
+        }
+
+        if (url.includes('/api/agent-runtimes/claude/models')) {
+          return okJsonResponse(claudeModelOptionsResponse);
+        }
+
+        if (url.endsWith('/api/threads/thread-1/prompt') && init?.method === 'POST') {
+          return okJsonResponse({
+            id: 'thread-1',
+            workspaceId: 'workspace-1',
+            provider: 'claude',
+            providerSessionId: 'claude-session-1',
+            source: 'supervisor',
+            title: 'Claude Thread',
+            model: 'sonnet',
+            reasoningEffort: 'medium',
+            collaborationMode: 'default',
+            approvalMode: 'yolo',
+            sandboxMode: 'danger-full-access',
+            status: 'running',
+            summaryText: prompt,
+            lastError: null,
+            activeTurnId: 'claude-turn-1',
+            isLoaded: true,
+            isPinned: false,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            lastTurnStartedAt: new Date().toISOString(),
+            lastTurnCompletedAt: null,
+          });
+        }
+
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
+          detailRequestCount += 1;
+          const hasLiveTurn = detailRequestCount > 1;
+          return okJsonResponse({
+            thread: {
+              id: 'thread-1',
+              workspaceId: 'workspace-1',
+              provider: 'claude',
+              providerSessionId: 'claude-session-1',
+              source: 'supervisor',
+              title: 'Claude Thread',
+              model: 'sonnet',
+              reasoningEffort: 'medium',
+              collaborationMode: 'default',
+              approvalMode: 'yolo',
+              sandboxMode: 'danger-full-access',
+              status: hasLiveTurn ? 'running' : 'idle',
+              summaryText: hasLiveTurn ? prompt : 'Preview',
+              lastError: null,
+              activeTurnId: hasLiveTurn ? 'claude-turn-1' : null,
+              isLoaded: true,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: hasLiveTurn ? new Date().toISOString() : null,
+              lastTurnCompletedAt: null,
+            },
+            workspace: {
+              id: 'workspace-1',
+              hostId: 'host-1',
+              label: 'Demo Workspace',
+              absPath: '/tmp/demo',
+              isFavorite: false,
+              createdAt: new Date().toISOString(),
+              lastOpenedAt: null,
+            },
+            workspacePathStatus: 'present',
+            pendingRequests: [],
+            turns: hasLiveTurn
+              ? [
+                  {
+                    id: 'claude-turn-1',
+                    startedAt: new Date().toISOString(),
+                    status: 'inProgress',
+                    error: null,
+                    items: [
+                      {
+                        id: 'claude-turn-1:user',
+                        kind: 'userMessage',
+                        text: prompt,
+                      },
+                      {
+                        id: 'assistant-live-1',
+                        kind: 'agentMessage',
+                        text: 'It looks like 9.',
+                      },
+                    ],
+                  },
+                ]
+              : [
+                  {
+                    id: 'turn-0',
+                    startedAt: new Date().toISOString(),
+                    status: 'completed',
+                    error: null,
+                    items: [
+                      {
+                        id: 'previous-user',
+                        kind: 'userMessage',
+                        text: 'hello',
+                      },
+                    ],
+                  },
+                ],
+          });
+        }
+
+        if (url.endsWith('/api/threads')) {
+          return okJsonResponse([]);
+        }
+
+        return Promise.reject(new Error(`Unexpected request: ${url}`));
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Claude Thread').length).toBeGreaterThan(0);
+    });
+
+    const editor = screen.getByLabelText('Prompt');
+    setPromptValue(editor, prompt);
+    fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
+    emitSocketMessage(FakeWebSocket.instances[0]!, {
+      type: 'thread.turn.started',
+      threadId: 'thread-1',
+      timestamp: new Date().toISOString(),
+      payload: {
+        turnId: 'claude-turn-1',
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('It looks like 9.')).toBeInTheDocument();
+    });
+
+    expect(screen.getAllByText(/What number is in the screenshot/)).toHaveLength(1);
+    expect(screen.getByText('Turn 2')).toBeInTheDocument();
+    expect(screen.queryByText('Turn 3')).not.toBeInTheDocument();
   });
 
   it('shows a steering bubble for prompts sent while the current turn is running', async () => {

@@ -567,34 +567,36 @@ function formatModelContextTitle(
   ].join(' · ');
 }
 
-function ContextRingFrame({
+function ContextProgressBar({
   contextUsage,
 }: {
   contextUsage: ThreadContextUsageDto | null | undefined;
 }) {
   const availability = contextUsage?.availability ?? 'unavailable';
   const percent = clampPercent(contextUsage?.remainingPercent);
-  const progressPercent = availability === 'available' ? percent : 100;
-  const progressColor =
-    availability !== 'available'
-      ? 'rgba(120,113,108,0.55)'
-      : percent <= 20
-        ? 'rgba(251,113,133,0.95)'
-        : percent <= 40
-          ? 'rgba(252,211,77,0.94)'
-          : 'rgba(125,211,252,0.95)';
+
+  if (availability !== 'available') return null;
+
+  const fillColor =
+    percent <= 20
+      ? 'rgba(251,113,133,0.90)'
+      : percent <= 40
+        ? 'rgba(252,211,77,0.85)'
+        : 'rgba(125,211,252,0.80)';
 
   return (
     <span
       aria-hidden="true"
-      className="thread-context-progress-frame pointer-events-none absolute inset-0"
-      style={
-        {
-          '--context-ring-progress': `${progressPercent}%`,
-          '--context-ring-color': progressColor,
-        } as CSSProperties
-      }
-    />
+      className="thread-context-progress-track pointer-events-none mt-0.5 block"
+    >
+      <span
+        className="thread-context-progress-fill block"
+        style={{
+          width: `${percent}%`,
+          backgroundColor: fillColor,
+        }}
+      />
+    </span>
   );
 }
 
@@ -3538,11 +3540,11 @@ export function ThreadComposer({
                   }
                   className="thread-composer-inline-toggle relative inline-flex min-w-0 max-w-[8.75rem] items-center overflow-hidden rounded-full px-2.5 py-1 text-left text-stone-300 transition disabled:cursor-not-allowed disabled:text-stone-600 sm:max-w-[11rem]"
                 >
-                  {model ? <ContextRingFrame contextUsage={contextUsage} /> : null}
                   <span className="relative z-[1] block min-w-0 truncate whitespace-nowrap [direction:rtl]">
                     {model ?? 'Select model'}
                   </span>
                 </button>
+                {model ? <ContextProgressBar contextUsage={contextUsage} /> : null}
                 {openMenu === 'model' && (
                   <div
                     data-composer-menu-surface="true"

@@ -7,6 +7,7 @@ import type {
 
 const DEFERRED_COMMAND_DETAIL_TITLE = 'Command Output';
 const DEFERRED_TOOL_DETAIL_TITLE = 'Tool Call Details';
+const DEFERRED_AGENT_TOOL_DETAIL_TITLE = 'Agent Details';
 
 export type TurnItemOrderSnapshot = Map<string, Map<string, number>>;
 
@@ -53,20 +54,25 @@ function deferCommandHistoryItem(
 }
 
 function deferToolCallHistoryItem(
-  item: ThreadHistoryItemDto & { kind: 'toolCall' },
+  item: ThreadHistoryItemDto & { kind: 'toolCall' | 'agentToolCall' | 'skillToolCall' },
   deferredDetails: Map<string, ThreadHistoryItemDetailDto>,
 ): ThreadHistoryItemDto {
   const fullText = item.detailText?.trim() || item.text || 'Tool call';
   deferredDetails.set(item.id, {
     id: item.id,
     kind: item.kind,
-    title: DEFERRED_TOOL_DETAIL_TITLE,
+    title:
+      item.kind === 'agentToolCall'
+        ? DEFERRED_AGENT_TOOL_DETAIL_TITLE
+        : item.kind === 'skillToolCall'
+          ? 'Skill Details'
+        : DEFERRED_TOOL_DETAIL_TITLE,
     text: fullText,
   });
 
   return {
     ...item,
-    text: summarizeText(fullText, 'Tool call'),
+    text: summarizeText(item.text, 'Tool call'),
     detailText: null,
     hasDeferredDetail: true,
   };
@@ -85,8 +91,12 @@ export function deferLargeHistoryItemDetails(
             deferredDetails,
           )
         : item.kind === 'toolCall'
+          || item.kind === 'agentToolCall'
+          || item.kind === 'skillToolCall'
           ? deferToolCallHistoryItem(
-              item as ThreadHistoryItemDto & { kind: 'toolCall' },
+              item as ThreadHistoryItemDto & {
+                kind: 'toolCall' | 'agentToolCall' | 'skillToolCall';
+              },
               deferredDetails,
             )
         : item,
@@ -99,7 +109,10 @@ export function shouldPersistLiveHistoryItem(item: ThreadHistoryItemDto) {
     item.kind === 'agentMessage' ||
     item.kind === 'commandExecution' ||
     item.kind === 'fileChange' ||
+    item.kind === 'fileRead' ||
     item.kind === 'hook' ||
+    item.kind === 'agentToolCall' ||
+    item.kind === 'skillToolCall' ||
     item.kind === 'toolCall' ||
     item.kind === 'webSearch'
   );
@@ -326,7 +339,12 @@ export function mergePersistedHistoryItemsIntoTurns(
         changed = true;
       }
 
-      if (persistedItem.kind === 'commandExecution' || persistedItem.kind === 'toolCall') {
+      if (
+        persistedItem.kind === 'commandExecution' ||
+        persistedItem.kind === 'toolCall' ||
+        persistedItem.kind === 'agentToolCall' ||
+        persistedItem.kind === 'skillToolCall'
+      ) {
         const existingText = item.detailText?.trim() || item.text.trim();
         const persistedText = persistedItem.detailText?.trim() || persistedItem.text.trim();
         if (persistedText.length > existingText.length) {
@@ -337,7 +355,9 @@ export function mergePersistedHistoryItemsIntoTurns(
                 deferredDetails,
               )
             : deferToolCallHistoryItem(
-                persistedItem as ThreadHistoryItemDto & { kind: 'toolCall' },
+                persistedItem as ThreadHistoryItemDto & {
+                  kind: 'toolCall' | 'agentToolCall' | 'skillToolCall';
+                },
                 deferredDetails,
               );
         }
@@ -356,8 +376,12 @@ export function mergePersistedHistoryItemsIntoTurns(
               deferredDetails,
             )
           : item.kind === 'toolCall'
+            || item.kind === 'agentToolCall'
+            || item.kind === 'skillToolCall'
             ? deferToolCallHistoryItem(
-                item as ThreadHistoryItemDto & { kind: 'toolCall' },
+                item as ThreadHistoryItemDto & {
+                  kind: 'toolCall' | 'agentToolCall' | 'skillToolCall';
+                },
                 deferredDetails,
               )
             : item,

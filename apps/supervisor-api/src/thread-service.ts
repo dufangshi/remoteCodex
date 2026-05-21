@@ -25,11 +25,13 @@ import {
   deleteThreadForkRecordsByForkedThreadId,
   deleteThreadForkRecordsBySourceThreadId,
   deleteThreadGoalRecordsByThreadId,
+  deleteThreadHistoryItemRecordsByThreadAndTurnId,
   deleteThreadHistoryItemRecordsByThreadId,
   deleteNotificationsByThreadId,
   deleteThreadPendingSteerRecordById,
   deleteThreadPendingSteerRecordsByThreadId,
   deleteThreadRecord,
+  deleteThreadTurnMetadataByThreadAndTurnId,
   deleteThreadTurnMetadataByThreadId,
   deleteViewerSessionsByThreadId,
   getThreadTurnMetadataByThreadAndTurnId,
@@ -197,6 +199,11 @@ interface ThreadTurnMetadataRecord {
   pricingTierKey: ThreadTurnPricingTierDto | null;
   tokenUsageJson: string | null;
   createdAt?: string | null;
+}
+
+interface RuntimeDisplayTurnMapping {
+  runtimeTurnId: string;
+  displayTurnId: string;
 }
 
 function toIsoFromEpoch(value: number | null | undefined) {
@@ -946,6 +953,44 @@ function latestThreadTurnMetadata(
     )[0];
 }
 
+function turnSortTimestamp(turn: ThreadTurnDto) {
+  return turn.startedAt ?? '';
+}
+
+function resolveTurnMetadataByVisibleTurnId(
+  turns: ThreadTurnDto[],
+  metadataById: Map<string, ThreadTurnMetadataRecord>,
+) {
+  const resolved = new Map(metadataById);
+  const visibleTurnIds = new Set(turns.map((turn) => turn.id));
+  const unmatchedTurns = turns.filter((turn) => !metadataById.has(turn.id));
+  if (unmatchedTurns.length === 0) {
+    return resolved;
+  }
+
+  const unmatchedMetadata = [...metadataById.entries()]
+    .filter(([turnId]) => !visibleTurnIds.has(turnId))
+    .sort((left, right) =>
+      (left[1].createdAt ?? '').localeCompare(right[1].createdAt ?? ''),
+    );
+  if (unmatchedMetadata.length === 0) {
+    return resolved;
+  }
+
+  const orderedUnmatchedTurns = [...unmatchedTurns].sort((left, right) =>
+    turnSortTimestamp(left).localeCompare(turnSortTimestamp(right)),
+  );
+  const pairCount = Math.min(orderedUnmatchedTurns.length, unmatchedMetadata.length);
+
+  for (let index = 0; index < pairCount; index += 1) {
+    const turn = orderedUnmatchedTurns[index]!;
+    const metadata = unmatchedMetadata[index]![1];
+    resolved.set(turn.id, metadata);
+  }
+
+  return resolved;
+}
+
 function sliceTurnsForDetail<T extends { id: string }>(
   turns: T[],
   options: { limit?: number; beforeTurnId?: string } = {},
@@ -1019,6 +1064,8 @@ export class ThreadService {
   private readonly threadDetailCache = new Map<string, ThreadDetailCacheEntry>();
   private readonly threadContextUsage = new Map<string, ThreadContextUsageDto>();
   private readonly threadCumulativeTokenUsage = new Map<string, ThreadTurnTokenUsageBreakdown>();
+  private readonly runtimeDisplayTurnIds = new Map<string, RuntimeDisplayTurnMapping>();
+  private readonly hiddenRuntimeTurnIds = new Map<string, Set<string>>();
   private readonly threadLivePlans = new Map<string, ThreadLivePlanDto>();
   private readonly threadLiveItems = new Map<string, ThreadLiveItemsDto>();
   private readonly threadTurnItemOrder = new Map<string, Map<string, Map<string, number>>>();
@@ -1080,6 +1127,78 @@ export class ThreadService {
       });
     }
     return record.providerSessionId;
+  }
+
+  private displayTurnIdForRuntimeTurn(
+    localThreadId: string,
+    runtimeTurnId: string | null | undefined,
+  ) {
+    if (!runtimeTurnId) {
+      return null;
+    }
+
+    const mapping = this.runtimeDisplayTurnIds.get(localThreadId);
+    return mapping?.runtimeTurnId === runtimeTurnId
+      ? mapping.displayTurnId
+      : runtimeTurnId;
+  }
+
+  private clearRuntimeDisplayTurnMapping(localThreadId: string, runtimeTurnId: string) {
+    const mapping = this.runtimeDisplayTurnIds.get(localThreadId);
+    if (mapping?.runtimeTurnId === runtimeTurnId) {
+      this.runtimeDisplayTurnIds.delete(localThreadId);
+    }
+  }
+
+  private hideRuntimeTurn(localThreadId: string, runtimeTurnId: string) {
+    let hiddenTurns = this.hiddenRuntimeTurnIds.get(localThreadId);
+    if (!hiddenTurns) {
+      hiddenTurns = new Set();
+      this.hiddenRuntimeTurnIds.set(localThreadId, hiddenTurns);
+    }
+    hiddenTurns.add(runtimeTurnId);
+  }
+
+  private visibleRemoteTurns(localThreadId: string, turns: AgentTurn[]) {
+    const hiddenTurns = this.hiddenRuntimeTurnIds.get(localThreadId);
+    if (!hiddenTurns || hiddenTurns.size === 0) {
+      return turns;
+    }
+    return turns.filter((turn) => !hiddenTurns.has(turn.providerTurnId));
+  }
+
+  private materializeHiddenRuntimeTurns(
+    localThreadId: string,
+    turns: AgentTurn[],
+  ) {
+    const hiddenTurns = this.hiddenRuntimeTurnIds.get(localThreadId);
+    if (!hiddenTurns || hiddenTurns.size === 0) {
+      return;
+    }
+
+    for (const turn of turns) {
+      if (!hiddenTurns.has(turn.providerTurnId)) {
+        continue;
+      }
+
+      const displayTurnId =
+        this.displayTurnIdForRuntimeTurn(localThreadId, turn.providerTurnId) ??
+        turn.providerTurnId;
+      if (displayTurnId === turn.providerTurnId) {
+        continue;
+      }
+
+      const dto = agentTurnToThreadTurnDto(
+        turn,
+        new Map<string, ThreadHistoryItemDetailDto>(),
+      );
+      this.persistRuntimeTurnItemsAsDisplayTurn(
+        localThreadId,
+        turn.providerTurnId,
+        displayTurnId,
+        dto.items,
+      );
+    }
   }
 
   private findRecordByProviderSessionId(provider: string | null | undefined, providerSessionId: string) {
@@ -1245,6 +1364,60 @@ export class ThreadService {
     });
   }
 
+  private deletePersistedHistoryItemsForTurn(localThreadId: string, turnId: string) {
+    deleteThreadHistoryItemRecordsByThreadAndTurnId(this.db, localThreadId, turnId);
+  }
+
+  private persistRuntimeTurnItemsAsDisplayTurn(
+    localThreadId: string,
+    runtimeTurnId: string,
+    displayTurnId: string,
+    items: ThreadHistoryItemDto[],
+  ) {
+    if (runtimeTurnId === displayTurnId) {
+      return;
+    }
+
+    for (const item of items) {
+      const sequence = this.recordTurnItemOrder(localThreadId, displayTurnId, item.id);
+      this.persistLiveHistoryItem(localThreadId, displayTurnId, {
+        ...item,
+        sequence,
+      });
+    }
+  }
+
+  private copyRuntimeTurnTokenUsageToDisplayTurn(
+    localThreadId: string,
+    runtimeTurnId: string,
+    displayTurnId: string,
+  ) {
+    if (runtimeTurnId === displayTurnId) {
+      return;
+    }
+
+    const runtimeMetadata = getThreadTurnMetadataByThreadAndTurnId(
+      this.db,
+      localThreadId,
+      runtimeTurnId,
+    );
+    if (!runtimeMetadata) {
+      return;
+    }
+
+    upsertThreadTurnMetadata(this.db, {
+      threadId: localThreadId,
+      turnId: displayTurnId,
+      model: runtimeMetadata.model ?? null,
+      reasoningEffort: runtimeMetadata.reasoningEffort ?? null,
+      reasoningEffortAvailable: runtimeMetadata.reasoningEffortAvailable ?? null,
+      pricingModelKey: runtimeMetadata.pricingModelKey ?? null,
+      pricingTierKey: runtimeMetadata.pricingTierKey ?? null,
+      tokenUsageJson: runtimeMetadata.tokenUsageJson ?? null,
+    });
+    deleteThreadTurnMetadataByThreadAndTurnId(this.db, localThreadId, runtimeTurnId);
+  }
+
   private async buildThreadDetailCacheEntry(
     localThreadId: string,
     record: {
@@ -1341,15 +1514,22 @@ export class ThreadService {
       updated,
       latestThreadTurnMetadata(turnMetadataById),
     );
+    this.materializeHiddenRuntimeTurns(localThreadId, remoteSession.turns);
+    const visibleTurns = this.visibleRemoteTurns(localThreadId, remoteSession.turns)
+      .map((turn) => agentTurnToThreadTurnDto(turn, deferredDetails));
+    const resolvedTurnMetadataById = resolveTurnMetadataByVisibleTurnId(
+      visibleTurns,
+      turnMetadataById,
+    );
     const turns = mergePersistedHistoryItemsIntoTurns(
       applyRecordedTurnItemOrders(
-        remoteSession.turns.map((turn) => agentTurnToThreadTurnDto(turn, deferredDetails)),
+        visibleTurns,
         this.turnItemOrderSnapshot(localThreadId),
       ),
       persistedItemsByTurnId,
       deferredDetails,
     ).map((turn) =>
-      buildTurnDto(turn, turnMetadataById.get(turn.id) ?? fallbackMetadata),
+      buildTurnDto(turn, resolvedTurnMetadataById.get(turn.id) ?? fallbackMetadata),
     );
     const entry = {
       cachedAt: Date.now(),
@@ -2272,16 +2452,16 @@ export class ThreadService {
       providerSessionId,
     };
 
-	    if (record.providerTurnId && record.status === 'running') {
-	      if (!runtime.sendInput || !runtime.capabilities.turns.steer) {
-	        throw new HttpError(409, {
-	          code: 'conflict',
-	          message: 'This backend does not support sending input while a turn is running.',
-	        });
-	      }
-	      return this.steerOrStartPromptTurn(localThreadId, {
-	        ...connectedRecord,
-	        providerTurnId: record.providerTurnId,
+    if (record.providerTurnId && record.status === 'running') {
+      if (!runtime.sendInput || !runtime.capabilities.turns.steer) {
+        throw new HttpError(409, {
+          code: 'conflict',
+          message: 'This backend does not support sending input while a turn is running.',
+        });
+      }
+      return this.steerOrStartPromptTurn(localThreadId, {
+        ...connectedRecord,
+        providerTurnId: record.providerTurnId,
       }, {
         prompt,
         displayPrompt,
@@ -2318,6 +2498,7 @@ export class ThreadService {
       performanceMode: 'fast' | 'standard';
       workspacePath: string;
       hidden?: boolean;
+      displayTurnId?: string | null;
     },
   ): Promise<ThreadDto> {
     const runtime = this.runtimeForProvider(record.provider);
@@ -2340,10 +2521,23 @@ export class ThreadService {
     if (input.hidden !== undefined) {
       startTurnInput.hidden = input.hidden;
     }
+    if (input.displayTurnId) {
+      startTurnInput.displayTurnId = input.displayTurnId;
+    }
     const turn = await runtime.startTurn(startTurnInput);
+    const displayTurnId = input.displayTurnId ?? turn.providerTurnId;
+    if (displayTurnId !== turn.providerTurnId) {
+      this.runtimeDisplayTurnIds.set(localThreadId, {
+        runtimeTurnId: turn.providerTurnId,
+        displayTurnId,
+      });
+      if (input.hidden) {
+        this.hideRuntimeTurn(localThreadId, turn.providerTurnId);
+      }
+    }
     upsertThreadTurnMetadata(this.db, {
       threadId: localThreadId,
-      turnId: turn.rawTurnId ?? turn.providerTurnId,
+      turnId: displayTurnId,
       model: input.effectiveModel,
       reasoningEffort: input.normalizedReasoning,
       reasoningEffortAvailable: this.reasoningEffortAvailableForModel(
@@ -3124,6 +3318,8 @@ export class ThreadService {
     deleteThreadHistoryItemRecordsByThreadId(this.db, localThreadId);
     deleteThreadPendingSteerRecordsByThreadId(this.db, localThreadId);
     deleteThreadTurnMetadataByThreadId(this.db, localThreadId);
+    this.runtimeDisplayTurnIds.delete(localThreadId);
+    this.hiddenRuntimeTurnIds.delete(localThreadId);
     deleteThreadRecord(this.db, localThreadId);
 
     return { id: localThreadId };
@@ -3214,6 +3410,7 @@ export class ThreadService {
             performanceMode: performanceModeForFastMode(fastMode),
             workspacePath: workspace.absPath,
             hidden: true,
+            displayTurnId: pending.request.turnId,
           });
         }
       }
@@ -3316,7 +3513,9 @@ export class ThreadService {
           this.persistThreadGoalSnapshot(record.id, dto),
         );
         this.emitThreadEvent('thread.goal.updated', record.id, {
-          turnId: event.providerTurnId,
+          turnId:
+            this.displayTurnIdForRuntimeTurn(record.id, event.providerTurnId) ??
+            event.providerTurnId,
           goal: persistedGoal,
           goalHistory: this.listThreadGoalHistory(record.id),
         });
@@ -3354,10 +3553,13 @@ export class ThreadService {
           record.model,
         );
         this.setThreadContextUsage(record.id, usage, true);
+        const displayTurnId =
+          this.displayTurnIdForRuntimeTurn(record.id, event.providerTurnId) ??
+          event.providerTurnId;
         const existingTurnMetadata = getThreadTurnMetadataByThreadAndTurnId(
           this.db,
           record.id,
-          event.providerTurnId,
+          displayTurnId,
         );
         const previousState = parseStoredThreadTurnTokenUsageState(
           existingTurnMetadata?.tokenUsageJson,
@@ -3373,7 +3575,7 @@ export class ThreadService {
           previousState.baselineTotal ??
           previousCumulativeTotal ??
           this.getLatestStoredThreadCumulativeTotal(record.id, {
-            excludeTurnId: event.providerTurnId,
+            excludeTurnId: displayTurnId,
           }) ??
           zeroTurnTokenBreakdown();
         const turnTokenUsage = buildThreadTurnTokenUsage(
@@ -3384,7 +3586,7 @@ export class ThreadService {
         if (turnTokenUsage) {
           upsertThreadTurnMetadata(this.db, {
             threadId: record.id,
-            turnId: event.providerTurnId,
+            turnId: displayTurnId,
             tokenUsageJson: stringifyStoredThreadTurnTokenUsageState({
               baselineTotal,
               usage: turnTokenUsage,
@@ -3392,7 +3594,7 @@ export class ThreadService {
           });
           this.invalidateThreadDetailCache(record.id);
           this.emitThreadEvent('thread.turn.token.updated', record.id, {
-            turnId: event.providerTurnId,
+            turnId: displayTurnId,
             tokenUsage: turnTokenUsage,
             priceEstimate: estimateTurnPrice(turnTokenUsage, {
               pricingModelKey: existingTurnMetadata?.pricingModelKey,
@@ -3410,13 +3612,16 @@ export class ThreadService {
         if (!record) {
           return;
         }
-        const turnId = event.turn.providerTurnId;
+        const rawTurnId = event.turn.providerTurnId;
+        const turnId =
+          this.displayTurnIdForRuntimeTurn(record.id, rawTurnId) ??
+          rawTurnId;
 
         this.clearPendingPlanDecisionRequests(record.id, true);
         this.dismissedPlanDecisionTurns.delete(record.id);
 
         updateThreadRecord(this.db, record.id, {
-          providerTurnId: turnId,
+          providerTurnId: rawTurnId,
           status: 'running',
           lastError: null,
           lastTurnStartedAt: new Date().toISOString()
@@ -3466,7 +3671,10 @@ export class ThreadService {
           return;
         }
 
-        const turnId = event.providerTurnId ?? record.providerTurnId;
+        const turnId = this.displayTurnIdForRuntimeTurn(
+          record.id,
+          event.providerTurnId ?? record.providerTurnId,
+        );
         if (!turnId) {
           return;
         }
@@ -3498,24 +3706,27 @@ export class ThreadService {
           return;
         }
 
+        const displayTurnId =
+          this.displayTurnIdForRuntimeTurn(record.id, event.providerTurnId) ??
+          event.providerTurnId;
         const sequence = this.recordTurnItemOrder(
           record.id,
-          event.providerTurnId,
+          displayTurnId,
           event.item.id,
         );
         const orderedLiveItem = {
           ...event.item,
           sequence,
         };
-        this.persistLiveHistoryItem(record.id, event.providerTurnId, orderedLiveItem);
-        this.upsertLiveItem(record.id, event.providerTurnId, orderedLiveItem);
+        this.persistLiveHistoryItem(record.id, displayTurnId, orderedLiveItem);
+        this.upsertLiveItem(record.id, displayTurnId, orderedLiveItem);
         this.emitThreadEvent(
           event.type === 'item.started'
             ? 'thread.item.started'
             : 'thread.item.completed',
           record.id,
           {
-            turnId: event.providerTurnId,
+            turnId: displayTurnId,
             item: orderedLiveItem,
           },
         );
@@ -3530,15 +3741,18 @@ export class ThreadService {
           return;
         }
 
+        const displayTurnId =
+          this.displayTurnIdForRuntimeTurn(record.id, event.providerTurnId) ??
+          event.providerTurnId;
         this.setLivePlan(record.id, {
-          turnId: event.providerTurnId,
+          turnId: displayTurnId,
           explanation: event.explanation,
           plan: event.plan,
           updatedAt: new Date().toISOString(),
         });
 
         this.emitThreadEvent('thread.plan.updated', record.id, {
-          turnId: event.providerTurnId,
+          turnId: displayTurnId,
           explanation: event.explanation,
           plan: event.plan,
         });
@@ -3553,20 +3767,23 @@ export class ThreadService {
           return;
         }
 
+        const displayTurnId =
+          this.displayTurnIdForRuntimeTurn(record.id, event.providerTurnId) ??
+          event.providerTurnId;
         const sequence = this.recordTurnItemOrder(
           record.id,
-          event.providerTurnId,
+          displayTurnId,
           event.itemId,
         );
         this.appendLiveAgentMessageDelta(
           record.id,
-          event.providerTurnId,
+          displayTurnId,
           event.itemId,
           event.delta,
           sequence,
         );
         this.emitThreadEvent('thread.output.delta', record.id, {
-          turnId: event.providerTurnId,
+          turnId: displayTurnId,
           itemId: event.itemId,
           sequence,
           delta: event.delta,
@@ -3581,7 +3798,10 @@ export class ThreadService {
         if (!record) {
           return;
         }
-        const turnId = event.turn.providerTurnId;
+        const rawTurnId = event.turn.providerTurnId;
+        const turnId =
+          this.displayTurnIdForRuntimeTurn(record.id, rawTurnId) ??
+          rawTurnId;
         const turnItems = event.turn.items;
 
         updateThreadRecord(this.db, record.id, {
@@ -3597,12 +3817,22 @@ export class ThreadService {
         });
         this.setLivePlan(record.id, null);
         this.setLiveItems(record.id, null);
+        this.persistRuntimeTurnItemsAsDisplayTurn(record.id, rawTurnId, turnId, turnItems);
+        if (rawTurnId !== turnId) {
+          this.deletePersistedHistoryItemsForTurn(record.id, rawTurnId);
+          this.resetRecordedTurnItemOrder(record.id, rawTurnId);
+        }
+        this.copyRuntimeTurnTokenUsageToDisplayTurn(record.id, rawTurnId, turnId);
         this.clearPendingSteersForTurn(record.id, turnId);
+        if (rawTurnId !== turnId) {
+          this.clearPendingSteersForTurn(record.id, rawTurnId);
+        }
         this.clearTerminalPendingRequests(record.id, true);
         if (
           event.turn.status === 'completed' &&
           normalizeCollaborationMode(record.collaborationMode) === 'plan' &&
-          turnItems.some((item) => item.kind === 'plan')
+          turnItems.some((item) => item.kind === 'plan') &&
+          !this.hasPendingAskUserQuestion(record.id)
         ) {
           this.createPendingPlanDecisionRequest(record.id, turnId, true);
         } else {
@@ -3619,6 +3849,7 @@ export class ThreadService {
             error: event.turn.error?.message ?? null,
           }
         );
+        this.clearRuntimeDisplayTurnMapping(record.id, rawTurnId);
         return;
       }
       case 'turn.failed': {
@@ -3630,6 +3861,9 @@ export class ThreadService {
           return;
         }
 
+        const turnId =
+          this.displayTurnIdForRuntimeTurn(record.id, event.providerTurnId) ??
+          event.providerTurnId;
         updateThreadRecord(this.db, record.id, {
           status: 'failed',
           lastError: event.error,
@@ -3637,15 +3871,19 @@ export class ThreadService {
         this.setLivePlan(record.id, null);
         this.setLiveItems(record.id, null);
         this.clearPendingSteersForTurn(record.id, event.providerTurnId);
+        if (turnId !== event.providerTurnId) {
+          this.clearPendingSteersForTurn(record.id, turnId);
+        }
         this.clearTerminalPendingRequests(record.id, true);
         this.dismissedPlanDecisionTurns.delete(record.id);
         this.invalidateThreadDetailCache(record.id);
 
         this.emitThreadEvent('thread.turn.failed', record.id, {
-          turnId: event.providerTurnId,
+          turnId,
           error: event.error,
           willRetry: event.willRetry,
         });
+        this.clearRuntimeDisplayTurnMapping(record.id, event.providerTurnId);
         return;
       }
     }
@@ -4316,6 +4554,14 @@ export class ThreadService {
     });
   }
 
+  private hasPendingAskUserQuestion(localThreadId: string) {
+    return [...(this.pendingRequests.get(localThreadId)?.values() ?? [])].some(
+      (request) =>
+        request.source === 'server' &&
+        request.responseKind === 'askUserQuestion',
+    );
+  }
+
   private syncPendingPlanDecisionRequest(
     localThreadId: string,
     collaborationMode: string | null | undefined,
@@ -4325,7 +4571,8 @@ export class ThreadService {
     const shouldHavePlanDecision =
       normalizeCollaborationMode(collaborationMode) === 'plan' &&
       latestTurn?.status === 'completed' &&
-      latestTurn.items.some((item) => item.kind === 'plan');
+      latestTurn.items.some((item) => item.kind === 'plan') &&
+      !this.hasPendingAskUserQuestion(localThreadId);
 
     if (!shouldHavePlanDecision || !latestTurn) {
       this.clearPendingPlanDecisionRequests(localThreadId, false);

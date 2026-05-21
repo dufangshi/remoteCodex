@@ -567,26 +567,19 @@ body.thread-detail-scroll-locked {
     0 6px 18px color-mix(in srgb, var(--theme-accent) 13%, transparent);
 }
 
-.thread-context-progress-frame {
-  --context-ring-track: color-mix(in srgb, var(--theme-border-contrast) 46%, transparent);
-  --context-ring-progress: 100%;
-  --context-ring-color: color-mix(in srgb, var(--theme-fg-muted) 70%, transparent);
-  border-radius: inherit;
-  padding: 1.5px;
-  background:
-    conic-gradient(
-      from -90deg,
-      var(--context-ring-color) 0 var(--context-ring-progress),
-      var(--context-ring-track) var(--context-ring-progress) 100%
-    );
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  mask-composite: exclude;
+.thread-context-progress-track {
+  height: 3px;
+  border-radius: 9999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--theme-border-contrast) 50%, transparent);
+}
+
+.thread-context-progress-fill {
+  height: 100%;
+  border-radius: 9999px;
+  transition:
+    width 0.45s ease,
+    background-color 0.3s ease;
 }
 
 .thread-jump-latest-badge {
@@ -664,6 +657,18 @@ body.thread-detail-scroll-locked {
   border-color: color-mix(in srgb, rgb(132 204 22) 30%, var(--theme-border));
 }
 
+.timeline-kind-file-read {
+  border-color: color-mix(in srgb, rgb(34 211 238) 30%, var(--theme-border));
+}
+
+.timeline-kind-agent-tool {
+  border-color: color-mix(in srgb, rgb(20 184 166) 30%, var(--theme-border));
+}
+
+.timeline-kind-skill-tool {
+  border-color: color-mix(in srgb, rgb(129 140 248) 30%, var(--theme-border));
+}
+
 .timeline-kind-action {
   border-color: color-mix(in srgb, rgb(217 70 239) 24%, var(--theme-border));
 }
@@ -680,6 +685,11 @@ body.thread-detail-scroll-locked {
 .timeline-special-info {
   border-color: var(--status-info-border);
   background: color-mix(in srgb, var(--status-info-bg) 58%, var(--theme-surface));
+}
+
+.timeline-special-file-read {
+  border-color: color-mix(in srgb, rgb(34 211 238) 28%, var(--theme-border));
+  background: color-mix(in srgb, rgb(34 211 238) 7%, var(--theme-surface));
 }
 
 .timeline-special-success {
@@ -912,6 +922,21 @@ body.thread-detail-scroll-locked {
   color: var(--theme-fg);
 }
 
+.timeline-file-read {
+  background: color-mix(in srgb, rgb(34 211 238) 7%, var(--theme-surface));
+  color: var(--theme-fg);
+}
+
+.timeline-agent-tool {
+  background: color-mix(in srgb, rgb(20 184 166) 7%, var(--theme-surface));
+  color: var(--theme-fg);
+}
+
+.timeline-skill-tool {
+  background: color-mix(in srgb, rgb(129 140 248) 7%, var(--theme-surface));
+  color: var(--theme-fg);
+}
+
 .timeline-action {
   background: color-mix(in srgb, rgb(217 70 239) 6%, var(--theme-surface));
   color: var(--theme-fg-soft);
@@ -943,6 +968,24 @@ body.thread-detail-scroll-locked {
   border-color: rgb(56 189 248 / 0.3);
   background: rgb(56 189 248 / 0.12);
   color: rgb(3 105 161);
+}
+
+.timeline-overlay-badge-file-read {
+  border-color: rgb(34 211 238 / 0.3);
+  background: rgb(34 211 238 / 0.12);
+  color: rgb(8 145 178);
+}
+
+.timeline-overlay-badge-agent-tool {
+  border-color: rgb(20 184 166 / 0.3);
+  background: rgb(20 184 166 / 0.12);
+  color: rgb(15 118 110);
+}
+
+.timeline-overlay-badge-skill-tool {
+  border-color: rgb(129 140 248 / 0.3);
+  background: rgb(129 140 248 / 0.12);
+  color: rgb(79 70 229);
 }
 
 .timeline-overlay-badge-action {
@@ -1088,6 +1131,18 @@ body.thread-detail-scroll-locked {
   border-color: rgb(77 124 15 / 0.2);
 }
 
+:root[data-theme-effective='light'] .timeline-kind-file-read {
+  border-color: rgb(8 145 178 / 0.22);
+}
+
+:root[data-theme-effective='light'] .timeline-kind-agent-tool {
+  border-color: rgb(15 118 110 / 0.22);
+}
+
+:root[data-theme-effective='light'] .timeline-kind-skill-tool {
+  border-color: rgb(79 70 229 / 0.2);
+}
+
 :root[data-theme-effective='light'] .timeline-user {
   background: rgb(232 241 237 / 0.78);
   color: rgb(41 37 36);
@@ -1105,6 +1160,18 @@ body.thread-detail-scroll-locked {
 :root[data-theme-effective='light'] .timeline-search,
 :root[data-theme-effective='light'] .timeline-plan {
   background: rgb(232 239 239 / 0.66);
+}
+
+:root[data-theme-effective='light'] .timeline-file-read {
+  background: rgb(229 240 238 / 0.66);
+}
+
+:root[data-theme-effective='light'] .timeline-agent-tool {
+  background: rgb(228 238 233 / 0.68);
+}
+
+:root[data-theme-effective='light'] .timeline-skill-tool {
+  background: rgb(234 235 244 / 0.68);
 }
 
 :root[data-theme-effective='light'] .timeline-file-change {
@@ -1150,6 +1217,11 @@ body.thread-detail-scroll-locked {
 :root[data-theme-effective='light'] .timeline-special-info {
   border-color: rgb(3 105 161 / 0.22);
   background: rgb(226 235 235 / 0.74);
+}
+
+:root[data-theme-effective='light'] .timeline-special-file-read {
+  border-color: rgb(8 145 178 / 0.22);
+  background: rgb(226 237 235 / 0.74);
 }
 
 :root[data-theme-effective='light'] .timeline-special-success {
@@ -1294,6 +1366,18 @@ body.thread-detail-scroll-locked {
 
 :root[data-theme-effective='dark'] .timeline-overlay-badge-search {
   color: rgb(224 242 254);
+}
+
+:root[data-theme-effective='dark'] .timeline-overlay-badge-file-read {
+  color: rgb(207 250 254);
+}
+
+:root[data-theme-effective='dark'] .timeline-overlay-badge-agent-tool {
+  color: rgb(204 251 241);
+}
+
+:root[data-theme-effective='dark'] .timeline-overlay-badge-skill-tool {
+  color: rgb(224 231 255);
 }
 
 :root[data-theme-effective='dark'] .timeline-overlay-badge-action {

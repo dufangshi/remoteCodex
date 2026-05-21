@@ -1,6 +1,7 @@
-import { EventEmitter } from 'node:events';
-
 import { describe, expect, it } from 'vitest';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import type {
   Query,
   SDKMessage,
@@ -134,7 +135,7 @@ function systemInit(sessionId = 'claude-session-1'): SDKMessage {
     tools: [],
     mcp_servers: [],
     model: 'sonnet',
-    permissionMode: 'dontAsk',
+    permissionMode: 'default',
     slash_commands: [],
     output_style: 'default',
     skills: [],
@@ -226,6 +227,213 @@ describe('ClaudeRuntimeAdapter', () => {
     });
 
     expect(sdkOptions[0]?.pathToClaudeCodeExecutable).toBe('claude');
+  });
+
+  it('maps thread sandbox modes to Claude permission and sandbox settings', async () => {
+    const turnOptions: Record<string, unknown>[] = [];
+    const adapter = makeAdapter((_prompt, options) => {
+      turnOptions.push(options);
+      return [systemInit(), result()];
+    });
+
+    await adapter.startTurn({
+      providerSessionId: 'claude-session-1',
+      prompt: 'Read only',
+      model: 'sonnet',
+      sandboxMode: 'read-only',
+      workspacePath: '/tmp/workspace',
+    });
+    await wait();
+    await adapter.startTurn({
+      providerSessionId: 'claude-session-1',
+      prompt: 'Workspace write',
+      model: 'sonnet',
+      sandboxMode: 'workspace-write',
+      workspacePath: '/tmp/workspace',
+    });
+    await wait();
+    await adapter.startTurn({
+      providerSessionId: 'claude-session-1',
+      prompt: 'Full access',
+      model: 'sonnet',
+      sandboxMode: 'danger-full-access',
+      workspacePath: '/tmp/workspace',
+    });
+    await wait();
+
+    expect(turnOptions.at(-3)).toMatchObject({
+      permissionMode: 'default',
+      sandbox: {
+        enabled: true,
+        autoAllowBashIfSandboxed: true,
+        allowUnsandboxedCommands: false,
+        filesystem: {
+          denyWrite: ['/tmp/workspace'],
+        },
+      },
+    });
+    expect(turnOptions.at(-2)).toMatchObject({
+      permissionMode: 'acceptEdits',
+      sandbox: {
+        enabled: true,
+        autoAllowBashIfSandboxed: true,
+        allowUnsandboxedCommands: false,
+        filesystem: {
+          allowWrite: ['/tmp/workspace'],
+        },
+      },
+    });
+    expect(turnOptions.at(-1)).toMatchObject({
+      permissionMode: 'bypassPermissions',
+      allowDangerouslySkipPermissions: true,
+    });
+    expect(turnOptions.at(-1)?.sandbox).toBeUndefined();
+  });
+
+  it('sends prompt photo tokens as Claude image content blocks', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-photo-prompt-'));
+    const workspacePath = path.join(tempDir, 'workspace');
+    const imagePath = path.join(workspacePath, '.temp', 'threads', 'thread-1', 'camera.png');
+    await fs.mkdir(path.dirname(imagePath), { recursive: true });
+    await fs.writeFile(imagePath, Buffer.from('fake-png'));
+
+    const prompts: unknown[] = [];
+    const adapter = new ClaudeRuntimeAdapter({
+      home: '/tmp/claude-home',
+      command: 'claude',
+      query: ((params: { prompt: unknown; options: Record<string, unknown> }) => {
+        prompts.push(params.prompt);
+        return new FakeQuery([systemInit(), result()]);
+      }) as any,
+      listSessions: (async () => [] satisfies SDKSessionInfo[]) as any,
+      getSessionInfo: (async () => null) as any,
+      getSessionMessages: (async () => [] satisfies SessionMessage[]) as any,
+    });
+
+    await adapter.startTurn({
+      providerSessionId: 'claude-session-1',
+      prompt: 'Please inspect [PHOTO ./.temp/threads/thread-1/camera.png] now.',
+      model: 'sonnet',
+      collaborationMode: 'default',
+      sandboxMode: 'danger-full-access',
+      workspacePath,
+    });
+
+    expect(typeof (prompts[0] as AsyncIterable<unknown>)[Symbol.asyncIterator]).toBe('function');
+    const messages: any[] = [];
+    for await (const message of prompts[0] as AsyncIterable<unknown>) {
+      messages.push(message);
+    }
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      type: 'user',
+      parent_tool_use_id: null,
+      message: {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Please inspect ' },
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: 'image/png',
+              data: Buffer.from('fake-png').toString('base64'),
+            },
+          },
+          { type: 'text', text: ' now.' },
+        ],
+      },
+    });
+  });
+
+  it('keeps unsupported or unreadable photo tokens as plain prompt text', async () => {
+    const prompts: unknown[] = [];
+    const adapter = new ClaudeRuntimeAdapter({
+      home: '/tmp/claude-home',
+      command: 'claude',
+      query: ((params: { prompt: unknown; options: Record<string, unknown> }) => {
+        prompts.push(params.prompt);
+        return new FakeQuery([systemInit(), result()]);
+      }) as any,
+      listSessions: (async () => [] satisfies SDKSessionInfo[]) as any,
+      getSessionInfo: (async () => null) as any,
+      getSessionMessages: (async () => [] satisfies SessionMessage[]) as any,
+    });
+
+    await adapter.startTurn({
+      providerSessionId: 'claude-session-1',
+      prompt: 'Please inspect [PHOTO ./.temp/threads/thread-1/camera.heic].',
+      model: 'sonnet',
+      collaborationMode: 'default',
+      sandboxMode: 'danger-full-access',
+      workspacePath: '/tmp/workspace',
+    });
+
+    expect(prompts[0]).toBe('Please inspect [PHOTO ./.temp/threads/thread-1/camera.heic].');
+  });
+
+  it('reconciles active multimodal transcript turns back to the live runtime turn id', async () => {
+    let queryMessages: SDKMessage[] = [systemInit()];
+    const adapter = new ClaudeRuntimeAdapter({
+      home: '/tmp/claude-home',
+      command: 'claude',
+      query: (() => new FakeQuery(queryMessages, { holdOpen: true })) as any,
+      listSessions: (async () => [] satisfies SDKSessionInfo[]) as any,
+      getSessionInfo: (async () => ({
+        sessionId: 'claude-session-1',
+        summary: 'Existing session',
+        lastModified: 1_772_000_000_000,
+        createdAt: 1_771_000_000_000,
+        cwd: '/tmp/workspace',
+      })) as any,
+      getSessionMessages: (async () => [
+        {
+          type: 'user',
+          uuid: '019e4657-bd3c-72d1-b59d-324ed8a4b1ec',
+          session_id: 'claude-session-1',
+          message: {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'What number is in the screenshot? ' },
+              {
+                type: 'image',
+                source: {
+                  type: 'base64',
+                  media_type: 'image/png',
+                  data: 'ZmFrZS1wbmc=',
+                },
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      ] satisfies SessionMessage[]) as any,
+    });
+
+    const started = await adapter.startTurn({
+      providerSessionId: 'claude-session-1',
+      prompt: 'What number is in the screenshot? [PHOTO ./.temp/threads/thread-1/image.png]',
+      model: 'sonnet',
+      collaborationMode: 'default',
+      sandboxMode: 'danger-full-access',
+      workspacePath: '/tmp/workspace',
+    });
+    queryMessages = [];
+    const session = await adapter.readSession('claude-session-1');
+
+    expect(session.turns).toHaveLength(1);
+    expect(session.turns[0]).toMatchObject({
+      providerTurnId: started.providerTurnId,
+      status: 'inProgress',
+      items: [
+        expect.objectContaining({
+          id: `${started.providerTurnId}:user`,
+          kind: 'userMessage',
+          text: 'What number is in the screenshot? [PHOTO ./.temp/threads/thread-1/image.png]',
+        }),
+      ],
+    });
   });
 
   it('starts a session from the Claude init message and hides the synthetic prompt', async () => {
@@ -563,6 +771,21 @@ describe('ClaudeRuntimeAdapter', () => {
         .join(''),
     ).toBe('Hello');
     expect(turnOptions.at(-1)?.effort).toBe('max');
+    expect(turnOptions.at(-1)?.thinking).toEqual({
+      type: 'adaptive',
+      display: 'summarized',
+    });
+    const firstReasoningEventIndex = events.findIndex(
+      (event) =>
+        event.type === 'item.started' &&
+        event.item.kind === 'reasoning' &&
+        event.item.text === 'Plan',
+    );
+    const firstOutputDeltaEventIndex = events.findIndex(
+      (event) => event.type === 'output.delta',
+    );
+    expect(firstReasoningEventIndex).toBeGreaterThanOrEqual(0);
+    expect(firstOutputDeltaEventIndex).toBeGreaterThan(firstReasoningEventIndex);
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'item.completed',
@@ -790,7 +1013,7 @@ describe('ClaudeRuntimeAdapter', () => {
   });
 
   it('suppresses Claude Code plan control tool plumbing from timeline items', async () => {
-    const adapter = makeAdapter((_prompt, _options) => [
+    const adapter = makeAdapter(() => [
       systemInit(),
       {
         type: 'assistant',
@@ -949,7 +1172,7 @@ describe('ClaudeRuntimeAdapter', () => {
   });
 
   it('maps Claude AskUserQuestion tool use to a provider request', async () => {
-    const adapter = makeAdapter((_prompt, _options) => [
+    const adapter = makeAdapter(() => [
       systemInit(),
       {
         type: 'assistant',
@@ -1094,6 +1317,85 @@ describe('ClaudeRuntimeAdapter', () => {
         ]),
       },
     });
+  });
+
+  it('emits hidden continuation events on the requested display turn id', async () => {
+    const adapter = makeAdapter(() => [
+      systemInit(),
+      {
+        type: 'assistant',
+        message: {
+          id: 'msg_continuation',
+          type: 'message',
+          role: 'assistant',
+          model: 'sonnet',
+          content: [{ type: 'text', text: 'Continuing the same plan.', citations: null }],
+          stop_reason: null,
+          stop_sequence: null,
+          stop_details: null,
+          usage: {} as any,
+          container: null,
+          context_management: null,
+          diagnostics: null,
+        },
+        parent_tool_use_id: null,
+        uuid: '00000000-0000-4000-8000-000000000034' as any,
+        session_id: 'claude-session-1',
+      },
+      result(),
+    ]);
+    const events: AgentRuntimeEvent[] = [];
+    adapter.on('event', (event) => events.push(event));
+
+    const started = await adapter.startTurn({
+      providerSessionId: 'claude-session-1',
+      prompt: 'Hidden continuation',
+      model: 'sonnet',
+      collaborationMode: 'plan',
+      workspacePath: '/tmp/workspace',
+      hidden: true,
+      displayTurnId: 'claude-turn-visible',
+    });
+    await wait();
+
+    expect(started).toMatchObject({
+      providerTurnId: 'claude-turn-visible',
+      items: [],
+    });
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'turn.started',
+          turn: expect.objectContaining({
+            providerTurnId: 'claude-turn-visible',
+            items: [],
+          }),
+        }),
+        expect.objectContaining({
+          type: 'turn.completed',
+          turn: expect.objectContaining({
+            providerTurnId: 'claude-turn-visible',
+            items: expect.arrayContaining([
+              expect.objectContaining({
+                kind: 'agentMessage',
+                text: 'Continuing the same plan.',
+              }),
+            ]),
+          }),
+        }),
+      ]),
+    );
+    expect(
+      events
+        .map((event) =>
+          event.type === 'turn.started' || event.type === 'turn.completed'
+            ? event.turn.providerTurnId
+            : 'providerTurnId' in event
+              ? event.providerTurnId
+              : null,
+        )
+        .filter(Boolean),
+    ).toEqual(['claude-turn-visible', 'claude-turn-visible']);
   });
 
   it('interrupts an active query', async () => {
@@ -1487,5 +1789,261 @@ describe('ClaudeRuntimeAdapter', () => {
         text: 'Build a basic calculator with history.',
       }),
     ]);
+  });
+
+  it('keeps later Claude plan questions in the same historical turn after hidden continuations', async () => {
+    const adapter = new ClaudeRuntimeAdapter({
+      home: '/tmp/claude-home',
+      query: (() => new FakeQuery([])) as any,
+      getSessionInfo: (async () => ({
+        sessionId: 'claude-session-1',
+        summary: 'Existing session',
+        lastModified: 1_772_000_000_000,
+        createdAt: 1_771_000_000_000,
+        cwd: '/tmp/workspace',
+      })) as any,
+      listSessions: (async () => []) as any,
+      getSessionMessages: (async () => [
+        {
+          type: 'user',
+          uuid: '019e4657-bd3c-72d1-b59d-324ed8a4b1ec',
+          session_id: 'claude-session-1',
+          message: { role: 'user', content: 'Plan a calculator.' },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'assistant',
+          uuid: 'assistant-question-1',
+          session_id: 'claude-session-1',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'Which features?' }] },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'user',
+          uuid: 'continuation-user-1',
+          session_id: 'claude-session-1',
+          message: {
+            role: 'user',
+            content:
+              'The user answered the clarification questions below. Continue from the same plan-mode task using these answers. If you have enough information, produce the concrete plan for approval.\n\n- Which features?: History',
+          },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'assistant',
+          uuid: 'assistant-question-2',
+          session_id: 'claude-session-1',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'Keyboard support?' }] },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'user',
+          uuid: 'continuation-user-2',
+          session_id: 'claude-session-1',
+          message: {
+            role: 'user',
+            content:
+              'The user answered the clarification questions below. Continue from the same plan-mode task using these answers. If you have enough information, produce the concrete plan for approval.\n\n- Keyboard support?: Yes',
+          },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'assistant',
+          uuid: 'assistant-plan',
+          session_id: 'claude-session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'toolu_plan',
+                name: 'ExitPlanMode',
+                input: { plan: 'Build a calculator with history and keyboard support.' },
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      ] satisfies SessionMessage[]) as any,
+    });
+
+    const session = await adapter.readSession('claude-session-1');
+    expect(session.turns).toHaveLength(1);
+    expect(session.turns[0]?.items).toEqual([
+      expect.objectContaining({ kind: 'userMessage', text: 'Plan a calculator.' }),
+      expect.objectContaining({ kind: 'agentMessage', text: 'Which features?' }),
+      expect.objectContaining({ kind: 'agentMessage', text: 'Keyboard support?' }),
+      expect.objectContaining({
+        kind: 'plan',
+        text: 'Build a calculator with history and keyboard support.',
+      }),
+    ]);
+  });
+
+  it('maps Claude file inspection and agent tools to readable timeline items', async () => {
+    const adapter = new ClaudeRuntimeAdapter({
+      home: '/tmp/claude-home',
+      query: (() => new FakeQuery([])) as any,
+      getSessionInfo: (async () => ({
+        sessionId: 'claude-session-1',
+        summary: 'Existing session',
+        lastModified: 1_772_000_000_000,
+        createdAt: 1_771_000_000_000,
+        cwd: '/tmp/workspace',
+      })) as any,
+      listSessions: (async () => []) as any,
+      getSessionMessages: (async () => [
+        {
+          type: 'user',
+          uuid: '019e4657-bd3c-72d1-b59d-324ed8a4b1ec',
+          session_id: 'claude-session-1',
+          message: { role: 'user', content: 'Plan backend alignment.' },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'assistant',
+          uuid: 'assistant-tools',
+          session_id: 'claude-session-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'toolu_agent',
+                name: 'Agent',
+                input: {
+                  description: 'Inspect backend runtime boundaries',
+                  prompt: 'Read the backend services and summarize risks.',
+                },
+              },
+              {
+                type: 'tool_use',
+                id: 'toolu_grep',
+                name: 'Grep',
+                input: {
+                  pattern: 'AgentRuntime',
+                  path: 'apps/supervisor-api/src',
+                },
+              },
+              {
+                type: 'tool_use',
+                id: 'toolu_read',
+                name: 'Read',
+                input: {
+                  file_path: 'packages/claude/src/runtimeAdapter.ts',
+                },
+              },
+              {
+                type: 'tool_use',
+                id: 'toolu_skill',
+                name: 'Skill',
+                input: {
+                  skill: 'update-config',
+                  args: 'Allow Bash and Edit for this workspace.',
+                },
+              },
+              {
+                type: 'tool_use',
+                id: 'toolu_tool_search',
+                name: 'ToolSearch',
+                input: { query: 'select:EnterPlanMode' },
+              },
+              {
+                type: 'tool_use',
+                id: 'toolu_plan',
+                name: 'ExitPlanMode',
+                input: { plan: '## Plan\n\n- Keep one visible turn.' },
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'user',
+          uuid: 'tool-results',
+          session_id: 'claude-session-1',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'toolu_agent',
+                content: 'Runtime boundaries summarized.',
+              },
+              {
+                type: 'tool_result',
+                tool_use_id: 'toolu_grep',
+                content: 'apps/supervisor-api/src/thread-service.ts:AgentRuntime',
+              },
+              {
+                type: 'tool_result',
+                tool_use_id: 'toolu_read',
+                content: 'export class ClaudeRuntimeAdapter {}',
+              },
+              {
+                type: 'tool_result',
+                tool_use_id: 'toolu_skill',
+                content: 'Skill completed.',
+              },
+              {
+                type: 'tool_result',
+                tool_use_id: 'toolu_tool_search',
+                content: [{ type: 'tool_reference', tool_name: 'EnterPlanMode' }],
+              },
+              {
+                type: 'tool_result',
+                tool_use_id: 'toolu_plan',
+                content: 'Exit plan mode?',
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+      ] satisfies SessionMessage[]) as any,
+    });
+
+    const session = await adapter.readSession('claude-session-1');
+    const items = session.turns[0]?.items ?? [];
+
+    expect(items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'toolu_agent',
+          kind: 'agentToolCall',
+          text: 'Agent: Inspect backend runtime boundaries',
+          status: 'completed',
+        }),
+        expect.objectContaining({
+          id: 'toolu_grep',
+          kind: 'fileRead',
+          text: 'Search files: AgentRuntime in apps/supervisor-api/src',
+          status: 'completed',
+        }),
+        expect.objectContaining({
+          id: 'toolu_read',
+          kind: 'fileRead',
+          text: 'Read file: packages/claude/src/runtimeAdapter.ts',
+          status: 'completed',
+        }),
+        expect.objectContaining({
+          id: 'toolu_skill',
+          kind: 'skillToolCall',
+          text: 'Skill: update-config',
+          status: 'completed',
+        }),
+        expect.objectContaining({
+          id: 'toolu_plan',
+          kind: 'plan',
+          text: '## Plan\n\n- Keep one visible turn.',
+          status: 'completed',
+        }),
+      ]),
+    );
+    expect(items).toEqual(
+      expect.not.arrayContaining([
+        expect.objectContaining({ id: 'toolu_tool_search' }),
+        expect.objectContaining({ text: expect.stringContaining('Exit plan mode?') }),
+      ]),
+    );
   });
 });

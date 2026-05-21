@@ -102,8 +102,14 @@ export function historyItemAccentClassName(kind: ThreadHistoryItemDto['kind']) {
       return 'timeline-kind-command';
     case 'webSearch':
       return 'timeline-kind-search';
+    case 'fileRead':
+      return 'timeline-kind-file-read';
     case 'reasoning':
       return 'timeline-kind-reasoning';
+    case 'agentToolCall':
+      return 'timeline-kind-agent-tool';
+    case 'skillToolCall':
+      return 'timeline-kind-skill-tool';
     case 'toolCall':
       return 'timeline-kind-action';
     case 'plan':
@@ -131,8 +137,14 @@ export function historyItemLabel(kind: ThreadHistoryItemDto['kind']) {
       return 'Command';
     case 'webSearch':
       return 'Web Search';
+    case 'fileRead':
+      return 'File Read';
     case 'reasoning':
       return 'Reasoning';
+    case 'agentToolCall':
+      return 'Agent';
+    case 'skillToolCall':
+      return 'Skill';
     case 'toolCall':
       return 'Tool';
     case 'plan':

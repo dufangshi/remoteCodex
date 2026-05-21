@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  buildTurnPricingSnapshot,
   contextWindowForModel,
   estimateTurnPrice,
   resetPricingConfigCacheForTest,
@@ -126,6 +127,28 @@ describe('modelPricing', () => {
       inputUsd: 0.001,
       cachedInputUsd: 0.00005,
       outputUsd: 0.0075,
+    });
+  });
+
+  it('normalizes Claude date-stamped runtime model names to local pricing keys', () => {
+    expect(contextWindowForModel('claude-sonnet-4-5-20250929')).toBe(200000);
+    expect(supportsFastMode('claude-sonnet-4-5-20250929')).toBe(false);
+    expect(buildTurnPricingSnapshot('claude-sonnet-4-5-20250929', false)).toEqual({
+      pricingModelKey: 'claude-sonnet-4-5',
+      pricingTierKey: 'standard',
+    });
+
+    const estimate = estimateTurnPrice(sampleUsage, {
+      pricingModelKey: 'claude-sonnet-4-5-20250929',
+      pricingTierKey: 'standard',
+    });
+
+    expect(estimate).toMatchObject({
+      pricingModelKey: 'claude-sonnet-4-5',
+      pricingTierKey: 'standard',
+      inputUsd: 0.003,
+      cachedInputUsd: 0.00015,
+      outputUsd: 0.0225,
     });
   });
 

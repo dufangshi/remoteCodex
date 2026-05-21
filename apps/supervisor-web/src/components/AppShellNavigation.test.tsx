@@ -105,7 +105,7 @@ const claudeBackendResponse = {
     controls: {
       planMode: true,
       permissionRequests: true,
-      sandboxMode: false,
+      sandboxMode: true,
       performanceMode: false,
       goals: false,
     },

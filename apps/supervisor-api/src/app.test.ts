@@ -39,7 +39,7 @@ class FakeClaudeRuntime extends EventEmitter implements AgentRuntime {
     controls: {
       planMode: false,
       permissionRequests: false,
-      sandboxMode: false,
+      sandboxMode: true,
       performanceMode: false,
       goals: false,
     },
@@ -65,6 +65,7 @@ class FakeClaudeRuntime extends EventEmitter implements AgentRuntime {
   };
   sessions = new Map<string, any>();
   activeTurnId: string | null = null;
+  startTurnInputs: Array<Parameters<AgentRuntime['startTurn']>[0]> = [];
 
   getStatus(): AgentRuntime['getStatus'] extends () => infer T ? T : never {
     return {
@@ -157,6 +158,7 @@ class FakeClaudeRuntime extends EventEmitter implements AgentRuntime {
     };
   }
   async startTurn(input: Parameters<AgentRuntime['startTurn']>[0]) {
+    this.startTurnInputs.push(input);
     const session = await this.readSession(input.providerSessionId);
     const providerTurnId = `claude-turn-${session.turns.length + 1}`;
     const userItem: AgentHistoryItem = {
@@ -222,7 +224,6 @@ class FakeClaudeRuntime extends EventEmitter implements AgentRuntime {
   }
   mapProviderRequest(
     request: Parameters<NonNullable<AgentRuntime['mapProviderRequest']>>[0],
-    _options: Parameters<NonNullable<AgentRuntime['mapProviderRequest']>>[1],
   ): AgentProviderRequestMapping | null {
     if (request.method !== 'tool/AskUserQuestion') {
       return null;
@@ -1297,6 +1298,10 @@ describe('supervisor api', () => {
       providerTurnId: 'claude-turn-2',
       status: 'inProgress',
     });
+    expect(fakeClaudeRuntime.startTurnInputs.at(-1)).toMatchObject({
+      hidden: true,
+      displayTurnId: 'claude-turn-1',
+    });
     expect(session.turns.at(-1).items).toEqual([
       expect.objectContaining({
         kind: 'agentMessage',
@@ -1314,6 +1319,105 @@ describe('supervisor api', () => {
         },
       ],
     });
+  });
+
+  it('keeps Claude plan-question continuations on the original visible turn', async () => {
+    await app.close();
+    fakeClaudeRuntime = new FakeClaudeRuntime();
+    app = buildTestApp(fakeCodexManager, { claudeRuntime: fakeClaudeRuntime });
+    await app.ready();
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspaceResponse.json().id,
+        provider: 'claude',
+        model: 'sonnet',
+        approvalMode: 'guarded',
+        collaborationMode: 'plan',
+        title: 'Claude Continuation Thread'
+      }
+    });
+    const thread = createResponse.json();
+
+    await app.inject({
+      method: 'POST',
+      url: `/api/threads/${thread.id}/prompt`,
+      payload: {
+        prompt: 'Plan a calculator.',
+      }
+    });
+    fakeClaudeRuntime.emit('provider-request', {
+      provider: 'claude',
+      id: 'toolu_question',
+      method: 'tool/AskUserQuestion',
+      params: {
+        providerSessionId: thread.providerSessionId,
+        providerTurnId: 'claude-turn-1',
+        toolUseId: 'toolu_question',
+      },
+    });
+    fakeClaudeRuntime.completeTurn(thread.providerSessionId, 'claude-turn-1');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${thread.id}/requests/toolu_question/respond`,
+      payload: {
+        answers: {
+          'question-1': {
+            answers: ['Detailed'],
+          },
+        },
+      },
+    });
+    expect(response.statusCode).toBe(200);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fakeClaudeRuntime.completeTurn(thread.providerSessionId, 'claude-turn-2');
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${thread.id}`,
+    });
+    expect(detailResponse.statusCode).toBe(200);
+
+    const detail = detailResponse.json();
+    expect(detail.thread).toMatchObject({
+      status: 'idle',
+      activeTurnId: null,
+    });
+    expect(detail.turns).toHaveLength(1);
+    expect(detail.turns[0]).toMatchObject({
+      id: 'claude-turn-1',
+      status: 'completed',
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'userMessage',
+          text: 'Plan a calculator.',
+        }),
+        expect.objectContaining({
+          id: 'claude-turn-2:assistant',
+          kind: 'agentMessage',
+          text: 'Hello from Claude',
+        }),
+      ]),
+    });
+    expect(detail.turns[0].items).toEqual(
+      expect.not.arrayContaining([
+        expect.objectContaining({
+          kind: 'userMessage',
+          text: expect.stringContaining('The user answered the clarification questions below'),
+        }),
+      ]),
+    );
   });
 
   it('uses thread settings as display metadata when a Claude historical turn id differs from the live id', async () => {
@@ -1351,6 +1455,7 @@ describe('supervisor api', () => {
     });
     expect(promptResponse.statusCode).toBe(200);
 
+    fakeClaudeRuntime.completeTurn('claude-session-1', 'claude-turn-1');
     const session = fakeClaudeRuntime.sessions.get('claude-session-1');
     session.turns = [
       {
@@ -1372,7 +1477,6 @@ describe('supervisor api', () => {
         ],
       },
     ];
-    fakeClaudeRuntime.completeTurn('claude-session-1', 'claude-turn-1');
 
     const detailResponse = await app.inject({
       method: 'GET',
@@ -1386,7 +1490,23 @@ describe('supervisor api', () => {
       model: 'sonnet',
       reasoningEffort: 'medium',
       reasoningEffortAvailable: true,
+      tokenUsage: {
+        total: {
+          totalTokens: 17348,
+          inputTokens: 16248,
+          cachedInputTokens: 15796,
+          outputTokens: 1100,
+          reasoningOutputTokens: 0,
+        },
+      },
+      priceEstimate: {
+        pricingModelKey: 'sonnet',
+        pricingTierKey: 'standard',
+        currency: 'USD',
+      },
     });
+    const historicalTurn = detailResponse.json().turns.at(-1);
+    expect(historicalTurn.priceEstimate.totalUsd).toBeCloseTo(0.0225948, 10);
   });
 
   it('uses local turn metadata time when Claude history lacks a parseable timestamp', async () => {

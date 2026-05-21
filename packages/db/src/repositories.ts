@@ -416,6 +416,21 @@ export function deleteThreadTurnMetadataByThreadId(db: DatabaseClient, threadId:
   db.delete(threadTurnMetadata).where(eq(threadTurnMetadata.threadId, threadId)).run();
 }
 
+export function deleteThreadTurnMetadataByThreadAndTurnId(
+  db: DatabaseClient,
+  threadId: string,
+  turnId: string,
+) {
+  db.delete(threadTurnMetadata)
+    .where(
+      and(
+        eq(threadTurnMetadata.threadId, threadId),
+        eq(threadTurnMetadata.turnId, turnId),
+      ),
+    )
+    .run();
+}
+
 export function listThreadHistoryItemRecordsByThreadId(
   db: DatabaseClient,
   threadId: string,
@@ -474,6 +489,21 @@ export function deleteThreadHistoryItemRecordsByThreadId(
   threadId: string,
 ) {
   db.delete(threadHistoryItems).where(eq(threadHistoryItems.threadId, threadId)).run();
+}
+
+export function deleteThreadHistoryItemRecordsByThreadAndTurnId(
+  db: DatabaseClient,
+  threadId: string,
+  turnId: string,
+) {
+  db.delete(threadHistoryItems)
+    .where(
+      and(
+        eq(threadHistoryItems.threadId, threadId),
+        eq(threadHistoryItems.turnId, turnId),
+      ),
+    )
+    .run();
 }
 
 export function listThreadPendingSteerRecordsByThreadId(

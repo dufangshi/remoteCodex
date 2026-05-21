@@ -194,8 +194,14 @@ function historyItemLabel(kind: ThreadHistoryItemDto['kind']) {
       return 'Command';
     case 'webSearch':
       return 'Web search';
+    case 'fileRead':
+      return 'File read';
     case 'fileChange':
       return 'File changes';
+    case 'agentToolCall':
+      return 'Agent';
+    case 'skillToolCall':
+      return 'Skill';
     case 'toolCall':
       return 'Tool call';
     case 'contextCompaction':
@@ -234,7 +240,7 @@ function summarizeCommand(item: ThreadHistoryItemDto, snapshot: ThreadPdfExportS
   `;
 }
 
-function summarizeFileChange(item: ThreadHistoryItemDto, snapshot: ThreadPdfExportSnapshot) {
+function summarizeFileChange(item: ThreadHistoryItemDto) {
   const changedFiles = item.changedFiles ?? null;
   const additions = item.addedLines ?? 0;
   const removals = item.removedLines ?? 0;
@@ -265,7 +271,7 @@ function summarizeFileChange(item: ThreadHistoryItemDto, snapshot: ThreadPdfExpo
   `;
 }
 
-function renderPlan(text: string, snapshot: ThreadPdfExportSnapshot) {
+function renderPlan(text: string) {
   const lines = text
     .split('\n')
     .map((line) => line.trim())
@@ -281,7 +287,7 @@ function renderPlan(text: string, snapshot: ThreadPdfExportSnapshot) {
     .join('')}</ul>`;
 }
 
-function renderGenericSummary(item: ThreadHistoryItemDto, snapshot: ThreadPdfExportSnapshot) {
+function renderGenericSummary(item: ThreadHistoryItemDto) {
   const text = item.previewText ?? item.text;
   const status = item.status ? `<span class="pill">${escapeHtml(item.status)}</span>` : '';
   return `
@@ -326,19 +332,18 @@ function renderHtmlEventItem(item: ThreadHistoryItemDto) {
           <span class="event-kind">File changes</span>
           <span>${escapeHtml(summarizeInlineText(item.previewText ?? item.text))}</span>
         </summary>
-        ${summarizeFileChange(item, {
-          profile: 'technical',
-          options: {
-            includeTokenAndPrice: false,
-            includeCommandOutput: false,
-            includeAbsolutePaths: true,
-          },
-        } as ThreadPdfExportSnapshot)}
+        ${summarizeFileChange(item)}
       </details>
     `;
   }
 
-  if (item.kind === 'webSearch' || item.kind === 'toolCall') {
+  if (
+    item.kind === 'webSearch' ||
+    item.kind === 'fileRead' ||
+    item.kind === 'agentToolCall' ||
+    item.kind === 'skillToolCall' ||
+    item.kind === 'toolCall'
+  ) {
     return `
       <details class="event event-tool">
         <summary>
@@ -373,7 +378,8 @@ function renderHtmlHistoryEntries(items: ThreadHistoryItemDto[]) {
     if (
       current.kind !== 'commandExecution' &&
       current.kind !== 'fileChange' &&
-      current.kind !== 'webSearch'
+      current.kind !== 'webSearch' &&
+      current.kind !== 'fileRead'
     ) {
       const rendered = renderHtmlEventItem(current);
       if (rendered) {
@@ -401,7 +407,9 @@ function renderHtmlHistoryEntries(items: ThreadHistoryItemDto[]) {
       ? 'Command batch'
       : current.kind === 'fileChange'
         ? 'File change batch'
-        : 'Web search batch';
+        : current.kind === 'fileRead'
+          ? 'File read batch'
+          : 'Web search batch';
     const detailItems = groupedItems
       .map((item, itemIndex) => {
         if (item.kind === 'commandExecution') {
@@ -460,13 +468,20 @@ function renderHistoryItem(item: ThreadHistoryItemDto, snapshot: ThreadPdfExport
       return summarizeCommand(item, snapshot);
     }
     if (item.kind === 'fileChange') {
-      return summarizeFileChange(item, snapshot);
+      return summarizeFileChange(item);
     }
-    if (item.kind === 'toolCall' || item.kind === 'webSearch' || item.kind === 'image') {
-      return renderGenericSummary(item, snapshot);
+    if (
+      item.kind === 'toolCall' ||
+      item.kind === 'agentToolCall' ||
+      item.kind === 'skillToolCall' ||
+      item.kind === 'webSearch' ||
+      item.kind === 'fileRead' ||
+      item.kind === 'image'
+    ) {
+      return renderGenericSummary(item);
     }
     if (item.kind === 'plan') {
-      return renderPlan(item.text, snapshot);
+      return renderPlan(item.text);
     }
 
     return renderPlainText(item.text);

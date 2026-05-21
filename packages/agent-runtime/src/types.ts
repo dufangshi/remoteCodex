@@ -228,6 +228,7 @@ export interface StartAgentTurnInput {
   workspacePath?: string | null;
   performanceMode?: 'standard' | 'fast' | null;
   hidden?: boolean;
+  displayTurnId?: string | null;
 }
 
 export interface SendAgentInputInput {

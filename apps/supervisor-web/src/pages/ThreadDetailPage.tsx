@@ -256,6 +256,13 @@ function turnHasUserMessage(
   );
 }
 
+function findTurnWithUserMessage(
+  turns: ThreadDetailDto['turns'],
+  prompt: string,
+) {
+  return turns.find((turn) => turnHasUserMessage(turn, prompt)) ?? null;
+}
+
 function mergeTurnTokenUsage(
   turns: ThreadDetailDto['turns'],
   turnId: string,
@@ -1171,9 +1178,21 @@ export function ThreadDetailPage() {
         const hasMaterializedTurn = nextDetail.turns.some(
           (turn) => turn.id === resolvedTurnId,
         );
-        const hasMaterializedPrompt = nextDetail.turns.some((turn) =>
-          turnHasUserMessage(turn, current.prompt),
-        );
+        const promptTurn = findTurnWithUserMessage(nextDetail.turns, current.prompt);
+        const hasMaterializedPrompt = Boolean(promptTurn);
+        if (promptTurn && !current.serverTurnId) {
+          return {
+            ...current,
+            id: promptTurn.id,
+            serverTurnId: promptTurn.id,
+            status:
+              current.status === 'failed'
+                ? current.status
+                : promptTurn.status === 'inProgress'
+                  ? 'inProgress'
+                  : current.status,
+          };
+        }
         return hasMaterializedTurn || (threadHasEnded && hasMaterializedPrompt)
           ? null
           : current;
@@ -2892,11 +2911,18 @@ export function ThreadDetailPage() {
     </div>
   ) : null;
 
+  const optimisticServerTurnId = optimisticTurn?.serverTurnId ?? null;
+  const optimisticMaterializedTurn =
+    optimisticTurn && detail
+      ? detail.turns.find(
+          (turn) =>
+            (optimisticServerTurnId && turn.id === optimisticServerTurnId) ||
+            turn.id === optimisticTurn.id ||
+            turnHasUserMessage(turn, optimisticTurn.prompt),
+        ) ?? null
+      : null;
   const timelineOptimisticTurn =
-    optimisticTurn &&
-    !detail?.turns.some(
-      (turn) => turn.id === (optimisticTurn.serverTurnId ?? optimisticTurn.id),
-    )
+    optimisticTurn && !optimisticMaterializedTurn
       ? {
           id: optimisticTurn.id,
           startedAt: optimisticTurn.startedAt,

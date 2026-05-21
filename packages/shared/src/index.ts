@@ -306,8 +306,11 @@ export interface ThreadHistoryItemDto {
     | 'reasoning'
     | 'commandExecution'
     | 'webSearch'
+    | 'fileRead'
     | 'fileChange'
     | 'hook'
+    | 'agentToolCall'
+    | 'skillToolCall'
     | 'toolCall'
     | 'other';
   text: string;
