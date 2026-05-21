@@ -344,9 +344,7 @@ function queryOptionsForRuntime(
   if (permission.allowDangerouslySkipPermissions) {
     options.allowDangerouslySkipPermissions = true;
   }
-  if (input.command && input.command !== 'claude') {
-    options.pathToClaudeCodeExecutable = input.command;
-  }
+  options.pathToClaudeCodeExecutable = input.command?.trim() || 'claude';
   return options;
 }
 

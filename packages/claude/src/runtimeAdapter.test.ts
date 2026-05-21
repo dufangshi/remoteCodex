@@ -198,6 +198,31 @@ function makeAdapter(messagesForPrompt: (prompt: string) => SDKMessage[] | FakeQ
 }
 
 describe('ClaudeRuntimeAdapter', () => {
+  it('passes the configured Claude executable to the SDK', async () => {
+    let sdkOptions: Record<string, unknown> | null = null;
+    const adapter = new ClaudeRuntimeAdapter({
+      home: '/tmp/claude-home',
+      command: 'claude',
+      query: ((params: { prompt: string; options: Record<string, unknown> }) => {
+        sdkOptions = params.options;
+        return new FakeQuery([systemInit(), result()]);
+      }) as any,
+      listSessions: (async () => [] satisfies SDKSessionInfo[]) as any,
+      getSessionInfo: (async () => null) as any,
+      getSessionMessages: (async () => [] satisfies SessionMessage[]) as any,
+    });
+
+    await adapter.start();
+    await adapter.startSession({
+      cwd: '/tmp/workspace',
+      model: 'sonnet',
+      approvalMode: 'guarded',
+      sandboxMode: 'workspace-write',
+    });
+
+    expect(sdkOptions?.pathToClaudeCodeExecutable).toBe('claude');
+  });
+
   it('starts a session from the Claude init message and hides the synthetic prompt', async () => {
     const adapter = makeAdapter((prompt) => {
       expect(prompt).toBe(hiddenInitPrompt());
