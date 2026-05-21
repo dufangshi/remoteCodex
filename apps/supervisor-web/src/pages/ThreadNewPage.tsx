@@ -15,7 +15,6 @@ import {
   fetchAgentBackends,
   fetchAgentBackendModels,
   fetchWorkspaces,
-  fetchWorkspaceSettings,
 } from '../lib/api';
 
 function backendCanStartSession(backend: AgentBackendDto) {
@@ -41,19 +40,13 @@ export function ThreadNewPage() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([fetchWorkspaces(), fetchWorkspaceSettings(), fetchAgentBackends()])
-      .then(async ([workspaceRecords, settings, backendRecords]) => {
+    Promise.all([fetchWorkspaces(), fetchAgentBackends()])
+      .then(async ([workspaceRecords, backendRecords]) => {
         if (cancelled) {
           return;
         }
         const enabledBackends = backendRecords.filter(backendCanStartSession);
-        const fallbackProvider = enabledBackends[0]?.provider ?? 'codex';
-        const initialProvider = enabledBackends.some(
-          (backend) => backend.provider === settings.defaultBackend,
-        )
-          ? settings.defaultBackend
-          : fallbackProvider;
-        shellNav?.setDefaultBackend(initialProvider);
+        const initialProvider = enabledBackends[0]?.provider ?? 'codex';
         setProvider(initialProvider);
         setBackends(backendRecords);
         const modelRecords = await fetchAgentBackendModels(initialProvider);
@@ -187,7 +180,6 @@ export function ThreadNewPage() {
               onChange={(event) => {
                 const next = event.target.value as AgentBackendIdDto;
                 setProvider(next);
-                shellNav?.setDefaultBackend(next);
               }}
               className="mt-2 w-full rounded-2xl border border-stone-700 bg-stone-950 px-4 py-3 text-stone-100 outline-none transition focus:border-amber-300"
             >

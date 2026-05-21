@@ -527,7 +527,6 @@ describe('AppShellNavigation', () => {
     expect(patchCall).toBeTruthy();
     expect(JSON.parse(String(patchCall?.[1]?.body))).toEqual({
       devHome: '/tmp/dev/projects/',
-      defaultBackend: 'codex',
     });
   });
 
@@ -606,7 +605,7 @@ describe('AppShellNavigation', () => {
     expect(restartCall).toBeTruthy();
   });
 
-  it('shows service build and restart when Claude is the selected backend', async () => {
+  it('does not expose backend selection in settings', async () => {
     render(
       <MemoryRouter initialEntries={['/threads?workspaceId=workspace-1']}>
         <NavigationHarness />
@@ -616,25 +615,11 @@ describe('AppShellNavigation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Claude/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Build and restart' })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /Claude/i }));
+    expect(screen.queryByText('Backend')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Build and restart' })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Build and restart' }));
-
-    await waitFor(() => {
-      expect(
-        screen.getByText('Build and restart launched. The page may disconnect briefly.'),
-      ).toBeInTheDocument();
-    });
-
-    const restartCall = vi.mocked(fetch).mock.calls.find(
-      ([url, init]) =>
-        String(url) === '/api/service/build-restart' && init?.method === 'POST',
-    );
-    expect(restartCall).toBeTruthy();
   });
 
   it('manages codex config archives from settings', async () => {

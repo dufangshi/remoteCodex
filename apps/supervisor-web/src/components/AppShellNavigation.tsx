@@ -159,21 +159,6 @@ function fallbackManagementSchema(provider: AgentBackendId) {
   );
 }
 
-function backendSelectionDescription(backends: AgentBackendDto[]) {
-  const enabledCount = backends.filter((backend) => backend.enabled).length;
-  const totalCount = backends.length;
-
-  if (enabledCount > 1) {
-    return 'New threads use the selected backend. Each backend exposes its own tools and settings.';
-  }
-
-  if (totalCount > enabledCount) {
-    return 'New threads use the selected backend. Additional backends appear here when configured.';
-  }
-
-  return 'New threads use the selected backend.';
-}
-
 function formatArchiveDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -370,14 +355,12 @@ export function AppShellSettingsDialog() {
   const [workspaceSettings, setWorkspaceSettings] = useState<WorkspaceSettingsDto | null>(null);
   const [workspaceSettingsState, setWorkspaceSettingsState] = useState<{
     devHomeDraft: string;
-    backendDraft: AgentBackendIdDto;
     loading: boolean;
     saving: boolean;
     message: string | null;
     error: string | null;
   }>({
     devHomeDraft: '',
-    backendDraft: 'codex',
     loading: false,
     saving: false,
     message: null,
@@ -500,11 +483,9 @@ export function AppShellSettingsDialog() {
         }
 
         setWorkspaceSettings(settings);
-        shellNav.setDefaultBackend(settings.defaultBackend);
         setWorkspaceSettingsState((current) => ({
           ...current,
           devHomeDraft: settings.devHome,
-          backendDraft: settings.defaultBackend,
           loading: false,
         }));
       })
@@ -750,14 +731,11 @@ export function AppShellSettingsDialog() {
     try {
       const updated = await updateWorkspaceSettings({
         devHome,
-        defaultBackend: workspaceSettingsState.backendDraft,
       });
       setWorkspaceSettings(updated);
-      shellNav?.setDefaultBackend(updated.defaultBackend);
       setWorkspaceSettingsState((current) => ({
         ...current,
         devHomeDraft: updated.devHome,
-        backendDraft: updated.defaultBackend,
         saving: false,
         message: 'Workspace defaults saved.',
       }));
@@ -1011,62 +989,6 @@ export function AppShellSettingsDialog() {
             <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-[var(--theme-fg)]">Backend</p>
-                  <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                    {backendSelectionDescription(backends)}
-                  </p>
-                </div>
-                {backendState.loading ? (
-                  <span className="text-[11px] uppercase tracking-[0.18em] text-[var(--theme-fg-muted)]">
-                    Loading
-                  </span>
-                ) : null}
-              </div>
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                {backends.map((backend) => {
-                  const active = workspaceSettingsState.backendDraft === backend.provider;
-                  return (
-                    <button
-                      key={backend.provider}
-                      type="button"
-                      disabled={!backend.enabled}
-                      onClick={() => {
-                        setWorkspaceSettingsState((current) => ({
-                          ...current,
-                          backendDraft: backend.provider,
-                          message: null,
-                          error: null,
-                        }));
-                      }}
-                      className={`block rounded-[1rem] border px-3 py-2.5 text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                        active
-                          ? 'border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)]'
-                          : 'border-[var(--theme-border)] bg-[var(--theme-surface-strong)] hover:bg-[var(--theme-hover)]'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-sm font-medium text-[var(--theme-fg)]">
-                          {backend.displayName}
-                        </span>
-                        <span className="rounded-full border border-[var(--theme-border)] bg-[var(--theme-panel)] px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-[var(--theme-fg-muted)]">
-                          {backend.enabled ? backend.status.state : 'Unavailable'}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                        {backend.description}
-                      </p>
-                    </button>
-                  );
-                })}
-              </div>
-              {backendState.error ? (
-                <p className="mt-2 text-xs text-rose-300">{backendState.error}</p>
-              ) : null}
-            </div>
-
-            <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
                   <p className="text-sm font-medium text-[var(--theme-fg)]">Workspace defaults</p>
                   <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
                     Git projects clone into dev home. New workspace directories can create one
@@ -1109,11 +1031,6 @@ export function AppShellSettingsDialog() {
                       }
                       placeholder="/Users/name/dev"
                       className="min-w-0 flex-1 rounded-full border border-[var(--theme-border)] bg-[var(--theme-panel)] px-3 py-2 text-sm text-[var(--theme-fg)] outline-none focus:border-[var(--theme-accent-border)]"
-                    />
-                    <input
-                      type="hidden"
-                      value={workspaceSettingsState.backendDraft}
-                      readOnly
                     />
                     <button
                       type="button"
@@ -1171,6 +1088,8 @@ export function AppShellSettingsDialog() {
                 <p className="mt-2 text-xs text-rose-300">{restartState.error}</p>
               ) : restartState.message ? (
                 <p className="mt-2 text-xs text-emerald-300">{restartState.message}</p>
+              ) : backendState.error ? (
+                <p className="mt-2 text-xs text-rose-300">{backendState.error}</p>
               ) : null}
             </div>
 
