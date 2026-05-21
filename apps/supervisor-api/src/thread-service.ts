@@ -2171,10 +2171,16 @@ export class ThreadService {
       providerSessionId,
     };
 
-    if (record.providerTurnId && record.status === 'running') {
-      return this.steerOrStartPromptTurn(localThreadId, {
-        ...connectedRecord,
-        providerTurnId: record.providerTurnId,
+	    if (record.providerTurnId && record.status === 'running') {
+	      if (!runtime.sendInput || !runtime.capabilities.turns.steer) {
+	        throw new HttpError(409, {
+	          code: 'conflict',
+	          message: 'This backend does not support sending input while a turn is running.',
+	        });
+	      }
+	      return this.steerOrStartPromptTurn(localThreadId, {
+	        ...connectedRecord,
+	        providerTurnId: record.providerTurnId,
       }, {
         prompt,
         displayPrompt,
@@ -2294,12 +2300,18 @@ export class ThreadService {
     let steerTurnId = record.providerTurnId;
     let retriedAfterTurnMismatch = false;
 
-    while (steerTurnId) {
-      try {
-        await runtime.sendInput?.({
-          providerSessionId: record.providerSessionId,
-          providerTurnId: steerTurnId,
-          prompt: input.prompt,
+	    while (steerTurnId) {
+	      try {
+	        if (!runtime.sendInput) {
+	          throw new HttpError(409, {
+	            code: 'conflict',
+	            message: 'This backend does not support sending input while a turn is running.',
+	          });
+	        }
+	        await runtime.sendInput({
+	          providerSessionId: record.providerSessionId,
+	          providerTurnId: steerTurnId,
+	          prompt: input.prompt,
         });
 
         updateThreadRecord(this.db, localThreadId, {

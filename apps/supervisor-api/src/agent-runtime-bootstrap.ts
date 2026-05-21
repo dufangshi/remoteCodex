@@ -7,6 +7,7 @@ import {
   CodexAppServerManager,
   CodexRuntimeAdapter,
 } from '../../../packages/codex/src/index';
+import { ClaudeRuntimeAdapter } from '../../../packages/claude/src/index';
 import type { RuntimeConfig } from '../../../packages/config/src/index';
 import { CodexManagementService } from './codex/codex-management-service';
 import { LocalCodexSessionStore } from './codex/local-session-store';
@@ -45,8 +46,17 @@ export function createAgentRuntimeBootstrap(config: RuntimeConfig): AgentRuntime
 
   const claudeConfig = config.agentProviders.claude;
   if (claudeConfig.enabled) {
+    const claudeRuntime = new ClaudeRuntimeAdapter({
+      home: claudeConfig.home,
+      command: claudeConfig.command,
+      clientInfo: {
+        name: 'remote-codex-supervisor',
+        title: config.appName,
+        version: config.appVersion,
+      },
+    });
+    runtimes.push(claudeRuntime);
     providerHostHomes.claude = claudeConfig.home;
-    // Claude is intentionally config-only until the Claude runtime adapter is added.
   }
 
   return {

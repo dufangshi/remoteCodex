@@ -1,13 +1,19 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { EventEmitter } from 'node:events';
 import { fileURLToPath } from 'node:url';
 
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { buildApp } from './app';
-import { AgentRuntimeRegistry } from '../../../packages/agent-runtime/src/index';
+import {
+  AgentRuntime,
+  AgentRuntimeEvent,
+  AgentHistoryItem,
+  AgentRuntimeRegistry,
+} from '../../../packages/agent-runtime/src/index';
 import { CodexRuntimeAdapter, JsonRpcClientError } from '../../../packages/codex/src/index';
 import { CodexManagementService } from './codex/codex-management-service';
 import { LocalCodexSessionStore } from './codex/local-session-store';
@@ -21,14 +27,234 @@ vi.mock('puppeteer-core', () => ({
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
+class FakeClaudeRuntime extends EventEmitter implements AgentRuntime {
+  readonly provider = 'claude' as const;
+  readonly displayName = 'Claude';
+  readonly description = 'Fake Claude runtime';
+  readonly capabilities: AgentRuntime['capabilities'] = {
+    sessions: { list: true, read: true, resume: true, importLocal: false },
+    turns: { start: true, streamInput: false, steer: false, interrupt: true, compact: false },
+    branching: { fork: false, hardRollback: false, resumeAt: false, rewindFiles: false },
+    controls: {
+      planMode: false,
+      permissionRequests: false,
+      sandboxMode: false,
+      performanceMode: false,
+      goals: false,
+    },
+    management: {
+      models: true,
+      mcpStatus: true,
+      skills: false,
+      hooks: false,
+      hookTrust: false,
+      hostConfigFiles: false,
+      providerSettings: false,
+    },
+    usage: { contextWindow: false, tokenUsage: false, costUsd: false },
+  };
+  readonly managementSchema: AgentRuntime['managementSchema'] = {
+    hostConfigFiles: [],
+    toolboxItems: [{ action: 'mcp', command: '/mcp', label: 'MCP', panel: 'mcp' }],
+    hookCommandTemplates: [],
+    providerConfigFormat: 'none',
+    mcpConfigFormat: 'none',
+    configArchives: false,
+    buildRestart: false,
+  };
+  sessions = new Map<string, any>();
+  activeTurnId: string | null = null;
+
+  getStatus(): AgentRuntime['getStatus'] extends () => infer T ? T : never {
+    return {
+      state: 'ready',
+      transport: 'sdk',
+      lastStartedAt: new Date().toISOString(),
+      lastError: null,
+      restartCount: 0,
+    };
+  }
+  async start() {}
+  async stop() {}
+  async listModels() {
+    return [
+      {
+        id: 'sonnet',
+        model: 'sonnet',
+        displayName: 'Claude Sonnet',
+        description: 'Fake Claude Sonnet',
+        isDefault: true,
+        hidden: false,
+        supportedReasoningEfforts: [
+          { reasoningEffort: 'low', description: 'Low' },
+          { reasoningEffort: 'medium', description: 'Medium' },
+          { reasoningEffort: 'high', description: 'High' },
+        ],
+        defaultReasoningEffort: 'medium',
+      },
+    ];
+  }
+  async listSessions() {
+    return [...this.sessions.values()].map((session) => ({
+      provider: 'claude' as const,
+      providerSessionId: session.providerSessionId,
+      cwd: session.cwd,
+      title: session.title,
+      preview: session.preview,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      status: session.status,
+      rawSession: session,
+    }));
+  }
+  async listLoadedSessions() {
+    return this.activeTurnId ? [...this.sessions.keys()] : [];
+  }
+  async readSession(providerSessionId: string) {
+    const session = this.sessions.get(providerSessionId);
+    if (!session) {
+      throw new Error('session missing');
+    }
+    return session;
+  }
+  async startSession(input: Parameters<AgentRuntime['startSession']>[0]) {
+    const providerSessionId = `claude-session-${this.sessions.size + 1}`;
+    const now = new Date().toISOString();
+    const session = {
+      provider: 'claude' as const,
+      providerSessionId,
+      cwd: input.cwd,
+      title: null,
+      preview: null,
+      createdAt: now,
+      updatedAt: now,
+      status: 'idle' as const,
+      turns: [],
+      rawSession: null,
+    };
+    this.sessions.set(providerSessionId, session);
+    return {
+      provider: 'claude' as const,
+      providerSessionId,
+      model: input.model,
+      reasoningEffort: null,
+      sandboxMode: input.sandboxMode ?? null,
+      session,
+      rawSession: session,
+    };
+  }
+  async resumeSession(input: Parameters<AgentRuntime['resumeSession']>[0]) {
+    const session = await this.readSession(input.providerSessionId);
+    return {
+      provider: 'claude' as const,
+      providerSessionId: input.providerSessionId,
+      model: input.model ?? null,
+      reasoningEffort: null,
+      sandboxMode: input.sandboxMode ?? null,
+      session,
+      rawSession: session,
+    };
+  }
+  async startTurn(input: Parameters<AgentRuntime['startTurn']>[0]) {
+    const session = await this.readSession(input.providerSessionId);
+    const providerTurnId = `claude-turn-${session.turns.length + 1}`;
+    const userItem: AgentHistoryItem = {
+      id: `${providerTurnId}:user`,
+      kind: 'userMessage',
+      text: input.prompt,
+    };
+    const turn = {
+      providerTurnId,
+      status: 'inProgress' as const,
+      error: null,
+      items: [userItem],
+      rawTurn: null,
+    };
+    session.turns.push(turn);
+    session.status = 'running';
+    this.activeTurnId = providerTurnId;
+    this.emitRuntimeEvent({
+      type: 'turn.started',
+      provider: 'claude',
+      providerSessionId: input.providerSessionId,
+      turn,
+    });
+    queueMicrotask(() => {
+      const agentItem: AgentHistoryItem = {
+        id: `${providerTurnId}:assistant`,
+        kind: 'agentMessage',
+        text: 'Hello from Claude',
+      };
+      turn.items.push(agentItem);
+      this.emitRuntimeEvent({
+        type: 'output.delta',
+        provider: 'claude',
+        providerSessionId: input.providerSessionId,
+        providerTurnId,
+        itemId: agentItem.id,
+        delta: agentItem.text,
+      });
+    });
+    return turn;
+  }
+  async interruptTurn(input: Parameters<AgentRuntime['interruptTurn']>[0]) {
+    const session = await this.readSession(input.providerSessionId);
+    const turn = session.turns.find((entry: any) => entry.providerTurnId === input.providerTurnId);
+    if (!turn) {
+      return null;
+    }
+    turn.status = 'interrupted';
+    session.status = 'interrupted';
+    this.activeTurnId = null;
+    return turn;
+  }
+  async listMcpServers() {
+    return [
+      {
+        name: 'docs',
+        authStatus: 'unsupported',
+        tools: [{ name: 'search', title: 'search', description: 'Search docs' }],
+        resourceCount: 0,
+        resourceTemplateCount: 0,
+      },
+    ];
+  }
+  completeTurn(providerSessionId: string, providerTurnId: string) {
+    const session = this.sessions.get(providerSessionId);
+    const turn = session?.turns.find((entry: any) => entry.providerTurnId === providerTurnId);
+    if (!session || !turn) {
+      return;
+    }
+    turn.status = 'completed';
+    session.status = 'idle';
+    this.activeTurnId = null;
+    this.emitRuntimeEvent({
+      type: 'turn.completed',
+      provider: 'claude',
+      providerSessionId,
+      turn,
+    });
+  }
+  private emitRuntimeEvent(event: AgentRuntimeEvent) {
+    this.emit('event', event);
+  }
+}
+
 describe('supervisor api', () => {
   let tempDir = '';
   let codexHome = '';
   let app: ReturnType<typeof buildApp>;
   let fakeCodexManager: FakeCodexManager;
+  let fakeClaudeRuntime: FakeClaudeRuntime | null = null;
   let launchBuildRestartCalls = 0;
 
-  function buildTestApp(manager: FakeCodexManager) {
+  function buildTestApp(manager: FakeCodexManager, options: { claudeRuntime?: FakeClaudeRuntime } = {}) {
+    const runtimes: AgentRuntime[] = [
+      new CodexRuntimeAdapter(manager as any),
+    ];
+    if (options.claudeRuntime) {
+      runtimes.push(options.claudeRuntime);
+    }
     return buildApp({
       env: {
         NODE_ENV: 'test',
@@ -39,13 +265,12 @@ describe('supervisor api', () => {
         CODEX_HOME: codexHome
       },
       runtimeBootstrap: {
-        agentRuntimes: new AgentRuntimeRegistry([
-          new CodexRuntimeAdapter(manager as any),
-        ]),
+        agentRuntimes: new AgentRuntimeRegistry(runtimes),
         localCodexSessionStore: new LocalCodexSessionStore(codexHome),
         codexManagement: new CodexManagementService(codexHome),
         providerHostHomes: {
           codex: codexHome,
+          ...(options.claudeRuntime ? { claude: path.join(tempDir, 'claude-home') } : {}),
         },
       },
       serviceLifecycle: {
@@ -65,6 +290,7 @@ describe('supervisor api', () => {
     await fs.mkdir(path.join(tempDir, 'dev'));
     await fs.mkdir(codexHome, { recursive: true });
     fakeCodexManager = new FakeCodexManager();
+    fakeClaudeRuntime = null;
     launchBuildRestartCalls = 0;
     vi.stubEnv('REMOTE_CODEX_PACKAGE_ROOT', repoRoot);
 
@@ -687,6 +913,194 @@ describe('supervisor api', () => {
     expect(createResponse.json()).toMatchObject({
       code: 'service_unavailable',
       message: 'Agent runtime provider is not configured: claude',
+    });
+  });
+
+  it('registers Claude as a backend when configured', async () => {
+    await app.close();
+    fakeClaudeRuntime = new FakeClaudeRuntime();
+    app = buildTestApp(fakeCodexManager, { claudeRuntime: fakeClaudeRuntime });
+    await app.ready();
+
+    const statusResponse = await app.inject({
+      method: 'GET',
+      url: '/api/agent-runtimes/claude/status',
+    });
+
+    expect(statusResponse.statusCode).toBe(200);
+    expect(statusResponse.json()).toMatchObject({
+      provider: 'claude',
+      displayName: 'Claude',
+      status: {
+        transport: 'sdk',
+      },
+      capabilities: {
+        turns: {
+          start: true,
+          steer: false,
+          interrupt: true,
+        },
+        controls: {
+          goals: false,
+          performanceMode: false,
+        },
+      },
+      managementSchema: {
+        providerConfigFormat: 'none',
+        mcpConfigFormat: 'none',
+      },
+    });
+
+    const modelsResponse = await app.inject({
+      method: 'GET',
+      url: '/api/agent-runtimes/claude/models',
+    });
+    expect(modelsResponse.statusCode).toBe(200);
+    expect(modelsResponse.json()).toEqual([
+      expect.objectContaining({
+        model: 'sonnet',
+        displayName: 'Claude Sonnet',
+      }),
+    ]);
+  });
+
+  it('creates a Claude thread and streams assistant output through runtime events', async () => {
+    await app.close();
+    fakeClaudeRuntime = new FakeClaudeRuntime();
+    app = buildTestApp(fakeCodexManager, { claudeRuntime: fakeClaudeRuntime });
+    await app.ready();
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        provider: 'claude',
+        model: 'sonnet',
+        approvalMode: 'guarded',
+        title: 'Claude Thread'
+      }
+    });
+
+    expect(createResponse.statusCode).toBe(200);
+    expect(createResponse.json()).toMatchObject({
+      provider: 'claude',
+      providerSessionId: 'claude-session-1',
+      model: 'sonnet',
+      fastMode: false,
+    });
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createResponse.json().id}/prompt`,
+      payload: {
+        prompt: 'Say hello.',
+      }
+    });
+    expect(promptResponse.statusCode).toBe(200);
+    expect(promptResponse.json()).toMatchObject({
+      provider: 'claude',
+      status: 'running',
+      activeTurnId: 'claude-turn-1',
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createResponse.json().id}`,
+    });
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json().turns.at(-1)).toMatchObject({
+      id: 'claude-turn-1',
+      status: 'inProgress',
+      items: [
+        expect.objectContaining({ kind: 'userMessage', text: 'Say hello.' }),
+        expect.objectContaining({ kind: 'agentMessage', text: 'Hello from Claude' }),
+      ],
+    });
+
+    const runningPromptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createResponse.json().id}/prompt`,
+      payload: {
+        prompt: 'Second prompt while running.',
+      },
+    });
+    expect(runningPromptResponse.statusCode).toBe(409);
+    expect(runningPromptResponse.json()).toMatchObject({
+      code: 'conflict',
+      message: 'This backend does not support sending input while a turn is running.',
+    });
+
+    fakeClaudeRuntime.completeTurn('claude-session-1', 'claude-turn-1');
+    const completedDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createResponse.json().id}`,
+    });
+    expect(completedDetailResponse.json().thread).toMatchObject({
+      status: 'idle',
+      activeTurnId: null,
+    });
+    expect(completedDetailResponse.json().turns.at(-1)).toMatchObject({
+      status: 'completed',
+      items: expect.arrayContaining([
+        expect.objectContaining({ kind: 'agentMessage', text: 'Hello from Claude' }),
+      ]),
+    });
+  });
+
+  it('interrupts an active Claude turn', async () => {
+    await app.close();
+    fakeClaudeRuntime = new FakeClaudeRuntime();
+    app = buildTestApp(fakeCodexManager, { claudeRuntime: fakeClaudeRuntime });
+    await app.ready();
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspaceResponse.json().id,
+        provider: 'claude',
+        model: 'sonnet',
+        approvalMode: 'guarded',
+      }
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createResponse.json().id}/prompt`,
+      payload: {
+        prompt: 'Run until interrupted.',
+      }
+    });
+
+    const interruptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createResponse.json().id}/interrupt`,
+      payload: {
+        turnId: 'claude-turn-1',
+      },
+    });
+
+    expect(interruptResponse.statusCode).toBe(200);
+    expect(interruptResponse.json()).toMatchObject({
+      provider: 'claude',
+      status: 'interrupted',
+      activeTurnId: null,
     });
   });
 
