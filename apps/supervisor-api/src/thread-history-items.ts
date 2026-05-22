@@ -1,4 +1,5 @@
 import type { AgentTurn } from '../../../packages/agent-runtime/src/index';
+import { isTransientAgentHistoryItem } from '../../../packages/agent-runtime/src/index';
 import type {
   ThreadHistoryItemDetailDto,
   ThreadHistoryItemDto,
@@ -38,6 +39,7 @@ function deferCommandHistoryItem(
   deferredDetails: Map<string, ThreadHistoryItemDetailDto>,
 ): ThreadHistoryItemDto {
   const fullText = item.detailText?.trim() || item.text || 'Command output';
+  const summaryText = item.previewText?.trim() || fullText;
   deferredDetails.set(item.id, {
     id: item.id,
     kind: item.kind,
@@ -47,7 +49,7 @@ function deferCommandHistoryItem(
 
   return {
     ...item,
-    text: summarizeText(fullText, 'Command output'),
+    text: summarizeText(summaryText, 'Command output'),
     detailText: null,
     hasDeferredDetail: true,
   };
@@ -106,7 +108,6 @@ export function deferLargeHistoryItemDetails(
 
 export function shouldPersistLiveHistoryItem(item: ThreadHistoryItemDto) {
   return (
-    item.kind === 'agentMessage' ||
     item.kind === 'commandExecution' ||
     item.kind === 'fileChange' ||
     item.kind === 'fileRead' ||
@@ -115,6 +116,34 @@ export function shouldPersistLiveHistoryItem(item: ThreadHistoryItemDto) {
     item.kind === 'skillToolCall' ||
     item.kind === 'toolCall' ||
     item.kind === 'webSearch'
+  );
+}
+
+export function shouldPersistFinalHistoryItem(item: ThreadHistoryItemDto) {
+  return item.kind === 'agentMessage' || shouldPersistLiveHistoryItem(item);
+}
+
+export function shouldPersistRuntimeFinalHistoryItem(
+  item: ThreadHistoryItemDto,
+  allItems: ThreadHistoryItemDto[],
+) {
+  if (item.kind === 'agentMessage' && isTransientAgentHistoryItem(item)) {
+    return false;
+  }
+
+  return shouldPersistFinalHistoryItem(item);
+}
+
+function visibleRuntimeTurnItems(items: ThreadHistoryItemDto[]) {
+  const hasFinalAgentMessage = items.some(
+    (item) => item.kind === 'agentMessage' && !isTransientAgentHistoryItem(item),
+  );
+  if (!hasFinalAgentMessage) {
+    return items;
+  }
+
+  return items.filter(
+    (item) => !(item.kind === 'agentMessage' && isTransientAgentHistoryItem(item)),
   );
 }
 
@@ -143,6 +172,32 @@ function hasHistoryItemSequence(item: ThreadHistoryItemDto) {
 
 function historyItemSequence(item: ThreadHistoryItemDto) {
   return hasHistoryItemSequence(item) ? item.sequence! : Number.POSITIVE_INFINITY;
+}
+
+function historyItemTranscriptOrder(item: ThreadHistoryItemDto) {
+  return typeof item.transcriptOrder === 'number' && Number.isFinite(item.transcriptOrder)
+    ? item.transcriptOrder
+    : null;
+}
+
+function copyPersistedOrderingHints(
+  item: ThreadHistoryItemDto,
+  persistedItem: ThreadHistoryItemDto,
+) {
+  let nextItem = item;
+  if (hasHistoryItemSequence(persistedItem)) {
+    const sequence = historyItemSequence(persistedItem);
+    if (nextItem.sequence !== sequence) {
+      nextItem = { ...nextItem, sequence };
+    }
+  }
+
+  const transcriptOrder = historyItemTranscriptOrder(persistedItem);
+  if (transcriptOrder !== null && nextItem.transcriptOrder !== transcriptOrder) {
+    nextItem = { ...nextItem, transcriptOrder };
+  }
+
+  return nextItem;
 }
 
 export function sortHistoryItemsBySequence<T extends ThreadHistoryItemDto>(items: T[]): T[] {
@@ -175,6 +230,9 @@ function sortTurnItemsByRecordedSequence(items: ThreadHistoryItemDto[]) {
 
   const trailingItems = items.slice(index);
   if (!trailingItems.some(hasHistoryItemSequence)) {
+    return items;
+  }
+  if (trailingItems.some((item) => historyItemTranscriptOrder(item) !== null)) {
     return items;
   }
 
@@ -293,16 +351,22 @@ function mergeHistoryItemsBySequence(
   return sortTurnItemsByRecordedSequence(mergedItems);
 }
 
-function copyPersistedSequence(
+function shouldAppendPersistedMissingItem(
+  turn: ThreadTurnDto,
   item: ThreadHistoryItemDto,
-  persistedItem: ThreadHistoryItemDto,
 ) {
-  if (!hasHistoryItemSequence(persistedItem)) {
-    return item;
+  if (item.kind !== 'agentMessage') {
+    return true;
   }
 
-  const sequence = historyItemSequence(persistedItem);
-  return item.sequence === sequence ? item : { ...item, sequence };
+  // Older builds persisted streaming agent drafts. Once the provider transcript
+  // contains completed assistant messages, treat that transcript as authoritative.
+  const isCrossTurnProjection = Boolean(item.sourceTurnId && item.sourceTurnId !== turn.id);
+  return !(
+    turn.status === 'completed' &&
+    turn.items.some((turnItem) => turnItem.kind === 'agentMessage') &&
+    !isCrossTurnProjection
+  );
 }
 
 export function mergePersistedHistoryItemsIntoTurns(
@@ -322,19 +386,32 @@ export function mergePersistedHistoryItemsIntoTurns(
 
     let changed = false;
     const persistedItemsById = new Map(persistedItems.map((item) => [item.id, item]));
-    const nextItems = turn.items.map((item) => {
+    const nextItems = turn.items.map((item, transcriptIndex) => {
       const persistedItem = persistedItemsById.get(item.id);
+      const itemWithTranscriptOrder =
+        item.transcriptOrder === transcriptIndex
+          ? item
+          : { ...item, transcriptOrder: transcriptIndex };
       if (!persistedItem) {
-        return item;
+        changed = true;
+        return itemWithTranscriptOrder;
       }
 
       persistedItemsById.delete(item.id);
 
       if (item.kind !== persistedItem.kind) {
-        return item;
+        changed = itemWithTranscriptOrder !== item || changed;
+        return itemWithTranscriptOrder;
       }
 
-      const sequencedItem = copyPersistedSequence(item, persistedItem);
+      const persistedItemWithTranscriptOrder = {
+        ...persistedItem,
+        transcriptOrder: transcriptIndex,
+      };
+      const sequencedItem = copyPersistedOrderingHints(
+        itemWithTranscriptOrder,
+        persistedItemWithTranscriptOrder,
+      );
       if (sequencedItem !== item) {
         changed = true;
       }
@@ -349,13 +426,13 @@ export function mergePersistedHistoryItemsIntoTurns(
         const persistedText = persistedItem.detailText?.trim() || persistedItem.text.trim();
         if (persistedText.length > existingText.length) {
           changed = true;
-          return persistedItem.kind === 'commandExecution'
+          return persistedItemWithTranscriptOrder.kind === 'commandExecution'
             ? deferCommandHistoryItem(
-                persistedItem as ThreadHistoryItemDto & { kind: 'commandExecution' },
+                persistedItemWithTranscriptOrder as ThreadHistoryItemDto & { kind: 'commandExecution' },
                 deferredDetails,
               )
             : deferToolCallHistoryItem(
-                persistedItem as ThreadHistoryItemDto & {
+                persistedItemWithTranscriptOrder as ThreadHistoryItemDto & {
                   kind: 'toolCall' | 'agentToolCall' | 'skillToolCall';
                 },
                 deferredDetails,
@@ -369,6 +446,7 @@ export function mergePersistedHistoryItemsIntoTurns(
     const existingItemIds = new Set(nextItems.map((item) => item.id));
     const missingItems = [...persistedItemsById.values()]
       .filter((item) => !existingItemIds.has(item.id))
+      .filter((item) => shouldAppendPersistedMissingItem(turn, item))
       .map((item) =>
         item.kind === 'commandExecution'
           ? deferCommandHistoryItem(
@@ -406,7 +484,7 @@ export function agentTurnToThreadTurnDto(
     startedAt: turn.startedAt ?? parseUuidV7Timestamp(turn.providerTurnId),
     status: turn.status,
     error: turn.error?.message ?? null,
-    items: turn.items,
+    items: visibleRuntimeTurnItems(turn.items),
   };
 
   return deferredDetails ? deferLargeHistoryItemDetails(baseTurn, deferredDetails) : baseTurn;

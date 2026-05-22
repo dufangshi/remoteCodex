@@ -1,7 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { ThreadTurnPriceEstimateDto, ThreadTurnTokenUsageDto } from '../../../../packages/shared/src/index';
+import type {
+  ThreadTurnPriceEstimateDto,
+  ThreadTurnTokenUsageDto,
+} from '../../shared/src/index';
 
 export type PricingTierKey = 'standard' | 'fast';
 
@@ -46,7 +49,7 @@ function resolvePackageRoot(start = process.cwd()) {
     current = path.dirname(current);
   }
 
-  throw new Error('Unable to locate package root for Codex pricing config.');
+  throw new Error('Unable to locate package root for model pricing config.');
 }
 
 function getPricingConfigPath() {
@@ -194,9 +197,22 @@ function pricingModelKeyForModel(model: string | null | undefined) {
     return modelKey;
   }
 
-  const claudeDateSuffixMatch = modelKey.match(/^(claude-[a-z]+-\d+(?:-\d+)?)-20\d{6}$/);
-  if (claudeDateSuffixMatch?.[1] && models[claudeDateSuffixMatch[1]]) {
-    return claudeDateSuffixMatch[1];
+  const providerSeparatorIndex = modelKey.indexOf('/');
+  const unqualifiedModelKey = providerSeparatorIndex >= 0
+    ? modelKey.slice(providerSeparatorIndex + 1)
+    : null;
+  if (unqualifiedModelKey && models[unqualifiedModelKey]) {
+    return unqualifiedModelKey;
+  }
+
+  for (const candidate of [modelKey, unqualifiedModelKey]) {
+    if (!candidate) {
+      continue;
+    }
+    const claudeDateSuffixMatch = candidate.match(/^(claude-[a-z]+-\d+(?:-\d+)?)-20\d{6}$/);
+    if (claudeDateSuffixMatch?.[1] && models[claudeDateSuffixMatch[1]]) {
+      return claudeDateSuffixMatch[1];
+    }
   }
 
   return modelKey;

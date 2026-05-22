@@ -1,3 +1,19 @@
+import type {
+  AgentBackendIdDto,
+} from './agent-providers';
+
+export {
+  agentBackendIds,
+  agentBackendMetadata,
+  defaultAgentBackendId,
+  isAgentBackendId,
+  normalizeAgentBackendId,
+} from './agent-providers';
+export type {
+  AgentBackendIdDto,
+  AgentBackendMetadata,
+} from './agent-providers';
+
 export type ApiErrorCode =
   | 'bad_request'
   | 'not_found'
@@ -14,6 +30,26 @@ export interface ApiErrorShape {
   details?: Record<string, unknown>;
 }
 
+const AUTO_THREAD_TITLE_MAX_CHARS = 15;
+
+function normalizeAutoThreadTitleWhitespace(value: string) {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+export function truncateAutoThreadTitle(value: string) {
+  const normalized = normalizeAutoThreadTitleWhitespace(value);
+  if (!normalized) {
+    return '';
+  }
+
+  const characters = Array.from(normalized);
+  if (characters.length <= AUTO_THREAD_TITLE_MAX_CHARS) {
+    return normalized;
+  }
+
+  return `${characters.slice(0, AUTO_THREAD_TITLE_MAX_CHARS).join('')}...`;
+}
+
 export interface RuntimeConfigDto {
   appName: string;
   appVersion: string;
@@ -22,8 +58,6 @@ export interface RuntimeConfigDto {
   workspaceRoot: string;
   environment: string;
 }
-
-export type AgentBackendIdDto = 'codex' | 'claude';
 
 export interface AgentRuntimeStatusDto {
   state: 'starting' | 'ready' | 'degraded' | 'stopped' | 'failed';
@@ -85,6 +119,18 @@ export interface AgentBackendDto {
   status: AgentRuntimeStatusDto;
   capabilities: AgentProviderCapabilitiesDto;
   managementSchema: AgentBackendManagementSchemaDto;
+  installation: AgentBackendInstallationDto;
+}
+
+export interface AgentBackendInstallationDto {
+  packageName: string | null;
+  installed: boolean;
+  installedVersion: string | null;
+  latestVersion: string | null;
+  installCommand: string | null;
+  updateCommand: string | null;
+  busy: boolean;
+  lastError: string | null;
 }
 
 export interface AgentBackendConfigFileSchemaDto {
@@ -133,8 +179,9 @@ export interface ModelOptionDto {
   description: string;
   isDefault: boolean;
   hidden: boolean;
+  supportsPerformanceMode?: boolean;
   supportedReasoningEfforts: ReasoningEffortOptionDto[];
-  defaultReasoningEffort: ReasoningEffortDto;
+  defaultReasoningEffort: ReasoningEffortDto | null;
 }
 
 export interface VersionDto {
@@ -300,6 +347,7 @@ export interface ThreadHistoryItemDto {
   kind:
     | 'userMessage'
     | 'agentMessage'
+    | 'artifact'
     | 'image'
     | 'plan'
     | 'contextCompaction'
@@ -318,6 +366,8 @@ export interface ThreadHistoryItemDto {
   detailText?: string | null;
   hasDeferredDetail?: boolean | null;
   sequence?: number | null;
+  transcriptOrder?: number | null;
+  sourceTurnId?: string | null;
   status?: string | null;
   assetPath?: string | null;
   changedFiles?: number | null;
@@ -334,6 +384,7 @@ export interface ThreadHistoryItemDto {
     kind: string;
     text: string;
   }> | null;
+  artifact?: ThreadArtifactDto | null;
 }
 
 export interface ThreadHistoryItemDetailDto {
@@ -341,6 +392,73 @@ export interface ThreadHistoryItemDetailDto {
   kind: ThreadHistoryItemDto['kind'];
   title: string;
   text: string;
+}
+
+export interface ThreadArtifactDto {
+  id: string;
+  pluginId: string;
+  type: string;
+  title: string;
+  summaryText?: string | null;
+  payload: unknown;
+  assets?: Array<{
+    id: string;
+    mediaType: string;
+    url: string;
+    name?: string | null;
+  }> | null;
+  sourceTurnId?: string | null;
+  sourceItemId?: string | null;
+  createdAt: string;
+}
+
+export interface PluginArtifactTypeDto {
+  type: string;
+  title: string;
+  fileExtensions?: string[];
+}
+
+export interface PluginThreadPanelDto {
+  id: string;
+  label: string;
+  artifactTypes: string[];
+}
+
+export interface PluginCapabilitiesDto {
+  artifactTypes: PluginArtifactTypeDto[];
+  timelineRenderers: string[];
+  threadPanels: PluginThreadPanelDto[];
+  frontend?: {
+    entry?: string;
+    style?: string;
+  };
+  backend?: {
+    entry?: string;
+  };
+}
+
+export interface PluginManifestDto {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  remoteCodex: string;
+  capabilities: PluginCapabilitiesDto;
+}
+
+export interface PluginDto extends PluginManifestDto {
+  enabled: boolean;
+  source?: 'builtin' | 'imported' | null;
+}
+
+export interface UpdatePluginInput {
+  enabled: boolean;
+}
+
+export interface ImportPluginInput {
+  manifest?: unknown;
+  manifestJson?: string;
+  enabled?: boolean;
 }
 
 export interface ThreadTurnTokenBreakdownDto {
@@ -795,39 +913,126 @@ export interface RespondThreadActionRequestInput {
   answers: Record<string, ThreadActionRequestAnswerDto>;
 }
 
-export interface ThreadEventEnvelope {
-  type:
-    | 'thread.updated'
-    | 'thread.context.updated'
-    | 'thread.goal.updated'
-    | 'thread.goal.cleared'
-    | 'thread.turn.token.updated'
-    | 'thread.turn.started'
-    | 'thread.item.started'
-    | 'thread.item.completed'
-    | 'thread.plan.updated'
-    | 'thread.request.created'
-    | 'thread.request.resolved'
-    | 'thread.output.delta'
-    | 'thread.turn.completed'
-    | 'thread.turn.failed';
-  threadId: string;
-  timestamp: string;
-  payload: Record<string, unknown>;
+export interface ThreadEventPayloadMap {
+  'thread.updated': {
+    status?: ThreadStatusDto | string | null;
+    title?: string | null;
+    reason?: string;
+    turnId?: string;
+    model?: string | null;
+    reasoningEffort?: ReasoningEffortDto | string | null;
+    fastMode?: boolean;
+    collaborationMode?: CollaborationModeDto | string | null;
+    sandboxMode?: SandboxModeDto | string | null;
+  };
+  'thread.context.updated': {
+    contextUsage: ThreadContextUsageDto;
+  };
+  'thread.goal.updated': {
+    turnId?: string | null;
+    goal: ThreadGoalDto | null;
+    goalHistory: ThreadGoalDto[];
+  };
+  'thread.goal.cleared': {
+    goalHistory: ThreadGoalDto[];
+  };
+  'thread.turn.token.updated': {
+    turnId: string;
+    tokenUsage: ThreadTurnTokenUsageDto;
+    priceEstimate: ThreadTurnPriceEstimateDto | null;
+  };
+  'thread.turn.started': {
+    turnId: string;
+  };
+  'thread.item.started': {
+    turnId: string;
+    item: ThreadHistoryItemDto;
+  };
+  'thread.item.completed': {
+    turnId: string;
+    item: ThreadHistoryItemDto;
+  };
+  'thread.plan.updated': {
+    turnId: string;
+    explanation: string | null;
+    plan: ThreadLivePlanDto['plan'];
+  };
+  'thread.request.created': {
+    request: ThreadActionRequestDto;
+  };
+  'thread.request.resolved': {
+    requestId: string;
+  };
+  'thread.output.delta': {
+    turnId: string;
+    itemId: string;
+    sequence: number;
+    delta: string;
+  };
+  'thread.turn.completed': {
+    turnId: string;
+    status: ThreadTurnDto['status'];
+    error: string | null;
+  };
+  'thread.turn.failed': {
+    turnId: string;
+    error: string | null;
+    willRetry?: boolean;
+  };
 }
 
-export interface ShellEventEnvelope {
-  type:
-    | 'shell.connected'
-    | 'shell.status'
-    | 'shell.output'
-    | 'shell.detached'
-    | 'shell.exited'
-    | 'shell.error';
-  shellId: string;
-  timestamp: string;
-  payload: Record<string, unknown>;
+export type ThreadEventEnvelope = {
+  [Type in keyof ThreadEventPayloadMap]: {
+    type: Type;
+    threadId: string;
+    timestamp: string;
+    payload: ThreadEventPayloadMap[Type];
+  };
+}[keyof ThreadEventPayloadMap];
+
+export interface ShellEventPayloadMap {
+  'shell.connected': {
+    viewerId: string;
+  };
+  'shell.status': {
+    threadId: string;
+    state: ShellStatusDto;
+    viewerId?: string;
+  };
+  'shell.output': {
+    data: string;
+    replace?: boolean;
+    cursorX?: number;
+    cursorY?: number;
+    paneHeight?: number;
+    cwdBaseName?: string;
+    envPrefix?: string;
+    isCommandRunning?: boolean;
+  };
+  'shell.detached': {
+    threadId: string;
+    state: Extract<ShellStatusDto, 'detached'>;
+    viewerId: string;
+    reason?: string;
+  };
+  'shell.exited': {
+    threadId: string;
+    state: Extract<ShellStatusDto, 'exited' | 'not_found'>;
+  };
+  'shell.error': {
+    code: string;
+    message: string;
+  };
 }
+
+export type ShellEventEnvelope = {
+  [Type in keyof ShellEventPayloadMap]: {
+    type: Type;
+    shellId: string;
+    timestamp: string;
+    payload: ShellEventPayloadMap[Type];
+  };
+}[keyof ShellEventPayloadMap];
 
 export interface SupervisorConnectedEnvelope {
   type: 'supervisor.connected';

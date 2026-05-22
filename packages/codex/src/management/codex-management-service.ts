@@ -1,14 +1,13 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import type { AgentRuntime } from '../../../../packages/agent-runtime/src/index';
+import type { AgentRuntime } from '../../../agent-runtime/src/index';
 import type {
   AgentHookDto,
   AgentHookEventNameDto,
   CreateThreadHookInput,
   UpdateThreadHookInput,
-} from '../../../../packages/shared/src/index';
-import { HttpError } from '../app';
+} from '../../../shared/src/index';
 import {
   readCodexFastModeSync,
   readCodexFeatureFlag,
@@ -16,9 +15,14 @@ import {
   writeCodexFastMode,
 } from './codexHostConfig';
 import {
+  CodexManagementError,
+  codexBadRequest,
+} from './errors';
+import {
+  isUnsupportedHooksListError,
   isCodexRuntimeRequestError,
   unwrapCodexJsonRpcError,
-} from './runtime-errors';
+} from '../runtime-errors';
 
 const GOAL_FEATURE_DISABLED_MESSAGE =
   'Codex /goal is experimental. Enable it by adding `goals = true` under `[features]` in ~/.codex/config.toml, then restart the Codex app-server.';
@@ -74,32 +78,20 @@ function readJsonFileOrDefault(
 
 function validateHookInput(input: CreateThreadHookInput) {
   if (!HOOK_EVENT_JSON_KEYS[input.eventName]) {
-    throw new HttpError(400, {
-      code: 'bad_request',
-      message: 'Unsupported hook event.',
-    });
+    codexBadRequest('Unsupported hook event.');
   }
   if (input.scope !== 'global' && input.scope !== 'project') {
-    throw new HttpError(400, {
-      code: 'bad_request',
-      message: 'Hook scope must be global or project.',
-    });
+    codexBadRequest('Hook scope must be global or project.');
   }
   if (!input.command.trim()) {
-    throw new HttpError(400, {
-      code: 'bad_request',
-      message: 'Hook command cannot be empty.',
-    });
+    codexBadRequest('Hook command cannot be empty.');
   }
   if (
     input.timeoutSec !== undefined &&
     input.timeoutSec !== null &&
     (!Number.isInteger(input.timeoutSec) || input.timeoutSec <= 0 || input.timeoutSec > 86_400)
   ) {
-    throw new HttpError(400, {
-      code: 'bad_request',
-      message: 'Hook timeout must be a positive number of seconds.',
-    });
+    codexBadRequest('Hook timeout must be a positive number of seconds.');
   }
 }
 
@@ -208,13 +200,13 @@ export class CodexManagementService {
     if (codexError) {
       const remoteMessage = codexError.message || '';
       if (remoteMessage.toLowerCase().includes('goals feature is disabled')) {
-        throw new HttpError(409, {
+        throw new CodexManagementError(409, {
           code: 'goal_feature_disabled',
           message: GOAL_FEATURE_DISABLED_MESSAGE,
         });
       }
 
-      throw new HttpError(502, {
+      throw new CodexManagementError(502, {
         code: 'provider_goal_error',
         message: remoteMessage || 'Provider goal operation failed.',
         details: {
@@ -237,7 +229,7 @@ export class CodexManagementService {
       await runtime.start();
     } catch (error) {
       if (isCodexRuntimeRequestError(error)) {
-        throw new HttpError(409, {
+        throw new CodexManagementError(409, {
           code: 'goal_feature_disabled',
           message: GOAL_FEATURE_DISABLED_MESSAGE,
         });
@@ -248,6 +240,18 @@ export class CodexManagementService {
 
   isRuntimeRequestError(error: unknown) {
     return isCodexRuntimeRequestError(error);
+  }
+
+  canManageHookFiles(provider: string | null | undefined) {
+    return !provider || provider === 'codex';
+  }
+
+  isUnsupportedHooksListError(error: unknown) {
+    return isUnsupportedHooksListError(error);
+  }
+
+  hooksListFallbackWarning() {
+    return 'Codex app-server does not expose hooks/list yet; showing hooks parsed from hooks.json only.';
   }
 
   async writeHookEntry(
@@ -298,10 +302,7 @@ export class CodexManagementService {
     validateHookInput(input.target);
 
     if (input.scope !== input.target.scope) {
-      throw new HttpError(400, {
-        code: 'bad_request',
-        message: 'Hook scope cannot be changed while editing.',
-      });
+      codexBadRequest('Hook scope cannot be changed while editing.');
     }
 
     const hooksPath = hooksPathForInput(this.codexHome, workspacePath, input);
@@ -368,7 +369,7 @@ export class CodexManagementService {
       });
 
     if (!replacementGroup) {
-      throw new HttpError(404, {
+      throw new CodexManagementError(404, {
         code: 'not_found',
         message: 'Hook was not found in hooks.json.',
       });

@@ -15,9 +15,11 @@ import type {
   CreateWorkspaceInput,
   HealthDto,
   ImportThreadInput,
+  ImportPluginInput,
   PromptAttachmentManifestEntryDto,
   InterruptTurnInput,
   ModelOptionDto,
+  PluginDto,
   RespondThreadActionRequestInput,
   ResumeThreadInput,
   RuntimeConfigDto,
@@ -46,6 +48,7 @@ import type {
   UpdateThreadSettingsInput,
   UpdateThreadInput,
   UpdateProviderHostFileInput,
+  UpdatePluginInput,
   UpdateWorkspaceSettingsInput,
   UpdateWorkspaceInput,
   UpdateWorkspaceFavoriteInput,
@@ -211,6 +214,19 @@ export function restartAgentBackend(provider: AgentBackendIdDto) {
   );
 }
 
+export function installOrUpdateAgentBackend(
+  provider: AgentBackendIdDto,
+  action: 'install' | 'update',
+) {
+  return request<AgentBackendDto>(
+    `/api/agent-runtimes/${encodeURIComponent(provider)}/install`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    },
+  );
+}
+
 export function fetchAgentBackendModels(provider: AgentBackendIdDto) {
   return request<ModelOptionDto[]>(
     `/api/agent-runtimes/${encodeURIComponent(provider)}/models`,
@@ -332,6 +348,26 @@ export function fetchThreadHistoryItemDetail(id: string, itemId: string) {
   return request<ThreadHistoryItemDetailDto>(
     `/api/threads/${id}/items/${encodeURIComponent(itemId)}/detail`,
   );
+}
+
+export function fetchPlugins() {
+  return request<PluginDto[]>('/api/plugins', {
+    cache: 'no-store',
+  });
+}
+
+export function importPlugin(input: ImportPluginInput) {
+  return request<PluginDto>('/api/plugins/import', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function updatePlugin(pluginId: string, input: UpdatePluginInput) {
+  return request<PluginDto>(`/api/plugins/${encodeURIComponent(pluginId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
 }
 
 export function fetchThreadExportTurns(id: string) {
@@ -637,7 +673,7 @@ export function connectSupervisorEvents(onEvent: (event: ThreadEventEnvelope) =>
   socket.addEventListener('message', (message) => {
     try {
       const parsed = JSON.parse(message.data as string) as SupervisorSocketServerEnvelope;
-      if ('threadId' in parsed && parsed.type.startsWith('thread.')) {
+      if (isThreadEventEnvelope(parsed)) {
         onEvent(parsed);
       }
     } catch {
@@ -664,7 +700,7 @@ export function connectShellSocket(
         handlers.onConnected?.(parsed);
         return;
       }
-      if ('shellId' in parsed && parsed.type.startsWith('shell.')) {
+      if (isShellEventEnvelope(parsed)) {
         handlers.onShellEvent?.(parsed);
       }
     } catch {
@@ -678,4 +714,26 @@ export function connectShellSocket(
       socket.send(JSON.stringify(message));
     }
   };
+}
+
+function isThreadEventEnvelope(
+  event: SupervisorSocketServerEnvelope,
+): event is ThreadEventEnvelope {
+  return (
+    'threadId' in event &&
+    event.type.startsWith('thread.') &&
+    typeof event.payload === 'object' &&
+    event.payload !== null
+  );
+}
+
+function isShellEventEnvelope(
+  event: SupervisorSocketServerEnvelope,
+): event is ShellEventEnvelope {
+  return (
+    'shellId' in event &&
+    event.type.startsWith('shell.') &&
+    typeof event.payload === 'object' &&
+    event.payload !== null
+  );
 }

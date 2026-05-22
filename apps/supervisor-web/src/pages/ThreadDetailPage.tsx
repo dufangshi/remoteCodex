@@ -21,6 +21,7 @@ import {
   ThreadTurnTokenUsageDto,
 } from '../../../../packages/shared/src/index';
 import { ExportTranscriptDialog } from '../components/ExportTranscriptDialog';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ThreadComposer } from '../components/ThreadComposer';
 import {
   ThreadShellPanel,
@@ -42,6 +43,7 @@ import {
   clearThreadGoal,
   disconnectThread,
   downloadThreadTranscriptExport,
+  deleteThread,
   fetchAgentBackendModels,
   fetchAgentBackendStatus,
   fetchProviderHostFile,
@@ -71,6 +73,7 @@ import {
   untrustThreadHook,
 } from '../lib/api';
 
+const INITIAL_DETAIL_TURN_PAGE_SIZE = 3;
 const DETAIL_TURN_PAGE_SIZE = 10;
 const SUPERVISOR_SOCKET_RECONNECT_DELAY_MS = 1_000;
 const SUPERVISOR_HEALTHCHECK_INTERVAL_MS = 2_000;
@@ -87,6 +90,16 @@ const SANDBOX_MODE_OPTIONS: SandboxModeDto[] = [
 
 function effectiveSandboxMode(thread: Pick<ThreadDto, 'sandboxMode' | 'approvalMode'>): SandboxModeDto {
   return thread.sandboxMode ?? (thread.approvalMode === 'guarded' ? 'workspace-write' : 'danger-full-access');
+}
+
+function truncateDialogThreadTitle(title: string) {
+  const normalized = title.replace(/\s+/g, ' ').trim();
+  const characters = Array.from(normalized);
+  if (characters.length <= 15) {
+    return normalized;
+  }
+
+  return `${characters.slice(0, 15).join('')}...`;
 }
 
 type RealtimeConnectionStatus =
@@ -119,6 +132,182 @@ function appendLatestTurns(
 ) {
   const latestIds = new Set(latest.map((turn) => turn.id));
   return [...existing.filter((turn) => !latestIds.has(turn.id)), ...latest];
+}
+
+function mergePendingRequestIntoDetail(
+  detail: ThreadDetailDto,
+  request: ThreadDetailDto['pendingRequests'][number],
+): ThreadDetailDto {
+  return {
+    ...detail,
+    pendingRequests: [
+      ...detail.pendingRequests.filter((entry) => entry.id !== request.id),
+      request,
+    ],
+  };
+}
+
+function removePendingRequestFromDetail(
+  detail: ThreadDetailDto,
+  requestId: string,
+): ThreadDetailDto {
+  const pendingRequests = detail.pendingRequests.filter(
+    (entry) => entry.id !== requestId,
+  );
+  return pendingRequests.length === detail.pendingRequests.length
+    ? detail
+    : {
+        ...detail,
+        pendingRequests,
+      };
+}
+
+function mergePendingRequests(
+  current: ThreadDetailDto['pendingRequests'],
+  incoming: ThreadDetailDto['pendingRequests'],
+  resolvedRequestIds: ReadonlySet<string>,
+) {
+  const filteredIncoming = incoming.filter(
+    (request) => !resolvedRequestIds.has(request.id),
+  );
+  const filteredCurrent = current.filter(
+    (request) => !resolvedRequestIds.has(request.id),
+  );
+
+  if (filteredCurrent.length === 0) {
+    return filteredIncoming;
+  }
+
+  const incomingById = new Map(
+    filteredIncoming.map((request) => [request.id, request] as const),
+  );
+  const merged = [
+    ...filteredCurrent.map((request) => incomingById.get(request.id) ?? request),
+    ...filteredIncoming.filter(
+      (request) => !filteredCurrent.some((entry) => entry.id === request.id),
+    ),
+  ];
+
+  return merged.sort((left, right) =>
+    left.createdAt.localeCompare(right.createdAt),
+  );
+}
+
+function isThreadActionRequest(
+  value: unknown,
+): value is ThreadDetailDto['pendingRequests'][number] {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const request = value as Partial<ThreadDetailDto['pendingRequests'][number]>;
+  return (
+    typeof request.id === 'string' &&
+    (request.kind === 'requestUserInput' || request.kind === 'planDecision') &&
+    typeof request.title === 'string' &&
+    typeof request.createdAt === 'string' &&
+    Array.isArray(request.questions)
+  );
+}
+
+function mergeLiveHistoryItem(
+  current: ThreadHistoryItemDto | undefined,
+  incoming: ThreadHistoryItemDto,
+): ThreadHistoryItemDto {
+  if (!current || current.kind !== incoming.kind) {
+    return incoming;
+  }
+
+  if (current.kind === 'agentMessage' && incoming.kind === 'agentMessage') {
+    return current.text.length > incoming.text.length
+      ? {
+          ...incoming,
+          text: current.text,
+          sequence: incoming.sequence ?? current.sequence ?? null,
+        }
+      : incoming;
+  }
+
+  const currentText = current.detailText?.trim() || current.text.trim();
+  const incomingText = incoming.detailText?.trim() || incoming.text.trim();
+  return currentText.length > incomingText.length ? current : incoming;
+}
+
+function reconcileLiveItemsWithDetail(
+  current: NonNullable<ThreadDetailDto['liveItems']> | null,
+  incoming: NonNullable<ThreadDetailDto['liveItems']> | null,
+  turns: ThreadDetailDto['turns'],
+): NonNullable<ThreadDetailDto['liveItems']> | null {
+  if (!current) {
+    return incoming;
+  }
+
+  if (incoming && incoming.turnId !== current.turnId) {
+    return incoming;
+  }
+
+  const materializedTurn = turns.find((turn) => turn.id === current.turnId);
+  const materializedItemsById = new Map(
+    materializedTurn?.items.map((item) => [item.id, item]) ?? [],
+  );
+  const materializedAgentTexts =
+    materializedTurn?.items
+      .filter((item) => item.kind === 'agentMessage')
+      .map((item) => item.text.trim())
+      .filter(Boolean) ?? [];
+  const isCoveredByMaterializedAgentText = (item: ThreadHistoryItemDto) =>
+    item.kind === 'agentMessage' &&
+    item.text.trim().length > 0 &&
+    materializedAgentTexts.some((text) => text.includes(item.text.trim()));
+
+  if (!incoming) {
+    const remainingItems = current.items.filter((item) => {
+      const materialized = materializedItemsById.get(item.id);
+      if (!materialized) {
+        return !isCoveredByMaterializedAgentText(item);
+      }
+      return materialized.kind !== item.kind;
+    });
+    return remainingItems.length === 0
+      ? null
+      : {
+          ...current,
+          items: remainingItems,
+        };
+  }
+
+  const currentItemsById = new Map(current.items.map((item) => [item.id, item]));
+  const incomingItemsById = new Map(incoming.items.map((item) => [item.id, item]));
+  const orderedIds = [
+    ...current.items.map((item) => item.id),
+    ...incoming.items
+      .map((item) => item.id)
+      .filter((id) => !currentItemsById.has(id)),
+  ];
+  const items = orderedIds
+    .map((id) => {
+      const incomingItem = incomingItemsById.get(id);
+      const currentItem = currentItemsById.get(id);
+      if (!incomingItem) {
+        const materialized = materializedItemsById.get(id);
+        if (!materialized && currentItem && isCoveredByMaterializedAgentText(currentItem)) {
+          return null;
+        }
+        return materialized?.kind === currentItem?.kind ? null : currentItem ?? null;
+      }
+      return mergeLiveHistoryItem(currentItem, incomingItem);
+    })
+    .filter((item): item is ThreadHistoryItemDto => Boolean(item));
+
+  return items.length === 0
+    ? null
+    : {
+        turnId: incoming.turnId,
+        items,
+        updatedAt:
+          incoming.updatedAt.localeCompare(current.updatedAt) >= 0
+            ? incoming.updatedAt
+            : current.updatedAt,
+      };
 }
 
 function mergeThreadIntoList(existing: ThreadDto[], thread: ThreadDto) {
@@ -256,11 +445,50 @@ function turnHasUserMessage(
   );
 }
 
+function promptWithoutPhotoTokens(prompt: string) {
+  return prompt.replace(/\s*\[PHOTO\s+[^\]]+\]\s*/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function turnHasPhotoPromptText(
+  turn: ThreadDetailDto['turns'][number] | undefined,
+  prompt: string,
+) {
+  const normalizedPrompt = promptWithoutPhotoTokens(prompt);
+  if (!normalizedPrompt) {
+    return false;
+  }
+
+  return (
+    turn?.items.some(
+      (item) =>
+        item.kind === 'userMessage' &&
+        promptWithoutPhotoTokens(item.text) === normalizedPrompt,
+    ) ?? false
+  );
+}
+
+function turnHasPhotoAttachment(
+  turn: ThreadDetailDto['turns'][number] | undefined,
+) {
+  return (
+    turn?.items.some(
+      (item) =>
+        item.kind === 'userMessage' &&
+        /\[PHOTO\s+\.\/\.temp\/threads\/[^\]]+\]/.test(item.text),
+    ) ?? false
+  );
+}
+
 function findTurnWithUserMessage(
   turns: ThreadDetailDto['turns'],
   prompt: string,
 ) {
-  return turns.find((turn) => turnHasUserMessage(turn, prompt)) ?? null;
+  return (
+    turns.find((turn) => turnHasUserMessage(turn, prompt)) ??
+    (prompt.includes('[PHOTO ')
+      ? turns.find((turn) => turnHasPhotoPromptText(turn, prompt)) ?? null
+      : null)
+  );
 }
 
 function mergeTurnTokenUsage(
@@ -384,8 +612,14 @@ export function ThreadDetailPage() {
   const pageContextRequestIdRef = useRef(0);
   const pageContextProviderRef = useRef<ThreadDto['provider'] | null>(null);
   const terminalTurnPendingRef = useRef<string | null>(null);
+  const backgroundHistoryCursorRef = useRef<{
+    threadId: string;
+    beforeTurnId: string;
+  } | null>(null);
+  const backgroundHistoryLoadingRef = useRef(false);
   const detailRef = useRef<ThreadDetailDto | null>(null);
   const pendingThreadSettingsRef = useRef<PendingThreadSettings | null>(null);
+  const resolvedRequestIdsRef = useRef<Set<string>>(new Set());
   const [detail, setDetail] = useState<ThreadDetailDto | null>(null);
   const [threads, setThreads] = useState<ThreadDto[]>([]);
   const [modelOptions, setModelOptions] = useState<ModelOptionDto[]>([]);
@@ -484,6 +718,8 @@ export function ThreadDetailPage() {
     data: null,
     error: null,
   });
+  const [deletingThread, setDeletingThread] = useState<ThreadDto | null>(null);
+  const [deletingThreadBusy, setDeletingThreadBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const mcpProviderConfigFileName =
     backendManagementSchema?.hostConfigFiles.find((file) => file.roles?.includes('mcp'))
@@ -1104,9 +1340,15 @@ export function ThreadDetailPage() {
               },
             }
           : detailResponse;
+      const previousDetail = detailRef.current;
       detailRef.current = nextDetail;
       setLivePlan(nextDetail.livePlan ?? null);
-      setLiveItems(nextDetail.liveItems ?? null);
+      const mergedTurns = previousDetail
+        ? appendLatestTurns(previousDetail.turns, nextDetail.turns)
+        : nextDetail.turns;
+      setLiveItems((current) =>
+        reconcileLiveItemsWithDetail(current, nextDetail.liveItems ?? null, mergedTurns),
+      );
       setGoalState((current) =>
         current.status === 'idle'
           ? current
@@ -1124,12 +1366,22 @@ export function ThreadDetailPage() {
           ? {
               ...nextDetail,
               turns: appendLatestTurns(current.turns, nextDetail.turns),
+              pendingRequests: mergePendingRequests(
+                current.pendingRequests,
+                nextDetail.pendingRequests,
+                resolvedRequestIdsRef.current,
+              ),
               ...(current.goalHistory ? { goalHistory: current.goalHistory } : {}),
             }
           : current
             ? {
                 ...nextDetail,
                 turns: appendLatestTurns(current.turns, nextDetail.turns),
+                pendingRequests: mergePendingRequests(
+                  current.pendingRequests,
+                  nextDetail.pendingRequests,
+                  resolvedRequestIdsRef.current,
+                ),
               }
             : nextDetail,
       );
@@ -1178,6 +1430,7 @@ export function ThreadDetailPage() {
         const hasMaterializedTurn = nextDetail.turns.some(
           (turn) => turn.id === resolvedTurnId,
         );
+        const materializedTurn = nextTurnsById.get(resolvedTurnId) ?? null;
         const promptTurn = findTurnWithUserMessage(nextDetail.turns, current.prompt);
         const hasMaterializedPrompt = Boolean(promptTurn);
         if (promptTurn && !current.serverTurnId) {
@@ -1192,6 +1445,32 @@ export function ThreadDetailPage() {
                   ? 'inProgress'
                   : current.status,
           };
+        }
+        if (materializedTurn && current.serverTurnId) {
+          return materializedTurn.status === 'inProgress'
+            ? {
+                ...current,
+                id: materializedTurn.id,
+                serverTurnId: materializedTurn.id,
+                status: current.status === 'failed' ? current.status : 'inProgress',
+              }
+            : null;
+        }
+        if (
+          !current.serverTurnId &&
+          current.prompt.includes('[PHOTO ') &&
+          nextDetail.thread.activeTurnId &&
+          nextDetail.thread.status === 'running'
+        ) {
+          const activeTurn = nextTurnsById.get(nextDetail.thread.activeTurnId);
+          if (activeTurn && turnHasPhotoAttachment(activeTurn)) {
+            return {
+              ...current,
+              id: activeTurn.id,
+              serverTurnId: activeTurn.id,
+              status: current.status === 'failed' ? current.status : 'inProgress',
+            };
+          }
         }
         return hasMaterializedTurn || (threadHasEnded && hasMaterializedPrompt)
           ? null
@@ -1265,10 +1544,12 @@ export function ThreadDetailPage() {
       showLoading = true,
       clearError = true,
       reportError = true,
+      limit = DETAIL_TURN_PAGE_SIZE,
     }: {
       showLoading?: boolean;
       clearError?: boolean;
       reportError?: boolean;
+      limit?: number;
     } = {}) => {
       const requestId = loadRequestIdRef.current + 1;
       loadRequestIdRef.current = requestId;
@@ -1281,7 +1562,7 @@ export function ThreadDetailPage() {
 
       try {
         const detailResponse = await fetchThreadDetail(id, {
-          limit: DETAIL_TURN_PAGE_SIZE,
+          limit,
         });
         if (loadRequestIdRef.current !== requestId) {
           return;
@@ -1324,7 +1605,7 @@ export function ThreadDetailPage() {
     let status: RealtimeConnectionStatus;
     if (!browserOnline) {
       status = 'offline';
-    } else if (socketOpen && hasRecentHealth && hasRecentPong) {
+    } else if (socketOpen && hasRecentPong) {
       status = 'connected';
     } else if (
       socketState === SOCKET_CONNECTING ||
@@ -1372,8 +1653,11 @@ export function ThreadDetailPage() {
     setOptimisticTurn(null);
     setOptimisticSteers([]);
     setLiveItems(null);
+    backgroundHistoryCursorRef.current = null;
+    backgroundHistoryLoadingRef.current = false;
     pendingThreadSettingsRef.current = null;
     terminalTurnPendingRef.current = null;
+    resolvedRequestIdsRef.current = new Set();
     supervisorHealthOkAtRef.current = null;
     supervisorPongAtRef.current = null;
     supervisorRecoveryPendingRef.current = false;
@@ -1559,9 +1843,87 @@ export function ThreadDetailPage() {
   ]);
 
   useEffect(() => {
-    void loadThreadDetail({ showLoading: true });
+    void loadThreadDetail({
+      showLoading: true,
+      limit: INITIAL_DETAIL_TURN_PAGE_SIZE,
+    });
     void loadPageContext();
   }, [loadPageContext, loadThreadDetail]);
+
+  useEffect(() => {
+    if (
+      !detail ||
+      detail.turns.length === 0 ||
+      loadingEarlier ||
+      backgroundHistoryLoadingRef.current
+    ) {
+      return;
+    }
+
+    const totalTurnCount = detail.totalTurnCount ?? detail.turns.length;
+    if (detail.turns.length >= totalTurnCount) {
+      backgroundHistoryCursorRef.current = null;
+      return;
+    }
+
+    const earliestLoadedTurnId = detail.turns[0]?.id;
+    if (!earliestLoadedTurnId) {
+      return;
+    }
+
+    const cursor = {
+      threadId: detail.thread.id,
+      beforeTurnId: earliestLoadedTurnId,
+    };
+    const previousCursor = backgroundHistoryCursorRef.current;
+    if (
+      previousCursor?.threadId === cursor.threadId &&
+      previousCursor.beforeTurnId === cursor.beforeTurnId
+    ) {
+      return;
+    }
+    backgroundHistoryCursorRef.current = cursor;
+
+    let cancelled = false;
+    const timeoutId = window.setTimeout(() => {
+      void (async () => {
+        backgroundHistoryLoadingRef.current = true;
+        try {
+          const earlier = await fetchThreadDetail(id, {
+            limit: DETAIL_TURN_PAGE_SIZE,
+            beforeTurnId: earliestLoadedTurnId,
+          });
+          if (cancelled) {
+            return;
+          }
+          setDetail((current) =>
+            current
+              ? {
+                  ...earlier,
+                  turns: prependTurns(current.turns, earlier.turns),
+                }
+              : earlier,
+          );
+          setThreads((current) =>
+            current.map((entry) =>
+              entry.id === earlier.thread.id ? earlier.thread : entry,
+            ),
+          );
+        } catch {
+          // Manual "Load earlier" still reports recoverable paging errors.
+        } finally {
+          if (backgroundHistoryCursorRef.current?.threadId === cursor.threadId) {
+            backgroundHistoryLoadingRef.current = false;
+          }
+        }
+      })();
+    }, 120);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [detail?.totalTurnCount, detail?.turns, id, loadingEarlier]);
 
   useEffect(() => {
     let isDisposed = false;
@@ -1632,7 +1994,6 @@ export function ThreadDetailPage() {
           Number.isFinite(event.payload.sequence)
             ? event.payload.sequence
             : null;
-        queueLiveOutputDelta(event.payload.delta);
         if (eventTurnId && itemId) {
           appendLiveAgentDelta(
             eventTurnId,
@@ -1640,6 +2001,8 @@ export function ThreadDetailPage() {
             event.payload.delta,
             sequence,
           );
+        } else {
+          queueLiveOutputDelta(event.payload.delta);
         }
         if (eventTurnId) {
           setOptimisticTurn((current) =>
@@ -1833,7 +2196,8 @@ export function ThreadDetailPage() {
           event.type === 'thread.turn.completed' ||
           event.type === 'thread.turn.failed'
         ) {
-          setLiveItems(null);
+          clearBufferedLiveOutput();
+          setLiveOutput('');
           const eventTurnId =
             typeof event.payload.turnId === 'string' ? event.payload.turnId : null;
           if (eventTurnId) {
@@ -1857,6 +2221,27 @@ export function ThreadDetailPage() {
             }
           }
         }
+      }
+
+      if (
+        event.type === 'thread.request.created' &&
+        isThreadActionRequest(event.payload.request)
+      ) {
+        resolvedRequestIdsRef.current.delete(event.payload.request.id);
+        setDetail((current) =>
+          current ? mergePendingRequestIntoDetail(current, event.payload.request) : current,
+        );
+      }
+
+      if (
+        event.type === 'thread.request.resolved' &&
+        typeof event.payload.requestId === 'string'
+      ) {
+        const requestId = event.payload.requestId;
+        resolvedRequestIdsRef.current.add(requestId);
+        setDetail((current) =>
+          current ? removePendingRequestFromDetail(current, requestId) : current,
+        );
       }
 
       if (
@@ -2714,6 +3099,34 @@ export function ThreadDetailPage() {
     }
   }
 
+  async function handleDeleteThread() {
+    if (!deletingThread) {
+      return;
+    }
+
+    setDeletingThreadBusy(true);
+    setError(null);
+    try {
+      await deleteThread(deletingThread.id);
+      setThreads((current) =>
+        current.filter((thread) => thread.id !== deletingThread.id),
+      );
+      const deletedCurrentThread = deletingThread.id === detail?.thread.id;
+      setDeletingThread(null);
+      if (deletedCurrentThread) {
+        const nextThread = threads.find((thread) =>
+          thread.id !== deletingThread.id &&
+          thread.workspaceId === detail?.thread.workspaceId
+        ) ?? threads.find((thread) => thread.id !== deletingThread.id);
+        navigate(nextThread ? `/threads/${nextThread.id}` : '/threads');
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to delete thread.');
+    } finally {
+      setDeletingThreadBusy(false);
+    }
+  }
+
   function handleToggleView() {
     setActiveView((current) => {
       if (current === 'chat') {
@@ -2918,7 +3331,9 @@ export function ThreadDetailPage() {
           (turn) =>
             (optimisticServerTurnId && turn.id === optimisticServerTurnId) ||
             turn.id === optimisticTurn.id ||
-            turnHasUserMessage(turn, optimisticTurn.prompt),
+            turnHasUserMessage(turn, optimisticTurn.prompt) ||
+            (optimisticTurn.prompt.includes('[PHOTO ') &&
+              turnHasPhotoPromptText(turn, optimisticTurn.prompt)),
         ) ?? null
       : null;
   const timelineOptimisticTurn =
@@ -3187,6 +3602,7 @@ export function ThreadDetailPage() {
       showMobileNewThreadShortcut={false}
       mobileHeaderAction={mobileSessionConnectionButton}
       onRenameThread={handleRenameThread}
+      onDeleteThread={setDeletingThread}
     >
       <div className="thread-detail-surface relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-none border-y shadow-2xl shadow-stone-950/20 sm:flex-none sm:rounded-[2rem] sm:border">
         <div className="pointer-events-none absolute right-4 top-4 z-30 hidden lg:block">
@@ -3236,6 +3652,11 @@ export function ThreadDetailPage() {
                   turns={detail.turns}
                   totalTurnCount={detail.totalTurnCount ?? detail.turns.length}
                   pendingRequests={detail.pendingRequests}
+                  activeTurnId={detail.thread.activeTurnId}
+                  threadRunning={
+                    detail.thread.status === 'running' ||
+                    detail.thread.activeTurnId !== null
+                  }
                   livePlan={livePlan}
                   liveItems={liveItems}
                   respondingRequestId={respondingRequestId}
@@ -3259,7 +3680,7 @@ export function ThreadDetailPage() {
                 {useFloatingMobileComposer ? (
                   <div
                     ref={composerHostRef}
-                    className="fixed inset-x-0 bottom-0 z-30 sm:hidden"
+                    className="fixed inset-x-0 bottom-0 z-40 max-h-[min(58dvh,24rem)] overflow-y-auto overscroll-contain sm:hidden"
                     style={{
                       bottom: `${floatingMobileComposerBottomOffset}px`,
                       paddingBottom: 'env(safe-area-inset-bottom)',
@@ -3481,6 +3902,23 @@ export function ThreadDetailPage() {
           }}
           onLoadTurns={loadExportTurns}
           onExport={handleExportTranscript}
+        />
+        <ConfirmDialog
+          open={deletingThread !== null}
+          title="Delete Thread"
+          description={
+            deletingThread
+              ? `Delete ${truncateDialogThreadTitle(deletingThread.title)} from supervisor. The backend session id will no longer appear in this workspace list.`
+              : ''
+          }
+          confirmLabel="Delete Thread"
+          busy={deletingThreadBusy}
+          onCancel={() => {
+            if (!deletingThreadBusy) {
+              setDeletingThread(null);
+            }
+          }}
+          onConfirm={() => void handleDeleteThread()}
         />
       </div>
     </ThreadWorkspaceLayout>

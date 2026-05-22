@@ -11,7 +11,7 @@ import {
   type RefObject,
 } from 'react';
 import { code } from '@streamdown/code';
-import { Streamdown, defaultRemarkPlugins } from 'streamdown';
+import { Streamdown, defaultRemarkPlugins, type CustomRendererProps } from 'streamdown';
 
 import type {
   RespondThreadActionRequestInput,
@@ -32,12 +32,15 @@ import {
   isScrollableHistoryItem,
   turnStatusLabel,
 } from './threadPresentation';
+import { usePlugins } from '../plugins/PluginProvider';
 
 interface ThreadTimelineProps {
   threadId?: string | undefined;
   turns: ThreadTurnDto[];
   totalTurnCount?: number;
   pendingRequests?: ThreadActionRequestDto[];
+  activeTurnId?: string | null;
+  threadRunning?: boolean;
   livePlan?: {
     turnId: string;
     explanation: string | null;
@@ -150,6 +153,10 @@ type TimelineTurn = Omit<ThreadTurnDto, 'status'> & {
   status: ThreadTurnDto['status'] | 'sending';
 };
 
+type TimelineAgentMessageEntry = Extract<TimelineHistoryEntry, { kind: 'item' }> & {
+  item: AgentMessageHistoryItemWithReasoning;
+};
+
 interface TurnTokenDetail {
   id: string;
   label: string;
@@ -171,6 +178,8 @@ function itemSurfaceClassName(kind: ThreadHistoryItemDto['kind']) {
       return 'timeline-user';
     case 'agentMessage':
       return 'timeline-agent';
+    case 'artifact':
+      return 'timeline-action';
     case 'image':
       return 'timeline-action';
     case 'contextCompaction':
@@ -376,7 +385,7 @@ function tokenizeUserMessageText(text: string): UserMessageSegment[] {
 }
 
 function formatTrailingPathLabel(label: string, maxLength = 42) {
-  const normalized = label.trim();
+  const normalized = projectRelativePathLabel(label);
   if (!normalized) {
     return '';
   }
@@ -410,6 +419,43 @@ function formatTrailingPathLabel(label: string, maxLength = 42) {
   }
 
   return `...${base.slice(-(maxLength - suffix.length - 3))}${suffix}`;
+}
+
+function projectRelativePathLabel(label: string) {
+  const normalized = label.trim();
+  if (!normalized) {
+    return '';
+  }
+
+  const suffixMatch = normalized.match(/(, \+\d+ more.*)$/);
+  const suffix = suffixMatch?.[1] ?? '';
+  const base = suffix ? normalized.slice(0, -suffix.length) : normalized;
+  const slashNormalized = base.replace(/\\/g, '/');
+  if (!slashNormalized.startsWith('/')) {
+    return `${slashNormalized.replace(/^\.\//, '')}${suffix}`;
+  }
+
+  const markers = [
+    '/apps/',
+    '/packages/',
+    '/src/',
+    '/test/',
+    '/tests/',
+    '/docs/',
+    '/config/',
+    '/scripts/',
+    '/e2e/',
+    '/.agents/',
+    '/.codex/',
+  ];
+  for (const marker of markers) {
+    const markerIndex = slashNormalized.indexOf(marker);
+    if (markerIndex >= 0) {
+      return `${slashNormalized.slice(markerIndex + 1)}${suffix}`;
+    }
+  }
+
+  return normalized;
 }
 
 function fileChangeSummarySegments(item: ThreadHistoryItemDto & { kind: 'fileChange' }) {
@@ -682,65 +728,6 @@ function mergeLiveTurnItems(
   return sortTurnItemsByRecordedSequence(mergedItems);
 }
 
-function getLiveOutputTailForTurn(
-  liveOutput: string,
-  items: ThreadHistoryItemDto[],
-) {
-  if (!liveOutput) {
-    return '';
-  }
-
-  const materializedAgentTexts = items
-    .filter(
-      (
-        item,
-      ): item is ThreadHistoryItemDto & {
-        kind: 'agentMessage';
-      } => item.kind === 'agentMessage',
-    )
-    .map((item) => item.text)
-    .filter((text) => text.length > 0);
-
-  const lastMaterializedAgentText = materializedAgentTexts.at(-1) ?? '';
-  if (lastMaterializedAgentText) {
-    const anchorIndex = liveOutput.lastIndexOf(lastMaterializedAgentText);
-    if (anchorIndex >= 0) {
-      const anchoredTail = liveOutput.slice(
-        anchorIndex + lastMaterializedAgentText.length,
-      );
-      if (!anchoredTail.trim()) {
-        return '';
-      }
-      return anchoredTail;
-    }
-  }
-
-  const materializedAgentText = materializedAgentTexts.join('');
-
-  if (!materializedAgentText) {
-    return liveOutput;
-  }
-
-  const sharedPrefixLength = Math.min(
-    liveOutput.length,
-    materializedAgentText.length,
-  );
-  let consumedLength = 0;
-  while (
-    consumedLength < sharedPrefixLength &&
-    liveOutput[consumedLength] === materializedAgentText[consumedLength]
-  ) {
-    consumedLength += 1;
-  }
-
-  if (consumedLength === 0) {
-    return liveOutput;
-  }
-
-  const remainingOutput = liveOutput.slice(consumedLength);
-  return remainingOutput.trim() ? remainingOutput : '';
-}
-
 function isRunningHistoryStatus(status?: string | null) {
   if (!status) {
     return false;
@@ -782,6 +769,35 @@ function groupTimelineHistoryItems(items: ThreadHistoryItemDto[]) {
   const attachedReasoningIds = new Set<string>();
   const pendingReasoningItems: Array<ThreadHistoryItemDto & { kind: 'reasoning' }> = [];
 
+  function lastAgentMessageEntry() {
+    const lastEntry = entries.at(-1);
+    if (lastEntry?.kind !== 'item' || lastEntry.item.kind !== 'agentMessage') {
+      return null;
+    }
+
+    return lastEntry as TimelineAgentMessageEntry;
+  }
+
+  function attachReasoningToAgentMessage(
+    entry: TimelineAgentMessageEntry,
+    reasoningItems: Array<ThreadHistoryItemDto & { kind: 'reasoning' }>,
+  ) {
+    if (reasoningItems.length === 0) {
+      return;
+    }
+
+    entry.item = {
+      ...entry.item,
+      reasoningItems: [
+        ...(entry.item.reasoningItems ?? []),
+        ...reasoningItems,
+      ],
+    };
+    for (const reasoningItem of reasoningItems) {
+      attachedReasoningIds.add(reasoningItem.id);
+    }
+  }
+
   function flushPendingReasoningItems() {
     const reasoningItems = pendingReasoningItems.splice(0);
     for (const reasoningItem of reasoningItems) {
@@ -806,9 +822,16 @@ function groupTimelineHistoryItems(items: ThreadHistoryItemDto[]) {
 
     if (current.kind === 'reasoning') {
       let cursor = index;
+      const reasoningItems: Array<ThreadHistoryItemDto & { kind: 'reasoning' }> = [];
       while (cursor < items.length && items[cursor]?.kind === 'reasoning') {
-        pendingReasoningItems.push(items[cursor] as ThreadHistoryItemDto & { kind: 'reasoning' });
+        reasoningItems.push(items[cursor] as ThreadHistoryItemDto & { kind: 'reasoning' });
         cursor += 1;
+      }
+      const previousAgentMessage = lastAgentMessageEntry();
+      if (previousAgentMessage) {
+        attachReasoningToAgentMessage(previousAgentMessage, reasoningItems);
+      } else {
+        pendingReasoningItems.push(...reasoningItems);
       }
       index = cursor;
       continue;
@@ -816,19 +839,13 @@ function groupTimelineHistoryItems(items: ThreadHistoryItemDto[]) {
 
     if (current.kind === 'agentMessage') {
       const reasoningItems = pendingReasoningItems.splice(0);
-      for (const reasoningItem of reasoningItems) {
-        attachedReasoningIds.add(reasoningItem.id);
-      }
-      entries.push({
+      const entry: TimelineAgentMessageEntry = {
         kind: 'item',
         key: current.id,
-        item: reasoningItems.length > 0
-          ? ({
-              ...current,
-              reasoningItems,
-            } as AgentMessageHistoryItemWithReasoning)
-          : current,
-      });
+        item: current as AgentMessageHistoryItemWithReasoning,
+      };
+      attachReasoningToAgentMessage(entry, reasoningItems);
+      entries.push(entry);
       index += 1;
       continue;
     }
@@ -2039,10 +2056,38 @@ function MarkdownContent({
   text: string;
   className?: string;
 }) {
+  const plugins = usePlugins();
+  const inlineCodeRenderers = useMemo(
+    () => [
+      {
+        language: ['xyz', 'extxyz', 'cif', 'pdb'],
+        component: function InlinePluginCodeRenderer({
+          code: sourceCode,
+          isIncomplete,
+          language,
+          meta,
+        }: CustomRendererProps) {
+          const rendered = plugins.renderInlineCode({
+            code: sourceCode,
+            isIncomplete,
+            language,
+            ...(meta === undefined ? {} : { meta }),
+          });
+          return rendered ?? (
+            <code className="whitespace-pre-wrap break-words text-xs">
+              {sourceCode}
+            </code>
+          );
+        },
+      },
+    ],
+    [plugins],
+  );
+
   return (
     <Streamdown
       mode="static"
-      plugins={{ code }}
+      plugins={{ code, renderers: inlineCodeRenderers }}
       controls={false}
       lineNumbers={false}
       remarkPlugins={MARKDOWN_REMARK_PLUGINS}
@@ -2548,7 +2593,7 @@ const CommandItem = memo(function CommandItem({
     title: string,
   ) => void;
 }) {
-  const summary = summarizeInlinePreviewText(item.text);
+  const summary = summarizeInlinePreviewText(item.previewText ?? item.text);
 
   return (
     <div
@@ -3281,7 +3326,7 @@ const FileReadItem = memo(function FileReadItem({
             <FileReadIcon />
           </span>
         </div>
-        <div className="timeline-item-inner timeline-mobile-dense-inner timeline-mobile-bubble-content relative min-w-0 w-full flex-1 rounded-[0.9rem] border px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2">
+        <div className="timeline-item-inner timeline-mobile-dense-inner timeline-mobile-bubble-content relative min-w-0 w-full flex-1 rounded-[0.9rem] border px-2.5 py-2.5 sm:rounded-xl sm:px-3 sm:py-2">
           <button
             type="button"
             aria-label="Expand file read"
@@ -3293,14 +3338,11 @@ const FileReadItem = memo(function FileReadItem({
               <ExpandIcon />
             </span>
           </button>
-          {item.status && (
-            <p className="timeline-meta-text pr-8 text-xs sm:pr-10">{item.status}</p>
-          )}
           <button
             type="button"
             aria-label="Open full file read"
             onClick={() => onOpen('File Read Details', detailText)}
-            className="block w-full text-left"
+            className="block w-full pr-8 text-left sm:pr-10"
           >
             <div className="timeline-mobile-dense-line flex min-w-0 items-center gap-2 text-sm leading-6">
               <p className="timeline-primary-text min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip">
@@ -3619,6 +3661,66 @@ const GenericHistoryItem = memo(function GenericHistoryItem({
   );
 });
 
+const ArtifactHistoryItem = memo(function ArtifactHistoryItem({
+  item,
+}: {
+  item: ThreadHistoryItemDto & { kind: 'artifact' };
+}) {
+  const plugins = usePlugins();
+  const [expanded, setExpanded] = useState(false);
+  const artifact = item.artifact;
+  const rendered = artifact
+    ? plugins.renderArtifact({
+        artifact,
+        expanded,
+        onToggleExpanded: () => setExpanded((current) => !current),
+      })
+    : null;
+
+  return (
+    <div
+      className={`timeline-item-frame relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-1.5 leading-none">
+        <span className="timeline-meta-text text-[10px] uppercase tracking-[0.16em]">
+          {artifact?.type ?? historyItemLabel(item.kind)}
+        </span>
+        {artifact && !plugins.hasRendererForArtifact(artifact) && (
+          <span className="timeline-meta-text text-[10px]">No renderer</span>
+        )}
+      </div>
+      <div className="mt-2">
+        {rendered ?? (
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={() => setExpanded((current) => !current)}
+              className="flex w-full items-center justify-between gap-3 text-left"
+            >
+              <span>
+                <span className="block text-sm font-medium text-[var(--theme-fg)]">
+                  {artifact?.title ?? item.text}
+                </span>
+                <span className="mt-1 block text-xs text-[var(--theme-fg-muted)]">
+                  {artifact?.summaryText ?? item.previewText ?? item.text}
+                </span>
+              </span>
+              <span className="rounded-full border border-[var(--theme-border)] px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-[var(--theme-fg-muted)]">
+                {expanded ? 'Hide' : 'Open'}
+              </span>
+            </button>
+            {expanded && (
+              <pre className="max-h-80 overflow-auto rounded-[0.9rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] p-3 text-xs text-[var(--theme-fg-soft)]">
+                {JSON.stringify(artifact?.payload ?? item, null, 2)}
+              </pre>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+});
+
 const HookItem = memo(function HookItem({
   item,
 }: {
@@ -3737,6 +3839,18 @@ const HistoryItemRow = memo(function HistoryItemRow({
           }
         }
         scrollRootRef={scrollRootRef}
+      />
+    );
+  }
+
+  if (item.kind === 'artifact') {
+    return (
+      <ArtifactHistoryItem
+        item={
+          item as ThreadHistoryItemDto & {
+            kind: 'artifact';
+          }
+        }
       />
     );
   }
@@ -4279,12 +4393,14 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
   livePlan,
   liveItems,
   liveOutput,
+  forceActive = false,
   onToggleCollapse,
   onOpenExpandedText,
   onOpenCommandDetail,
   onOpenToolCallDetail,
   scrollRootRef,
   articleRef,
+  isLatestVisibleTurn = false,
 }: {
   threadId: string | undefined;
   turn: TimelineTurn;
@@ -4299,6 +4415,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
     | null;
   liveItems: ThreadHistoryItemDto[] | null;
   liveOutput: string;
+  forceActive?: boolean;
   onToggleCollapse: (turnId: string) => void;
   onOpenExpandedText: (title: string, text: string) => void;
   onOpenCommandDetail: (
@@ -4313,7 +4430,21 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
   ) => void;
   scrollRootRef: RefObject<HTMLDivElement | null>;
   articleRef?: RefCallback<HTMLElement> | undefined;
+  isLatestVisibleTurn?: boolean;
 }) {
+  const hasLiveActivity =
+    Boolean(livePlan) ||
+    Boolean(liveOutput) ||
+    Boolean(liveItems && liveItems.length > 0);
+  const activeForRendering =
+    forceActive || isActiveTurnStatus(turn.status) || hasLiveActivity || isLatestVisibleTurn;
+  const activeFooterTurn: TimelineTurn =
+    activeForRendering && !isActiveTurnStatus(turn.status)
+      ? {
+          ...turn,
+          status: 'inProgress',
+        }
+      : turn;
   const mergedItems = useMemo(
     () => mergeLiveTurnItems(turn.items, liveItems),
     [liveItems, turn.items],
@@ -4323,14 +4454,11 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
     [livePlan, mergedItems, turn.status],
   );
   const preparedItems = useMemo(
-    () => prepareTurnItemsForRendering(mergedItems, isActiveTurnStatus(turn.status)),
-    [mergedItems, turn.status],
+    () => prepareTurnItemsForRendering(mergedItems, activeForRendering),
+    [activeForRendering, mergedItems],
   );
   const groupedItems = useMemo(() => groupTimelineHistoryItems(preparedItems), [preparedItems]);
-  const visibleLiveOutput = useMemo(
-    () => getLiveOutputTailForTurn(liveOutput, mergedItems),
-    [liveOutput, mergedItems],
-  );
+  const visibleLiveOutput = liveOutput;
   const visibleLiveHookPrompt = useMemo(
     () => parseHookPromptText(visibleLiveOutput),
     [visibleLiveOutput],
@@ -4400,51 +4528,16 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
 
       {!isCollapsed && (
         <div className="mt-1.5 space-y-1.5">
-          {groupedItems.map((entry) =>
-            entry.kind === 'commandGroup' ? (
-              <CommandGroupItem
-                key={entry.key}
-                items={entry.items}
-                expanded={expandedGroups[entry.key] ?? false}
-                onToggleExpanded={() => toggleGroupedItem(entry.key)}
-                onOpen={onOpenCommandDetail}
-              />
-            ) : entry.kind === 'fileChangeGroup' ? (
-              <FileChangeGroupItem
-                key={entry.key}
-                items={entry.items}
-                expanded={expandedGroups[entry.key] ?? false}
-                onToggleExpanded={() => toggleGroupedItem(entry.key)}
-                onOpen={onOpenExpandedText}
-              />
-            ) : entry.kind === 'searchGroup' ? (
-              <SearchGroupItem
-                key={entry.key}
-                items={entry.items}
-                expanded={expandedGroups[entry.key] ?? false}
-                onToggleExpanded={() => toggleGroupedItem(entry.key)}
-                onOpen={onOpenExpandedText}
-              />
-            ) : entry.kind === 'fileReadGroup' ? (
-              <FileReadGroupItem
-                key={entry.key}
-                items={entry.items}
-                expanded={expandedGroups[entry.key] ?? false}
-                onToggleExpanded={() => toggleGroupedItem(entry.key)}
-                onOpen={onOpenExpandedText}
-              />
-            ) : (
-              <HistoryItemRow
-                key={entry.key}
-                threadId={threadId}
-                item={entry.item}
-                scrollRootRef={scrollRootRef}
-                onOpenExpandedText={onOpenExpandedText}
-                onOpenCommandDetail={onOpenCommandDetail}
-                onOpenToolCallDetail={onOpenToolCallDetail}
-              />
-            ),
-          )}
+          <TimelineHistoryEntries
+            entries={groupedItems}
+            expandedGroups={expandedGroups}
+            onToggleGroupedItem={toggleGroupedItem}
+            threadId={threadId}
+            scrollRootRef={scrollRootRef}
+            onOpenExpandedText={onOpenExpandedText}
+            onOpenCommandDetail={onOpenCommandDetail}
+            onOpenToolCallDetail={onOpenToolCallDetail}
+          />
           {displayedLivePlan && (
             <div className="timeline-live-plan-card rounded-[1rem] border px-3 py-3 sm:rounded-[1.2rem]">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -4489,8 +4582,8 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
               streaming
             />
           ) : null}
-          {isActiveTurnStatus(turn.status) && (
-            <TurnStatusBar turn={turn} variant="footer" />
+          {activeForRendering && (
+            <TurnStatusBar turn={activeFooterTurn} variant="footer" />
           )}
         </div>
       )}
@@ -4498,11 +4591,91 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
   );
 });
 
+function TimelineHistoryEntries({
+  entries,
+  expandedGroups,
+  onToggleGroupedItem,
+  threadId,
+  scrollRootRef,
+  onOpenExpandedText,
+  onOpenCommandDetail,
+  onOpenToolCallDetail,
+}: {
+  entries: TimelineHistoryEntry[];
+  expandedGroups: Record<string, boolean>;
+  onToggleGroupedItem: (groupKey: string) => void;
+  threadId: string | undefined;
+  scrollRootRef: RefObject<HTMLDivElement | null>;
+  onOpenExpandedText: (title: string, text: string) => void;
+  onOpenCommandDetail: (
+    item: ThreadHistoryItemDto & { kind: 'commandExecution' },
+    title: string,
+  ) => void;
+  onOpenToolCallDetail: (
+    item: ThreadHistoryItemDto & {
+      kind: 'toolCall' | 'agentToolCall' | 'skillToolCall';
+    },
+    title: string,
+  ) => void;
+}) {
+  return (
+    <>
+      {entries.map((entry) =>
+        entry.kind === 'commandGroup' ? (
+          <CommandGroupItem
+            key={entry.key}
+            items={entry.items}
+            expanded={expandedGroups[entry.key] ?? false}
+            onToggleExpanded={() => onToggleGroupedItem(entry.key)}
+            onOpen={onOpenCommandDetail}
+          />
+        ) : entry.kind === 'fileChangeGroup' ? (
+          <FileChangeGroupItem
+            key={entry.key}
+            items={entry.items}
+            expanded={expandedGroups[entry.key] ?? false}
+            onToggleExpanded={() => onToggleGroupedItem(entry.key)}
+            onOpen={onOpenExpandedText}
+          />
+        ) : entry.kind === 'searchGroup' ? (
+          <SearchGroupItem
+            key={entry.key}
+            items={entry.items}
+            expanded={expandedGroups[entry.key] ?? false}
+            onToggleExpanded={() => onToggleGroupedItem(entry.key)}
+            onOpen={onOpenExpandedText}
+          />
+        ) : entry.kind === 'fileReadGroup' ? (
+          <FileReadGroupItem
+            key={entry.key}
+            items={entry.items}
+            expanded={expandedGroups[entry.key] ?? false}
+            onToggleExpanded={() => onToggleGroupedItem(entry.key)}
+            onOpen={onOpenExpandedText}
+          />
+        ) : (
+          <HistoryItemRow
+            key={entry.key}
+            threadId={threadId}
+            item={entry.item}
+            scrollRootRef={scrollRootRef}
+            onOpenExpandedText={onOpenExpandedText}
+            onOpenCommandDetail={onOpenCommandDetail}
+            onOpenToolCallDetail={onOpenToolCallDetail}
+          />
+        ),
+      )}
+    </>
+  );
+}
+
 export function ThreadTimeline({
   threadId,
   turns,
   totalTurnCount,
   pendingRequests = [],
+  activeTurnId = null,
+  threadRunning = false,
   pendingSteers = [],
   livePlan = null,
   liveItems = null,
@@ -4540,6 +4713,9 @@ export function ThreadTimeline({
   const [loadMoreClicks, setLoadMoreClicks] = useState(0);
   const [expandedText, setExpandedText] = useState<ExpandedTextState | null>(null);
   const [collapsedTurns, setCollapsedTurns] = useState<Record<string, boolean>>(
+    {},
+  );
+  const [expandedLooseGroups, setExpandedLooseGroups] = useState<Record<string, boolean>>(
     {},
   );
   const [isTailVisible, setIsTailVisible] = useState(true);
@@ -4648,6 +4824,13 @@ export function ThreadTimeline({
     setCollapsedTurns((current) => ({
       ...current,
       [turnId]: !current[turnId],
+    }));
+  }, []);
+
+  const handleToggleLooseGroup = useCallback((groupKey: string) => {
+    setExpandedLooseGroups((current) => ({
+      ...current,
+      [groupKey]: !current[groupKey],
     }));
   }, []);
 
@@ -4909,17 +5092,45 @@ export function ThreadTimeline({
     ? Math.max(0, effectiveTotalTurnCount - turns.length)
     : turns.length - visibleTurns.length;
   const showLoadAll = !serverManagedHistory && hiddenCount > 0 && loadMoreClicks >= 2;
-  const liveOutputTurnIndex =
-    liveOutput && visibleTurns.length > 0
-      ? visibleTurns.findLastIndex((turn) => isRunningHistoryStatus(turn.status))
-      : -1;
+  const forceLatestTurnActive =
+    threadRunning &&
+    (
+      !activeTurnId ||
+      (
+        !visibleTurns.some((turn) => turn.id === activeTurnId) &&
+        optimisticTurn?.id !== activeTurnId
+      )
+    );
+  const latestVisibleTurnId =
+    optimisticTurn?.id ?? visibleTurns.at(-1)?.id ?? null;
+  const shouldForceLatestVisibleTurnActive =
+    forceLatestTurnActive && latestVisibleTurnId !== null;
+  const liveItemsAttachedToVisibleTurn =
+    !!liveItems &&
+    (visibleTurns.some((turn) => turn.id === liveItems.turnId) ||
+      optimisticTurn?.id === liveItems.turnId);
+  const liveItemsTargetTurnId =
+    liveItems && liveItemsAttachedToVisibleTurn
+      ? liveItems.turnId
+      : liveItems && shouldForceLatestVisibleTurnActive
+        ? latestVisibleTurnId
+        : null;
+  const optimisticLiveItems =
+    optimisticTurn && liveItemsTargetTurnId === optimisticTurn.id
+      ? liveItems?.items ?? null
+      : null;
+  const hasStructuredLiveItems = (liveItems?.items.length ?? 0) > 0;
+  const unattachedLiveItems =
+    liveItems && liveItemsTargetTurnId === null ? liveItems.items : null;
+  const unattachedLiveEntries = useMemo(
+    () => groupTimelineHistoryItems(unattachedLiveItems ?? []),
+    [unattachedLiveItems],
+  );
   const liveOutputAttachedToOptimisticTurn =
-    liveOutputTurnIndex < 0 &&
     !!liveOutput &&
     !!optimisticTurn &&
-    optimisticTurn.status !== 'failed';
-  const liveOutputAttachedToTurn =
-    liveOutputTurnIndex >= 0 || liveOutputAttachedToOptimisticTurn;
+    optimisticTurn.status !== 'failed' &&
+    !optimisticLiveItems;
   const visibleTurnIds = new Set(visibleTurns.map((turn) => turn.id));
   const notesByTurnId = answeredRequestNotes.reduce<Map<string, typeof answeredRequestNotes>>(
     (map, note) => {
@@ -5221,8 +5432,15 @@ export function ThreadTimeline({
                     absoluteIndex={visibleTurnAbsoluteOffset + visibleIndex + 1}
                     isCollapsed={collapsedTurns[turn.id] ?? false}
                     livePlan={livePlan?.turnId === turn.id ? livePlan : null}
-                    liveItems={liveItems?.turnId === turn.id ? liveItems.items : null}
-                    liveOutput={visibleIndex === liveOutputTurnIndex ? liveOutput : ''}
+                    liveItems={liveItemsTargetTurnId === turn.id ? liveItems?.items ?? null : null}
+                    liveOutput=""
+                    forceActive={
+                      activeTurnId === turn.id ||
+                      (
+                        shouldForceLatestVisibleTurnActive &&
+                        latestVisibleTurnId === turn.id
+                      )
+                    }
                     onToggleCollapse={handleToggleCollapse}
                     onOpenExpandedText={handleOpenExpandedText}
                     onOpenCommandDetail={handleOpenCommandDetail}
@@ -5306,8 +5524,15 @@ export function ThreadTimeline({
                     absoluteIndex={optimisticAbsoluteIndex}
                     isCollapsed={collapsedTurns[optimisticTurn.id] ?? false}
                     livePlan={null}
-                    liveItems={null}
+                    liveItems={optimisticLiveItems}
                     liveOutput={liveOutputAttachedToOptimisticTurn ? liveOutput : ''}
+                    forceActive={
+                      activeTurnId === optimisticTurn.id ||
+                      (
+                        shouldForceLatestVisibleTurnActive &&
+                        latestVisibleTurnId === optimisticTurn.id
+                      )
+                    }
                     onToggleCollapse={handleToggleCollapse}
                     onOpenExpandedText={handleOpenExpandedText}
                     onOpenCommandDetail={handleOpenCommandDetail}
@@ -5390,7 +5615,22 @@ export function ThreadTimeline({
             </div>
           )}
 
-          {liveOutput && !liveOutputAttachedToTurn && (
+          {unattachedLiveItems && unattachedLiveItems.length > 0 && (
+            <div className="space-y-3 border-t border-stone-800/80 px-2.5 py-2.5 sm:px-6">
+              <TimelineHistoryEntries
+                entries={unattachedLiveEntries}
+                expandedGroups={expandedLooseGroups}
+                onToggleGroupedItem={handleToggleLooseGroup}
+                threadId={threadId}
+                scrollRootRef={scrollContainerRef}
+                onOpenExpandedText={handleOpenExpandedText}
+                onOpenCommandDetail={handleOpenCommandDetail}
+                onOpenToolCallDetail={handleOpenToolCallDetail}
+              />
+            </div>
+          )}
+
+          {liveOutput && !liveOutputAttachedToOptimisticTurn && !hasStructuredLiveItems && (
             <div className="border-t border-stone-800/80 px-2.5 py-2.5 sm:px-6">
               {parseHookPromptText(liveOutput) ? (
                 <HistoryItemRow

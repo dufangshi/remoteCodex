@@ -1,7 +1,15 @@
 import { EventEmitter } from 'node:events';
-import type { ThreadHistoryItemDto } from '../../shared/src/index';
+import type {
+  AgentBackendIdDto,
+  AgentBackendInstallationDto,
+  ThreadHistoryItemDto,
+} from '../../shared/src/index';
 
-export type AgentProviderId = 'codex' | 'claude';
+export const transientAgentHistoryItemSymbol: unique symbol = Symbol(
+  'remoteCodex.transientAgentHistoryItem',
+);
+
+export type AgentProviderId = AgentBackendIdDto;
 
 export type AgentRuntimeErrorCode =
   | 'provider_unavailable'
@@ -84,6 +92,7 @@ export interface AgentRuntimeDescriptor {
   status: AgentRuntimeStatus;
   capabilities: AgentProviderCapabilities;
   managementSchema: AgentRuntimeManagementSchema;
+  installation: AgentBackendInstallationDto;
 }
 
 export interface AgentRuntimeConfigFileSchema {
@@ -142,6 +151,7 @@ export interface AgentModel {
   description: string;
   isDefault: boolean;
   hidden: boolean;
+  supportsPerformanceMode?: boolean;
   supportedReasoningEfforts: Array<{
     reasoningEffort: string;
     description: string;
@@ -169,7 +179,26 @@ export interface AgentSessionSummary {
   rawSession?: unknown;
 }
 
-export type AgentHistoryItem = ThreadHistoryItemDto;
+export type AgentHistoryItem = ThreadHistoryItemDto & {
+  [transientAgentHistoryItemSymbol]?: true;
+};
+
+export function markTransientAgentHistoryItem<T extends ThreadHistoryItemDto>(
+  item: T,
+): T & AgentHistoryItem {
+  Object.defineProperty(item, transientAgentHistoryItemSymbol, {
+    value: true,
+    enumerable: false,
+    configurable: true,
+  });
+  return item as T & AgentHistoryItem;
+}
+
+export function isTransientAgentHistoryItem(
+  item: ThreadHistoryItemDto,
+): item is AgentHistoryItem & { [transientAgentHistoryItemSymbol]: true } {
+  return Boolean((item as AgentHistoryItem)[transientAgentHistoryItemSymbol]);
+}
 
 export type AgentTurnItem = AgentHistoryItem;
 
@@ -191,6 +220,8 @@ export interface AgentSessionDetail extends AgentSessionSummary {
 export interface ReadAgentSessionOptions {
   limit?: number;
   beforeTurnId?: string | null;
+  localThreadId?: string;
+  workspacePath?: string;
 }
 
 export interface StartAgentSessionInput {
@@ -221,6 +252,7 @@ export interface ResumeAgentSessionInput {
 export interface StartAgentTurnInput {
   providerSessionId: string;
   prompt: string;
+  displayPrompt?: string | null;
   model?: string | null;
   reasoningEffort?: string | null;
   collaborationMode?: 'default' | 'plan' | null;
@@ -505,6 +537,7 @@ export interface AgentRuntime extends EventEmitter {
   readonly description: string;
   readonly capabilities: AgentProviderCapabilities;
   readonly managementSchema: AgentRuntimeManagementSchema;
+  readonly installation: AgentBackendInstallationDto;
 
   getStatus(): AgentRuntimeStatus;
   start(): Promise<void>;

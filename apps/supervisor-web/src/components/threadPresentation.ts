@@ -94,6 +94,8 @@ export function historyItemAccentClassName(kind: ThreadHistoryItemDto['kind']) {
       return 'timeline-kind-user';
     case 'agentMessage':
       return 'timeline-kind-agent';
+    case 'artifact':
+      return 'timeline-kind-action';
     case 'image':
       return 'timeline-kind-action';
     case 'contextCompaction':
@@ -129,6 +131,8 @@ export function historyItemLabel(kind: ThreadHistoryItemDto['kind']) {
       return 'User';
     case 'agentMessage':
       return 'Agent';
+    case 'artifact':
+      return 'Artifact';
     case 'image':
       return 'Image';
     case 'contextCompaction':

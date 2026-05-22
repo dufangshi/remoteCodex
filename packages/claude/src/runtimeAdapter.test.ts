@@ -2,16 +2,20 @@ import { describe, expect, it } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type {
-  Query,
-  SDKMessage,
-  SDKSessionInfo,
-  SessionMessage,
-} from '@anthropic-ai/claude-agent-sdk';
 
 import { ClaudeRuntimeAdapter } from './runtimeAdapter';
 import { hiddenInitPrompt } from './historyItems';
 import type { AgentRuntimeEvent } from '../../agent-runtime/src/index';
+
+type SDKMessage = Record<string, any>;
+type SDKSessionInfo = Record<string, any>;
+type SessionMessage = Record<string, any>;
+interface Query extends AsyncIterable<SDKMessage> {
+  close(): void;
+  interrupt(): Promise<void>;
+  supportedModels(): Promise<any[]>;
+  mcpServerStatus(): Promise<any[]>;
+}
 
 function wait(ms = 0) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -229,6 +233,23 @@ describe('ClaudeRuntimeAdapter', () => {
     expect(sdkOptions[0]?.pathToClaudeCodeExecutable).toBe('claude');
   });
 
+  it('does not pass an empty tool list to Claude session initialization', async () => {
+    const sdkOptions: Record<string, unknown>[] = [];
+    const adapter = makeAdapter((_prompt, options) => {
+      sdkOptions.push(options);
+      return [systemInit(), result()];
+    });
+
+    await adapter.startSession({
+      cwd: '/tmp/workspace',
+      model: 'sonnet',
+      approvalMode: 'guarded',
+      sandboxMode: 'workspace-write',
+    });
+
+    expect(sdkOptions[0]).not.toHaveProperty('tools');
+  });
+
   it('maps thread sandbox modes to Claude permission and sandbox settings', async () => {
     const turnOptions: Record<string, unknown>[] = [];
     const adapter = makeAdapter((_prompt, options) => {
@@ -434,6 +455,74 @@ describe('ClaudeRuntimeAdapter', () => {
         }),
       ],
     });
+  });
+
+  it('keeps image blocks visible when reading Claude session history', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-history-image-'));
+    const adapter = new ClaudeRuntimeAdapter({
+      home: '/tmp/claude-home',
+      command: 'claude',
+      query: (() => new FakeQuery([systemInit(), result()])) as any,
+      listSessions: (async () => [] satisfies SDKSessionInfo[]) as any,
+      getSessionInfo: (async () => ({
+        sessionId: 'claude-session-1',
+        summary: 'Existing session',
+        lastModified: 1_772_000_000_000,
+        createdAt: 1_771_000_000_000,
+        cwd: workspace,
+      })) as any,
+      getSessionMessages: (async () => [
+        {
+          type: 'user',
+          uuid: '019e4657-bd3c-72d1-b59d-324ed8a4b1ec',
+          session_id: 'claude-session-1',
+          message: {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'What number is in the screenshot? ' },
+              {
+                type: 'image',
+                source: {
+                  type: 'base64',
+                  media_type: 'image/png',
+                  data: 'ZmFrZS1wbmc=',
+                },
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'assistant',
+          uuid: '019e4657-bd3c-72d1-b59d-324ed8a4b1ed',
+          session_id: 'claude-session-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'The number is 9.' }],
+          },
+          parent_tool_use_id: null,
+        },
+      ] satisfies SessionMessage[]) as any,
+    });
+
+    const session = await adapter.readSession('claude-session-1', {
+      localThreadId: 'thread-1',
+      workspacePath: workspace,
+    });
+
+    expect(session.turns[0]?.items[0]).toMatchObject({
+      kind: 'userMessage',
+      text: 'What number is in the screenshot? \n[PHOTO ./.temp/threads/thread-1/claude-history-019e4657-bd3c-72d1-b59d-324ed8a4b1ec-1.png]',
+    });
+    await expect(
+      fs.readFile(
+        path.join(
+          workspace,
+          '.temp/threads/thread-1/claude-history-019e4657-bd3c-72d1-b59d-324ed8a4b1ec-1.png',
+        ),
+        'utf8',
+      ),
+    ).resolves.toBe('fake-png');
   });
 
   it('starts a session from the Claude init message and hides the synthetic prompt', async () => {
@@ -1935,6 +2024,16 @@ describe('ClaudeRuntimeAdapter', () => {
               },
               {
                 type: 'tool_use',
+                id: 'toolu_edit',
+                name: 'Edit',
+                input: {
+                  file_path: '/home/u/dev/remoteCodex/apps/supervisor-api/src/thread-service.ts',
+                  old_string: 'before',
+                  new_string: 'after',
+                },
+              },
+              {
+                type: 'tool_use',
                 id: 'toolu_skill',
                 name: 'Skill',
                 input: {
@@ -1982,6 +2081,11 @@ describe('ClaudeRuntimeAdapter', () => {
               },
               {
                 type: 'tool_result',
+                tool_use_id: 'toolu_edit',
+                content: 'File updated.',
+              },
+              {
+                type: 'tool_result',
                 tool_use_id: 'toolu_skill',
                 content: 'Skill completed.',
               },
@@ -2023,6 +2127,13 @@ describe('ClaudeRuntimeAdapter', () => {
           id: 'toolu_read',
           kind: 'fileRead',
           text: 'Read file: packages/claude/src/runtimeAdapter.ts',
+          status: 'completed',
+        }),
+        expect.objectContaining({
+          id: 'toolu_edit',
+          kind: 'fileChange',
+          text: 'apps/supervisor-api/src/thread-service.ts',
+          previewText: 'Edit file: apps/supervisor-api/src/thread-service.ts',
           status: 'completed',
         }),
         expect.objectContaining({

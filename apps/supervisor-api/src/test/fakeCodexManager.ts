@@ -42,6 +42,7 @@ export class FakeCodexManager extends EventEmitter {
       description: 'Default test model',
       hidden: false,
       isDefault: true,
+      supportsPerformanceMode: true,
       supportedReasoningEfforts: [
         { reasoningEffort: 'low' as ReasoningEffort, description: 'Fast responses' },
         { reasoningEffort: 'medium' as ReasoningEffort, description: 'Balanced' },

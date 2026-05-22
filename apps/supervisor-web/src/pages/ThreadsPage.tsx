@@ -3,6 +3,7 @@ import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 
 import {
   AgentRuntimeStatusDto,
+  defaultAgentBackendId,
   ThreadDto,
   WorkspaceDto,
 } from '../../../../packages/shared/src/index';
@@ -55,7 +56,7 @@ export function ThreadsPage() {
     try {
       const [statusResponse, threadResponse, workspaceResponse] =
         await Promise.all([
-          fetchAgentBackendStatus(shellNav?.defaultBackend ?? 'codex').then(
+          fetchAgentBackendStatus(shellNav?.defaultBackend ?? defaultAgentBackendId).then(
             (backend) => backend.status,
           ),
           fetchThreads(),
@@ -87,14 +88,18 @@ export function ThreadsPage() {
             ? {
                 ...thread,
                 status:
+                  event.type === 'thread.updated' &&
                   typeof event.payload.status === 'string'
                     ? (event.payload.status as ThreadDto['status'])
                     : thread.status,
                 lastError:
+                  (event.type === 'thread.turn.failed' ||
+                    event.type === 'thread.turn.completed') &&
                   typeof event.payload.error === 'string'
                     ? event.payload.error
                     : thread.lastError,
                 title:
+                  event.type === 'thread.updated' &&
                   typeof event.payload.title === 'string'
                     ? event.payload.title
                     : thread.title,
@@ -214,6 +219,7 @@ export function ThreadsPage() {
       currentWorkspaceId={selectedWorkspaceId}
       currentWorkspaceLabel={selectedWorkspace?.label ?? null}
       onRenameThread={handleRenameThread}
+      onDeleteThread={setDeletingThread}
     >
       <>
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[2rem] border border-stone-800 bg-stone-900/85 shadow-2xl shadow-stone-950/20">

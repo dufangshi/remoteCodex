@@ -4,8 +4,14 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import type {
   AgentBackendDto,
   AgentBackendIdDto,
+  AgentBackendInstallationDto,
   ProviderHostConfigArchiveDto,
   WorkspaceSettingsDto,
+} from '../../../../packages/shared/src/index';
+import {
+  agentBackendIds,
+  agentBackendMetadata,
+  defaultAgentBackendId,
 } from '../../../../packages/shared/src/index';
 import {
   ApiError,
@@ -16,12 +22,14 @@ import {
   fetchProviderHostFile,
   fetchProviderHostConfigArchives,
   fetchWorkspaceSettings,
+  installOrUpdateAgentBackend,
   renameProviderHostConfigArchive,
   restartAgentBackend,
   updateProviderHostFile,
   updateWorkspaceSettings,
 } from '../lib/api';
 import { type AgentBackendId, type ThemeMode, useAppShellNav } from './AppShellNavContext';
+import { usePlugins } from '../plugins/PluginProvider';
 
 function MenuIcon() {
   return (
@@ -87,16 +95,51 @@ const emptyManagementSchema: AgentBackendDto['managementSchema'] = {
   buildRestart: false,
 };
 
+const backendInstallationFallbacks: Record<AgentBackendIdDto, Pick<
+  AgentBackendInstallationDto,
+  'packageName' | 'installCommand' | 'updateCommand'
+>> = {
+  codex: {
+    packageName: '@openai/codex',
+    installCommand: null,
+    updateCommand: 'npm install -g @openai/codex@latest',
+  },
+  claude: {
+    packageName: '@anthropic-ai/claude-agent-sdk',
+    installCommand: 'npm install -g @anthropic-ai/claude-code @anthropic-ai/claude-agent-sdk',
+    updateCommand: 'npm install -g @anthropic-ai/claude-code@latest @anthropic-ai/claude-agent-sdk@latest',
+  },
+  opencode: {
+    packageName: 'opencode-ai',
+    installCommand: 'npm install -g opencode-ai @opencode-ai/sdk',
+    updateCommand: 'npm install -g opencode-ai@latest @opencode-ai/sdk@latest',
+  },
+};
+
+function unavailableInstallation(provider: AgentBackendIdDto): AgentBackendInstallationDto {
+  const fallback = backendInstallationFallbacks[provider];
+  return {
+    packageName: fallback.packageName,
+    installed: provider === 'codex',
+    installedVersion: null,
+    latestVersion: null,
+    installCommand: fallback.installCommand,
+    updateCommand: fallback.updateCommand,
+    busy: false,
+    lastError: null,
+  };
+}
+
 function unavailableBackend(provider: AgentBackendIdDto, displayName: string): AgentBackendDto {
   return {
     provider,
     displayName,
     description: `${displayName} backend descriptor is not available.`,
     enabled: false,
-    isDefault: provider === 'codex',
+    isDefault: provider === defaultAgentBackendId,
     status: {
       state: 'stopped',
-      transport: provider === 'claude' ? 'sdk' : 'none',
+      transport: agentBackendMetadata[provider].defaultTransport,
       lastStartedAt: null,
       lastError: 'Backend descriptor is not available.',
       restartCount: 0,
@@ -144,12 +187,25 @@ function unavailableBackend(provider: AgentBackendIdDto, displayName: string): A
       },
     },
     managementSchema: emptyManagementSchema,
+    installation: unavailableInstallation(provider),
+  };
+}
+
+function normalizeBackendDescriptor(backend: AgentBackendDto): AgentBackendDto {
+  const installation = backend.installation ?? unavailableInstallation(backend.provider);
+  return {
+    ...backend,
+    installation: {
+      ...unavailableInstallation(backend.provider),
+      ...installation,
+    },
   };
 }
 
 const fallbackBackends: AgentBackendDto[] = [
-  unavailableBackend('codex', 'Codex'),
-  unavailableBackend('claude', 'Claude'),
+  ...agentBackendIds.map((provider) =>
+    unavailableBackend(provider, agentBackendMetadata[provider].displayName),
+  ),
 ];
 
 function fallbackManagementSchema(provider: AgentBackendId) {
@@ -171,6 +227,17 @@ function formatArchiveDate(value: string) {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function apiErrorMessage(error: ApiError) {
+  const details = error.payload.details;
+  const detailText =
+    typeof details?.stderr === 'string' && details.stderr.trim()
+      ? details.stderr.trim()
+      : typeof details?.stdout === 'string' && details.stdout.trim()
+        ? details.stdout.trim()
+        : null;
+  return detailText ? `${error.message}\n${detailText}` : error.message;
 }
 
 function defaultProviderHostFileState(name: string) {
@@ -315,6 +382,17 @@ export function AppShellNavigationMenu({
 
 export function AppShellSettingsDialog() {
   const shellNav = useAppShellNav();
+  const plugins = usePlugins();
+  const [pluginImportDraft, setPluginImportDraft] = useState('');
+  const [pluginImportState, setPluginImportState] = useState<{
+    busy: boolean;
+    message: string | null;
+    error: string | null;
+  }>({
+    busy: false,
+    message: null,
+    error: null,
+  });
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [files, setFiles] = useState<
     Record<
@@ -347,10 +425,16 @@ export function AppShellSettingsDialog() {
     loading: boolean;
     saving: boolean;
     error: string | null;
+    operatingProvider: AgentBackendIdDto | null;
+    operatingAction: 'install' | 'update' | null;
+    message: string | null;
   }>({
     loading: false,
     saving: false,
     error: null,
+    operatingProvider: null,
+    operatingAction: null,
+    message: null,
   });
   const [workspaceSettings, setWorkspaceSettings] = useState<WorkspaceSettingsDto | null>(null);
   const [workspaceSettingsState, setWorkspaceSettingsState] = useState<{
@@ -384,8 +468,39 @@ export function AppShellSettingsDialog() {
     error: null,
   });
   const selectedThemeMode = shellNav?.themeMode ?? 'system';
+
+  async function handleImportPlugin() {
+    const manifestJson = pluginImportDraft.trim();
+    if (!manifestJson || pluginImportState.busy) {
+      return;
+    }
+
+    setPluginImportState({
+      busy: true,
+      message: null,
+      error: null,
+    });
+    try {
+      await plugins.importPluginManifest({
+        manifestJson,
+        enabled: true,
+      });
+      setPluginImportDraft('');
+      setPluginImportState({
+        busy: false,
+        message: 'Plugin manifest imported.',
+        error: null,
+      });
+    } catch (error) {
+      setPluginImportState({
+        busy: false,
+        message: null,
+        error: error instanceof Error ? error.message : 'Unable to import plugin manifest.',
+      });
+    }
+  }
   const effectiveTheme = shellNav?.effectiveTheme ?? 'dark';
-  const selectedBackend = shellNav?.defaultBackend ?? 'codex';
+  const selectedBackend = shellNav?.defaultBackend ?? defaultAgentBackendId;
   const activeBackend =
     backends.find((backend) => backend.provider === selectedBackend) ??
     fallbackBackends.find((backend) => backend.provider === selectedBackend) ??
@@ -431,7 +546,7 @@ export function AppShellSettingsDialog() {
           return;
         }
         const merged = [
-          ...records,
+          ...records.map(normalizeBackendDescriptor),
           ...fallbackBackends.filter(
             (fallback) =>
               !records.some((record) => record.provider === fallback.provider),
@@ -650,7 +765,7 @@ export function AppShellSettingsDialog() {
   }, [activeBackend.provider, activeManagementSchema.configArchives, shellNav?.settingsOpen]);
 
   async function handleRestartAppServer() {
-    if (restartState.busy) {
+    if (restartState.busy || backendState.saving) {
       return;
     }
 
@@ -662,17 +777,18 @@ export function AppShellSettingsDialog() {
 
     try {
       const runtime = await restartAgentBackend(activeBackend.provider);
+      const normalizedRuntime = normalizeBackendDescriptor(runtime);
       setRestartState({
         busy: false,
         message:
-          runtime.status.state === 'ready'
-            ? `${runtime.displayName} backend restarted.`
-            : `${runtime.displayName} backend state: ${runtime.status.state}`,
+          normalizedRuntime.status.state === 'ready'
+            ? `${normalizedRuntime.displayName} backend restarted.`
+            : `${normalizedRuntime.displayName} backend state: ${normalizedRuntime.status.state}`,
         error: null,
       });
       setBackends((current) =>
         current.map((backend) =>
-          backend.provider === runtime.provider ? runtime : backend,
+          backend.provider === normalizedRuntime.provider ? normalizedRuntime : backend,
         ),
       );
     } catch (error) {
@@ -685,8 +801,59 @@ export function AppShellSettingsDialog() {
     }
   }
 
+  async function handleInstallOrUpdateBackend(
+    provider: AgentBackendIdDto,
+    action: 'install' | 'update',
+  ) {
+    if (restartState.busy || backendState.saving) {
+      return;
+    }
+
+    const backend = backends.find((entry) => entry.provider === provider);
+    setBackendState((current) => ({
+      ...current,
+      saving: true,
+      operatingProvider: provider,
+      operatingAction: action,
+      message: null,
+      error: null,
+    }));
+
+    try {
+      const runtime = await installOrUpdateAgentBackend(provider, action);
+      const normalizedRuntime = normalizeBackendDescriptor(runtime);
+      setBackends((current) =>
+        current.map((entry) =>
+          entry.provider === normalizedRuntime.provider ? normalizedRuntime : entry,
+        ),
+      );
+      setBackendState((current) => ({
+        ...current,
+        saving: false,
+        operatingProvider: null,
+        operatingAction: null,
+        message: normalizedRuntime.installation.lastError
+          ? `${normalizedRuntime.displayName} ${action === 'install' ? 'installed' : 'updated'}, but requires attention:\n${normalizedRuntime.installation.lastError}`
+          : `${normalizedRuntime.displayName} ${action === 'install' ? 'installed' : 'updated'}.`,
+        error: null,
+      }));
+    } catch (error) {
+      setBackendState((current) => ({
+        ...current,
+        saving: false,
+        operatingProvider: null,
+        operatingAction: null,
+        message: null,
+        error:
+          error instanceof ApiError
+            ? apiErrorMessage(error)
+            : `Unable to ${action} ${backend?.displayName ?? provider}.`,
+      }));
+    }
+  }
+
   async function handleBuildAndRestartService() {
-    if (restartState.busy) {
+    if (restartState.busy || backendState.saving) {
       return;
     }
 
@@ -989,6 +1156,105 @@ export function AppShellSettingsDialog() {
             <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
+                  <p className="text-sm font-medium text-[var(--theme-fg)]">Plugins</p>
+                  <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
+                    Enable renderers and thread extensions loaded by this supervisor.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void plugins.refresh()}
+                  disabled={plugins.loading}
+                  className="rounded-full border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-1.5 text-xs font-medium text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] disabled:cursor-not-allowed disabled:text-[var(--theme-fg-muted)]"
+                >
+                  {plugins.loading ? 'Loading...' : 'Refresh'}
+                </button>
+              </div>
+              <div className="mt-3 grid gap-2">
+                {plugins.plugins.map((plugin) => (
+                  <label
+                    key={plugin.id}
+                    className="flex items-start justify-between gap-3 rounded-[1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-2.5"
+                  >
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-[var(--theme-fg)]">
+                        {plugin.name}
+                      </span>
+                      <span className="mt-1 block text-xs leading-5 text-[var(--theme-fg-muted)]">
+                        {plugin.description}
+                      </span>
+                      <span className="mt-2 block text-[10px] uppercase tracking-[0.16em] text-[var(--theme-fg-muted)]">
+                        {plugin.capabilities.artifactTypes.map((type) => type.type).join(', ')}
+                      </span>
+                      <span className="mt-1 block text-[10px] uppercase tracking-[0.16em] text-[var(--theme-fg-muted)]">
+                        {plugin.source === 'imported' ? 'Imported manifest' : 'Built-in module'}
+                      </span>
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={plugin.enabled}
+                      onChange={(event) =>
+                        void plugins.setPluginEnabled(plugin.id, event.currentTarget.checked)
+                      }
+                      className="mt-1 h-4 w-4 shrink-0 accent-[var(--theme-accent-solid)]"
+                    />
+                  </label>
+                ))}
+                {plugins.plugins.length === 0 && (
+                  <p className="rounded-[1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-3 text-xs text-[var(--theme-fg-muted)]">
+                    No plugins are registered.
+                  </p>
+                )}
+              </div>
+              <div className="mt-3 border-t border-[var(--theme-border)] pt-3">
+                <label className="block text-xs font-medium text-[var(--theme-fg)]">
+                  Import manifest JSON
+                </label>
+                <textarea
+                  value={pluginImportDraft}
+                  onChange={(event) => {
+                    setPluginImportDraft(event.currentTarget.value);
+                    if (pluginImportState.message || pluginImportState.error) {
+                      setPluginImportState({
+                        busy: false,
+                        message: null,
+                        error: null,
+                      });
+                    }
+                  }}
+                  placeholder='{"id":"example.viewer","name":"Example Viewer","version":"0.1.0",...}'
+                  rows={4}
+                  className="mt-2 min-h-28 w-full resize-y rounded-[0.9rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-2 font-mono text-xs leading-5 text-[var(--theme-fg)] outline-none transition placeholder:text-[var(--theme-fg-muted)] focus:border-[var(--theme-accent-border)]"
+                />
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                  <p className="max-w-[42rem] text-xs leading-5 text-[var(--theme-fg-muted)]">
+                    Imports register manifest-declared artifact types. Rendering code still needs a
+                    trusted built-in frontend module.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void handleImportPlugin()}
+                    disabled={!pluginImportDraft.trim() || pluginImportState.busy}
+                    className="rounded-full border border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)] px-3 py-1.5 text-xs font-medium text-[var(--theme-accent-strong)] transition hover:bg-[var(--theme-hover)] disabled:cursor-not-allowed disabled:border-[var(--theme-border)] disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
+                  >
+                    {pluginImportState.busy ? 'Importing...' : 'Import'}
+                  </button>
+                </div>
+                {pluginImportState.error && (
+                  <p className="mt-2 text-xs text-rose-300">{pluginImportState.error}</p>
+                )}
+                {pluginImportState.message && (
+                  <p className="mt-2 text-xs text-emerald-300">{pluginImportState.message}</p>
+                )}
+              </div>
+              {plugins.error && (
+                <p className="mt-2 text-xs text-rose-300">{plugins.error}</p>
+              )}
+            </div>
+
+            <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
                   <p className="text-sm font-medium text-[var(--theme-fg)]">Workspace defaults</p>
                   <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
                     Git projects clone into dev home. New workspace directories can create one
@@ -1062,14 +1328,14 @@ export function AppShellSettingsDialog() {
                     Runtime controls
                   </p>
                   <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                    Restart the selected backend, or rebuild and restart the supervisor service from this checkout.
+                    Inspect installed backend versions, install optional runtimes, or restart the selected backend.
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-wrap justify-end gap-2">
                   <button
                     type="button"
                     onClick={() => void handleRestartAppServer()}
-                    disabled={restartState.busy}
+                    disabled={restartState.busy || backendState.saving}
                     className="rounded-full border border-sky-400/35 bg-sky-400/10 px-3 py-1.5 text-xs font-medium text-sky-500 transition hover:bg-sky-400/16 disabled:cursor-not-allowed disabled:border-[var(--theme-border)] disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
                   >
                     {restartState.busy ? 'Restarting...' : 'Restart'}
@@ -1077,19 +1343,85 @@ export function AppShellSettingsDialog() {
                   <button
                     type="button"
                     onClick={() => void handleBuildAndRestartService()}
-                    disabled={restartState.busy}
+                    disabled={restartState.busy || backendState.saving}
                     className="rounded-full border border-amber-400/35 bg-amber-400/10 px-3 py-1.5 text-xs font-medium text-amber-500 transition hover:bg-amber-400/16 disabled:cursor-not-allowed disabled:border-[var(--theme-border)] disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
                   >
                     {restartState.busy ? 'Working...' : 'Build and restart'}
                   </button>
                 </div>
               </div>
+              <div className="mt-3 grid gap-2">
+                {backends.map((backend) => {
+                  const installation = backend.installation;
+                  const canInstall = !installation.installed && Boolean(installation.installCommand);
+                  const canUpdate = installation.installed && Boolean(installation.updateCommand);
+                  const operationInProgress = backendState.saving &&
+                    backendState.operatingProvider === backend.provider;
+                  const operationLabel = canInstall ? 'Install' : 'Update';
+                  return (
+                    <div
+                      key={backend.provider}
+                      className="flex flex-col gap-2 rounded-[0.95rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-medium text-[var(--theme-fg)]">
+                            {backend.displayName}
+                          </span>
+                          <span className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] ${
+                            backend.enabled
+                              ? 'border-emerald-400/35 bg-emerald-400/10 text-emerald-400'
+                              : 'border-[var(--theme-border)] bg-[var(--theme-muted)] text-[var(--theme-fg-muted)]'
+                          }`}>
+                            {backend.enabled ? 'Ready' : installation.installed ? backend.status.state : 'Not installed'}
+                          </span>
+                        </div>
+                        <p className="mt-1 truncate text-xs text-[var(--theme-fg-muted)]">
+                          Version: {installation.installedVersion ?? (installation.installed ? 'Installed' : 'Unavailable')}
+                          {installation.latestVersion ? ` · Latest: ${installation.latestVersion}` : ''}
+                        </p>
+                        {installation.lastError ? (
+                          <p className="mt-1 line-clamp-2 text-xs text-rose-300">
+                            {installation.lastError}
+                          </p>
+                        ) : null}
+                      </div>
+                      {canInstall || canUpdate ? (
+                        <button
+                          type="button"
+                          aria-label={`${canInstall ? 'Install' : 'Update'} ${backend.displayName}`}
+                          onClick={() =>
+                            void handleInstallOrUpdateBackend(
+                              backend.provider,
+                              canInstall ? 'install' : 'update',
+                            )
+                          }
+                          disabled={restartState.busy || backendState.saving || (!canInstall && !canUpdate)}
+                          className="shrink-0 rounded-full border border-[var(--theme-border-strong)] bg-[var(--theme-panel)] px-3 py-1.5 text-xs font-medium text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] disabled:cursor-not-allowed disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
+                        >
+                          {operationInProgress
+                            ? backendState.operatingAction === 'install'
+                              ? 'Installing...'
+                              : 'Updating...'
+                            : operationLabel}
+                        </button>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
               {restartState.error ? (
                 <p className="mt-2 text-xs text-rose-300">{restartState.error}</p>
               ) : restartState.message ? (
                 <p className="mt-2 text-xs text-emerald-300">{restartState.message}</p>
+              ) : backendState.message ? (
+                <p className={`mt-2 whitespace-pre-line text-xs ${
+                  backendState.message.includes('requires attention')
+                    ? 'text-amber-300'
+                    : 'text-emerald-300'
+                }`}>{backendState.message}</p>
               ) : backendState.error ? (
-                <p className="mt-2 text-xs text-rose-300">{backendState.error}</p>
+                <p className="mt-2 whitespace-pre-line text-xs text-rose-300">{backendState.error}</p>
               ) : null}
             </div>
 

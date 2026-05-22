@@ -28,15 +28,22 @@ describe('loadRuntimeConfig', () => {
       home: path.join(os.homedir(), '.claude'),
       command: 'claude',
     });
+    expect(config.agentProviders.opencode).toEqual({
+      provider: 'opencode',
+      enabled: true,
+      home: path.join(os.homedir(), '.opencode'),
+      command: 'opencode',
+    });
   });
 
-  it('allows Claude to be explicitly disabled', () => {
+  it('allows optional providers to be explicitly disabled', () => {
     const config = loadRuntimeConfig({
       REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: 'codex',
     });
 
     expect(config.agentProviders.codex.enabled).toBe(true);
     expect(config.agentProviders.claude.enabled).toBe(false);
+    expect(config.agentProviders.opencode.enabled).toBe(false);
   });
 
   it('resolves production database to user home', () => {
@@ -68,6 +75,8 @@ describe('loadRuntimeConfig', () => {
       CODEX_APP_SERVER_START_TIMEOUT_MS: '15000',
       CLAUDE_HOME: '/tmp/claude-home',
       CLAUDE_COMMAND: 'claude-custom',
+      OPENCODE_HOME: '/tmp/opencode-home',
+      OPENCODE_COMMAND: 'opencode-custom',
       REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: 'codex,claude'
     });
 
@@ -90,6 +99,12 @@ describe('loadRuntimeConfig', () => {
       enabled: true,
       home: '/tmp/claude-home',
       command: 'claude-custom',
+    });
+    expect(config.agentProviders.opencode).toEqual({
+      provider: 'opencode',
+      enabled: false,
+      home: '/tmp/opencode-home',
+      command: 'opencode-custom',
     });
   });
 });

@@ -306,7 +306,7 @@ describe('ThreadsPage', () => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith('codex-1');
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete thread Demo Thread' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Delete thread Demo Thread' })[0]!);
 
     await waitFor(() => {
       expect(screen.getByRole('dialog', { name: 'Delete Thread' })).toBeInTheDocument();
@@ -322,6 +322,29 @@ describe('ThreadsPage', () => {
       ([input, init]) => String(input).endsWith('/api/threads/thread-1') && init?.method === 'DELETE',
     );
     expect(deleteCall).toBeTruthy();
+  });
+
+  it('collapses and expands the desktop thread list', async () => {
+    renderPage('/threads?workspaceId=workspace-1');
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Demo Workspace' })).toBeInTheDocument();
+    });
+
+    const collapseButton = screen.getByRole('button', {
+      name: 'Collapse thread list',
+    });
+    fireEvent.click(collapseButton);
+
+    expect(
+      screen.getByRole('button', { name: 'Expand thread list' }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand thread list' }));
+
+    expect(
+      screen.getByRole('button', { name: 'Collapse thread list' }),
+    ).toBeInTheDocument();
   });
 
   it('opens a workspace thread directly into the thread detail route', async () => {

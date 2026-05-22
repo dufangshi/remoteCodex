@@ -20,6 +20,7 @@ import {
 } from '../../../../packages/db/src/index';
 import type {
   ShellEventEnvelope,
+  ShellEventPayloadMap,
   ShellSessionDto,
   ShellStatusDto,
   ThreadShellStateDto,
@@ -421,7 +422,7 @@ export class ShellSessionService {
       });
       deleteViewerSessionsByShellId(this.db, record.id);
       this.emitShellEvent(record.id, 'shell.status', {
-        threadId: record.threadId,
+        threadId: shellThreadId(record),
         state: nextStatus,
       });
     }
@@ -1003,16 +1004,16 @@ export class ShellSessionService {
     });
   }
 
-  private emitShellEvent(
+  private emitShellEvent<Type extends keyof ShellEventPayloadMap>(
     shellId: string,
-    type: ShellEventEnvelope['type'],
-    payload: Record<string, unknown>,
+    type: Type,
+    payload: ShellEventPayloadMap[Type],
   ) {
     this.eventBus.emitShellEvent({
       type,
       shellId,
       timestamp: nowIso(),
       payload,
-    });
+    } as ShellEventEnvelope);
   }
 }

@@ -14,10 +14,14 @@ import {
   AgentHistoryItem,
   AgentProviderRequestMapping,
   AgentRuntimeRegistry,
+  markTransientAgentHistoryItem,
 } from '../../../packages/agent-runtime/src/index';
-import { CodexRuntimeAdapter, JsonRpcClientError } from '../../../packages/codex/src/index';
-import { CodexManagementService } from './codex/codex-management-service';
-import { LocalCodexSessionStore } from './codex/local-session-store';
+import {
+  CodexManagementService,
+  CodexRuntimeAdapter,
+  JsonRpcClientError,
+  LocalCodexSessionStore,
+} from '../../../packages/codex/src/index';
 import { FakeCodexManager } from './test/fakeCodexManager';
 
 vi.mock('puppeteer-core', () => ({
@@ -62,6 +66,16 @@ class FakeClaudeRuntime extends EventEmitter implements AgentRuntime {
     mcpConfigFormat: 'none',
     configArchives: false,
     buildRestart: false,
+  };
+  readonly installation: AgentRuntime['installation'] = {
+    packageName: '@anthropic-ai/claude-agent-sdk',
+    installed: true,
+    installedVersion: 'test',
+    latestVersion: null,
+    installCommand: 'npm install -g @anthropic-ai/claude-agent-sdk',
+    updateCommand: 'npm install -g @anthropic-ai/claude-code@latest @anthropic-ai/claude-agent-sdk@latest',
+    busy: false,
+    lastError: null,
   };
   sessions = new Map<string, any>();
   activeTurnId: string | null = null;
@@ -183,11 +197,11 @@ class FakeClaudeRuntime extends EventEmitter implements AgentRuntime {
       turn,
     });
     queueMicrotask(() => {
-      const agentItem: AgentHistoryItem = {
+      const agentItem: AgentHistoryItem = markTransientAgentHistoryItem({
         id: `${providerTurnId}:assistant`,
         kind: 'agentMessage',
         text: 'Hello from Claude',
-      };
+      });
       turn.items.push(agentItem);
       this.emitRuntimeEvent({
         type: 'output.delta',
@@ -326,6 +340,30 @@ class FakeClaudeRuntime extends EventEmitter implements AgentRuntime {
   }
 }
 
+class FakeInstallRuntime extends FakeClaudeRuntime {
+  override readonly installation: AgentRuntime['installation'] = {
+    packageName: '@anthropic-ai/claude-agent-sdk',
+    installed: false,
+    installedVersion: null,
+    latestVersion: '999.0.0',
+    installCommand: 'node -e "console.error(\'install failed\'); process.exit(7)"',
+    updateCommand: 'node -e "console.error(\'update failed\'); process.exit(8)"',
+    busy: false,
+    lastError: null,
+  };
+
+  constructor(commands: {
+    installCommand?: string;
+    updateCommand?: string;
+  } = {}) {
+    super();
+    this.installation.installCommand =
+      commands.installCommand ?? this.installation.installCommand;
+    this.installation.updateCommand =
+      commands.updateCommand ?? this.installation.updateCommand;
+  }
+}
+
 describe('supervisor api', () => {
   let tempDir = '';
   let codexHome = '';
@@ -334,7 +372,13 @@ describe('supervisor api', () => {
   let fakeClaudeRuntime: FakeClaudeRuntime | null = null;
   let launchBuildRestartCalls = 0;
 
-  function buildTestApp(manager: FakeCodexManager, options: { claudeRuntime?: FakeClaudeRuntime } = {}) {
+  function buildTestApp(
+    manager: FakeCodexManager,
+    options: {
+      claudeRuntime?: FakeClaudeRuntime;
+      env?: Record<string, string>;
+    } = {},
+  ) {
     const runtimes: AgentRuntime[] = [
       new CodexRuntimeAdapter(manager as any),
     ];
@@ -348,7 +392,8 @@ describe('supervisor api', () => {
         APP_VERSION: '0.1.0-test',
         DATABASE_URL: path.join(tempDir, 'test.sqlite'),
         WORKSPACE_ROOT: tempDir,
-        CODEX_HOME: codexHome
+        CODEX_HOME: codexHome,
+        ...options.env,
       },
       runtimeBootstrap: {
         agentRuntimes: new AgentRuntimeRegistry(runtimes),
@@ -773,6 +818,130 @@ describe('supervisor api', () => {
     });
   });
 
+  it('lists, imports, toggles, and persists plugin settings', async () => {
+    const initialResponse = await app.inject({
+      method: 'GET',
+      url: '/api/plugins',
+    });
+
+    expect(initialResponse.statusCode).toBe(200);
+    expect(initialResponse.json()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'remote-codex.xyz-viewer',
+          enabled: true,
+          source: 'builtin',
+        }),
+      ]),
+    );
+
+    const importedManifest = {
+      id: 'example.markdown-diagram',
+      name: 'Markdown Diagram',
+      version: '0.1.0',
+      description: 'Manifest-only test plugin.',
+      remoteCodex: '^0.11.0',
+      capabilities: {
+        artifactTypes: [
+          {
+            type: 'diagram.markdown',
+            title: 'Markdown Diagram',
+            fileExtensions: ['md'],
+          },
+        ],
+        timelineRenderers: ['diagram.markdown'],
+        threadPanels: [],
+      },
+    };
+
+    const importResponse = await app.inject({
+      method: 'POST',
+      url: '/api/plugins/import',
+      payload: {
+        manifestJson: JSON.stringify(importedManifest),
+        enabled: false,
+      },
+    });
+
+    expect(importResponse.statusCode).toBe(200);
+    expect(importResponse.json()).toMatchObject({
+      id: importedManifest.id,
+      enabled: false,
+      source: 'imported',
+    });
+
+    const toggleResponse = await app.inject({
+      method: 'PATCH',
+      url: '/api/plugins/remote-codex.xyz-viewer',
+      payload: {
+        enabled: false,
+      },
+    });
+
+    expect(toggleResponse.statusCode).toBe(200);
+    expect(toggleResponse.json()).toMatchObject({
+      id: 'remote-codex.xyz-viewer',
+      enabled: false,
+    });
+
+    await app.close();
+    app = buildTestApp(fakeCodexManager);
+    await app.ready();
+
+    const persistedResponse = await app.inject({
+      method: 'GET',
+      url: '/api/plugins',
+    });
+
+    expect(persistedResponse.statusCode).toBe(200);
+    expect(persistedResponse.json()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'remote-codex.xyz-viewer',
+          enabled: false,
+          source: 'builtin',
+        }),
+        expect.objectContaining({
+          id: importedManifest.id,
+          enabled: false,
+          source: 'imported',
+        }),
+      ]),
+    );
+  });
+
+  it('rejects imported manifests that replace built-in plugin ids', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/plugins/import',
+      payload: {
+        manifestJson: JSON.stringify({
+          id: 'remote-codex.xyz-viewer',
+          name: 'Replacement',
+          version: '0.1.0',
+          description: 'Should not replace a built-in plugin.',
+          remoteCodex: '^0.11.0',
+          capabilities: {
+            artifactTypes: [
+              {
+                type: 'replacement.artifact',
+                title: 'Replacement Artifact',
+              },
+            ],
+            timelineRenderers: ['replacement.artifact'],
+            threadPanels: [],
+          },
+        }),
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      code: 'bad_request',
+      message: 'Built-in plugin cannot be replaced: remote-codex.xyz-viewer',
+    });
+  });
+
   it('rejects workspace dev home outside workspace root', async () => {
     const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'remote-codex-dev-home-'));
 
@@ -1065,6 +1234,70 @@ describe('supervisor api', () => {
     ]);
   });
 
+  it('returns install command failure details for backend operations', async () => {
+    await app.close();
+    const failingRuntime = new FakeInstallRuntime();
+    app = buildTestApp(fakeCodexManager, { claudeRuntime: failingRuntime });
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/agent-runtimes/claude/install',
+      payload: {
+        action: 'install',
+      },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toMatchObject({
+      code: 'bad_request',
+      message: expect.stringContaining('install failed'),
+      details: {
+        exitCode: 7,
+        stderr: expect.stringContaining('install failed'),
+      },
+    });
+    expect(failingRuntime.installation.busy).toBe(false);
+    expect(failingRuntime.installation.lastError).toContain('install failed');
+  });
+
+  it('reports when a backend update succeeds but the active command still resolves to the old version', async () => {
+    await app.close();
+    const binDir = path.join(tempDir, 'bin');
+    await fs.mkdir(binDir, { recursive: true });
+    const claudeCommand = path.join(binDir, 'claude-old');
+    await fs.writeFile(
+      claudeCommand,
+      '#!/usr/bin/env node\nconsole.log("2.1.146 (Claude Code)")\n',
+      { mode: 0o755 },
+    );
+    const runtime = new FakeInstallRuntime({
+      updateCommand: 'node -e "process.exit(0)"',
+    });
+    runtime.installation.installed = true;
+    app = buildTestApp(fakeCodexManager, {
+      claudeRuntime: runtime,
+      env: {
+        CLAUDE_COMMAND: claudeCommand,
+      },
+    });
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/agent-runtimes/claude/install',
+      payload: {
+        action: 'update',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().installation.lastError).toContain(
+      'Claude update command completed, but the active command still reports 2.1.146 (Claude Code).',
+    );
+    expect(response.json().installation.lastError).toContain(claudeCommand);
+  });
+
   it('creates a Claude thread and streams assistant output through runtime events', async () => {
     await app.close();
     fakeClaudeRuntime = new FakeClaudeRuntime();
@@ -1191,6 +1424,85 @@ describe('supervisor api', () => {
       modelContextWindow: 200000,
       tokensInContextWindow: 17348,
     });
+  });
+
+  it('keeps Claude streamed assistant output out of persisted history when final transcript arrives', async () => {
+    await app.close();
+    fakeClaudeRuntime = new FakeClaudeRuntime();
+    app = buildTestApp(fakeCodexManager, { claudeRuntime: fakeClaudeRuntime });
+    await app.ready();
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspaceResponse.json().id,
+        provider: 'claude',
+        model: 'sonnet',
+        approvalMode: 'guarded',
+        title: 'Claude Streaming Persistence Thread',
+      },
+    });
+    const thread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${thread.id}/prompt`,
+      payload: {
+        prompt: 'Say hello.',
+      },
+    });
+    expect(promptResponse.statusCode).toBe(200);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const session = fakeClaudeRuntime.sessions.get(thread.providerSessionId);
+    const turn = session.turns.at(-1);
+    turn.items.push({
+      id: `${turn.providerTurnId}:assistant-final`,
+      kind: 'agentMessage',
+      text: 'Hello from Claude',
+    });
+
+    fakeClaudeRuntime.completeTurn(thread.providerSessionId, turn.providerTurnId);
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${thread.id}`,
+    });
+    expect(detailResponse.statusCode).toBe(200);
+    expect(
+      detailResponse
+        .json()
+        .turns.at(-1)
+        .items.filter((item: any) => item.kind === 'agentMessage'),
+    ).toEqual([
+      expect.objectContaining({
+        id: `${turn.providerTurnId}:assistant-final`,
+        text: 'Hello from Claude',
+      }),
+    ]);
+
+    const sqlite = new Database(path.join(tempDir, 'test.sqlite'), { readonly: true });
+    const persistedRows = sqlite
+      .prepare(
+        `SELECT item_id, item_json
+         FROM thread_history_items
+         WHERE thread_id = ? AND turn_id = ?
+         ORDER BY item_id`,
+      )
+      .all(thread.id, turn.providerTurnId);
+    sqlite.close();
+
+    expect(persistedRows.map((row: any) => row.item_id)).not.toContain(
+      `${turn.providerTurnId}:assistant`,
+    );
   });
 
   it('maps Claude plan questions to interactive pending requests', async () => {
@@ -1321,6 +1633,78 @@ describe('supervisor api', () => {
     });
   });
 
+  it('keeps Claude plan questions visible even when a completed plan turn exists', async () => {
+    await app.close();
+    fakeClaudeRuntime = new FakeClaudeRuntime();
+    app = buildTestApp(fakeCodexManager, { claudeRuntime: fakeClaudeRuntime });
+    await app.ready();
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspaceResponse.json().id,
+        provider: 'claude',
+        model: 'sonnet',
+        approvalMode: 'guarded',
+        collaborationMode: 'plan',
+        title: 'Claude Plan Question With Plan Thread'
+      }
+    });
+    const thread = createResponse.json();
+
+    await app.inject({
+      method: 'POST',
+      url: `/api/threads/${thread.id}/prompt`,
+      payload: {
+        prompt: 'Ask a plan question after drafting a plan.',
+      }
+    });
+
+    const session = fakeClaudeRuntime.sessions.get(thread.providerSessionId);
+    const activeTurn = session.turns.at(-1);
+    activeTurn.items.push({
+      id: 'claude-plan-1',
+      kind: 'plan',
+      text: '# Plan\n\n- Confirm preference.',
+    });
+
+    fakeClaudeRuntime.emit('provider-request', {
+      provider: 'claude',
+      id: 'toolu_question',
+      method: 'tool/AskUserQuestion',
+      params: {
+        providerSessionId: thread.providerSessionId,
+        providerTurnId: activeTurn.providerTurnId,
+        toolUseId: 'toolu_question',
+      },
+    });
+    fakeClaudeRuntime.completeTurn(thread.providerSessionId, activeTurn.providerTurnId);
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${thread.id}`,
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json().pendingRequests).toEqual([
+      expect.objectContaining({
+        id: 'toolu_question',
+        kind: 'requestUserInput',
+        title: 'Mode',
+        turnId: activeTurn.providerTurnId,
+        itemId: 'toolu_question',
+      }),
+    ]);
+  });
+
   it('keeps Claude plan-question continuations on the original visible turn', async () => {
     await app.close();
     fakeClaudeRuntime = new FakeClaudeRuntime();
@@ -1381,6 +1765,12 @@ describe('supervisor api', () => {
     expect(response.statusCode).toBe(200);
 
     await new Promise((resolve) => setTimeout(resolve, 0));
+    const session = fakeClaudeRuntime.sessions.get(thread.providerSessionId);
+    session.turns.at(-1).items.push({
+      id: 'claude-turn-2:assistant-final',
+      kind: 'agentMessage',
+      text: 'Hello from Claude',
+    });
     fakeClaudeRuntime.completeTurn(thread.providerSessionId, 'claude-turn-2');
 
     const detailResponse = await app.inject({
@@ -1404,7 +1794,7 @@ describe('supervisor api', () => {
           text: 'Plan a calculator.',
         }),
         expect.objectContaining({
-          id: 'claude-turn-2:assistant',
+          id: 'claude-turn-2:assistant-final',
           kind: 'agentMessage',
           text: 'Hello from Claude',
         }),
@@ -2404,6 +2794,95 @@ describe('supervisor api', () => {
         },
         modelContextWindow: 272000,
       },
+      priceEstimate: {
+        pricingModelKey: 'gpt-5.4',
+        pricingTierKey: 'standard',
+        currency: 'USD',
+        inputUsd: 0.0285,
+        cachedInputUsd: 0.00055,
+        outputUsd: 0.0741,
+      },
+    });
+    expect(turn?.priceEstimate?.totalUsd).toBeCloseTo(0.10315, 10);
+  });
+
+  it('prices provider-qualified model token usage updates', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'openai/gpt-5.4',
+        approvalMode: 'yolo',
+        title: 'Provider Qualified Price Thread',
+      },
+    });
+
+    const createdThread = createResponse.json();
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Track provider-qualified token usage.',
+      },
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+
+    const initialDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+
+    expect(initialDetailResponse.statusCode).toBe(200);
+    const turnId = initialDetailResponse.json().turns.at(-1)?.id;
+    expect(typeof turnId).toBe('string');
+
+    fakeCodexManager.emit('notification', {
+      method: 'thread/tokenUsage/updated',
+      params: {
+        threadId: createdThread.providerSessionId,
+        turnId,
+        tokenUsage: {
+          total: {
+            totalTokens: 20540,
+            inputTokens: 13600,
+            cachedInputTokens: 2200,
+            outputTokens: 4940,
+            reasoningOutputTokens: 420,
+          },
+          last: {
+            totalTokens: 20540,
+            inputTokens: 13600,
+            cachedInputTokens: 2200,
+            outputTokens: 4940,
+            reasoningOutputTokens: 420,
+          },
+          modelContextWindow: 272000,
+          cumulative: false,
+        },
+      },
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    const turn = detailResponse.json().turns.at(-1);
+    expect(turn).toMatchObject({
+      id: turnId,
+      model: 'openai/gpt-5.4',
       priceEstimate: {
         pricingModelKey: 'gpt-5.4',
         pricingTierKey: 'standard',
@@ -3581,11 +4060,12 @@ describe('supervisor api', () => {
     fakeCodexManager.models = [
       {
         ...fakeCodexManager.models[0]!,
-        model: 'gpt-5',
-        displayName: 'GPT-5',
+        model: 'gpt-5.4',
+        displayName: 'GPT-5.4',
         description: 'Default model',
         hidden: false,
         isDefault: true,
+        supportsPerformanceMode: true,
         supportedReasoningEfforts: [
           { reasoningEffort: 'medium', description: 'Balanced' },
           { reasoningEffort: 'high', description: 'Deep' },
@@ -3600,6 +4080,7 @@ describe('supervisor api', () => {
         description: 'Fast model',
         hidden: false,
         isDefault: false,
+        supportsPerformanceMode: false,
         supportedReasoningEfforts: [
           { reasoningEffort: 'low', description: 'Fastest' },
           { reasoningEffort: 'medium', description: 'Balanced' },
@@ -4558,6 +5039,88 @@ describe('supervisor api', () => {
           text: 'Implement the approved plan.'
         }
       ]
+    });
+  });
+
+  it('recreates a missing plan decision request before implementing a completed plan turn', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Plan Mode Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Plan the next change.',
+        collaborationMode: 'plan'
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+
+    const startedThread = promptResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(startedThread.providerSessionId);
+    const activeTurn = remoteThread?.turns.at(-1);
+    expect(activeTurn).toBeTruthy();
+
+    const completedTurn = {
+      ...activeTurn!,
+      status: 'completed' as const,
+      items: [
+        ...activeTurn!.items,
+        {
+          id: 'plan-item-1',
+          type: 'plan',
+          text: '# Plan\n\n- Inspect the implementation.\n- Apply one focused fix.\n- Verify the result.'
+        }
+      ]
+    };
+
+    fakeCodexManager.threads.set(startedThread.providerSessionId, {
+      ...remoteThread!,
+      status: { type: 'idle' },
+      turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
+    });
+
+    const planRequestId = `plan-decision:${completedTurn.id}`;
+    const implementResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/requests/${encodeURIComponent(planRequestId)}/respond`,
+      payload: {
+        answers: {
+          'plan-decision': {
+            answers: ['Implement']
+          }
+        }
+      }
+    });
+
+    expect(implementResponse.statusCode).toBe(200);
+    expect(implementResponse.json()).toMatchObject({
+      thread: {
+        id: createdThread.id,
+        collaborationMode: 'default',
+        status: 'running',
+        summaryText: 'Implement the approved plan.'
+      },
+      pendingRequests: []
     });
   });
 
@@ -5644,13 +6207,27 @@ describe('supervisor api', () => {
     });
 
     expect(detailResponse.statusCode).toBe(200);
-    expect(detailResponse.json().liveItems).toBeNull();
+    expect(detailResponse.json().liveItems).toMatchObject({
+      turnId: activeTurn!.id,
+      items: [
+        {
+          id: 'agent-before',
+          kind: 'agentMessage',
+          text: 'I will run the first batch.',
+          sequence: 0,
+        },
+        {
+          id: 'agent-between',
+          kind: 'agentMessage',
+          text: 'The first batch passed. I will build next.',
+          sequence: 3,
+        },
+      ],
+    });
     expect(detailResponse.json().turns.at(-1).items.map((item: any) => item.id)).toEqual([
       activeTurn!.items[0]!.id,
-      'agent-before',
       'command-1',
       'command-2',
-      'agent-between',
       'command-3',
     ]);
   });
@@ -5797,6 +6374,142 @@ describe('supervisor api', () => {
       'agent-between',
       'command-c',
     ]);
+  });
+
+  it('drops live agent drafts after readThread materializes assistant messages with different ids', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Materialized Agent Draft Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Stream progress updates.',
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    const startedThread = promptResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(startedThread.providerSessionId);
+    const activeTurn = remoteThread?.turns.at(-1);
+    expect(activeTurn).toBeTruthy();
+
+    fakeCodexManager.emit('notification', {
+      method: 'item/agentMessage/delta',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turnId: activeTurn!.id,
+        itemId: 'msg-live-first',
+        delta: 'First streamed update.',
+      }
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turnId: activeTurn!.id,
+        item: {
+          id: 'command-between',
+          type: 'commandExecution',
+          command: 'pnpm lint',
+          aggregatedOutput: 'lint ok',
+          status: 'completed',
+        },
+      }
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'item/agentMessage/delta',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turnId: activeTurn!.id,
+        itemId: 'msg-live-second',
+        delta: 'Second streamed update.',
+      }
+    });
+
+    const materializedActiveTurn = {
+      ...activeTurn!,
+      status: 'inProgress' as const,
+      items: [
+        ...activeTurn!.items,
+        {
+          id: 'item-materialized-first',
+          type: 'agentMessage',
+          text: 'First streamed update.',
+        },
+        {
+          id: 'command-between',
+          type: 'commandExecution',
+          command: 'pnpm lint',
+          aggregatedOutput: 'lint ok',
+          status: 'completed',
+        },
+      ],
+    };
+    fakeCodexManager.threads.set(startedThread.providerSessionId, {
+      ...remoteThread!,
+      status: { type: 'active', activeFlags: [] },
+      turns: [...remoteThread!.turns.slice(0, -1), materializedActiveTurn]
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json().turns.at(-1).items.map((item: any) => item.id)).toEqual([
+      activeTurn!.items[0]!.id,
+      'item-materialized-first',
+      'command-between',
+    ]);
+    expect(detailResponse.json().liveItems).toMatchObject({
+      turnId: activeTurn!.id,
+      items: [
+        {
+          id: 'msg-live-second',
+          kind: 'agentMessage',
+          text: 'Second streamed update.',
+          sequence: 2,
+        },
+      ],
+    });
+
+    const secondDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(secondDetailResponse.statusCode).toBe(200);
+    expect(secondDetailResponse.json().liveItems).toMatchObject({
+      turnId: activeTurn!.id,
+      items: [
+        {
+          id: 'msg-live-second',
+          kind: 'agentMessage',
+          text: 'Second streamed update.',
+          sequence: 2,
+        },
+      ],
+    });
   });
 
   it('preserves final-history messages between recorded live command batches', async () => {
@@ -5951,7 +6664,317 @@ describe('supervisor api', () => {
     ]);
   });
 
-  it('restores completed turn item order from persisted live sequence after restart', async () => {
+  it('preserves final-history messages between recorded live file change batches', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Interleaved File Change Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Edit files, explain, then edit more.',
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    const startedThread = promptResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(startedThread.providerSessionId);
+    const activeTurn = remoteThread?.turns.at(-1);
+    expect(activeTurn).toBeTruthy();
+
+    for (const item of [
+      {
+        id: 'file-change-a',
+        type: 'fileChange',
+        text: 'src/app.ts',
+        changedFiles: 1,
+        addedLines: 12,
+        removedLines: 1,
+        status: 'completed',
+      },
+      {
+        id: 'file-change-b',
+        type: 'fileChange',
+        text: 'src/routes.ts',
+        changedFiles: 1,
+        addedLines: 4,
+        removedLines: 3,
+        status: 'completed',
+      },
+      {
+        id: 'file-change-c',
+        type: 'fileChange',
+        text: 'src/ui.tsx',
+        changedFiles: 1,
+        addedLines: 6,
+        removedLines: 0,
+        status: 'completed',
+      },
+    ]) {
+      fakeCodexManager.emit('notification', {
+        method: 'item/completed',
+        params: {
+          threadId: startedThread.providerSessionId,
+          turnId: activeTurn!.id,
+          item,
+        }
+      });
+      if (item.id === 'file-change-b') {
+        fakeCodexManager.emit('notification', {
+          method: 'item/agentMessage/delta',
+          params: {
+            threadId: startedThread.providerSessionId,
+            turnId: activeTurn!.id,
+            itemId: 'agent-between',
+            delta: 'The first edits are done. I am updating the UI next.',
+          }
+        });
+      }
+    }
+
+    const completedTurn = {
+      ...activeTurn!,
+      status: 'completed' as const,
+      items: [
+        ...activeTurn!.items,
+        {
+          id: 'file-change-a',
+          type: 'fileChange',
+          text: 'src/app.ts',
+          changedFiles: 1,
+          addedLines: 12,
+          removedLines: 1,
+          status: 'completed',
+        },
+        {
+          id: 'file-change-b',
+          type: 'fileChange',
+          text: 'src/routes.ts',
+          changedFiles: 1,
+          addedLines: 4,
+          removedLines: 3,
+          status: 'completed',
+        },
+        {
+          id: 'agent-between',
+          type: 'agentMessage',
+          text: 'The first edits are done. I am updating the UI next.',
+        },
+        {
+          id: 'file-change-c',
+          type: 'fileChange',
+          text: 'src/ui.tsx',
+          changedFiles: 1,
+          addedLines: 6,
+          removedLines: 0,
+          status: 'completed',
+        },
+        {
+          id: 'agent-final',
+          type: 'agentMessage',
+          text: 'All edits are complete.',
+        },
+      ],
+    };
+    fakeCodexManager.threads.set(startedThread.providerSessionId, {
+      ...remoteThread!,
+      status: { type: 'idle' },
+      turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turn: completedTurn
+      }
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(
+      detailResponse
+        .json()
+        .turns.at(-1)
+        .items.map((item: any) => item.id),
+    ).toEqual([
+      activeTurn!.items[0]!.id,
+      'file-change-a',
+      'file-change-b',
+      'agent-between',
+      'file-change-c',
+      'agent-final',
+    ]);
+  });
+
+  it('does not duplicate persisted streaming agent messages when final history uses a different id', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Streaming Final Id Drift Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Explain the architecture.',
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    const startedThread = promptResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(startedThread.providerSessionId);
+    const activeTurn = remoteThread?.turns.at(-1);
+    expect(activeTurn).toBeTruthy();
+
+    fakeCodexManager.emit('notification', {
+      method: 'item/agentMessage/delta',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turnId: activeTurn!.id,
+        itemId: 'streaming-agent-draft',
+        delta: 'Draft architecture explanation.',
+      }
+    });
+
+    const liveDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(liveDetailResponse.statusCode).toBe(200);
+    expect(liveDetailResponse.json().liveItems).toMatchObject({
+      turnId: activeTurn!.id,
+      items: [
+        {
+          id: 'streaming-agent-draft',
+          kind: 'agentMessage',
+          text: 'Draft architecture explanation.',
+        },
+      ],
+    });
+
+    const sqlite = new Database(path.join(tempDir, 'test.sqlite'), { readonly: true });
+    const persistedStreamingRows = sqlite
+      .prepare(
+        `SELECT item_json
+         FROM thread_history_items
+         WHERE thread_id = ? AND turn_id = ? AND item_id = ?`,
+      )
+      .all(createdThread.id, activeTurn!.id, 'streaming-agent-draft');
+    sqlite.close();
+    expect(persistedStreamingRows).toEqual([]);
+
+    const legacySqlite = new Database(path.join(tempDir, 'test.sqlite'));
+    legacySqlite
+      .prepare(
+        `INSERT INTO thread_history_items
+         (id, thread_id, turn_id, item_id, item_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        'legacy-streaming-row',
+        createdThread.id,
+        activeTurn!.id,
+        'legacy-streaming-agent',
+        JSON.stringify({
+          id: 'legacy-streaming-agent',
+          kind: 'agentMessage',
+          text: 'Legacy persisted streaming draft.',
+          sequence: 1,
+        }),
+        new Date().toISOString(),
+        new Date().toISOString(),
+      );
+    legacySqlite.close();
+
+    const completedTurn = {
+      ...activeTurn!,
+      status: 'completed' as const,
+      items: [
+        ...activeTurn!.items,
+        {
+          id: 'final-agent-message',
+          type: 'agentMessage',
+          text: 'Final architecture explanation.',
+        },
+      ],
+    };
+    fakeCodexManager.threads.set(startedThread.providerSessionId, {
+      ...remoteThread!,
+      status: { type: 'idle' },
+      turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turn: completedTurn
+      }
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    const agentMessages = detailResponse
+      .json()
+      .turns.at(-1)
+      .items.filter((item: any) => item.kind === 'agentMessage');
+    expect(agentMessages).toEqual([
+      expect.objectContaining({
+        id: 'final-agent-message',
+        text: 'Final architecture explanation.',
+      }),
+    ]);
+    expect(
+      detailResponse
+        .json()
+        .turns.at(-1)
+        .items.some((item: any) => item.id === 'legacy-streaming-agent'),
+    ).toBe(false);
+  });
+
+  it('restores completed turn item order from provider final history after restart', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',
       url: '/api/workspaces',
@@ -6058,16 +7081,16 @@ describe('supervisor api', () => {
           status: 'completed',
         },
         {
+          id: 'agent-between',
+          type: 'agentMessage',
+          text: 'The first two commands passed. I am building now.',
+        },
+        {
           id: 'command-c',
           type: 'commandExecution',
           command: 'pnpm build',
           aggregatedOutput: 'build ok',
           status: 'completed',
-        },
-        {
-          id: 'agent-between',
-          type: 'agentMessage',
-          text: 'The first two commands passed. I am building now.',
         },
         {
           id: 'agent-final',

@@ -1,29 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import path from 'node:path';
-
-import {
-  getSessionInfo as sdkGetSessionInfo,
-  getSessionMessages as sdkGetSessionMessages,
-  listSessions as sdkListSessions,
-  query as sdkQuery,
-} from '@anthropic-ai/claude-agent-sdk';
-import type {
-  GetSessionInfoOptions,
-  GetSessionMessagesOptions,
-  ListSessionsOptions,
-  McpServerStatus,
-  ModelInfo,
-  Options as ClaudeQueryOptions,
-  PermissionMode,
-  Query,
-  SandboxSettings,
-  SDKMessage,
-  SDKUserMessage,
-  SDKSessionInfo,
-  SessionMessage,
-} from '@anthropic-ai/claude-agent-sdk';
+import { pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
 
 import type {
   AgentActionQuestion,
@@ -43,12 +25,19 @@ import type {
   AgentSessionSummary,
   AgentTurn,
   InterruptAgentTurnInput,
+  ReadAgentSessionOptions,
   ResumeAgentSessionInput,
   StartAgentSessionInput,
   StartAgentSessionResult,
   StartAgentTurnInput,
 } from '../../agent-runtime/src/index';
-import { AgentRuntimeError } from '../../agent-runtime/src/index';
+import type {
+  AgentBackendInstallationDto,
+} from '../../shared/src/index';
+import {
+  AgentRuntimeError,
+  markTransientAgentHistoryItem,
+} from '../../agent-runtime/src/index';
 import {
   assistantMessageToHistoryItems,
   buildAgentTurn,
@@ -67,14 +56,135 @@ import {
   userMessageToHistoryItem,
 } from './historyItems';
 
-type ClaudeQueryFunction = typeof sdkQuery;
-type ClaudeListSessionsFunction = typeof sdkListSessions;
-type ClaudeGetSessionMessagesFunction = typeof sdkGetSessionMessages;
-type ClaudeGetSessionInfoFunction = typeof sdkGetSessionInfo;
-type ClaudePromptInput = Parameters<ClaudeQueryFunction>[0]['prompt'];
-type ClaudeMessageContent = SDKUserMessage['message']['content'];
-type ClaudeMessageContentBlock = Exclude<ClaudeMessageContent, string>[number];
+const execFileAsync = promisify(execFile);
 
+type ClaudePromptInput = string | AsyncIterable<SDKUserMessage>;
+type ClaudeMessageContent =
+  | string
+  | Array<{
+      type: 'text';
+      text: string;
+    } | {
+      type: 'image';
+      source: {
+        type: 'base64';
+        media_type: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+        data: string;
+      };
+    }>;
+type ClaudeMessageContentBlock = Exclude<ClaudeMessageContent, string>[number];
+type ClaudeQueryFunction = (input: {
+  prompt: ClaudePromptInput;
+  options: ClaudeQueryOptions;
+}) => Query;
+type ClaudeListSessionsFunction = (_options: ListSessionsOptions) => Promise<SDKSessionInfo[]>;
+type ClaudeGetSessionMessagesFunction = (
+  sessionId: string,
+  options: GetSessionMessagesOptions,
+) => Promise<SessionMessage[]>;
+type ClaudeGetSessionInfoFunction = (
+  sessionId: string,
+  options: GetSessionInfoOptions,
+) => Promise<SDKSessionInfo | null>;
+interface ClaudeSdkModule {
+  query: ClaudeQueryFunction;
+  listSessions: ClaudeListSessionsFunction;
+  getSessionMessages: ClaudeGetSessionMessagesFunction;
+  getSessionInfo: ClaudeGetSessionInfoFunction;
+}
+interface Query extends AsyncIterable<SDKMessage> {
+  close(): void;
+  interrupt(): Promise<void>;
+  supportedModels(): Promise<ModelInfo[]>;
+  mcpServerStatus(): Promise<McpServerStatus[]>;
+}
+interface SDKMessage {
+  type: string;
+  subtype?: string;
+  session_id?: string;
+  cwd?: string;
+  model?: string;
+  uuid?: string;
+  message?: unknown;
+  event?: unknown;
+  parent_tool_use_id?: string | null;
+  tool_use_result?: unknown;
+  tool_use_id?: string;
+  tool_name?: string;
+  elapsed_time_seconds?: number;
+  usage?: unknown;
+  modelUsage?: unknown;
+  errors?: string[];
+  stop_reason?: string;
+}
+interface SDKUserMessage {
+  type: 'user';
+  message: {
+    role: 'user';
+    content: ClaudeMessageContent;
+  };
+  parent_tool_use_id: string | null;
+}
+interface SDKSessionInfo {
+  sessionId: string;
+  cwd?: string;
+  firstPrompt?: string | null;
+  summary?: string | null;
+  customTitle?: string | null;
+  createdAt?: number | null;
+  lastModified?: number | null;
+}
+type SessionMessage = SDKMessage;
+interface ModelInfo {
+  value: string;
+  displayName: string;
+  description: string;
+  supportedEffortLevels?: string[];
+  supportsEffort?: boolean;
+}
+type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
+interface SandboxSettings {
+  enabled: boolean;
+  autoAllowBashIfSandboxed?: boolean;
+  allowUnsandboxedCommands?: boolean;
+  filesystem?: {
+    allowWrite?: string[];
+    denyWrite?: string[];
+  };
+}
+interface ClaudeQueryOptions {
+  includeHookEvents?: boolean;
+  permissionMode?: PermissionMode;
+  thinking?: {
+    type: string;
+    display: string;
+  };
+  env?: Record<string, string | undefined>;
+  cwd?: string;
+  sandbox?: SandboxSettings;
+  model?: string;
+  betas?: string[];
+  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  resume?: string;
+  includePartialMessages?: boolean;
+  maxTurns?: number;
+  tools?: unknown;
+  allowDangerouslySkipPermissions?: boolean;
+  pathToClaudeCodeExecutable?: string;
+}
+interface GetSessionInfoOptions {}
+interface GetSessionMessagesOptions {
+  includeSystemMessages?: boolean;
+}
+interface ListSessionsOptions {}
+interface McpServerStatus {
+  name: string;
+  status: string;
+  tools?: Array<{
+    name: string;
+    description?: string | null;
+  }>;
+}
 export interface ClaudeRuntimeAdapterOptions {
   home: string;
   command?: string;
@@ -87,6 +197,7 @@ export interface ClaudeRuntimeAdapterOptions {
   listSessions?: ClaudeListSessionsFunction;
   getSessionMessages?: ClaudeGetSessionMessagesFunction;
   getSessionInfo?: ClaudeGetSessionInfoFunction;
+  sdk?: ClaudeSdkModule;
 }
 
 interface ActiveClaudeTurn {
@@ -125,6 +236,22 @@ function mimeTypeForImagePath(filePath: string) {
   }
 }
 
+function extensionForImageMediaType(mediaType: string | null | undefined) {
+  switch (mediaType?.toLowerCase()) {
+    case 'image/jpeg':
+    case 'image/jpg':
+      return 'jpg';
+    case 'image/png':
+      return 'png';
+    case 'image/gif':
+      return 'gif';
+    case 'image/webp':
+      return 'webp';
+    default:
+      return null;
+  }
+}
+
 function resolvePromptAssetPath(assetPath: string, cwd: string | null | undefined) {
   if (!cwd) {
     return null;
@@ -137,6 +264,10 @@ function resolvePromptAssetPath(assetPath: string, cwd: string | null | undefine
     return resolvedPath;
   }
   return null;
+}
+
+function safeAssetFilePart(value: string) {
+  return value.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || randomUUID();
 }
 
 async function* singleUserMessage(content: ClaudeMessageContent): AsyncIterable<SDKUserMessage> {
@@ -865,7 +996,7 @@ function queryOptionsForRuntime(
   if (input.maxTurns !== undefined) {
     options.maxTurns = input.maxTurns;
   }
-  if (input.tools !== undefined) {
+  if (input.tools !== undefined && (!Array.isArray(input.tools) || input.tools.length > 0)) {
     options.tools = input.tools;
   }
   if (permission.allowDangerouslySkipPermissions) {
@@ -877,9 +1008,19 @@ function queryOptionsForRuntime(
 
 export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
   readonly provider = 'claude' as const;
-  readonly displayName = 'Claude';
+  readonly displayName = 'Claude Code';
   readonly description = 'Local Claude Code Agent SDK runtime.';
   readonly capabilities = claudeCapabilities;
+  readonly installation: AgentBackendInstallationDto = {
+    packageName: '@anthropic-ai/claude-agent-sdk',
+    installed: false,
+    installedVersion: null,
+    latestVersion: null,
+    installCommand: 'npm install -g @anthropic-ai/claude-code @anthropic-ai/claude-agent-sdk',
+    updateCommand: 'npm install -g @anthropic-ai/claude-code@latest @anthropic-ai/claude-agent-sdk@latest',
+    busy: false,
+    lastError: null,
+  };
   readonly managementSchema: AgentRuntimeManagementSchema = {
     hostConfigFiles: [],
     toolboxItems: [
@@ -899,10 +1040,10 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     lastError: null,
     restartCount: 0,
   };
-  private readonly queryFactory: ClaudeQueryFunction;
-  private readonly listSessionsFn: ClaudeListSessionsFunction;
-  private readonly getSessionMessagesFn: ClaudeGetSessionMessagesFunction;
-  private readonly getSessionInfoFn: ClaudeGetSessionInfoFunction;
+  private queryFactory: ClaudeQueryFunction;
+  private listSessionsFn: ClaudeListSessionsFunction;
+  private getSessionMessagesFn: ClaudeGetSessionMessagesFunction;
+  private getSessionInfoFn: ClaudeGetSessionInfoFunction;
   private readonly activeTurns = new Map<string, ActiveClaudeTurn>();
   private readonly knownSessionIds = new Set<string>();
   private readonly sessionCwds = new Map<string, string>();
@@ -910,13 +1051,15 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
   private readonly sessionApprovalModes = new Map<string, StartAgentSessionInput['approvalMode']>();
   private readonly liveUserPrompts = new Map<string, Map<string, string>>();
   private readonly clientApp: string;
+  private sdkLoadError: string | null = null;
 
   constructor(private readonly options: ClaudeRuntimeAdapterOptions) {
     super();
-    this.queryFactory = options.query ?? sdkQuery;
-    this.listSessionsFn = options.listSessions ?? sdkListSessions;
-    this.getSessionMessagesFn = options.getSessionMessages ?? sdkGetSessionMessages;
-    this.getSessionInfoFn = options.getSessionInfo ?? sdkGetSessionInfo;
+    const sdk = options.sdk;
+    this.queryFactory = options.query ?? sdk?.query ?? this.unavailableQueryFactory.bind(this);
+    this.listSessionsFn = options.listSessions ?? sdk?.listSessions ?? this.unavailableListSessions.bind(this);
+    this.getSessionMessagesFn = options.getSessionMessages ?? sdk?.getSessionMessages ?? this.unavailableGetSessionMessages.bind(this);
+    this.getSessionInfoFn = options.getSessionInfo ?? sdk?.getSessionInfo ?? this.unavailableGetSessionInfo.bind(this);
     this.clientApp = [
       options.clientInfo?.name ?? 'remote-codex-supervisor',
       options.clientInfo?.version,
@@ -929,6 +1072,29 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
 
   async start() {
     await fs.mkdir(this.options.home, { recursive: true });
+    if (!this.options.query && !this.options.sdk) {
+      try {
+        const sdk = await this.loadSdk();
+        this.queryFactory = sdk.query;
+        this.listSessionsFn = sdk.listSessions;
+        this.getSessionMessagesFn = sdk.getSessionMessages;
+        this.getSessionInfoFn = sdk.getSessionInfo;
+        this.sdkLoadError = null;
+        this.installation.installed = true;
+        this.installation.lastError = null;
+      } catch (error) {
+        this.sdkLoadError = errorMessage(error);
+        this.installation.installed = false;
+        this.installation.lastError = this.sdkLoadError;
+        this.status = {
+          ...this.status,
+          state: 'stopped',
+          lastError: `Claude Code SDK is not installed or could not be loaded. ${this.sdkLoadError}`,
+        };
+        this.emit('status', this.getStatus());
+        return;
+      }
+    }
     this.status = {
       ...this.status,
       state: 'ready',
@@ -992,7 +1158,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
 
   async readSession(
     providerSessionId: string,
-    _options: { limit?: number; beforeTurnId?: string | null } = {},
+    options: ReadAgentSessionOptions = {},
   ): Promise<AgentSessionDetail> {
     const [info, messages] = await this.withClaudeConfigEnv(async () => Promise.all([
       this.getSessionInfoFn(providerSessionId, {} as GetSessionInfoOptions),
@@ -1015,14 +1181,19 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
           rawSession: null,
         };
 
-    const turns = this.sessionMessagesToTurns(messages);
+    const cwd = summary.cwd || this.sessionCwds.get(providerSessionId) || '';
+    const historyAssetContext = {
+      workspacePath: options.workspacePath || cwd,
+      ...(options.localThreadId ? { localThreadId: options.localThreadId } : {}),
+    };
+    const turns = await this.sessionMessagesToTurns(messages, historyAssetContext);
     const activeTurn = [...this.activeTurns.values()].find(
       (turn) => turn.providerSessionId === providerSessionId,
     );
 
     return {
       ...summary,
-      cwd: summary.cwd || this.sessionCwds.get(providerSessionId) || '',
+      cwd,
       turns: this.reconcileActiveTranscriptTurn(providerSessionId, turns, activeTurn),
     };
   }
@@ -1052,9 +1223,12 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       for await (const message of query) {
         rawMessages.push(message);
         if (message.type === 'system' && message.subtype === 'init') {
-          providerSessionId = message.session_id;
-          model = displayClaudeModel(input.model, message.model ?? model);
-          this.sessionCwds.set(providerSessionId, message.cwd);
+          const sessionId = message.session_id;
+          if (sessionId) {
+            providerSessionId = sessionId;
+            model = displayClaudeModel(input.model, message.model ?? model);
+            this.sessionCwds.set(sessionId, message.cwd ?? input.cwd);
+          }
         } else if ('session_id' in message && typeof message.session_id === 'string') {
           providerSessionId ??= message.session_id;
         }
@@ -1382,8 +1556,10 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     this.captureUsage(state, message);
 
     if (message.type === 'system' && message.subtype === 'init') {
-      this.sessionCwds.set(message.session_id, message.cwd);
-      this.sessionModels.set(message.session_id, message.model);
+      if (message.session_id) {
+        this.sessionCwds.set(message.session_id, message.cwd ?? '');
+        this.sessionModels.set(message.session_id, message.model ?? null);
+      }
       return;
     }
 
@@ -1430,15 +1606,15 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       if (delta) {
         const existing = state.items.get(delta.itemId);
         const nextItem: AgentHistoryItem = existing?.kind === 'agentMessage'
-          ? {
+          ? markTransientAgentHistoryItem({
               ...existing,
               text: `${existing.text}${delta.delta}`,
-            }
-          : {
+            })
+          : markTransientAgentHistoryItem({
               id: delta.itemId,
               kind: 'agentMessage',
               text: delta.delta,
-            };
+            });
         addOrUpdateItem(state, nextItem);
         this.emitRuntimeEvent({
           type: 'output.delta',
@@ -1523,10 +1699,15 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     }
 
     if (message.type === 'tool_progress') {
-      if (!state.items.has(message.tool_use_id)) {
+      const toolUseId = message.tool_use_id;
+      const toolName = message.tool_name;
+      if (!toolUseId || !toolName) {
+        return;
+      }
+      if (!state.items.has(toolUseId)) {
         const item = toolUseToHistoryItem({
-          id: message.tool_use_id,
-          name: message.tool_name,
+          id: toolUseId,
+          name: toolName,
           toolInput: {
             elapsed_time_seconds: message.elapsed_time_seconds,
           },
@@ -1536,14 +1717,18 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
           addOrUpdateItem(state, item);
           this.emitItem(state, item, 'item.started');
         } else {
-          state.suppressedToolUseIds.add(message.tool_use_id);
+          state.suppressedToolUseIds.add(toolUseId);
         }
       }
       return;
     }
 
     if (message.type === 'system' && message.subtype === 'permission_denied') {
-      const previous = state.items.get(message.tool_use_id);
+      const toolUseId = message.tool_use_id;
+      if (!toolUseId) {
+        return;
+      }
+      const previous = state.items.get(toolUseId);
       const item: AgentHistoryItem = previous
         ? {
             ...previous,
@@ -1551,10 +1736,10 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
             detailText: [previous.detailText ?? previous.text, '', message.message].join('\n'),
           }
         : {
-            id: message.tool_use_id,
+            id: toolUseId,
             kind: 'toolCall',
             text: `${message.tool_name} denied`,
-            detailText: message.message,
+            detailText: typeof message.message === 'string' ? message.message : null,
             status: 'denied',
           };
       addOrUpdateItem(state, item);
@@ -1620,6 +1805,44 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     this.emit('event', event);
   }
 
+  private async loadSdk(): Promise<ClaudeSdkModule> {
+    try {
+      return await importOptionalPackage('@anthropic-ai/claude-agent-sdk') as unknown as ClaudeSdkModule;
+    } catch (error) {
+      throw new AgentRuntimeError(
+        'Install Claude Code support with npm install -g @anthropic-ai/claude-agent-sdk, or add @anthropic-ai/claude-agent-sdk to this checkout.',
+        'claude',
+        'provider_unavailable',
+        undefined,
+        error,
+      );
+    }
+  }
+
+  private unavailableError() {
+    return new AgentRuntimeError(
+      this.sdkLoadError ?? 'Claude Code SDK is not installed.',
+      'claude',
+      'provider_unavailable',
+    );
+  }
+
+  private unavailableQueryFactory(): Query {
+    throw this.unavailableError();
+  }
+
+  private async unavailableListSessions(): Promise<SDKSessionInfo[]> {
+    throw this.unavailableError();
+  }
+
+  private async unavailableGetSessionMessages(): Promise<SessionMessage[]> {
+    throw this.unavailableError();
+  }
+
+  private async unavailableGetSessionInfo(): Promise<SDKSessionInfo | null> {
+    throw this.unavailableError();
+  }
+
   private mapMcpServer(server: McpServerStatus): AgentMcpServer {
     return {
       name: server.name,
@@ -1634,7 +1857,103 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     };
   }
 
-  private sessionMessagesToTurns(messages: SessionMessage[]): AgentTurn[] {
+  private async userMessageToHistoryItem(
+    id: string,
+    message: unknown,
+    context: {
+      localThreadId?: string;
+      workspacePath?: string;
+    },
+  ): Promise<AgentHistoryItem> {
+    if (!isRecord(message) || !Array.isArray(message.content)) {
+      return userMessageToHistoryItem(id, message);
+    }
+
+    const parts: string[] = [];
+    for (let index = 0; index < message.content.length; index += 1) {
+      const block = message.content[index];
+      if (!isRecord(block)) {
+        continue;
+      }
+      if (block.type === 'image') {
+        const photoToken = await this.persistHistoryImageBlock({
+          messageId: id,
+          blockIndex: index,
+          block,
+          ...context,
+        });
+        if (photoToken) {
+          parts.push(photoToken);
+        }
+        continue;
+      }
+      if (typeof block.text === 'string') {
+        parts.push(block.text);
+        continue;
+      }
+      if (typeof block.content === 'string') {
+        parts.push(block.content);
+      }
+    }
+
+    return userMessageHistoryItem(id, parts.filter(Boolean).join('\n'));
+  }
+
+  private async persistHistoryImageBlock(input: {
+    messageId: string;
+    blockIndex: number;
+    block: Record<string, unknown>;
+    localThreadId?: string;
+    workspacePath?: string;
+  }): Promise<string | null> {
+    if (!input.localThreadId || !input.workspacePath) {
+      return null;
+    }
+
+    const source = isRecord(input.block.source) ? input.block.source : null;
+    if (!source || source.type !== 'base64') {
+      return null;
+    }
+
+    const data = typeof source.data === 'string' ? source.data : null;
+    if (!data) {
+      return null;
+    }
+
+    const extension = extensionForImageMediaType(
+      typeof source.media_type === 'string' ? source.media_type : null,
+    );
+    if (!extension) {
+      return null;
+    }
+
+    const relativePath = `./.temp/threads/${input.localThreadId}/claude-history-${safeAssetFilePart(input.messageId)}-${input.blockIndex}.${extension}`;
+    const targetPath = path.resolve(input.workspacePath, relativePath);
+    const relativeToWorkspace = path.relative(input.workspacePath, targetPath);
+    if (
+      relativeToWorkspace === '' ||
+      relativeToWorkspace.startsWith('..') ||
+      path.isAbsolute(relativeToWorkspace)
+    ) {
+      return null;
+    }
+
+    try {
+      await fs.mkdir(path.dirname(targetPath), { recursive: true });
+      await fs.writeFile(targetPath, Buffer.from(data, 'base64'));
+      return `[PHOTO ${relativePath}]`;
+    } catch {
+      return null;
+    }
+  }
+
+  private async sessionMessagesToTurns(
+    messages: SessionMessage[],
+    context: {
+      localThreadId?: string;
+      workspacePath?: string;
+    } = {},
+  ): Promise<AgentTurn[]> {
     const turns: AgentTurn[] = [];
     let current: {
       providerTurnId: string;
@@ -1703,12 +2022,17 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
             items: current.items,
           }));
         }
-        const userItem = userMessageToHistoryItem(message.uuid, message.message);
+        const messageUuid = message.uuid ?? randomUUID();
+        const userItem = await this.userMessageToHistoryItem(
+          messageUuid,
+          message.message,
+          context,
+        );
         current = {
-          providerTurnId: `claude-turn-${message.uuid}`,
-          startedAt: isoFromUuidV7(message.uuid),
+          providerTurnId: `claude-turn-${messageUuid}`,
+          startedAt: isoFromUuidV7(messageUuid),
           items: [userItem],
-          itemsById: new Map([[message.uuid, userItem]]),
+          itemsById: new Map([[messageUuid, userItem]]),
         };
         continue;
       }
@@ -1723,7 +2047,7 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
           current?.itemsById.delete(toolUseId);
         }
         for (const item of assistantMessageToHistoryItems({
-          messageId: message.uuid,
+          messageId: message.uuid ?? randomUUID(),
           message: message.message,
         })) {
           upsertCurrentItem(item);
@@ -1785,5 +2109,37 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
       lastError: errorMessage(error),
     };
     this.emit('status', this.getStatus());
+  }
+}
+
+async function importOptionalPackage(specifier: string) {
+  const dynamicImport = new Function('specifier', 'return import(specifier);') as (
+    specifier: string,
+  ) => Promise<unknown>;
+  try {
+    return await dynamicImport(specifier);
+  } catch (localError) {
+    const globalRoot = await npmGlobalRoot();
+    if (!globalRoot) {
+      throw localError;
+    }
+    try {
+      const requireFromGlobal = createRequire(path.join(globalRoot, 'remote-codex-global.cjs'));
+      const resolved = requireFromGlobal.resolve(specifier);
+      return await dynamicImport(pathToFileURL(resolved).href);
+    } catch {
+      throw localError;
+    }
+  }
+}
+
+async function npmGlobalRoot() {
+  try {
+    const { stdout } = await execFileAsync('npm', ['root', '-g'], {
+      timeout: 3_000,
+    });
+    return stdout.trim() || null;
+  } catch {
+    return null;
   }
 }

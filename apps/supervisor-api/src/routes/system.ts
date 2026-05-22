@@ -10,6 +10,7 @@ import {
   UpdateWorkspaceSettingsInput,
   VersionDto
 } from '../../../../packages/shared/src/index';
+import { agentBackendIdSchema } from '../provider-schemas';
 import {
   getWorkspaceSettings,
   saveWorkspaceSettings,
@@ -27,10 +28,10 @@ const renameProviderHostConfigArchiveSchema = z.object({
 });
 const updateWorkspaceSettingsSchema = z.object({
   devHome: z.string().trim().min(1),
-  defaultBackend: z.enum(['codex', 'claude']).optional(),
+  defaultBackend: agentBackendIdSchema.optional(),
 });
 const providerParamSchema = z.object({
-  provider: z.enum(['codex', 'claude']),
+  provider: agentBackendIdSchema,
 });
 
 function parseProviderHostFileParams(params: unknown) {

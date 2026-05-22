@@ -104,6 +104,40 @@ function readableToolName(toolName: string) {
   return toolName;
 }
 
+function projectRelativePathLabel(value: string | null | undefined) {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const slashNormalized = normalized.replace(/\\/g, '/');
+  if (!slashNormalized.startsWith('/')) {
+    return slashNormalized.replace(/^\.\//, '');
+  }
+
+  const markers = [
+    '/apps/',
+    '/packages/',
+    '/src/',
+    '/test/',
+    '/tests/',
+    '/docs/',
+    '/config/',
+    '/scripts/',
+    '/e2e/',
+    '/.agents/',
+    '/.codex/',
+  ];
+  for (const marker of markers) {
+    const markerIndex = slashNormalized.indexOf(marker);
+    if (markerIndex >= 0) {
+      return slashNormalized.slice(markerIndex + 1);
+    }
+  }
+
+  return slashNormalized;
+}
+
 function commandFromInput(input: unknown) {
   if (!isRecord(input)) {
     return null;
@@ -115,11 +149,13 @@ function pathFromInput(input: unknown) {
   if (!isRecord(input)) {
     return null;
   }
-  return (
-    stringValue(input.file_path) ??
-    stringValue(input.filePath) ??
-    stringValue(input.path) ??
-    stringValue(input.notebook_path)
+  return projectRelativePathLabel(
+    stringValue(input.relative_path) ??
+      stringValue(input.relativePath) ??
+      stringValue(input.file_path) ??
+      stringValue(input.filePath) ??
+      stringValue(input.path) ??
+      stringValue(input.notebook_path),
   );
 }
 

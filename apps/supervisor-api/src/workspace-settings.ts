@@ -5,6 +5,8 @@ import {
 } from '../../../packages/db/src/index';
 import {
   AgentBackendIdDto,
+  defaultAgentBackendId,
+  normalizeAgentBackendId,
   WorkspaceSettingsDto,
 } from '../../../packages/shared/src/index';
 import {
@@ -16,7 +18,7 @@ const DEV_HOME_POLICY_KEY = 'dev_home';
 const DEFAULT_BACKEND_POLICY_KEY = 'default_backend';
 
 function normalizeBackend(value: unknown): AgentBackendIdDto {
-  return value === 'claude' ? 'claude' : 'codex';
+  return normalizeAgentBackendId(value) ?? defaultAgentBackendId;
 }
 
 function parseDevHomePolicy(valueJson: string | null | undefined) {

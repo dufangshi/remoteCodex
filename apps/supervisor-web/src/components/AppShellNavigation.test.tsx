@@ -3,13 +3,14 @@ import { useState } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { AgentBackendDto, AgentBackendIdDto } from '../../../../packages/shared/src/index';
 import { AppShellNavContext } from './AppShellNavContext';
 import {
   AppShellNavigationMenu,
   AppShellSettingsDialog,
 } from './AppShellNavigation';
 
-const codexBackendResponse = {
+const codexBackendResponse: AgentBackendDto = {
   provider: 'codex',
   displayName: 'Codex',
   description: 'Local Codex app-server runtime.',
@@ -85,6 +86,16 @@ const codexBackendResponse = {
     configArchives: true,
     buildRestart: true,
   },
+  installation: {
+    packageName: '@openai/codex',
+    installed: true,
+    installedVersion: 'codex-cli 0.131.0',
+    latestVersion: '0.133.0',
+    installCommand: null,
+    updateCommand: 'npm install -g @openai/codex@latest',
+    busy: false,
+    lastError: null,
+  },
 };
 
 const claudeBackendResponse = {
@@ -129,13 +140,23 @@ const claudeBackendResponse = {
     configArchives: false,
     buildRestart: false,
   },
-} as typeof codexBackendResponse;
+  installation: {
+    packageName: '@anthropic-ai/claude-agent-sdk',
+    installed: false,
+    installedVersion: null,
+    latestVersion: '2.1.148',
+    installCommand: 'npm install -g @anthropic-ai/claude-code @anthropic-ai/claude-agent-sdk',
+    updateCommand: 'npm install -g @anthropic-ai/claude-code@latest @anthropic-ai/claude-agent-sdk@latest',
+    busy: false,
+    lastError: 'Claude Code command is not available: claude Claude Code Agent SDK is not installed.',
+  },
+};
 
 function NavigationHarness() {
   const [navOpen, setNavOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [themeMode, setThemeMode] = useState<'system' | 'light' | 'dark'>('system');
-  const [defaultBackend, setDefaultBackend] = useState<'codex' | 'claude'>('codex');
+  const [defaultBackend, setDefaultBackend] = useState<AgentBackendIdDto>('codex');
 
   return (
     <AppShellNavContext.Provider
@@ -164,7 +185,9 @@ function NavigationHarness() {
 }
 
 describe('AppShellNavigation', () => {
+  let installClaudeShouldFail = false;
   beforeEach(() => {
+    installClaudeShouldFail = false;
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo, init?: RequestInit) => {
@@ -185,6 +208,35 @@ describe('AppShellNavigation', () => {
               status: {
                 ...codexBackendResponse.status,
                 restartCount: 1,
+              },
+            }),
+          } satisfies Partial<Response>;
+        }
+
+        if (url === '/api/agent-runtimes/claude/install' && init?.method === 'POST') {
+          if (installClaudeShouldFail) {
+            return {
+              ok: false,
+              status: 500,
+              json: async () => ({
+                code: 'bad_request',
+                message: 'npm install failed: install failed',
+                details: {
+                  stderr: 'install failed\npermission denied',
+                },
+              }),
+            } satisfies Partial<Response>;
+          }
+          return {
+            ok: true,
+            json: async () => ({
+              ...claudeBackendResponse,
+              enabled: true,
+              installation: {
+                ...claudeBackendResponse.installation,
+                installed: true,
+                installedVersion: '2.1.148 (SDK 0.3.148)',
+                lastError: null,
               },
             }),
           } satisfies Partial<Response>;
@@ -620,6 +672,60 @@ describe('AppShellNavigation', () => {
 
     expect(screen.queryByText('Backend')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Build and restart' })).toBeInTheDocument();
+  });
+
+  it('shows backend versions with update or install actions in settings', async () => {
+    render(
+      <MemoryRouter initialEntries={['/threads?workspaceId=workspace-1']}>
+        <NavigationHarness />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Version:\s*codex-cli 0\.131\.0/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Latest:\s*0\.133\.0/i)).toBeInTheDocument();
+    expect(screen.getByText(/Claude Code command is not available/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Update Codex' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Install Claude' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Install Claude' }));
+    expect(screen.getByRole('button', { name: 'Install Claude' })).toHaveTextContent('Installing...');
+
+    await waitFor(() => {
+      expect(
+        vi.mocked(fetch).mock.calls.some(
+          ([url, init]) =>
+            String(url) === '/api/agent-runtimes/claude/install' &&
+            init?.method === 'POST' &&
+            String(init.body).includes('"install"'),
+        ),
+      ).toBe(true);
+    });
+    expect(await screen.findByText('Claude installed.')).toBeInTheDocument();
+  });
+
+  it('shows install failure details from backend command output', async () => {
+    installClaudeShouldFail = true;
+    render(
+      <MemoryRouter initialEntries={['/threads?workspaceId=workspace-1']}>
+        <NavigationHarness />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Install Claude' })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Install Claude' }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/npm install failed: install failed/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/permission denied/i)).toBeInTheDocument();
   });
 
   it('manages codex config archives from settings', async () => {

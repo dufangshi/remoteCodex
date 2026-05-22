@@ -35,6 +35,7 @@ interface ThreadWorkspaceLayoutProps {
   metaContent?: ReactNode;
   settingsContent?: ReactNode;
   onRenameThread?: ((threadId: string, title: string) => Promise<void> | void) | undefined;
+  onDeleteThread?: ((thread: ThreadDto) => void) | undefined;
   children: ReactNode;
 }
 
@@ -358,9 +359,11 @@ export function ThreadWorkspaceLayout({
   metaContent,
   settingsContent,
   onRenameThread,
+  onDeleteThread,
   children,
 }: ThreadWorkspaceLayoutProps) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false);
   const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
   const [renamingThreadId, setRenamingThreadId] = useState<string | null>(null);
@@ -483,6 +486,8 @@ export function ThreadWorkspaceLayout({
               workspaceLabels={workspaceLabels}
               onOpenThread={openThread}
               onBeginRenameThread={beginRenameThread}
+              showDeleteButton={Boolean(onDeleteThread)}
+              {...(onDeleteThread ? { onDeleteThread } : {})}
             />
           )}
         </section>
@@ -511,8 +516,16 @@ export function ThreadWorkspaceLayout({
       <div
         className={
           viewportConstrained
-            ? 'flex h-full max-h-full min-h-0 flex-col gap-2 overflow-hidden overscroll-none sm:gap-4 lg:grid lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]'
-            : 'flex min-h-[calc(100dvh-2rem)] flex-col gap-4 lg:grid lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]'
+            ? `flex h-full max-h-full min-h-0 flex-col gap-2 overflow-hidden overscroll-none sm:gap-4 lg:grid ${
+                desktopSidebarCollapsed
+                  ? 'lg:grid-cols-[0_minmax(0,1fr)]'
+                  : 'lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]'
+              }`
+            : `flex min-h-[calc(100dvh-2rem)] flex-col gap-4 lg:grid ${
+                desktopSidebarCollapsed
+                  ? 'lg:grid-cols-[0_minmax(0,1fr)]'
+                  : 'lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]'
+              }`
         }
       >
         <div className="lg:hidden">
@@ -594,20 +607,53 @@ export function ThreadWorkspaceLayout({
             )}
 
             {showMobileThreadNavToggle && mobileSidebarOpen && (
-              <aside className="thread-sidebar-surface absolute inset-x-2 top-[calc(100%+0.35rem)] z-10 max-h-[40dvh] overflow-y-auto rounded-[1.35rem] border p-4 shadow-2xl shadow-stone-950/18 backdrop-blur">
+              <aside className="thread-sidebar-surface absolute inset-x-2 top-[calc(100%+0.35rem)] z-50 max-h-[min(70dvh,34rem)] overflow-y-auto overscroll-contain rounded-[1.35rem] border p-4 shadow-2xl shadow-stone-950/18 backdrop-blur">
                 {renderSidebarContent()}
               </aside>
             )}
           </div>
         </div>
 
-        <aside className="hidden min-h-0 lg:block">
-          <div
-            className={`thread-sidebar-surface sticky top-4 rounded-[2rem] border p-4 shadow-2xl shadow-stone-950/12 backdrop-blur ${
-              viewportConstrained
-                ? 'h-full max-h-full overflow-y-auto'
-                : ''
+        <aside
+          className={`relative hidden min-h-0 lg:block ${
+            desktopSidebarCollapsed ? 'pointer-events-none overflow-visible' : ''
+          }`}
+        >
+          <button
+            type="button"
+            onClick={() => setDesktopSidebarCollapsed((current) => !current)}
+            aria-label={
+              desktopSidebarCollapsed
+                ? 'Expand thread list'
+                : 'Collapse thread list'
+            }
+            title={
+              desktopSidebarCollapsed
+                ? 'Expand thread list'
+                : 'Collapse thread list'
+            }
+            className={`pointer-events-auto absolute top-3 z-20 inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--theme-border-strong)] bg-[var(--theme-surface-strong)] text-[var(--theme-fg-soft)] shadow-lg shadow-stone-950/20 transition hover:bg-[var(--theme-hover)] ${
+              desktopSidebarCollapsed ? 'left-2' : 'right-[-0.9rem]'
             }`}
+          >
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 16 16"
+              className={`h-4 w-4 fill-none stroke-current transition ${
+                desktopSidebarCollapsed ? 'rotate-180' : ''
+              }`}
+              strokeWidth="1.7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="m9.75 4.25-3.5 3.75 3.5 3.75" />
+            </svg>
+          </button>
+          <div
+            aria-hidden={desktopSidebarCollapsed}
+            className={`thread-sidebar-surface sticky top-4 rounded-[2rem] border p-4 shadow-2xl shadow-stone-950/12 backdrop-blur transition-opacity ${
+              viewportConstrained ? 'h-full max-h-full overflow-y-auto' : ''
+            } ${desktopSidebarCollapsed ? 'pointer-events-none opacity-0' : 'opacity-100'}`}
           >
             {renderSidebarContent()}
           </div>

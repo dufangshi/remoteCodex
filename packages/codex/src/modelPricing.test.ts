@@ -152,6 +152,57 @@ describe('modelPricing', () => {
     });
   });
 
+  it('normalizes provider-qualified runtime model names to local pricing keys', () => {
+    expect(contextWindowForModel('openai/gpt-5.5')).toBe(272000);
+    expect(supportsFastMode('openai/gpt-5.5')).toBe(true);
+    expect(buildTurnPricingSnapshot('openai/gpt-5.5', false)).toEqual({
+      pricingModelKey: 'gpt-5.5',
+      pricingTierKey: 'standard',
+    });
+
+    const estimate = estimateTurnPrice(sampleUsage, {
+      pricingModelKey: 'openai/gpt-5.5',
+      pricingTierKey: 'standard',
+    });
+
+    expect(estimate).toMatchObject({
+      pricingModelKey: 'gpt-5.5',
+      pricingTierKey: 'standard',
+      inputUsd: 0.005,
+      cachedInputUsd: 0.00025,
+      outputUsd: 0.045,
+    });
+  });
+
+  it('normalizes provider-qualified Claude date-stamped model names', () => {
+    expect(contextWindowForModel('anthropic/claude-sonnet-4-5-20250929')).toBe(200000);
+    expect(buildTurnPricingSnapshot('anthropic/claude-sonnet-4-5-20250929', false)).toEqual({
+      pricingModelKey: 'claude-sonnet-4-5',
+      pricingTierKey: 'standard',
+    });
+
+    const estimate = estimateTurnPrice(sampleUsage, {
+      pricingModelKey: 'anthropic/claude-sonnet-4-5-20250929',
+      pricingTierKey: 'standard',
+    });
+
+    expect(estimate).toMatchObject({
+      pricingModelKey: 'claude-sonnet-4-5',
+      pricingTierKey: 'standard',
+      inputUsd: 0.003,
+      cachedInputUsd: 0.00015,
+      outputUsd: 0.0225,
+    });
+  });
+
+  it('leaves unknown provider-qualified models unpriced', () => {
+    expect(contextWindowForModel('unknown/not-priced')).toBe(null);
+    expect(estimateTurnPrice(sampleUsage, {
+      pricingModelKey: 'unknown/not-priced',
+      pricingTierKey: 'standard',
+    })).toBe(null);
+  });
+
   it('resolves pricing config from the installed package root when provided', async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'remote-codex-pricing-root-'));
     await fs.mkdir(path.join(tempDir, 'config'), { recursive: true });

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   codexHookRunToHistoryItem,
   parseCodexHookPromptText,
-} from '../../../../packages/codex/src/index';
+} from './index';
 
 describe('codex hook history mapping', () => {
   it('parses hook prompt XML emitted as assistant text', () => {

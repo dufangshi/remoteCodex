@@ -322,6 +322,56 @@ describe('ThreadTimeline', () => {
     expect(screen.getByText('I should inspect the failing command first.')).toBeInTheDocument();
   });
 
+  it('attaches trailing live reasoning to a completed agent message before the turn ends', async () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        liveItems={{
+          turnId: 'turn-1',
+          items: [
+            {
+              id: 'agent-1',
+              kind: 'agentMessage',
+              text: 'The direct answer is ready.',
+              status: 'completed',
+            },
+            {
+              id: 'reasoning-1',
+              kind: 'reasoning',
+              text: 'I checked the context and selected the concise answer.',
+              status: 'completed',
+            },
+          ],
+        }}
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'inProgress',
+            error: null,
+            items: [
+              {
+                id: 'user-1',
+                kind: 'userMessage',
+                text: 'Answer briefly.',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    FakeIntersectionObserver.triggerAll();
+
+    await screen.findByText('The direct answer is ready.');
+    expect(screen.queryByText('I checked the context and selected the concise answer.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Reasoning', { selector: '.timeline-meta-text' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Thinking/i }));
+
+    expect(screen.getByText('I checked the context and selected the concise answer.')).toBeInTheDocument();
+  });
+
   it('attaches Claude reasoning to the eventual agent message even when tool items intervene', async () => {
     render(
       <ThreadTimeline
@@ -727,6 +777,38 @@ describe('ThreadTimeline', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('prefers command preview text over legacy tool labels', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'command-1',
+                kind: 'commandExecution',
+                text: 'Tool: bash',
+                previewText: 'pnpm --filter @remote-codex/opencode test',
+                status: 'completed',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'Open full command' }),
+    ).toHaveTextContent('pnpm --filter @remote-codex/opencode test');
+    expect(
+      screen.getByRole('button', { name: 'Open full command' }),
+    ).not.toHaveTextContent('Tool: bash');
+  });
+
   it('renders unfinished command status as a compact pending icon only', () => {
     render(
       <ThreadTimeline
@@ -1018,6 +1100,52 @@ describe('ThreadTimeline', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('does not group commands across an intervening agent message', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'command-1',
+                kind: 'commandExecution',
+                text: 'pnpm lint\nok',
+                status: 'completed',
+              },
+              {
+                id: 'agent-1',
+                kind: 'agentMessage',
+                text: 'Lint passed, now testing.',
+              },
+              {
+                id: 'command-2',
+                kind: 'commandExecution',
+                text: 'pnpm test\nok',
+                status: 'completed',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.queryByText('2 commands')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Open full command' })).toHaveLength(2);
+    const timelineText =
+      screen.getByTestId('thread-scroll-container').textContent ?? '';
+    expect(timelineText.indexOf('pnpm lint')).toBeLessThan(
+      timelineText.indexOf('Lint passed, now testing.'),
+    );
+    expect(timelineText.indexOf('Lint passed, now testing.')).toBeLessThan(
+      timelineText.indexOf('pnpm test'),
+    );
+  });
+
   it('renders file change items with compact stats and expandable details', () => {
     render(
       <ThreadTimeline
@@ -1114,6 +1242,113 @@ describe('ThreadTimeline', () => {
     expect(screen.getByRole('button', { name: 'Open grouped file change 1' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open grouped file change 2' })).toBeInTheDocument();
     expect(screen.getByText('src/routes.ts')).toBeInTheDocument();
+  });
+
+  it('does not group file changes across an intervening agent message', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'file-change-1',
+                kind: 'fileChange',
+                text: 'src/app.ts',
+                previewText: '1 file changed · +12 · -1',
+                detailText: '- src/app.ts (+12 -1)',
+                changedFiles: 1,
+                addedLines: 12,
+                removedLines: 1,
+                status: 'completed',
+              },
+              {
+                id: 'agent-1',
+                kind: 'agentMessage',
+                text: 'I updated the app entry, now adjusting routes.',
+              },
+              {
+                id: 'file-change-2',
+                kind: 'fileChange',
+                text: 'src/routes.ts',
+                previewText: '1 file changed · +4 · -3',
+                detailText: '- src/routes.ts (+4 -3)',
+                changedFiles: 1,
+                addedLines: 4,
+                removedLines: 3,
+                status: 'completed',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.queryByText('2 file changes')).not.toBeInTheDocument();
+    expect(
+      screen.getByText('I updated the app entry, now adjusting routes.'),
+    ).toBeInTheDocument();
+    const timelineText =
+      screen.getByTestId('thread-scroll-container').textContent ?? '';
+    expect(timelineText.indexOf('src/app.ts')).toBeLessThan(
+      timelineText.indexOf('I updated the app entry, now adjusting routes.'),
+    );
+    expect(
+      timelineText.indexOf('I updated the app entry, now adjusting routes.'),
+    ).toBeLessThan(timelineText.indexOf('src/routes.ts'));
+  });
+
+  it('groups unattached live file change items into a collapsible batch', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        liveItems={{
+          turnId: 'runtime-turn-not-loaded',
+          items: [
+            {
+              id: 'file-change-live-1',
+              kind: 'fileChange',
+              text: 'src/app.ts',
+              previewText: '1 file changed · +12 · -1',
+              detailText: '- src/app.ts (+12 -1)',
+              changedFiles: 1,
+              addedLines: 12,
+              removedLines: 1,
+              status: 'completed',
+            },
+            {
+              id: 'file-change-live-2',
+              kind: 'fileChange',
+              text: 'src/routes.ts',
+              previewText: '1 file changed · +4 · -3',
+              detailText: '- src/routes.ts (+4 -3)',
+              changedFiles: 1,
+              addedLines: 4,
+              removedLines: 3,
+              status: 'completed',
+            },
+          ],
+        }}
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('2 file changes')).toBeInTheDocument();
+    expect(screen.getByText('+16')).toBeInTheDocument();
+    expect(screen.getByText('-4')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open full file change' })).not.toBeInTheDocument();
   });
 
   it('renders plan history items as markdown once they enter the viewport', async () => {
@@ -1301,12 +1536,55 @@ describe('ThreadTimeline', () => {
 
     const openButton = screen.getByRole('button', { name: 'Open full file read' });
     expect(openButton).toHaveTextContent('Search files: AgentRuntime');
+    expect(openButton).not.toHaveTextContent('completed');
 
     fireEvent.click(openButton);
 
     expect(
       screen.getByRole('dialog', { name: 'File Read Details' }),
     ).toHaveTextContent('Tool: Grep');
+  });
+
+  it('groups unattached live file read items into a collapsible batch', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        liveItems={{
+          turnId: 'runtime-turn-not-loaded',
+          items: [
+            {
+              id: 'read-live-1',
+              kind: 'fileRead',
+              text: 'src/tokenUsage.ts',
+              previewText: 'src/tokenUsage.ts',
+              detailText: 'Tool: read\nsrc/tokenUsage.ts',
+              status: 'completed',
+            },
+            {
+              id: 'read-live-2',
+              kind: 'fileRead',
+              text: 'src/threadUsage.ts',
+              previewText: 'src/threadUsage.ts',
+              detailText: 'Tool: read\nsrc/threadUsage.ts',
+              status: 'completed',
+            },
+          ],
+        }}
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('2 file reads')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Expand 2 file read entries' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open full file read' })).not.toBeInTheDocument();
   });
 
   it('renders Claude agent tool calls as dedicated agent bubbles', () => {
@@ -1433,10 +1711,21 @@ describe('ThreadTimeline', () => {
     expect(screen.queryByText('Other')).not.toBeInTheDocument();
   });
 
-  it('renders streaming agent output inside the same agent message surface', async () => {
+  it('renders streaming agent output from live items inside the same agent message surface', async () => {
     render(
       <ThreadTimeline
-        liveOutput="## Streaming reply in progress"
+        liveOutput=""
+        liveItems={{
+          turnId: 'turn-1',
+          items: [
+            {
+              id: 'agent-live-1',
+              kind: 'agentMessage',
+              text: 'Streaming reply in progress',
+              sequence: 1,
+            },
+          ],
+        }}
         turns={[
           {
             id: 'turn-1',
@@ -1448,6 +1737,7 @@ describe('ThreadTimeline', () => {
                 id: 'user-1',
                 kind: 'userMessage',
                 text: 'Show me the fix.',
+                sequence: 0,
               },
             ],
           },
@@ -1456,11 +1746,7 @@ describe('ThreadTimeline', () => {
     );
 
     expect(screen.getByText('Show me the fix.')).toBeInTheDocument();
-    await waitFor(() => {
-      expect(
-        screen.getByRole('heading', { name: 'Streaming reply in progress' }),
-      ).toBeInTheDocument();
-    });
+    expect(screen.getByText('Streaming reply in progress')).toBeInTheDocument();
     expect(screen.getAllByLabelText('Running')).toHaveLength(2);
     expect(screen.queryByText('Streaming output')).not.toBeInTheDocument();
   });
@@ -1723,10 +2009,21 @@ describe('ThreadTimeline', () => {
     );
   });
 
-  it('shows only the unmaterialized tail of streaming output', () => {
+  it('renders streaming agent progress from live items rather than live output text', () => {
     render(
       <ThreadTimeline
-        liveOutput="Alpha is done.Beta is still streaming."
+        liveOutput=""
+        liveItems={{
+          turnId: 'turn-1',
+          items: [
+            {
+              id: 'agent-2',
+              kind: 'agentMessage',
+              text: 'Beta is still streaming.',
+              sequence: 3,
+            },
+          ],
+        }}
         turns={[
           {
             id: 'turn-1',
@@ -1738,12 +2035,14 @@ describe('ThreadTimeline', () => {
                 id: 'agent-1',
                 kind: 'agentMessage',
                 text: 'Alpha is done.',
+                sequence: 1,
               },
               {
                 id: 'command-1',
                 kind: 'commandExecution',
                 text: 'pnpm test\nok',
                 status: 'completed',
+                sequence: 2,
               },
             ],
           },
@@ -2061,16 +2360,21 @@ describe('ThreadTimeline', () => {
     ).toBeLessThan(timelineText.indexOf('pnpm build'));
   });
 
-  it('drops already materialized earlier agent messages from the streaming tail', () => {
+  it('keeps live agent messages interleaved without reading a duplicate live output string', () => {
     render(
       <ThreadTimeline
-        liveOutput={[
-          'Root cause is clear.',
-          '',
-          'I updated the composer sync logic.',
-          '',
-          'Running the next verification step now.',
-        ].join('\n')}
+        liveOutput=""
+        liveItems={{
+          turnId: 'turn-1',
+          items: [
+            {
+              id: 'agent-live-3',
+              kind: 'agentMessage',
+              text: 'Running the next verification step now.',
+              sequence: 4,
+            },
+          ],
+        }}
         turns={[
           {
             id: 'turn-1',
@@ -2082,17 +2386,20 @@ describe('ThreadTimeline', () => {
                 id: 'agent-1',
                 kind: 'agentMessage',
                 text: 'Root cause is clear.',
+                sequence: 1,
               },
               {
                 id: 'command-1',
                 kind: 'commandExecution',
                 text: 'apply patch',
                 status: 'completed',
+                sequence: 2,
               },
               {
                 id: 'agent-2',
                 kind: 'agentMessage',
                 text: 'I updated the composer sync logic.',
+                sequence: 3,
               },
             ],
           },
@@ -2108,10 +2415,10 @@ describe('ThreadTimeline', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('hides the streaming bubble when all streamed output is already materialized', () => {
+  it('renders materialized agent messages without requiring live output text', () => {
     render(
       <ThreadTimeline
-        liveOutput="Alpha is done.Beta is done."
+        liveOutput=""
         turns={[
           {
             id: 'turn-1',
@@ -2142,9 +2449,27 @@ describe('ThreadTimeline', () => {
     );
 
     expect(screen.getAllByLabelText('Copy agent reply')).toHaveLength(2);
-    expect(
-      screen.queryByText('Alpha is done.Beta is done.'),
-    ).not.toBeInTheDocument();
+    expect(screen.getByText('Alpha is done.')).toBeInTheDocument();
+    expect(screen.getByText('Beta is done.')).toBeInTheDocument();
+  });
+
+  it('uses trailing live output only as an unstructured fallback', () => {
+    render(
+      <ThreadTimeline
+        liveOutput="Unstructured streaming fallback."
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'inProgress',
+            error: null,
+            items: [],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('Unstructured streaming fallback.')).toBeInTheDocument();
   });
 
   it('renders an optimistic sending turn before the server materializes it', () => {
@@ -2172,6 +2497,42 @@ describe('ThreadTimeline', () => {
     expect(screen.getAllByLabelText('Sending')).toHaveLength(2);
     expect(screen.getByText('Ship this optimistic turn.')).toBeInTheDocument();
     expect(screen.getByText('streaming draft')).toBeInTheDocument();
+  });
+
+  it('uses matching live items instead of live output on an optimistic turn', () => {
+    render(
+      <ThreadTimeline
+        turns={[]}
+        liveOutput="legacy fallback draft"
+        liveItems={{
+          turnId: 'server-turn-1',
+          items: [
+            {
+              id: 'assistant-live-1',
+              kind: 'agentMessage',
+              text: 'Structured live draft.',
+              sequence: 1,
+            },
+          ],
+        }}
+        optimisticTurn={{
+          id: 'server-turn-1',
+          startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+          status: 'inProgress',
+          error: null,
+          items: [
+            {
+              id: 'optimistic-turn-1-user',
+              kind: 'userMessage',
+              text: 'Ship this optimistic turn.',
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Structured live draft.')).toBeInTheDocument();
+    expect(screen.queryByText('legacy fallback draft')).not.toBeInTheDocument();
   });
 
   it('shows per-turn model metadata plus price in the turn header', () => {
@@ -2286,6 +2647,186 @@ describe('ThreadTimeline', () => {
     expect(screen.getAllByText('2k').length).toBeGreaterThan(0);
     expect(screen.getAllByText('3k').length).toBeGreaterThan(0);
     expect(screen.getAllByText('1.2k').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('$0.089').length).toBeGreaterThan(0);
+  });
+
+  it('shows the running footer bubble for a completed turn that still has live opencode items', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        liveItems={{
+          turnId: 'turn-1',
+          items: [
+            {
+              id: 'cmd-1',
+              kind: 'commandExecution',
+              text: 'pnpm test',
+              status: 'running',
+            },
+          ],
+        }}
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            model: 'gpt-5.4',
+            reasoningEffort: 'low',
+            reasoningEffortAvailable: true,
+            tokenUsage: {
+              total: {
+                totalTokens: 18240,
+                inputTokens: 12000,
+                cachedInputTokens: 2000,
+                outputTokens: 4240,
+                reasoningOutputTokens: 1240,
+              },
+              last: {
+                totalTokens: 2400,
+                inputTokens: 1600,
+                cachedInputTokens: 200,
+                outputTokens: 800,
+                reasoningOutputTokens: 320,
+              },
+              modelContextWindow: 272000,
+            },
+            priceEstimate: {
+              pricingModelKey: 'gpt-5.4',
+              pricingTierKey: 'standard',
+              currency: 'USD',
+              inputUsd: 0.025,
+              cachedInputUsd: 0.0005,
+              outputUsd: 0.0636,
+              totalUsd: 0.0891,
+            },
+            items: [
+              {
+                id: 'user-1',
+                kind: 'userMessage',
+                text: 'Keep working.',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByLabelText('Running')).toBeInTheDocument();
+    expect(screen.getAllByText('$0.089').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('10k').length).toBeGreaterThan(0);
+  });
+
+  it('keeps the running footer bubble visible when the thread active turn is still running', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        activeTurnId="turn-1"
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            model: 'gpt-5.4',
+            reasoningEffort: 'low',
+            reasoningEffortAvailable: true,
+            tokenUsage: {
+              total: {
+                totalTokens: 18240,
+                inputTokens: 12000,
+                cachedInputTokens: 2000,
+                outputTokens: 4240,
+                reasoningOutputTokens: 1240,
+              },
+              last: {
+                totalTokens: 2400,
+                inputTokens: 1600,
+                cachedInputTokens: 200,
+                outputTokens: 800,
+                reasoningOutputTokens: 320,
+              },
+              modelContextWindow: 272000,
+            },
+            priceEstimate: {
+              pricingModelKey: 'gpt-5.4',
+              pricingTierKey: 'standard',
+              currency: 'USD',
+              inputUsd: 0.025,
+              cachedInputUsd: 0.0005,
+              outputUsd: 0.0636,
+              totalUsd: 0.0891,
+            },
+            items: [
+              {
+                id: 'user-1',
+                kind: 'userMessage',
+                text: 'Keep working.',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByLabelText('Running')).toBeInTheDocument();
+    expect(screen.getAllByText('$0.089').length).toBeGreaterThan(0);
+  });
+
+  it('keeps the running footer visible on the latest visible turn when opencode active turn ids do not match', () => {
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        activeTurnId="runtime-turn-raw"
+        threadRunning
+        turns={[
+          {
+            id: 'display-turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            model: 'gpt-5.4',
+            reasoningEffort: 'low',
+            reasoningEffortAvailable: true,
+            tokenUsage: {
+              total: {
+                totalTokens: 18240,
+                inputTokens: 12000,
+                cachedInputTokens: 2000,
+                outputTokens: 4240,
+                reasoningOutputTokens: 1240,
+              },
+              last: {
+                totalTokens: 2400,
+                inputTokens: 1600,
+                cachedInputTokens: 200,
+                outputTokens: 800,
+                reasoningOutputTokens: 320,
+              },
+              modelContextWindow: 272000,
+            },
+            priceEstimate: {
+              pricingModelKey: 'gpt-5.4',
+              pricingTierKey: 'standard',
+              currency: 'USD',
+              inputUsd: 0.025,
+              cachedInputUsd: 0.0005,
+              outputUsd: 0.0636,
+              totalUsd: 0.0891,
+            },
+            items: [
+              {
+                id: 'user-1',
+                kind: 'userMessage',
+                text: 'Keep working.',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByLabelText('Running')).toBeInTheDocument();
     expect(screen.getAllByText('$0.089').length).toBeGreaterThan(0);
   });
 

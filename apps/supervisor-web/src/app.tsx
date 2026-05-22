@@ -9,6 +9,10 @@ import { useEffect, useState } from 'react';
 
 import type { AgentBackendIdDto } from '../../../packages/shared/src/index';
 import {
+  defaultAgentBackendId,
+  normalizeAgentBackendId,
+} from '../../../packages/shared/src/index';
+import {
   AppShellNavContext,
   type ThemeMode,
 } from './components/AppShellNavContext';
@@ -24,6 +28,7 @@ import { ThreadNewPage } from './pages/ThreadNewPage';
 import { ThreadsPage } from './pages/ThreadsPage';
 import { WorkspaceNewPage } from './pages/WorkspaceNewPage';
 import { WorkspacesPage } from './pages/WorkspacesPage';
+import { PluginProvider } from './plugins/PluginProvider';
 
 const THEME_STORAGE_KEY = 'remote-codex-theme-mode';
 const BACKEND_STORAGE_KEY = 'remote-codex-default-backend';
@@ -43,11 +48,11 @@ function readInitialThemeMode(): ThemeMode {
 
 function readInitialBackend(): AgentBackendIdDto {
   if (typeof window === 'undefined') {
-    return 'codex';
+    return defaultAgentBackendId;
   }
 
   const stored = window.localStorage.getItem(BACKEND_STORAGE_KEY);
-  return stored === 'claude' ? 'claude' : 'codex';
+  return normalizeAgentBackendId(stored) ?? defaultAgentBackendId;
 }
 
 function systemThemePreference(): 'light' | 'dark' {
@@ -150,7 +155,13 @@ function AppShell({
           }`}
         >
           <section
-            className={`min-w-0 ${isViewportLockedRoute ? 'h-full overflow-hidden overscroll-none' : ''}`}
+            className={`min-w-0 ${
+              isViewportLockedRoute
+                ? isThreadDetailRoute
+                  ? 'h-full min-h-0 overflow-hidden overscroll-none'
+                  : 'h-full overflow-hidden overscroll-none'
+                : ''
+            }`}
           >
             <Outlet />
           </section>
@@ -210,27 +221,29 @@ export function App() {
 
   return (
     <div className="theme-shell theme-scrollbar">
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route
-            element={
-              <AppShell
-                themeMode={themeMode}
-                setThemeMode={setThemeMode}
-                effectiveTheme={effectiveTheme}
-              />
-            }
-          >
-            <Route path="/workspaces" element={<WorkspacesPage />} />
-            <Route path="/workspaces/new" element={<WorkspaceNewPage />} />
-            <Route path="/threads" element={<ThreadsPage />} />
-            <Route path="/threads/import" element={<ThreadImportPage />} />
-            <Route path="/threads/new" element={<ThreadNewPage />} />
-            <Route path="/threads/:id" element={<ThreadDetailPage />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
+      <PluginProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<LandingPage />} />
+            <Route
+              element={
+                <AppShell
+                  themeMode={themeMode}
+                  setThemeMode={setThemeMode}
+                  effectiveTheme={effectiveTheme}
+                />
+              }
+            >
+              <Route path="/workspaces" element={<WorkspacesPage />} />
+              <Route path="/workspaces/new" element={<WorkspaceNewPage />} />
+              <Route path="/threads" element={<ThreadsPage />} />
+              <Route path="/threads/import" element={<ThreadImportPage />} />
+              <Route path="/threads/new" element={<ThreadNewPage />} />
+              <Route path="/threads/:id" element={<ThreadDetailPage />} />
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      </PluginProvider>
     </div>
   );
 }

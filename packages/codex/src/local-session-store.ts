@@ -6,9 +6,10 @@ import Database from 'better-sqlite3';
 
 import {
   ThreadHistoryItemDto,
+  ThreadSourceDto,
   ThreadTurnDto,
-} from '../../../../packages/shared/src/index';
-import { truncateAutoThreadTitle } from './thread-title';
+  truncateAutoThreadTitle,
+} from '../../shared/src/index';
 
 interface LocalStateThreadRow {
   id: string;
@@ -31,6 +32,17 @@ export interface LocalCodexSessionRecord {
   model: string | null;
   rolloutPath: string | null;
   turns: ThreadTurnDto[];
+}
+
+export interface LocalCodexImportSession {
+  provider: 'codex';
+  source: Extract<ThreadSourceDto, 'local_codex_import'>;
+  sessionId: string;
+  cwd: string;
+  title: string;
+  model: string | null;
+  summaryText: string | null;
+  fastMode: boolean;
 }
 
 interface MutableTurn {
@@ -235,6 +247,33 @@ export class LocalCodexSessionStore {
       model: stateRecord?.model ?? null,
       rolloutPath: transcriptPath,
       turns: transcript?.turns ?? [],
+    };
+  }
+
+  async findImportSession(
+    sessionId: string,
+    input: { fastMode: boolean },
+  ): Promise<LocalCodexImportSession | null> {
+    const localSession = await this.findSession(sessionId);
+    if (!localSession) {
+      return null;
+    }
+
+    return {
+      provider: 'codex',
+      source: 'local_codex_import',
+      sessionId: localSession.sessionId,
+      cwd: localSession.cwd,
+      title: truncateAutoThreadTitle(
+        localSession.title?.trim() || 'Untitled imported session',
+      ),
+      model: localSession.model,
+      summaryText:
+        localSession.turns
+          .flatMap((turn) => turn.items)
+          .find((item) => item.kind === 'userMessage')
+          ?.text ?? null,
+      fastMode: input.fastMode,
     };
   }
 

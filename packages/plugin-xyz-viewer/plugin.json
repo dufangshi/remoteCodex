@@ -1,0 +1,28 @@
+{
+  "id": "remote-codex.xyz-viewer",
+  "name": "XYZ Molecule Viewer",
+  "version": "0.1.0",
+  "description": "A draft built-in plugin for previewing xyz, extxyz, cif, and pdb molecular structures with 3Dmol.js.",
+  "remoteCodex": "^0.11.0",
+  "capabilities": {
+    "artifactTypes": [
+      {
+        "type": "chemistry.molecule3d",
+        "title": "3D Molecule",
+        "fileExtensions": ["xyz", "extxyz", "cif", "pdb"]
+      }
+    ],
+    "timelineRenderers": ["chemistry.molecule3d"],
+    "threadPanels": [
+      {
+        "id": "xyz-viewer",
+        "label": "Molecules",
+        "artifactTypes": ["chemistry.molecule3d"]
+      }
+    ],
+    "frontend": {
+      "entry": "./dist/index.js",
+      "style": "./src/styles.css"
+    }
+  }
+}

@@ -8,9 +8,11 @@ import { ZodError } from 'zod';
 
 import { loadRuntimeConfig, RuntimeConfig } from '../../../packages/config/src/index';
 import {
+  AgentRuntimeManagementError,
   AgentRuntimeError,
   AgentRuntimeRegistry,
 } from '../../../packages/agent-runtime/src/index';
+import { PluginRegistry } from '../../../packages/plugin-runtime/src/index';
 import {
   createDatabase,
   DatabaseContext,
@@ -35,9 +37,13 @@ import { registerShellRoutes } from './routes/shells';
 import { registerSystemRoutes } from './routes/system';
 import { registerThreadRoutes } from './routes/threads';
 import { registerWorkspaceRoutes } from './routes/workspaces';
+import { registerPluginRoutes } from './routes/plugins';
 import { ProviderHostConfigService } from './provider-host-config-service';
 import { ShellServiceError, ShellSessionService } from './shell/shell-session-service';
 import { TmuxManager } from './shell/tmux-manager';
+import { builtinPlugins } from './plugins/builtin-plugins';
+import { PluginService } from './plugins/plugin-service';
+import { PluginSettingsStore } from './plugins/plugin-settings-store';
 
 const MAX_PROMPT_ATTACHMENTS = 10;
 const MAX_PROMPT_ATTACHMENT_BYTES = 25 * 1024 * 1024;
@@ -62,6 +68,8 @@ export interface AppServices {
   threadService: ThreadService;
   shellService: ShellSessionService;
   providerHostConfigService: ProviderHostConfigService;
+  pluginRegistry: PluginRegistry;
+  pluginService: PluginService;
 }
 
 function findRepoRoot(start = process.cwd()) {
@@ -140,6 +148,9 @@ export function buildApp(
   const database = createDatabase(config.databaseUrl);
   seedDefaults(database.db);
   const eventBus = new SupervisorEventBus();
+  const pluginRegistry = new PluginRegistry(builtinPlugins);
+  const pluginSettingsStore = new PluginSettingsStore(database.db);
+  const pluginService = new PluginService(pluginRegistry, pluginSettingsStore);
   const runtimeBootstrap = options.runtimeBootstrap ?? createAgentRuntimeBootstrap(config);
   const agentRuntimes = options.agentRuntimes ?? runtimeBootstrap.agentRuntimes;
   const threadService = new ThreadService(
@@ -149,6 +160,7 @@ export function buildApp(
     runtimeBootstrap.localCodexSessionStore,
     config.workspaceRoot,
     runtimeBootstrap.codexManagement,
+    pluginService,
   );
   const shellService =
     options.shellService ??
@@ -183,7 +195,9 @@ export function buildApp(
     eventBus,
     threadService,
     shellService,
-    providerHostConfigService
+    providerHostConfigService,
+    pluginRegistry,
+    pluginService
   });
 
   app.register(async (realtimeApp) => {
@@ -358,6 +372,7 @@ export function buildApp(
   app.register(registerSystemRoutes);
   app.register(registerAgentRuntimeRoutes);
   app.register(registerShellRoutes);
+  app.register(registerPluginRoutes);
   app.register(registerThreadRoutes);
   app.register(registerWorkspaceRoutes);
 
@@ -370,6 +385,11 @@ export function buildApp(
 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof HttpError) {
+      reply.status(error.statusCode).send(error.payload);
+      return;
+    }
+
+    if (error instanceof AgentRuntimeManagementError) {
       reply.status(error.statusCode).send(error.payload);
       return;
     }
@@ -472,7 +492,7 @@ export function buildApp(
       'statusCode' in error &&
       typeof error.statusCode === 'number' &&
       error.statusCode >= 400 &&
-      error.statusCode < 500
+      error.statusCode < 600
     ) {
       if ('code' in error && error.code === 'FST_REQ_FILE_TOO_LARGE') {
         reply.status(413).send({
@@ -486,10 +506,14 @@ export function buildApp(
         return;
       }
 
-      reply.status(error.statusCode).send({
+      const payload: ApiErrorShape = {
         code: 'bad_request',
         message: error.message || 'Request could not be processed.',
-      } satisfies ApiErrorShape);
+      };
+      if ('details' in error && error.details && typeof error.details === 'object') {
+        payload.details = error.details as Record<string, unknown>;
+      }
+      reply.status(error.statusCode).send(payload);
       return;
     }
 

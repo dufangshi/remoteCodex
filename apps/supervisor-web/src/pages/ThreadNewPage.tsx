@@ -5,6 +5,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AgentBackendDto,
   AgentBackendIdDto,
+  defaultAgentBackendId,
   ModelOptionDto,
   WorkspaceDto,
 } from '../../../../packages/shared/src/index';
@@ -21,6 +22,17 @@ function backendCanStartSession(backend: AgentBackendDto) {
   return backend.enabled && backend.capabilities.sessions.resume && backend.capabilities.turns.start;
 }
 
+function chooseInitialProvider(
+  backends: AgentBackendDto[],
+  preferredProvider: AgentBackendIdDto,
+) {
+  const preferred = backends.find((backend) => backend.provider === preferredProvider);
+  if (preferred && backendCanStartSession(preferred)) {
+    return preferred.provider;
+  }
+  return backends.find(backendCanStartSession)?.provider ?? defaultAgentBackendId;
+}
+
 export function ThreadNewPage() {
   const navigate = useNavigate();
   const shellNav = useAppShellNav();
@@ -28,7 +40,9 @@ export function ThreadNewPage() {
   const [workspaces, setWorkspaces] = useState<WorkspaceDto[]>([]);
   const [backends, setBackends] = useState<AgentBackendDto[]>([]);
   const [models, setModels] = useState<ModelOptionDto[]>([]);
-  const [provider, setProvider] = useState<AgentBackendIdDto>(shellNav?.defaultBackend ?? 'codex');
+  const [provider, setProvider] = useState<AgentBackendIdDto>(
+    shellNav?.defaultBackend ?? defaultAgentBackendId,
+  );
   const [workspaceId, setWorkspaceId] = useState('');
   const [model, setModel] = useState('');
   const [title, setTitle] = useState('');
@@ -45,8 +59,10 @@ export function ThreadNewPage() {
         if (cancelled) {
           return;
         }
-        const enabledBackends = backendRecords.filter(backendCanStartSession);
-        const initialProvider = enabledBackends[0]?.provider ?? 'codex';
+        const initialProvider = chooseInitialProvider(
+          backendRecords,
+          shellNav?.defaultBackend ?? defaultAgentBackendId,
+        );
         setProvider(initialProvider);
         setBackends(backendRecords);
         const modelRecords = await fetchAgentBackendModels(initialProvider);
@@ -86,6 +102,9 @@ export function ThreadNewPage() {
     }
 
     let cancelled = false;
+    setModels([]);
+    setModel('');
+    setError(null);
     fetchAgentBackendModels(provider)
       .then((modelRecords) => {
         if (cancelled) {
@@ -98,6 +117,8 @@ export function ThreadNewPage() {
         if (cancelled) {
           return;
         }
+        setModels([]);
+        setModel('');
         setError(caught instanceof Error ? caught.message : 'Unable to load backend models.');
       });
 
@@ -220,8 +241,12 @@ export function ThreadNewPage() {
               id="thread-model"
               value={model}
               onChange={(event) => setModel(event.target.value)}
+              disabled={models.length === 0}
               className="mt-2 w-full rounded-2xl border border-stone-700 bg-stone-950 px-4 py-3 text-stone-100 outline-none transition focus:border-amber-300"
             >
+              {models.length === 0 ? (
+                <option value="">No models available</option>
+              ) : null}
               {models.map((entry) => (
                 <option key={entry.id} value={entry.model}>
                   {entry.displayName} · {entry.model}

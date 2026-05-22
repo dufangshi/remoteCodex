@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { AgentRuntimeError } from '../../../../packages/agent-runtime/src/index';
-import { JsonRpcClientError } from '../../../../packages/codex/src/index';
+import { AgentRuntimeError } from '../../agent-runtime/src/index';
+import { JsonRpcClientError } from './jsonrpc';
 import {
   isCodexRuntimeRequestError,
   isRemoteThreadBootstrapError,

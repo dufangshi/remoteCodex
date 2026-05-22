@@ -1,8 +1,13 @@
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
+import {
+  agentBackendIds,
+  agentBackendMetadata,
+  type AgentBackendIdDto,
+} from '../../shared/src/index';
 
-export type AgentProviderId = 'codex' | 'claude';
+export type AgentProviderId = AgentBackendIdDto;
 
 export interface CodexProviderConfig {
   provider: 'codex';
@@ -19,10 +24,18 @@ export interface ClaudeProviderConfig {
   command: string;
 }
 
-export type AgentProviderConfig = CodexProviderConfig | ClaudeProviderConfig;
+export interface OpenCodeProviderConfig {
+  provider: 'opencode';
+  enabled: boolean;
+  home: string;
+  command: string;
+}
+
+export type AgentProviderConfig = CodexProviderConfig | ClaudeProviderConfig | OpenCodeProviderConfig;
 export interface AgentProviderConfigMap {
   codex: CodexProviderConfig;
   claude: ClaudeProviderConfig;
+  opencode: OpenCodeProviderConfig;
 }
 
 export interface RuntimeConfig {
@@ -53,6 +66,8 @@ const envSchema = z.object({
   CODEX_APP_SERVER_START_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
   CLAUDE_HOME: z.string().optional(),
   CLAUDE_COMMAND: z.string().min(1).optional(),
+  OPENCODE_HOME: z.string().optional(),
+  OPENCODE_COMMAND: z.string().min(1).optional(),
   REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: z.string().optional()
 });
 
@@ -82,17 +97,20 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
       ? nodeEnv === 'production'
       : ['1', 'true', 'yes', 'on'].includes(parsed.DISABLE_REQUEST_LOGGING.toLowerCase());
   const enabledProviders = new Set(
-    (parsed.REMOTE_CODEX_ENABLED_AGENT_PROVIDERS ?? 'codex,claude')
+    (parsed.REMOTE_CODEX_ENABLED_AGENT_PROVIDERS ?? agentBackendIds.join(','))
       .split(',')
       .map((provider) => provider.trim().toLowerCase())
       .filter(Boolean)
   );
   const codexHome = parsed.CODEX_HOME?.trim()
     ? path.resolve(parsed.CODEX_HOME)
-    : path.join(os.homedir(), '.codex');
+    : path.join(os.homedir(), agentBackendMetadata.codex.defaultHomeDir);
   const claudeHome = parsed.CLAUDE_HOME?.trim()
     ? path.resolve(parsed.CLAUDE_HOME)
-    : path.join(os.homedir(), '.claude');
+    : path.join(os.homedir(), agentBackendMetadata.claude.defaultHomeDir);
+  const opencodeHome = parsed.OPENCODE_HOME?.trim()
+    ? path.resolve(parsed.OPENCODE_HOME)
+    : path.join(os.homedir(), agentBackendMetadata.opencode.defaultHomeDir);
 
   return {
     nodeEnv,
@@ -109,14 +127,20 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
         provider: 'codex',
         enabled: enabledProviders.has('codex'),
         home: codexHome,
-        command: parsed.CODEX_COMMAND ?? 'codex',
+        command: parsed.CODEX_COMMAND ?? agentBackendMetadata.codex.defaultCommand,
         appServerStartTimeoutMs: parsed.CODEX_APP_SERVER_START_TIMEOUT_MS ?? 10_000,
       },
       claude: {
         provider: 'claude',
         enabled: enabledProviders.has('claude'),
         home: claudeHome,
-        command: parsed.CLAUDE_COMMAND ?? 'claude',
+        command: parsed.CLAUDE_COMMAND ?? agentBackendMetadata.claude.defaultCommand,
+      },
+      opencode: {
+        provider: 'opencode',
+        enabled: enabledProviders.has('opencode'),
+        home: opencodeHome,
+        command: parsed.OPENCODE_COMMAND ?? agentBackendMetadata.opencode.defaultCommand,
       },
     },
   };

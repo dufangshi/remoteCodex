@@ -23,6 +23,9 @@ import type {
   StartAgentSessionResult,
   StartAgentTurnInput,
 } from '../../agent-runtime/src/index';
+import type {
+  AgentBackendInstallationDto,
+} from '../../shared/src/index';
 import {
   buildCodexProviderRequestResponse,
   mapCodexProviderRequest,
@@ -51,6 +54,7 @@ import {
   ThreadStartInput,
   TurnStartInput,
   JsonRpcClientError,
+  supportsFastMode,
 } from './index';
 
 export const codexCapabilities: AgentProviderCapabilities = {
@@ -137,6 +141,7 @@ function mapModel(model: Awaited<ReturnType<CodexAppServerManager['listModels']>
     description: model.description,
     isDefault: model.isDefault,
     hidden: model.hidden,
+    supportsPerformanceMode: supportsFastMode(model.model),
     supportedReasoningEfforts: model.supportedReasoningEfforts.map((entry) => ({
       reasoningEffort: entry.reasoningEffort,
       description: entry.description,
@@ -465,6 +470,16 @@ export class CodexRuntimeAdapter extends EventEmitter implements AgentRuntime {
   readonly displayName = 'Codex';
   readonly description = 'Local Codex app-server runtime.';
   readonly capabilities = codexCapabilities;
+  readonly installation: AgentBackendInstallationDto = {
+    packageName: '@openai/codex',
+    installed: true,
+    installedVersion: null,
+    latestVersion: null,
+    installCommand: null,
+    updateCommand: 'npm install -g @openai/codex@latest',
+    busy: false,
+    lastError: null,
+  };
   readonly managementSchema: AgentRuntimeManagementSchema = {
     hostConfigFiles: [
       {

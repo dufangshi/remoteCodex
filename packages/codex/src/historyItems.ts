@@ -3,6 +3,7 @@ import type {
   CodexTurnItem,
 } from './types';
 import type { AgentTurn } from '../../agent-runtime/src/index';
+import { isTransientAgentHistoryItem } from '../../agent-runtime/src/index';
 import type {
   ThreadHistoryItemDetailDto,
   ThreadHistoryItemDto,
@@ -13,6 +14,7 @@ import { parseCodexHookPromptText } from './hookHistory';
 
 const DEFERRED_COMMAND_DETAIL_TITLE = 'Command Output';
 const DEFERRED_TOOL_DETAIL_TITLE = 'Tool Call Details';
+const DEFERRED_AGENT_TOOL_DETAIL_TITLE = 'Agent Details';
 
 export type TurnItemOrderSnapshot = Map<string, Map<string, number>>;
 
@@ -74,6 +76,40 @@ function stringArray(value: unknown) {
 
 function uniqueStrings(values: Array<string | null | undefined>) {
   return [...new Set(values.filter((value): value is string => Boolean(value?.trim())))];
+}
+
+function projectRelativePathLabel(value: string | null | undefined) {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const slashNormalized = normalized.replace(/\\/g, '/');
+  if (!slashNormalized.startsWith('/')) {
+    return slashNormalized.replace(/^\.\//, '');
+  }
+
+  const markers = [
+    '/apps/',
+    '/packages/',
+    '/src/',
+    '/test/',
+    '/tests/',
+    '/docs/',
+    '/config/',
+    '/scripts/',
+    '/e2e/',
+    '/.agents/',
+    '/.codex/',
+  ];
+  for (const marker of markers) {
+    const markerIndex = slashNormalized.indexOf(marker);
+    if (markerIndex >= 0) {
+      return slashNormalized.slice(markerIndex + 1);
+    }
+  }
+
+  return slashNormalized;
 }
 
 function normalizeTextLines(text: string) {
@@ -213,14 +249,19 @@ function formatCommandHistoryItem(
 }
 
 function deferToolCallHistoryItem(
-  item: ThreadHistoryItemDto & { kind: 'toolCall' },
+  item: ThreadHistoryItemDto & { kind: 'toolCall' | 'agentToolCall' | 'skillToolCall' },
   deferredDetails: Map<string, ThreadHistoryItemDetailDto>,
 ): ThreadHistoryItemDto {
   const fullText = item.detailText?.trim() || item.text || 'Tool call';
   deferredDetails.set(item.id, {
     id: item.id,
     kind: item.kind,
-    title: DEFERRED_TOOL_DETAIL_TITLE,
+    title:
+      item.kind === 'agentToolCall'
+        ? DEFERRED_AGENT_TOOL_DETAIL_TITLE
+        : item.kind === 'skillToolCall'
+          ? 'Skill Details'
+          : DEFERRED_TOOL_DETAIL_TITLE,
     text: fullText,
   });
 
@@ -267,6 +308,7 @@ function valueFromNestedRecords(
 function formatToolCallHistoryItem(
   item: CodexTurnItem,
   deferredDetails?: Map<string, ThreadHistoryItemDetailDto>,
+  kind: 'toolCall' | 'agentToolCall' | 'skillToolCall' = 'toolCall',
 ): ThreadHistoryItemDto {
   const { action, result, input, output } = extractToolCallRecords(item);
   const nestedRecords = [item, action, result, input, output];
@@ -295,14 +337,18 @@ function formatToolCallHistoryItem(
   const summaryLine = serverName && toolName
     ? `${serverName}/${toolName}`
     : toolName ?? serverName ?? stringOrNull(item.text) ?? item.type;
+  const displaySummary =
+    kind === 'agentToolCall' && !/^agent\b/i.test(summaryLine)
+      ? `Agent: ${summaryLine}`
+      : summaryLine;
 
-  const detailLines = [summaryLine];
+  const detailLines = [displaySummary];
   if (status) {
     detailLines.push(`Status: ${status}`);
   }
 
   const text = stringOrNull(item.text);
-  if (text && text !== summaryLine) {
+  if (text && text !== summaryLine && text !== displaySummary) {
     detailLines.push('', text);
   }
 
@@ -320,9 +366,9 @@ function formatToolCallHistoryItem(
 
   const historyItem: ThreadHistoryItemDto = {
     id: item.id,
-    kind: 'toolCall',
-    text: summaryLine,
-    previewText: summaryLine,
+    kind,
+    text: displaySummary,
+    previewText: kind === 'agentToolCall' ? 'Agent' : displaySummary,
     detailText: detailLines.join('\n'),
     status,
   };
@@ -334,7 +380,9 @@ function formatToolCallHistoryItem(
       (historyItem.detailText?.length ?? 0) > 240)
   ) {
     return deferToolCallHistoryItem(
-      historyItem as ThreadHistoryItemDto & { kind: 'toolCall' },
+      historyItem as ThreadHistoryItemDto & {
+        kind: 'toolCall' | 'agentToolCall' | 'skillToolCall';
+      },
       deferredDetails,
     );
   }
@@ -355,8 +403,12 @@ export function deferLargeHistoryItemDetails(
             deferredDetails,
           )
         : item.kind === 'toolCall'
+          || item.kind === 'agentToolCall'
+          || item.kind === 'skillToolCall'
           ? deferToolCallHistoryItem(
-              item as ThreadHistoryItemDto & { kind: 'toolCall' },
+              item as ThreadHistoryItemDto & {
+                kind: 'toolCall' | 'agentToolCall' | 'skillToolCall';
+              },
               deferredDetails,
             )
         : item,
@@ -366,12 +418,42 @@ export function deferLargeHistoryItemDetails(
 
 export function shouldPersistLiveHistoryItem(item: ThreadHistoryItemDto) {
   return (
-    item.kind === 'agentMessage' ||
     item.kind === 'commandExecution' ||
     item.kind === 'fileChange' ||
+    item.kind === 'fileRead' ||
     item.kind === 'hook' ||
+    item.kind === 'agentToolCall' ||
+    item.kind === 'skillToolCall' ||
     item.kind === 'toolCall' ||
     item.kind === 'webSearch'
+  );
+}
+
+export function shouldPersistFinalHistoryItem(item: ThreadHistoryItemDto) {
+  return item.kind === 'agentMessage' || shouldPersistLiveHistoryItem(item);
+}
+
+export function shouldPersistRuntimeFinalHistoryItem(
+  item: ThreadHistoryItemDto,
+  allItems: ThreadHistoryItemDto[],
+) {
+  if (item.kind === 'agentMessage' && isTransientAgentHistoryItem(item)) {
+    return false;
+  }
+
+  return shouldPersistFinalHistoryItem(item);
+}
+
+function visibleRuntimeTurnItems(items: ThreadHistoryItemDto[]) {
+  const hasFinalAgentMessage = items.some(
+    (item) => item.kind === 'agentMessage' && !isTransientAgentHistoryItem(item),
+  );
+  if (!hasFinalAgentMessage) {
+    return items;
+  }
+
+  return items.filter(
+    (item) => !(item.kind === 'agentMessage' && isTransientAgentHistoryItem(item)),
   );
 }
 
@@ -562,6 +644,24 @@ function copyPersistedSequence(
   return item.sequence === sequence ? item : { ...item, sequence };
 }
 
+function shouldAppendPersistedMissingItem(
+  turn: ThreadTurnDto,
+  item: ThreadHistoryItemDto,
+) {
+  if (item.kind !== 'agentMessage') {
+    return true;
+  }
+
+  // Older builds persisted streaming assistant drafts. Once the provider
+  // transcript has final assistant text, do not resurrect those draft rows.
+  const isCrossTurnProjection = Boolean(item.sourceTurnId && item.sourceTurnId !== turn.id);
+  return !(
+    turn.status === 'completed' &&
+    turn.items.some((turnItem) => turnItem.kind === 'agentMessage') &&
+    !isCrossTurnProjection
+  );
+}
+
 export function mergePersistedHistoryItemsIntoTurns(
   turns: ThreadTurnDto[],
   persistedItemsByTurnId: Map<string, ThreadHistoryItemDto[]>,
@@ -596,7 +696,12 @@ export function mergePersistedHistoryItemsIntoTurns(
         changed = true;
       }
 
-      if (persistedItem.kind === 'commandExecution' || persistedItem.kind === 'toolCall') {
+      if (
+        persistedItem.kind === 'commandExecution' ||
+        persistedItem.kind === 'toolCall' ||
+        persistedItem.kind === 'agentToolCall' ||
+        persistedItem.kind === 'skillToolCall'
+      ) {
         const existingText = item.detailText?.trim() || item.text.trim();
         const persistedText = persistedItem.detailText?.trim() || persistedItem.text.trim();
         if (persistedText.length > existingText.length) {
@@ -607,7 +712,9 @@ export function mergePersistedHistoryItemsIntoTurns(
                 deferredDetails,
               )
             : deferToolCallHistoryItem(
-                persistedItem as ThreadHistoryItemDto & { kind: 'toolCall' },
+                persistedItem as ThreadHistoryItemDto & {
+                  kind: 'toolCall' | 'agentToolCall' | 'skillToolCall';
+                },
                 deferredDetails,
               );
         }
@@ -619,6 +726,7 @@ export function mergePersistedHistoryItemsIntoTurns(
     const existingItemIds = new Set(nextItems.map((item) => item.id));
     const missingItems = [...persistedItemsById.values()]
       .filter((item) => !existingItemIds.has(item.id))
+      .filter((item) => shouldAppendPersistedMissingItem(turn, item))
       .map((item) =>
         item.kind === 'commandExecution'
           ? deferCommandHistoryItem(
@@ -626,8 +734,12 @@ export function mergePersistedHistoryItemsIntoTurns(
               deferredDetails,
             )
           : item.kind === 'toolCall'
+            || item.kind === 'agentToolCall'
+            || item.kind === 'skillToolCall'
             ? deferToolCallHistoryItem(
-                item as ThreadHistoryItemDto & { kind: 'toolCall' },
+                item as ThreadHistoryItemDto & {
+                  kind: 'toolCall' | 'agentToolCall' | 'skillToolCall';
+                },
                 deferredDetails,
               )
             : item,
@@ -958,7 +1070,9 @@ function extractFileChangeEntries(item: CodexTurnItem) {
           'old_path',
         ]),
       ),
-    ])[0] ?? null;
+    ])
+      .map(projectRelativePathLabel)
+      .find((entry): entry is string => Boolean(entry)) ?? null;
 
     const explicitAdditions =
       numberOrNull(
@@ -997,7 +1111,8 @@ function extractFileChangeEntries(item: CodexTurnItem) {
         : null;
     const additions = explicitAdditions || diffStats?.additions || 0;
     const deletions = explicitDeletions || diffStats?.deletions || 0;
-    const normalizedPath = path ?? (diffText ? extractPathFromDiffText(diffText) : null);
+    const normalizedPath =
+      path ?? (diffText ? projectRelativePathLabel(extractPathFromDiffText(diffText)) : null);
 
     if (!normalizedPath && additions === 0 && deletions === 0) {
       return null;
@@ -1175,8 +1290,9 @@ function itemToHistoryItem(
       return formatFileChangeHistoryItem(item);
     case 'mcpToolCall':
     case 'dynamicToolCall':
-    case 'collabAgentToolCall':
       return formatToolCallHistoryItem(item, deferredDetails);
+    case 'collabAgentToolCall':
+      return formatToolCallHistoryItem(item, deferredDetails, 'agentToolCall');
     default:
       return {
         id: item.id,
@@ -1195,6 +1311,8 @@ export function liveCodexItemToHistoryItem(
   if (
     historyItem.kind !== 'commandExecution' &&
     historyItem.kind !== 'toolCall' &&
+    historyItem.kind !== 'agentToolCall' &&
+    historyItem.kind !== 'skillToolCall' &&
     historyItem.kind !== 'fileChange' &&
     historyItem.kind !== 'webSearch'
   ) {
@@ -1218,7 +1336,7 @@ export function agentTurnToThreadTurnDto(
     startedAt: turn.startedAt ?? parseUuidV7Timestamp(turn.providerTurnId),
     status: turn.status,
     error: turn.error?.message ?? null,
-    items: turn.items,
+    items: visibleRuntimeTurnItems(turn.items),
   };
 
   return deferredDetails ? deferLargeHistoryItemDetails(baseTurn, deferredDetails) : baseTurn;

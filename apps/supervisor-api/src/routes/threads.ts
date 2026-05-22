@@ -27,11 +27,12 @@ import {
   UpdateThreadInput,
 } from '../../../../packages/shared/src/index';
 import { HttpError } from '../app';
+import { agentBackendIdSchema } from '../provider-schemas';
 
 const createThreadSchema = z.object({
   workspaceId: z.string().uuid(),
   title: z.string().optional(),
-  provider: z.enum(['codex', 'claude']).optional(),
+  provider: agentBackendIdSchema.optional(),
   model: z.string().min(1),
   approvalMode: z.enum(['yolo', 'guarded']).default('yolo')
 });
