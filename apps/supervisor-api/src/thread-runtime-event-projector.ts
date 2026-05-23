@@ -20,10 +20,13 @@ import { ThreadLiveStateStore } from './thread-live-state-store';
 import {
   buildThreadContextUsageFromPayload,
   buildThreadTurnPricingSnapshot,
+  mergeThreadContextUsageFromPayload,
+  shouldResetThreadContextUsageForTurnStart,
   stringifyStoredThreadTurnTokenUsageState,
   ThreadContextTokenUsagePayload,
   ThreadUsageAccounting,
 } from './thread-usage-accounting';
+import { deferHistoryItemDetailForTransport } from './thread-history-items';
 
 type ThreadRecord = NonNullable<ReturnType<typeof getThreadRecordById>>;
 
@@ -83,6 +86,7 @@ export interface ThreadRuntimeEventProjectorCallbacks {
     usage: ReturnType<typeof buildThreadContextUsageFromPayload>,
     emitEvent?: boolean,
   ): void;
+  getThreadContextUsage(localThreadId: string): ReturnType<typeof buildThreadContextUsageFromPayload>;
   toThreadGoalDtoFromAgentGoal(goal: Extract<AgentRuntimeEvent, { type: 'goal.updated' }>['goal']): ThreadGoalDto;
   toThreadGoalDtoFromRecord(record: unknown): ThreadGoalDto;
 }
@@ -191,7 +195,8 @@ export class ThreadRuntimeEventProjector {
           ? (event.usage as ThreadContextTokenUsagePayload)
           : null;
 
-        const usage = buildThreadContextUsageFromPayload(
+        const usage = mergeThreadContextUsageFromPayload(
+          callbacks.getThreadContextUsage(record.id),
           tokenUsage,
           record.model,
         );
@@ -242,7 +247,9 @@ export class ThreadRuntimeEventProjector {
         }
         liveState.setLivePlan(record.id, null);
         liveState.setLiveItems(record.id, null);
-        callbacks.resetThreadContextUsage(record.id, true);
+        if (shouldResetThreadContextUsageForTurnStart(callbacks.getThreadContextUsage(record.id))) {
+          callbacks.resetThreadContextUsage(record.id, true);
+        }
         const pricingSnapshot = buildThreadTurnPricingSnapshot(
           record.model,
           callbacks.fastModeForProvider(record.provider, record.fastMode),
@@ -287,8 +294,9 @@ export class ThreadRuntimeEventProjector {
           ...event.item,
           sequence: liveState.recordTurnItemOrder(record.id, turnId, event.item.id),
         };
+        const transportLiveItem = deferHistoryItemDetailForTransport(liveItem);
         callbacks.persistLiveHistoryItem(record.id, turnId, liveItem);
-        liveState.upsertLiveItem(record.id, turnId, liveItem);
+        liveState.upsertLiveItem(record.id, turnId, transportLiveItem);
         callbacks.emitThreadEvent(
           event.type === 'hook.started'
             ? 'thread.item.started'
@@ -296,7 +304,7 @@ export class ThreadRuntimeEventProjector {
           record.id,
           {
             turnId,
-            item: liveItem,
+            item: transportLiveItem,
           },
         );
         return;
@@ -323,8 +331,9 @@ export class ThreadRuntimeEventProjector {
           ...event.item,
           sequence,
         };
+        const transportLiveItem = deferHistoryItemDetailForTransport(orderedLiveItem);
         callbacks.persistLiveHistoryItem(record.id, displayTurnId, orderedLiveItem);
-        liveState.upsertLiveItem(record.id, displayTurnId, orderedLiveItem);
+        liveState.upsertLiveItem(record.id, displayTurnId, transportLiveItem);
         callbacks.emitThreadEvent(
           event.type === 'item.started'
             ? 'thread.item.started'
@@ -332,7 +341,7 @@ export class ThreadRuntimeEventProjector {
           record.id,
           {
             turnId: displayTurnId,
-            item: orderedLiveItem,
+            item: transportLiveItem,
           },
         );
         return;

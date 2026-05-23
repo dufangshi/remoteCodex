@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 export const hosts = sqliteTable('hosts', {
   id: text('id').primaryKey(),
@@ -174,4 +174,157 @@ export const policies = sqliteTable('policies', {
   valueJson: text('value_json').notNull(),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull()
+});
+
+export const controlUsers = sqliteTable(
+  'control_users',
+  {
+    id: text('id').primaryKey(),
+    authProvider: text('auth_provider').notNull(),
+    authSubject: text('auth_subject').notNull(),
+    email: text('email').notNull(),
+    displayName: text('display_name'),
+    status: text('status').notNull().default('active'),
+    plan: text('plan').notNull().default('developer'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+    lastSeenAt: text('last_seen_at'),
+  },
+  (table) => ({
+    authSubjectUnique: uniqueIndex('control_users_auth_subject_idx').on(
+      table.authProvider,
+      table.authSubject,
+    ),
+  }),
+);
+
+export const controlSandboxes = sqliteTable('control_sandboxes', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().unique(),
+  state: text('state').notNull(),
+  image: text('image').notNull(),
+  region: text('region').notNull(),
+  k8sNamespace: text('k8s_namespace'),
+  k8sPodName: text('k8s_pod_name'),
+  routerBaseUrl: text('router_base_url'),
+  workerServiceName: text('worker_service_name'),
+  s3Prefix: text('s3_prefix').notNull(),
+  gatewayKeyId: text('gateway_key_id'),
+  lastStartedAt: text('last_started_at'),
+  lastSeenAt: text('last_seen_at'),
+  idleTimeoutAt: text('idle_timeout_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const controlWorkspaces = sqliteTable(
+  'control_workspaces',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull(),
+    sandboxId: text('sandbox_id').notNull(),
+    name: text('name').notNull(),
+    slug: text('slug').notNull(),
+    path: text('path').notNull(),
+    sourceType: text('source_type').notNull(),
+    gitUrl: text('git_url'),
+    defaultBranch: text('default_branch'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => ({
+    sandboxSlugUnique: uniqueIndex('control_workspaces_sandbox_slug_idx').on(
+      table.sandboxId,
+      table.slug,
+    ),
+  }),
+);
+
+export const controlSessions = sqliteTable('control_sessions', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  sandboxId: text('sandbox_id').notNull(),
+  workspaceId: text('workspace_id').notNull(),
+  provider: text('provider').notNull(),
+  workerSessionId: text('worker_session_id'),
+  title: text('title').notNull(),
+  status: text('status').notNull(),
+  lastActivityAt: text('last_activity_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const controlGatewayUsers = sqliteTable(
+  'control_gateway_users',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull(),
+    provider: text('provider').notNull(),
+    externalUserId: text('external_user_id').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => ({
+    userProviderUnique: uniqueIndex('control_gateway_users_user_provider_idx').on(
+      table.userId,
+      table.provider,
+    ),
+    providerExternalUnique: uniqueIndex('control_gateway_users_provider_external_idx').on(
+      table.provider,
+      table.externalUserId,
+    ),
+  }),
+);
+
+export const controlGatewayKeys = sqliteTable(
+  'control_gateway_keys',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull(),
+    sandboxId: text('sandbox_id').notNull(),
+    provider: text('provider').notNull(),
+    externalKeyId: text('external_key_id').notNull(),
+    keyCiphertext: text('key_ciphertext'),
+    status: text('status').notNull(),
+    createdAt: text('created_at').notNull(),
+    rotatedAt: text('rotated_at'),
+    revokedAt: text('revoked_at'),
+  },
+  (table) => ({
+    sandboxProviderUnique: uniqueIndex('control_gateway_keys_sandbox_provider_idx').on(
+      table.sandboxId,
+      table.provider,
+    ),
+    providerExternalUnique: uniqueIndex('control_gateway_keys_provider_external_idx').on(
+      table.provider,
+      table.externalKeyId,
+    ),
+  }),
+);
+
+export const controlUsageEvents = sqliteTable('control_usage_events', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  sandboxId: text('sandbox_id').notNull(),
+  workspaceId: text('workspace_id'),
+  sessionId: text('session_id'),
+  gatewayKeyId: text('gateway_key_id'),
+  provider: text('provider').notNull(),
+  model: text('model').notNull(),
+  inputTokens: integer('input_tokens').notNull().default(0),
+  outputTokens: integer('output_tokens').notNull().default(0),
+  cachedTokens: integer('cached_tokens').notNull().default(0),
+  costUsd: real('cost_usd').notNull().default(0),
+  externalRequestId: text('external_request_id'),
+  occurredAt: text('occurred_at').notNull(),
+  importedAt: text('imported_at').notNull(),
+});
+
+export const controlAuditLogs = sqliteTable('control_audit_logs', {
+  id: text('id').primaryKey(),
+  userId: text('user_id'),
+  action: text('action').notNull(),
+  resourceType: text('resource_type').notNull(),
+  resourceId: text('resource_id'),
+  metadataJson: text('metadata_json').notNull(),
+  createdAt: text('created_at').notNull(),
 });

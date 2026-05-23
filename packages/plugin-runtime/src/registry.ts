@@ -35,6 +35,21 @@ export class PluginRegistry {
     this.enabled.set(plugin.manifest.id, plugin.enabledByDefault ?? true);
   }
 
+  unregisterImported(pluginId: string): PluginDto {
+    const existing = this.plugins.get(pluginId);
+    if (!existing) {
+      throw new Error(`Plugin is not registered: ${pluginId}`);
+    }
+    if (existing.source !== 'imported') {
+      throw new Error(`Built-in plugin cannot be uninstalled: ${pluginId}`);
+    }
+
+    const plugin = this.toDto(existing.manifest);
+    this.plugins.delete(pluginId);
+    this.enabled.delete(pluginId);
+    return plugin;
+  }
+
   list(): PluginDto[] {
     return [...this.plugins.values()].map((plugin) =>
       this.toDto(plugin.manifest),

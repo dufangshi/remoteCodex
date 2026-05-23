@@ -317,6 +317,7 @@ export interface ThreadRollbackInput {
 export interface TurnStartInput {
   threadId: string;
   prompt: string;
+  developerInstructions?: string | null;
   model?: string | null;
   effort?: ReasoningEffort | null;
   collaborationMode?: CollaborationModeKind | null;

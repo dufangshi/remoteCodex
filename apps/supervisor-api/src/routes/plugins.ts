@@ -19,12 +19,26 @@ const updatePluginSchema = z.object({
 const importPluginSchema = z.object({
   enabled: z.boolean().optional(),
   manifestJson: z.string().optional(),
+  manifestUrl: z.string().optional(),
   manifest: z.unknown().optional(),
-}).refine((value) => value.manifest !== undefined || value.manifestJson !== undefined, {
-  message: 'Plugin import requires manifest or manifestJson.',
-});
+}).refine(
+  (value) =>
+    value.manifest !== undefined ||
+    value.manifestJson !== undefined ||
+    value.manifestUrl !== undefined,
+  {
+    message: 'Plugin import requires manifest, manifestJson, or manifestUrl.',
+  },
+);
 
 export async function registerPluginRoutes(app: FastifyInstance) {
+  async function syncManagedPluginMcpConfig() {
+    await app.services.pluginService.syncManagedCodexMcpConfig({
+      codexHome: app.services.config.agentProviders.codex.home ?? null,
+      repoRoot: app.services.repoRoot,
+    });
+  }
+
   app.get('/api/plugins', async () => {
     return app.services.pluginService.listPlugins() satisfies PluginDto[];
   });
@@ -35,9 +49,12 @@ export async function registerPluginRoutes(app: FastifyInstance) {
       ...(parsed.enabled === undefined ? {} : { enabled: parsed.enabled }),
       ...(parsed.manifest === undefined ? {} : { manifest: parsed.manifest }),
       ...(parsed.manifestJson === undefined ? {} : { manifestJson: parsed.manifestJson }),
+      ...(parsed.manifestUrl === undefined ? {} : { manifestUrl: parsed.manifestUrl }),
     };
     try {
-      return app.services.pluginService.importPlugin(body) satisfies PluginDto;
+      const plugin = await app.services.pluginService.importPlugin(body);
+      await syncManagedPluginMcpConfig();
+      return plugin satisfies PluginDto;
     } catch (error) {
       if (error instanceof SyntaxError) {
         throw new HttpError(400, {
@@ -67,13 +84,44 @@ export async function registerPluginRoutes(app: FastifyInstance) {
   app.patch('/api/plugins/:pluginId', async (request) => {
     const { pluginId } = pluginParamsSchema.parse(request.params);
     const body = updatePluginSchema.parse(request.body) satisfies UpdatePluginInput;
+    let plugin: PluginDto;
     try {
-      return app.services.pluginService.setPluginEnabled(pluginId, body.enabled);
+      plugin = app.services.pluginService.setPluginEnabled(pluginId, body.enabled);
     } catch {
       throw new HttpError(404, {
         code: 'not_found',
         message: 'Plugin was not found.',
       });
     }
+    await syncManagedPluginMcpConfig();
+    return plugin;
+  });
+
+  app.delete('/api/plugins/:pluginId', async (request) => {
+    const { pluginId } = pluginParamsSchema.parse(request.params);
+    let plugin: PluginDto;
+    try {
+      plugin = app.services.pluginService.uninstallPlugin(pluginId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Plugin uninstall failed.';
+      if (message.startsWith('Plugin is not registered:')) {
+        throw new HttpError(404, {
+          code: 'not_found',
+          message: 'Plugin was not found.',
+        });
+      }
+      if (message.startsWith('Built-in plugin cannot be uninstalled:')) {
+        throw new HttpError(400, {
+          code: 'bad_request',
+          message,
+        });
+      }
+      throw new HttpError(400, {
+        code: 'bad_request',
+        message,
+      });
+    }
+    await syncManagedPluginMcpConfig();
+    return plugin;
   });
 }

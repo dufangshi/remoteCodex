@@ -14,6 +14,7 @@ import type {
   ThreadArtifactDto,
 } from '../../../../packages/shared/src/index';
 import {
+  deletePlugin,
   fetchPlugins,
   importPlugin,
   updatePlugin,
@@ -32,6 +33,7 @@ interface PluginContextValue {
   refresh: () => Promise<void>;
   importPluginManifest: (input: ImportPluginInput) => Promise<void>;
   setPluginEnabled: (pluginId: string, enabled: boolean) => Promise<void>;
+  uninstallPlugin: (pluginId: string) => Promise<void>;
   renderArtifact: (context: ArtifactRenderContext) => ReactNode | null;
   renderInlineCode: (context: InlineCodeRenderContext) => ReactNode | null;
   hasRendererForArtifact: (artifact: ThreadArtifactDto) => boolean;
@@ -100,6 +102,11 @@ export function PluginProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const uninstallPlugin = useCallback(async (pluginId: string) => {
+    const removed = await deletePlugin(pluginId);
+    setPlugins((current) => current.filter((plugin) => plugin.id !== removed.id));
+  }, []);
+
   const enabledModules = useMemo(() => {
     const enabledIds = new Set(
       plugins.filter((plugin) => plugin.enabled).map((plugin) => plugin.id),
@@ -161,6 +168,7 @@ export function PluginProvider({ children }: { children: ReactNode }) {
       refresh,
       importPluginManifest,
       setPluginEnabled,
+      uninstallPlugin,
       renderArtifact,
       renderInlineCode,
       hasRendererForArtifact,
@@ -175,6 +183,7 @@ export function PluginProvider({ children }: { children: ReactNode }) {
       renderArtifact,
       renderInlineCode,
       setPluginEnabled,
+      uninstallPlugin,
     ],
   );
 

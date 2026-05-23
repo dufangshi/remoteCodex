@@ -572,6 +572,110 @@ describe('supervisor api', () => {
     });
   });
 
+  it('returns worker readiness and metadata in worker mode', async () => {
+    await app.close();
+    app = buildTestApp(fakeCodexManager, {
+      env: {
+        REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+        REMOTE_CODEX_SANDBOX_ID: 'sbx_test',
+        REMOTE_CODEX_USER_ID: 'user_test',
+      },
+    });
+    await app.ready();
+
+    const ready = await app.inject({
+      method: 'GET',
+      url: '/readyz',
+    });
+    expect(ready.statusCode).toBe(200);
+    expect(ready.json()).toMatchObject({
+      status: 'ready',
+      worker: {
+        role: 'worker',
+        sandboxId: 'sbx_test',
+        userId: 'user_test',
+        workspaceRoot: tempDir,
+      },
+    });
+
+    const metadata = await app.inject({
+      method: 'GET',
+      url: '/api/worker/metadata',
+    });
+    expect(metadata.statusCode).toBe(200);
+    expect(metadata.json()).toMatchObject({
+      role: 'worker',
+      sandboxId: 'sbx_test',
+      userId: 'user_test',
+      managementRoutesEnabled: false,
+      agentRuntimeManagementEnabled: false,
+    });
+  });
+
+  it('requires the router token for worker API access when configured', async () => {
+    await app.close();
+    app = buildTestApp(fakeCodexManager, {
+      env: {
+        REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+        REMOTE_CODEX_WORKER_AUTH_TOKEN: 'router-secret',
+      },
+    });
+    await app.ready();
+
+    const health = await app.inject({
+      method: 'GET',
+      url: '/readyz',
+    });
+    expect(health.statusCode).toBe(200);
+
+    const unauthorized = await app.inject({
+      method: 'GET',
+      url: '/api/worker/metadata',
+    });
+    expect(unauthorized.statusCode).toBe(401);
+
+    const authorized = await app.inject({
+      method: 'GET',
+      url: '/api/worker/metadata',
+      headers: {
+        'x-remote-codex-worker-token': 'router-secret',
+      },
+    });
+    expect(authorized.statusCode).toBe(200);
+  });
+
+  it('writes gateway-backed provider config during worker startup', async () => {
+    await app.close();
+    const claudeHome = path.join(tempDir, 'claude-home');
+    const opencodeHome = path.join(tempDir, 'opencode-home');
+    const gatewayHome = path.join(tempDir, 'agent-home');
+    app = buildTestApp(fakeCodexManager, {
+      env: {
+        REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+        REMOTE_CODEX_LLM_GATEWAY_BASE_URL: 'https://llm-gateway.example.com',
+        REMOTE_CODEX_LLM_GATEWAY_TOKEN: 'sandbox-gateway-token',
+        CLAUDE_HOME: claudeHome,
+        OPENCODE_HOME: opencodeHome,
+        HOME: gatewayHome,
+      },
+    });
+    await app.ready();
+
+    await expect(fs.readFile(path.join(codexHome, 'config.toml'), 'utf8')).resolves.toContain(
+      'base_url = "https://llm-gateway.example.com/v1"',
+    );
+    await expect(fs.readFile(path.join(codexHome, 'config.toml'), 'utf8')).resolves.toContain(
+      'env_key = "REMOTE_CODEX_LLM_GATEWAY_TOKEN"',
+    );
+    await expect(fs.readFile(path.join(claudeHome, 'settings.json'), 'utf8')).resolves.toContain(
+      '"ANTHROPIC_BASE_URL": "https://llm-gateway.example.com/anthropic"',
+    );
+    await expect(fs.readFile(path.join(opencodeHome, 'opencode.json'), 'utf8')).resolves.toContain(
+      '"baseURL": "https://llm-gateway.example.com/v1"',
+    );
+    expect(process.env.REMOTE_CODEX_LLM_GATEWAY_TOKEN).toBe('sandbox-gateway-token');
+  });
+
   it('restarts the selected agent runtime on demand', async () => {
     const response = await app.inject({
       method: 'POST',
@@ -616,6 +720,63 @@ describe('supervisor api', () => {
       message: 'Build and restart launched.',
     });
     expect(launchBuildRestartCalls).toBe(1);
+  });
+
+  it('disables host management operations in worker mode', async () => {
+    await app.close();
+    const failingRuntime = new FakeInstallRuntime();
+    app = buildTestApp(fakeCodexManager, {
+      claudeRuntime: failingRuntime,
+      env: {
+        REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+      },
+    });
+    await app.ready();
+
+    const serviceRestart = await app.inject({
+      method: 'POST',
+      url: '/api/service/build-restart',
+    });
+    expect(serviceRestart.statusCode).toBe(403);
+
+    const providerRestart = await app.inject({
+      method: 'POST',
+      url: '/api/agent-runtimes/codex/build-restart',
+    });
+    expect(providerRestart.statusCode).toBe(403);
+
+    const install = await app.inject({
+      method: 'POST',
+      url: '/api/agent-runtimes/claude/install',
+      payload: {
+        action: 'install',
+      },
+    });
+    expect(install.statusCode).toBe(403);
+
+    const workspaceSettings = await app.inject({
+      method: 'PATCH',
+      url: '/api/config/workspace-settings',
+      payload: {
+        devHome: tempDir,
+      },
+    });
+    expect(workspaceSettings.statusCode).toBe(403);
+
+    const providerConfigWrite = await app.inject({
+      method: 'PATCH',
+      url: '/api/config/providers/codex/files/config.toml',
+      payload: {
+        content: 'model = "gpt-5.4"\n',
+      },
+    });
+    expect(providerConfigWrite.statusCode).toBe(403);
+
+    const providerConfigRead = await app.inject({
+      method: 'GET',
+      url: '/api/config/providers/codex/files/config.toml',
+    });
+    expect(providerConfigRead.statusCode).toBe(403);
   });
 
   it('reads editable provider host files from CODEX_HOME', async () => {
@@ -758,9 +919,9 @@ describe('supervisor api', () => {
         state: 'ready',
       },
     });
-    await expect(fs.readFile(path.join(codexHome, 'config.toml'), 'utf8')).resolves.toBe(
-      'model = "gpt-5.4"\n',
-    );
+    const restoredConfig = await fs.readFile(path.join(codexHome, 'config.toml'), 'utf8');
+    expect(restoredConfig).toContain('model = "gpt-5.4"');
+    expect(restoredConfig).toContain('[mcp_servers.remote_codex_plugins]');
     await expect(fs.readFile(path.join(codexHome, 'auth.json'), 'utf8')).resolves.toBe(
       '{"token":"old"}\n',
     );
@@ -818,7 +979,7 @@ describe('supervisor api', () => {
     });
   });
 
-  it('lists, imports, toggles, and persists plugin settings', async () => {
+  it('lists, imports, toggles, uninstalls, and persists plugin settings', async () => {
     const initialResponse = await app.inject({
       method: 'GET',
       url: '/api/plugins',
@@ -870,6 +1031,42 @@ describe('supervisor api', () => {
       source: 'imported',
     });
 
+    const uninstallResponse = await app.inject({
+      method: 'DELETE',
+      url: `/api/plugins/${encodeURIComponent(importedManifest.id)}`,
+    });
+
+    expect(uninstallResponse.statusCode).toBe(200);
+    expect(uninstallResponse.json()).toMatchObject({
+      id: importedManifest.id,
+      source: 'imported',
+    });
+
+    const afterUninstallResponse = await app.inject({
+      method: 'GET',
+      url: '/api/plugins',
+    });
+
+    expect(afterUninstallResponse.statusCode).toBe(200);
+    expect(afterUninstallResponse.json()).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: importedManifest.id,
+        }),
+      ]),
+    );
+
+    const reimportResponse = await app.inject({
+      method: 'POST',
+      url: '/api/plugins/import',
+      payload: {
+        manifestJson: JSON.stringify(importedManifest),
+        enabled: false,
+      },
+    });
+
+    expect(reimportResponse.statusCode).toBe(200);
+
     const toggleResponse = await app.inject({
       method: 'PATCH',
       url: '/api/plugins/remote-codex.xyz-viewer',
@@ -908,6 +1105,64 @@ describe('supervisor api', () => {
         }),
       ]),
     );
+  });
+
+  it('rejects uninstalling built-in plugins', async () => {
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/api/plugins/remote-codex.xyz-viewer',
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      code: 'bad_request',
+      message: 'Built-in plugin cannot be uninstalled: remote-codex.xyz-viewer',
+    });
+  });
+
+  it('imports plugin manifests from an https URL', async () => {
+    const importedManifest = {
+      id: 'example.remote-manifest',
+      name: 'Remote Manifest',
+      version: '0.1.0',
+      description: 'Manifest imported from URL.',
+      remoteCodex: '^0.11.0',
+      capabilities: {
+        artifactTypes: [
+          {
+            type: 'remote.manifest',
+            title: 'Remote Manifest',
+          },
+        ],
+        timelineRenderers: ['remote.manifest'],
+        threadPanels: [],
+      },
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(importedManifest)));
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(fetchMock as typeof fetch);
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/plugins/import',
+        payload: {
+          manifestUrl: 'https://github.com/example/remote-plugin',
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        id: importedManifest.id,
+        source: 'imported',
+        enabled: true,
+      });
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://raw.githubusercontent.com/example/remote-plugin/main/plugin.json',
+      );
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 
   it('rejects imported manifests that replace built-in plugin ids', async () => {
@@ -3274,6 +3529,114 @@ describe('supervisor api', () => {
     });
   });
 
+  it('keeps context remaining visible while a Codex turn is running with partial usage updates', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'unknown-model',
+        approvalMode: 'yolo',
+        title: 'Running Context Thread',
+      },
+    });
+
+    const createdThread = createResponse.json();
+
+    fakeCodexManager.emit('notification', {
+      method: 'thread/tokenUsage/updated',
+      params: {
+        threadId: createdThread.providerSessionId,
+        turnId: 'turn-context-baseline',
+        tokenUsage: {
+          total: {
+            totalTokens: 165200,
+            inputTokens: 140000,
+            cachedInputTokens: 0,
+            outputTokens: 25200,
+            reasoningOutputTokens: 0,
+          },
+          last: {
+            totalTokens: 165200,
+            inputTokens: 140000,
+            cachedInputTokens: 0,
+            outputTokens: 25200,
+            reasoningOutputTokens: 0,
+          },
+          modelContextWindow: 258400,
+        },
+      },
+    });
+
+    const baselineDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+    expect(baselineDetailResponse.json().thread.contextUsage).toMatchObject({
+      availability: 'available',
+      remainingPercent: 38,
+      tokensInContextWindow: 165200,
+      modelContextWindow: 258400,
+    });
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Keep working while context is visible.',
+      },
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    expect(promptResponse.json().contextUsage).toMatchObject({
+      availability: 'available',
+      remainingPercent: 38,
+      tokensInContextWindow: 165200,
+      modelContextWindow: 258400,
+    });
+
+    const runningTurnId = promptResponse.json().activeTurnId;
+    expect(typeof runningTurnId).toBe('string');
+
+    fakeCodexManager.emit('notification', {
+      method: 'thread/tokenUsage/updated',
+      params: {
+        threadId: createdThread.providerSessionId,
+        turnId: runningTurnId,
+        tokenUsage: {
+          total: {
+            totalTokens: 166000,
+            inputTokens: 140800,
+            cachedInputTokens: 0,
+            outputTokens: 25200,
+            reasoningOutputTokens: 0,
+          },
+        },
+      },
+    });
+
+    const runningDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+
+    expect(runningDetailResponse.json().thread.contextUsage).toMatchObject({
+      availability: 'available',
+      remainingPercent: 38,
+      tokensInContextWindow: 165200,
+      modelContextWindow: 258400,
+    });
+  });
+
   it('stores prompt attachments in the workspace temp directory and rewrites the prompt path', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',
@@ -4166,6 +4529,7 @@ describe('supervisor api', () => {
     expect(promptResponse.statusCode).toBe(200);
     expect(fakeCodexManager.startTurnCalls.at(-1)).toMatchObject({
       prompt: 'fast turn',
+      developerInstructions: expect.stringContaining('remote_codex_render_molecule'),
       serviceTier: 'fast',
     });
 
@@ -7637,19 +8001,29 @@ describe('supervisor api', () => {
       status: 'completed',
       items: expect.arrayContaining([
         expect.objectContaining({
+          id: 'search-item-1',
           kind: 'webSearch',
           text: 'remote codex release notes',
           previewText: 'remote codex release notes',
+          detailText: null,
+          hasDeferredDetail: true,
           status: 'completed'
         })
       ])
     });
-    expect(
-      detailResponse
-        .json()
-        .turns.at(-1)
-        .items.find((item: any) => item.kind === 'webSearch').detailText
-    ).toContain('https://example.com/releases');
+
+    const searchDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}/items/search-item-1/detail`
+    });
+
+    expect(searchDetailResponse.statusCode).toBe(200);
+    expect(searchDetailResponse.json()).toMatchObject({
+      id: 'search-item-1',
+      kind: 'webSearch',
+      title: 'Web Search Details',
+    });
+    expect(searchDetailResponse.json().text).toContain('https://example.com/releases');
   });
 
   it('maps file change turn items into compact stats and detail lines', async () => {
@@ -7737,16 +8111,31 @@ describe('supervisor api', () => {
       .items.find((item: any) => item.kind === 'fileChange');
 
     expect(fileChangeItem).toMatchObject({
+      id: 'file-change-1',
       kind: 'fileChange',
       previewText: '3 files changed · +9 · -4',
       text: 'src/app.ts, +2 more',
+      detailText: null,
+      hasDeferredDetail: true,
       status: 'completed',
       changedFiles: 3,
       addedLines: 9,
       removedLines: 4
     });
-    expect(fileChangeItem.detailText).toContain('src/app.ts (+2 -1)');
-    expect(fileChangeItem.detailText).toContain('src/ui.tsx (+3)');
+
+    const fileChangeDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}/items/file-change-1/detail`
+    });
+
+    expect(fileChangeDetailResponse.statusCode).toBe(200);
+    expect(fileChangeDetailResponse.json()).toMatchObject({
+      id: 'file-change-1',
+      kind: 'fileChange',
+      title: 'File Change Details',
+    });
+    expect(fileChangeDetailResponse.json().text).toContain('src/app.ts (+2 -1)');
+    expect(fileChangeDetailResponse.json().text).toContain('src/ui.tsx (+3)');
   });
 
   it('maps context compaction turn items into dedicated history entries', async () => {

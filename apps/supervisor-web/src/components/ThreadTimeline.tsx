@@ -112,6 +112,18 @@ interface ContextCompactionHistoryItem extends ThreadHistoryItemDto {
   kind: 'contextCompaction';
 }
 
+type DeferredTextHistoryItem = ThreadHistoryItemDto & {
+  kind:
+    | 'commandExecution'
+    | 'toolCall'
+    | 'agentToolCall'
+    | 'skillToolCall'
+    | 'webSearch'
+    | 'fileRead'
+    | 'fileChange'
+    | 'hook';
+};
+
 interface AgentMessageHistoryItemWithReasoning extends ThreadHistoryItemDto {
   kind: 'agentMessage';
   reasoningItems?: Array<ThreadHistoryItemDto & { kind: 'reasoning' }>;
@@ -2969,7 +2981,7 @@ const SearchGroupItem = memo(function SearchGroupItem({
   items: SearchHistoryItem[];
   expanded: boolean;
   onToggleExpanded: () => void;
-  onOpen: (title: string, text: string) => void;
+  onOpen: (item: SearchHistoryItem, title: string) => void;
 }) {
   const countLabel = items.length === 1 ? '1 search' : `${items.length} searches`;
 
@@ -3014,14 +3026,13 @@ const SearchGroupItem = memo(function SearchGroupItem({
               {items.map((item, index) => {
                 const previewText = item.previewText?.trim() || item.text || 'Web search';
                 const summary = summarizeInlinePreviewText(previewText);
-                const detailText = item.detailText?.trim() || item.text || 'Web search';
 
                 return (
                   <button
                     key={item.id}
                     type="button"
                     aria-label={`Open grouped web search ${index + 1}`}
-                    onClick={() => onOpen(`Web Search ${index + 1}`, detailText)}
+                    onClick={() => onOpen(item, `Web Search ${index + 1}`)}
                     className="timeline-detail-row block w-full rounded-xl border px-3 py-2 text-left transition"
                   >
                     <div className="flex flex-wrap items-center gap-2">
@@ -3062,7 +3073,7 @@ const FileReadGroupItem = memo(function FileReadGroupItem({
   items: FileReadHistoryItem[];
   expanded: boolean;
   onToggleExpanded: () => void;
-  onOpen: (title: string, text: string) => void;
+  onOpen: (item: FileReadHistoryItem, title: string) => void;
 }) {
   const countLabel = items.length === 1 ? '1 file read' : `${items.length} file reads`;
 
@@ -3107,14 +3118,13 @@ const FileReadGroupItem = memo(function FileReadGroupItem({
               {items.map((item, index) => {
                 const previewText = item.previewText?.trim() || item.text || 'File read';
                 const summary = summarizeInlinePreviewText(previewText);
-                const detailText = item.detailText?.trim() || item.text || 'File read';
 
                 return (
                   <button
                     key={item.id}
                     type="button"
                     aria-label={`Open grouped file read ${index + 1}`}
-                    onClick={() => onOpen(`File Read ${index + 1}`, detailText)}
+                    onClick={() => onOpen(item, `File Read ${index + 1}`)}
                     className="timeline-detail-row block w-full rounded-xl border px-3 py-2 text-left transition"
                   >
                     <div className="flex flex-wrap items-center gap-2">
@@ -3237,10 +3247,9 @@ const WebSearchItem = memo(function WebSearchItem({
   onOpen,
 }: {
   item: ThreadHistoryItemDto & { kind: 'webSearch' };
-  onOpen: (title: string, text: string) => void;
+  onOpen: (item: ThreadHistoryItemDto & { kind: 'webSearch' }, title: string) => void;
 }) {
   const previewText = item.previewText?.trim() || item.text || 'Web search';
-  const detailText = item.detailText?.trim() || item.text || 'Web search';
   const summary = summarizeInlinePreviewText(previewText);
 
   return (
@@ -3265,7 +3274,7 @@ const WebSearchItem = memo(function WebSearchItem({
             type="button"
             aria-label="Expand web search"
             title="Expand web search"
-            onClick={() => onOpen('Web Search Details', detailText)}
+            onClick={() => onOpen(item, 'Web Search Details')}
             className={`absolute right-0 top-0 inline-flex h-5 w-5 items-center justify-center rounded-bl-[0.7rem] rounded-tr-[0.9rem] border shadow-sm shadow-stone-950/25 transition sm:right-2 sm:top-2 sm:h-7 sm:w-7 sm:rounded-full ${overlayBadgeClassName('action')} hover:bg-stone-800`}
           >
             <span className="scale-[0.72] sm:scale-100">
@@ -3278,7 +3287,7 @@ const WebSearchItem = memo(function WebSearchItem({
           <button
             type="button"
             aria-label="Open full web search"
-            onClick={() => onOpen('Web Search Details', detailText)}
+            onClick={() => onOpen(item, 'Web Search Details')}
             className="block w-full text-left"
           >
             <div className="timeline-mobile-dense-line flex min-w-0 items-center gap-2 text-sm leading-6">
@@ -3303,10 +3312,9 @@ const FileReadItem = memo(function FileReadItem({
   onOpen,
 }: {
   item: ThreadHistoryItemDto & { kind: 'fileRead' };
-  onOpen: (title: string, text: string) => void;
+  onOpen: (item: ThreadHistoryItemDto & { kind: 'fileRead' }, title: string) => void;
 }) {
   const previewText = item.previewText?.trim() || item.text || 'File read';
-  const detailText = item.detailText?.trim() || item.text || 'File read';
   const summary = summarizeInlinePreviewText(previewText);
 
   return (
@@ -3331,7 +3339,7 @@ const FileReadItem = memo(function FileReadItem({
             type="button"
             aria-label="Expand file read"
             title="Expand file read"
-            onClick={() => onOpen('File Read Details', detailText)}
+            onClick={() => onOpen(item, 'File Read Details')}
             className={`absolute right-0 top-0 inline-flex h-5 w-5 items-center justify-center rounded-bl-[0.7rem] rounded-tr-[0.9rem] border shadow-sm shadow-stone-950/25 transition sm:right-2 sm:top-2 sm:h-7 sm:w-7 sm:rounded-full ${overlayBadgeClassName('action')} hover:bg-stone-800`}
           >
             <span className="scale-[0.72] sm:scale-100">
@@ -3341,7 +3349,7 @@ const FileReadItem = memo(function FileReadItem({
           <button
             type="button"
             aria-label="Open full file read"
-            onClick={() => onOpen('File Read Details', detailText)}
+            onClick={() => onOpen(item, 'File Read Details')}
             className="block w-full pr-8 text-left sm:pr-10"
           >
             <div className="timeline-mobile-dense-line flex min-w-0 items-center gap-2 text-sm leading-6">
@@ -3436,7 +3444,7 @@ const FileChangeItem = memo(function FileChangeItem({
   onOpen,
 }: {
   item: ThreadHistoryItemDto & { kind: 'fileChange' };
-  onOpen: (title: string, text: string) => void;
+  onOpen: (item: ThreadHistoryItemDto & { kind: 'fileChange' }, title: string) => void;
 }) {
   const pathSummary =
     item.previewText?.trim() && item.text.trim() !== item.previewText.trim()
@@ -3448,7 +3456,8 @@ const FileChangeItem = memo(function FileChangeItem({
     48,
   );
   const summarySegments = fileChangeSummarySegments(item);
-  const ContainerTag = detailText ? 'button' : 'div';
+  const hasDetail = Boolean(detailText || item.hasDeferredDetail);
+  const ContainerTag = hasDetail ? 'button' : 'div';
 
   return (
     <div
@@ -3472,11 +3481,17 @@ const FileChangeItem = memo(function FileChangeItem({
             ? {
                 type: 'button' as const,
                 'aria-label': 'Open file change details',
-                onClick: () => onOpen('File Change Details', detailText),
+                onClick: () => onOpen(item, 'File Change Details'),
               }
+            : item.hasDeferredDetail
+              ? {
+                  type: 'button' as const,
+                  'aria-label': 'Open file change details',
+                  onClick: () => onOpen(item, 'File Change Details'),
+                }
             : {})}
           className={`timeline-item-inner timeline-mobile-dense-inner timeline-mobile-bubble-content min-w-0 flex-1 rounded-[0.9rem] border px-2.5 py-2 text-left sm:rounded-xl sm:px-3 ${
-            detailText ? 'transition hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)]' : ''
+            hasDetail ? 'transition hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)]' : ''
           }`}
         >
           <div className="timeline-mobile-file-line flex min-w-0 items-center gap-2">
@@ -3520,7 +3535,7 @@ const FileChangeGroupItem = memo(function FileChangeGroupItem({
   items: FileChangeHistoryItem[];
   expanded: boolean;
   onToggleExpanded: () => void;
-  onOpen: (title: string, text: string) => void;
+  onOpen: (item: FileChangeHistoryItem, title: string) => void;
 }) {
   const changedFiles = items.reduce(
     (sum, item) => sum + (item.changedFiles ?? 0),
@@ -3585,7 +3600,6 @@ const FileChangeGroupItem = memo(function FileChangeGroupItem({
           {expanded && (
             <div className="timeline-mobile-section-list mt-3 space-y-0 border-t border-lime-300/12 pt-3 sm:space-y-2">
               {items.map((item, index) => {
-                const detailText = item.detailText?.trim() || item.previewText?.trim() || item.text;
                 const pathSummary =
                   item.previewText?.trim() && item.text.trim() !== item.previewText.trim()
                     ? item.text.trim()
@@ -3595,7 +3609,7 @@ const FileChangeGroupItem = memo(function FileChangeGroupItem({
                     key={item.id}
                     type="button"
                     aria-label={`Open grouped file change ${index + 1}`}
-                    onClick={() => onOpen(`File Change ${index + 1}`, detailText)}
+                    onClick={() => onOpen(item, `File Change ${index + 1}`)}
                     className="timeline-detail-row block w-full rounded-xl border px-3 py-2 text-left transition"
                   >
                     <div className="flex min-w-0 items-center gap-2">
@@ -3723,8 +3737,10 @@ const ArtifactHistoryItem = memo(function ArtifactHistoryItem({
 
 const HookItem = memo(function HookItem({
   item,
+  onOpen,
 }: {
   item: ThreadHistoryItemDto & { kind: 'hook' };
+  onOpen: (item: ThreadHistoryItemDto & { kind: 'hook' }, title: string) => void;
 }) {
   const outputText =
     item.hookOutputEntries
@@ -3742,6 +3758,7 @@ const HookItem = memo(function HookItem({
   const summaryText = outputText || (fallbackText && fallbackText !== hookLabel ? fallbackText : hookLabel);
   const summary = summarizeInlinePreviewText(summaryText);
   const showGap = Boolean(outputText && summary.showGap);
+  const hasDetail = Boolean(item.detailText?.trim() || outputText || item.hasDeferredDetail);
 
   return (
     <div
@@ -3766,7 +3783,15 @@ const HookItem = memo(function HookItem({
           </span>
           {isRunningHistoryStatus(item.status) && <RunningDots />}
         </div>
-        <div className="timeline-item-inner timeline-mobile-dense-inner timeline-mobile-bubble-content relative min-w-0 w-full flex-1 rounded-[0.9rem] border px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2">
+        <button
+          type="button"
+          disabled={!hasDetail}
+          aria-label="Open hook details"
+          onClick={() => onOpen(item, 'Hook Details')}
+          className={`timeline-item-inner timeline-mobile-dense-inner timeline-mobile-bubble-content relative min-w-0 w-full flex-1 rounded-[0.9rem] border px-2.5 py-2.5 pt-6 text-left sm:rounded-xl sm:px-3 sm:py-2 ${
+            hasDetail ? 'transition hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)]' : ''
+          } disabled:cursor-default`}
+        >
           <div className="flex flex-wrap items-center justify-between gap-1.5 leading-none">
             <span className="timeline-meta-text min-w-0 truncate text-[10px] uppercase tracking-[0.16em]">
               Hook · {item.hookEventLabel ?? item.text}
@@ -3800,7 +3825,7 @@ const HookItem = memo(function HookItem({
               </span>
             ) : null}
           </div>
-        </div>
+        </button>
       </div>
     </div>
   );
@@ -3813,6 +3838,7 @@ const HistoryItemRow = memo(function HistoryItemRow({
   onOpenExpandedText,
   onOpenCommandDetail,
   onOpenToolCallDetail,
+  onOpenHistoryItemDetail,
 }: {
   threadId: string | undefined;
   item: ThreadHistoryItemDto;
@@ -3828,6 +3854,7 @@ const HistoryItemRow = memo(function HistoryItemRow({
     },
     title: string,
   ) => void;
+  onOpenHistoryItemDetail: (item: DeferredTextHistoryItem, title: string) => void;
 }) {
   if (isCompactChatItem(item.kind)) {
     return (
@@ -3915,7 +3942,7 @@ const HistoryItemRow = memo(function HistoryItemRow({
             kind: 'webSearch';
           }
         }
-        onOpen={onOpenExpandedText}
+        onOpen={onOpenHistoryItemDetail}
       />
     );
   }
@@ -3928,7 +3955,7 @@ const HistoryItemRow = memo(function HistoryItemRow({
             kind: 'fileRead';
           }
         }
-        onOpen={onOpenExpandedText}
+        onOpen={onOpenHistoryItemDetail}
       />
     );
   }
@@ -3968,7 +3995,7 @@ const HistoryItemRow = memo(function HistoryItemRow({
             kind: 'fileChange';
           }
         }
-        onOpen={onOpenExpandedText}
+        onOpen={onOpenHistoryItemDetail}
       />
     );
   }
@@ -3993,6 +4020,7 @@ const HistoryItemRow = memo(function HistoryItemRow({
             kind: 'hook';
           }
         }
+        onOpen={onOpenHistoryItemDetail}
       />
     );
   }
@@ -4398,6 +4426,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
   onOpenExpandedText,
   onOpenCommandDetail,
   onOpenToolCallDetail,
+  onOpenHistoryItemDetail,
   scrollRootRef,
   articleRef,
   isLatestVisibleTurn = false,
@@ -4428,6 +4457,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
     },
     title: string,
   ) => void;
+  onOpenHistoryItemDetail: (item: DeferredTextHistoryItem, title: string) => void;
   scrollRootRef: RefObject<HTMLDivElement | null>;
   articleRef?: RefCallback<HTMLElement> | undefined;
   isLatestVisibleTurn?: boolean;
@@ -4537,6 +4567,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
             onOpenExpandedText={onOpenExpandedText}
             onOpenCommandDetail={onOpenCommandDetail}
             onOpenToolCallDetail={onOpenToolCallDetail}
+            onOpenHistoryItemDetail={onOpenHistoryItemDetail}
           />
           {displayedLivePlan && (
             <div className="timeline-live-plan-card rounded-[1rem] border px-3 py-3 sm:rounded-[1.2rem]">
@@ -4570,6 +4601,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
               onOpenExpandedText={onOpenExpandedText}
               onOpenCommandDetail={onOpenCommandDetail}
               onOpenToolCallDetail={onOpenToolCallDetail}
+              onOpenHistoryItemDetail={onOpenHistoryItemDetail}
             />
           ) : visibleLiveOutput ? (
             <CompactMessageItem
@@ -4600,6 +4632,7 @@ function TimelineHistoryEntries({
   onOpenExpandedText,
   onOpenCommandDetail,
   onOpenToolCallDetail,
+  onOpenHistoryItemDetail,
 }: {
   entries: TimelineHistoryEntry[];
   expandedGroups: Record<string, boolean>;
@@ -4617,6 +4650,7 @@ function TimelineHistoryEntries({
     },
     title: string,
   ) => void;
+  onOpenHistoryItemDetail: (item: DeferredTextHistoryItem, title: string) => void;
 }) {
   return (
     <>
@@ -4635,7 +4669,7 @@ function TimelineHistoryEntries({
             items={entry.items}
             expanded={expandedGroups[entry.key] ?? false}
             onToggleExpanded={() => onToggleGroupedItem(entry.key)}
-            onOpen={onOpenExpandedText}
+            onOpen={onOpenHistoryItemDetail}
           />
         ) : entry.kind === 'searchGroup' ? (
           <SearchGroupItem
@@ -4643,7 +4677,7 @@ function TimelineHistoryEntries({
             items={entry.items}
             expanded={expandedGroups[entry.key] ?? false}
             onToggleExpanded={() => onToggleGroupedItem(entry.key)}
-            onOpen={onOpenExpandedText}
+            onOpen={onOpenHistoryItemDetail}
           />
         ) : entry.kind === 'fileReadGroup' ? (
           <FileReadGroupItem
@@ -4651,7 +4685,7 @@ function TimelineHistoryEntries({
             items={entry.items}
             expanded={expandedGroups[entry.key] ?? false}
             onToggleExpanded={() => onToggleGroupedItem(entry.key)}
-            onOpen={onOpenExpandedText}
+            onOpen={onOpenHistoryItemDetail}
           />
         ) : (
           <HistoryItemRow
@@ -4662,6 +4696,7 @@ function TimelineHistoryEntries({
             onOpenExpandedText={onOpenExpandedText}
             onOpenCommandDetail={onOpenCommandDetail}
             onOpenToolCallDetail={onOpenToolCallDetail}
+            onOpenHistoryItemDetail={onOpenHistoryItemDetail}
           />
         ),
       )}
@@ -4838,12 +4873,40 @@ export function ThreadTimeline({
     setExpandedText({ title, text });
   }, []);
 
-  const handleOpenCommandDetail = useCallback(
-    async (
-      item: ThreadHistoryItemDto & { kind: 'commandExecution' },
-      fallbackTitle: string,
-    ) => {
-      const inlineText = item.detailText?.trim() || item.text || 'Command output';
+  const handleOpenHistoryItemDetail = useCallback(
+    async (item: DeferredTextHistoryItem, fallbackTitle: string) => {
+      const fallbackTextByKind: Partial<Record<DeferredTextHistoryItem['kind'], string>> = {
+        commandExecution: 'Command output',
+        toolCall: 'Tool call',
+        agentToolCall: 'Agent details',
+        skillToolCall: 'Skill details',
+        webSearch: 'Web search',
+        fileRead: 'File read',
+        fileChange: 'File changes',
+        hook: 'Hook output',
+      };
+      const loadingTextByKind: Partial<Record<DeferredTextHistoryItem['kind'], string>> = {
+        commandExecution: 'Loading full command output...',
+        toolCall: 'Loading full tool call details...',
+        agentToolCall: 'Loading full agent details...',
+        skillToolCall: 'Loading full skill details...',
+        webSearch: 'Loading full web search details...',
+        fileRead: 'Loading full file read details...',
+        fileChange: 'Loading full file change details...',
+        hook: 'Loading full hook details...',
+      };
+      const errorTextByKind: Partial<Record<DeferredTextHistoryItem['kind'], string>> = {
+        commandExecution: 'Unable to load full command output.',
+        toolCall: 'Unable to load full tool call details.',
+        agentToolCall: 'Unable to load full agent details.',
+        skillToolCall: 'Unable to load full skill details.',
+        webSearch: 'Unable to load full web search details.',
+        fileRead: 'Unable to load full file read details.',
+        fileChange: 'Unable to load full file change details.',
+        hook: 'Unable to load full hook details.',
+      };
+      const fallbackText = fallbackTextByKind[item.kind] ?? 'Details';
+      const inlineText = item.detailText?.trim() || item.text || fallbackText;
       if (!item.hasDeferredDetail || !onLoadHistoryItemDetail) {
         setExpandedText({ title: fallbackTitle, text: inlineText });
         return;
@@ -4857,7 +4920,10 @@ export function ThreadTimeline({
 
       const requestId = expandedTextRequestIdRef.current + 1;
       expandedTextRequestIdRef.current = requestId;
-      setExpandedText({ title: fallbackTitle, text: 'Loading full command output...' });
+      setExpandedText({
+        title: fallbackTitle,
+        text: loadingTextByKind[item.kind] ?? 'Loading details...',
+      });
 
       try {
         const detail = await onLoadHistoryItemDetail(item.id);
@@ -4875,57 +4941,33 @@ export function ThreadTimeline({
           text:
             caught instanceof Error
               ? caught.message
-              : 'Unable to load full command output.',
+              : errorTextByKind[item.kind] ?? 'Unable to load details.',
         });
       }
     },
     [onLoadHistoryItemDetail],
   );
 
+  const handleOpenCommandDetail = useCallback(
+    (
+      item: ThreadHistoryItemDto & { kind: 'commandExecution' },
+      fallbackTitle: string,
+    ) => {
+      void handleOpenHistoryItemDetail(item, fallbackTitle);
+    },
+    [handleOpenHistoryItemDetail],
+  );
+
   const handleOpenToolCallDetail = useCallback(
-    async (
+    (
       item: ThreadHistoryItemDto & {
         kind: 'toolCall' | 'agentToolCall' | 'skillToolCall';
       },
       fallbackTitle: string,
     ) => {
-      const inlineText = item.detailText?.trim() || item.text || 'Tool call';
-      if (!item.hasDeferredDetail || !onLoadHistoryItemDetail) {
-        setExpandedText({ title: fallbackTitle, text: inlineText });
-        return;
-      }
-
-      const cached = deferredDetailCacheRef.current.get(item.id);
-      if (cached) {
-        setExpandedText({ title: cached.title, text: cached.text });
-        return;
-      }
-
-      const requestId = expandedTextRequestIdRef.current + 1;
-      expandedTextRequestIdRef.current = requestId;
-      setExpandedText({ title: fallbackTitle, text: 'Loading full tool call details...' });
-
-      try {
-        const detail = await onLoadHistoryItemDetail(item.id);
-        deferredDetailCacheRef.current.set(item.id, detail);
-        if (expandedTextRequestIdRef.current !== requestId) {
-          return;
-        }
-        setExpandedText({ title: detail.title, text: detail.text });
-      } catch (caught) {
-        if (expandedTextRequestIdRef.current !== requestId) {
-          return;
-        }
-        setExpandedText({
-          title: fallbackTitle,
-          text:
-            caught instanceof Error
-              ? caught.message
-              : 'Unable to load full tool call details.',
-        });
-      }
+      void handleOpenHistoryItemDetail(item, fallbackTitle);
     },
-    [onLoadHistoryItemDetail],
+    [handleOpenHistoryItemDetail],
   );
 
   const recomputeTailVisibility = useCallback(() => {
@@ -5445,6 +5487,7 @@ export function ThreadTimeline({
                     onOpenExpandedText={handleOpenExpandedText}
                     onOpenCommandDetail={handleOpenCommandDetail}
                     onOpenToolCallDetail={handleOpenToolCallDetail}
+                    onOpenHistoryItemDetail={handleOpenHistoryItemDetail}
                     scrollRootRef={scrollContainerRef}
                     articleRef={undefined}
                   />
@@ -5537,6 +5580,7 @@ export function ThreadTimeline({
                     onOpenExpandedText={handleOpenExpandedText}
                     onOpenCommandDetail={handleOpenCommandDetail}
                     onOpenToolCallDetail={handleOpenToolCallDetail}
+                    onOpenHistoryItemDetail={handleOpenHistoryItemDetail}
                     scrollRootRef={scrollContainerRef}
                   />
                   {(activityNoteAnchors.afterTurnId.get(optimisticTurn.id)?.length ?? 0) > 0 ? (
@@ -5626,6 +5670,7 @@ export function ThreadTimeline({
                 onOpenExpandedText={handleOpenExpandedText}
                 onOpenCommandDetail={handleOpenCommandDetail}
                 onOpenToolCallDetail={handleOpenToolCallDetail}
+                onOpenHistoryItemDetail={handleOpenHistoryItemDetail}
               />
             </div>
           )}
@@ -5640,6 +5685,7 @@ export function ThreadTimeline({
                   onOpenExpandedText={handleOpenExpandedText}
                   onOpenCommandDetail={handleOpenCommandDetail}
                   onOpenToolCallDetail={handleOpenToolCallDetail}
+                  onOpenHistoryItemDetail={handleOpenHistoryItemDetail}
                 />
               ) : (
                 <CompactMessageItem

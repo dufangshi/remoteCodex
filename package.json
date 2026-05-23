@@ -35,6 +35,7 @@
   },
   "scripts": {
     "dev": "concurrently -k -n api,web -c blue,green \"pnpm --filter @remote-codex/supervisor-api dev\" \"pnpm --filter @remote-codex/supervisor-web dev\"",
+    "dev:control-plane": "pnpm --filter @remote-codex/control-plane-api dev",
     "dev:stop": "node scripts/stop-dev-servers.mjs",
     "dev:reset": "pnpm dev:stop && pnpm dev",
     "service:start": "node scripts/service-manager.mjs start",
@@ -43,6 +44,7 @@
     "service:restart": "node scripts/service-restart.mjs launch",
     "prepack": "pnpm build",
     "build": "pnpm -r --if-present build",
+    "build:worker-image": "docker build -f Dockerfile.worker -t remote-codex-worker:local .",
     "lint": "pnpm -r --if-present lint",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "NODE_ENV=test pnpm -r --if-present test",

@@ -9,10 +9,18 @@ describe('loadRuntimeConfig', () => {
     const config = loadRuntimeConfig({});
 
     expect(config.nodeEnv).toBe('development');
+    expect(config.runtimeRole).toBe('supervisor');
+    expect(config.sandboxId).toBeNull();
+    expect(config.userId).toBeNull();
     expect(config.host).toBe('127.0.0.1');
     expect(config.port).toBe(8787);
     expect(config.logLevel).toBe('info');
     expect(config.disableRequestLogging).toBe(false);
+    expect(config.managementRoutesEnabled).toBe(true);
+    expect(config.agentRuntimeManagementEnabled).toBe(true);
+    expect(config.workerAuthToken).toBeNull();
+    expect(config.llmGatewayBaseUrl).toBeNull();
+    expect(config.llmGatewayToken).toBeNull();
     expect(config.workspaceRoot).toBe(os.homedir());
     expect(config.databaseUrl).toBe(path.resolve('.local', 'supervisor-dev.sqlite'));
     expect(config.agentProviders.codex).toEqual({
@@ -61,6 +69,34 @@ describe('loadRuntimeConfig', () => {
     expect(config.disableRequestLogging).toBe(true);
   });
 
+  it('uses container worker defaults when requested', () => {
+    const config = loadRuntimeConfig({
+      NODE_ENV: 'production',
+      REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+      REMOTE_CODEX_SANDBOX_ID: 'sbx_123',
+      REMOTE_CODEX_USER_ID: 'user_123',
+      REMOTE_CODEX_WORKER_AUTH_TOKEN: 'worker-token',
+      REMOTE_CODEX_LLM_GATEWAY_BASE_URL: 'https://llm-gateway.example.com',
+      REMOTE_CODEX_LLM_GATEWAY_TOKEN: 'gw-token',
+    });
+
+    expect(config.runtimeRole).toBe('worker');
+    expect(config.sandboxId).toBe('sbx_123');
+    expect(config.userId).toBe('user_123');
+    expect(config.host).toBe('0.0.0.0');
+    expect(config.workspaceRoot).toBe('/workspace');
+    expect(config.databaseUrl).toBe('/home/agent/.remote-codex/worker.sqlite');
+    expect(config.managementRoutesEnabled).toBe(false);
+    expect(config.agentRuntimeManagementEnabled).toBe(false);
+    expect(config.workerAuthToken).toBe('worker-token');
+    expect(config.llmGatewayBaseUrl).toBe('https://llm-gateway.example.com');
+    expect(config.llmGatewayToken).toBe('gw-token');
+    expect(config.appName).toBe('Remote Codex Worker');
+    expect(config.agentProviders.codex.home).toBe('/home/agent/.codex');
+    expect(config.agentProviders.claude.home).toBe('/home/agent/.claude');
+    expect(config.agentProviders.opencode.home).toBe('/home/agent/.opencode');
+  });
+
   it('honors explicit overrides', () => {
     const config = loadRuntimeConfig({
       NODE_ENV: 'test',
@@ -81,6 +117,7 @@ describe('loadRuntimeConfig', () => {
     });
 
     expect(config.nodeEnv).toBe('test');
+    expect(config.runtimeRole).toBe('supervisor');
     expect(config.host).toBe('0.0.0.0');
     expect(config.port).toBe(9999);
     expect(config.logLevel).toBe('error');

@@ -658,6 +658,9 @@ export class CodexRuntimeAdapter extends EventEmitter implements AgentRuntime {
       threadId: input.providerSessionId,
       prompt: input.prompt,
     };
+    if (input.developerInstructions !== undefined) {
+      turnInput.developerInstructions = input.developerInstructions;
+    }
     if (input.model !== undefined) {
       turnInput.model = input.model;
     }

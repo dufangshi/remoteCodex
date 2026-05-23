@@ -133,6 +133,10 @@ interface SendPromptOptions {
   displayPrompt?: string | null;
 }
 
+function pluginDeveloperInstructions(pluginService?: PluginService) {
+  return pluginService?.modelContextPrompt() ?? null;
+}
+
 async function pathExists(absPath: string) {
   try {
     await fs.access(absPath);
@@ -208,6 +212,8 @@ export class ThreadService {
         runtimeForProvider: (provider) => this.runtimeForProvider(provider),
         resetThreadContextUsage: (localThreadId, emitEvent) =>
           this.resetThreadContextUsage(localThreadId, emitEvent),
+        getThreadContextUsage: (localThreadId) =>
+          this.getThreadContextUsage(localThreadId),
         invalidateThreadDetailCache: (localThreadId) =>
           this.invalidateThreadDetailCache(localThreadId),
         emitThreadUpdated: (localThreadId, payload) =>
@@ -391,6 +397,8 @@ export class ThreadService {
           this.resetThreadContextUsage(localThreadId, emitEvent),
         setThreadContextUsage: (localThreadId, usage, emitEvent) =>
           this.setThreadContextUsage(localThreadId, usage, emitEvent),
+        getThreadContextUsage: (localThreadId) =>
+          this.getThreadContextUsage(localThreadId),
         toThreadGoalDtoFromAgentGoal: (goal) =>
           this.goalCoordinator.toThreadGoalDtoFromAgentGoal(goal),
         toThreadGoalDtoFromRecord: (record) =>
@@ -880,6 +888,7 @@ export class ThreadService {
     }
 
     this.clearPendingPlanDecisionRequests(localThreadId, true);
+    const developerInstructions = pluginDeveloperInstructions(this.pluginService);
 
     const workspace = getWorkspaceRecordById(this.db, record.workspaceId);
     if (!workspace) {
@@ -916,6 +925,7 @@ export class ThreadService {
       }, {
         prompt,
         displayPrompt,
+        developerInstructions,
         clientRequestId: input.clientRequestId ?? null,
         effectiveModel: turnConfig.effectiveModel,
         normalizedReasoning: turnConfig.normalizedReasoning,
@@ -929,6 +939,7 @@ export class ThreadService {
     return this.promptTurnCoordinator.startPromptTurn(localThreadId, connectedRecord, {
       prompt,
       displayPrompt,
+      developerInstructions,
       effectiveModel: turnConfig.effectiveModel,
       normalizedReasoning: turnConfig.normalizedReasoning,
       collaborationMode: turnConfig.collaborationMode,

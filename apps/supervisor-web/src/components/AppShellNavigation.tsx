@@ -470,8 +470,8 @@ export function AppShellSettingsDialog() {
   const selectedThemeMode = shellNav?.themeMode ?? 'system';
 
   async function handleImportPlugin() {
-    const manifestJson = pluginImportDraft.trim();
-    if (!manifestJson || pluginImportState.busy) {
+    const importValue = pluginImportDraft.trim();
+    if (!importValue || pluginImportState.busy) {
       return;
     }
 
@@ -481,14 +481,15 @@ export function AppShellSettingsDialog() {
       error: null,
     });
     try {
+      const isManifestJson = importValue.startsWith('{') || importValue.startsWith('[');
       await plugins.importPluginManifest({
-        manifestJson,
+        ...(isManifestJson ? { manifestJson: importValue } : { manifestUrl: importValue }),
         enabled: true,
       });
       setPluginImportDraft('');
       setPluginImportState({
         busy: false,
-        message: 'Plugin manifest imported.',
+        message: 'Plugin imported.',
         error: null,
       });
     } catch (error) {
@@ -496,6 +497,23 @@ export function AppShellSettingsDialog() {
         busy: false,
         message: null,
         error: error instanceof Error ? error.message : 'Unable to import plugin manifest.',
+      });
+    }
+  }
+
+  async function handleUninstallPlugin(pluginId: string, pluginName: string) {
+    const confirmed = window.confirm(`Uninstall ${pluginName}?`);
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await plugins.uninstallPlugin(pluginId);
+    } catch (error) {
+      setPluginImportState({
+        busy: false,
+        message: null,
+        error: error instanceof Error ? error.message : 'Unable to uninstall plugin.',
       });
     }
   }
@@ -1172,33 +1190,49 @@ export function AppShellSettingsDialog() {
               </div>
               <div className="mt-3 grid gap-2">
                 {plugins.plugins.map((plugin) => (
-                  <label
+                  <div
                     key={plugin.id}
                     className="flex items-start justify-between gap-3 rounded-[1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-2.5"
                   >
-                    <span className="min-w-0">
-                      <span className="block text-sm font-medium text-[var(--theme-fg)]">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-[var(--theme-fg)]">
                         {plugin.name}
-                      </span>
-                      <span className="mt-1 block text-xs leading-5 text-[var(--theme-fg-muted)]">
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
                         {plugin.description}
-                      </span>
-                      <span className="mt-2 block text-[10px] uppercase tracking-[0.16em] text-[var(--theme-fg-muted)]">
+                      </p>
+                      <p className="mt-2 text-[10px] uppercase tracking-[0.16em] text-[var(--theme-fg-muted)]">
                         {plugin.capabilities.artifactTypes.map((type) => type.type).join(', ')}
-                      </span>
-                      <span className="mt-1 block text-[10px] uppercase tracking-[0.16em] text-[var(--theme-fg-muted)]">
+                      </p>
+                      <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-[var(--theme-fg-muted)]">
                         {plugin.source === 'imported' ? 'Imported manifest' : 'Built-in module'}
-                      </span>
-                    </span>
-                    <input
-                      type="checkbox"
-                      checked={plugin.enabled}
-                      onChange={(event) =>
-                        void plugins.setPluginEnabled(plugin.id, event.currentTarget.checked)
-                      }
-                      className="mt-1 h-4 w-4 shrink-0 accent-[var(--theme-accent-solid)]"
-                    />
-                  </label>
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {plugin.source === 'imported' ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleUninstallPlugin(plugin.id, plugin.name)}
+                          className="rounded-full border border-[var(--theme-border)] px-2.5 py-1 text-xs font-medium text-[var(--theme-danger-strong,var(--theme-fg))] transition hover:bg-[var(--theme-hover)]"
+                        >
+                          Uninstall
+                        </button>
+                      ) : null}
+                      <label className="inline-flex items-center gap-2 text-xs text-[var(--theme-fg-muted)]">
+                        <span className="sr-only">
+                          {plugin.enabled ? 'Disable' : 'Enable'} {plugin.name}
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={plugin.enabled}
+                          onChange={(event) =>
+                            void plugins.setPluginEnabled(plugin.id, event.currentTarget.checked)
+                          }
+                          className="h-4 w-4 accent-[var(--theme-accent-solid)]"
+                        />
+                      </label>
+                    </div>
+                  </div>
                 ))}
                 {plugins.plugins.length === 0 && (
                   <p className="rounded-[1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-3 text-xs text-[var(--theme-fg-muted)]">
@@ -1208,7 +1242,7 @@ export function AppShellSettingsDialog() {
               </div>
               <div className="mt-3 border-t border-[var(--theme-border)] pt-3">
                 <label className="block text-xs font-medium text-[var(--theme-fg)]">
-                  Import manifest JSON
+                  Import plugin
                 </label>
                 <textarea
                   value={pluginImportDraft}
@@ -1222,14 +1256,14 @@ export function AppShellSettingsDialog() {
                       });
                     }
                   }}
-                  placeholder='{"id":"example.viewer","name":"Example Viewer","version":"0.1.0",...}'
+                  placeholder='Paste plugin.json, an HTTPS manifest URL, or a GitHub repo/blob URL'
                   rows={4}
                   className="mt-2 min-h-28 w-full resize-y rounded-[0.9rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-2 font-mono text-xs leading-5 text-[var(--theme-fg)] outline-none transition placeholder:text-[var(--theme-fg-muted)] focus:border-[var(--theme-accent-border)]"
                 />
                 <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                   <p className="max-w-[42rem] text-xs leading-5 text-[var(--theme-fg-muted)]">
-                    Imports register manifest-declared artifact types. Rendering code still needs a
-                    trusted built-in frontend module.
+                    URL imports fetch a plugin manifest only. Plugin-name install needs a trusted
+                    registry and is not available yet.
                   </p>
                   <button
                     type="button"

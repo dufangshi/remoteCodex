@@ -253,6 +253,7 @@ export interface StartAgentTurnInput {
   providerSessionId: string;
   prompt: string;
   displayPrompt?: string | null;
+  developerInstructions?: string | null;
   model?: string | null;
   reasoningEffort?: string | null;
   collaborationMode?: 'default' | 'plan' | null;

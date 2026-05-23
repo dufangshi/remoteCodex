@@ -15,6 +15,7 @@ import {
   getWorkspaceSettings,
   saveWorkspaceSettings,
 } from '../workspace-settings';
+import { HttpError } from '../app';
 
 const updateProviderHostFileSchema = z.object({
   content: z.string(),
@@ -51,6 +52,26 @@ export async function registerSystemRoutes(app: FastifyInstance) {
     } satisfies HealthDto;
   });
 
+  app.get('/readyz', async () => {
+    const runtimes = app.services.agentRuntimes.all().map((runtime) => ({
+      provider: runtime.provider,
+      status: runtime.getStatus(),
+      enabled: runtime.installation.installed,
+    }));
+
+    return {
+      status: 'ready',
+      timestamp: new Date().toISOString(),
+      worker: {
+        role: app.services.config.runtimeRole,
+        sandboxId: app.services.config.sandboxId,
+        userId: app.services.config.userId,
+        workspaceRoot: app.services.config.workspaceRoot,
+      },
+      runtimes,
+    };
+  });
+
   app.get('/api/version', async () => {
     return {
       name: app.services.config.appName,
@@ -59,6 +80,12 @@ export async function registerSystemRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/service/build-restart', async () => {
+    if (!app.services.config.managementRoutesEnabled) {
+      throw new HttpError(403, {
+        code: 'forbidden',
+        message: 'Build restart is disabled for this worker.',
+      });
+    }
     const launched = await app.services.serviceLifecycle.launchBuildRestart();
 
     return {
@@ -79,6 +106,21 @@ export async function registerSystemRoutes(app: FastifyInstance) {
     } satisfies RuntimeConfigDto;
   });
 
+  app.get('/api/worker/metadata', async () => {
+    return {
+      role: app.services.config.runtimeRole,
+      sandboxId: app.services.config.sandboxId,
+      userId: app.services.config.userId,
+      workspaceRoot: app.services.config.workspaceRoot,
+      managementRoutesEnabled: app.services.config.managementRoutesEnabled,
+      agentRuntimeManagementEnabled: app.services.config.agentRuntimeManagementEnabled,
+      providers: app.services.agentRuntimes.all().map((runtime) => ({
+        provider: runtime.provider,
+        status: runtime.getStatus(),
+      })),
+    };
+  });
+
   app.get('/api/config/workspace-settings', async () => {
     return getWorkspaceSettings(
       app.services.database.db,
@@ -87,6 +129,12 @@ export async function registerSystemRoutes(app: FastifyInstance) {
   });
 
   app.patch('/api/config/workspace-settings', async (request) => {
+    if (!app.services.config.managementRoutesEnabled) {
+      throw new HttpError(403, {
+        code: 'forbidden',
+        message: 'Workspace settings are managed by the control plane for this worker.',
+      });
+    }
     const body = updateWorkspaceSettingsSchema.parse(request.body);
     const input: UpdateWorkspaceSettingsInput = {
       devHome: body.devHome,
@@ -103,12 +151,24 @@ export async function registerSystemRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/config/providers/:provider/files/:name', async (request) => {
+    if (!app.services.config.managementRoutesEnabled) {
+      throw new HttpError(403, {
+        code: 'forbidden',
+        message: 'Provider host config reads are disabled for this worker.',
+      });
+    }
     const params = parseProviderHostFileParams(request.params);
 
     return app.services.providerHostConfigService.readFile(params.provider, params.name);
   });
 
   app.patch('/api/config/providers/:provider/files/:name', async (request) => {
+    if (!app.services.config.managementRoutesEnabled) {
+      throw new HttpError(403, {
+        code: 'forbidden',
+        message: 'Provider host config writes are disabled for this worker.',
+      });
+    }
     const params = parseProviderHostFileParams(request.params);
 
     const body = updateProviderHostFileSchema.parse(request.body);
@@ -120,12 +180,24 @@ export async function registerSystemRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/config/providers/:provider/archives', async (request) => {
+    if (!app.services.config.managementRoutesEnabled) {
+      throw new HttpError(403, {
+        code: 'forbidden',
+        message: 'Provider config archives are disabled for this worker.',
+      });
+    }
     const { provider } = providerParamSchema.parse(request.params);
 
     return app.services.providerHostConfigService.listArchives(provider);
   });
 
   app.post('/api/config/providers/:provider/archives', async (request) => {
+    if (!app.services.config.managementRoutesEnabled) {
+      throw new HttpError(403, {
+        code: 'forbidden',
+        message: 'Provider config archives are disabled for this worker.',
+      });
+    }
     const { provider } = providerParamSchema.parse(request.params);
 
     const body: CreateProviderHostConfigArchiveInput = {};
@@ -138,6 +210,12 @@ export async function registerSystemRoutes(app: FastifyInstance) {
   });
 
   app.patch('/api/config/providers/:provider/archives/:id', async (request) => {
+    if (!app.services.config.managementRoutesEnabled) {
+      throw new HttpError(403, {
+        code: 'forbidden',
+        message: 'Provider config archives are disabled for this worker.',
+      });
+    }
     const params = z
       .object({
         ...providerParamSchema.shape,
@@ -157,6 +235,12 @@ export async function registerSystemRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/config/providers/:provider/archives/:id/apply', async (request) => {
+    if (!app.services.config.managementRoutesEnabled) {
+      throw new HttpError(403, {
+        code: 'forbidden',
+        message: 'Provider config archives are disabled for this worker.',
+      });
+    }
     const params = z
       .object({
         ...providerParamSchema.shape,
@@ -164,6 +248,16 @@ export async function registerSystemRoutes(app: FastifyInstance) {
       })
       .parse(request.params);
 
-    return app.services.providerHostConfigService.applyArchive(params.provider, params.id);
+    const result = await app.services.providerHostConfigService.applyArchive(
+      params.provider,
+      params.id,
+    );
+    if (params.provider === 'codex') {
+      await app.services.pluginService.syncManagedCodexMcpConfig({
+        codexHome: app.services.config.agentProviders.codex.home ?? null,
+        repoRoot: app.services.repoRoot,
+      });
+    }
+    return result;
   });
 }

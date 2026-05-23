@@ -16,6 +16,7 @@ import {
   ReasoningEffortDto,
 } from '../../../../packages/shared/src/index';
 import { agentBackendIdSchema } from '../provider-schemas';
+import { HttpError } from '../app';
 
 const providerParamSchema = z.object({
   provider: agentBackendIdSchema,
@@ -88,6 +89,12 @@ export async function registerAgentRuntimeRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/agent-runtimes/:provider/install', async (request) => {
+    if (!app.services.config.agentRuntimeManagementEnabled) {
+      throw new HttpError(403, {
+        code: 'forbidden',
+        message: 'Agent runtime install and update are disabled for this worker.',
+      });
+    }
     const { provider } = providerParamSchema.parse(request.params);
     const { action } = installActionSchema.parse(request.body ?? {});
     const runtime = app.services.agentRuntimes.getOptional(provider);
@@ -160,6 +167,12 @@ export async function registerAgentRuntimeRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/agent-runtimes/:provider/build-restart', async (request) => {
+    if (!app.services.config.managementRoutesEnabled) {
+      throw new HttpError(403, {
+        code: 'forbidden',
+        message: 'Build restart is disabled for this worker.',
+      });
+    }
     const { provider } = providerParamSchema.parse(request.params);
     const runtime = app.services.agentRuntimes.getOptional(provider);
     if (!runtime) {
@@ -343,6 +356,9 @@ async function packageVersionFromPath(packageJsonPath: string) {
 }
 
 async function latestPackageVersion(packageName: string) {
+  if (process.env.REMOTE_CODEX_RUNTIME_ROLE === 'worker') {
+    return null;
+  }
   const result = await runShellCommand(`npm view ${shellQuote(packageName)} version`, 4_000);
   return result.code === 0 ? firstLine(result.stdout) : null;
 }

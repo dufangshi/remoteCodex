@@ -1,0 +1,9 @@
+.git
+.local
+.pnpm-store
+node_modules
+apps/*/dist
+packages/*/dist
+output
+coverage
+*.log

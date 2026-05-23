@@ -463,13 +463,13 @@ export class CodexAppServerManager extends EventEmitter {
         input.serviceTier === undefined ? undefined : input.serviceTier,
       effort: input.effort ?? null,
       sandboxPolicy: input.sandboxPolicy ?? null,
-      collaborationMode: input.collaborationMode
+      collaborationMode: input.collaborationMode || input.developerInstructions
         ? {
-            mode: input.collaborationMode,
+            mode: input.collaborationMode ?? 'default',
             settings: {
               model: input.model ?? '',
               reasoning_effort: input.effort ?? null,
-              developer_instructions: null
+              developer_instructions: input.developerInstructions ?? null
             }
           }
         : null

@@ -370,6 +370,12 @@ export function updatePlugin(pluginId: string, input: UpdatePluginInput) {
   });
 }
 
+export function deletePlugin(pluginId: string) {
+  return request<PluginDto>(`/api/plugins/${encodeURIComponent(pluginId)}`, {
+    method: 'DELETE',
+  });
+}
+
 export function fetchThreadExportTurns(id: string) {
   return request<ThreadExportTurnOptionsDto>(`/api/threads/${id}/export-turns`, {
     cache: 'no-store',

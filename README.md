@@ -131,6 +131,10 @@ pnpm test
 pnpm db:migrate
 ```
 
+## Documentation
+
+- [Plugin system](./docs/plugins.md)
+
 ## API Endpoints
 
 - `GET /healthz`

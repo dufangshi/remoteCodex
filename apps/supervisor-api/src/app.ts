@@ -44,9 +44,11 @@ import { TmuxManager } from './shell/tmux-manager';
 import { builtinPlugins } from './plugins/builtin-plugins';
 import { PluginService } from './plugins/plugin-service';
 import { PluginSettingsStore } from './plugins/plugin-settings-store';
+import { configureWorkerProviderGateway } from './worker-bootstrap';
 
 const MAX_PROMPT_ATTACHMENTS = 10;
 const MAX_PROMPT_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+const WORKER_AUTH_EXEMPT_PATHS = new Set(['/healthz', '/readyz']);
 
 class HttpError extends Error {
   constructor(
@@ -70,6 +72,7 @@ export interface AppServices {
   providerHostConfigService: ProviderHostConfigService;
   pluginRegistry: PluginRegistry;
   pluginService: PluginService;
+  repoRoot: string;
 }
 
 function findRepoRoot(start = process.cwd()) {
@@ -152,6 +155,7 @@ export function buildApp(
   const pluginSettingsStore = new PluginSettingsStore(database.db);
   const pluginService = new PluginService(pluginRegistry, pluginSettingsStore);
   const runtimeBootstrap = options.runtimeBootstrap ?? createAgentRuntimeBootstrap(config);
+  const repoRoot = findRepoRoot();
   const agentRuntimes = options.agentRuntimes ?? runtimeBootstrap.agentRuntimes;
   const threadService = new ThreadService(
     database.db,
@@ -180,6 +184,27 @@ export function buildApp(
     disableRequestLogging: config.disableRequestLogging
   });
 
+  app.addHook('onRequest', async (request) => {
+    if (
+      config.runtimeRole !== 'worker' ||
+      !config.workerAuthToken ||
+      WORKER_AUTH_EXEMPT_PATHS.has(request.url.split('?')[0] ?? request.url)
+    ) {
+      return;
+    }
+
+    const headerToken = request.headers['x-remote-codex-worker-token'];
+    const authorization = request.headers.authorization;
+    const bearer = authorization?.match(/^Bearer\s+(.+)$/i)?.[1] ?? null;
+    const token = typeof headerToken === 'string' ? headerToken : bearer;
+    if (token !== config.workerAuthToken) {
+      throw new HttpError(401, {
+        code: 'forbidden',
+        message: 'Worker access requires a valid router token.',
+      });
+    }
+  });
+
   app.register(multipart, {
     limits: {
       files: MAX_PROMPT_ATTACHMENTS,
@@ -197,7 +222,8 @@ export function buildApp(
     shellService,
     providerHostConfigService,
     pluginRegistry,
-    pluginService
+    pluginService,
+    repoRoot
   });
 
   app.register(async (realtimeApp) => {
@@ -532,6 +558,11 @@ export function buildApp(
 
   app.addHook('onReady', async () => {
     try {
+      await configureWorkerProviderGateway(config);
+      await pluginService.syncManagedCodexMcpConfig({
+        codexHome: runtimeBootstrap.providerHostHomes.codex ?? null,
+        repoRoot,
+      });
       await Promise.all(agentRuntimes.all().map((runtime) => runtime.start()));
       await shellService.syncShellStateOnStartup();
     } catch (error) {

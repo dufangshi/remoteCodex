@@ -12,6 +12,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { createPortal } from 'react-dom';
 
 import type {
   AgentBackendHookCommandTemplateDto,
@@ -119,6 +120,12 @@ type SettingsMenu =
   | 'effort'
   | 'shellTools'
   | null;
+
+interface ComposerMenuPosition {
+  left: number;
+  bottom: number;
+  maxHeight: number;
+}
 
 interface ComposerAttachmentDraft extends PromptAttachmentUpload {}
 
@@ -937,7 +944,10 @@ export function ThreadComposer({
   const [goalLocalError, setGoalLocalError] = useState<string | null>(null);
   const [optimisticCollaborationMode, setOptimisticCollaborationMode] =
     useState<CollaborationModeDto | null>(null);
+  const [slashMenuPosition, setSlashMenuPosition] =
+    useState<ComposerMenuPosition | null>(null);
   const menuRef = useRef<HTMLFormElement | null>(null);
+  const slashMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const promptRef = useRef<HTMLDivElement | null>(null);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -1002,6 +1012,46 @@ export function ThreadComposer({
       setHookConfigSuccess(null);
     }
   }, [slashPanelView]);
+
+  useLayoutEffect(() => {
+    if (openMenu !== 'slash') {
+      setSlashMenuPosition(null);
+      return;
+    }
+
+    function updateSlashMenuPosition() {
+      const trigger = slashMenuTriggerRef.current;
+      if (!trigger) {
+        setSlashMenuPosition(null);
+        return;
+      }
+
+      const triggerRect = trigger.getBoundingClientRect();
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const margin = 12;
+      const menuWidth = Math.min(288, viewportWidth - margin * 2);
+      const left = Math.min(
+        Math.max(margin, triggerRect.left),
+        Math.max(margin, viewportWidth - menuWidth - margin),
+      );
+      const availableAbove = Math.max(160, triggerRect.top - margin * 2);
+
+      setSlashMenuPosition({
+        left,
+        bottom: Math.max(margin, viewportHeight - triggerRect.top + 8),
+        maxHeight: Math.min(480, availableAbove),
+      });
+    }
+
+    updateSlashMenuPosition();
+    window.addEventListener('resize', updateSlashMenuPosition);
+    window.addEventListener('scroll', updateSlashMenuPosition, true);
+    return () => {
+      window.removeEventListener('resize', updateSlashMenuPosition);
+      window.removeEventListener('scroll', updateSlashMenuPosition, true);
+    };
+  }, [openMenu, slashPanelView]);
 
   useEffect(() => {
     const selected = HOOK_EVENT_OPTIONS.find((entry) => entry.value === hookEventName);
@@ -2460,6 +2510,7 @@ export function ThreadComposer({
             {!isShellView && (
               <div className="relative">
                 <button
+                  ref={slashMenuTriggerRef}
                   type="button"
                   data-composer-menu-trigger="true"
                   aria-label="Open slash toolbox"
@@ -2474,10 +2525,18 @@ export function ThreadComposer({
                   <SlashIcon />
                 </button>
 
-                {openMenu === 'slash' && (
+                {openMenu === 'slash' &&
+                  slashMenuPosition &&
+                  typeof document !== 'undefined' &&
+                  createPortal(
                   <div
                     data-composer-menu-surface="true"
-                    className="thread-composer-menu absolute bottom-full left-0 z-40 mb-2 w-72 overflow-hidden rounded-2xl border bg-stone-900/72 shadow-2xl shadow-stone-950/20 backdrop-blur-xl"
+                    className="thread-composer-menu fixed z-[120] w-[min(18rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border bg-stone-900/72 shadow-2xl shadow-stone-950/20 backdrop-blur-xl"
+                    style={{
+                      left: slashMenuPosition.left,
+                      bottom: slashMenuPosition.bottom,
+                      maxHeight: slashMenuPosition.maxHeight,
+                    }}
                     onClick={(event) => {
                       event.stopPropagation();
                     }}
@@ -3164,8 +3223,9 @@ export function ThreadComposer({
                         )}
                       </div>
                     )}
-                  </div>
-                )}
+                  </div>,
+                    document.body,
+                  )}
               </div>
             )}
 

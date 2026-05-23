@@ -4,6 +4,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ThreadTimeline } from './ThreadTimeline';
 
+vi.mock('../plugins/PluginProvider', () => ({
+  usePlugins: () => ({
+    plugins: [],
+    loading: false,
+    error: null,
+    refresh: async () => undefined,
+    importPluginManifest: async () => undefined,
+    setPluginEnabled: async () => undefined,
+    uninstallPlugin: async () => undefined,
+    renderArtifact: () => null,
+    renderInlineCode: () => null,
+    hasRendererForArtifact: () => false,
+  }),
+}));
+
 class FakeIntersectionObserver {
   static instances: FakeIntersectionObserver[] = [];
 
@@ -1146,10 +1161,22 @@ describe('ThreadTimeline', () => {
     );
   });
 
-  it('renders file change items with compact stats and expandable details', () => {
+  it('renders file change items with compact stats and expandable deferred details', async () => {
+    const loadDetail = vi.fn(async () => ({
+      id: 'file-change-1',
+      kind: 'fileChange' as const,
+      title: 'File Change Details',
+      text: [
+        '- src/app.ts (+12 -1)',
+        '- src/routes.ts (+4 -3)',
+        '- src/ui.tsx (+3)',
+      ].join('\n'),
+    }));
+
     render(
       <ThreadTimeline
         liveOutput=""
+        onLoadHistoryItemDetail={loadDetail}
         turns={[
           {
             id: 'turn-1',
@@ -1162,11 +1189,8 @@ describe('ThreadTimeline', () => {
                 kind: 'fileChange',
                 text: 'workspace/project/src/features/release/important/app.ts, +2 more',
                 previewText: '3 files changed · +19 · -4',
-                detailText: [
-                  '- src/app.ts (+12 -1)',
-                  '- src/routes.ts (+4 -3)',
-                  '- src/ui.tsx (+3)',
-                ].join('\n'),
+                detailText: null,
+                hasDeferredDetail: true,
                 changedFiles: 3,
                 addedLines: 19,
                 removedLines: 4,
@@ -1188,9 +1212,16 @@ describe('ThreadTimeline', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Open file change details' }));
 
+    expect(loadDetail).toHaveBeenCalledWith('file-change-1');
     expect(
       screen.getByRole('dialog', { name: 'File Change Details' }),
-    ).toHaveTextContent('src/ui.tsx (+3)');
+    ).toHaveTextContent('Loading full file change details...');
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('dialog', { name: 'File Change Details' }),
+      ).toHaveTextContent('src/ui.tsx (+3)');
+    });
   });
 
   it('groups consecutive file change items into a collapsible batch', () => {
@@ -1393,9 +1424,26 @@ describe('ThreadTimeline', () => {
   });
 
   it('renders web search items as a compact one-line preview with expandable details', () => {
+    const loadDetail = vi.fn(async () => ({
+      id: 'search-1',
+      kind: 'webSearch' as const,
+      title: 'Web Search Details',
+      text: [
+        'Search query',
+        '',
+        '- latest remote codex release notes',
+        '',
+        'Sources',
+        '',
+        '- Release notes',
+        '  https://example.com/releases',
+      ].join('\n'),
+    }));
+
     render(
       <ThreadTimeline
         liveOutput=""
+        onLoadHistoryItemDetail={loadDetail}
         turns={[
           {
             id: 'turn-1',
@@ -1412,16 +1460,8 @@ describe('ThreadTimeline', () => {
                 previewText: ['latest remote codex release notes', 'site:example.com'].join(
                   '\n',
                 ),
-                detailText: [
-                  'Search query',
-                  '',
-                  '- latest remote codex release notes',
-                  '',
-                  'Sources',
-                  '',
-                  '- Release notes',
-                  '  https://example.com/releases',
-                ].join('\n'),
+                detailText: null,
+                hasDeferredDetail: true,
                 status: 'completed',
               },
             ],
@@ -1437,15 +1477,16 @@ describe('ThreadTimeline', () => {
 
     fireEvent.click(openButton);
 
+    expect(loadDetail).toHaveBeenCalledWith('search-1');
     expect(
       screen.getByRole('dialog', { name: 'Web Search Details' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('dialog', { name: 'Web Search Details' }),
-    ).toHaveTextContent('Release notes');
-    expect(
-      screen.getByRole('dialog', { name: 'Web Search Details' }),
-    ).toHaveTextContent('https://example.com/releases');
+    ).toHaveTextContent('Loading full web search details...');
+
+    return waitFor(() => {
+      expect(
+        screen.getByRole('dialog', { name: 'Web Search Details' }),
+      ).toHaveTextContent('https://example.com/releases');
+    });
   });
 
   it('groups consecutive web search items into a collapsible batch', () => {
@@ -1505,10 +1546,18 @@ describe('ThreadTimeline', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('renders Claude file inspection items separately from web search', () => {
+  it('renders Claude file inspection items separately from web search', async () => {
+    const loadDetail = vi.fn(async () => ({
+      id: 'read-1',
+      kind: 'fileRead' as const,
+      title: 'File Read Details',
+      text: 'Tool: Grep\n\nInput:\n{"pattern":"AgentRuntime"}',
+    }));
+
     render(
       <ThreadTimeline
         liveOutput=""
+        onLoadHistoryItemDetail={loadDetail}
         turns={[
           {
             id: 'turn-1',
@@ -1521,7 +1570,8 @@ describe('ThreadTimeline', () => {
                 kind: 'fileRead',
                 text: 'Search files: AgentRuntime in apps/supervisor-api/src',
                 previewText: 'Search files: AgentRuntime in apps/supervisor-api/src',
-                detailText: 'Tool: Grep\n\nInput:\n{"pattern":"AgentRuntime"}',
+                detailText: null,
+                hasDeferredDetail: true,
                 status: 'completed',
               },
             ],
@@ -1540,9 +1590,16 @@ describe('ThreadTimeline', () => {
 
     fireEvent.click(openButton);
 
+    expect(loadDetail).toHaveBeenCalledWith('read-1');
     expect(
       screen.getByRole('dialog', { name: 'File Read Details' }),
-    ).toHaveTextContent('Tool: Grep');
+    ).toHaveTextContent('Loading full file read details...');
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('dialog', { name: 'File Read Details' }),
+      ).toHaveTextContent('Tool: Grep');
+    });
   });
 
   it('groups unattached live file read items into a collapsible batch', () => {
