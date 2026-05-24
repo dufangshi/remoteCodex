@@ -1,10 +1,10 @@
 import {
   ClipboardEvent,
-  type CSSProperties,
   type Dispatch,
   DragEvent,
   FormEvent,
   KeyboardEvent,
+  useCallback,
   useLayoutEffect,
   type SetStateAction,
   useEffect,
@@ -128,7 +128,7 @@ interface ComposerMenuPosition {
   maxHeight: number;
 }
 
-interface ComposerAttachmentDraft extends PromptAttachmentUpload {}
+type ComposerAttachmentDraft = PromptAttachmentUpload;
 
 interface SlashPanelState<T> {
   status: 'idle' | 'loading' | 'ready' | 'failed';
@@ -914,10 +914,13 @@ export function ThreadComposer({
     }
     return templates;
   }, [hookCommandTemplates]);
-  const defaultHookCommand = (eventName: AgentHookEventNameDto) =>
-    hookCommandTemplateByEvent.get(eventName) ??
-    hookCommandTemplateByEvent.get('preToolUse') ??
-    FALLBACK_HOOK_COMMAND;
+  const defaultHookCommand = useMemo(
+    () => (eventName: AgentHookEventNameDto) =>
+      hookCommandTemplateByEvent.get(eventName) ??
+      hookCommandTemplateByEvent.get('preToolUse') ??
+      FALLBACK_HOOK_COMMAND,
+    [hookCommandTemplateByEvent],
+  );
   const defaultHookCommands = useMemo(
     () => new Set([FALLBACK_HOOK_COMMAND, ...hookCommandTemplateByEvent.values()]),
     [hookCommandTemplateByEvent],
@@ -1069,7 +1072,7 @@ export function ThreadComposer({
     setHookCommand((current) =>
       defaultHookCommands.has(current.trim()) ? defaultHookCommand(hookEventName) : current,
     );
-  }, [defaultHookCommands, hookEventName, hookCommandTemplateByEvent]);
+  }, [defaultHookCommand, defaultHookCommands, hookEventName, hookCommandTemplateByEvent]);
 
   useEffect(() => {
     if (!copiedSkillName) {
@@ -1132,30 +1135,6 @@ export function ThreadComposer({
       return {
         prompt: next,
         attachments: current.attachments,
-      };
-    });
-  }
-
-  function setAttachments(
-    next:
-      | ComposerAttachmentDraft[]
-      | ((current: ComposerAttachmentDraft[]) => {
-          attachments: ComposerAttachmentDraft[];
-          prompt?: string;
-        }),
-  ) {
-    updateDraft((current) => {
-      if (typeof next === 'function') {
-        const resolved = next(current.attachments);
-        return {
-          prompt: resolved.prompt ?? current.prompt,
-          attachments: resolved.attachments,
-        };
-      }
-
-      return {
-        prompt: current.prompt,
-        attachments: next,
       };
     });
   }
@@ -1661,11 +1640,12 @@ export function ThreadComposer({
   }, [attachments, isShellView]);
 
   useEffect(() => {
+    const previewUrlCache = previewUrlCacheRef.current;
     return () => {
-      for (const previewUrl of previewUrlCacheRef.current.values()) {
+      for (const previewUrl of previewUrlCache.values()) {
         URL.revokeObjectURL(previewUrl);
       }
-      previewUrlCacheRef.current.clear();
+      previewUrlCache.clear();
     };
   }, []);
 
@@ -1832,7 +1812,7 @@ export function ThreadComposer({
     };
   }
 
-  function restoreSelection(selection: { start: number; end: number } | null) {
+  const restoreSelection = useCallback((selection: { start: number; end: number } | null) => {
     const editor = promptRef.current;
     if (!editor || !selection) {
       return;
@@ -1847,7 +1827,7 @@ export function ThreadComposer({
     const currentSelection = window.getSelection();
     currentSelection?.removeAllRanges();
     currentSelection?.addRange(range);
-  }
+  }, []);
 
   function restoreSelectionAfterInsertedAttachments(editor: HTMLDivElement) {
     const insertedClientIds = pendingInsertedAttachmentIdsRef.current;
@@ -1886,7 +1866,7 @@ export function ThreadComposer({
     return true;
   }
 
-  function serializeEditorPrompt() {
+  const serializeEditorPrompt = useCallback(() => {
     const editor = promptRef.current;
     if (!editor) {
       return prompt;
@@ -1898,7 +1878,7 @@ export function ThreadComposer({
     }
 
     return normalizePromptText(nextPrompt);
-  }
+  }, [prompt]);
 
   function buildAttachmentPlaceholder(
     kind: PromptAttachmentKindDto,
@@ -2227,6 +2207,8 @@ export function ThreadComposer({
     previewSignature,
     prompt,
     promptSegments,
+    restoreSelection,
+    serializeEditorPrompt,
   ]);
 
   function dismissPromptFocus() {

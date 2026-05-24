@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { expect, test, type Page } from '@playwright/test';
 
-const workspaceRoot = '/home/u/dev/remoteCodex/.local/e2e-playwright';
+const workspaceRoot = path.resolve(process.env.E2E_WORKSPACE_ROOT ?? '.local/e2e-playwright');
 
 async function ensureWorkspaceDir(name: string) {
   const dir = path.join(workspaceRoot, name);
@@ -42,7 +42,7 @@ test.describe('Composer caret behavior', () => {
     const workspacePath = await ensureWorkspaceDir(workspaceName);
 
     await page.goto('/workspaces/new');
-    await page.getByLabel('Absolute path').fill(workspacePath);
+    await page.getByLabel('Path or Git URL').fill(workspacePath);
     await page.getByLabel('Display label').fill(workspaceName);
     await page.getByRole('button', { name: 'Create Workspace' }).click();
 

@@ -51,6 +51,7 @@ export function ThreadNewPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestedWorkspaceId = searchParams.get('workspaceId');
+  const defaultBackend = shellNav?.defaultBackend ?? defaultAgentBackendId;
 
   useEffect(() => {
     let cancelled = false;
@@ -61,7 +62,7 @@ export function ThreadNewPage() {
         }
         const initialProvider = chooseInitialProvider(
           backendRecords,
-          shellNav?.defaultBackend ?? defaultAgentBackendId,
+          defaultBackend,
         );
         setProvider(initialProvider);
         setBackends(backendRecords);
@@ -94,7 +95,7 @@ export function ThreadNewPage() {
     return () => {
       cancelled = true;
     };
-  }, [requestedWorkspaceId]);
+  }, [defaultBackend, requestedWorkspaceId]);
 
   useEffect(() => {
     if (!provider) {

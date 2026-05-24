@@ -61,7 +61,7 @@ export function ExportTranscriptDialog({
   onLoadTurns,
   onExport,
 }: ExportTranscriptDialogProps) {
-  const turns = turnsState.data?.turns ?? [];
+  const turns = useMemo(() => turnsState.data?.turns ?? [], [turnsState.data?.turns]);
   const latestTurnIds = useMemo(
     () => turns.slice(0, 10).map((turn) => turn.turnId),
     [turns],

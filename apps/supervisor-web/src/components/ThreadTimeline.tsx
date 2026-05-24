@@ -32,7 +32,7 @@ import {
   isScrollableHistoryItem,
   turnStatusLabel,
 } from './threadPresentation';
-import { usePlugins } from '../plugins/PluginProvider';
+import { usePlugins } from '../plugins/usePlugins';
 
 interface ThreadTimelineProps {
   threadId?: string | undefined;

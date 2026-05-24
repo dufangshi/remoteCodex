@@ -30,9 +30,7 @@ describe('codex history item persistence policy', () => {
       text: 'Streaming draft',
     });
 
-    expect(shouldPersistRuntimeFinalHistoryItem(transientMessage, [transientMessage])).toBe(
-      false,
-    );
+    expect(shouldPersistRuntimeFinalHistoryItem(transientMessage)).toBe(false);
   });
 
   it('hides transient streamed assistant text once a final assistant message exists', () => {

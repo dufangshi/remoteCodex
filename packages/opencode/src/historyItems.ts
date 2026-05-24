@@ -266,23 +266,6 @@ function fileChangeStatsFromMetadata(metadata: unknown) {
   };
 }
 
-function todoSummary(input: unknown, output: string | null) {
-  const todos = isRecord(input) && Array.isArray(input.todos)
-    ? input.todos
-    : null;
-  if (!todos) {
-    return output ?? toolSummary(input);
-  }
-  const counts = new Map<string, number>();
-  todos.forEach((todo) => {
-    const status = isRecord(todo) ? stringValue(todo.status) ?? 'unknown' : 'unknown';
-    counts.set(status, (counts.get(status) ?? 0) + 1);
-  });
-  return Array.from(counts.entries())
-    .map(([status, count]) => `${count} ${status}`)
-    .join(', ');
-}
-
 function todoRecordsFromValue(value: unknown): unknown[] | null {
   if (Array.isArray(value)) {
     return value;

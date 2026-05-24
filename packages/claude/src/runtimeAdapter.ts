@@ -44,7 +44,6 @@ import {
   hiddenInitPrompt,
   isHiddenContinuationMessage,
   isHiddenInitMessage,
-  messageContentText,
   partialReasoningDelta,
   partialTextDelta,
   resultForToolUse,
@@ -172,11 +171,11 @@ interface ClaudeQueryOptions {
   allowDangerouslySkipPermissions?: boolean;
   pathToClaudeCodeExecutable?: string;
 }
-interface GetSessionInfoOptions {}
+type GetSessionInfoOptions = Record<string, never>;
 interface GetSessionMessagesOptions {
   includeSystemMessages?: boolean;
 }
-interface ListSessionsOptions {}
+type ListSessionsOptions = Record<string, never>;
 interface McpServerStatus {
   name: string;
   status: string;
@@ -1471,8 +1470,9 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
 
   mapProviderRequest(
     request: AgentProviderRequest,
-    _options: { approvalMode: 'yolo' | 'guarded' },
+    options: { approvalMode: 'yolo' | 'guarded' },
   ): AgentProviderRequestMapping | null {
+    void options;
     return mapClaudeAskUserQuestionRequest(request);
   }
 
@@ -1483,7 +1483,9 @@ export class ClaudeRuntimeAdapter extends EventEmitter implements AgentRuntime {
     return buildClaudeProviderRequestResponse(pending, input);
   }
 
-  respondToProviderRequest(_id: string | number, _result: unknown) {
+  respondToProviderRequest(id: string | number, result: unknown) {
+    void id;
+    void result;
     // Claude Code's built-in AskUserQuestion arrives as transcripted tool use in
     // this SDK mode. The supervisor records the user's answer locally so the
     // interaction matches other backends, but there is no live JSON-RPC request

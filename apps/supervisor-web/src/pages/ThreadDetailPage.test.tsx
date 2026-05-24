@@ -40,6 +40,8 @@ vi.mock('../components/ThreadShellPanel', async () => {
     },
     ref: React.ForwardedRef<unknown>,
   ) {
+    const { onStateChange } = props;
+
     React.useImperativeHandle(ref, () => ({
       toggleConnection: shellPanelMock.toggleConnection,
       sendInput: shellPanelMock.sendInput,
@@ -52,7 +54,7 @@ vi.mock('../components/ThreadShellPanel', async () => {
       }));
 
       React.useEffect(() => {
-      props.onStateChange?.({
+      onStateChange?.({
         status: shellPanelMock.status,
         connectionButtonDisabled: false,
         connectionButtonLabel: 'Connect shell',
@@ -66,7 +68,7 @@ vi.mock('../components/ThreadShellPanel', async () => {
         loading: false,
         error: null,
         });
-      }, [props.onStateChange]);
+      }, [onStateChange]);
 
       React.useEffect(() => {
         shellPanelMock.mounts += 1;
@@ -83,7 +85,7 @@ vi.mock('../components/ThreadShellPanel', async () => {
   };
 });
 
-vi.mock('../plugins/PluginProvider', () => ({
+vi.mock('../plugins/usePlugins', () => ({
   usePlugins: () => ({
     plugins: [
       {
@@ -371,6 +373,7 @@ describe('ThreadDetailPage', () => {
     vi.stubGlobal(
       'fetch',
       withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
+        void init;
         const url = String(input);
 
         if (url.includes('/api/agent-runtimes/codex/status')) {
@@ -798,6 +801,7 @@ describe('ThreadDetailPage', () => {
     vi.stubGlobal(
       'fetch',
       withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
+        void init;
         const url = String(input);
 
         if (url.includes('/api/agent-runtimes/codex/status')) {
