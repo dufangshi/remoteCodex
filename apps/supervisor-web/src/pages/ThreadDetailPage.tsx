@@ -34,6 +34,7 @@ import {
   formatLongTimestamp,
   threadStatusLabel,
 } from '../components/threadPresentation';
+import { usePlugins } from '../plugins/PluginProvider';
 import {
   ApiError,
   buildThreadPdfExportUrl,
@@ -217,19 +218,46 @@ function mergeLiveHistoryItem(
     return incoming;
   }
 
+  const mergeOrderingHints = (item: ThreadHistoryItemDto): ThreadHistoryItemDto => {
+    let nextItem = item;
+    const sequence =
+      typeof incoming.sequence === 'number' && Number.isFinite(incoming.sequence)
+        ? incoming.sequence
+        : typeof current.sequence === 'number' && Number.isFinite(current.sequence)
+          ? current.sequence
+          : null;
+    if (sequence !== null && nextItem.sequence !== sequence) {
+      nextItem = { ...nextItem, sequence };
+    }
+
+    const transcriptOrder =
+      typeof incoming.transcriptOrder === 'number' && Number.isFinite(incoming.transcriptOrder)
+        ? incoming.transcriptOrder
+        : typeof current.transcriptOrder === 'number' && Number.isFinite(current.transcriptOrder)
+          ? current.transcriptOrder
+          : null;
+    if (transcriptOrder !== null && nextItem.transcriptOrder !== transcriptOrder) {
+      nextItem = { ...nextItem, transcriptOrder };
+    }
+
+    return nextItem;
+  };
+
   if (current.kind === 'agentMessage' && incoming.kind === 'agentMessage') {
-    return current.text.length > incoming.text.length
-      ? {
+    return mergeOrderingHints(
+      current.text.length > incoming.text.length
+        ? {
           ...incoming,
           text: current.text,
           sequence: incoming.sequence ?? current.sequence ?? null,
         }
-      : incoming;
+        : incoming,
+    );
   }
 
   const currentText = current.detailText?.trim() || current.text.trim();
   const incomingText = incoming.detailText?.trim() || incoming.text.trim();
-  return currentText.length > incomingText.length ? current : incoming;
+  return mergeOrderingHints(currentText.length > incomingText.length ? current : incoming);
 }
 
 function reconcileLiveItemsWithDetail(
@@ -265,7 +293,14 @@ function reconcileLiveItemsWithDetail(
       if (!materialized) {
         return !isCoveredByMaterializedAgentText(item);
       }
-      return materialized.kind !== item.kind;
+      return (
+        materialized.kind !== item.kind ||
+        (
+          typeof item.sequence === 'number' &&
+          Number.isFinite(item.sequence) &&
+          materialized.sequence !== item.sequence
+        )
+      );
     });
     return remainingItems.length === 0
       ? null
@@ -292,7 +327,17 @@ function reconcileLiveItemsWithDetail(
         if (!materialized && currentItem && isCoveredByMaterializedAgentText(currentItem)) {
           return null;
         }
-        return materialized?.kind === currentItem?.kind ? null : currentItem ?? null;
+        if (materialized && materialized.kind === currentItem?.kind) {
+          const shouldKeepSequencedLiveItem =
+            currentItem &&
+            typeof currentItem.sequence === 'number' &&
+            Number.isFinite(currentItem.sequence) &&
+            materialized.sequence !== currentItem.sequence;
+          if (!shouldKeepSequencedLiveItem) {
+            return null;
+          }
+        }
+        return currentItem ?? null;
       }
       return mergeLiveHistoryItem(currentItem, incomingItem);
     })
@@ -595,6 +640,7 @@ function threadConnectionSummary(isLoaded: boolean, connection: RealtimeConnecti
 export function ThreadDetailPage() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
+  const plugins = usePlugins();
   const liveOutputBufferRef = useRef('');
   const liveOutputFrameRef = useRef<number | null>(null);
   const supervisorSocketRef = useRef<WebSocket | null>(null);
@@ -642,6 +688,9 @@ export function ThreadDetailPage() {
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [busy, setBusy] = useState(false);
   const [activeView, setActiveView] = useState<'chat' | 'shell'>('chat');
+  const terminalPluginEnabled = plugins.getThreadPanels().some(
+    (panel) => panel.kind === 'terminal',
+  );
   const [chatDraft, setChatDraft] = useState<{
     prompt: string;
     attachments: PromptAttachmentUpload[];
@@ -756,10 +805,12 @@ export function ThreadDetailPage() {
       setLiveItems((current) => {
         const currentItems =
           current?.turnId === turnId ? current.items : [];
-        const nextItems = [
-          ...currentItems.filter((entry) => entry.id !== item.id),
-          item,
-        ];
+        const existingIndex = currentItems.findIndex((entry) => entry.id === item.id);
+        const nextItem = mergeLiveHistoryItem(currentItems[existingIndex], item);
+        const nextItems =
+          existingIndex >= 0
+            ? currentItems.map((entry, index) => (index === existingIndex ? nextItem : entry))
+            : [...currentItems, nextItem];
         return {
           turnId,
           items: nextItems,
@@ -789,12 +840,16 @@ export function ThreadDetailPage() {
                 text: delta,
                 sequence,
               };
+        const existingIndex = currentItems.findIndex((item) => item.id === itemId);
+        const items =
+          existingIndex >= 0
+            ? currentItems.map((item, index) =>
+                index === existingIndex ? nextItem : item,
+              )
+            : [...currentItems, nextItem];
         return {
           turnId,
-          items: [
-            ...currentItems.filter((item) => item.id !== itemId),
-            nextItem,
-          ],
+          items,
           updatedAt: new Date().toISOString(),
         };
       });
@@ -2550,16 +2605,38 @@ export function ThreadDetailPage() {
     if (activeView === 'shell') {
       if (detail?.thread.isLoaded === false) {
         await handleThreadConnectionToggle({ attachShell: true });
-        return;
+        return false;
+      }
+
+      let attemptedShellConnection = false;
+      if (shellControlState?.shellInputEnabled !== true) {
+        if (
+          shellControlState?.loading === false &&
+          shellControlState?.isConnecting !== true &&
+          shellControlState?.status !== 'creating' &&
+          shellControlState?.status !== 'workspace_missing'
+        ) {
+          await shellPanelRef.current?.toggleConnection();
+          attemptedShellConnection = true;
+        }
+        if (shellControlState?.isConnecting === true) {
+          setError('Connecting to the shell. Try again after it attaches.');
+          return false;
+        }
       }
 
       const sent = shellPanelRef.current?.sendCommand(input.prompt) ?? false;
       if (!sent) {
-        setError('Connect the shell before sending commands.');
+        setError(
+          attemptedShellConnection
+            ? 'Shell is still attaching. Try again after it connects.'
+            : 'Connect the shell before sending commands.',
+        );
+        return false;
       } else {
         setError(null);
       }
-      return;
+      return true;
     }
 
     setBusy(true);
@@ -3195,7 +3272,7 @@ export function ThreadDetailPage() {
     }
 
     const frame = window.requestAnimationFrame(() => {
-      shellPanelRef.current?.refreshLayout({ focus: true });
+      shellPanelRef.current?.refreshLayout({ syncBackendSize: false });
     });
 
     return () => {
@@ -3680,7 +3757,7 @@ export function ThreadDetailPage() {
                 {useFloatingMobileComposer ? (
                   <div
                     ref={composerHostRef}
-                    className="fixed inset-x-0 bottom-0 z-40 max-h-[min(58dvh,24rem)] overflow-y-auto overscroll-contain sm:hidden"
+                    className="fixed inset-x-0 bottom-0 z-50 overflow-visible sm:hidden"
                     style={{
                       bottom: `${floatingMobileComposerBottomOffset}px`,
                       paddingBottom: 'env(safe-area-inset-bottom)',
@@ -3704,6 +3781,7 @@ export function ThreadDetailPage() {
                       mcpConfigFormat={backendManagementSchema?.mcpConfigFormat ?? 'none'}
                       followTail={followTail}
                       threadConnected={detail.thread.isLoaded}
+                      shellAvailable={terminalPluginEnabled}
                       disabled={Boolean(promptDisabledReason)}
                       disabledPlaceholder={promptDisabledReason ?? undefined}
                       shellControlState={shellControlState}
@@ -3777,6 +3855,7 @@ export function ThreadDetailPage() {
                       mcpConfigFormat={backendManagementSchema?.mcpConfigFormat ?? 'none'}
                       followTail={followTail}
                       threadConnected={detail.thread.isLoaded}
+                      shellAvailable={terminalPluginEnabled}
                       disabled={Boolean(promptDisabledReason)}
                       disabledPlaceholder={promptDisabledReason ?? undefined}
                       shellControlState={shellControlState}
@@ -3840,7 +3919,7 @@ export function ThreadDetailPage() {
                     : 'hidden'
                 }
               >
-                {detail.thread.isLoaded && (
+                {detail.thread.isLoaded && terminalPluginEnabled && (
                   <ThreadShellPanel
                     ref={shellPanelRef}
                     threadId={detail.thread.id}
@@ -3849,6 +3928,18 @@ export function ThreadDetailPage() {
                     showFloatingToolbox={false}
                     onStateChange={setShellControlState}
                   />
+                )}
+                {detail.thread.isLoaded && !terminalPluginEnabled && activeView === 'shell' && (
+                  <div className="flex min-h-0 flex-1 items-center justify-center p-4 sm:p-6">
+                    <div className="thread-empty-surface max-w-md rounded-[1.6rem] border px-6 py-8 text-center">
+                      <p className="text-base font-medium text-[var(--theme-fg)]">
+                        Terminal plugin disabled
+                      </p>
+                      <p className="mt-3 text-sm leading-6 text-[var(--theme-fg-muted)]">
+                        Enable the Terminal plugin in Settings to use the shell panel.
+                      </p>
+                    </div>
+                  </div>
                 )}
                 {activeView === 'shell' && !detail.thread.isLoaded && (
                   <div className="flex min-h-0 flex-1 items-center justify-center p-4 sm:p-6">
@@ -3874,6 +3965,7 @@ export function ThreadDetailPage() {
                     hookCommandTemplates={backendManagementSchema?.hookCommandTemplates ?? []}
                     mcpConfigFormat={backendManagementSchema?.mcpConfigFormat ?? 'none'}
                     threadConnected={detail.thread.isLoaded}
+                    shellAvailable={terminalPluginEnabled}
                     shellControlState={shellControlState}
                     canInterrupt={Boolean(detail.thread.isLoaded && shellControlState?.isCommandRunning)}
                     onSubmit={handlePrompt}

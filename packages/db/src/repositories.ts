@@ -124,12 +124,14 @@ export interface UpsertThreadGoalRecordInput {
 export interface CreateShellSessionRecordInput {
   workspaceId: string;
   threadId: string | null;
+  label?: string | null;
   tmuxSessionName: string;
   cwd: string;
   status: string;
 }
 
 export interface UpdateShellSessionRecordInput {
+  label?: string | null;
   tmuxSessionName?: string;
   cwd?: string;
   status?: string;
@@ -809,6 +811,15 @@ export function getShellSessionRecordByThreadId(db: DatabaseClient, threadId: st
   return db.select().from(shellSessions).where(eq(shellSessions.threadId, threadId)).get();
 }
 
+export function listShellSessionRecordsByThreadId(db: DatabaseClient, threadId: string) {
+  return db
+    .select()
+    .from(shellSessions)
+    .where(eq(shellSessions.threadId, threadId))
+    .orderBy(desc(shellSessions.lastActivityAt), desc(shellSessions.createdAt))
+    .all();
+}
+
 export function createShellSessionRecord(
   db: DatabaseClient,
   input: CreateShellSessionRecordInput,
@@ -818,6 +829,7 @@ export function createShellSessionRecord(
     id: randomUUID(),
     workspaceId: input.workspaceId,
     threadId: input.threadId,
+    label: input.label ?? null,
     tmuxSessionName: input.tmuxSessionName,
     cwd: input.cwd,
     status: input.status,

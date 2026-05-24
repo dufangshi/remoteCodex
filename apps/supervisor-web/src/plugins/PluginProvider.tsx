@@ -23,6 +23,7 @@ import {
   type ArtifactRenderContext,
   type FrontendPluginModule,
   type InlineCodeRenderContext,
+  type ThreadPanelContribution,
 } from './builtin-plugin-modules';
 
 interface PluginContextValue {
@@ -35,9 +36,28 @@ interface PluginContextValue {
   renderArtifact: (context: ArtifactRenderContext) => ReactNode | null;
   renderInlineCode: (context: InlineCodeRenderContext) => ReactNode | null;
   hasRendererForArtifact: (artifact: ThreadArtifactDto) => boolean;
+  getThreadPanels: () => ThreadPanelContribution[];
 }
 
-const PluginContext = createContext<PluginContextValue | null>(null);
+function createDefaultPluginContext(): PluginContextValue {
+  const plugins = mergePluginState(builtinFrontendPlugins, []);
+  const enabledModules = builtinFrontendPlugins;
+  return {
+    plugins,
+    loading: false,
+    error: null,
+    async refresh() {},
+    async importPluginManifest() {},
+    async setPluginEnabled() {},
+    renderArtifact: () => null,
+    renderInlineCode: () => null,
+    hasRendererForArtifact: () => false,
+    getThreadPanels: () =>
+      enabledModules.flatMap((module) => module.threadPanels ?? []),
+  };
+}
+
+const PluginContext = createContext<PluginContextValue>(createDefaultPluginContext());
 
 function mergePluginState(
   modules: FrontendPluginModule[],
@@ -153,6 +173,11 @@ export function PluginProvider({ children }: { children: ReactNode }) {
     [enabledModules],
   );
 
+  const getThreadPanels = useCallback(
+    () => enabledModules.flatMap((module) => module.threadPanels ?? []),
+    [enabledModules],
+  );
+
   const value = useMemo<PluginContextValue>(
     () => ({
       plugins,
@@ -164,9 +189,11 @@ export function PluginProvider({ children }: { children: ReactNode }) {
       renderArtifact,
       renderInlineCode,
       hasRendererForArtifact,
+      getThreadPanels,
     }),
     [
       error,
+      getThreadPanels,
       hasRendererForArtifact,
       importPluginManifest,
       loading,
@@ -186,9 +213,5 @@ export function PluginProvider({ children }: { children: ReactNode }) {
 }
 
 export function usePlugins() {
-  const value = useContext(PluginContext);
-  if (!value) {
-    throw new Error('usePlugins must be used within PluginProvider.');
-  }
-  return value;
+  return useContext(PluginContext);
 }

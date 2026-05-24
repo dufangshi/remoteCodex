@@ -15,6 +15,12 @@ interface RuntimeDisplayTurnMapping {
   displayTurnId: string;
 }
 
+interface AgentMessageOrderingHint {
+  id: string;
+  text: string;
+  sequence: number;
+}
+
 export class ThreadLiveStateStore {
   private readonly runtimeDisplayTurnIds = new Map<string, RuntimeDisplayTurnMapping>();
   private readonly hiddenRuntimeTurnIds = new Map<string, Set<string>>();
@@ -23,6 +29,10 @@ export class ThreadLiveStateStore {
   private readonly threadTurnItemOrder = new Map<string, Map<string, Map<string, number>>>();
   private readonly threadNextTurnItemSequence = new Map<string, Map<string, number>>();
   private readonly threadMaterializedAgentMessageCounts = new Map<string, Map<string, number>>();
+  private readonly threadAgentMessageOrderingHints = new Map<
+    string,
+    Map<string, Map<string, AgentMessageOrderingHint>>
+  >();
 
   displayTurnIdForRuntimeTurn(
     localThreadId: string,
@@ -81,6 +91,7 @@ export class ThreadLiveStateStore {
     this.threadLivePlans.delete(localThreadId);
     this.threadLiveItems.delete(localThreadId);
     this.threadMaterializedAgentMessageCounts.delete(localThreadId);
+    this.threadAgentMessageOrderingHints.delete(localThreadId);
     this.clearRecordedTurnItemOrders(localThreadId);
     this.runtimeDisplayTurnIds.delete(localThreadId);
     this.hiddenRuntimeTurnIds.delete(localThreadId);
@@ -110,11 +121,13 @@ export class ThreadLiveStateStore {
   resetRecordedTurnItemOrder(localThreadId: string, turnId: string) {
     this.threadTurnItemOrder.get(localThreadId)?.delete(turnId);
     this.threadNextTurnItemSequence.get(localThreadId)?.delete(turnId);
+    this.threadAgentMessageOrderingHints.get(localThreadId)?.delete(turnId);
   }
 
   clearRecordedTurnItemOrders(localThreadId: string) {
     this.threadTurnItemOrder.delete(localThreadId);
     this.threadNextTurnItemSequence.delete(localThreadId);
+    this.threadAgentMessageOrderingHints.delete(localThreadId);
   }
 
   recordTurnItemOrder(localThreadId: string, turnId: string, itemId: string) {
@@ -151,6 +164,99 @@ export class ThreadLiveStateStore {
     return this.threadTurnItemOrder.get(localThreadId) ?? new Map();
   }
 
+  finalTurnAgentMessageOrderingHints(
+    localThreadId: string,
+    turnId: string,
+    items: ThreadHistoryItemDto[],
+    options: { allowUnmatchedFallback?: boolean } = {},
+  ) {
+    const hints = new Map<string, number>();
+    const turnOrder = this.threadTurnItemOrder.get(localThreadId)?.get(turnId);
+    const liveAgentMessages = [
+      ...(this.threadAgentMessageOrderingHints
+        .get(localThreadId)
+        ?.get(turnId)
+        ?.values() ?? []),
+    ].map((item) => ({
+      id: item.id,
+      text: normalizeAgentMessageForMatching(item.text),
+      sequence: item.sequence,
+    }));
+    const usedLiveAgentIds = new Set<string>();
+    const finalAgentItems = items.filter((item) => item.kind === 'agentMessage');
+
+    for (const item of finalAgentItems) {
+      const existingSequence = turnOrder?.get(item.id);
+      if (existingSequence !== undefined) {
+        hints.set(item.id, existingSequence);
+        const matchingLiveAgent = liveAgentMessages.find(
+          (liveAgent) =>
+            liveAgent.id === item.id || liveAgent.sequence === existingSequence,
+        );
+        if (matchingLiveAgent) {
+          usedLiveAgentIds.add(matchingLiveAgent.id);
+        }
+        continue;
+      }
+
+      const text = normalizeAgentMessageForMatching(item.text);
+      if (!text) {
+        continue;
+      }
+
+      let bestMatch:
+        | {
+            id: string;
+            sequence: number;
+            score: number;
+          }
+        | null = null;
+      for (const liveAgent of liveAgentMessages) {
+        if (usedLiveAgentIds.has(liveAgent.id) || !liveAgent.text) {
+          continue;
+        }
+
+        const score = agentMessageMatchScore(text, liveAgent.text);
+        if (score === 0 || (bestMatch && bestMatch.score >= score)) {
+          continue;
+        }
+
+        bestMatch = {
+          id: liveAgent.id,
+          sequence: liveAgent.sequence,
+          score,
+        };
+      }
+
+      if (bestMatch) {
+        usedLiveAgentIds.add(bestMatch.id);
+        hints.set(item.id, bestMatch.sequence);
+      }
+    }
+
+    if (options.allowUnmatchedFallback ?? true) {
+      const remainingLiveAgents = liveAgentMessages
+        .filter((liveAgent) => !usedLiveAgentIds.has(liveAgent.id))
+        .sort((left, right) => left.sequence - right.sequence);
+      let remainingLiveAgentIndex = 0;
+      for (const item of finalAgentItems) {
+        if (hints.has(item.id) || !normalizeAgentMessageForMatching(item.text)) {
+          continue;
+        }
+
+        const liveAgent = remainingLiveAgents[remainingLiveAgentIndex];
+        if (!liveAgent) {
+          break;
+        }
+
+        hints.set(item.id, liveAgent.sequence);
+        remainingLiveAgentIndex += 1;
+      }
+    }
+
+    return hints;
+  }
+
   getLiveItems(
     localThreadId: string,
     allTurns: ThreadTurnDto[],
@@ -178,10 +284,11 @@ export class ThreadLiveStateStore {
     const current = this.threadLiveItems.get(localThreadId);
     const currentItems =
       current?.turnId === turnId ? current.items : [];
-    const nextItems = [
-      ...currentItems.filter((entry) => entry.id !== item.id),
-      item,
-    ];
+    const existingIndex = currentItems.findIndex((entry) => entry.id === item.id);
+    const nextItems =
+      existingIndex >= 0
+        ? currentItems.map((entry, index) => (index === existingIndex ? item : entry))
+        : [...currentItems, item];
 
     this.setLiveItems(localThreadId, {
       turnId,
@@ -214,16 +321,54 @@ export class ThreadLiveStateStore {
             text: input.delta,
             sequence: input.sequence,
           };
+    this.recordAgentMessageOrderingHint(
+      input.localThreadId,
+      input.turnId,
+      nextItem,
+      input.sequence,
+    );
 
     this.setLiveItems(input.localThreadId, {
       turnId: input.turnId,
-      items: sortHistoryItemsBySequence([
-        ...currentItems.filter((entry) => entry.id !== input.itemId),
-        nextItem,
-      ]),
+      items: sortHistoryItemsBySequence(
+        existing
+          ? currentItems.map((entry) =>
+              entry.id === input.itemId ? nextItem : entry,
+            )
+          : [...currentItems, nextItem],
+      ),
       updatedAt: new Date().toISOString(),
     });
     return nextItem;
+  }
+
+  private recordAgentMessageOrderingHint(
+    localThreadId: string,
+    turnId: string,
+    item: ThreadHistoryItemDto,
+    sequence: number,
+  ) {
+    if (item.kind !== 'agentMessage' || !Number.isFinite(sequence)) {
+      return;
+    }
+
+    let threadHints = this.threadAgentMessageOrderingHints.get(localThreadId);
+    if (!threadHints) {
+      threadHints = new Map();
+      this.threadAgentMessageOrderingHints.set(localThreadId, threadHints);
+    }
+
+    let turnHints = threadHints.get(turnId);
+    if (!turnHints) {
+      turnHints = new Map();
+      threadHints.set(turnId, turnHints);
+    }
+
+    turnHints.set(item.id, {
+      id: item.id,
+      text: item.text,
+      sequence,
+    });
   }
 
   private reconcileLiveItems(
@@ -298,4 +443,25 @@ export class ThreadLiveStateStore {
     this.threadLiveItems.set(localThreadId, nextLiveItems);
     return nextLiveItems;
   }
+}
+
+function normalizeAgentMessageForMatching(text: string) {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function agentMessageMatchScore(finalText: string, liveText: string) {
+  if (finalText === liveText) {
+    return 3;
+  }
+
+  // Very short streaming fragments can appear in unrelated final answers.
+  if (liveText.length >= 8 && finalText.includes(liveText)) {
+    return 2;
+  }
+
+  if (finalText.length >= 8 && liveText.includes(finalText)) {
+    return 1;
+  }
+
+  return 0;
 }

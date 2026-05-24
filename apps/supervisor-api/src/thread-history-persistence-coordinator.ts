@@ -63,6 +63,43 @@ export class ThreadHistoryPersistenceCoordinator {
     deleteThreadHistoryItemRecordsByThreadAndTurnId(this.db, localThreadId, turnId);
   }
 
+  persistFinalTurnOrderingHints(
+    localThreadId: string,
+    turnId: string,
+    items: ThreadHistoryItemDto[],
+  ) {
+    const orderingHints = this.liveState.finalTurnAgentMessageOrderingHints(
+      localThreadId,
+      turnId,
+      items,
+    );
+
+    for (const item of items) {
+      if (
+        item.kind !== 'agentMessage' ||
+        !shouldPersistRuntimeFinalHistoryItem(item, items)
+      ) {
+        continue;
+      }
+
+      const sequence = orderingHints.get(item.id);
+      if (sequence === undefined) {
+        continue;
+      }
+
+      upsertThreadHistoryItemRecord(this.db, {
+        threadId: localThreadId,
+        turnId,
+        itemId: item.id,
+        itemJson: JSON.stringify({
+          ...item,
+          sequence,
+          sourceTurnId: turnId,
+        }),
+      });
+    }
+  }
+
   persistRuntimeTurnItemsAsDisplayTurn(
     localThreadId: string,
     runtimeTurnId: string,

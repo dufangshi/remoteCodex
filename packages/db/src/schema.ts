@@ -51,6 +51,7 @@ export const shellSessions = sqliteTable('shell_sessions', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull(),
   threadId: text('thread_id'),
+  label: text('label'),
   tmuxSessionName: text('tmux_session_name'),
   cwd: text('cwd').notNull(),
   status: text('status'),

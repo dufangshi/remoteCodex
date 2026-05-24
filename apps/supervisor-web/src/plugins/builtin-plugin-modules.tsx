@@ -4,6 +4,7 @@ import {
   xyzViewerPluginManifest,
   type MoleculeViewerSnapshot,
 } from '../../../../packages/plugin-xyz-viewer/src/index';
+import { terminalPluginManifest } from '../../../../packages/plugin-terminal/src/index';
 import { XyzMoleculeViewer } from '../../../../packages/plugin-xyz-viewer/src/frontend';
 import '../../../../packages/plugin-xyz-viewer/src/styles.css';
 import { looksLikeMoleculeStructure } from '../../../../packages/plugin-runtime/src/index';
@@ -25,8 +26,15 @@ export interface InlineCodeRenderContext {
   meta?: string;
 }
 
+export interface ThreadPanelContribution {
+  id: string;
+  kind: string;
+  label: string;
+}
+
 export interface FrontendPluginModule {
   manifest: PluginManifestDto;
+  threadPanels?: ThreadPanelContribution[];
   renderArtifact?: (context: ArtifactRenderContext) => ReactNode;
   inlineCodeRenderers?: Array<{
     languages: string[];
@@ -164,6 +172,16 @@ function InlineXyzRenderer({
 }
 
 export const builtinFrontendPlugins: FrontendPluginModule[] = [
+  {
+    manifest: terminalPluginManifest,
+    threadPanels: [
+      {
+        id: 'terminal',
+        kind: 'terminal',
+        label: 'Terminal',
+      },
+    ],
+  },
   {
     manifest: xyzViewerPluginManifest,
     renderArtifact: (context) => <XyzArtifactRenderer {...context} />,

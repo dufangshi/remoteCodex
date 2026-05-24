@@ -421,6 +421,7 @@ export interface PluginArtifactTypeDto {
 export interface PluginThreadPanelDto {
   id: string;
   label: string;
+  kind?: 'artifact' | 'terminal' | string;
   artifactTypes: string[];
 }
 
@@ -812,7 +813,9 @@ export interface ShellSessionDto {
   id: string;
   threadId: string;
   workspaceId: string;
+  label: string | null;
   tmuxSessionName: string;
+  backend: 'pty' | 'tmux' | string;
   cwd: string;
   status: Exclude<ShellStatusDto, 'not_created' | 'workspace_missing'>;
   attachedViewerId: string | null;
@@ -827,11 +830,18 @@ export interface ThreadShellStateDto {
   workspacePathStatus: 'present' | 'missing';
   state: ShellStatusDto;
   shell: ShellSessionDto | null;
+  shells: ShellSessionDto[];
+  activeShellId: string | null;
 }
 
 export interface ShellCreateInput {
   cols?: number;
   rows?: number;
+  label?: string;
+}
+
+export interface UpdateShellInput {
+  label?: string | null;
 }
 
 export interface ShellAttachInput {

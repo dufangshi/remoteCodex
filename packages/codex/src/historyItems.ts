@@ -485,18 +485,7 @@ function historyItemSequence(item: ThreadHistoryItemDto) {
 }
 
 export function sortHistoryItemsBySequence<T extends ThreadHistoryItemDto>(items: T[]): T[] {
-  if (!items.some(hasHistoryItemSequence)) {
-    return items;
-  }
-
-  return items
-    .map((item, index) => ({ item, index }))
-    .sort((left, right) => {
-      const sequenceDelta =
-        historyItemSequence(left.item) - historyItemSequence(right.item);
-      return sequenceDelta === 0 ? left.index - right.index : sequenceDelta;
-    })
-    .map((entry) => entry.item);
+  return sortTurnItemsByRecordedSequence(items) as T[];
 }
 
 function sortTurnItemsByRecordedSequence(items: ThreadHistoryItemDto[]) {
@@ -636,12 +625,15 @@ function copyPersistedSequence(
   item: ThreadHistoryItemDto,
   persistedItem: ThreadHistoryItemDto,
 ) {
-  if (!hasHistoryItemSequence(persistedItem)) {
-    return item;
+  let nextItem = item;
+  if (hasHistoryItemSequence(persistedItem)) {
+    const sequence = historyItemSequence(persistedItem);
+    if (nextItem.sequence !== sequence) {
+      nextItem = { ...nextItem, sequence };
+    }
   }
 
-  const sequence = historyItemSequence(persistedItem);
-  return item.sequence === sequence ? item : { ...item, sequence };
+  return nextItem;
 }
 
 function shouldAppendPersistedMissingItem(
@@ -1336,7 +1328,11 @@ export function agentTurnToThreadTurnDto(
     startedAt: turn.startedAt ?? parseUuidV7Timestamp(turn.providerTurnId),
     status: turn.status,
     error: turn.error?.message ?? null,
-    items: visibleRuntimeTurnItems(turn.items),
+    items: visibleRuntimeTurnItems(turn.items).map((item, transcriptIndex) =>
+      item.transcriptOrder === transcriptIndex
+        ? item
+        : { ...item, transcriptOrder: transcriptIndex },
+    ),
   };
 
   return deferredDetails ? deferLargeHistoryItemDetails(baseTurn, deferredDetails) : baseTurn;

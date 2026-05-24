@@ -1,6 +1,6 @@
 {
   "name": "remote-codex",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "description": "Local web supervisor for Codex workspaces and threads.",
   "license": "MIT",
   "type": "module",
@@ -20,12 +20,16 @@
     "packages/opencode/src/",
     "packages/db/src/",
     "packages/db/migrations/*.sql",
+    "packages/plugin-terminal/package.json",
+    "packages/plugin-terminal/plugin.json",
+    "packages/plugin-terminal/src/",
     "packages/shared/src/",
     "README.md"
   ],
   "packageManager": "pnpm@10.11.1",
   "pnpm": {
     "onlyBuiltDependencies": [
+      "@homebridge/node-pty-prebuilt-multiarch",
       "better-sqlite3",
       "esbuild"
     ]
@@ -56,6 +60,7 @@
   "dependencies": {
     "@fastify/multipart": "^9.0.3",
     "@fastify/websocket": "^11.0.2",
+    "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.10.0",
     "fastify": "^5.2.1",

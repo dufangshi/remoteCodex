@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn as spawnChild } from 'node:child_process';
 
+import { resolveDefaultShell } from './default-shell';
+
 export interface TmuxManagerOptions {
   command?: string;
   defaultShell?: string;
@@ -82,7 +84,7 @@ export class TmuxManager {
 
   constructor(options: TmuxManagerOptions = {}) {
     this.command = resolveExecutablePath(options.command ?? 'tmux');
-    this.defaultShell = options.defaultShell ?? process.env.SHELL ?? '/bin/zsh';
+    this.defaultShell = options.defaultShell ?? resolveDefaultShell();
     this.execCommand = options.execCommand ?? defaultExecCommand;
   }
 

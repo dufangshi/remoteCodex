@@ -54,7 +54,7 @@ describe('codex history item persistence policy', () => {
         error: null,
         items: [transientMessage, finalMessage],
       }).items,
-    ).toEqual([finalMessage]);
+    ).toEqual([{ ...finalMessage, transcriptOrder: 0 }]);
   });
 
   it('maps Codex collab agent tool calls to dedicated agent tool call items', () => {

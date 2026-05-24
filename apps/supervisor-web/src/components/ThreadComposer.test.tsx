@@ -276,6 +276,7 @@ describe('ThreadComposer', () => {
           },
         ]}
         capabilities={codexCapabilities}
+        shellAvailable
         onSubmit={() => undefined}
       />,
     );
@@ -291,6 +292,23 @@ describe('ThreadComposer', () => {
     expect(screen.getByRole('button', { name: 'Switch to shell' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'medium' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Plan' })).toBeInTheDocument();
+  });
+
+  it('hides the shell switch when terminal support is unavailable', () => {
+    render(
+      <ThreadComposer
+        activeView="chat"
+        model="gpt-5.4"
+        reasoningEffort="medium"
+        collaborationMode="default"
+        modelOptions={modelOptions}
+        capabilities={codexCapabilities}
+        shellAvailable={false}
+        onSubmit={() => undefined}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Switch to shell' })).not.toBeInTheDocument();
   });
 
   it('shows slash toolbox actions for fast toggle and compact', async () => {
@@ -1719,6 +1737,7 @@ describe('ThreadComposer', () => {
           connectionButtonDisabled: false,
           connectionButtonLabel: 'Disconnect shell',
           shellInputEnabled: true,
+          isConnecting: false,
           isCommandRunning: false,
           promptLabel: '(base) trading-lab',
           isMobileShell: false,
@@ -1750,6 +1769,7 @@ describe('ThreadComposer', () => {
           connectionButtonDisabled: false,
           connectionButtonLabel: 'Disconnect shell',
           shellInputEnabled: true,
+          isConnecting: false,
           isCommandRunning: false,
           promptLabel: '(base) trading-lab',
           isMobileShell: true,
@@ -1769,6 +1789,41 @@ describe('ThreadComposer', () => {
     });
   });
 
+  it('keeps shell prompt text when shell submission is not accepted', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(false);
+
+    render(
+      <ThreadComposer
+        activeView="shell"
+        shellControlState={{
+          status: 'detached',
+          connectionButtonDisabled: false,
+          connectionButtonLabel: 'Connect shell',
+          shellInputEnabled: false,
+          isConnecting: false,
+          isCommandRunning: false,
+          promptLabel: '(base) trading-lab',
+          isMobileShell: true,
+          hasShell: true,
+          busy: false,
+          loading: false,
+          error: null,
+        }}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    const editor = screen.getByLabelText('Prompt');
+    editor.textContent = 'pwd';
+    fireEvent.input(editor);
+    fireEvent.click(screen.getByRole('button', { name: 'Send Shell Input' }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({ prompt: 'pwd' });
+    });
+    expect(editor).toHaveTextContent('pwd');
+  });
+
   it('routes mobile shell CLEAR through the same submit path as typing clear and sending', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
 
@@ -1780,6 +1835,7 @@ describe('ThreadComposer', () => {
           connectionButtonDisabled: false,
           connectionButtonLabel: 'Disconnect shell',
           shellInputEnabled: true,
+          isConnecting: false,
           isCommandRunning: false,
           promptLabel: '(base) trading-lab',
           isMobileShell: true,
@@ -1818,6 +1874,7 @@ describe('ThreadComposer', () => {
           connectionButtonDisabled: false,
           connectionButtonLabel: 'Disconnect shell',
           shellInputEnabled: true,
+          isConnecting: false,
           isCommandRunning: false,
           promptLabel: '(base) trading-lab',
           isMobileShell: true,
@@ -1851,6 +1908,7 @@ describe('ThreadComposer', () => {
           connectionButtonDisabled: false,
           connectionButtonLabel: 'Disconnect shell',
           shellInputEnabled: true,
+          isConnecting: false,
           isCommandRunning: false,
           promptLabel: '(base) trading-lab',
           isMobileShell: true,

@@ -40,6 +40,11 @@
       "idx": 17,
       "tag": "0017_remove_codex_thread_columns",
       "when": 1740000017000
+    },
+    {
+      "idx": 18,
+      "tag": "0018_shell_session_label",
+      "when": 1740000018000
     }
   ]
 }

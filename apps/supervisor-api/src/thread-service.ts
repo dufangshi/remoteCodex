@@ -378,6 +378,8 @@ export class ThreadService {
           this.goalCoordinator.normalizeThreadGoalStatusForThread(goal, record),
         persistLiveHistoryItem: (localThreadId, turnId, item) =>
           this.historyPersistence.persistLiveHistoryItem(localThreadId, turnId, item),
+        persistFinalTurnOrderingHints: (localThreadId, turnId, items) =>
+          this.historyPersistence.persistFinalTurnOrderingHints(localThreadId, turnId, items),
         persistRuntimeTurnItemsAsDisplayTurn: (localThreadId, runtimeTurnId, displayTurnId, items) =>
           this.historyPersistence.persistRuntimeTurnItemsAsDisplayTurn(
             localThreadId,

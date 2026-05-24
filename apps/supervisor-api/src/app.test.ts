@@ -390,6 +390,7 @@ describe('supervisor api', () => {
         NODE_ENV: 'test',
         APP_NAME: 'Test Supervisor',
         APP_VERSION: '0.1.0-test',
+        REMOTE_CODEX_SHELL_BACKEND: 'tmux',
         DATABASE_URL: path.join(tempDir, 'test.sqlite'),
         WORKSPACE_ROOT: tempDir,
         CODEX_HOME: codexHome,
@@ -939,6 +940,98 @@ describe('supervisor api', () => {
     expect(response.json()).toMatchObject({
       code: 'bad_request',
       message: 'Built-in plugin cannot be replaced: remote-codex.xyz-viewer',
+    });
+  });
+
+  it('rejects shell API requests when the Terminal plugin is disabled', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+    expect(workspaceResponse.statusCode).toBe(200);
+
+    const threadResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspaceResponse.json().id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Terminal disabled thread',
+      },
+    });
+    expect(threadResponse.statusCode).toBe(200);
+
+    const toggleResponse = await app.inject({
+      method: 'PATCH',
+      url: '/api/plugins/remote-codex.terminal',
+      payload: {
+        enabled: false,
+      },
+    });
+    expect(toggleResponse.statusCode).toBe(200);
+
+    const shellResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${threadResponse.json().id}/shell`,
+    });
+
+    expect(shellResponse.statusCode).toBe(409);
+    expect(shellResponse.json()).toMatchObject({
+      code: 'conflict',
+      message: 'The Terminal plugin is disabled.',
+      details: {
+        shellCode: 'plugin_disabled',
+      },
+    });
+  });
+
+  it('updates shell labels through the shell API', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+    expect(workspaceResponse.statusCode).toBe(200);
+
+    const threadResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspaceResponse.json().id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Terminal rename thread',
+      },
+    });
+    expect(threadResponse.statusCode).toBe(200);
+
+    const shellResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${threadResponse.json().id}/shell`,
+      payload: {
+        label: 'server',
+      },
+    });
+    expect(shellResponse.statusCode).toBe(200);
+    expect(shellResponse.json().shell.label).toBe('server');
+
+    const renameResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/shells/${shellResponse.json().shell.id}`,
+      payload: {
+        label: 'worker',
+      },
+    });
+    expect(renameResponse.statusCode).toBe(200);
+    expect(renameResponse.json()).toMatchObject({
+      id: shellResponse.json().shell.id,
+      label: 'worker',
     });
   });
 
@@ -5944,6 +6037,132 @@ describe('supervisor api', () => {
     ]);
   });
 
+  it('keeps unsequenced final text between persisted command items', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Command Text Command Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Run a command, explain, then run another command.',
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    const startedThread = promptResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(startedThread.providerSessionId);
+    const activeTurn = remoteThread?.turns.at(-1);
+    expect(activeTurn).toBeTruthy();
+
+    for (const item of [
+      {
+        id: 'command-before-text',
+        type: 'commandExecution',
+        command: 'pnpm lint',
+        aggregatedOutput: 'lint ok',
+        status: 'completed',
+      },
+      {
+        id: 'command-after-text',
+        type: 'commandExecution',
+        command: 'pnpm build',
+        aggregatedOutput: 'build ok',
+        status: 'completed',
+      },
+    ]) {
+      fakeCodexManager.emit('notification', {
+        method: 'item/completed',
+        params: {
+          threadId: startedThread.providerSessionId,
+          turnId: activeTurn!.id,
+          item,
+        }
+      });
+    }
+
+    const completedTurn = {
+      ...activeTurn!,
+      status: 'completed' as const,
+      items: [
+        ...activeTurn!.items,
+        {
+          id: 'command-before-text',
+          type: 'commandExecution',
+          command: 'pnpm lint',
+          aggregatedOutput: 'lint ok',
+          status: 'completed',
+        },
+        {
+          id: 'agent-between',
+          type: 'agentMessage',
+          text: 'Lint passed. I am building next.',
+        },
+        {
+          id: 'command-after-text',
+          type: 'commandExecution',
+          command: 'pnpm build',
+          aggregatedOutput: 'build ok',
+          status: 'completed',
+        },
+        {
+          id: 'agent-final',
+          type: 'agentMessage',
+          text: 'Build passed.',
+        },
+      ],
+    };
+    fakeCodexManager.threads.set(startedThread.providerSessionId, {
+      ...remoteThread!,
+      status: { type: 'idle' },
+      turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turn: completedTurn
+      }
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(
+      detailResponse
+        .json()
+        .turns.at(-1)
+        .items.map((item: any) => item.id),
+    ).toEqual([
+      activeTurn!.items[0]!.id,
+      'command-before-text',
+      'agent-between',
+      'command-after-text',
+      'agent-final',
+    ]);
+  });
+
   it('restores materialized command order when the final history appends commands after agent text', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',
@@ -6376,6 +6595,215 @@ describe('supervisor api', () => {
     ]);
   });
 
+  it('keeps materialized running agent messages between command batches when provider ids change', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Materialized Active Split Batch Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Run two checks, explain, run three checks, then explain again.',
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    const startedThread = promptResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(startedThread.providerSessionId);
+    const activeTurn = remoteThread?.turns.at(-1);
+    expect(activeTurn).toBeTruthy();
+
+    for (const item of [
+      {
+        id: 'command-a',
+        type: 'commandExecution',
+        command: 'pnpm lint',
+        aggregatedOutput: 'lint ok',
+        status: 'completed',
+      },
+      {
+        id: 'command-b',
+        type: 'commandExecution',
+        command: 'pnpm typecheck',
+        aggregatedOutput: 'typecheck ok',
+        status: 'completed',
+      },
+    ]) {
+      fakeCodexManager.emit('notification', {
+        method: 'item/completed',
+        params: {
+          threadId: startedThread.providerSessionId,
+          turnId: activeTurn!.id,
+          item,
+        }
+      });
+    }
+
+    fakeCodexManager.emit('notification', {
+      method: 'item/agentMessage/delta',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turnId: activeTurn!.id,
+        itemId: 'live-agent-between',
+        delta: 'The first batch passed. I will run the next checks.',
+      }
+    });
+
+    for (const item of [
+      {
+        id: 'command-c',
+        type: 'commandExecution',
+        command: 'pnpm test',
+        aggregatedOutput: 'test ok',
+        status: 'completed',
+      },
+      {
+        id: 'command-d',
+        type: 'commandExecution',
+        command: 'pnpm build',
+        aggregatedOutput: 'build ok',
+        status: 'completed',
+      },
+      {
+        id: 'command-e',
+        type: 'commandExecution',
+        command: 'pnpm package',
+        aggregatedOutput: 'package ok',
+        status: 'completed',
+      },
+    ]) {
+      fakeCodexManager.emit('notification', {
+        method: 'item/completed',
+        params: {
+          threadId: startedThread.providerSessionId,
+          turnId: activeTurn!.id,
+          item,
+        }
+      });
+    }
+
+    fakeCodexManager.emit('notification', {
+      method: 'item/agentMessage/delta',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turnId: activeTurn!.id,
+        itemId: 'live-agent-after',
+        delta: 'The second batch passed too.',
+      }
+    });
+
+    const materializedActiveTurn = {
+      ...activeTurn!,
+      status: 'inProgress' as const,
+      items: [
+        ...activeTurn!.items,
+        {
+          id: 'materialized-agent-between',
+          type: 'agentMessage',
+          text: 'The first batch passed. I will run the next checks.',
+        },
+        {
+          id: 'command-a',
+          type: 'commandExecution',
+          command: 'pnpm lint',
+          aggregatedOutput: 'lint ok',
+          status: 'completed',
+        },
+        {
+          id: 'command-b',
+          type: 'commandExecution',
+          command: 'pnpm typecheck',
+          aggregatedOutput: 'typecheck ok',
+          status: 'completed',
+        },
+        {
+          id: 'command-c',
+          type: 'commandExecution',
+          command: 'pnpm test',
+          aggregatedOutput: 'test ok',
+          status: 'completed',
+        },
+        {
+          id: 'command-d',
+          type: 'commandExecution',
+          command: 'pnpm build',
+          aggregatedOutput: 'build ok',
+          status: 'completed',
+        },
+        {
+          id: 'command-e',
+          type: 'commandExecution',
+          command: 'pnpm package',
+          aggregatedOutput: 'package ok',
+          status: 'completed',
+        },
+        {
+          id: 'materialized-agent-after',
+          type: 'agentMessage',
+          text: 'The second batch passed too.',
+        },
+      ],
+    };
+    fakeCodexManager.threads.set(startedThread.providerSessionId, {
+      ...remoteThread!,
+      status: { type: 'active', activeFlags: [] },
+      turns: [...remoteThread!.turns.slice(0, -1), materializedActiveTurn]
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json().liveItems).toBeNull();
+    expect(
+      detailResponse.json().turns.at(-1).items.map((item: any) => item.id),
+    ).toEqual([
+      activeTurn!.items[0]!.id,
+      'command-a',
+      'command-b',
+      'materialized-agent-between',
+      'command-c',
+      'command-d',
+      'command-e',
+      'materialized-agent-after',
+    ]);
+    expect(
+      detailResponse
+        .json()
+        .turns.at(-1)
+        .items.map((item: any) => [item.id, item.sequence ?? null]),
+    ).toEqual([
+      [activeTurn!.items[0]!.id, null],
+      ['command-a', 0],
+      ['command-b', 1],
+      ['materialized-agent-between', 2],
+      ['command-c', 3],
+      ['command-d', 4],
+      ['command-e', 5],
+      ['materialized-agent-after', 6],
+    ]);
+  });
+
   it('drops live agent drafts after readThread materializes assistant messages with different ids', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',
@@ -6659,6 +7087,209 @@ describe('supervisor api', () => {
       'command-a',
       'command-b',
       'agent-between',
+      'command-c',
+      'agent-final',
+    ]);
+  });
+
+  it('preserves final-history message order after polling materializes a streamed agent message with a different id', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Interleaved Final History After Poll Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Run a batch, explain, then run another command.',
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    const startedThread = promptResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(startedThread.providerSessionId);
+    const activeTurn = remoteThread?.turns.at(-1);
+    expect(activeTurn).toBeTruthy();
+
+    for (const item of [
+      {
+        id: 'command-a',
+        type: 'commandExecution',
+        command: 'pnpm typecheck',
+        aggregatedOutput: 'typecheck ok',
+        status: 'completed',
+      },
+      {
+        id: 'command-b',
+        type: 'commandExecution',
+        command: 'pnpm test',
+        aggregatedOutput: 'test ok',
+        status: 'completed',
+      },
+    ]) {
+      fakeCodexManager.emit('notification', {
+        method: 'item/completed',
+        params: {
+          threadId: startedThread.providerSessionId,
+          turnId: activeTurn!.id,
+          item,
+        }
+      });
+    }
+
+    fakeCodexManager.emit('notification', {
+      method: 'item/agentMessage/delta',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turnId: activeTurn!.id,
+        itemId: 'stream-agent-between',
+        delta: 'First batch is done. I am running the final check.',
+      }
+    });
+
+    const materializedActiveTurn = {
+      ...activeTurn!,
+      status: 'inProgress' as const,
+      items: [
+        ...activeTurn!.items,
+        {
+          id: 'command-a',
+          type: 'commandExecution',
+          command: 'pnpm typecheck',
+          aggregatedOutput: 'typecheck ok',
+          status: 'completed',
+        },
+        {
+          id: 'command-b',
+          type: 'commandExecution',
+          command: 'pnpm test',
+          aggregatedOutput: 'test ok',
+          status: 'completed',
+        },
+        {
+          id: 'final-agent-between',
+          type: 'agentMessage',
+          text: 'First batch is done. I am running the final check.',
+        },
+      ],
+    };
+    fakeCodexManager.threads.set(startedThread.providerSessionId, {
+      ...remoteThread!,
+      status: { type: 'active', activeFlags: [] },
+      turns: [...remoteThread!.turns.slice(0, -1), materializedActiveTurn]
+    });
+
+    const runningDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+    expect(runningDetailResponse.statusCode).toBe(200);
+    expect(
+      runningDetailResponse
+        .json()
+        .turns.at(-1)
+        .items.map((item: any) => item.id),
+    ).toContain('final-agent-between');
+
+    fakeCodexManager.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turnId: activeTurn!.id,
+        item: {
+          id: 'command-c',
+          type: 'commandExecution',
+          command: 'pnpm build',
+          aggregatedOutput: 'build ok',
+          status: 'completed',
+        },
+      }
+    });
+
+    const completedTurn = {
+      ...activeTurn!,
+      status: 'completed' as const,
+      items: [
+        ...activeTurn!.items,
+        {
+          id: 'command-a',
+          type: 'commandExecution',
+          command: 'pnpm typecheck',
+          aggregatedOutput: 'typecheck ok',
+          status: 'completed',
+        },
+        {
+          id: 'command-b',
+          type: 'commandExecution',
+          command: 'pnpm test',
+          aggregatedOutput: 'test ok',
+          status: 'completed',
+        },
+        {
+          id: 'final-agent-between',
+          type: 'agentMessage',
+          text: 'First batch is done. I am running the final check.',
+        },
+        {
+          id: 'command-c',
+          type: 'commandExecution',
+          command: 'pnpm build',
+          aggregatedOutput: 'build ok',
+          status: 'completed',
+        },
+        {
+          id: 'agent-final',
+          type: 'agentMessage',
+          text: 'All checks passed.',
+        },
+      ],
+    };
+    fakeCodexManager.threads.set(startedThread.providerSessionId, {
+      ...remoteThread!,
+      status: { type: 'idle' },
+      turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turn: completedTurn
+      }
+    });
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(
+      detailResponse
+        .json()
+        .turns.at(-1)
+        .items.map((item: any) => item.id),
+    ).toEqual([
+      activeTurn!.items[0]!.id,
+      'command-a',
+      'command-b',
+      'final-agent-between',
       'command-c',
       'agent-final',
     ]);
@@ -7143,6 +7774,653 @@ describe('supervisor api', () => {
       'agent-between',
       'command-c',
       'agent-final',
+    ]);
+  });
+
+  it('keeps later command batches separated by final-history agent text across restart', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Separated Command Batches Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Run two checks, explain, then run three checks.',
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    const startedThread = promptResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(startedThread.providerSessionId);
+    const activeTurn = remoteThread?.turns.at(-1);
+    expect(activeTurn).toBeTruthy();
+
+    for (const command of [
+      {
+        id: 'command-a',
+        type: 'commandExecution',
+        command: 'pnpm lint',
+        aggregatedOutput: 'lint ok',
+        status: 'completed',
+      },
+      {
+        id: 'command-b',
+        type: 'commandExecution',
+        command: 'pnpm typecheck',
+        aggregatedOutput: 'typecheck ok',
+        status: 'completed',
+      },
+    ]) {
+      fakeCodexManager.emit('notification', {
+        method: 'item/completed',
+        params: {
+          threadId: startedThread.providerSessionId,
+          turnId: activeTurn!.id,
+          item: command,
+        }
+      });
+    }
+
+    fakeCodexManager.emit('notification', {
+      method: 'item/agentMessage/delta',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turnId: activeTurn!.id,
+        itemId: 'agent-between',
+        delta: 'The first batch passed. I will run the next checks.',
+      }
+    });
+
+    for (const command of [
+      {
+        id: 'command-c',
+        type: 'commandExecution',
+        command: 'pnpm test',
+        aggregatedOutput: 'test ok',
+        status: 'completed',
+      },
+      {
+        id: 'command-d',
+        type: 'commandExecution',
+        command: 'pnpm build',
+        aggregatedOutput: 'build ok',
+        status: 'completed',
+      },
+      {
+        id: 'command-e',
+        type: 'commandExecution',
+        command: 'pnpm package',
+        aggregatedOutput: 'package ok',
+        status: 'completed',
+      },
+    ]) {
+      fakeCodexManager.emit('notification', {
+        method: 'item/completed',
+        params: {
+          threadId: startedThread.providerSessionId,
+          turnId: activeTurn!.id,
+          item: command,
+        }
+      });
+    }
+
+    const completedTurn = {
+      ...activeTurn!,
+      status: 'completed' as const,
+      items: [
+        ...activeTurn!.items,
+        {
+          id: 'command-a',
+          type: 'commandExecution',
+          command: 'pnpm lint',
+          aggregatedOutput: 'lint ok',
+          status: 'completed',
+        },
+        {
+          id: 'command-b',
+          type: 'commandExecution',
+          command: 'pnpm typecheck',
+          aggregatedOutput: 'typecheck ok',
+          status: 'completed',
+        },
+        {
+          id: 'agent-between',
+          type: 'agentMessage',
+          text: 'The first batch passed. I will run the next checks.',
+        },
+        {
+          id: 'command-c',
+          type: 'commandExecution',
+          command: 'pnpm test',
+          aggregatedOutput: 'test ok',
+          status: 'completed',
+        },
+        {
+          id: 'command-d',
+          type: 'commandExecution',
+          command: 'pnpm build',
+          aggregatedOutput: 'build ok',
+          status: 'completed',
+        },
+        {
+          id: 'command-e',
+          type: 'commandExecution',
+          command: 'pnpm package',
+          aggregatedOutput: 'package ok',
+          status: 'completed',
+        },
+      ],
+    };
+    fakeCodexManager.threads.set(startedThread.providerSessionId, {
+      ...remoteThread!,
+      status: { type: 'idle' },
+      turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turn: completedTurn
+      }
+    });
+
+    await app.close();
+
+    const restartedCodexManager = new FakeCodexManager();
+    restartedCodexManager.threads.set(startedThread.providerSessionId, {
+      ...remoteThread!,
+      status: { type: 'idle' },
+      turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
+    });
+    restartedCodexManager.loadedThreadIds.add(startedThread.providerSessionId);
+    fakeCodexManager = restartedCodexManager;
+    app = buildTestApp(fakeCodexManager);
+    await app.ready();
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(
+      detailResponse
+        .json()
+        .turns.at(-1)
+        .items.map((item: any) => item.id),
+    ).toEqual([
+      activeTurn!.items[0]!.id,
+      'command-a',
+      'command-b',
+      'agent-between',
+      'command-c',
+      'command-d',
+      'command-e',
+    ]);
+  });
+
+  it('persists completed turn ordering hints for same-id Codex turns across restart', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Persist Same Turn Order Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Run commands with a status update between them.',
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    const startedThread = promptResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(startedThread.providerSessionId);
+    const activeTurn = remoteThread?.turns.at(-1);
+    expect(activeTurn).toBeTruthy();
+
+    fakeCodexManager.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turnId: activeTurn!.id,
+        item: {
+          id: 'command-a',
+          type: 'commandExecution',
+          command: 'pnpm lint',
+          aggregatedOutput: 'lint ok',
+          status: 'completed',
+        },
+      }
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'item/agentMessage/delta',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turnId: activeTurn!.id,
+        itemId: 'agent-between',
+        delta: 'Lint passed, now testing.',
+      }
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turnId: activeTurn!.id,
+        item: {
+          id: 'command-b',
+          type: 'commandExecution',
+          command: 'pnpm test',
+          aggregatedOutput: 'test ok',
+          status: 'completed',
+        },
+      }
+    });
+
+    const completedTurn = {
+      ...activeTurn!,
+      status: 'completed' as const,
+      items: [
+        ...activeTurn!.items,
+        {
+          id: 'agent-between',
+          type: 'agentMessage',
+          text: 'Lint passed, now testing.',
+        },
+        {
+          id: 'agent-final',
+          type: 'agentMessage',
+          text: 'All checks passed.',
+        },
+        {
+          id: 'command-a',
+          type: 'commandExecution',
+          command: 'pnpm lint',
+          aggregatedOutput: 'lint ok',
+          status: 'completed',
+        },
+        {
+          id: 'command-b',
+          type: 'commandExecution',
+          command: 'pnpm test',
+          aggregatedOutput: 'test ok',
+          status: 'completed',
+        },
+      ],
+    };
+    fakeCodexManager.threads.set(startedThread.providerSessionId, {
+      ...remoteThread!,
+      status: { type: 'idle' },
+      turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turn: completedTurn
+      }
+    });
+
+    await app.close();
+
+    const restartedCodexManager = new FakeCodexManager();
+    restartedCodexManager.threads.set(startedThread.providerSessionId, {
+      ...remoteThread!,
+      status: { type: 'idle' },
+      turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
+    });
+    restartedCodexManager.loadedThreadIds.add(startedThread.providerSessionId);
+    fakeCodexManager = restartedCodexManager;
+    app = buildTestApp(fakeCodexManager);
+    await app.ready();
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(
+      detailResponse
+        .json()
+        .turns.at(-1)
+        .items.map((item: any) => item.id),
+    ).toEqual([
+      activeTurn!.items[0]!.id,
+      'command-a',
+      'agent-between',
+      'command-b',
+      'agent-final',
+    ]);
+  });
+
+  it('matches final Codex assistant messages to streaming drafts when ids differ', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Persist Differing Agent Id Order Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Run a command, explain, then run another command.',
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    const startedThread = promptResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(startedThread.providerSessionId);
+    const activeTurn = remoteThread?.turns.at(-1);
+    expect(activeTurn).toBeTruthy();
+
+    fakeCodexManager.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turnId: activeTurn!.id,
+        item: {
+          id: 'command-a',
+          type: 'commandExecution',
+          command: 'pnpm lint',
+          aggregatedOutput: 'lint ok',
+          status: 'completed',
+        },
+      }
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'item/agentMessage/delta',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turnId: activeTurn!.id,
+        itemId: 'streaming-agent-between',
+        delta: 'Lint passed, now testing.',
+      }
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turnId: activeTurn!.id,
+        item: {
+          id: 'command-b',
+          type: 'commandExecution',
+          command: 'pnpm test',
+          aggregatedOutput: 'test ok',
+          status: 'completed',
+        },
+      }
+    });
+
+    const completedTurn = {
+      ...activeTurn!,
+      status: 'completed' as const,
+      items: [
+        ...activeTurn!.items,
+        {
+          id: 'final-agent-between',
+          type: 'agentMessage',
+          text: 'Lint passed, now testing.',
+        },
+        {
+          id: 'final-agent-summary',
+          type: 'agentMessage',
+          text: 'All checks passed.',
+        },
+        {
+          id: 'command-a',
+          type: 'commandExecution',
+          command: 'pnpm lint',
+          aggregatedOutput: 'lint ok',
+          status: 'completed',
+        },
+        {
+          id: 'command-b',
+          type: 'commandExecution',
+          command: 'pnpm test',
+          aggregatedOutput: 'test ok',
+          status: 'completed',
+        },
+      ],
+    };
+    fakeCodexManager.threads.set(startedThread.providerSessionId, {
+      ...remoteThread!,
+      status: { type: 'idle' },
+      turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turn: completedTurn
+      }
+    });
+
+    await app.close();
+
+    const restartedCodexManager = new FakeCodexManager();
+    restartedCodexManager.threads.set(startedThread.providerSessionId, {
+      ...remoteThread!,
+      status: { type: 'idle' },
+      turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
+    });
+    restartedCodexManager.loadedThreadIds.add(startedThread.providerSessionId);
+    fakeCodexManager = restartedCodexManager;
+    app = buildTestApp(fakeCodexManager);
+    await app.ready();
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(
+      detailResponse
+        .json()
+        .turns.at(-1)
+        .items.map((item: any) => item.id),
+    ).toEqual([
+      activeTurn!.items[0]!.id,
+      'command-a',
+      'final-agent-between',
+      'command-b',
+      'final-agent-summary',
+    ]);
+  });
+
+  it('falls back to live draft order for final Codex assistant messages with edited text', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Persist Edited Agent Order Thread'
+      }
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Run a command, give a status, then run another command.',
+      }
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    const startedThread = promptResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(startedThread.providerSessionId);
+    const activeTurn = remoteThread?.turns.at(-1);
+    expect(activeTurn).toBeTruthy();
+
+    fakeCodexManager.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turnId: activeTurn!.id,
+        item: {
+          id: 'command-a',
+          type: 'commandExecution',
+          command: 'pnpm lint',
+          aggregatedOutput: 'lint ok',
+          status: 'completed',
+        },
+      }
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'item/agentMessage/delta',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turnId: activeTurn!.id,
+        itemId: 'streaming-agent-edited',
+        delta: 'Initial draft status text.',
+      }
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turnId: activeTurn!.id,
+        item: {
+          id: 'command-b',
+          type: 'commandExecution',
+          command: 'pnpm test',
+          aggregatedOutput: 'test ok',
+          status: 'completed',
+        },
+      }
+    });
+
+    const completedTurn = {
+      ...activeTurn!,
+      status: 'completed' as const,
+      items: [
+        ...activeTurn!.items,
+        {
+          id: 'final-agent-edited',
+          type: 'agentMessage',
+          text: 'Lint completed successfully; starting the test run.',
+        },
+        {
+          id: 'command-a',
+          type: 'commandExecution',
+          command: 'pnpm lint',
+          aggregatedOutput: 'lint ok',
+          status: 'completed',
+        },
+        {
+          id: 'command-b',
+          type: 'commandExecution',
+          command: 'pnpm test',
+          aggregatedOutput: 'test ok',
+          status: 'completed',
+        },
+      ],
+    };
+    fakeCodexManager.threads.set(startedThread.providerSessionId, {
+      ...remoteThread!,
+      status: { type: 'idle' },
+      turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
+    });
+    fakeCodexManager.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: startedThread.providerSessionId,
+        turn: completedTurn
+      }
+    });
+
+    await app.close();
+
+    const restartedCodexManager = new FakeCodexManager();
+    restartedCodexManager.threads.set(startedThread.providerSessionId, {
+      ...remoteThread!,
+      status: { type: 'idle' },
+      turns: [...remoteThread!.turns.slice(0, -1), completedTurn]
+    });
+    restartedCodexManager.loadedThreadIds.add(startedThread.providerSessionId);
+    fakeCodexManager = restartedCodexManager;
+    app = buildTestApp(fakeCodexManager);
+    await app.ready();
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(
+      detailResponse
+        .json()
+        .turns.at(-1)
+        .items.map((item: any) => item.id),
+    ).toEqual([
+      activeTurn!.items[0]!.id,
+      'command-a',
+      'final-agent-edited',
+      'command-b',
     ]);
   });
 

@@ -58,6 +58,7 @@ interface ThreadComposerProps {
   mcpConfigFormat?: AgentBackendManagementSchemaDto['mcpConfigFormat'] | null | undefined;
   followTail?: boolean;
   threadConnected?: boolean;
+  shellAvailable?: boolean;
   disabled?: boolean;
   disabledPlaceholder?: string | undefined;
   shellControlState?: ThreadShellControlState | null;
@@ -77,7 +78,7 @@ interface ThreadComposerProps {
   onSubmit: (input: {
     prompt: string;
     attachments?: PromptAttachmentUpload[];
-  }) => Promise<void> | void;
+  }) => Promise<boolean | void> | boolean | void;
   onInterrupt?: () => Promise<void> | void;
   onCompact?: () => Promise<void> | void;
   onOpenSkills?: () => Promise<void> | void;
@@ -787,6 +788,7 @@ export function ThreadComposer({
   mcpConfigFormat = 'none',
   followTail = false,
   threadConnected = true,
+  shellAvailable = true,
   disabled = false,
   disabledPlaceholder,
   shellControlState = null,
@@ -948,6 +950,7 @@ export function ThreadComposer({
   const renderedPreviewSignatureRef = useRef('');
   const renderedSanitizeNonceRef = useRef(0);
   const isShellView = activeView === 'shell';
+  const canToggleShellView = shellAvailable || isShellView;
   const isMobileShell = Boolean(isShellView && shellControlState?.isMobileShell);
   const shellPromptLabel = shellControlState?.promptLabel ?? null;
   const [attachmentPreviewUrls, setAttachmentPreviewUrls] = useState<AttachmentPreviewMap>({});
@@ -2217,11 +2220,14 @@ export function ThreadComposer({
       ? []
       : attachments.filter((attachment) => normalizedPrompt.includes(attachment.placeholder));
 
-    await onSubmit(
+    const submitted = await onSubmit(
       activeAttachments.length > 0
         ? { prompt: normalizedPrompt, attachments: activeAttachments }
         : { prompt: normalizedPrompt }
     );
+    if (submitted === false) {
+      return;
+    }
     updateDraft(() => ({
       prompt: '',
       attachments: [],
@@ -2383,6 +2389,9 @@ export function ThreadComposer({
     : supportedEfforts.length === 0
       ? 'The selected model does not expose adjustable reasoning effort.'
       : 'Select reasoning effort';
+  const composerLayerClassName = openMenu
+    ? 'relative z-[80] shrink-0'
+    : 'relative z-20 shrink-0';
   const formClassName = edgeToEdgeMobile || isMobileShell
     ? 'relative z-20 shrink-0 bg-transparent px-3 pb-0 pt-3 sm:p-4'
     : 'relative z-20 shrink-0 bg-transparent px-3 pb-3 pt-0 sm:px-4 sm:pb-4 sm:pt-0';
@@ -2394,7 +2403,7 @@ export function ThreadComposer({
     }`;
 
   return (
-    <div className="relative z-20 shrink-0">
+    <div className={composerLayerClassName}>
       <input
         ref={photoInputRef}
         type="file"
@@ -3218,15 +3227,17 @@ export function ThreadComposer({
               </div>
             )}
 
-            <button
-              type="button"
-              aria-label={isShellView ? 'Switch to chat' : 'Switch to shell'}
-              title={isShellView ? 'Switch to chat' : 'Switch to shell'}
-              onClick={() => onToggleView?.()}
-              className="thread-composer-icon-button inline-flex h-7 w-7 items-center justify-center rounded-full border border-stone-700 bg-stone-900/92 text-stone-200 transition hover:bg-stone-800"
-            >
-              {isShellView ? <ChatIcon /> : <TerminalIcon />}
-            </button>
+            {canToggleShellView && (
+              <button
+                type="button"
+                aria-label={isShellView ? 'Switch to chat' : 'Switch to shell'}
+                title={isShellView ? 'Switch to chat' : 'Switch to shell'}
+                onClick={() => onToggleView?.()}
+                className="thread-composer-icon-button inline-flex h-7 w-7 items-center justify-center rounded-full border border-stone-700 bg-stone-900/92 text-stone-200 transition hover:bg-stone-800"
+              >
+                {isShellView ? <ChatIcon /> : <TerminalIcon />}
+              </button>
+            )}
           </div>
 
           <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5">

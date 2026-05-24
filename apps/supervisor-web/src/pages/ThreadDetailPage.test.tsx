@@ -12,6 +12,8 @@ const shellPanelMock = vi.hoisted(() => ({
   focus: vi.fn(() => undefined),
   refreshLayout: vi.fn(() => undefined),
   status: 'detached' as const,
+  shellInputEnabled: true,
+  isConnecting: false,
   mounts: 0,
   unmounts: 0,
 }));
@@ -26,6 +28,7 @@ vi.mock('../components/ThreadShellPanel', async () => {
         connectionButtonDisabled: boolean;
         connectionButtonLabel: string;
         shellInputEnabled: boolean;
+        isConnecting: boolean;
         isCommandRunning: boolean;
         promptLabel: string | null;
         isMobileShell: boolean;
@@ -53,7 +56,8 @@ vi.mock('../components/ThreadShellPanel', async () => {
         status: shellPanelMock.status,
         connectionButtonDisabled: false,
         connectionButtonLabel: 'Connect shell',
-        shellInputEnabled: true,
+        shellInputEnabled: shellPanelMock.shellInputEnabled,
+        isConnecting: shellPanelMock.isConnecting,
         isCommandRunning: false,
         promptLabel: '(base) trading-lab',
         isMobileShell: false,
@@ -78,6 +82,36 @@ vi.mock('../components/ThreadShellPanel', async () => {
     ThreadShellPanel,
   };
 });
+
+vi.mock('../plugins/PluginProvider', () => ({
+  usePlugins: () => ({
+    plugins: [
+      {
+        id: 'remote-codex.terminal',
+        enabled: true,
+        capabilities: {
+          artifactTypes: [],
+          timelineRenderers: [],
+          threadPanels: [
+            {
+              id: 'terminal',
+              label: 'Terminal',
+              kind: 'terminal',
+              artifactTypes: [],
+            },
+          ],
+        },
+      },
+    ],
+    getThreadPanels: () => [
+      {
+        id: 'terminal',
+        label: 'Terminal',
+        kind: 'terminal',
+      },
+    ],
+  }),
+}));
 
 import { ThreadDetailPage } from './ThreadDetailPage';
 
@@ -329,6 +363,8 @@ describe('ThreadDetailPage', () => {
     shellPanelMock.focus.mockClear();
     shellPanelMock.refreshLayout.mockClear();
     shellPanelMock.status = 'detached';
+    shellPanelMock.shellInputEnabled = true;
+    shellPanelMock.isConnecting = false;
     shellPanelMock.mounts = 0;
     shellPanelMock.unmounts = 0;
     vi.stubGlobal('WebSocket', FakeWebSocket as any);
@@ -2822,6 +2858,196 @@ describe('ThreadDetailPage', () => {
     expect(screen.queryByText('FINAL_TEXT_BEFORE_REFRESH')).not.toBeInTheDocument();
   });
 
+  it('keeps sequenced live command snapshots through materialized detail refreshes', async () => {
+    let detailRequestCount = 0;
+
+    vi.stubGlobal(
+      'fetch',
+      withHealthz((input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.includes('/api/agent-runtimes/codex/status')) {
+          return okJsonResponse(codexBackendResponse);
+        }
+
+        if (url.includes('/api/agent-runtimes/codex/models')) {
+          return okJsonResponse(modelOptionsResponse);
+        }
+
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
+          detailRequestCount += 1;
+          const hasMaterializedCommands = detailRequestCount > 1;
+          return okJsonResponse({
+            thread: {
+              id: 'thread-1',
+              workspaceId: 'workspace-1',
+              providerSessionId: 'codex-1',
+              source: 'supervisor',
+              title: 'Demo Thread',
+              model: 'gpt-5',
+              reasoningEffort: 'medium',
+              collaborationMode: 'default',
+              approvalMode: 'yolo',
+              status: 'running',
+              summaryText: 'Preview',
+              lastError: null,
+              activeTurnId: 'turn-1',
+              isLoaded: true,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: new Date().toISOString(),
+              lastTurnCompletedAt: null,
+            },
+            workspace: {
+              id: 'workspace-1',
+              hostId: 'host-1',
+              label: 'Demo Workspace',
+              absPath: '/tmp/demo',
+              isFavorite: false,
+              createdAt: new Date().toISOString(),
+              lastOpenedAt: null,
+            },
+            workspacePathStatus: 'present',
+            pendingRequests: [],
+            liveItems: null,
+            turns: [
+              {
+                id: 'turn-1',
+                startedAt: new Date().toISOString(),
+                status: 'inProgress',
+                error: null,
+                items: hasMaterializedCommands
+                  ? [
+                      {
+                        id: 'command-1',
+                        kind: 'commandExecution',
+                        text: 'pnpm lint',
+                        status: 'completed',
+                      },
+                      {
+                        id: 'command-2',
+                        kind: 'commandExecution',
+                        text: 'pnpm typecheck',
+                        status: 'completed',
+                      },
+                      {
+                        id: 'command-3',
+                        kind: 'commandExecution',
+                        text: 'pnpm test',
+                        status: 'completed',
+                      },
+                      {
+                        id: 'command-4',
+                        kind: 'commandExecution',
+                        text: 'pnpm build',
+                        status: 'completed',
+                      },
+                      {
+                        id: 'command-5',
+                        kind: 'commandExecution',
+                        text: 'pnpm package',
+                        status: 'completed',
+                      },
+                    ]
+                  : [],
+              },
+            ],
+          });
+        }
+
+        if (url.endsWith('/api/threads')) {
+          return okJsonResponse([]);
+        }
+
+        return Promise.reject(new Error(`Unexpected request: ${url}`));
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Demo Thread').length).toBeGreaterThan(0);
+    });
+    await act(async () => {
+      emitSocketEvent(FakeWebSocket.instances[0]!, 'open');
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(FakeWebSocket.instances[0]?.readyState).toBe(1);
+    });
+
+    for (const item of [
+      { id: 'command-1', text: 'pnpm lint', sequence: 1 },
+      { id: 'command-2', text: 'pnpm typecheck', sequence: 2 },
+      { id: 'command-3', text: 'pnpm test', sequence: 4 },
+      { id: 'command-4', text: 'pnpm build', sequence: 5 },
+      { id: 'command-5', text: 'pnpm package', sequence: 6 },
+    ]) {
+      emitSocketMessage(FakeWebSocket.instances[0]!, {
+        type: 'thread.item.completed',
+        threadId: 'thread-1',
+        timestamp: new Date().toISOString(),
+        payload: {
+          turnId: 'turn-1',
+          item: {
+            id: item.id,
+            kind: 'commandExecution',
+            text: item.text,
+            status: 'completed',
+            sequence: item.sequence,
+          },
+        },
+      });
+      if (item.id === 'command-2') {
+        emitSocketMessage(FakeWebSocket.instances[0]!, {
+          type: 'thread.output.delta',
+          threadId: 'thread-1',
+          timestamp: new Date().toISOString(),
+          payload: {
+            turnId: 'turn-1',
+            itemId: 'agent-between',
+            sequence: 3,
+            delta: 'The first batch passed. I will run the next checks.',
+          },
+        });
+      }
+    }
+
+    await waitFor(() => {
+      expect(screen.getByText('2 commands')).toBeInTheDocument();
+    });
+    expect(screen.getByText('3 commands')).toBeInTheDocument();
+    expect(screen.queryByText('5 commands')).not.toBeInTheDocument();
+
+    await act(async () => {
+      emitSocketMessage(FakeWebSocket.instances[0]!, {
+        type: 'thread.updated',
+        threadId: 'thread-1',
+        timestamp: new Date().toISOString(),
+        payload: {
+          status: 'running',
+        },
+      });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('2 commands')).toBeInTheDocument();
+    });
+    expect(screen.getByText('3 commands')).toBeInTheDocument();
+    expect(screen.queryByText('5 commands')).not.toBeInTheDocument();
+    expect(
+      screen.getByText('The first batch passed. I will run the next checks.'),
+    ).toBeInTheDocument();
+  });
+
   it('does not render a duplicate optimistic turn once the live provider turn is materialized', async () => {
     const prompt = 'What number is in the screenshot? [PHOTO ./.temp/threads/thread-1/image.png]';
     let detailRequestCount = 0;
@@ -3466,6 +3692,40 @@ describe('ThreadDetailPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('mock-thread-shell-panel')).toBeInTheDocument();
       expect(shellPanelMock.toggleConnection).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('waits for shell attach before sending the first shell command', async () => {
+    shellPanelMock.shellInputEnabled = false;
+    shellPanelMock.toggleConnection.mockImplementation(async () => {
+      shellPanelMock.shellInputEnabled = true;
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Demo Thread')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to shell' }));
+    await screen.findByTestId('mock-thread-shell-panel');
+
+    const editor = screen.getAllByLabelText('Prompt').at(-1);
+    expect(editor).toBeDefined();
+    setPromptValue(editor!, 'pwd');
+    const sendButton = screen.getAllByRole('button', { name: 'Send Shell Input' }).at(-1);
+    expect(sendButton).toBeDefined();
+    fireEvent.click(sendButton!);
+
+    await waitFor(() => {
+      expect(shellPanelMock.toggleConnection).toHaveBeenCalled();
+      expect(shellPanelMock.sendCommand).toHaveBeenCalledWith('pwd');
     });
   });
 
@@ -5151,6 +5411,44 @@ describe('ThreadDetailPage', () => {
     });
     expect(detailCallCount).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('Recovered after reconnect.')).toBeInTheDocument();
+  });
+
+  it('keeps the mobile chat composer menu above the timeline without clipping', async () => {
+    const addEventListener = vi.fn();
+    const removeEventListener = vi.fn();
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      matches: true,
+      media: '(max-width: 639px)',
+      addEventListener,
+      removeEventListener,
+    })));
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Demo Thread')).toBeInTheDocument();
+    });
+
+    const trigger = screen.getByRole('button', { name: 'Open slash toolbox' });
+    const composerHost = trigger.closest('div.fixed');
+    expect(composerHost).toHaveClass('z-50', 'overflow-visible');
+
+    fireEvent.click(trigger);
+
+    const slashMenu = document.querySelector('[data-composer-menu-surface="true"]');
+    expect(slashMenu).toBeInTheDocument();
+    expect(slashMenu).toHaveClass('bottom-full');
+    let composerLayer = slashMenu?.parentElement;
+    while (composerLayer && !composerLayer.classList.contains('z-[80]')) {
+      composerLayer = composerLayer.parentElement;
+    }
+    expect(composerLayer).toHaveClass('z-[80]');
   });
 
 });
