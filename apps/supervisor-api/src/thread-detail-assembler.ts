@@ -237,7 +237,7 @@ export class ThreadDetailAssembler {
     );
     const localTurns =
       localSession?.turns ??
-      [...persistedItemsByTurnId.entries()].map(([turnId, items]) => ({
+      [...persistedItemsByTurnId.keys()].map((turnId) => ({
         id: turnId,
         startedAt: null,
         status: 'completed' as const,

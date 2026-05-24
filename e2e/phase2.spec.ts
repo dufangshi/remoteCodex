@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { expect, test, type Page } from '@playwright/test';
 
-const workspaceRoot = '/Users/fonsh/remoteCodex/.local/e2e';
+const workspaceRoot = path.resolve(process.env.E2E_WORKSPACE_ROOT ?? '.local/e2e-playwright');
 
 async function ensureWorkspaceDir(name: string) {
   const dir = path.join(workspaceRoot, name);
@@ -45,16 +45,16 @@ test.describe('Phase 2 acceptance', () => {
     const workspacePath = await ensureWorkspaceDir(workspaceName);
 
     await page.goto('/workspaces/new');
-    await page.getByLabel('Absolute path').fill(workspacePath);
+    await page.getByLabel('Path or Git URL').fill(workspacePath);
     await page.getByLabel('Display label').fill(workspaceName);
     await page.getByRole('button', { name: 'Create Workspace' }).click();
 
-    await expect(page).toHaveURL(/\/workspaces\/.+/);
+    await expect(page).toHaveURL(/\/threads\?workspaceId=.+/);
     await expect(
       page.getByRole('heading', { level: 2, name: workspaceName }),
     ).toBeVisible();
     await expect(
-      page.getByRole('button', { name: /README\.md/ }).first(),
+      page.getByText('No threads available in this workspace.'),
     ).toBeVisible();
 
     await page.goto('/threads/new');
@@ -63,19 +63,19 @@ test.describe('Phase 2 acceptance', () => {
     await page.getByRole('button', { name: 'Create Thread' }).click();
 
     await expect(page).toHaveURL(/\/threads\/.+/);
-    await expect(
-      page.getByRole('heading', { level: 2, name: `${workspaceName} thread` }),
-    ).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'Prompt' })).toBeVisible();
 
     await page
-      .getByPlaceholder('Ask Codex to inspect, modify, or explain code...')
+      .getByRole('textbox', { name: 'Prompt' })
       .fill('hello, reply me with hello');
     await page.getByRole('button', { name: 'Send Prompt' }).click();
 
     await expect(page.getByText('hello', { exact: true })).toBeVisible({
       timeout: 30_000,
     });
-    await expect(page.getByText(/completed/i)).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('[aria-label="Completed"]').first()).toBeVisible({
+      timeout: 30_000,
+    });
   });
 
   test('can interrupt a running turn and return to an interactive state', async ({
@@ -85,11 +85,11 @@ test.describe('Phase 2 acceptance', () => {
     const workspacePath = await ensureWorkspaceDir(workspaceName);
 
     await page.goto('/workspaces/new');
-    await page.getByLabel('Absolute path').fill(workspacePath);
+    await page.getByLabel('Path or Git URL').fill(workspacePath);
     await page.getByLabel('Display label').fill(workspaceName);
     await page.getByRole('button', { name: 'Create Workspace' }).click();
 
-    await expect(page).toHaveURL(/\/workspaces\/.+/);
+    await expect(page).toHaveURL(/\/threads\?workspaceId=.+/);
 
     await page.goto('/threads/new');
     await selectWorkspaceByLabelText(page, workspaceName);
@@ -99,7 +99,7 @@ test.describe('Phase 2 acceptance', () => {
     await expect(page).toHaveURL(/\/threads\/.+/);
 
     await page
-      .getByPlaceholder('Ask Codex to inspect, modify, or explain code...')
+      .getByRole('textbox', { name: 'Prompt' })
       .fill(
         'Inspect this repository in depth, enumerate every top-level source file group, and write a detailed multi-section report before giving a final summary.',
       );
@@ -112,7 +112,9 @@ test.describe('Phase 2 acceptance', () => {
 
     await page.getByRole('button', { name: 'Stop Current Turn' }).click();
 
-    await expect(page.getByText(/interrupted/i).first()).toBeVisible({
+    await expect(
+      page.getByRole('button', { name: 'Stop Current Turn' }),
+    ).toBeDisabled({
       timeout: 20_000,
     });
     await expect(page.getByRole('button', { name: 'Send Prompt' })).toBeEnabled(
@@ -134,11 +136,11 @@ test.describe('Phase 2 acceptance', () => {
     const workspacePath = await ensureWorkspaceDir(workspaceName);
 
     await page.goto('/workspaces/new');
-    await page.getByLabel('Absolute path').fill(workspacePath);
+    await page.getByLabel('Path or Git URL').fill(workspacePath);
     await page.getByLabel('Display label').fill(workspaceName);
     await page.getByRole('button', { name: 'Create Workspace' }).click();
 
-    await expect(page).toHaveURL(/\/workspaces\/.+/);
+    await expect(page).toHaveURL(/\/threads\?workspaceId=.+/);
 
     await page.goto('/threads/new');
     await selectWorkspaceByLabelText(page, workspaceName);
@@ -146,13 +148,18 @@ test.describe('Phase 2 acceptance', () => {
     await page.getByRole('button', { name: 'Create Thread' }).click();
 
     await expect(page).toHaveURL(/\/threads\/.+/);
-    const threadNavButton = page.locator('button[aria-expanded]').nth(1);
+    const threadNavButton = page.getByRole('button', {
+      name: /thread navigation/i,
+    });
     await expect(threadNavButton).toHaveAttribute('aria-expanded', 'false');
 
     await threadNavButton.click();
 
     await expect(threadNavButton).toHaveAttribute('aria-expanded', 'true');
-    const mobileSidebar = page.locator('aside').first();
+    await expect(
+      page.getByRole('button', { name: 'Collapse thread navigation' }),
+    ).toBeVisible();
+    const mobileSidebar = page.locator('aside:visible').first();
     await expect(mobileSidebar.getByText('Thread List')).toBeVisible();
     await expect(
       mobileSidebar.getByRole('button', { name: /Thread Meta/i }),

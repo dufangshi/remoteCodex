@@ -122,25 +122,6 @@ function SidebarSection({
   );
 }
 
-function supervisorSummary(status: AgentRuntimeStatusDto | null) {
-  if (!status) {
-    return 'Checking supervisor';
-  }
-
-  switch (status.state) {
-    case 'ready':
-      return 'Supervisor ready';
-    case 'starting':
-      return 'Supervisor starting';
-    case 'degraded':
-      return 'Supervisor degraded';
-    case 'stopped':
-      return 'Supervisor stopped';
-    case 'failed':
-      return 'Supervisor failed';
-  }
-}
-
 function ThreadCard({
   thread,
   currentThreadId,
@@ -343,7 +324,6 @@ export function ThreadCards({
 
 export function ThreadWorkspaceLayout({
   threads,
-  status,
   loading = false,
   error,
   viewportConstrained = false,

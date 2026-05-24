@@ -1,5 +1,4 @@
 import fs from 'node:fs/promises';
-import path from 'node:path';
 
 import {
   AgentRuntime,
@@ -18,19 +17,16 @@ import {
   getWorkspaceRecordById,
   listThreadTurnMetadataByThreadId,
   listThreadRecords,
-  upsertThreadTurnMetadata,
   updateThreadRecord
 } from '../../../packages/db/src/index';
 import {
   ApprovalMode,
-  CollaborationModeDto,
   CreateThreadInput,
   ExportThreadPdfInput,
   ForkThreadInput,
   ImportThreadInput,
   CreateThreadHookInput,
   ModelOptionDto,
-  ReasoningEffortDto,
   RespondThreadActionRequestInput,
   ResumeThreadInput,
   SendThreadPromptInput,
@@ -47,8 +43,6 @@ import {
   ThreadHooksDto,
   TrustThreadHookInput,
   ThreadHistoryItemDetailDto,
-  ThreadLiveItemsDto,
-  ThreadLivePlanDto,
   ThreadMcpServersDto,
   ThreadSkillsDto,
   ThreadTurnDto,
@@ -70,11 +64,7 @@ import {
   ProviderRequestCoordinator,
 } from './provider-request-coordinator';
 import {
-  buildThreadContextUsageFromPayload,
-  createUnavailableThreadContextUsage,
   normalizePricingTier,
-  stringifyStoredThreadTurnTokenUsageState,
-  ThreadContextTokenUsagePayload,
   ThreadUsageAccounting,
 } from './thread-usage-accounting';
 import {
@@ -104,7 +94,6 @@ import { ThreadDeletionCoordinator } from './thread-deletion-coordinator';
 import { ThreadExportCoordinator } from './thread-export-coordinator';
 import {
   buildThreadPatch,
-  defaultSandboxModeForApprovalMode,
   normalizeCollaborationMode,
   normalizeSandboxMode,
   toThreadDto as threadRecordToThreadDto,

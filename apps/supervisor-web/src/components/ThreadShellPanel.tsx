@@ -1655,7 +1655,7 @@ export const ThreadShellPanel = forwardRef<
     } finally {
       setBusy(false);
     }
-  }, [renameDraft, renamingShellId, updateShellEntry]);
+  }, [renameDraft, renamingShellId]);
 
   const setPaneShell = useCallback((paneId: ShellPaneId, shellId: string) => {
     if (paneId === 'primary') {
@@ -1796,25 +1796,6 @@ export const ThreadShellPanel = forwardRef<
     connectionButtonDisabled,
     handleCreateShell,
   ]);
-
-  const handleToggleSplit = useCallback(() => {
-    setSplitMode((current) => {
-      if (current === 'columns') {
-        setActivePaneId('primary');
-        setMobileProcessListOpen(false);
-        return 'single';
-      }
-      const nextSecondary =
-        liveShells.find((shell) => shell.id !== primaryShell?.id) ??
-        liveShells[0] ??
-        null;
-      if (nextSecondary) {
-        setSecondaryShellId(nextSecondary.id);
-      }
-      setActivePaneId('secondary');
-      return 'columns';
-    });
-  }, [liveShells, primaryShell?.id]);
 
   const persistSplitRatio = useCallback(
     (nextRatio: number) => {
@@ -1958,46 +1939,6 @@ export const ThreadShellPanel = forwardRef<
     }),
     [activePaneRef, handleConnectionToggle, handleTerminateShell, splitMode],
   );
-
-  const renderShellTab = (shell: ShellSessionDto) => {
-    const assignedPane =
-      shell.id === primaryShell?.id ? 'primary' : shell.id === secondaryShell?.id ? 'secondary' : null;
-    const selected = assignedPane === activePaneId;
-    return (
-      <button
-        key={shell.id}
-        type="button"
-        onClick={() => handleSelectShell(shell)}
-        className={`shrink-0 rounded-md border px-2.5 py-1.5 text-xs transition ${
-          selected
-            ? 'border-sky-300/45 bg-sky-300/14 text-sky-50'
-            : 'border-stone-700/80 bg-stone-900/50 text-stone-300 hover:border-stone-500'
-        }`}
-        title={`${shell.tmuxSessionName} (${statusLabel(shell.status)})`}
-      >
-        <span
-          className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle"
-          style={{
-            background:
-              shell.status === 'attached'
-                ? '#34d399'
-                : shell.status === 'detached' || shell.status === 'running'
-                  ? '#60a5fa'
-                  : '#78716c',
-          }}
-        />
-        {shellLabel(shell)}
-        {shell.label?.trim() && (
-          <span className="sr-only"> custom name</span>
-        )}
-        {assignedPane && splitMode === 'columns' && (
-          <span className="ml-1.5 text-[10px] uppercase text-[var(--theme-fg-muted)]">
-            {assignedPane === 'primary' ? 'L' : 'R'}
-          </span>
-        )}
-      </button>
-    );
-  };
 
   const renderProcessRow = (shell: ShellSessionDto) => (
     <div

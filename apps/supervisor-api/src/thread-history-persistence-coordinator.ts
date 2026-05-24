@@ -77,7 +77,7 @@ export class ThreadHistoryPersistenceCoordinator {
     for (const item of items) {
       if (
         item.kind !== 'agentMessage' ||
-        !shouldPersistRuntimeFinalHistoryItem(item, items)
+        !shouldPersistRuntimeFinalHistoryItem(item)
       ) {
         continue;
       }
@@ -111,7 +111,7 @@ export class ThreadHistoryPersistenceCoordinator {
     }
 
     for (const item of items) {
-      if (!shouldPersistRuntimeFinalHistoryItem(item, items)) {
+      if (!shouldPersistRuntimeFinalHistoryItem(item)) {
         continue;
       }
 

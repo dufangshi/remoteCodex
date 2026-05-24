@@ -106,7 +106,8 @@ export class FakeCodexManager extends EventEmitter {
     return [...this.loadedThreadIds];
   }
 
-  async listSkills(_input: { cwds?: string[]; forceReload?: boolean } = {}) {
+  async listSkills(input: { cwds?: string[]; forceReload?: boolean } = {}) {
+    void input;
     return this.skillsEntries;
   }
 
@@ -114,7 +115,8 @@ export class FakeCodexManager extends EventEmitter {
     return this.mcpServers;
   }
 
-  async listHooks(_input: { cwds?: string[] } = {}) {
+  async listHooks(input: { cwds?: string[] } = {}) {
+    void input;
     if (this.hooksListError) {
       throw this.hooksListError;
     }

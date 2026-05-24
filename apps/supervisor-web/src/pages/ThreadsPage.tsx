@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 
 import {
   AgentRuntimeStatusDto,
   defaultAgentBackendId,
   ThreadDto,
+  truncateAutoThreadTitle,
   WorkspaceDto,
 } from '../../../../packages/shared/src/index';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -23,16 +24,6 @@ import {
   updateThread,
 } from '../lib/api';
 
-function truncateDialogThreadTitle(title: string) {
-  const normalized = title.replace(/\s+/g, ' ').trim();
-  const characters = Array.from(normalized);
-  if (characters.length <= 15) {
-    return normalized;
-  }
-
-  return `${characters.slice(0, 15).join('')}...`;
-}
-
 export function ThreadsPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -48,15 +39,16 @@ export function ThreadsPage() {
   const [savingRecentThreadId, setSavingRecentThreadId] = useState<string | null>(null);
   const [deletingThread, setDeletingThread] = useState<ThreadDto | null>(null);
   const [deletingThreadBusy, setDeletingThreadBusy] = useState(false);
+  const defaultBackend = shellNav?.defaultBackend ?? defaultAgentBackendId;
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
 
     try {
       const [statusResponse, threadResponse, workspaceResponse] =
         await Promise.all([
-          fetchAgentBackendStatus(shellNav?.defaultBackend ?? defaultAgentBackendId).then(
+          fetchAgentBackendStatus(defaultBackend).then(
             (backend) => backend.status,
           ),
           fetchThreads(),
@@ -72,7 +64,7 @@ export function ThreadsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [defaultBackend]);
 
   useEffect(() => {
     if (selectedWorkspaceId === null) {
@@ -112,7 +104,7 @@ export function ThreadsPage() {
     return () => {
       socket.close();
     };
-  }, [selectedWorkspaceId, shellNav?.defaultBackend]);
+  }, [load, selectedWorkspaceId]);
 
   const workspaceLabels = Object.fromEntries(
     workspaces.map((workspace) => [workspace.id, workspace.label]),
@@ -317,7 +309,7 @@ export function ThreadsPage() {
           title="Delete Thread"
           description={
             deletingThread
-              ? `Delete ${truncateDialogThreadTitle(deletingThread.title)} from supervisor. The backend session id will no longer appear in this workspace list.`
+              ? `Delete ${truncateAutoThreadTitle(deletingThread.title)} from supervisor. The backend session id will no longer appear in this workspace list.`
               : ''
           }
           confirmLabel="Delete Thread"

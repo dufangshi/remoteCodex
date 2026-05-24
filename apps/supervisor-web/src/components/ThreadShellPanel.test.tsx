@@ -51,7 +51,8 @@ class MockWebSocket {
   sentMessages: string[] = [];
   readyState: number = WebSocket.OPEN;
 
-  constructor(_url: string) {
+  constructor(url: string) {
+    void url;
     MockWebSocket.instances.push(this);
     queueMicrotask(() => {
       this.emit('message', {

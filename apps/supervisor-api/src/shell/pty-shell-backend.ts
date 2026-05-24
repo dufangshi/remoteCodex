@@ -25,6 +25,7 @@ interface PtySession {
 }
 
 const MAX_SCROLLBACK_BYTES = 512 * 1024;
+const ANSI_ESCAPE_PATTERN = new RegExp(String.raw`\u001B\[[0-?]*[ -/]*[@-~]`, 'g');
 
 function shellArgs(shell: string) {
   const shellName = path.basename(shell).toLowerCase();
@@ -45,7 +46,7 @@ function trimScrollback(value: string) {
 }
 
 function lastVisibleLine(snapshot: string) {
-  const normalized = snapshot.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+  const normalized = snapshot.replace(ANSI_ESCAPE_PATTERN, '');
   const lines = normalized.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
   return lines.findLast((line) => line.trim().length > 0) ?? '';
 }

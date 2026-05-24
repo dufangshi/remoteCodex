@@ -27,11 +27,6 @@ export function unwrapCodexJsonRpcError(error: unknown): JsonRpcClientError | nu
   return null;
 }
 
-function isCodexRemoteError(error: unknown) {
-  const codexError = unwrapCodexJsonRpcError(error);
-  return codexError?.code === 'remote_error' ? codexError : null;
-}
-
 export function isCodexRuntimeRequestError(error: unknown) {
   return Boolean(unwrapCodexJsonRpcError(error)) || isRuntimeRequestError(error);
 }

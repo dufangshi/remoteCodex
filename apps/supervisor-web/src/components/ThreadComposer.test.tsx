@@ -1432,7 +1432,7 @@ describe('ThreadComposer', () => {
     });
 
     expect(
-      screen.getByLabelText('Prompt').querySelector('[data-placeholder=\"[FILE notes.txt]\"]'),
+      screen.getByLabelText('Prompt').querySelector('[data-placeholder="[FILE notes.txt]"]'),
     ).toBeTruthy();
     expect(screen.getAllByText('notes.txt').length).toBeGreaterThan(0);
   });

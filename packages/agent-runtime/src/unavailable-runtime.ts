@@ -14,12 +14,7 @@ import type {
   AgentRuntime,
   AgentRuntimeManagementSchema,
   AgentRuntimeStatus,
-  InterruptAgentTurnInput,
-  ReadAgentSessionOptions,
-  ResumeAgentSessionInput,
-  StartAgentSessionInput,
   StartAgentSessionResult,
-  StartAgentTurnInput,
 } from './types';
 import { AgentRuntimeError } from './types';
 
@@ -136,26 +131,23 @@ export class UnavailableRuntimeAdapter extends EventEmitter implements AgentRunt
     return [];
   }
 
-  async readSession(
-    _providerSessionId: string,
-    _options?: ReadAgentSessionOptions,
-  ): Promise<AgentSessionDetail> {
+  async readSession(): Promise<AgentSessionDetail> {
     throw this.unavailableError();
   }
 
-  async startSession(_input: StartAgentSessionInput): Promise<StartAgentSessionResult> {
+  async startSession(): Promise<StartAgentSessionResult> {
     throw this.unavailableError();
   }
 
-  async resumeSession(_input: ResumeAgentSessionInput): Promise<StartAgentSessionResult> {
+  async resumeSession(): Promise<StartAgentSessionResult> {
     throw this.unavailableError();
   }
 
-  async startTurn(_input: StartAgentTurnInput): Promise<AgentTurn> {
+  async startTurn(): Promise<AgentTurn> {
     throw this.unavailableError();
   }
 
-  async interruptTurn(_input: InterruptAgentTurnInput): Promise<AgentTurn | null> {
+  async interruptTurn(): Promise<AgentTurn | null> {
     throw this.unavailableError();
   }
 

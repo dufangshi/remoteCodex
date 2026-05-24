@@ -9,7 +9,6 @@ import {
   type DatabaseClient,
 } from '../../../packages/db/src/index';
 import type {
-  SandboxModeDto,
   ThreadEventPayloadMap,
   ThreadGoalDto,
   UpdateThreadGoalInput,

@@ -125,7 +125,6 @@ export function shouldPersistFinalHistoryItem(item: ThreadHistoryItemDto) {
 
 export function shouldPersistRuntimeFinalHistoryItem(
   item: ThreadHistoryItemDto,
-  allItems: ThreadHistoryItemDto[],
 ) {
   if (item.kind === 'agentMessage' && isTransientAgentHistoryItem(item)) {
     return false;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import type {
@@ -29,7 +29,7 @@ import {
   updateWorkspaceSettings,
 } from '../lib/api';
 import { type AgentBackendId, type ThemeMode, useAppShellNav } from './AppShellNavContext';
-import { usePlugins } from '../plugins/PluginProvider';
+import { usePlugins } from '../plugins/usePlugins';
 
 function MenuIcon() {
   return (
@@ -526,7 +526,7 @@ export function AppShellSettingsDialog() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [shellNav]);
+  }, [activeManagementSchema.configArchives, shellNav]);
 
   useEffect(() => {
     if (!shellNav?.settingsOpen) {
