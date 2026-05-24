@@ -1,6 +1,4 @@
 import fs from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 
 import {
   createShellSessionRecord,
@@ -14,6 +12,7 @@ import {
   getViewerSessionRecordByShellId,
   getWorkspaceRecordById,
   listShellSessionRecords,
+  listShellSessionRecordsByThreadId,
   updateShellSessionRecord,
   updateViewerSessionRecord,
   type DatabaseClient,
@@ -26,14 +25,13 @@ import type {
   ThreadShellStateDto,
 } from '../../../../packages/shared/src/index';
 import { SupervisorEventBus } from '../event-bus';
-import { TmuxManager } from './tmux-manager';
+import type { ShellBackend, ShellBackendAttachment } from './shell-backend';
+import { basenameFromPath } from './shell-prompt';
 
 interface ShellAttachment {
   viewerId: string;
   onData: (data: string, options?: ShellOutputOptions) => void;
-  pollHandle: NodeJS.Timeout;
-  lastSnapshot: string;
-  polling: boolean;
+  backendAttachment: ShellBackendAttachment;
 }
 
 type ShellOutputOptions = {
@@ -59,233 +57,12 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function waitForShellTick(milliseconds: number) {
-  if (process.env.VITEST) {
-    return Promise.resolve();
+function uniqueShellSessionName(baseName: string, index: number) {
+  if (index <= 1) {
+    return baseName;
   }
-
-  return new Promise((resolve) => {
-    setTimeout(resolve, milliseconds);
-  });
-}
-
-function basenameFromPath(filePath: string | null | undefined) {
-  if (!filePath) {
-    return '';
-  }
-
-  const normalized = filePath.replace(/[\\/]+$/, '');
-  if (!normalized) {
-    return '';
-  }
-
-  return path.basename(normalized) || normalized;
-}
-
-function isInteractiveShellCommand(command: string | null | undefined) {
-  const normalized = (command ?? '').trim().toLowerCase();
-  return new Set([
-    'zsh',
-    'bash',
-    'sh',
-    'dash',
-    'ksh',
-    'fish',
-    'tcsh',
-    'csh',
-    'login',
-  ]).has(normalized);
-}
-
-function extractEnvironmentValue(environmentText: string, key: string) {
-  const marker = `${key}=`;
-  const start = environmentText.indexOf(marker);
-  if (start === -1) {
-    return null;
-  }
-
-  const valueStart = start + marker.length;
-  const remainder = environmentText.slice(valueStart);
-  const nextVariableMatch = remainder.match(/\s+[A-Z_][A-Z0-9_]*=/);
-  const value = nextVariableMatch
-    ? remainder.slice(0, nextVariableMatch.index)
-    : remainder;
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
-function resolveEnvironmentPrefix(environmentText: string) {
-  const condaPromptModifier = extractEnvironmentValue(
-    environmentText,
-    'CONDA_PROMPT_MODIFIER',
-  );
-  if (condaPromptModifier) {
-    return condaPromptModifier.trim();
-  }
-
-  const condaDefaultEnv = extractEnvironmentValue(
-    environmentText,
-    'CONDA_DEFAULT_ENV',
-  );
-  if (condaDefaultEnv) {
-    return `(${condaDefaultEnv})`;
-  }
-
-  const virtualEnvPrompt = extractEnvironmentValue(
-    environmentText,
-    'VIRTUAL_ENV_PROMPT',
-  );
-  if (virtualEnvPrompt) {
-    return virtualEnvPrompt.trim();
-  }
-
-  const virtualEnvPath = extractEnvironmentValue(environmentText, 'VIRTUAL_ENV');
-  if (virtualEnvPath) {
-    const name = basenameFromPath(virtualEnvPath);
-    if (name) {
-      return `(${name})`;
-    }
-  }
-
-  return null;
-}
-
-function shellSingleQuote(value: string) {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
-
-async function resolvePaneEnvironmentPrefix(
-  tmuxManager: TmuxManager,
-  sessionName: string,
-  panePid: number,
-) {
-  const sessionPrefix = await tmuxManager.getSessionEnvironmentVariable(
-    sessionName,
-    'REMOTE_CODEX_ENV_PREFIX',
-  );
-  if (sessionPrefix) {
-    return sessionPrefix;
-  }
-
-  try {
-    const environment = await tmuxManager.readProcessEnvironment(panePid);
-    return resolveEnvironmentPrefix(environment);
-  } catch {
-    return null;
-  }
-}
-
-function buildShellPromptInitScriptContents(command: string) {
-  const normalized = command.trim().toLowerCase();
-
-  if (normalized === 'zsh') {
-    return (
-      [
-        'export CONDA_CHANGEPS1=no VIRTUAL_ENV_DISABLE_PROMPT=1',
-        'typeset -ga precmd_functions',
-        '__remote_codex_env_prefix() {',
-        '  if [[ -n "${CONDA_PROMPT_MODIFIER:-}" ]]; then',
-        '    print -r -- "${CONDA_PROMPT_MODIFIER% }"',
-        '  elif [[ -n "${CONDA_DEFAULT_ENV:-}" ]]; then',
-        '    print -r -- "(${CONDA_DEFAULT_ENV})"',
-        '  elif [[ -n "${VIRTUAL_ENV_PROMPT:-}" ]]; then',
-        '    print -r -- "${VIRTUAL_ENV_PROMPT% }"',
-        '  elif [[ -n "${VIRTUAL_ENV:-}" ]]; then',
-        '    print -r -- "(${VIRTUAL_ENV:t})"',
-        '  fi',
-        '}',
-        '__remote_codex_sync_tmux_env_prefix() {',
-        '  local prefix="$(__remote_codex_env_prefix)"',
-        '  local session_name=""',
-        '  if [[ -n "${TMUX:-}" ]]; then',
-        `    session_name="$(tmux display-message -p '#S' 2>/dev/null || true)"`,
-        '    if [[ -n "$session_name" ]]; then',
-        '      if [[ -n "$prefix" ]]; then',
-        '        tmux set-environment -t "$session_name" REMOTE_CODEX_ENV_PREFIX "$prefix" >/dev/null 2>&1 || true',
-        '      else',
-        '        tmux set-environment -u -t "$session_name" REMOTE_CODEX_ENV_PREFIX >/dev/null 2>&1 || true',
-        '      fi',
-        '    fi',
-        '  fi',
-        '}',
-        '__remote_codex_prompt_precmd() {',
-        '  __remote_codex_sync_tmux_env_prefix',
-        '  PROMPT="$ "',
-        '  RPROMPT=""',
-        '}',
-        'if (( ${precmd_functions[(Ie)__remote_codex_prompt_precmd]} == 0 )); then precmd_functions+=(__remote_codex_prompt_precmd); fi',
-        '__remote_codex_prompt_precmd',
-        '',
-      ].join('\n')
-    );
-  }
-
-  return (
-    [
-      'export CONDA_CHANGEPS1=no VIRTUAL_ENV_DISABLE_PROMPT=1',
-      '__remote_codex_env_prefix() {',
-      '  if [ -n "${CONDA_PROMPT_MODIFIER:-}" ]; then',
-      '    printf "%s" "${CONDA_PROMPT_MODIFIER% }"',
-      '  elif [ -n "${CONDA_DEFAULT_ENV:-}" ]; then',
-      '    printf "(%s)" "${CONDA_DEFAULT_ENV}"',
-      '  elif [ -n "${VIRTUAL_ENV_PROMPT:-}" ]; then',
-      '    printf "%s" "${VIRTUAL_ENV_PROMPT% }"',
-      '  elif [ -n "${VIRTUAL_ENV:-}" ]; then',
-      '    printf "(%s)" "${VIRTUAL_ENV##*/}"',
-      '  fi',
-      '}',
-      '__remote_codex_sync_tmux_env_prefix() {',
-      '  prefix="$(__remote_codex_env_prefix)"',
-      '  session_name=""',
-      '  if [ -n "${TMUX:-}" ]; then',
-      `    session_name="$(tmux display-message -p '#S' 2>/dev/null || true)"`,
-      '    if [ -n "$session_name" ]; then',
-      '      if [ -n "$prefix" ]; then',
-      '        tmux set-environment -t "$session_name" REMOTE_CODEX_ENV_PREFIX "$prefix" >/dev/null 2>&1 || true',
-      '      else',
-      '        tmux set-environment -u -t "$session_name" REMOTE_CODEX_ENV_PREFIX >/dev/null 2>&1 || true',
-      '      fi',
-      '    fi',
-      '  fi',
-      '}',
-      '__remote_codex_prompt_precmd() {',
-      '  __remote_codex_sync_tmux_env_prefix',
-      '  PS1="$ "',
-      '}',
-      'case ";$PROMPT_COMMAND;" in',
-      '  *";__remote_codex_prompt_precmd;"*) ;;',
-      '  *) PROMPT_COMMAND="__remote_codex_prompt_precmd${PROMPT_COMMAND:+;$PROMPT_COMMAND}" ;;',
-      'esac',
-      '__remote_codex_prompt_precmd',
-      '',
-    ].join('\n')
-  );
-}
-
-async function ensureShellPromptInitScript(command: string) {
-  const normalized = command.trim().toLowerCase();
-  const extension = normalized === 'zsh' ? 'zsh' : 'sh';
-  const filePath = path.join(
-    os.tmpdir(),
-    `remote-codex-shell-prompt.${extension}`,
-  );
-  await fs.writeFile(filePath, buildShellPromptInitScriptContents(command), 'utf8');
-  return filePath;
-}
-
-async function buildShellPromptInitCommand(
-  command: string,
-  options: { clearScreen?: boolean } = {},
-) {
-  const scriptPath = await ensureShellPromptInitScript(command);
-  const normalized = command.trim().toLowerCase();
-  const sourceCommand =
-    normalized === 'zsh'
-      ? `source ${shellSingleQuote(scriptPath)} >/dev/null 2>&1`
-      : `. ${shellSingleQuote(scriptPath)} >/dev/null 2>&1`;
-
-  return options.clearScreen ? `${sourceCommand}\nclear\n` : `${sourceCommand}\n`;
+  const suffix = `-${index}`;
+  return `${baseName.slice(0, Math.max(1, 64 - suffix.length))}${suffix}`;
 }
 
 function shellThreadId(shell: {
@@ -382,7 +159,8 @@ export class ShellServiceError extends Error {
       | 'viewer_conflict'
       | 'viewer_not_attached'
       | 'invalid_viewer'
-      | 'tmux_error',
+      | 'plugin_disabled'
+      | 'shell_backend_error',
     message: string,
   ) {
     super(message);
@@ -395,12 +173,12 @@ export class ShellSessionService {
   constructor(
     private readonly db: DatabaseClient,
     private readonly eventBus: SupervisorEventBus,
-    private readonly tmuxManager: TmuxManager,
+    private readonly shellBackend: ShellBackend,
   ) {}
 
   async stop() {
     for (const [shellId, attachment] of this.attachments) {
-      clearInterval(attachment.pollHandle);
+      attachment.backendAttachment.dispose();
       deleteViewerSessionRecord(this.db, attachment.viewerId);
       this.attachments.delete(shellId);
     }
@@ -408,7 +186,7 @@ export class ShellSessionService {
 
   async syncShellStateOnStartup() {
     const records = listShellSessionRecords(this.db);
-    const sessionNames = new Set(await this.tmuxManager.listSessionNames());
+    const sessionNames = new Set(await this.shellBackend.listSessionNames());
 
     for (const record of records) {
       const sessionName = record.tmuxSessionName ?? '';
@@ -439,12 +217,12 @@ export class ShellSessionService {
       throw new ShellServiceError('thread_not_found', 'Workspace not found.');
     }
 
-    const shell = getShellSessionRecordByThreadId(this.db, threadId);
+    const shells = listShellSessionRecordsByThreadId(this.db, threadId);
     const workspacePathStatus = (await pathExists(workspace.absPath))
       ? 'present'
       : 'missing';
 
-    if (!shell) {
+    if (shells.length === 0) {
       return {
         threadId: thread.id,
         workspaceId: workspace.id,
@@ -452,21 +230,36 @@ export class ShellSessionService {
         state:
           workspacePathStatus === 'missing' ? 'workspace_missing' : 'not_created',
         shell: null,
+        shells: [],
+        activeShellId: null,
       };
     }
+
+    const shellDtos = await Promise.all(
+      shells.map((shell) => this.toShellSessionDto(shell.id)),
+    );
+    const activeShell =
+      shellDtos.find((shell) => shell.status === 'attached') ??
+      shellDtos.find(
+        (shell) => shell.status !== 'exited' && shell.status !== 'not_found',
+      ) ??
+      shellDtos[0] ??
+      null;
 
     return {
       threadId: thread.id,
       workspaceId: workspace.id,
       workspacePathStatus,
-      state: await this.resolveShellState(shell.id),
-      shell: await this.toShellSessionDto(shell.id),
+      state: activeShell ? activeShell.status : 'not_created',
+      shell: activeShell,
+      shells: shellDtos,
+      activeShellId: activeShell?.id ?? null,
     };
   }
 
   async createShellForThread(
     threadId: string,
-    options: { cols?: number; rows?: number } = {},
+    options: { cols?: number; rows?: number; label?: string } = {},
   ): Promise<ThreadShellStateDto> {
     const thread = getThreadRecordById(this.db, threadId);
     if (!thread) {
@@ -492,36 +285,31 @@ export class ShellSessionService {
       );
     }
 
-    const tmuxSessionName = this.tmuxManager.sessionNameForThread(thread.id);
-    const existing = getShellSessionRecordByThreadId(this.db, threadId);
-
-    if (existing) {
-      const canRevive =
-        existing.status === 'exited' || existing.status === 'not_found';
-      if (!canRevive) {
-        throw new ShellServiceError(
-          'shell_exists',
-          'A durable shell already exists for this thread.',
-        );
-      }
-
-      updateShellSessionRecord(this.db, existing.id, {
-        tmuxSessionName,
-        cwd: workspace.absPath,
-        status: 'creating',
-        lastActivityAt: nowIso(),
-      });
+    const baseSessionName = this.shellBackend.sessionNameForThread(thread.id);
+    const existingShells = listShellSessionRecordsByThreadId(this.db, threadId);
+    const existingSessionNames = new Set(
+      existingShells
+        .map((shell) => shell.tmuxSessionName)
+        .filter((name): name is string => Boolean(name)),
+    );
+    let sessionIndex = existingShells.length + 1;
+    let tmuxSessionName = uniqueShellSessionName(baseSessionName, sessionIndex);
+    while (
+      existingSessionNames.has(tmuxSessionName) ||
+      (await this.shellBackend.hasSession(tmuxSessionName))
+    ) {
+      sessionIndex += 1;
+      tmuxSessionName = uniqueShellSessionName(baseSessionName, sessionIndex);
     }
 
-    const record =
-      existing ??
-      createShellSessionRecord(this.db, {
-        workspaceId: workspace.id,
-        threadId: thread.id,
-        tmuxSessionName,
-        cwd: workspace.absPath,
-        status: 'creating',
-      });
+    const record = createShellSessionRecord(this.db, {
+      workspaceId: workspace.id,
+      threadId: thread.id,
+      label: options.label ?? null,
+      tmuxSessionName,
+      cwd: workspace.absPath,
+      status: 'creating',
+    });
 
     this.emitShellEvent(record.id, 'shell.status', {
       threadId: thread.id,
@@ -529,29 +317,15 @@ export class ShellSessionService {
     });
 
     try {
-      const existingSession = await this.tmuxManager.hasSession(tmuxSessionName);
+      const existingSession = await this.shellBackend.hasSession(tmuxSessionName);
       if (!existingSession) {
-        await this.tmuxManager.createSession({
-          sessionName: tmuxSessionName,
+        await this.shellBackend.createSession({
+          sessionId: tmuxSessionName,
+          threadId: thread.id,
           cwd: workspace.absPath,
           ...(options.cols !== undefined ? { cols: options.cols } : {}),
           ...(options.rows !== undefined ? { rows: options.rows } : {}),
         });
-        try {
-          const runtime = await this.tmuxManager.getPaneRuntimeInfo(tmuxSessionName);
-          if (isInteractiveShellCommand(runtime.currentCommand)) {
-            await this.tmuxManager.sendInput(
-              tmuxSessionName,
-              await buildShellPromptInitCommand(runtime.currentCommand, {
-                clearScreen: true,
-              }),
-            );
-            await waitForShellTick(120);
-          }
-        } catch {
-          // The shell can lag a moment behind the tmux session coming up.
-          // Failing prompt initialization must not fail shell creation.
-        }
       }
       updateShellSessionRecord(this.db, record.id, {
         status: 'running',
@@ -562,7 +336,7 @@ export class ShellSessionService {
         status: 'not_found',
       });
       throw new ShellServiceError(
-        'tmux_error',
+        'shell_backend_error',
         error instanceof Error ? error.message : 'Unable to start shell.',
       );
     }
@@ -572,7 +346,35 @@ export class ShellSessionService {
       state: 'detached',
     });
 
-    return this.getThreadShellState(threadId);
+    const state = await this.getThreadShellState(threadId);
+    const createdShell = await this.toShellSessionDto(record.id);
+    return {
+      ...state,
+      state: createdShell.status,
+      shell: createdShell,
+      activeShellId: createdShell.id,
+    };
+  }
+
+  async updateShell(shellId: string, input: { label?: string | null }) {
+    const shell = getShellSessionRecordById(this.db, shellId);
+    if (!shell) {
+      throw new ShellServiceError('shell_not_found', 'Shell not found.');
+    }
+
+    const updates: { label?: string | null } = {};
+    if ('label' in input) {
+      const label = input.label?.trim() ?? '';
+      updates.label = label.length > 0 ? label : null;
+    }
+
+    updateShellSessionRecord(this.db, shell.id, updates);
+    const shellDto = await this.toShellSessionDto(shell.id);
+    this.emitShellEvent(shell.id, 'shell.status', {
+      threadId: shellThreadId(shell),
+      state: shellDto.status,
+    });
+    return shellDto;
   }
 
   async detachThreadViewers(threadId: string) {
@@ -587,7 +389,7 @@ export class ShellSessionService {
       return;
     }
 
-    clearInterval(attachment.pollHandle);
+    attachment.backendAttachment.dispose();
     deleteViewerSessionRecord(this.db, attachment.viewerId);
     deleteViewerSessionsByThreadId(this.db, threadId);
     this.attachments.delete(shell.id);
@@ -610,6 +412,10 @@ export class ShellSessionService {
       cols: number;
       rows: number;
       onData: (data: string, options?: ShellOutputOptions) => void;
+      onConnected?: (attachment: {
+        viewerId: string;
+        shell: ShellSessionDto;
+      }) => void;
     },
   ) {
     const shell = getShellSessionRecordById(this.db, shellId);
@@ -622,7 +428,7 @@ export class ShellSessionService {
     const existingAttachment = this.attachments.get(shell.id);
 
     if (existingAttachment) {
-      clearInterval(existingAttachment.pollHandle);
+      existingAttachment.backendAttachment.dispose();
       deleteViewerSessionRecord(this.db, existingAttachment.viewerId);
       this.attachments.delete(shell.id);
       this.emitShellEvent(shell.id, 'shell.detached', {
@@ -635,7 +441,7 @@ export class ShellSessionService {
       deleteViewerSessionRecord(this.db, existingViewer.id);
     }
 
-    const hasSession = await this.tmuxManager.hasSession(shellSessionName(shell));
+    const hasSession = await this.shellBackend.hasSession(shellSessionName(shell));
     if (!hasSession) {
       updateShellSessionRecord(this.db, shell.id, {
         status: 'not_found',
@@ -646,7 +452,7 @@ export class ShellSessionService {
       });
       throw new ShellServiceError(
         'shell_not_running',
-        'The durable shell is no longer available.',
+        'The terminal is no longer available.',
       );
     }
 
@@ -655,32 +461,54 @@ export class ShellSessionService {
       shellId: shell.id,
       activeTab: 'shell',
     });
-    await this.tmuxManager.resizeWindow(
-      shellSessionName(shell),
-      options.cols,
-      options.rows,
-    );
-
-    const initialSnapshot = await this.tmuxManager.capturePane(shellSessionName(shell));
-    const initialRuntime = await this.tmuxManager.getPaneRuntimeInfo(
-      shellSessionName(shell),
-    );
+    const attached = await this.shellBackend.attach(shellSessionName(shell), {
+      cols: options.cols,
+      rows: options.rows,
+      onData: (data, session, backendOptions) => {
+        updateShellSessionRecord(this.db, shell.id, {
+          lastActivityAt: nowIso(),
+        });
+        updateViewerSessionRecord(this.db, viewer.id, {
+          lastHeartbeatAt: nowIso(),
+          activeTab: 'shell',
+        });
+        options.onData(
+          data,
+          shellOutputOptions({
+            replace: backendOptions?.replace === true,
+            cursorX: session.runtime.cursorX,
+            cursorY: session.runtime.cursorY,
+            paneHeight: session.runtime.paneHeight,
+            cwdBaseName: basenameFromPath(session.runtime.currentPath || shell.cwd),
+            envPrefix: session.runtime.envPrefix ?? undefined,
+            isCommandRunning: session.runtime.isCommandRunning,
+          }),
+        );
+      },
+      onExit: () => {
+        void this.handleMissingShell(shell, viewer.id);
+      },
+    });
+    const initialSnapshot = attached.session.snapshot;
+    const initialRuntime = attached.session.runtime;
     const initialCwdBaseName = basenameFromPath(initialRuntime.currentPath || shell.cwd);
-    const initialEnvPrefix = await resolvePaneEnvironmentPrefix(
-      this.tmuxManager,
-      shellSessionName(shell),
-      initialRuntime.panePid,
-    );
     const attachment: ShellAttachment = {
       viewerId: viewer.id,
       onData: options.onData,
-      pollHandle: setInterval(() => {
-        void this.pollAttachment(shell.id);
-      }, 250),
-      lastSnapshot: initialSnapshot,
-      polling: false,
+      backendAttachment: attached.attachment,
     };
     this.attachments.set(shell.id, attachment);
+
+    updateShellSessionRecord(this.db, shell.id, {
+      status: 'running',
+      lastActivityAt: nowIso(),
+    });
+
+    const shellDto = await this.toShellSessionDto(shell.id);
+    options.onConnected?.({
+      viewerId: viewer.id,
+      shell: shellDto,
+    });
 
     if (initialSnapshot) {
       options.onData(
@@ -691,18 +519,11 @@ export class ShellSessionService {
           cursorY: initialRuntime.cursorY,
           paneHeight: initialRuntime.paneHeight,
           cwdBaseName: initialCwdBaseName,
-          envPrefix: initialEnvPrefix ?? undefined,
-          isCommandRunning: !isInteractiveShellCommand(
-            initialRuntime.currentCommand,
-          ),
+          envPrefix: initialRuntime.envPrefix ?? undefined,
+          isCommandRunning: initialRuntime.isCommandRunning,
         }),
       );
     }
-
-    updateShellSessionRecord(this.db, shell.id, {
-      status: 'running',
-      lastActivityAt: nowIso(),
-    });
 
     this.emitShellEvent(shell.id, 'shell.status', {
       threadId,
@@ -712,7 +533,7 @@ export class ShellSessionService {
 
     return {
       viewerId: viewer.id,
-      shell: await this.toShellSessionDto(shell.id),
+      shell: shellDto,
     };
   }
 
@@ -737,7 +558,7 @@ export class ShellSessionService {
       );
     }
 
-    clearInterval(attachment.pollHandle);
+    attachment.backendAttachment.dispose();
     deleteViewerSessionRecord(this.db, viewerId);
     this.attachments.delete(shell.id);
 
@@ -755,7 +576,7 @@ export class ShellSessionService {
 
   async sendInput(shellId: string, viewerId: string, data: string) {
     const { shell } = this.requireOwnedAttachment(shellId, viewerId);
-    await this.tmuxManager.sendInput(shellSessionName(shell), data);
+    await this.shellBackend.sendInput(shellSessionName(shell), data);
     updateShellSessionRecord(this.db, shellId, {
       lastActivityAt: nowIso(),
     });
@@ -769,10 +590,7 @@ export class ShellSessionService {
     const { shell, attachment } = this.requireOwnedAttachment(shellId, viewerId);
     const sessionName = shellSessionName(shell);
 
-    await this.tmuxManager.sendInput(sessionName, '\u000c');
-    await waitForShellTick(60);
-    await this.tmuxManager.clearHistory(sessionName);
-    await waitForShellTick(60);
+    const session = await this.shellBackend.clear(sessionName);
 
     updateShellSessionRecord(this.db, shellId, {
       lastActivityAt: nowIso(),
@@ -782,7 +600,18 @@ export class ShellSessionService {
       activeTab: 'shell',
     });
 
-    await this.pushSnapshot(shell, attachment);
+    attachment.onData(
+      session.snapshot,
+      shellOutputOptions({
+        replace: true,
+        cursorX: session.runtime.cursorX,
+        cursorY: session.runtime.cursorY,
+        paneHeight: session.runtime.paneHeight,
+        cwdBaseName: basenameFromPath(session.runtime.currentPath || shell.cwd),
+        envPrefix: session.runtime.envPrefix ?? undefined,
+        isCommandRunning: session.runtime.isCommandRunning,
+      }),
+    );
   }
 
   async resizeShell(
@@ -811,7 +640,7 @@ export class ShellSessionService {
       );
     }
 
-    await this.tmuxManager.resizeWindow(shellSessionName(shell), cols, rows);
+    await this.shellBackend.resize(shellSessionName(shell), cols, rows);
     updateViewerSessionRecord(this.db, viewerId, {
       lastHeartbeatAt: nowIso(),
       activeTab: 'shell',
@@ -826,12 +655,12 @@ export class ShellSessionService {
 
     const attachment = this.attachments.get(shell.id);
     if (attachment) {
-      clearInterval(attachment.pollHandle);
+      attachment.backendAttachment.dispose();
       deleteViewerSessionRecord(this.db, attachment.viewerId);
       this.attachments.delete(shell.id);
     }
 
-    await this.tmuxManager.killSession(shellSessionName(shell));
+    await this.shellBackend.killSession(shellSessionName(shell));
     updateShellSessionRecord(this.db, shell.id, {
       status: 'exited',
       lastActivityAt: nowIso(),
@@ -857,7 +686,9 @@ export class ShellSessionService {
       id: shell.id,
       threadId: shellThreadId(shell),
       workspaceId: shell.workspaceId,
+      label: shell.label ?? null,
       tmuxSessionName: shellSessionName(shell),
+      backend: this.shellBackend.kind,
       cwd: shell.cwd,
       status: shellDtoStatus(shell.status, status),
       attachedViewerId: this.attachments.get(shell.id)?.viewerId ?? null,
@@ -889,33 +720,6 @@ export class ShellSessionService {
     return attachment ? 'attached' : 'detached';
   }
 
-  private async pollAttachment(shellId: string) {
-    const attachment = this.attachments.get(shellId);
-    if (!attachment || attachment.polling) {
-      return;
-    }
-
-    attachment.polling = true;
-    const shell = getShellSessionRecordById(this.db, shellId);
-    if (!shell) {
-      clearInterval(attachment.pollHandle);
-      this.attachments.delete(shellId);
-      deleteViewerSessionRecord(this.db, attachment.viewerId);
-      return;
-    }
-
-    try {
-      const hasSession = await this.tmuxManager.hasSession(shellSessionName(shell));
-      if (!hasSession) {
-        await this.handleMissingShell(shell, attachment.viewerId);
-        return;
-      }
-      await this.pushSnapshot(shell, attachment);
-    } finally {
-      attachment.polling = false;
-    }
-  }
-
   private requireOwnedAttachment(shellId: string, viewerId: string) {
     const shell = getShellSessionRecordById(this.db, shellId);
     if (!shell) {
@@ -940,55 +744,13 @@ export class ShellSessionService {
     return { shell, attachment };
   }
 
-  private async pushSnapshot(
-    shell: {
-      id: string;
-      cwd: string;
-      tmuxSessionName: string | null;
-    },
-    attachment: ShellAttachment,
-  ) {
-    const sessionName = shellSessionName(shell);
-    const snapshot = await this.tmuxManager.capturePane(sessionName);
-    const runtime = await this.tmuxManager.getPaneRuntimeInfo(sessionName);
-    if (snapshot === attachment.lastSnapshot) {
-      return;
-    }
-
-    attachment.lastSnapshot = snapshot;
-    updateShellSessionRecord(this.db, shell.id, {
-      lastActivityAt: nowIso(),
-    });
-    updateViewerSessionRecord(this.db, attachment.viewerId, {
-      lastHeartbeatAt: nowIso(),
-      activeTab: 'shell',
-    });
-    attachment.onData(
-      snapshot,
-      shellOutputOptions({
-        replace: true,
-        cursorX: runtime.cursorX,
-        cursorY: runtime.cursorY,
-        paneHeight: runtime.paneHeight,
-        cwdBaseName: basenameFromPath(runtime.currentPath || shell.cwd),
-        envPrefix:
-          (await resolvePaneEnvironmentPrefix(
-            this.tmuxManager,
-            sessionName,
-            runtime.panePid,
-          )) ?? undefined,
-        isCommandRunning: !isInteractiveShellCommand(runtime.currentCommand),
-      }),
-    );
-  }
-
   private async handleMissingShell(
     shell: { id: string; threadId: string | null },
     viewerId: string,
   ) {
     const attachment = this.attachments.get(shell.id);
     if (attachment) {
-      clearInterval(attachment.pollHandle);
+      attachment.backendAttachment.dispose();
       this.attachments.delete(shell.id);
     }
     deleteViewerSessionRecord(this.db, viewerId);

@@ -740,6 +740,64 @@ function mergeLiveTurnItems(
   return sortTurnItemsByRecordedSequence(mergedItems);
 }
 
+function getLiveOutputTailForTurn(
+  liveOutput: string,
+  items: ThreadHistoryItemDto[],
+) {
+  if (!liveOutput) {
+    return '';
+  }
+
+  const materializedAgentTexts = items
+    .filter(
+      (
+        item,
+      ): item is ThreadHistoryItemDto & {
+        kind: 'agentMessage';
+      } => item.kind === 'agentMessage',
+    )
+    .map((item) => item.text)
+    .filter((text) => text.length > 0);
+
+  const lastMaterializedAgentText = materializedAgentTexts.at(-1) ?? '';
+  if (lastMaterializedAgentText) {
+    const anchorIndex = liveOutput.lastIndexOf(lastMaterializedAgentText);
+    if (anchorIndex >= 0) {
+      const anchoredTail = liveOutput.slice(
+        anchorIndex + lastMaterializedAgentText.length,
+      );
+      if (!anchoredTail.trim()) {
+        return '';
+      }
+      return anchoredTail;
+    }
+  }
+
+  const materializedAgentText = materializedAgentTexts.join('');
+  if (!materializedAgentText) {
+    return liveOutput;
+  }
+
+  const sharedPrefixLength = Math.min(
+    liveOutput.length,
+    materializedAgentText.length,
+  );
+  let consumedLength = 0;
+  while (
+    consumedLength < sharedPrefixLength &&
+    liveOutput[consumedLength] === materializedAgentText[consumedLength]
+  ) {
+    consumedLength += 1;
+  }
+
+  if (consumedLength === 0) {
+    return liveOutput;
+  }
+
+  const remainingOutput = liveOutput.slice(consumedLength);
+  return remainingOutput.trim() ? remainingOutput : '';
+}
+
 function isRunningHistoryStatus(status?: string | null) {
   if (!status) {
     return false;
@@ -4483,12 +4541,15 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
     () => deriveDisplayedLivePlan(livePlan, mergedItems, turn.status),
     [livePlan, mergedItems, turn.status],
   );
+  const visibleLiveOutput = useMemo(
+    () => getLiveOutputTailForTurn(liveOutput, mergedItems),
+    [liveOutput, mergedItems],
+  );
   const preparedItems = useMemo(
     () => prepareTurnItemsForRendering(mergedItems, activeForRendering),
     [activeForRendering, mergedItems],
   );
   const groupedItems = useMemo(() => groupTimelineHistoryItems(preparedItems), [preparedItems]);
-  const visibleLiveOutput = liveOutput;
   const visibleLiveHookPrompt = useMemo(
     () => parseHookPromptText(visibleLiveOutput),
     [visibleLiveOutput],
@@ -4766,6 +4827,8 @@ export function ThreadTimeline({
             id: item.id,
             kind: item.kind,
             status: item.status,
+            sequence: item.sequence ?? null,
+            transcriptOrder: item.transcriptOrder ?? null,
             textLength: item.text.length,
           })),
         })),
@@ -4804,6 +4867,8 @@ export function ThreadTimeline({
                   id: item.id,
                   kind: item.kind,
                   status: item.status,
+                  sequence: item.sequence ?? null,
+                  transcriptOrder: item.transcriptOrder ?? null,
                   textLength: item.text.length,
                 })),
               },
@@ -5173,6 +5238,16 @@ export function ThreadTimeline({
     !!optimisticTurn &&
     optimisticTurn.status !== 'failed' &&
     !optimisticLiveItems;
+  const liveOutputTargetTurnId =
+    liveOutput && visibleTurns.length > 0
+      ? (
+          activeTurnId && visibleTurns.some((turn) => turn.id === activeTurnId)
+            ? activeTurnId
+            : visibleTurns.findLast((turn) => isRunningHistoryStatus(turn.status))?.id ??
+              (shouldForceLatestVisibleTurnActive ? latestVisibleTurnId : null)
+        )
+      : null;
+  const liveOutputAttachedToVisibleTurn = Boolean(liveOutputTargetTurnId);
   const visibleTurnIds = new Set(visibleTurns.map((turn) => turn.id));
   const notesByTurnId = answeredRequestNotes.reduce<Map<string, typeof answeredRequestNotes>>(
     (map, note) => {
@@ -5475,7 +5550,7 @@ export function ThreadTimeline({
                     isCollapsed={collapsedTurns[turn.id] ?? false}
                     livePlan={livePlan?.turnId === turn.id ? livePlan : null}
                     liveItems={liveItemsTargetTurnId === turn.id ? liveItems?.items ?? null : null}
-                    liveOutput=""
+                    liveOutput={liveOutputTargetTurnId === turn.id ? liveOutput : ''}
                     forceActive={
                       activeTurnId === turn.id ||
                       (
@@ -5675,7 +5750,10 @@ export function ThreadTimeline({
             </div>
           )}
 
-          {liveOutput && !liveOutputAttachedToOptimisticTurn && !hasStructuredLiveItems && (
+          {liveOutput &&
+            !liveOutputAttachedToVisibleTurn &&
+            !liveOutputAttachedToOptimisticTurn &&
+            !hasStructuredLiveItems && (
             <div className="border-t border-stone-800/80 px-2.5 py-2.5 sm:px-6">
               {parseHookPromptText(liveOutput) ? (
                 <HistoryItemRow

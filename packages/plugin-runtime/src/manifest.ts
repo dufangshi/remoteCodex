@@ -118,6 +118,7 @@ export function parsePluginManifest(value: unknown): PluginManifestDto {
         return {
           id: assertString(entry.id, `capabilities.threadPanels[${index}].id`),
           label: assertString(entry.label, `capabilities.threadPanels[${index}].label`),
+          ...(typeof entry.kind === 'string' ? { kind: entry.kind } : {}),
           artifactTypes: optionalStringArray(
             entry.artifactTypes,
             `capabilities.threadPanels[${index}].artifactTypes`,

@@ -14,6 +14,7 @@ import {
   agentTurnToThreadTurnDto,
   deferLargeHistoryItemDetails,
   mergePersistedHistoryItemsIntoTurns,
+  sortHistoryItemsBySequence,
 } from './thread-history-items';
 import type { ThreadLiveStateStore } from './thread-live-state-store';
 import {
@@ -176,13 +177,18 @@ export class ThreadDetailAssembler {
     const visibleTurns = this.input.liveState
       .visibleRemoteTurns(input.localThreadId, remoteSession.turns)
       .map((turn) => agentTurnToThreadTurnDto(turn, deferredDetails));
-    const resolvedTurnMetadataById = resolveTurnMetadataByVisibleTurnId(
+    const orderedVisibleTurns = applyLiveAgentMessageOrderingHints(
       visibleTurns,
+      input.localThreadId,
+      this.input.liveState,
+    );
+    const resolvedTurnMetadataById = resolveTurnMetadataByVisibleTurnId(
+      orderedVisibleTurns,
       input.turnMetadataById,
     );
     const turns = mergePersistedHistoryItemsIntoTurns(
       applyRecordedTurnItemOrders(
-        visibleTurns,
+        orderedVisibleTurns,
         this.input.liveState.turnItemOrderSnapshot(input.localThreadId),
       ),
       persistedItemsByTurnId,
@@ -263,6 +269,49 @@ export class ThreadDetailAssembler {
     }
     return entry;
   }
+}
+
+function applyLiveAgentMessageOrderingHints(
+  turns: ThreadTurnDto[],
+  localThreadId: string,
+  liveState: ThreadLiveStateStore,
+) {
+  return turns.map((turn) => {
+    const orderingHints = liveState.finalTurnAgentMessageOrderingHints(
+      localThreadId,
+      turn.id,
+      turn.items,
+      { allowUnmatchedFallback: false },
+    );
+    if (orderingHints.size === 0) {
+      return turn;
+    }
+
+    let changed = false;
+    const items = turn.items.map((item) => {
+      if (item.kind !== 'agentMessage') {
+        return item;
+      }
+
+      const sequence = orderingHints.get(item.id);
+      if (sequence === undefined || item.sequence === sequence) {
+        return item;
+      }
+
+      changed = true;
+      return {
+        ...item,
+        sequence,
+      };
+    });
+
+    return changed
+      ? {
+          ...turn,
+          items: sortHistoryItemsBySequence(items),
+        }
+      : turn;
+  });
 }
 
 export function buildTurnDto(

@@ -21,7 +21,6 @@ import {
 } from '../../../packages/db/src/index';
 import {
   ApiErrorShape,
-  ShellEventEnvelope,
   SupervisorSocketClientEnvelope,
   SupervisorSocketServerEnvelope,
 } from '../../../packages/shared/src/index';
@@ -33,18 +32,21 @@ import {
 import { SupervisorEventBus } from './event-bus';
 import { ThreadService } from './thread-service';
 import { registerAgentRuntimeRoutes } from './routes/agent-runtimes';
-import { registerShellRoutes } from './routes/shells';
 import { registerSystemRoutes } from './routes/system';
 import { registerThreadRoutes } from './routes/threads';
 import { registerWorkspaceRoutes } from './routes/workspaces';
 import { registerPluginRoutes } from './routes/plugins';
 import { ProviderHostConfigService } from './provider-host-config-service';
 import { ShellServiceError, ShellSessionService } from './shell/shell-session-service';
-import { TmuxManager } from './shell/tmux-manager';
 import { builtinPlugins } from './plugins/builtin-plugins';
 import { PluginService } from './plugins/plugin-service';
 import { PluginSettingsStore } from './plugins/plugin-settings-store';
 import { configureWorkerProviderGateway } from './worker-bootstrap';
+import { BackendPluginHost } from './plugins/backend-plugin-host';
+import {
+  createTerminalShellBackend,
+  createTerminalPluginBackendContribution,
+} from './plugins/terminal-plugin-backend';
 
 const MAX_PROMPT_ATTACHMENTS = 10;
 const MAX_PROMPT_ATTACHMENT_BYTES = 25 * 1024 * 1024;
@@ -168,7 +170,11 @@ export function buildApp(
   );
   const shellService =
     options.shellService ??
-    new ShellSessionService(database.db, eventBus, new TmuxManager());
+    new ShellSessionService(
+      database.db,
+      eventBus,
+      createTerminalShellBackend(options.env),
+    );
   const providerHostConfigService = new ProviderHostConfigService(
     agentRuntimes,
     runtimeBootstrap.providerHostHomes,
@@ -226,6 +232,9 @@ export function buildApp(
     repoRoot
   });
 
+  const backendPluginHost = new BackendPluginHost(app);
+  backendPluginHost.register(createTerminalPluginBackendContribution());
+
   app.register(async (realtimeApp) => {
     await realtimeApp.register(websocket);
 
@@ -239,7 +248,11 @@ export function buildApp(
         } satisfies ApiErrorShape);
       },
       wsHandler: (socket) => {
-        let attachedShell: { shellId: string; viewerId: string } | null = null;
+        const closeHandlers: Array<() => void> = [];
+        const socketState = new Map<string, unknown>();
+        const onClose = (handler: () => void) => {
+          closeHandlers.push(handler);
+        };
 
         function send(message: SupervisorSocketServerEnvelope) {
           if (socket.readyState === 1) {
@@ -268,66 +281,6 @@ export function buildApp(
           }
 
           try {
-            if (parsed.type === 'shell.attach') {
-              if (
-                attachedShell &&
-                attachedShell.shellId !== parsed.shellId
-              ) {
-                await shellService.detachShell(
-                  attachedShell.shellId,
-                  attachedShell.viewerId,
-                );
-                attachedShell = null;
-              }
-
-              const attachment = await shellService.attachShell(parsed.shellId, {
-                cols: parsed.cols,
-                rows: parsed.rows,
-                onData: (data, options) => {
-                  send({
-                    type: 'shell.output',
-                    shellId: parsed.shellId,
-                    timestamp: new Date().toISOString(),
-                    payload: {
-                      data,
-                      ...(options?.replace ? { replace: true } : {}),
-                      ...(options?.cursorX !== undefined
-                        ? { cursorX: options.cursorX }
-                        : {}),
-                      ...(options?.cursorY !== undefined
-                        ? { cursorY: options.cursorY }
-                        : {}),
-                      ...(options?.paneHeight !== undefined
-                        ? { paneHeight: options.paneHeight }
-                        : {}),
-                      ...(options?.cwdBaseName !== undefined
-                        ? { cwdBaseName: options.cwdBaseName }
-                        : {}),
-                      ...(options?.envPrefix !== undefined
-                        ? { envPrefix: options.envPrefix }
-                        : {}),
-                      ...(options?.isCommandRunning !== undefined
-                        ? { isCommandRunning: options.isCommandRunning }
-                        : {}),
-                    }
-                  });
-                },
-              });
-              attachedShell = {
-                shellId: parsed.shellId,
-                viewerId: attachment.viewerId,
-              };
-              send({
-                type: 'shell.connected',
-                shellId: parsed.shellId,
-                timestamp: new Date().toISOString(),
-                payload: {
-                  viewerId: attachment.viewerId,
-                },
-              });
-              return;
-            }
-
             if (parsed.type === 'supervisor.ping') {
               send({
                 type: 'supervisor.pong',
@@ -340,53 +293,24 @@ export function buildApp(
               return;
             }
 
-            if (parsed.type === 'shell.detach') {
-              await shellService.detachShell(parsed.shellId, parsed.viewerId);
-              if (
-                attachedShell?.shellId === parsed.shellId &&
-                attachedShell.viewerId === parsed.viewerId
-              ) {
-                attachedShell = null;
-              }
+            const handled = await backendPluginHost.handleSocketMessage({
+              app,
+              send,
+              onClose,
+              state: socketState,
+              message: parsed,
+            });
+            if (!handled) {
               return;
             }
-
-            if (parsed.type === 'shell.input') {
-              await shellService.sendInput(
-                parsed.shellId,
-                parsed.viewerId,
-                parsed.data,
-              );
-              return;
-            }
-
-            if (parsed.type === 'shell.resize') {
-              await shellService.resizeShell(
-                parsed.shellId,
-                parsed.viewerId,
-                parsed.cols,
-                parsed.rows,
-              );
-              return;
-            }
-
-            if (parsed.type === 'shell.clear') {
-              await shellService.clearShell(parsed.shellId, parsed.viewerId);
-            }
-          } catch (error) {
-            if ('shellId' in parsed) {
-              send(makeShellErrorEnvelope(parsed.shellId, error));
-            }
+          } catch {
+            return;
           }
         });
 
         socket.on('close', () => {
-          if (attachedShell) {
-            void shellService.detachShell(
-              attachedShell.shellId,
-              attachedShell.viewerId,
-            ).catch(() => {});
-            attachedShell = null;
+          for (const handler of closeHandlers.splice(0)) {
+            handler();
           }
           unsubscribe();
           unsubscribeShell();
@@ -397,7 +321,6 @@ export function buildApp(
 
   app.register(registerSystemRoutes);
   app.register(registerAgentRuntimeRoutes);
-  app.register(registerShellRoutes);
   app.register(registerPluginRoutes);
   app.register(registerThreadRoutes);
   app.register(registerWorkspaceRoutes);
@@ -466,7 +389,8 @@ export function buildApp(
               error.code === 'workspace_missing' ||
               error.code === 'shell_not_running' ||
               error.code === 'viewer_not_attached' ||
-              error.code === 'invalid_viewer'
+              error.code === 'invalid_viewer' ||
+              error.code === 'plugin_disabled'
             ? 409
             : 503;
       reply.status(statusCode).send({
@@ -583,31 +507,3 @@ function requestLog(app: FastifyInstance, error: unknown) {
 }
 
 export { HttpError };
-
-function makeShellErrorEnvelope(
-  shellId: string,
-  error: unknown,
-): ShellEventEnvelope {
-  if (error instanceof ShellServiceError) {
-    return {
-      type: 'shell.error',
-      shellId,
-      timestamp: new Date().toISOString(),
-      payload: {
-        code: error.code,
-        message: error.message,
-      },
-    };
-  }
-
-  return {
-    type: 'shell.error',
-    shellId,
-    timestamp: new Date().toISOString(),
-    payload: {
-      code: 'unknown',
-      message:
-        error instanceof Error ? error.message : 'Unexpected shell error.',
-    },
-  };
-}

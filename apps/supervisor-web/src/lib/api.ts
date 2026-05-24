@@ -45,6 +45,7 @@ import type {
   ThreadForkTurnOptionDto,
   ThreadShellStateDto,
   RenameProviderHostConfigArchiveInput,
+  UpdateShellInput,
   UpdateThreadSettingsInput,
   UpdateThreadInput,
   UpdateProviderHostFileInput,
@@ -443,7 +444,7 @@ export function importThread(sessionId: ImportThreadInput['sessionId']) {
   });
 }
 
-export function createThreadShell(id: string, input: { cols?: number; rows?: number } = {}) {
+export function createThreadShell(id: string, input: { cols?: number; rows?: number; label?: string } = {}) {
   return request<ThreadShellStateDto>(`/api/threads/${id}/shell`, {
     method: 'POST',
     ...(Object.keys(input).length > 0 ? { body: JSON.stringify(input) } : {})
@@ -453,6 +454,13 @@ export function createThreadShell(id: string, input: { cols?: number; rows?: num
 export function terminateShell(id: string) {
   return request<ShellSessionDto>(`/api/shells/${id}/terminate`, {
     method: 'POST'
+  });
+}
+
+export function updateShell(id: string, input: UpdateShellInput) {
+  return request<ShellSessionDto>(`/api/shells/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input)
   });
 }
 

@@ -1202,7 +1202,10 @@ export function AppShellSettingsDialog() {
                         {plugin.description}
                       </p>
                       <p className="mt-2 text-[10px] uppercase tracking-[0.16em] text-[var(--theme-fg-muted)]">
-                        {plugin.capabilities.artifactTypes.map((type) => type.type).join(', ')}
+                        {[
+                          ...plugin.capabilities.artifactTypes.map((type) => type.type),
+                          ...plugin.capabilities.threadPanels.map((panel) => panel.kind ?? panel.id),
+                        ].join(', ') || 'utility'}
                       </p>
                       <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-[var(--theme-fg-muted)]">
                         {plugin.source === 'imported' ? 'Imported manifest' : 'Built-in module'}

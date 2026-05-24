@@ -345,18 +345,7 @@ function copyPersistedOrderingHints(
 }
 
 export function sortHistoryItemsBySequence<T extends ThreadHistoryItemDto>(items: T[]): T[] {
-  if (!items.some(hasHistoryItemSequence)) {
-    return items;
-  }
-
-  return items
-    .map((item, index) => ({ item, index }))
-    .sort((left, right) => {
-      const sequenceDelta =
-        historyItemSequence(left.item) - historyItemSequence(right.item);
-      return sequenceDelta === 0 ? left.index - right.index : sequenceDelta;
-    })
-    .map((entry) => entry.item);
+  return sortTurnItemsByRecordedSequence(items) as T[];
 }
 
 function sortTurnItemsByRecordedSequence(items: ThreadHistoryItemDto[]) {
@@ -374,9 +363,6 @@ function sortTurnItemsByRecordedSequence(items: ThreadHistoryItemDto[]) {
 
   const trailingItems = items.slice(index);
   if (!trailingItems.some(hasHistoryItemSequence)) {
-    return items;
-  }
-  if (trailingItems.some((item) => historyItemTranscriptOrder(item) !== null)) {
     return items;
   }
 
@@ -597,7 +583,11 @@ export function agentTurnToThreadTurnDto(
     startedAt: turn.startedAt ?? parseUuidV7Timestamp(turn.providerTurnId),
     status: turn.status,
     error: turn.error?.message ?? null,
-    items: visibleRuntimeTurnItems(turn.items),
+    items: visibleRuntimeTurnItems(turn.items).map((item, transcriptIndex) =>
+      item.transcriptOrder === transcriptIndex
+        ? item
+        : { ...item, transcriptOrder: transcriptIndex },
+    ),
   };
 
   return deferredDetails ? deferLargeHistoryItemDetails(baseTurn, deferredDetails) : baseTurn;

@@ -13,6 +13,12 @@ import {
   seedDefaults,
 } from '../../../../packages/db/src/index';
 import { SupervisorEventBus } from '../event-bus';
+import type {
+  ShellBackend,
+  ShellBackendAttachOptions,
+  ShellBackendCreateInput,
+  ShellBackendSession,
+} from './shell-backend';
 import { ShellServiceError, ShellSessionService } from './shell-session-service';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
@@ -28,6 +34,7 @@ describe('ShellSessionService', () => {
   let clearHistoryCalls: string[];
   let paneSnapshot = '';
   let resizeCalls: Array<{ sessionName: string; cols: number; rows: number }>;
+  let detachCalls = 0;
   let threadId = '';
 
   beforeEach(async () => {
@@ -46,6 +53,7 @@ describe('ShellSessionService', () => {
     clearHistoryCalls = [];
     paneSnapshot = '$ ';
     resizeCalls = [];
+    detachCalls = 0;
 
     const workspace = createWorkspaceRecord(context.db, {
       absPath: workspacePath,
@@ -65,6 +73,7 @@ describe('ShellSessionService', () => {
       context.db,
       new SupervisorEventBus(),
       {
+        kind: 'test',
         sessionNameForThread(id: string) {
           return `rcx-${id.slice(0, 8)}`;
         },
@@ -74,10 +83,25 @@ describe('ShellSessionService', () => {
         async hasSession(sessionName: string) {
           return sessionNames.has(sessionName);
         },
-        async createSession(input: { sessionName: string }) {
-          sessionNames.add(input.sessionName);
+        async createSession(input: ShellBackendCreateInput) {
+          sessionNames.add(input.sessionId);
         },
-        async resizeWindow(sessionName: string, cols: number, rows: number) {
+        async attach(sessionName: string, options: ShellBackendAttachOptions) {
+          resizeCalls.push({
+            sessionName,
+            cols: options.cols,
+            rows: options.rows,
+          });
+          return {
+            session: makeBackendSession(sessionName),
+            attachment: {
+              dispose() {
+                detachCalls += 1;
+              },
+            },
+          };
+        },
+        async resize(sessionName: string, cols: number, rows: number) {
           resizeCalls.push({ sessionName, cols, rows });
         },
         async sendInput(_sessionName: string, data: string) {
@@ -86,36 +110,41 @@ describe('ShellSessionService', () => {
             paneSnapshot = '$ ';
           }
         },
-        async capturePane() {
-          return paneSnapshot;
-        },
-        async getPaneRuntimeInfo() {
-          return {
-            cursorX: 2,
-            cursorY: 0,
-            panePid: 42,
-            currentCommand: 'zsh',
-            currentPath: workspacePath,
-            paneWidth: 120,
-            paneHeight: 36,
-          };
-        },
-        async getSessionEnvironmentVariable() {
-          return '(base)';
-        },
-        async readProcessEnvironment() {
-          return 'CONDA_PROMPT_MODIFIER=(base)  CONDA_DEFAULT_ENV=base';
-        },
         async killSession(sessionName: string) {
           sessionNames.delete(sessionName);
         },
-        async clearHistory() {
+        async clear(sessionName: string) {
           clearHistoryCalls.push('clear');
-          return;
+          paneSnapshot = '$ ';
+          return makeBackendSession(sessionName);
         },
-      } as any,
+        async snapshot(sessionName: string) {
+          return makeBackendSession(sessionName);
+        },
+      } satisfies ShellBackend,
     );
   });
+
+  function makeBackendSession(sessionName: string): ShellBackendSession {
+    return {
+      id: sessionName,
+      cwd: workspacePath,
+      cols: 120,
+      rows: 36,
+      snapshot: paneSnapshot,
+      runtime: {
+        cursorX: 2,
+        cursorY: 0,
+        panePid: 42,
+        currentCommand: 'zsh',
+        currentPath: workspacePath,
+        paneWidth: 120,
+        paneHeight: 36,
+        envPrefix: '(base)',
+        isCommandRunning: false,
+      },
+    };
+  }
 
   afterEach(async () => {
     await service.stop();
@@ -129,17 +158,36 @@ describe('ShellSessionService', () => {
     const state = await service.createShellForThread(threadId, {
       cols: 100,
       rows: 30,
+      label: 'server',
     });
 
     expect(state.state).toBe('detached');
     expect(state.shell).toMatchObject({
       threadId,
+      label: 'server',
       cwd: workspacePath,
       status: 'detached',
+      backend: 'test',
     });
     expect(sessionNames.size).toBe(1);
-    expect(sentInputs.join('\n')).toContain('remote-codex-shell-prompt.zsh');
-    expect(sentInputs.join('\n')).toContain('clear');
+    expect(sentInputs).toEqual([]);
+  });
+
+  it('renames a shell and clears empty labels', async () => {
+    const created = await service.createShellForThread(threadId);
+
+    const renamed = await service.updateShell(created.shell!.id, {
+      label: 'server',
+    });
+    expect(renamed.label).toBe('server');
+
+    const state = await service.getThreadShellState(threadId);
+    expect(state.shells[0]?.label).toBe('server');
+
+    const cleared = await service.updateShell(created.shell!.id, {
+      label: '   ',
+    });
+    expect(cleared.label).toBeNull();
   });
 
   it('lets a new viewer take over the shell attachment and keeps the shell alive after detach', async () => {
@@ -160,6 +208,7 @@ describe('ShellSessionService', () => {
     });
 
     expect(secondAttachment.viewerId).not.toBe(firstAttachment.viewerId);
+    expect(detachCalls).toBe(1);
 
     await expect(
       service.sendInput(shellId!, firstAttachment.viewerId, 'pwd\n'),
@@ -182,7 +231,7 @@ describe('ShellSessionService', () => {
     expect(sessionNames.size).toBe(1);
   });
 
-  it('revives an exited shell for the same thread', async () => {
+  it('creates another shell for the same thread after one exits', async () => {
     const created = await service.createShellForThread(threadId);
     const shellId = created.shell?.id;
     expect(shellId).toBeTruthy();
@@ -195,9 +244,21 @@ describe('ShellSessionService', () => {
       rows: 28,
     });
 
-    expect(revived.shell?.id).toBe(shellId);
+    expect(revived.shell?.id).not.toBe(shellId);
     expect(revived.state).toBe('detached');
     expect(sessionNames.size).toBe(1);
+    expect(revived.shells).toHaveLength(2);
+  });
+
+  it('allows multiple live shells for the same thread', async () => {
+    const first = await service.createShellForThread(threadId);
+    const second = await service.createShellForThread(threadId);
+
+    expect(first.shell?.id).toBeTruthy();
+    expect(second.shell?.id).toBeTruthy();
+    expect(second.shell?.id).not.toBe(first.shell?.id);
+    expect(second.shells).toHaveLength(2);
+    expect(sessionNames.size).toBe(2);
   });
 
   it('includes cwd, env prefix, and running-state metadata in shell output', async () => {
@@ -253,7 +314,6 @@ describe('ShellSessionService', () => {
     outputSpy.mockClear();
     await service.clearShell(created.shell!.id, attachment.viewerId);
 
-    expect(sentInputs).toContain('\u000c');
     expect(clearHistoryCalls).toHaveLength(1);
     expect(outputSpy).toHaveBeenCalledWith(
       '$ ',

@@ -70,6 +70,11 @@ export interface ThreadRuntimeEventProjectorCallbacks {
     turnId: string,
     item: ThreadHistoryItemDto,
   ): void;
+  persistFinalTurnOrderingHints(
+    localThreadId: string,
+    turnId: string,
+    items: ThreadHistoryItemDto[],
+  ): void;
   persistRuntimeTurnItemsAsDisplayTurn(
     localThreadId: string,
     runtimeTurnId: string,
@@ -429,9 +434,10 @@ export class ThreadRuntimeEventProjector {
           lastError: event.turn.error?.message ?? null,
           lastTurnCompletedAt: new Date().toISOString()
         });
+        callbacks.persistFinalTurnOrderingHints(record.id, turnId, turnItems);
+        callbacks.persistRuntimeTurnItemsAsDisplayTurn(record.id, rawTurnId, turnId, turnItems);
         liveState.setLivePlan(record.id, null);
         liveState.setLiveItems(record.id, null);
-        callbacks.persistRuntimeTurnItemsAsDisplayTurn(record.id, rawTurnId, turnId, turnItems);
         if (rawTurnId !== turnId) {
           callbacks.deletePersistedHistoryItemsForTurn(record.id, rawTurnId);
           liveState.resetRecordedTurnItemOrder(record.id, rawTurnId);
