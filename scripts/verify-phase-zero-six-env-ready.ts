@@ -78,6 +78,10 @@ function presentNames(requirements: EnvRequirement[]) {
   );
 }
 
+function hasFlag(name: string) {
+  return process.argv.includes(name);
+}
+
 const groups: EnvGroup[] = [
   {
     id: 'aws-preflight',
@@ -390,7 +394,11 @@ function evaluateGroup(group: EnvGroup) {
 }
 
 function main() {
-  const evaluatedGroups = groups.map(evaluateGroup);
+  const skipStagingSmoke = hasFlag('--skip-staging-smoke');
+  const selectedGroups = skipStagingSmoke
+    ? groups.filter((group) => group.id === 'aws-preflight')
+    : groups;
+  const evaluatedGroups = selectedGroups.map(evaluateGroup);
   const readyGroups = evaluatedGroups
     .filter((group) => group.ready)
     .map((group) => group.id);
@@ -401,6 +409,7 @@ function main() {
   console.log(JSON.stringify({
     ok: notReadyGroups.length === 0,
     generatedAt: new Date().toISOString(),
+    skippedStagingSmoke: skipStagingSmoke,
     readyGroups,
     notReadyGroups,
     groups: evaluatedGroups,

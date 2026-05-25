@@ -87,6 +87,25 @@ function commandOk(result: CommandResult) {
   return result.exitCode === 0 && parsed?.ok !== false;
 }
 
+function commandOkForBundle(result: CommandResult) {
+  if (result.name === 'verify_phase_zero_six_evidence') {
+    return result.exitCode === 0 && Boolean(parseJsonOutput(result));
+  }
+  if (result.name === 'verify_phase_zero_six_evidence_apply') {
+    const parsed = parseJsonOutput(result) as {
+      apply?: { applied?: unknown };
+      checkedButContradicted?: unknown[];
+    } | null;
+    return (
+      result.exitCode === 0 &&
+      parsed?.apply?.applied === true &&
+      Array.isArray(parsed.checkedButContradicted) &&
+      parsed.checkedButContradicted.length === 0
+    );
+  }
+  return commandOk(result);
+}
+
 function phaseVerificationAllowsApply(result: CommandResult) {
   const parsed = parseJsonOutput(result) as {
     readyToCheck?: unknown[];
@@ -99,6 +118,21 @@ function phaseVerificationAllowsApply(result: CommandResult) {
     Array.isArray(parsed.checkedButContradicted) &&
     parsed.checkedButContradicted.length === 0,
   );
+}
+
+function phaseVerificationComplete(result: CommandResult | undefined) {
+  const parsed = result ? parseJsonOutput(result) as { ok?: unknown } | null : null;
+  return result?.exitCode === 0 && parsed?.ok === true;
+}
+
+function successfulCommandNamesForPartialEvidence() {
+  return new Set([
+    'verify_phase_zero_six_evidence',
+  ]);
+}
+
+function commandRequiredForBundleSuccess(result: CommandResult) {
+  return !successfulCommandNamesForPartialEvidence().has(result.name);
 }
 
 async function main() {
@@ -124,7 +158,13 @@ async function main() {
 
   commands.push(await runCommand({
     name: 'verify_phase_zero_six_env_ready',
-    command: ['pnpm', 'exec', 'tsx', 'scripts/verify-phase-zero-six-env-ready.ts'],
+    command: [
+      'pnpm',
+      'exec',
+      'tsx',
+      'scripts/verify-phase-zero-six-env-ready.ts',
+      ...(hasFlag('--skip-staging-smoke') ? ['--skip-staging-smoke'] : []),
+    ],
     outputPath: envReadinessPath,
   }));
 
@@ -233,8 +273,12 @@ async function main() {
   }
 
   const applyCompletedOrNotRequested = !applyReady || Boolean(phaseApplyResult);
+  const requiredCommandsOk = commands
+    .filter(commandRequiredForBundleSuccess)
+    .every(commandOkForBundle);
+  const phaseZeroSixComplete = phaseVerificationComplete(phaseApplyResult ?? phaseVerification);
   const summary = {
-    ok: commands.every(commandOk) && applyCompletedOrNotRequested,
+    ok: requiredCommandsOk && applyCompletedOrNotRequested,
     generatedAt: new Date().toISOString(),
     outputDir,
     applyReady,
@@ -242,6 +286,7 @@ async function main() {
     checklistPath,
     skippedStagingSmoke: hasFlag('--skip-staging-smoke'),
     stoppedAfterEnvReadiness: false,
+    phaseZeroSixComplete,
     applySkippedReason,
     artifacts: {
       envReadiness: envReadinessPath,

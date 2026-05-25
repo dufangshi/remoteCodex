@@ -339,6 +339,13 @@ If a provider command exits non-zero, the staging smoke still emits a JSON
 report with that provider step marked `ok: false`; the verifier then leaves the
 corresponding G6 box unchecked with a concrete failure record.
 
+In `summary.json`, `ok: true` means the bundle collection, artifact scan, and
+requested checklist apply flow completed successfully. It does not necessarily
+mean every Phase 0 through Phase 6 checklist item is complete. Use
+`phaseZeroSixComplete: true` for that stronger claim. Partial evidence runs,
+such as AWS-only S3.04/S3.05 preflight with `--skip-staging-smoke`, can produce
+`ok: true` and `phaseZeroSixComplete: false`.
+
 Checklist apply inside the bundle is intentionally ordered after read-only
 verification and artifact scanning. Even when `--apply-ready` is present, the
 bundle first writes `phase-zero-six-verification.json`, then scans the artifact
@@ -358,7 +365,9 @@ pnpm collect:phase-zero-six-evidence -- \
 ```
 
 For AWS-only preflight work, such as checking only S3.04/S3.05 before the
-runtime smoke is available, pass `--skip-staging-smoke`.
+runtime smoke is available, pass `--skip-staging-smoke`. In that mode the
+bundle also passes `--skip-staging-smoke` to the env readiness verifier, so only
+AWS preflight env is required before collection starts.
 
 The recommended `.temp/phase-zero-six-evidence/` output location and legacy
 `artifacts/phase-zero-six-evidence/` location are ignored by Git. If an

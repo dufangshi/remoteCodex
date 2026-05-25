@@ -82,9 +82,13 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   staging release record. Its bundle-level `--apply-ready` path now runs
   read-only Phase 0-6 verification first, scans generated artifacts second, and
   only then runs a separate checklist apply command; if the artifact scan
-  fails, no checklist file is edited. It stops after env readiness failure by
-  default; `--force` is available only for diagnostic collection. The
-  recommended `.temp` output path is ignored by Git.
+  fails, no checklist file is edited. Bundle `summary.ok` reports collection
+  and apply-flow success, while `summary.phaseZeroSixComplete` separately
+  reports whether all Phase 0-6 boxes are complete, so AWS-only partial
+  evidence can succeed without claiming full release readiness. Its
+  `--skip-staging-smoke` mode limits env readiness to AWS preflight inputs. It
+  stops after env readiness failure by default; `--force` is available only for
+  diagnostic collection. The recommended `.temp` output path is ignored by Git.
 - Phase 0-6 staging env readiness verifier exists as
   `pnpm verify:phase-zero-six-env-ready`; it reports only environment variable
   names by evidence group and helps operators see which AWS, runtime, router,

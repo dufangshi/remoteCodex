@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
@@ -50,6 +50,58 @@ async function runScriptWithEnv(
 
 async function tempDir() {
   return mkdtemp(path.join(os.tmpdir(), 'phase-zero-six-evidence-test-'));
+}
+
+async function fakeAwsKubectlBin(root: string) {
+  const binDir = path.join(root, 'bin');
+  await mkdir(binDir, { recursive: true });
+  const awsPath = path.join(binDir, 'aws');
+  const kubectlPath = path.join(binDir, 'kubectl');
+  await writeFile(
+    awsPath,
+    [
+      '#!/usr/bin/env node',
+      'const args = process.argv.slice(2);',
+      "if (args.join(' ') === 'sts get-caller-identity') {",
+      '  console.log(JSON.stringify({ Account: "123456789012" }));',
+      '  process.exit(0);',
+      '}',
+      "if (args[0] === 'eks' && args[1] === 'describe-cluster') {",
+      '  console.log(JSON.stringify({ cluster: { resourcesVpcConfig: { vpcId: "vpc-123", subnetIds: ["subnet-1"], securityGroupIds: ["sg-1"] } } }));',
+      '  process.exit(0);',
+      '}',
+      "if (args[0] === 'eks' && args[1] === 'describe-fargate-profile') {",
+      '  console.log(JSON.stringify({ fargateProfile: { podExecutionRoleArn: "arn:aws:iam::123456789012:role/remote-codex-sandbox-manager" } }));',
+      '  process.exit(0);',
+      '}',
+      'console.error(`unexpected aws args: ${args.join(" ")}`);',
+      'process.exit(2);',
+      '',
+    ].join('\n'),
+  );
+  await writeFile(
+    kubectlPath,
+    [
+      '#!/usr/bin/env node',
+      'const args = process.argv.slice(2);',
+      "if (args[0] === 'auth' && args[1] === 'can-i') {",
+      "  if (args.includes('--all-namespaces') || args.includes('kube-system')) {",
+      "    console.log('no');",
+      '  } else {',
+      "    console.log('yes');",
+      '  }',
+      '  process.exit(0);',
+      '}',
+      'console.error(`unexpected kubectl args: ${args.join(" ")}`);',
+      'process.exit(2);',
+      '',
+    ].join('\n'),
+  );
+  await Promise.all([
+    chmod(awsPath, 0o755),
+    chmod(kubectlPath, 0o755),
+  ]);
+  return binDir;
 }
 
 async function withFakeStagingServers(
@@ -655,6 +707,33 @@ describe('phase zero-six evidence tooling', () => {
     expect(r511.matchedSteps).toEqual(['direct_worker_private_denial']);
   });
 
+  it('checks only AWS preflight env when staging smoke is skipped', async () => {
+    const result = await runScriptWithEnv(
+      'scripts/verify-phase-zero-six-env-ready.ts',
+      ['--skip-staging-smoke'],
+      {
+        AWS_STAGING_REVIEWED_BY: 'operator@example.test',
+        AWS_STAGING_EKS_CLUSTER_NAME: 'remote-codex-staging',
+        AWS_STAGING_K8S_NAMESPACE: 'remote-codex-sandboxes',
+        AWS_STAGING_FARGATE_PROFILE_NAME: 'sandbox-workers',
+        AWS_STAGING_K8S_SERVICE_ACCOUNT: 'remote-codex-sandbox-manager',
+        AWS_STAGING_WORKER_IMAGE_REPOSITORY: 'example/remote-codex-worker',
+        AWS_STAGING_WORKER_IMAGE_TAG: 'sha-abc123',
+        AWS_STAGING_LOG_GROUP_NAMES: '/aws/eks/remote-codex-staging',
+        AWS_STAGING_CONFIG_REVIEWED: 'true',
+        AWS_STAGING_CREDENTIAL_REVIEW_PASSED: 'true',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.skippedStagingSmoke).toBe(true);
+    expect(parsed.readyGroups).toEqual(['aws-preflight']);
+    expect(parsed.notReadyGroups).toEqual([]);
+    expect(parsed.groups.map((group: { id: string }) => group.id)).toEqual(['aws-preflight']);
+  });
+
   it('stops bundle collection after env readiness failure unless forced', async () => {
     const dir = await tempDir();
     const result = await runScript('scripts/run-phase-zero-six-staging-evidence.ts', [
@@ -697,6 +776,53 @@ describe('phase zero-six evidence tooling', () => {
     expect(files).toContain('phase-zero-six-verification.json');
     expect(files).toContain('artifact-secret-scan.json');
     expect(files).toContain('summary.json');
+  });
+
+  it('treats partial bundle evidence as successful without claiming phase zero-six complete', async () => {
+    const dir = await tempDir();
+    const fakeBin = await fakeAwsKubectlBin(dir);
+    const checklistPath = path.join(dir, 'checklist.md');
+    await writeFile(checklistPath, minimalChecklist());
+
+    const result = await runScriptWithEnv(
+      'scripts/run-phase-zero-six-staging-evidence.ts',
+      [
+        '--output-dir',
+        dir,
+        '--skip-staging-smoke',
+        '--apply-ready',
+        '--checklist',
+        checklistPath,
+      ],
+      {
+        PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ''}`,
+        AWS_STAGING_REVIEWED_BY: 'operator@example.test',
+        AWS_STAGING_REGION: 'us-east-1',
+        AWS_STAGING_EKS_CLUSTER_NAME: 'remote-codex-staging',
+        AWS_STAGING_K8S_NAMESPACE: 'remote-codex-sandboxes',
+        AWS_STAGING_FARGATE_PROFILE_NAME: 'sandbox-workers',
+        AWS_STAGING_K8S_SERVICE_ACCOUNT: 'remote-codex-sandbox-manager',
+        AWS_STAGING_WORKER_IMAGE_REPOSITORY: 'example/remote-codex-worker',
+        AWS_STAGING_WORKER_IMAGE_TAG: 'sha-abc123',
+        AWS_STAGING_LOG_GROUP_NAMES: '/aws/eks/remote-codex-staging',
+        AWS_STAGING_CONFIG_REVIEWED: 'true',
+        AWS_STAGING_CREDENTIAL_REVIEW_PASSED: 'true',
+        AWS_STAGING_K8S_AUTH_MODE: 'aws-iam',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+    const checklist = await readFile(checklistPath, 'utf8');
+    const files = await readdir(dir);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.phaseZeroSixComplete).toBe(false);
+    expect(parsed.applySkippedReason).toBeNull();
+    expect(parsed.artifacts.phaseZeroSixApply).toBe(path.join(dir, 'phase-zero-six-apply.json'));
+    expect(files).toContain('phase-zero-six-apply.json');
+    expect(checklist).toContain('- [x] S3.04 Finalize AWS staging configuration.');
+    expect(checklist).toContain('- [x] S3.05 Add least-privilege Kubernetes credentials.');
+    expect(checklist).toContain('- [ ] S3.06 Create a real worker Pod from the control plane.');
   });
 
   it('does not apply checklist changes when bundle artifact scan fails', async () => {
