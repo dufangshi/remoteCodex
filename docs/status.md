@@ -270,9 +270,10 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 ## Immediate Next Implementation Queue
 
 1. Run `pnpm phase-zero-six:audit` first and inspect `nextCommands`,
-   `blockingGroups`, and item-level `nextEvidenceCommand` fields. These fields
-   identify whether the next collection step can be AWS-only or must use the
-   full staging/runtime/provider bundle.
+   `blockingGroups`, and item-level `nextEvidenceCommand` fields. Use
+   `pnpm phase-zero-six:audit:report` when a human-readable text report is
+   easier than raw JSON. These fields identify whether the next collection step
+   can be AWS-only or must use the full staging/runtime/provider bundle.
 2. Run `pnpm phase-zero-six:template`, fill
    `.temp/phase-zero-six-evidence/phase-zero-six.env.sh` in a private operator
    shell, then `source` it. Do not commit the filled env file.

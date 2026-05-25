@@ -318,6 +318,7 @@ convenience audit command:
 
 ```bash
 pnpm phase-zero-six:audit
+pnpm phase-zero-six:audit:report
 ```
 
 The read-only audit emits:
@@ -328,6 +329,10 @@ The read-only audit emits:
 - `nextCommands`, which tells the operator whether to run the AWS-only
   `template:aws/env:aws/collect:aws/apply:aws` flow or the full
   `template/env/collect/apply` staging flow.
+
+Use `phase-zero-six:audit` for machine-readable JSON and
+`phase-zero-six:audit:report` for the same state as a human-readable text
+report.
 
 After the aggregate report shows one or more remaining Phase 0 through Phase 6
 items under `readyToCheck`, the same tool can update those proven checklist

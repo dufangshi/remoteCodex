@@ -645,6 +645,31 @@ describe('phase zero-six evidence tooling', () => {
     );
   });
 
+  it('renders aggregate phase zero-six audit as a text report', async () => {
+    const dir = await tempDir();
+    const checklistPath = path.join(dir, 'checklist.md');
+    await writeFile(checklistPath, minimalChecklist());
+
+    const result = await runScript('scripts/verify-phase-zero-six-evidence.ts', [
+      '--checklist',
+      checklistPath,
+      '--format',
+      'text',
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('# Remote Codex Phase 0-6 Audit');
+    expect(result.stdout).toContain('Complete: false');
+    expect(result.stdout).toContain('## Next Commands');
+    expect(result.stdout).toContain('collectEvidence: pnpm phase-zero-six:collect');
+    expect(result.stdout).toContain('## Blocking Groups');
+    expect(result.stdout).toContain('aws-preflight');
+    expect(result.stdout).toContain('provider-smoke');
+    expect(result.stdout).toContain('## Still Missing');
+    expect(result.stdout).toContain('S3.04 Finalize AWS staging configuration.');
+    expect(result.stdout).toContain('Do not check live AWS/staging/provider boxes');
+  });
+
   it('applies only ready checklist boxes from AWS preflight evidence', async () => {
     const dir = await tempDir();
     const checklistPath = path.join(dir, 'checklist.md');

@@ -63,6 +63,7 @@
     "phase-zero-six:apply": "pnpm collect:phase-zero-six-evidence -- --from-output-dir ./.temp/phase-zero-six-evidence/latest --output-dir ./.temp/phase-zero-six-evidence/latest-apply --apply-ready",
     "phase-zero-six:apply:aws": "pnpm collect:phase-zero-six-evidence -- --from-output-dir ./.temp/phase-zero-six-evidence/latest-aws --output-dir ./.temp/phase-zero-six-evidence/latest-aws-apply --apply-ready --skip-staging-smoke",
     "phase-zero-six:audit": "pnpm verify:phase-zero-six-evidence",
+    "phase-zero-six:audit:report": "pnpm verify:phase-zero-six-evidence -- --format text",
     "service:start": "node scripts/service-manager.mjs start",
     "service:stop": "node scripts/service-manager.mjs stop",
     "service:status": "node scripts/service-manager.mjs status",

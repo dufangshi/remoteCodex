@@ -176,6 +176,7 @@ Use the Phase 0-6 evidence tooling before checking any of these boxes:
 
 ```bash
 pnpm phase-zero-six:audit
+pnpm phase-zero-six:audit:report
 pnpm phase-zero-six:template
 pnpm phase-zero-six:env
 pnpm phase-zero-six:collect
@@ -190,6 +191,8 @@ pnpm verify:phase-zero-six-evidence -- --aws-preflight <evidence-json> --staging
 to decide whether to run the AWS-only flow
 `template:aws/env:aws/collect:aws/apply:aws` or the full staging flow
 `template/env/collect/apply`.
+For an operator-friendly text summary of the same read-only state, run
+`pnpm phase-zero-six:audit:report`.
 
 Run `--apply-ready` only after reviewing the read-only report. The guarded
 apply mode updates only boxes that are proven by the supplied evidence.
@@ -1505,6 +1508,7 @@ pnpm smoke:production-auth
 pnpm smoke:provider-gateway -- <codex|claude|opencode>
 pnpm smoke:staging-phase-one
 pnpm phase-zero-six:audit
+pnpm phase-zero-six:audit:report
 pnpm phase-zero-six:template
 pnpm phase-zero-six:env
 pnpm phase-zero-six:collect

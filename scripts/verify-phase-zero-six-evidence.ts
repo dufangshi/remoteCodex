@@ -36,6 +36,40 @@ interface BlockingGroup {
   nextEvidenceCommand: string;
 }
 
+interface PhaseZeroSixAuditReport {
+  ok: boolean;
+  generatedAt: string;
+  checklistPath: string;
+  evidenceInputs: {
+    awsPreflight: string | null;
+    stagingSmoke: string | null;
+  };
+  apply: {
+    requested: boolean;
+    applied: boolean;
+    changedCount: number;
+    appliedItems?: string[];
+    reason: string;
+  };
+  countsByPrefix: Record<string, {
+    total: number;
+    checked: number;
+    unchecked: number;
+  }>;
+  updatedCountsByPrefix: null | Record<string, {
+    total: number;
+    checked: number;
+    unchecked: number;
+  }>;
+  checkedCount: number;
+  uncheckedCount: number;
+  readyToCheck: Array<Record<string, unknown>>;
+  stillMissing: Array<Record<string, unknown>>;
+  blockingGroups: BlockingGroup[];
+  nextCommands: Record<string, string | null>;
+  checkedButContradicted: Array<Record<string, unknown>>;
+}
+
 const phaseZeroSixPrefixes = ['D0', 'A1', 'P2', 'S3', 'W4', 'R5', 'G6'];
 const blockingGroupDefinitions = [
   {
@@ -87,6 +121,14 @@ function argValue(name: string) {
 
 function hasFlag(name: string) {
   return process.argv.includes(name);
+}
+
+function outputFormat() {
+  const format = argValue('--format') ?? 'json';
+  if (format !== 'json' && format !== 'text') {
+    throw new Error('--format must be json or text.');
+  }
+  return format;
 }
 
 async function readChecklist(path = 'docs/remote-codex-side-detailed-checklist.md') {
@@ -235,11 +277,70 @@ function buildNextCommands(blockingGroups: BlockingGroup[]) {
   };
 }
 
+function renderTextReport(report: PhaseZeroSixAuditReport) {
+  const lines = [
+    '# Remote Codex Phase 0-6 Audit',
+    '',
+    `Generated at: ${report.generatedAt}`,
+    `Checklist: ${report.checklistPath}`,
+    `Complete: ${String(report.ok)}`,
+    `Checked: ${report.checkedCount}`,
+    `Unchecked: ${report.uncheckedCount}`,
+    '',
+    '## Next Commands',
+  ];
+
+  for (const [name, command] of Object.entries(report.nextCommands)) {
+    lines.push(`- ${name}: ${command ?? '(none)'}`);
+  }
+
+  lines.push('');
+  lines.push('## Blocking Groups');
+  if (report.blockingGroups.length === 0) {
+    lines.push('- (none)');
+  } else {
+    for (const group of report.blockingGroups) {
+      lines.push(`- ${group.id}`);
+      lines.push(`  Not ready: ${group.notReadyItems.join(', ') || '(none)'}`);
+      lines.push(`  Ready: ${group.readyItems.join(', ') || '(none)'}`);
+      lines.push(`  Next evidence command: ${group.nextEvidenceCommand}`);
+    }
+  }
+
+  lines.push('');
+  lines.push('## Ready To Check');
+  if (report.readyToCheck.length === 0) {
+    lines.push('- (none)');
+  } else {
+    for (const item of report.readyToCheck) {
+      lines.push(`- ${String(item.item)} ${String(item.title ?? '')}`.trim());
+    }
+  }
+
+  lines.push('');
+  lines.push('## Still Missing');
+  if (report.stillMissing.length === 0) {
+    lines.push('- (none)');
+  } else {
+    for (const item of report.stillMissing) {
+      lines.push(`- ${String(item.item)} ${String(item.title ?? '')}`.trim());
+      lines.push(`  Group: ${String(item.groupId ?? '(none)')}`);
+      lines.push(`  Next evidence command: ${String(item.nextEvidenceCommand ?? '(none)')}`);
+      lines.push(`  Reason: ${String(item.reason ?? '(none)')}`);
+    }
+  }
+
+  lines.push('');
+  lines.push('Do not check live AWS/staging/provider boxes until readyToCheck contains the item.');
+  return `${lines.join('\n')}\n`;
+}
+
 async function main() {
   const checklistPath = argValue('--checklist') ?? 'docs/remote-codex-side-detailed-checklist.md';
   const awsPath = argValue('--aws-preflight');
   const stagingPath = argValue('--staging-smoke');
   const applyReady = hasFlag('--apply-ready');
+  const format = outputFormat();
   const checklistMarkdown = await readChecklist(checklistPath);
   const checklist = parseChecklistItems(checklistMarkdown);
   const evidence = mergeEvidenceResults([
@@ -304,7 +405,7 @@ async function main() {
     }
   }
 
-  console.log(JSON.stringify({
+  const report: PhaseZeroSixAuditReport = {
     ok: stillMissing.length === 0 && checkedButContradicted.length === 0,
     generatedAt: new Date().toISOString(),
     checklistPath,
@@ -352,7 +453,9 @@ async function main() {
       source: entry.evidence?.source,
       reason: entry.evidence?.reason,
     })),
-  }, null, 2));
+  };
+
+  console.log(format === 'text' ? renderTextReport(report) : JSON.stringify(report, null, 2));
 }
 
 main().catch((error) => {
