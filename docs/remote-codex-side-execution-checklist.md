@@ -334,7 +334,7 @@ user on EKS Fargate.
 
 ### AWS Runtime Tasks
 
-- [ ] Define namespace and label strategy for hundreds of users.
+- [x] Define namespace and label strategy for hundreds of users.
   - Acceptance: docs and adapter config define namespace, labels, owner ids,
     environment names, and cleanup selectors.
   - Verification: AWS adapter tests assert required labels on created Pods.

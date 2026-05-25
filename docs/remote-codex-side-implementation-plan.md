@@ -277,7 +277,7 @@ user.
 - [x] Handle AWS capacity errors.
 - [x] Handle image pull errors.
 - [x] Handle worker readiness timeout.
-- [ ] Add namespace or label strategy for production multi-user isolation.
+- [x] Add namespace or label strategy for production multi-user isolation.
 - [ ] Add idle-timeout policy.
 - [ ] Add sandbox reaper job for stale `starting`, `stopping`, and orphaned
   runtime records.

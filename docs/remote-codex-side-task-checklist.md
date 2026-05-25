@@ -888,6 +888,7 @@ start, stop, observe, and eventually snapshot it.
 - [x] Implement worker environment injection.
 - [x] Implement worker secret injection.
 - [x] Add AWS adapter tests with mocked AWS clients.
+- [x] Add namespace and label strategy for production multi-user isolation.
 - [x] Add failure handling for AWS capacity errors.
 - [x] Add failure handling for image pull errors.
 - [x] Add failure handling for worker readiness timeout.

@@ -132,6 +132,65 @@ CPU and memory:
 Heavy chemistry compute should go through ElAgenteHarness and the job pool, not
 through the interactive sandbox profile by default.
 
+## Namespace And Label Strategy
+
+Phase one uses one Kubernetes namespace per Remote Codex environment:
+
+| Environment | Namespace example | Purpose |
+| --- | --- | --- |
+| `development` | `remote-codex-sandboxes-dev` | Local or shared developer AWS tests. |
+| `staging` | `remote-codex-sandboxes-staging` | Release validation and smoke tests. |
+| `production` | `remote-codex-sandboxes` | Customer sandboxes. |
+
+The namespace is configured by `SANDBOX_K8S_NAMESPACE`. The logical
+environment name is configured by `SANDBOX_ENVIRONMENT`; if omitted, the AWS
+adapter falls back to `NODE_ENV` and then `development`.
+
+Use a single namespace per environment for the first few hundred users. Per-user
+namespaces are intentionally deferred because the phase-one model needs fast Pod
+creation, simple Fargate profile management, and predictable router discovery.
+The boundary for one user to one sandbox is the deterministic Pod/Service name,
+control-plane ownership checks, worker route tokens, and Kubernetes labels.
+
+Every sandbox worker Pod and Service must carry these labels:
+
+| Label | Example | Purpose |
+| --- | --- | --- |
+| `app.kubernetes.io/name` | `remote-codex-worker` | Standard app identity. |
+| `app.kubernetes.io/part-of` | `remote-codex` | Groups all product resources. |
+| `app.kubernetes.io/component` | `sandbox-worker` | Separates workers from router/control-plane resources. |
+| `app.kubernetes.io/managed-by` | `remote-codex-control-plane` | Marks control-plane ownership. |
+| `app.kubernetes.io/instance` | `sbx_abc123` | Stable sandbox instance id. |
+| `remote-codex.dev/runtime-role` | `worker` | Runtime role for policy and metrics. |
+| `remote-codex.dev/cleanup-scope` | `sandbox-worker` | Selector used by cleanup and reaper jobs. |
+| `remote-codex.dev/environment` | `production` | Prevents cross-environment cleanup. |
+| `remote-codex.dev/sandbox-id` | `sbx_abc123` | Links Kubernetes resources to the sandbox registry. |
+| `remote-codex.dev/user-id` | `user_abc123` | Links runtime resources to the owning user. |
+| `remote-codex.dev/image-tag` | `staging-a1b2c3d` | Supports image rollout audits. |
+| `remote-codex.dev/resource-profile` | `standard` | Supports capacity and cost analysis. |
+
+The adapter also keeps the older `remote-codex/*` labels during migration so
+existing tests, dashboards, and exploratory scripts do not break. New code
+should use the `remote-codex.dev/*` labels.
+
+Cleanup selectors:
+
+```text
+remote-codex.dev/cleanup-scope=sandbox-worker
+remote-codex.dev/environment=<environment>
+```
+
+For a single sandbox, add:
+
+```text
+remote-codex.dev/sandbox-id=<sandbox-id>
+```
+
+Reapers, admin detail lookups, route diagnostics, and capacity reports should
+use these selectors instead of scanning the full namespace. This keeps the
+runtime model viable for hundreds of users while leaving room to move large
+customers or high-risk workloads into dedicated namespaces later.
+
 ## AWS Network Requirements
 
 Minimum phase-one AWS requirements:

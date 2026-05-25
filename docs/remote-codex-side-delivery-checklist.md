@@ -299,7 +299,7 @@ user.
 - [x] Handle AWS capacity errors.
 - [x] Handle image pull errors.
 - [x] Handle worker readiness timeout.
-- [ ] Define namespace and label strategy for hundreds of users.
+- [x] Define namespace and label strategy for hundreds of users.
 - [ ] Define Pod TTL/cleanup behavior.
 - [ ] Define scaling and capacity request process.
 - [ ] Add staging start-one-sandbox smoke test.

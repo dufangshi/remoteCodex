@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { z } from 'zod';
 
@@ -239,6 +240,8 @@ export class LocalWorkerProcessSandboxManager implements SandboxManager {
 const awsSandboxAdapterEnvSchema = z.object({
   AWS_REGION: z.string().min(1).optional(),
   SANDBOX_AWS_REGION: z.string().min(1).optional(),
+  SANDBOX_ENVIRONMENT: z.string().min(1).optional(),
+  NODE_ENV: z.string().min(1).optional(),
   SANDBOX_EKS_CLUSTER_NAME: z.string().min(1),
   SANDBOX_K8S_NAMESPACE: z.string().min(1).default('remote-codex-sandboxes'),
   SANDBOX_K8S_SERVICE_ACCOUNT: z.string().min(1),
@@ -253,6 +256,7 @@ const awsSandboxAdapterEnvSchema = z.object({
 
 export interface AwsSandboxAdapterConfig {
   region: string;
+  environmentName: string;
   clusterName: string;
   namespace: string;
   serviceAccountName: string;
@@ -338,6 +342,7 @@ export function loadAwsSandboxAdapterConfig(
 
   return {
     region: parsed.SANDBOX_AWS_REGION ?? parsed.AWS_REGION ?? 'us-east-1',
+    environmentName: kubernetesLabelValue(parsed.SANDBOX_ENVIRONMENT ?? parsed.NODE_ENV ?? 'development'),
     clusterName: parsed.SANDBOX_EKS_CLUSTER_NAME,
     namespace: parsed.SANDBOX_K8S_NAMESPACE,
     serviceAccountName: parsed.SANDBOX_K8S_SERVICE_ACCOUNT,
@@ -371,6 +376,70 @@ const awsResourceProfiles: Record<
     ephemeralStorage: '80Gi',
   },
 };
+
+const sandboxWorkerCleanupScope = 'sandbox-worker';
+
+function kubernetesLabelValue(value: string) {
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9_.-]/g, '-')
+    .replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '');
+  if (normalized.length > 0 && normalized.length <= 63) {
+    return normalized;
+  }
+  const digest = createHash('sha256').update(value).digest('hex').slice(0, 12);
+  const prefix = normalized
+    .replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '')
+    .slice(0, 50)
+    .replace(/[^a-z0-9]+$/g, '');
+  return prefix ? `${prefix}-${digest}` : digest;
+}
+
+export function awsSandboxWorkerLabels(input: {
+  sandboxId: string;
+  userId: string;
+  imageTag: string;
+  resourceProfile: AwsSandboxAdapterConfig['resourceProfile'];
+  environmentName: string;
+}) {
+  const sandboxId = kubernetesLabelValue(input.sandboxId);
+  const userId = kubernetesLabelValue(input.userId);
+  const imageTag = kubernetesLabelValue(input.imageTag);
+  const environmentName = kubernetesLabelValue(input.environmentName);
+  return {
+    'app.kubernetes.io/name': 'remote-codex-worker',
+    'app.kubernetes.io/part-of': 'remote-codex',
+    'app.kubernetes.io/component': 'sandbox-worker',
+    'app.kubernetes.io/managed-by': 'remote-codex-control-plane',
+    'app.kubernetes.io/instance': sandboxId,
+    'remote-codex.dev/runtime-role': 'worker',
+    'remote-codex.dev/cleanup-scope': sandboxWorkerCleanupScope,
+    'remote-codex.dev/environment': environmentName,
+    'remote-codex.dev/sandbox-id': sandboxId,
+    'remote-codex.dev/user-id': userId,
+    'remote-codex.dev/image-tag': imageTag,
+    'remote-codex.dev/resource-profile': input.resourceProfile,
+    'remote-codex/runtime-role': 'worker',
+    'remote-codex/sandbox-id': sandboxId,
+    'remote-codex/user-id': userId,
+    'remote-codex/image-tag': imageTag,
+    'remote-codex/resource-profile': input.resourceProfile,
+  };
+}
+
+export function awsSandboxWorkerCleanupSelector(input: {
+  environmentName: string;
+  sandboxId?: string;
+}) {
+  const labels: Record<string, string> = {
+    'remote-codex.dev/cleanup-scope': sandboxWorkerCleanupScope,
+    'remote-codex.dev/environment': kubernetesLabelValue(input.environmentName),
+  };
+  if (input.sandboxId) {
+    labels['remote-codex.dev/sandbox-id'] = kubernetesLabelValue(input.sandboxId);
+  }
+  return labels;
+}
 
 export class AwsEksFargateSandboxManager implements SandboxManager {
   constructor(
@@ -517,14 +586,13 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
       serviceName: this.workerServiceName(input.sandboxId),
       image,
       serviceAccountName: this.config.serviceAccountName,
-      labels: {
-        'app.kubernetes.io/name': 'remote-codex-worker',
-        'remote-codex/runtime-role': 'worker',
-        'remote-codex/sandbox-id': input.sandboxId,
-        'remote-codex/user-id': input.userId,
-        'remote-codex/image-tag': this.config.imageTag,
-        'remote-codex/resource-profile': this.config.resourceProfile,
-      },
+      labels: awsSandboxWorkerLabels({
+        sandboxId: input.sandboxId,
+        userId: input.userId,
+        imageTag: this.config.imageTag,
+        resourceProfile: this.config.resourceProfile,
+        environmentName: this.config.environmentName,
+      }),
       env: env.env,
       secretEnv: env.secretEnv ?? {},
       subnetIds: this.config.subnetIds,

@@ -9,6 +9,8 @@ import {
   LocalWorkerProcessSandboxManager,
   NoopSandboxManager,
   SandboxManagerError,
+  awsSandboxWorkerCleanupSelector,
+  awsSandboxWorkerLabels,
   loadAwsSandboxAdapterConfig,
 } from './adapters';
 
@@ -133,10 +135,12 @@ describe('sandbox manager adapters', () => {
       SANDBOX_SUBNET_IDS: 'subnet-a, subnet-b',
       SANDBOX_SECURITY_GROUP_IDS: 'sg-worker',
       SANDBOX_RESOURCE_PROFILE: 'standard',
+      SANDBOX_ENVIRONMENT: 'staging',
     });
 
     expect(config).toMatchObject({
       region: 'us-east-1',
+      environmentName: 'staging',
       clusterName: 'remote-codex-staging',
       namespace: 'remote-codex-sandboxes',
       serviceAccountName: 'remote-codex-worker',
@@ -163,6 +167,45 @@ describe('sandbox manager adapters', () => {
         SANDBOX_SECURITY_GROUP_IDS: 'sg-worker',
       }),
     ).toThrow('SANDBOX_SUBNET_IDS must include at least one subnet id.');
+  });
+
+  it('builds deterministic AWS worker labels and cleanup selectors', () => {
+    const labels = awsSandboxWorkerLabels({
+      sandboxId: 'sbx_test',
+      userId: 'user_test',
+      imageTag: 'staging-abc123',
+      resourceProfile: 'standard',
+      environmentName: 'staging',
+    });
+
+    expect(labels).toMatchObject({
+      'app.kubernetes.io/name': 'remote-codex-worker',
+      'app.kubernetes.io/part-of': 'remote-codex',
+      'app.kubernetes.io/component': 'sandbox-worker',
+      'app.kubernetes.io/managed-by': 'remote-codex-control-plane',
+      'app.kubernetes.io/instance': 'sbx_test',
+      'remote-codex.dev/runtime-role': 'worker',
+      'remote-codex.dev/cleanup-scope': 'sandbox-worker',
+      'remote-codex.dev/environment': 'staging',
+      'remote-codex.dev/sandbox-id': 'sbx_test',
+      'remote-codex.dev/user-id': 'user_test',
+      'remote-codex.dev/image-tag': 'staging-abc123',
+      'remote-codex.dev/resource-profile': 'standard',
+    });
+    expect(awsSandboxWorkerCleanupSelector({ environmentName: 'staging' })).toEqual({
+      'remote-codex.dev/cleanup-scope': 'sandbox-worker',
+      'remote-codex.dev/environment': 'staging',
+    });
+    expect(
+      awsSandboxWorkerCleanupSelector({
+        environmentName: 'staging',
+        sandboxId: 'sbx_test',
+      }),
+    ).toEqual({
+      'remote-codex.dev/cleanup-scope': 'sandbox-worker',
+      'remote-codex.dev/environment': 'staging',
+      'remote-codex.dev/sandbox-id': 'sbx_test',
+    });
   });
 
   it('prepares AWS worker identity without exposing provider root keys', async () => {
@@ -247,6 +290,18 @@ describe('sandbox manager adapters', () => {
       },
     });
     expect(podSpec!.labels).toMatchObject({
+      'app.kubernetes.io/name': 'remote-codex-worker',
+      'app.kubernetes.io/part-of': 'remote-codex',
+      'app.kubernetes.io/component': 'sandbox-worker',
+      'app.kubernetes.io/managed-by': 'remote-codex-control-plane',
+      'app.kubernetes.io/instance': 'sbx_test',
+      'remote-codex.dev/runtime-role': 'worker',
+      'remote-codex.dev/cleanup-scope': 'sandbox-worker',
+      'remote-codex.dev/environment': 'development',
+      'remote-codex.dev/sandbox-id': 'sbx_test',
+      'remote-codex.dev/user-id': 'user_test',
+      'remote-codex.dev/image-tag': 'staging-abc123',
+      'remote-codex.dev/resource-profile': 'standard',
       'remote-codex/runtime-role': 'worker',
       'remote-codex/sandbox-id': 'sbx_test',
       'remote-codex/user-id': 'user_test',
