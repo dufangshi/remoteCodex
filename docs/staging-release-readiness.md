@@ -162,4 +162,3 @@ For the first staging deploy, rollback is operational rather than automated:
   [Remote Codex Branch Status](./status.md)
 - Production release gates:
   [Release Gates](./release-gates.md)
-

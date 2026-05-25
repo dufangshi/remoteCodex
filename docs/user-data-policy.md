@@ -78,4 +78,3 @@ Production release must either:
 - [Remote Codex Side Execution Checklist](./remote-codex-side-execution-checklist.md)
 - [Release Gates](./release-gates.md)
 - [Remote Codex Branch Status](./status.md)
-
