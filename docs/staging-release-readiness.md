@@ -125,6 +125,17 @@ STAGING_PROVIDER_SMOKE_TIMEOUT_MS=180000
 
 The script prints JSON evidence with step names and ids. Store the output with
 the staging release record before checking the corresponding staging boxes.
+Before changing any staging checkbox, run the evidence verifier against that
+stored JSON:
+
+```bash
+pnpm verify:staging-phase-one-evidence -- ./staging-phase-one-smoke.json
+```
+
+The verifier is intentionally read-only. It reports which remaining staging
+checkboxes have enough evidence to check and which proof fields are missing. It
+does not update checklist files automatically.
+
 The important step-to-checkbox mapping is:
 
 - `start_sandbox`, `sandbox_ready`, and `admin_sandbox_runtime_detail` prove
@@ -141,6 +152,26 @@ The important step-to-checkbox mapping is:
   `opencode_gateway_smoke` prove G6.11-G6.13 only when the command output also
   records a successful gateway usage event and confirms no provider root key is
   present in worker env/config.
+
+Provider smoke commands should print a JSON object to stdout so the staging
+runner can attach it as `details.parsedStdout`. The verifier expects this
+minimal shape:
+
+```json
+{
+  "ok": true,
+  "provider": "codex",
+  "gatewayUsageRecorded": true,
+  "rootKeysAbsent": true,
+  "workerConfigUsesGateway": true,
+  "requestId": "optional-gateway-or-provider-request-id"
+}
+```
+
+Use `"provider": "claude"` for Claude Code and `"provider": "opencode"` for
+OpenCode. `gatewayUsageRecorded` must be based on a gateway usage record, not
+only on a successful CLI exit. `rootKeysAbsent` must come from checking worker
+environment and generated provider config for raw provider root keys.
 
 - Auth smoke:
   - valid staging user token reaches `GET /api/me`;

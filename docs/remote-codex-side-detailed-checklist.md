@@ -475,7 +475,9 @@ and recover it.
   `pnpm smoke:staging-phase-one` runner now emits `start_sandbox`,
   `sandbox_ready`, optional `admin_sandbox_runtime_detail`, optional
   `idempotent_lifecycle`, and `stop_sandbox` evidence for these remaining
-  staging boxes once real staging URLs and tokens are available.
+  staging boxes once real staging URLs and tokens are available. Run
+  `pnpm verify:staging-phase-one-evidence -- <smoke-json>` against captured
+  staging output before checking any of these boxes.
 
 ## Phase 4: Worker Image And Runtime Guardrails
 
@@ -675,6 +677,8 @@ router-injected worker identity.
   and browser-to-router-to-worker staging evidence still need
   `pnpm smoke:staging-phase-one` output. The runner now emits
   `browser_to_router_to_worker` and optional `direct_worker_denial` evidence.
+  Run `pnpm verify:staging-phase-one-evidence -- <smoke-json>` before marking
+  these staging router boxes complete.
 
 ## Phase 6: LLM Gateway And Provider Runtime Bootstrap
 
@@ -819,7 +823,9 @@ the sandbox, while real provider root keys stay outside the sandbox.
   gateway from real worker sandboxes. The staging runner can attach
   `codex_gateway_smoke`, `claude_gateway_smoke`, and `opencode_gateway_smoke`
   command output; check these boxes only when that output also includes gateway
-  usage records and root-key absence checks.
+  usage records and root-key absence checks. The verifier expects each provider
+  smoke command to emit parsed JSON with `provider`, `gatewayUsageRecorded`,
+  `rootKeysAbsent`, and `workerConfigUsesGateway`.
 
 ## Phase 7: ElAgenteHarness Integration
 
@@ -1307,5 +1313,6 @@ pnpm --filter @remote-codex/db typecheck
 pnpm smoke:local-worker-checkpoint
 pnpm smoke:production-auth
 pnpm smoke:staging-phase-one
+pnpm verify:staging-phase-one-evidence -- <smoke-json>
 docker build -f Dockerfile.worker -t remote-codex-worker:verify .
 ```

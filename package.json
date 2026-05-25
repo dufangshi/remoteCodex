@@ -46,6 +46,7 @@
     "smoke:local-worker-checkpoint": "tsx scripts/local-worker-checkpoint-smoke.ts",
     "smoke:production-auth": "tsx scripts/local-production-auth-smoke.ts",
     "smoke:staging-phase-one": "tsx scripts/staging-phase-one-smoke.ts",
+    "verify:staging-phase-one-evidence": "tsx scripts/verify-staging-phase-one-evidence.ts",
     "service:start": "node scripts/service-manager.mjs start",
     "service:stop": "node scripts/service-manager.mjs stop",
     "service:status": "node scripts/service-manager.mjs status",
