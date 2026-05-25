@@ -388,7 +388,7 @@ async function writeSummaryAndOperatorReport(input: {
   summary: Record<string, unknown>;
   summaryPath: string;
   operatorReportPath: string;
-}) {
+}): Promise<Record<string, unknown>> {
   const summaryWithReport = {
     ...input.summary,
     artifacts: {
@@ -399,6 +399,46 @@ async function writeSummaryAndOperatorReport(input: {
   await writeFile(input.summaryPath, JSON.stringify(summaryWithReport, null, 2));
   await writeFile(input.operatorReportPath, renderOperatorReport(summaryWithReport));
   return summaryWithReport;
+}
+
+async function writeFinalSummaryWithArtifactScan(input: {
+  summary: Record<string, unknown>;
+  summaryPath: string;
+  operatorReportPath: string;
+  finalArtifactSafetyPath: string;
+  commands: CommandResult[];
+}): Promise<Record<string, unknown>> {
+  const summaryWithReport = await writeSummaryAndOperatorReport({
+    summary: input.summary,
+    summaryPath: input.summaryPath,
+    operatorReportPath: input.operatorReportPath,
+  });
+  const scanResult = await runCommand({
+    name: 'verify_phase_zero_six_final_artifacts_safe',
+    command: ['pnpm', 'exec', 'tsx', 'scripts/verify-phase-zero-six-artifacts-safe.ts', '--dir', path.dirname(input.summaryPath)],
+    outputPath: input.finalArtifactSafetyPath,
+  });
+  input.commands.push(scanResult);
+  const finalArtifactScanPassed = commandOk(scanResult);
+  const finalSummary = {
+    ...summaryWithReport,
+    ok: summaryWithReport.ok === true && finalArtifactScanPassed,
+    finalArtifactScanPassed,
+    reason: finalArtifactScanPassed
+      ? summaryWithReport.reason
+      : 'Final artifact secret scan found unsafe evidence files.',
+    artifacts: {
+      ...asRecord(summaryWithReport.artifacts),
+      finalArtifactSecretScan: input.finalArtifactSafetyPath,
+    },
+    results: input.commands.map(commandSummary),
+  };
+  await writeSummaryAndOperatorReport({
+    summary: finalSummary,
+    summaryPath: input.summaryPath,
+    operatorReportPath: input.operatorReportPath,
+  });
+  return finalSummary;
 }
 
 async function missingRequiredEvidenceFiles(input: {
@@ -448,6 +488,7 @@ async function main() {
   const inputArtifactSafetyPath = path.join(outputDir, 'artifact-secret-scan-input.json');
   const outputArtifactSafetyPath = path.join(outputDir, 'artifact-secret-scan-output.json');
   const postApplyArtifactSafetyPath = path.join(outputDir, 'artifact-secret-scan-post-apply.json');
+  const finalArtifactSafetyPath = path.join(outputDir, 'artifact-secret-scan-final.json');
   const summaryPath = path.join(outputDir, 'summary.json');
   const operatorReportPath = path.join(outputDir, 'operator-report.txt');
 
@@ -493,14 +534,17 @@ async function main() {
           phaseZeroSixApply: null,
           artifactSecretScan: null,
           operatorReport: operatorReportPath,
+          finalArtifactSecretScan: finalArtifactSafetyPath,
           summary: summaryPath,
         },
         results: [],
       };
-      const summaryWithReport = await writeSummaryAndOperatorReport({
+      const summaryWithReport = await writeFinalSummaryWithArtifactScan({
         summary,
         summaryPath,
         operatorReportPath,
+        finalArtifactSafetyPath,
+        commands,
       });
       console.log(JSON.stringify(summaryWithReport, null, 2));
       process.exitCode = 1;
@@ -557,6 +601,7 @@ async function main() {
         phaseZeroSixApply: null,
         artifactSecretScan: artifactSafetyPath,
         operatorReport: operatorReportPath,
+        finalArtifactSecretScan: finalArtifactSafetyPath,
         summary: preScanSummaryPath,
       },
       results: commands.map(commandSummary),
@@ -581,10 +626,12 @@ async function main() {
         : 'Environment readiness failed and artifact secret scan found unsafe evidence files.',
       results: commands.map(commandSummary),
     };
-    const finalSummaryWithReport = await writeSummaryAndOperatorReport({
+    const finalSummaryWithReport = await writeFinalSummaryWithArtifactScan({
       summary: finalSummary,
       summaryPath,
       operatorReportPath,
+      finalArtifactSafetyPath,
+      commands,
     });
     console.log(JSON.stringify(finalSummaryWithReport, null, 2));
     process.exitCode = 1;
@@ -733,15 +780,18 @@ async function main() {
       outputArtifactSecretScan: reuseExistingArtifacts ? outputArtifactSafetyPath : null,
       postApplyArtifactSecretScan: postApplyScanResult ? postApplyArtifactSafetyPath : null,
       operatorReport: operatorReportPath,
+      finalArtifactSecretScan: finalArtifactSafetyPath,
       summary: summaryPath,
     },
     results: commands.map(commandSummary),
   };
 
-  const summaryWithReport = await writeSummaryAndOperatorReport({
+  const summaryWithReport = await writeFinalSummaryWithArtifactScan({
     summary,
     summaryPath,
     operatorReportPath,
+    finalArtifactSafetyPath,
+    commands,
   });
   console.log(JSON.stringify(summaryWithReport, null, 2));
 

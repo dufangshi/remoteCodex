@@ -389,6 +389,7 @@ The bundle runner writes:
 - `phase-zero-six-verification.json`
 - `phase-zero-six-apply.json` when `--apply-ready` is requested and allowed
 - `artifact-secret-scan.json`
+- `artifact-secret-scan-final.json`
 - `operator-report.txt`
 - `summary.json`
 
@@ -439,6 +440,11 @@ edited.
 When apply runs, the bundle writes `phase-zero-six-apply.json` and then runs a
 post-apply artifact scan over the output directory. The result is recorded as
 `postApplyScanPassed` and `postApplyArtifactSecretScan` in `summary.json`.
+After `summary.json` and `operator-report.txt` are written, the bundle performs
+a final artifact scan over the output directory and records
+`finalArtifactScanPassed` plus `finalArtifactSecretScan`. This final scan keeps
+the human-readable handoff report inside the same secret-safety gate as the
+raw JSON evidence.
 
 After reviewing the JSON files for accidental secret exposure and confirming
 the aggregate verifier lists the expected items under `readyToCheck`, rerun the

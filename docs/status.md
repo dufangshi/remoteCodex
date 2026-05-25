@@ -91,7 +91,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   only then runs a separate checklist apply command; if the artifact scan
   fails, no checklist file is edited. When apply runs, it performs a post-apply
   scan over the generated apply artifacts and records the result in
-  `summary.postApplyScanPassed`. The bundle also supports
+  `summary.postApplyScanPassed`. After writing final `summary.json` and
+  `operator-report.txt`, it also performs a final artifact scan and records
+  `summary.finalArtifactScanPassed`. The bundle also supports
   `--from-output-dir <dir>` to reuse already reviewed evidence artifacts for
   verification/apply without rerunning live AWS, Kubernetes, control-plane,
   router, or provider smoke commands; reuse mode scans both the input evidence

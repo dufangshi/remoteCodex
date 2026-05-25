@@ -703,6 +703,10 @@ describe('phase zero-six evidence tooling', () => {
           envTemplate: '.temp/phase-zero-six-evidence/latest-local-template-check/phase-zero-six.env.sh',
           absoluteEnvReadiness: path.join(safeDir, '.temp/phase-zero-six-evidence/latest/env-readiness.json'),
           testArtifact: path.join(safeDir, 'artifact-secret-scan.json'),
+          inputArtifactSecretScan: path.join(safeDir, 'artifact-secret-scan-input.json'),
+          outputArtifactSecretScan: path.join(safeDir, 'artifact-secret-scan-output.json'),
+          postApplyArtifactSecretScan: path.join(safeDir, 'artifact-secret-scan-post-apply.json'),
+          finalArtifactSecretScan: path.join(safeDir, 'artifact-secret-scan-final.json'),
         },
         scannedFiles: [
           path.join(safeDir, 'aws-staging-preflight-verification.json'),
@@ -1019,8 +1023,11 @@ describe('phase zero-six evidence tooling', () => {
     expect(parsed.artifacts.envTemplate).toBe(path.join(dir, 'phase-zero-six.env.sh'));
     expect(parsed.artifacts.artifactSecretScan).toBe(path.join(dir, 'artifact-secret-scan.json'));
     expect(parsed.artifacts.operatorReport).toBe(path.join(dir, 'operator-report.txt'));
+    expect(parsed.artifacts.finalArtifactSecretScan).toBe(path.join(dir, 'artifact-secret-scan-final.json'));
+    expect(parsed.finalArtifactScanPassed).toBe(true);
     expect(parsed.artifacts.awsPreflight).toBeNull();
     expect(files.sort()).toEqual([
+      'artifact-secret-scan-final.json',
       'artifact-secret-scan.json',
       'env-readiness.json',
       'operator-report.txt',
@@ -1030,6 +1037,7 @@ describe('phase zero-six evidence tooling', () => {
     expect(parsed.results.map((entry: { name: string }) => entry.name)).toEqual([
       'verify_phase_zero_six_env_ready',
       'verify_phase_zero_six_artifacts_safe',
+      'verify_phase_zero_six_final_artifacts_safe',
     ]);
     expect(template).toContain('Phase 0-6 staging evidence environment template');
     expect(template).not.toContain('secret-product-jwt-value');
@@ -1138,8 +1146,11 @@ describe('phase zero-six evidence tooling', () => {
     expect(parsed.artifacts.phaseZeroSixApply).toBe(path.join(dir, 'phase-zero-six-apply.json'));
     expect(parsed.artifacts.postApplyArtifactSecretScan).toBe(path.join(dir, 'artifact-secret-scan-post-apply.json'));
     expect(parsed.artifacts.operatorReport).toBe(path.join(dir, 'operator-report.txt'));
+    expect(parsed.artifacts.finalArtifactSecretScan).toBe(path.join(dir, 'artifact-secret-scan-final.json'));
+    expect(parsed.finalArtifactScanPassed).toBe(true);
     expect(files).toContain('phase-zero-six-apply.json');
     expect(files).toContain('artifact-secret-scan-post-apply.json');
+    expect(files).toContain('artifact-secret-scan-final.json');
     expect(files).toContain('operator-report.txt');
     expect(checklist).toContain('- [x] S3.04 Finalize AWS staging configuration.');
     expect(checklist).toContain('- [x] S3.05 Add least-privilege Kubernetes credentials.');
@@ -1206,6 +1217,7 @@ describe('phase zero-six evidence tooling', () => {
       'verify_phase_zero_six_output_artifacts_safe',
       'verify_phase_zero_six_evidence_apply',
       'verify_phase_zero_six_post_apply_artifacts_safe',
+      'verify_phase_zero_six_final_artifacts_safe',
     ]);
     expect(parsed.envReadiness.readyGroups).toEqual(['aws-preflight']);
     expect(parsed.artifacts.awsPreflight).toBe(path.join(evidenceDir, 'aws-staging-preflight.json'));
@@ -1255,7 +1267,13 @@ describe('phase zero-six evidence tooling', () => {
       path.join(evidenceDir, 'aws-staging-preflight.json'),
       path.join(evidenceDir, 'staging-phase-one-smoke.json'),
     ]);
-    expect(parsed.results).toEqual([]);
+    expect(parsed.results).toEqual([
+      expect.objectContaining({
+        name: 'verify_phase_zero_six_final_artifacts_safe',
+        ok: true,
+      }),
+    ]);
+    expect(parsed.finalArtifactScanPassed).toBe(true);
     expect(parsed.envReadiness.notReadyGroups).toEqual(['aws-preflight']);
     expect(parsed.envReadiness.itemReadiness).toEqual([]);
     expect(parsed.nextSteps.rerunBundle).toContain(`--from-output-dir ${evidenceDir}`);
