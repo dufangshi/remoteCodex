@@ -92,6 +92,8 @@ Each task should be checked only when all three statements are true:
 - [x] Document architecture decisions for AWS runtime, sandbox shape, and local
   development mode.
 - [x] Add this Remote Codex side task checklist.
+- [x] Add the Remote Codex side implementation plan with phase-by-phase
+  execution checklists.
 - [ ] Add a short release-readiness document before the first staging deploy.
 
 Verification:

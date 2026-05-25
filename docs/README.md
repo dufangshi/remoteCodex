@@ -11,8 +11,9 @@ Recommended reading order:
 4. [Control Plane To Sandbox Worker](./control-plane-sandbox-worker.md)
 5. [Control Plane Auth](./control-plane-auth.md)
 6. [Control Plane Session To Worker Contract](./control-plane-session-worker-contract.md)
-7. [Remote Codex Side Task Checklist](./remote-codex-side-task-checklist.md)
-8. [Remote Codex Implementation Checklist](./remote-codex-implementation-checklist.md)
+7. [Remote Codex Side Implementation Plan](./remote-codex-side-implementation-plan.md)
+8. [Remote Codex Side Task Checklist](./remote-codex-side-task-checklist.md)
+9. [Remote Codex Implementation Checklist](./remote-codex-implementation-checklist.md)
 
 The control plane owns users, projects, sandbox lifecycle, routing, secrets,
 policy, and durable indexes. The worker runs inside each sandbox and owns the
