@@ -1006,11 +1006,13 @@ describe('phase zero-six evidence tooling', () => {
           item: 'S3.04',
           groupId: 'aws-preflight',
           envReady: false,
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
         }),
         expect.objectContaining({
           item: 'G6.13',
           groupId: 'opencode-provider-smoke',
           envReady: false,
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
         }),
       ]),
     );
@@ -1025,6 +1027,18 @@ describe('phase zero-six evidence tooling', () => {
     expect(parsed.artifacts.artifactSecretScan).toBe(path.join(dir, 'artifact-secret-scan.json'));
     expect(parsed.artifacts.operatorReport).toBe(path.join(dir, 'operator-report.txt'));
     expect(parsed.artifacts.releaseReview).toBe(path.join(dir, 'release-review.json'));
+    expect(releaseReview.envReadiness.itemReadiness).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          item: 'S3.04',
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
+        }),
+        expect.objectContaining({
+          item: 'G6.13',
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+      ]),
+    );
     expect(parsed.artifacts.finalArtifactSecretScan).toBe(path.join(dir, 'artifact-secret-scan-final.json'));
     expect(parsed.finalArtifactScanPassed).toBe(true);
     expect(parsed.artifacts.awsPreflight).toBeNull();

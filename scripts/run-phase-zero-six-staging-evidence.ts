@@ -431,6 +431,9 @@ function buildReleaseReview(summary: Record<string, unknown>) {
           groupId: typeof item.groupId === 'string' ? item.groupId : null,
           envReady: item.envReady === true,
           missingEnv: asArray(item.missingEnv),
+          nextEvidenceCommand: typeof item.nextEvidenceCommand === 'string'
+            ? item.nextEvidenceCommand
+            : null,
         };
       }),
     },

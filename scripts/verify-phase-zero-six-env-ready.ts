@@ -474,7 +474,9 @@ function buildItemReadiness(input: {
       missingRecommendedEnv: group.missingRecommendedEnv,
       blockedUntil: group.ready
         ? 'Environment inputs are present; run the live evidence bundle and review verifier output before checking this item.'
-        : 'Set the missing environment inputs, then rerun pnpm verify:phase-zero-six-env-ready.',
+        : `Set the missing environment inputs, then rerun ${
+            input.skippedStagingSmoke ? 'pnpm phase-zero-six:env:aws' : 'pnpm phase-zero-six:env'
+          }.`,
       nextEvidenceCommand: groupEvidenceCommand(group.id, input.skippedStagingSmoke),
     })),
   );
