@@ -79,9 +79,12 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   it checks non-secret env readiness, collects AWS preflight evidence, runs the
   phase-one staging smoke, runs all evidence verifiers, scans generated JSON
   artifacts for obvious secret-like leakage, and writes a summary JSON for the
-  staging release record. It now stops after env readiness failure by default;
-  `--force` is available only for diagnostic collection. The recommended
-  `.temp` output path is ignored by Git.
+  staging release record. Its bundle-level `--apply-ready` path now runs
+  read-only Phase 0-6 verification first, scans generated artifacts second, and
+  only then runs a separate checklist apply command; if the artifact scan
+  fails, no checklist file is edited. It stops after env readiness failure by
+  default; `--force` is available only for diagnostic collection. The
+  recommended `.temp` output path is ignored by Git.
 - Phase 0-6 staging env readiness verifier exists as
   `pnpm verify:phase-zero-six-env-ready`; it reports only environment variable
   names by evidence group and helps operators see which AWS, runtime, router,
@@ -90,7 +93,8 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   and recommended env. It is not checklist-completion evidence by itself.
 - Phase 0-6 evidence tooling has CLI-level tests via
   `pnpm test:phase-zero-six-evidence`, covering guarded checklist application
-  and obvious artifact secret leakage detection.
+  and obvious artifact secret leakage detection, including bundle-level refusal
+  to apply checklist changes after an artifact scan failure.
 - Phase 0-6 evidence tooling CI workflow exists at
   `.github/workflows/phase-zero-six-evidence.yml`; it typechecks the evidence
   scripts, runs `pnpm test:phase-zero-six-evidence`, and audits the current

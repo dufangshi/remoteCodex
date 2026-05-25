@@ -308,6 +308,7 @@ The bundle runner writes:
 - `staging-phase-one-smoke.json`
 - `staging-phase-one-verification.json`
 - `phase-zero-six-verification.json`
+- `phase-zero-six-apply.json` when `--apply-ready` is requested and allowed
 - `artifact-secret-scan.json`
 - `summary.json`
 
@@ -321,9 +322,17 @@ If a provider command exits non-zero, the staging smoke still emits a JSON
 report with that provider step marked `ok: false`; the verifier then leaves the
 corresponding G6 box unchecked with a concrete failure record.
 
+Checklist apply inside the bundle is intentionally ordered after read-only
+verification and artifact scanning. Even when `--apply-ready` is present, the
+bundle first writes `phase-zero-six-verification.json`, then scans the artifact
+directory with `verify-phase-zero-six-artifacts-safe`, and only then runs a
+second `verify-phase-zero-six-evidence --apply-ready` command. If the artifact
+scan fails, `summary.json` records `applySkippedReason` and no checklist file is
+edited.
+
 After reviewing the JSON files for accidental secret exposure and confirming
-the aggregate verifier lists the expected items under `readyToCheck`, rerun
-with the guarded checklist update:
+the aggregate verifier lists the expected items under `readyToCheck`, rerun the
+bundle with the guarded checklist update:
 
 ```bash
 pnpm collect:phase-zero-six-evidence -- \

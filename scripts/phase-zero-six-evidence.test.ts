@@ -641,6 +641,57 @@ describe('phase zero-six evidence tooling', () => {
     expect(files).toContain('summary.json');
   });
 
+  it('does not apply checklist changes when bundle artifact scan fails', async () => {
+    const dir = await tempDir();
+    const checklistPath = path.join(dir, 'checklist.md');
+    await writeFile(checklistPath, minimalChecklist());
+
+    const result = await runScriptWithEnv(
+      'scripts/run-phase-zero-six-staging-evidence.ts',
+      [
+        '--output-dir',
+        dir,
+        '--skip-staging-smoke',
+        '--force',
+        '--apply-ready',
+        '--checklist',
+        checklistPath,
+      ],
+      {
+        AWS_STAGING_PREFLIGHT_SKIP_COMMANDS: '1',
+        AWS_STAGING_REVIEWED_BY: 'operator@example.test',
+        AWS_STAGING_ACCOUNT_ID: '123456789012',
+        AWS_STAGING_REGION: 'us-east-1',
+        AWS_STAGING_EKS_CLUSTER_NAME: 'remote-codex-staging',
+        AWS_STAGING_K8S_NAMESPACE: 'remote-codex-sandboxes',
+        AWS_STAGING_FARGATE_PROFILE_NAME: 'sandbox-workers',
+        AWS_STAGING_K8S_SERVICE_ACCOUNT: 'remote-codex-sandbox-manager',
+        AWS_STAGING_WORKER_IMAGE_REPOSITORY: 'example/remote-codex-worker',
+        AWS_STAGING_WORKER_IMAGE_TAG: 'sha-abc123',
+        AWS_STAGING_LOG_GROUP_NAMES: '/aws/eks/remote-codex-staging',
+        AWS_STAGING_CONFIG_REVIEWED: 'true',
+        AWS_STAGING_CREDENTIAL_REVIEW_PASSED: 'true',
+        AWS_STAGING_K8S_AUTH_MODE: 'aws-iam',
+        AWS_STAGING_K8S_ROLE_ARN: 'arn:aws:iam::123456789012:role/remote-codex-sandbox-manager',
+        AWS_STAGING_VPC_ID: 'vpc-123',
+        AWS_STAGING_SUBNET_IDS: 'subnet-1',
+        AWS_STAGING_SECURITY_GROUP_IDS: 'sg-1',
+        AWS_STAGING_ENVIRONMENT: 'Bearer eyJaaaaaaaaaaaaaaaa.eyJbbbbbbbbbbbbbbbb.cccccccccccccccccc',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+    const checklist = await readFile(checklistPath, 'utf8');
+    const files = await readdir(dir);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.applySkippedReason).toBe('Artifact secret scan failed; checklist apply was not run.');
+    expect(parsed.artifacts.phaseZeroSixApply).toBeNull();
+    expect(files).not.toContain('phase-zero-six-apply.json');
+    expect(checklist).toContain('- [ ] S3.04 Finalize AWS staging configuration.');
+    expect(checklist).toContain('- [ ] S3.05 Add least-privilege Kubernetes credentials.');
+  });
+
   it('records direct worker denial when direct worker returns non-json 403', async () => {
     await withFakeStagingServers(async ({ controlPlaneBaseUrl, directWorkerBaseUrl }) => {
       const result = await runScriptWithEnv(

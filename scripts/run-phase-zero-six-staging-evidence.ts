@@ -87,12 +87,27 @@ function commandOk(result: CommandResult) {
   return result.exitCode === 0 && parsed?.ok !== false;
 }
 
+function phaseVerificationAllowsApply(result: CommandResult) {
+  const parsed = parseJsonOutput(result) as {
+    readyToCheck?: unknown[];
+    checkedButContradicted?: unknown[];
+  } | null;
+  return Boolean(
+    parsed &&
+    Array.isArray(parsed.readyToCheck) &&
+    parsed.readyToCheck.length > 0 &&
+    Array.isArray(parsed.checkedButContradicted) &&
+    parsed.checkedButContradicted.length === 0,
+  );
+}
+
 async function main() {
   const outputDir =
     argValue('--output-dir') ??
     path.join('artifacts', 'phase-zero-six-evidence', timestampForPath());
   const applyReady = hasFlag('--apply-ready');
   const force = hasFlag('--force');
+  const checklistPath = argValue('--checklist');
   await mkdir(outputDir, { recursive: true });
 
   const envReadinessPath = path.join(outputDir, 'env-readiness.json');
@@ -101,6 +116,7 @@ async function main() {
   const awsVerificationPath = path.join(outputDir, 'aws-staging-preflight-verification.json');
   const stagingVerificationPath = path.join(outputDir, 'staging-phase-one-verification.json');
   const phaseVerificationPath = path.join(outputDir, 'phase-zero-six-verification.json');
+  const phaseApplyPath = path.join(outputDir, 'phase-zero-six-apply.json');
   const artifactSafetyPath = path.join(outputDir, 'artifact-secret-scan.json');
   const summaryPath = path.join(outputDir, 'summary.json');
 
@@ -119,6 +135,7 @@ async function main() {
       outputDir,
       applyReady,
       force,
+      checklistPath,
       skippedStagingSmoke: hasFlag('--skip-staging-smoke'),
       stoppedAfterEnvReadiness: true,
       reason: 'Environment readiness failed. Fill missing env names or rerun with --force for diagnostic collection.',
@@ -129,6 +146,7 @@ async function main() {
         awsVerification: null,
         stagingVerification: null,
         phaseZeroSixVerification: null,
+        phaseZeroSixApply: null,
         artifactSecretScan: null,
         summary: summaryPath,
       },
@@ -176,10 +194,10 @@ async function main() {
     'exec',
     'tsx',
     'scripts/verify-phase-zero-six-evidence.ts',
+    ...(checklistPath ? ['--checklist', checklistPath] : []),
     '--aws-preflight',
     awsPath,
     ...(hasFlag('--skip-staging-smoke') ? [] : ['--staging-smoke', stagingPath]),
-    ...(applyReady ? ['--apply-ready'] : []),
   ];
   commands.push(await runCommand({
     name: 'verify_phase_zero_six_evidence',
@@ -192,14 +210,39 @@ async function main() {
     outputPath: artifactSafetyPath,
   }));
 
+  let phaseApplyResult: CommandResult | null = null;
+  let applySkippedReason: string | null = null;
+  const artifactScanPassed = commandOk(commands[commands.length - 1] as CommandResult);
+  const phaseVerification = commands.find((result) => result.name === 'verify_phase_zero_six_evidence');
+  if (applyReady) {
+    if (!artifactScanPassed) {
+      applySkippedReason = 'Artifact secret scan failed; checklist apply was not run.';
+    } else if (!phaseVerification || !phaseVerificationAllowsApply(phaseVerification)) {
+      applySkippedReason = 'Read-only Phase 0-6 verification found no ready checklist boxes or found contradicted checked boxes.';
+    } else {
+      phaseApplyResult = await runCommand({
+        name: 'verify_phase_zero_six_evidence_apply',
+        command: [
+          ...phaseCommand,
+          '--apply-ready',
+        ],
+        outputPath: phaseApplyPath,
+      });
+      commands.push(phaseApplyResult);
+    }
+  }
+
+  const applyCompletedOrNotRequested = !applyReady || Boolean(phaseApplyResult);
   const summary = {
-    ok: commands.every(commandOk),
+    ok: commands.every(commandOk) && applyCompletedOrNotRequested,
     generatedAt: new Date().toISOString(),
     outputDir,
     applyReady,
     force,
+    checklistPath,
     skippedStagingSmoke: hasFlag('--skip-staging-smoke'),
     stoppedAfterEnvReadiness: false,
+    applySkippedReason,
     artifacts: {
       envReadiness: envReadinessPath,
       awsPreflight: awsPath,
@@ -207,6 +250,7 @@ async function main() {
       awsVerification: awsVerificationPath,
       stagingVerification: hasFlag('--skip-staging-smoke') ? null : stagingVerificationPath,
       phaseZeroSixVerification: phaseVerificationPath,
+      phaseZeroSixApply: phaseApplyResult ? phaseApplyPath : null,
       artifactSecretScan: artifactSafetyPath,
       summary: summaryPath,
     },
