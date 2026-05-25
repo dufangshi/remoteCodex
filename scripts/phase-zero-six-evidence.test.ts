@@ -1039,6 +1039,20 @@ describe('phase zero-six evidence tooling', () => {
         }),
       ]),
     );
+    expect(releaseReview.envReadiness.blockingGroups).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'aws-preflight',
+          items: ['S3.04', 'S3.05'],
+          nextEvidenceCommands: ['pnpm phase-zero-six:collect:aws'],
+        }),
+        expect.objectContaining({
+          id: 'opencode-provider-smoke',
+          items: ['G6.13'],
+          nextEvidenceCommands: ['pnpm phase-zero-six:collect'],
+        }),
+      ]),
+    );
     expect(parsed.artifacts.finalArtifactSecretScan).toBe(path.join(dir, 'artifact-secret-scan-final.json'));
     expect(parsed.finalArtifactScanPassed).toBe(true);
     expect(parsed.artifacts.awsPreflight).toBeNull();

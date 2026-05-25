@@ -388,6 +388,7 @@ function buildReleaseReview(summary: Record<string, unknown>) {
   const readiness = asRecord(summary.checklistReadiness);
   const artifacts = asRecord(summary.artifacts);
   const envReadiness = asRecord(summary.envReadiness);
+  const groups = asArray(envReadiness.groups).map((entry) => asRecord(entry));
   const stillMissing = asArray(readiness.stillMissing).map((entry) => {
     const item = asRecord(entry);
     return {
@@ -404,6 +405,35 @@ function buildReleaseReview(summary: Record<string, unknown>) {
       source: typeof item.source === 'string' ? item.source : null,
     };
   });
+  const itemReadiness = asArray(envReadiness.itemReadiness).map((entry) => {
+    const item = asRecord(entry);
+    return {
+      item: typeof item.item === 'string' ? item.item : null,
+      groupId: typeof item.groupId === 'string' ? item.groupId : null,
+      envReady: item.envReady === true,
+      missingEnv: asArray(item.missingEnv),
+      nextEvidenceCommand: typeof item.nextEvidenceCommand === 'string'
+        ? item.nextEvidenceCommand
+        : null,
+    };
+  });
+  const blockingGroups = groups
+    .filter((group) => group.ready !== true)
+    .map((group) => {
+      const id = typeof group.id === 'string' ? group.id : null;
+      const groupItems = itemReadiness.filter((item) => item.groupId === id);
+      return {
+        id,
+        items: asArray(group.items),
+        missingEnv: asArray(group.missingEnv),
+        missingRecommendedEnv: asArray(group.missingRecommendedEnv),
+        nextEvidenceCommands: Array.from(new Set(
+          groupItems
+            .map((item) => item.nextEvidenceCommand)
+            .filter((command): command is string => typeof command === 'string'),
+        )),
+      };
+    });
 
   return {
     generatedAt: summary.generatedAt ?? null,
@@ -424,18 +454,8 @@ function buildReleaseReview(summary: Record<string, unknown>) {
     envReadiness: {
       readyGroups: asArray(envReadiness.readyGroups),
       notReadyGroups: asArray(envReadiness.notReadyGroups),
-      itemReadiness: asArray(envReadiness.itemReadiness).map((entry) => {
-        const item = asRecord(entry);
-        return {
-          item: typeof item.item === 'string' ? item.item : null,
-          groupId: typeof item.groupId === 'string' ? item.groupId : null,
-          envReady: item.envReady === true,
-          missingEnv: asArray(item.missingEnv),
-          nextEvidenceCommand: typeof item.nextEvidenceCommand === 'string'
-            ? item.nextEvidenceCommand
-            : null,
-        };
-      }),
+      blockingGroups,
+      itemReadiness,
     },
     artifacts,
   };
