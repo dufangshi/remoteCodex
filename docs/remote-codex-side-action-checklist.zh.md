@@ -854,9 +854,12 @@ git diff --check
 Phase 0-6 staging evidence 使用：
 
 ```bash
-pnpm verify:phase-zero-six-env-ready
-pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id>
-pnpm verify:phase-zero-six-evidence
+pnpm phase-zero-six:env
+pnpm phase-zero-six:template
+source ./.temp/phase-zero-six-evidence/phase-zero-six.env.sh
+pnpm phase-zero-six:collect
+pnpm phase-zero-six:audit
+pnpm phase-zero-six:apply
 pnpm test:phase-zero-six-evidence
 ```
 

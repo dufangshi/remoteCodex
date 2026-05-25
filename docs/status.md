@@ -124,6 +124,14 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   bundle writes a non-authoritative `operator-report.txt` plus
   `release-review.json` for quick staging handoff and release review. It is not
   checklist-completion evidence by itself.
+- Phase 0-6 operator convenience scripts now wrap the evidence flow:
+  `pnpm phase-zero-six:env`, `pnpm phase-zero-six:template`,
+  `pnpm phase-zero-six:collect`, `pnpm phase-zero-six:collect:aws`, and
+  `pnpm phase-zero-six:audit`, with guarded apply commands
+  `pnpm phase-zero-six:apply` and `pnpm phase-zero-six:apply:aws`. These scripts
+  do not relax evidence rules; they standardize the commands operators use to
+  collect and apply the real AWS/staging/provider evidence required by the
+  remaining unchecked S3/R5/G6 boxes.
 - Phase 0-6 evidence tooling has CLI-level tests via
   `pnpm test:phase-zero-six-evidence`, covering guarded checklist application
   and obvious artifact secret leakage detection in JSON and shell/env evidence

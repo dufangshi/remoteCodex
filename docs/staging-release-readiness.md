@@ -140,14 +140,13 @@ Before collecting the full Phase 0 through Phase 6 bundle, operators can run a
 non-secret environment readiness check:
 
 ```bash
-pnpm verify:phase-zero-six-env-ready
+pnpm phase-zero-six:env
 ```
 
 To generate a private shell template for the missing staging inputs, use:
 
 ```bash
-pnpm verify:phase-zero-six-env-ready -- \
-  --write-env-template ./.temp/phase-zero-six-evidence/phase-zero-six.env.sh
+pnpm phase-zero-six:template
 ```
 
 The generated template contains only placeholder values and non-secret
@@ -156,15 +155,13 @@ run:
 
 ```bash
 source ./.temp/phase-zero-six-evidence/phase-zero-six.env.sh
-pnpm verify:phase-zero-six-env-ready
+pnpm phase-zero-six:env
 ```
 
 For AWS-only S3.04/S3.05 preflight work, generate a smaller template:
 
 ```bash
-pnpm verify:phase-zero-six-env-ready -- \
-  --skip-staging-smoke \
-  --write-env-template ./.temp/phase-zero-six-evidence/aws-preflight.env.sh
+pnpm phase-zero-six:template:aws
 ```
 
 This command reports readiness by evidence group:
@@ -346,7 +343,7 @@ runner to collect and verify the Phase 0 through Phase 6 evidence in one
 directory:
 
 ```bash
-pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id>
+pnpm phase-zero-six:collect
 ```
 
 The bundle runner checks `env-readiness.json` first. If required environment
@@ -360,10 +357,10 @@ template into the output directory:
 - `phase-zero-six.env.sh` for the full AWS/runtime/router/provider smoke.
 - `aws-preflight.env.sh` when `--skip-staging-smoke` is used.
 
-Fill that file in outside Git, `source` it, rerun
-`pnpm verify:phase-zero-six-env-ready`, and then rerun the bundle. The template
-contains placeholders and non-secret examples only; it is not completion
-evidence. Even in this early-stop path, the bundle writes
+Fill that file in outside Git, `source` it, rerun `pnpm phase-zero-six:env`,
+and then rerun the bundle. The template contains placeholders and non-secret
+examples only; it is not completion evidence. Even in this early-stop path, the
+bundle writes
 `artifact-secret-scan.json` and scans the generated readiness JSON, summary,
 and shell template before returning.
 The resulting `summary.json` includes `envReadiness.readyGroups`,
@@ -456,9 +453,7 @@ the aggregate verifier lists the expected items under `readyToCheck`, rerun the
 bundle with the guarded checklist update:
 
 ```bash
-pnpm collect:phase-zero-six-evidence -- \
-  --output-dir ./.temp/phase-zero-six-evidence/<run-id>-apply \
-  --apply-ready
+pnpm phase-zero-six:apply
 ```
 
 If the live evidence has already been collected and reviewed, do not rerun the
@@ -484,6 +479,19 @@ For AWS-only preflight work, such as checking only S3.04/S3.05 before the
 runtime smoke is available, pass `--skip-staging-smoke`. In that mode the
 bundle also passes `--skip-staging-smoke` to the env readiness verifier, so only
 AWS preflight env is required before collection starts.
+
+The fixed AWS-only convenience command is:
+
+```bash
+pnpm phase-zero-six:collect:aws
+```
+
+After reviewing AWS-only evidence in `latest-aws`, apply only ready AWS
+preflight boxes with:
+
+```bash
+pnpm phase-zero-six:apply:aws
+```
 
 The recommended `.temp/phase-zero-six-evidence/` output location and legacy
 `artifacts/phase-zero-six-evidence/` location are ignored by Git. If an
