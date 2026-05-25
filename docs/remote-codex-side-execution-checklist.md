@@ -159,17 +159,17 @@ credential.
   - Verification: integration smoke or documented staging smoke covers success,
     expired token, wrong issuer, and wrong audience.
 
-- [ ] Enforce disabled-user behavior for route-token issuance.
+- [x] Enforce disabled-user behavior for route-token issuance.
   - Acceptance: disabled users receive a stable `403` response and no route
     token.
   - Verification: control-plane tests cover active and disabled users.
 
-- [ ] Enforce disabled-user behavior for sandbox start/restart.
+- [x] Enforce disabled-user behavior for sandbox start/restart.
   - Acceptance: disabled users cannot start or restart a sandbox; already
     running sandboxes are handled according to documented policy.
   - Verification: lifecycle API tests cover disabled-account denial.
 
-- [ ] Enforce disabled-user behavior for usage import and billing visibility.
+- [x] Enforce disabled-user behavior for usage import and billing visibility.
   - Acceptance: usage import never reactivates disabled users and billing
     visibility follows the documented account policy.
   - Verification: usage import tests cover disabled-user records.
@@ -226,9 +226,12 @@ credential.
 
 ### Evidence
 
-- Files:
-- Verification:
-- Residual risk:
+- Files: `apps/control-plane-api/src/app.ts`,
+  `apps/control-plane-api/src/app.test.ts`
+- Verification: `pnpm --filter @remote-codex/control-plane-api typecheck`;
+  `pnpm --filter @remote-codex/control-plane-api test`
+- Residual risk: production auth-provider and frontend disabled-account UI
+  tasks remain unchecked.
 
 ## Phase 2: Projects, Workspaces, Sessions, And Worker Session Contract
 

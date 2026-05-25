@@ -23,8 +23,8 @@ requires staging evidence.
 
 - [ ] Production auth-provider smoke passes for valid, expired, wrong-issuer,
   and wrong-audience tokens.
-- [ ] Disabled users cannot issue route tokens.
-- [ ] Disabled users cannot start or restart sandboxes.
+- [x] Disabled users cannot issue route tokens.
+- [x] Disabled users cannot start or restart sandboxes.
 - [ ] Product JWTs are stripped before router-to-worker traffic in staging.
 - [ ] Admin user management has non-admin denial tests.
 
@@ -133,4 +133,3 @@ Production release is blocked until every item below is checked:
 - [Staging Release Readiness](./staging-release-readiness.md)
 - [Remote Codex Side Execution Checklist](./remote-codex-side-execution-checklist.md)
 - [Remote Codex Branch Status](./status.md)
-

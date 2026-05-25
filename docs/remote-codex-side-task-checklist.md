@@ -126,7 +126,7 @@ Verification:
 - [x] Add admin quota-profile update.
 - [x] Add audit events for admin user updates.
 - [ ] Add provider-specific auth integration or smoke tests.
-- [ ] Add explicit user deactivation policy.
+- [x] Add explicit user deactivation policy.
 - [ ] Add user data export policy.
 - [ ] Add email verification state only if the chosen auth provider does not
   own it.

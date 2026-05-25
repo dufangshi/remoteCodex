@@ -157,9 +157,9 @@ credential.
 - [x] Add admin quota-profile update API.
 - [x] Add audit events for admin user updates.
 - [ ] Add integration smoke test for the selected production auth provider.
-- [ ] Define and implement disabled-user behavior for route-token issuance.
-- [ ] Define and implement disabled-user behavior for sandbox start/restart.
-- [ ] Define and implement disabled-user behavior for usage import.
+- [x] Define and implement disabled-user behavior for route-token issuance.
+- [x] Define and implement disabled-user behavior for sandbox start/restart.
+- [x] Define and implement disabled-user behavior for usage import.
 - [ ] Add user data export API or explicitly document deferral.
 - [ ] Add user deletion/anonymization API or explicitly document deferral.
 

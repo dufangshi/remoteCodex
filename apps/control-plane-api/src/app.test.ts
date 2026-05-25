@@ -1605,8 +1605,135 @@ describe('control plane api', () => {
       headers: userAuth,
       payload: {},
     });
-    expect(suspendedToken.statusCode).toBe(401);
-    expect(suspendedToken.json().code).toBe('unauthorized');
+    expect(suspendedToken.statusCode).toBe(403);
+    expect(suspendedToken.json().code).toBe('account_inactive');
+  });
+
+  it('refuses sandbox start and restart for inactive accounts', async () => {
+    const manager = new RecordingSandboxManager();
+    const app = buildControlPlaneApp({
+      env: testEnv('inactive-sandbox-lifecycle'),
+      sandboxManager: manager,
+    });
+    apps.push(app);
+
+    const userAuth = { authorization: 'Bearer dev:inactive-lifecycle-user' };
+    const adminAuth = { authorization: 'Bearer dev:admin' };
+    await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: adminAuth,
+      payload: { email: 'admin-inactive-lifecycle@example.com' },
+    });
+    const bootstrap = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: userAuth,
+      payload: { email: 'inactive-lifecycle@example.com' },
+    });
+    expect(bootstrap.statusCode).toBe(200);
+    const user = bootstrap.json().user;
+
+    const suspended = await app.inject({
+      method: 'PATCH',
+      url: `/api/admin/users/${user.id}`,
+      headers: adminAuth,
+      payload: {
+        status: 'suspended',
+      },
+    });
+    expect(suspended.statusCode).toBe(200);
+
+    const start = await app.inject({
+      method: 'POST',
+      url: '/api/sandbox/start',
+      headers: userAuth,
+    });
+    expect(start.statusCode).toBe(403);
+    expect(start.json().code).toBe('account_inactive');
+
+    const restart = await app.inject({
+      method: 'POST',
+      url: '/api/sandbox/restart',
+      headers: userAuth,
+    });
+    expect(restart.statusCode).toBe(403);
+    expect(restart.json().code).toBe('account_inactive');
+    expect(manager.starts).toHaveLength(0);
+  });
+
+  it('refuses usage import for inactive accounts without recording usage', async () => {
+    const app = buildControlPlaneApp({ env: testEnv('inactive-usage-import') });
+    apps.push(app);
+
+    const userAuth = { authorization: 'Bearer dev:inactive-usage-user' };
+    const adminAuth = { authorization: 'Bearer dev:admin' };
+    await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: adminAuth,
+      payload: { email: 'admin-inactive-usage@example.com' },
+    });
+    const bootstrap = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: userAuth,
+      payload: { email: 'inactive-usage@example.com' },
+    });
+    expect(bootstrap.statusCode).toBe(200);
+    const { user, sandbox, gatewayKey } = bootstrap.json();
+
+    const suspended = await app.inject({
+      method: 'PATCH',
+      url: `/api/admin/users/${user.id}`,
+      headers: adminAuth,
+      payload: {
+        status: 'suspended',
+      },
+    });
+    expect(suspended.statusCode).toBe(200);
+
+    const imported = await app.inject({
+      method: 'POST',
+      url: '/api/admin/usage/import',
+      headers: adminAuth,
+      payload: {
+        events: [
+          {
+            userId: user.id,
+            sandboxId: sandbox.id,
+            gatewayKeyId: gatewayKey.id,
+            provider: 'sub2api',
+            model: 'gpt-5.1-codex',
+            inputTokens: 100,
+            outputTokens: 25,
+            costUsd: 0.12,
+            externalRequestId: 'req_inactive_usage',
+            occurredAt: '2026-05-23T00:00:00.000Z',
+          },
+        ],
+      },
+    });
+    expect(imported.statusCode).toBe(403);
+    expect(imported.json().code).toBe('account_inactive');
+
+    const reactivated = await app.inject({
+      method: 'PATCH',
+      url: `/api/admin/users/${user.id}`,
+      headers: adminAuth,
+      payload: {
+        status: 'active',
+      },
+    });
+    expect(reactivated.statusCode).toBe(200);
+
+    const summary = await app.inject({
+      method: 'GET',
+      url: '/api/usage/summary',
+      headers: userAuth,
+    });
+    expect(summary.statusCode).toBe(200);
+    expect(summary.json().usage.requestCount).toBe(0);
   });
 
   it('refuses route tokens when the quota profile disables worker routing', async () => {

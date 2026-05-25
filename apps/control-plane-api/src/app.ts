@@ -238,8 +238,11 @@ function requireUser(app: FastifyInstance, request: FastifyRequest) {
     app.services.repository,
     app.services.authVerifier,
   );
-  if (!user || user.status !== 'active') {
+  if (!user) {
     throw new HttpError(401, 'unauthorized', 'Authentication is required.');
+  }
+  if (user.status !== 'active') {
+    throw new HttpError(403, 'account_inactive', 'Account is not active.');
   }
   return user;
 }
@@ -306,6 +309,13 @@ function normalizeUsageImportEvent(
       'usage_identity_unresolved',
       'Usage import event must include user/sandbox ids or a known gateway key id.',
     );
+  }
+  const user = repository.getUserById(userId);
+  if (!user) {
+    throw new HttpError(400, 'usage_identity_unresolved', 'Usage import user could not be resolved.');
+  }
+  if (user.status !== 'active') {
+    throw new HttpError(403, 'account_inactive', 'Usage import user account is not active.');
   }
   return {
     ...event,
