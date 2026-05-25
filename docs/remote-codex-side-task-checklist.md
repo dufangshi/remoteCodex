@@ -1030,7 +1030,7 @@ token.
 - [x] Add tests for wrong-sandbox tokens.
 - [x] Add key id to route token header or payload.
 - [x] Add route-token signing key rotation strategy.
-- [ ] Add route-token revocation strategy if required.
+- [x] Add route-token revocation strategy if required.
 
 ### Control-Plane Route Token API
 

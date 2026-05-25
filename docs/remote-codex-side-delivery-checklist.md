@@ -414,7 +414,7 @@ router-injected internal worker token.
 - [x] Add route-token key id.
 - [x] Add route-token signing key rotation strategy.
 - [x] Add expiry/tamper/wrong-sandbox tests.
-- [ ] Add revocation strategy if required before launch.
+- [x] Add revocation strategy if required before launch.
 - [x] Include project/workspace/session scopes when opening a session.
 
 ### Control Plane API

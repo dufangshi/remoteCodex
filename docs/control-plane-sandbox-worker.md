@@ -751,6 +751,33 @@ After all tokens signed by an old key have expired, remove that key from
 `CONTROL_PLANE_JWT_PREVIOUS_SECRETS`. Keep route-token TTLs short so rotation
 windows stay small.
 
+## Route Token Revocation Strategy
+
+Phase one uses short-lived route tokens plus signing-key rotation rather than a
+per-token revocation database.
+
+Current strategy:
+
+- Route tokens default to a 300 second TTL through
+  `SANDBOX_ROUTE_TOKEN_TTL_SECONDS`.
+- Browser storage must keep route tokens in memory only.
+- Account disablement blocks new route-token issuance.
+- Session archive/delete blocks new session-scoped route-token issuance.
+- Signing-key rotation is the emergency revoke mechanism for all outstanding
+  route tokens.
+- Removing a previous signing key after the TTL window invalidates any old
+  token still presented to the router.
+
+Risk acceptance:
+
+- A single issued token can remain valid until `exp` if it is stolen before
+  expiry.
+- Production TTL should stay at or below five minutes unless a jti denylist or
+  introspection-backed revocation check is added.
+- Add per-token revocation before launch if product requirements need immediate
+  single-session revoke, admin kill-switch for one browser session, or long
+  route-token TTLs.
+
 The AWS sandbox router validates the signed token, checks that the path
 `sandboxId` matches the token payload, and proxies HTTP/SSE/WSS to the worker
 pod. The worker should only trust identity headers injected by the router, not

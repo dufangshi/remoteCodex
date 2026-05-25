@@ -106,7 +106,8 @@ requires staging evidence.
 - [ ] Railway frontend rollback procedure is documented.
 - [ ] Railway control-plane rollback procedure is documented.
 - [ ] Worker image rollback procedure is documented and tested in staging.
-- [ ] Route-token signing key rotation procedure is documented.
+- [x] Route-token signing key rotation and phase-one revocation strategy are
+  documented.
 - [ ] Gateway key revoke/rotate procedure is documented.
 - [ ] Harness key revoke/rotate procedure is documented.
 - [ ] Emergency stop for active sandboxes is available to admins.

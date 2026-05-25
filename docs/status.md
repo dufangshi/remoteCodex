@@ -61,6 +61,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 - Route-token signing supports key ids and previous-key verification.
 - Route tokens carry validated project, workspace, and session scopes, and the
   sandbox router forwards project scope in the signed worker identity envelope.
+- Phase-one route-token revocation strategy is documented as short TTL plus
+  signing-key rotation; per-token revocation remains deferred unless launch
+  requirements change.
 - Local worker-process sandbox adapter exists for development.
 - Phase-one AWS runtime decision is EKS Fargate with one Pod per active user
   sandbox.

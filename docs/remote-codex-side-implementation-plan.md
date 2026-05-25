@@ -429,6 +429,7 @@ control-plane-issued route tokens and router-injected worker identity.
 - [x] Sign route tokens with a control-plane secret.
 - [x] Add route-token key id.
 - [x] Document route-token signing key rotation.
+- [x] Document route-token revocation strategy.
 - [x] Add route-token tests for expiry, tampering, and wrong sandbox.
 - [x] Add `POST /api/sandboxes/:sandboxId/route-token`.
 - [x] Check sandbox ownership before issuing a route token.

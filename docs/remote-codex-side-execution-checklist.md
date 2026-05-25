@@ -466,7 +466,7 @@ router-injected internal worker identity.
 
 ### Route Token Tasks
 
-- [ ] Add revocation strategy if required before launch.
+- [x] Add revocation strategy if required before launch.
   - Acceptance: route-token revocation is either implemented or explicitly
     deferred with a short TTL risk note.
   - Verification: revocation tests pass, or release notes document deferral.
