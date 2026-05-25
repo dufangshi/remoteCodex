@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import {
   evaluateAwsStagingPreflightEvidence,
   parseAwsStagingPreflightEvidence,
@@ -42,6 +42,10 @@ function argValue(name: string) {
   return value;
 }
 
+function hasFlag(name: string) {
+  return process.argv.includes(name);
+}
+
 async function readChecklist(path = 'docs/remote-codex-side-detailed-checklist.md') {
   return readFile(path, 'utf8');
 }
@@ -63,6 +67,26 @@ function parseChecklistItems(markdown: string): ChecklistItem[] {
     });
   });
   return items;
+}
+
+function applyReadyItemsToChecklist(input: {
+  markdown: string;
+  readyItems: ChecklistItem[];
+}) {
+  const readyIds = new Set(input.readyItems.map((item) => item.item));
+  let changedCount = 0;
+  const updated = input.markdown.split(/\r?\n/).map((line) => {
+    const match = line.match(/^(- )\[ \] ((?:D0|A1|P2|S3|W4|R5|G6)\.\d+ .+)$/);
+    if (!match || !readyIds.has(match[2]?.split(' ')[0] ?? '')) {
+      return line;
+    }
+    changedCount += 1;
+    return `${match[1]}[x] ${match[2]}`;
+  }).join('\n');
+  return {
+    markdown: updated,
+    changedCount,
+  };
 }
 
 function normalizeAwsResult(result: AwsPreflightCheckResult): EvidenceResult {
@@ -112,11 +136,24 @@ function checklistPrefix(item: string) {
   return phaseZeroSixPrefixes.find((prefix) => item.startsWith(`${prefix}.`)) ?? null;
 }
 
+function countsByPrefix(checklist: ChecklistItem[]) {
+  return Object.fromEntries(phaseZeroSixPrefixes.map((prefix) => {
+    const items = checklist.filter((item) => checklistPrefix(item.item) === prefix);
+    return [prefix, {
+      total: items.length,
+      checked: items.filter((item) => item.checked).length,
+      unchecked: items.filter((item) => !item.checked).length,
+    }];
+  }));
+}
+
 async function main() {
   const checklistPath = argValue('--checklist') ?? 'docs/remote-codex-side-detailed-checklist.md';
   const awsPath = argValue('--aws-preflight');
   const stagingPath = argValue('--staging-smoke');
-  const checklist = parseChecklistItems(await readChecklist(checklistPath));
+  const applyReady = hasFlag('--apply-ready');
+  const checklistMarkdown = await readChecklist(checklistPath);
+  const checklist = parseChecklistItems(checklistMarkdown);
   const evidence = mergeEvidenceResults([
     ...(await optionalAwsResults(awsPath)),
     ...(await optionalStagingResults(stagingPath)),
@@ -133,14 +170,46 @@ async function main() {
     .filter((item) => item.checked)
     .map((item) => ({ checklist: item, evidence: evidence.get(item.item) }))
     .filter((entry) => entry.evidence && entry.evidence.readyToCheck === false);
-  const countsByPrefix = Object.fromEntries(phaseZeroSixPrefixes.map((prefix) => {
-    const items = checklist.filter((item) => checklistPrefix(item.item) === prefix);
-    return [prefix, {
-      total: items.length,
-      checked: items.filter((item) => item.checked).length,
-      unchecked: items.filter((item) => !item.checked).length,
-    }];
-  }));
+  const originalCountsByPrefix = countsByPrefix(checklist);
+  const canApply =
+    applyReady &&
+    readyToCheck.length > 0 &&
+    checkedButContradicted.length === 0;
+  let applyResult: null | {
+    requested: boolean;
+    applied: boolean;
+    changedCount: number;
+    appliedItems?: string[];
+    reason: string;
+  } = null;
+  if (applyReady) {
+    if (!canApply) {
+      applyResult = {
+        requested: true,
+        applied: false,
+        changedCount: 0,
+        reason: readyToCheck.length === 0
+          ? 'Refusing to edit checklist because no ready Phase 0-6 boxes were found.'
+          : 'Refusing to edit checklist because checked boxes are contradicted.',
+      };
+      process.exitCode = 1;
+    } else {
+      const updated = applyReadyItemsToChecklist({
+        markdown: checklistMarkdown,
+        readyItems: readyToCheck.map((entry) => entry.checklist),
+      });
+      await writeFile(checklistPath, updated.markdown);
+      applyResult = {
+        requested: true,
+        applied: true,
+        changedCount: updated.changedCount,
+        appliedItems: readyToCheck.map((entry) => entry.checklist.item),
+        reason: stillMissing.length === 0
+          ? 'Applied all ready Phase 0-6 checklist boxes; no Phase 0-6 evidence gaps remain.'
+          : 'Applied ready Phase 0-6 checklist boxes; some Phase 0-6 boxes still need evidence.',
+      };
+    }
+  }
 
   console.log(JSON.stringify({
     ok: stillMissing.length === 0 && checkedButContradicted.length === 0,
@@ -150,7 +219,16 @@ async function main() {
       awsPreflight: awsPath,
       stagingSmoke: stagingPath,
     },
-    countsByPrefix,
+    apply: applyResult ?? {
+      requested: false,
+      applied: false,
+      changedCount: 0,
+      reason: 'Read-only audit. Pass --apply-ready to update checklist boxes after evidence is complete.',
+    },
+    countsByPrefix: originalCountsByPrefix,
+    updatedCountsByPrefix: applyResult?.applied
+      ? countsByPrefix(parseChecklistItems(await readChecklist(checklistPath)))
+      : null,
     checkedCount: checklist.filter((item) => item.checked).length,
     uncheckedCount: unchecked.length,
     readyToCheck: readyToCheck.map((entry) => ({

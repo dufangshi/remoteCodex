@@ -1395,5 +1395,6 @@ pnpm exec tsx scripts/collect-aws-staging-preflight-evidence.ts > <evidence-json
 pnpm verify:aws-staging-preflight-evidence -- <evidence-json>
 pnpm verify:staging-phase-one-evidence -- <smoke-json>
 pnpm verify:phase-zero-six-evidence -- --aws-preflight <evidence-json> --staging-smoke <smoke-json>
+pnpm verify:phase-zero-six-evidence -- --aws-preflight <evidence-json> --staging-smoke <smoke-json> --apply-ready
 docker build -f Dockerfile.worker -t remote-codex-worker:verify .
 ```

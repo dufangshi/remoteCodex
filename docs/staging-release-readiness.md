@@ -222,9 +222,27 @@ pnpm verify:phase-zero-six-evidence -- \
   --staging-smoke ./staging-phase-one-smoke.json
 ```
 
-The verifier is intentionally read-only. It reports which remaining staging
-checkboxes have enough evidence to check and which proof fields are missing. It
-does not update checklist files automatically.
+After the aggregate report shows one or more remaining Phase 0 through Phase 6
+items under `readyToCheck`, the same tool can update those proven checklist
+items in one guarded step:
+
+```bash
+pnpm verify:phase-zero-six-evidence -- \
+  --aws-preflight ./aws-staging-preflight.json \
+  --staging-smoke ./staging-phase-one-smoke.json \
+  --apply-ready
+```
+
+`--apply-ready` refuses to edit the checklist if no Phase 0 through Phase 6
+boxes are ready or if existing checked evidence is contradicted. It can safely
+apply a partial staging result, such as S3.04/S3.05 from AWS preflight first
+and S3.06-S3.08/R5.10-R5.12/G6.11-G6.13 later as runtime smoke evidence
+arrives.
+
+The verifier is read-only by default. It reports which remaining staging
+checkboxes have enough evidence to check and which proof fields are missing.
+Only the explicit `--apply-ready` mode updates checklist files, and only after
+the boxes it changes are backed by evidence.
 
 The important step-to-checkbox mapping is:
 

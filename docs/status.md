@@ -71,7 +71,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   `pnpm verify:phase-zero-six-evidence -- --aws-preflight <evidence-json> --staging-smoke <smoke-json>`;
   it reads the active checklist and combines AWS preflight plus staging smoke
   verifier output into one read-only report of boxes that are ready to check
-  and boxes still missing evidence.
+  and boxes still missing evidence. Its explicit `--apply-ready` mode updates
+  only ready checkboxes and refuses to edit when no boxes are ready or any
+  checked box is contradicted.
 - AWS staging preflight evidence verifier exists as
   `pnpm verify:aws-staging-preflight-evidence -- <evidence-json>` with template
   `docs/aws-staging-preflight-evidence-template.json`; it audits S3.04 and
@@ -194,11 +196,14 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 4. Run
    `pnpm verify:phase-zero-six-evidence -- --aws-preflight <evidence-json> --staging-smoke <smoke-json>`
    to produce one read-only Phase 0-6 checklist audit before editing boxes.
-5. Capture staging AWS/EKS proof for sandbox start, readiness, stop, and
+5. If the aggregate audit reports proven items under `readyToCheck`, run the
+   same command with `--apply-ready`, then review and commit the checklist
+   changes with the evidence artifacts referenced in the commit message.
+6. Capture staging AWS/EKS proof for sandbox start, readiness, stop, and
    idempotent lifecycle.
-6. Capture staging router proof for direct-worker denial and
+7. Capture staging router proof for direct-worker denial and
    browser-to-router-to-worker traffic.
-7. Run staging provider-runtime gateway smokes for Codex, Claude Code, and
+8. Run staging provider-runtime gateway smokes for Codex, Claude Code, and
    OpenCode, including gateway usage records and worker env/config root-key
    absence. Use `pnpm exec tsx scripts/provider-gateway-smoke.ts <provider>`
    inside the worker to produce the required evidence JSON.
