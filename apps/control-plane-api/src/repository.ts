@@ -121,6 +121,17 @@ export class ControlPlaneRepository {
       .all();
   }
 
+  listAuditLogs(input: { action?: string | undefined; resourceId?: string | undefined } = {}) {
+    const filters = [
+      input.action ? eq(controlAuditLogs.action, input.action) : null,
+      input.resourceId ? eq(controlAuditLogs.resourceId, input.resourceId) : null,
+    ].filter((filter): filter is NonNullable<typeof filter> => Boolean(filter));
+    const query = this.db.select().from(controlAuditLogs);
+    return (filters.length ? query.where(and(...filters)) : query)
+      .orderBy(desc(controlAuditLogs.createdAt))
+      .all();
+  }
+
   getUserById(id: string) {
     return this.db.select().from(controlUsers).where(eq(controlUsers.id, id)).get();
   }
@@ -525,6 +536,34 @@ export class ControlPlaneRepository {
     const session = this.getSessionById(id);
     if (session) {
       this.audit(session.userId, 'session.updated', 'session', id, input);
+    }
+    return session;
+  }
+
+  checkpointSession(id: string, input: {
+    workerSessionId?: string | null | undefined;
+    status?: string | undefined;
+  }) {
+    const now = new Date().toISOString();
+    const update: {
+      workerSessionId?: string | null;
+      status?: string;
+      lastActivityAt: string;
+      updatedAt: string;
+    } = {
+      lastActivityAt: now,
+      updatedAt: now,
+    };
+    if (input.workerSessionId !== undefined) {
+      update.workerSessionId = input.workerSessionId;
+    }
+    if (input.status !== undefined) {
+      update.status = input.status;
+    }
+    this.db.update(controlSessions).set(update).where(eq(controlSessions.id, id)).run();
+    const session = this.getSessionById(id);
+    if (session) {
+      this.audit(session.userId, 'session.checkpointed', 'session', id, input);
     }
     return session;
   }

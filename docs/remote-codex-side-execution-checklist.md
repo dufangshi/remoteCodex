@@ -262,31 +262,31 @@ sandbox-local execution state.
 
 ### Session Sync Tasks
 
-- [ ] Add worker-to-control-plane heartbeat/checkpoint call.
+- [x] Add worker-to-control-plane heartbeat/checkpoint call.
   - Acceptance: worker mode can send checkpoint metadata for a live session to
     the control plane.
   - Verification: supervisor-api or integration test proves a checkpoint call
     reaches the expected control-plane endpoint.
 
-- [ ] Reject checkpoint sync for the wrong user.
+- [x] Reject checkpoint sync for the wrong user.
   - Acceptance: a worker/user mismatch is rejected and audited.
   - Verification: control-plane tests cover wrong-user denial.
 
-- [ ] Reject checkpoint sync for the wrong sandbox.
+- [x] Reject checkpoint sync for the wrong sandbox.
   - Acceptance: a sandbox mismatch is rejected and audited.
   - Verification: control-plane tests cover wrong-sandbox denial.
 
-- [ ] Add retry/backoff policy for checkpoint submission.
+- [x] Add retry/backoff policy for checkpoint submission.
   - Acceptance: transient control-plane failures retry with bounded backoff and
     do not block the worker indefinitely.
   - Verification: worker tests cover retry, stop condition, and log redaction.
 
-- [ ] Add audit events for session sync failures.
+- [x] Add audit events for session sync failures.
   - Acceptance: sync denials and repeated sync failures create audit records
     without sensitive payloads.
   - Verification: control-plane tests assert audit events.
 
-- [ ] Add session close/finalize sync behavior.
+- [x] Add session close/finalize sync behavior.
   - Acceptance: closing a worker session updates the durable control-plane
     session state.
   - Verification: integration or unit tests cover finalize success and retry.
@@ -314,11 +314,18 @@ sandbox-local execution state.
 
 - Files: `apps/control-plane-api/src/app.ts`,
   `apps/control-plane-api/src/repository.ts`,
-  `apps/control-plane-api/src/app.test.ts`
+  `apps/control-plane-api/src/app.test.ts`,
+  `apps/supervisor-api/src/worker-control-plane-sync.ts`,
+  `apps/supervisor-api/src/worker-control-plane-sync.test.ts`,
+  `apps/supervisor-api/src/routes/system.ts`, `packages/config/src/index.ts`
 - Verification: `pnpm --filter @remote-codex/control-plane-api typecheck`;
-  `pnpm --filter @remote-codex/control-plane-api test`
-- Residual risk: worker checkpoint sync and frontend project
-  detail/loading/open-session tasks remain unchecked.
+  `pnpm --filter @remote-codex/control-plane-api test`;
+  `pnpm --filter @remote-codex/supervisor-api typecheck`;
+  `pnpm --filter @remote-codex/supervisor-api test`;
+  `pnpm --filter @remote-codex/config typecheck`;
+  `pnpm --filter @remote-codex/config test`
+- Residual risk: frontend project detail/loading/open-session tasks remain
+  unchecked; no staging worker-to-control-plane smoke has run.
 
 ## Phase 3: Sandbox Lifecycle And AWS Runtime
 
@@ -1466,7 +1473,7 @@ corresponding implementation and verification land.
 - [ ] 3. Enforce disabled-user behavior across route tokens, sandbox lifecycle,
   and usage import.
 - [ ] 4. Add project detail UI, list loading states, and open-session flow.
-- [ ] 5. Add worker checkpoint caller, wrong-user/wrong-sandbox denial, retry,
+- [x] 5. Add worker checkpoint caller, wrong-user/wrong-sandbox denial, retry,
   and session finalize behavior.
 - [ ] 6. Add AWS namespace/label strategy, Pod cleanup policy, idle timeout, and
   sandbox reaper.

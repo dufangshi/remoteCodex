@@ -228,12 +228,12 @@ execution state inside the sandbox.
 - [x] Define required worker metadata fields.
 - [x] Add safe worker metadata endpoint fields.
 - [x] Add explicit session checkpoint endpoint.
-- [ ] Add worker-to-control-plane heartbeat/checkpoint call.
-- [ ] Reject checkpoint sync for the wrong user.
-- [ ] Reject checkpoint sync for the wrong sandbox.
-- [ ] Add retry/backoff policy for checkpoint submission.
-- [ ] Add audit events for session sync failures.
-- [ ] Add session close/finalize sync behavior.
+- [x] Add worker-to-control-plane heartbeat/checkpoint call.
+- [x] Reject checkpoint sync for the wrong user.
+- [x] Reject checkpoint sync for the wrong sandbox.
+- [x] Add retry/backoff policy for checkpoint submission.
+- [x] Add audit events for session sync failures.
+- [x] Add session close/finalize sync behavior.
 
 ### Frontend
 
@@ -255,7 +255,7 @@ execution state inside the sandbox.
 - [x] Control-plane CRUD and ownership tests pass.
 - [x] Frontend project/workspace/session navigation tests pass.
 - [x] Worker metadata tests cover safe metadata shape.
-- [ ] Session sync tests cover wrong-user and wrong-sandbox denial.
+- [x] Session sync tests cover wrong-user and wrong-sandbox denial.
 - [ ] Local smoke proves a worker checkpoint reaches the control plane.
 - [ ] E2E smoke creates project, workspace, session, and opens the session.
 
@@ -868,7 +868,7 @@ The first usable product phase is complete only when all of these are checked:
 
 - [ ] 1. Finish frontend auth shell and provider auth smoke.
 - [ ] 2. Finish project detail and open-session flow.
-- [ ] 3. Add worker session checkpoint caller and wrong-user/wrong-sandbox tests.
+- [x] 3. Add worker session checkpoint caller and wrong-user/wrong-sandbox tests.
 - [x] 4. Validate harness env when chemistry tools are enabled.
 - [x] 5. Add gateway client interface and mocked gateway admin tests.
 - [ ] 6. Decide and document gateway deployment shape.

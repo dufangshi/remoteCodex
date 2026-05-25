@@ -44,6 +44,10 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   sandboxes, route tokens, and admin user/sandbox operations.
 - Project, workspace, and session list APIs support bounded `limit`/`offset`
   pagination with response metadata plus search/status filters.
+- Worker-mode session checkpoint sync can call the control plane through the
+  internal service-token endpoint with bounded retry/backoff.
+- Control-plane session checkpoint sync rejects wrong-user and wrong-sandbox
+  updates and audits sync failures.
 - Inactive account behavior is implemented for route-token issuance, sandbox
   start/restart, and usage import.
 - User data export and deletion/anonymization APIs are explicitly deferred in
@@ -77,11 +81,10 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 2. Add production auth-provider smoke coverage or staging smoke procedure for
    valid, expired, wrong-issuer, and wrong-audience tokens.
 3. Add frontend project detail/loading/open-session flows.
-4. Add worker checkpoint caller plus wrong-user and wrong-sandbox denial tests.
-5. Add AWS namespace/label strategy, Pod cleanup policy, idle timeout, and
+4. Add AWS namespace/label strategy, Pod cleanup policy, idle timeout, and
    sandbox reaper.
-6. Build and smoke-test the worker Docker image, then add CI image checks.
-7. Finish gateway usage adapter, scheduled import, metrics, and frontend usage
+5. Build and smoke-test the worker Docker image, then add CI image checks.
+6. Finish gateway usage adapter, scheduled import, metrics, and frontend usage
    UI.
 
 ## Verification Commands

@@ -17,6 +17,13 @@ function testEnv(name: string) {
   };
 }
 
+function testEnvWithInternalService(name: string) {
+  return {
+    ...testEnv(name),
+    CONTROL_PLANE_INTERNAL_SERVICE_TOKEN: 'test-internal-service-token',
+  };
+}
+
 function decodeTokenHeader(token: string) {
   const [encodedHeader] = token.split('.');
   if (!encodedHeader) {
@@ -1140,6 +1147,124 @@ describe('control plane api', () => {
       },
     });
     expect(badRouteToken.statusCode).toBe(404);
+  });
+
+  it('accepts internal worker session checkpoints and audits sync failures', async () => {
+    const app = buildControlPlaneApp({ env: testEnvWithInternalService('session-checkpoint') });
+    apps.push(app);
+
+    const auth = { authorization: 'Bearer dev:checkpoint-user' };
+    const bootstrap = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: auth,
+      payload: {
+        email: 'checkpoint@example.com',
+      },
+    });
+    expect(bootstrap.statusCode).toBe(200);
+    const { user, sandbox } = bootstrap.json();
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      headers: auth,
+      payload: {
+        name: 'Checkpoint Workspace',
+        slug: 'checkpoint-workspace',
+      },
+    });
+    expect(workspaceResponse.statusCode).toBe(200);
+    const workspace = workspaceResponse.json().workspace;
+
+    const sessionResponse = await app.inject({
+      method: 'POST',
+      url: `/api/workspaces/${workspace.id}/sessions`,
+      headers: auth,
+      payload: {
+        provider: 'codex',
+        title: 'Checkpoint Session',
+      },
+    });
+    expect(sessionResponse.statusCode).toBe(200);
+    const session = sessionResponse.json().session;
+
+    const wrongUser = await app.inject({
+      method: 'POST',
+      url: `/api/internal/sessions/${session.id}/checkpoint`,
+      headers: {
+        'x-remote-codex-service-token': 'test-internal-service-token',
+      },
+      payload: {
+        userId: '00000000-0000-4000-8000-000000000001',
+        sandboxId: sandbox.id,
+        workerSessionId: 'worker-session-wrong-user',
+        status: 'active',
+      },
+    });
+    expect(wrongUser.statusCode).toBe(403);
+    expect(wrongUser.json().code).toBe('wrong_user');
+
+    const wrongSandbox = await app.inject({
+      method: 'POST',
+      url: `/api/internal/sessions/${session.id}/checkpoint`,
+      headers: {
+        'x-remote-codex-service-token': 'test-internal-service-token',
+      },
+      payload: {
+        userId: user.id,
+        sandboxId: '00000000-0000-4000-8000-000000000002',
+        workerSessionId: 'worker-session-wrong-sandbox',
+        status: 'active',
+      },
+    });
+    expect(wrongSandbox.statusCode).toBe(403);
+    expect(wrongSandbox.json().code).toBe('wrong_sandbox');
+
+    const checkpoint = await app.inject({
+      method: 'POST',
+      url: `/api/internal/sessions/${session.id}/checkpoint`,
+      headers: {
+        'x-remote-codex-service-token': 'test-internal-service-token',
+      },
+      payload: {
+        userId: user.id,
+        sandboxId: sandbox.id,
+        workerSessionId: 'worker-session-1',
+        status: 'active',
+      },
+    });
+    expect(checkpoint.statusCode).toBe(200);
+    expect(checkpoint.json().session).toMatchObject({
+      id: session.id,
+      userId: user.id,
+      sandboxId: sandbox.id,
+      workerSessionId: 'worker-session-1',
+      status: 'active',
+    });
+    expect(checkpoint.json().session.lastActivityAt).toEqual(expect.any(String));
+
+    const refreshed = await app.inject({
+      method: 'GET',
+      url: `/api/workspaces/${workspace.id}/sessions`,
+      headers: auth,
+    });
+    expect(refreshed.statusCode).toBe(200);
+    expect(refreshed.json().sessions[0]).toMatchObject({
+      id: session.id,
+      workerSessionId: 'worker-session-1',
+      status: 'active',
+    });
+
+    const failures = app.services.repository.listAuditLogs({
+      action: 'session.checkpoint_failed',
+      resourceId: session.id,
+    });
+    expect(failures).toHaveLength(2);
+    expect(failures.map((entry) => JSON.parse(entry.metadataJson).reason).sort()).toEqual([
+      'wrong_sandbox',
+      'wrong_user',
+    ]);
   });
 
   it('supports jwt auth mode and rejects invalid production tokens', async () => {

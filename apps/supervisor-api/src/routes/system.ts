@@ -17,6 +17,7 @@ import {
 } from '../workspace-settings';
 import { HttpError } from '../app';
 import { readWorkerRuntimeManifest } from '../worker-runtime-manifest';
+import { WorkerControlPlaneSyncClient } from '../worker-control-plane-sync';
 
 const updateProviderHostFileSchema = z.object({
   content: z.string(),
@@ -31,6 +32,11 @@ const renameProviderHostConfigArchiveSchema = z.object({
 const updateWorkspaceSettingsSchema = z.object({
   devHome: z.string().trim().min(1),
   defaultBackend: agentBackendIdSchema.optional(),
+});
+const checkpointSessionSchema = z.object({
+  sessionId: z.string().uuid(),
+  workerSessionId: z.string().min(1).nullable().optional(),
+  status: z.enum(['created', 'active', 'idle', 'archived', 'deleted']).optional(),
 });
 const providerParamSchema = z.object({
   provider: agentBackendIdSchema,
@@ -128,6 +134,12 @@ export async function registerSystemRoutes(app: FastifyInstance) {
       })),
       runtimeManifest,
     };
+  });
+
+  app.post('/api/worker/session-checkpoint', async (request) => {
+    const input = checkpointSessionSchema.parse(request.body);
+    const syncClient = new WorkerControlPlaneSyncClient(app.services.config);
+    return syncClient.checkpointSession(input);
   });
 
   app.get('/api/config/workspace-settings', async () => {

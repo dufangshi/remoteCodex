@@ -121,6 +121,13 @@ const updateSessionSchema = z.object({
   workerSessionId: z.string().min(1).nullable().optional(),
 });
 
+const checkpointSessionSchema = z.object({
+  userId: z.string().uuid(),
+  sandboxId: z.string().uuid(),
+  workerSessionId: z.string().min(1).nullable().optional(),
+  status: z.enum(['created', 'active', 'idle', 'archived', 'deleted']).optional(),
+});
+
 const routeTokenSchema = z.object({
   workspaceId: z.string().uuid().optional(),
   sessionId: z.string().uuid().optional(),
@@ -592,6 +599,43 @@ export function buildControlPlaneApp(
       sandboxId: sandbox.id,
       userId: sandbox.userId,
       workerBaseUrl,
+    };
+  });
+
+  app.post('/api/internal/sessions/:sessionId/checkpoint', async (request) => {
+    requireInternalService(app, request);
+    const params = z.object({ sessionId: z.string().uuid() }).parse(request.params);
+    const input = checkpointSessionSchema.parse(request.body);
+    const session = repository.getSessionById(params.sessionId);
+    if (!session) {
+      repository.audit(input.userId, 'session.checkpoint_failed', 'session', params.sessionId, {
+        reason: 'session_not_found',
+        sandboxId: input.sandboxId,
+      });
+      throw new HttpError(404, 'not_found', 'Session not found.');
+    }
+    if (session.userId !== input.userId) {
+      repository.audit(session.userId, 'session.checkpoint_failed', 'session', session.id, {
+        reason: 'wrong_user',
+        expectedUserId: session.userId,
+        receivedUserId: input.userId,
+        sandboxId: input.sandboxId,
+      });
+      throw new HttpError(403, 'wrong_user', 'Checkpoint user does not match session owner.');
+    }
+    if (session.sandboxId !== input.sandboxId) {
+      repository.audit(session.userId, 'session.checkpoint_failed', 'session', session.id, {
+        reason: 'wrong_sandbox',
+        expectedSandboxId: session.sandboxId,
+        receivedSandboxId: input.sandboxId,
+      });
+      throw new HttpError(403, 'wrong_sandbox', 'Checkpoint sandbox does not match session sandbox.');
+    }
+    return {
+      session: repository.checkpointSession(session.id, {
+        workerSessionId: input.workerSessionId,
+        status: input.status,
+      }),
     };
   });
 

@@ -198,12 +198,12 @@ live sandbox-local execution state.
 - [x] Define required worker metadata fields.
 - [x] Add worker metadata endpoint fields.
 - [x] Add explicit session checkpoint endpoint.
-- [ ] Add worker-to-control-plane heartbeat or checkpoint call.
-- [ ] Reject worker session sync for the wrong user.
-- [ ] Reject worker session sync for the wrong sandbox.
-- [ ] Add retry and backoff policy for checkpoint submission.
-- [ ] Add audit events for session sync failures.
-- [ ] Add session close/finalize sync behavior.
+- [x] Add worker-to-control-plane heartbeat or checkpoint call.
+- [x] Reject worker session sync for the wrong user.
+- [x] Reject worker session sync for the wrong sandbox.
+- [x] Add retry and backoff policy for checkpoint submission.
+- [x] Add audit events for session sync failures.
+- [x] Add session close/finalize sync behavior.
 
 ### Frontend Checklist
 
@@ -225,7 +225,7 @@ live sandbox-local execution state.
 - [x] Control-plane CRUD and ownership tests pass.
 - [x] Frontend project/workspace/session navigation tests pass.
 - [x] Worker metadata tests cover safe metadata shape.
-- [ ] Session sync tests cover wrong-user and wrong-sandbox denial.
+- [x] Session sync tests cover wrong-user and wrong-sandbox denial.
 - [ ] E2E smoke test creates a project, workspace, session, and opens the
   session through the router.
 - [ ] Local smoke test proves a worker checkpoint reaches the control plane.

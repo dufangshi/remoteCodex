@@ -51,6 +51,8 @@ export interface RuntimeConfig {
   agentRuntimeManagementEnabled: boolean;
   workerAuthToken: string | null;
   workerIdentitySecret: string | null;
+  controlPlaneBaseUrl: string | null;
+  controlPlaneServiceToken: string | null;
   llmGatewayBaseUrl: string | null;
   llmGatewayToken: string | null;
   harnessBaseUrl: string | null;
@@ -77,6 +79,8 @@ const envSchema = z.object({
   REMOTE_CODEX_AGENT_RUNTIME_MANAGEMENT_ENABLED: z.string().optional(),
   REMOTE_CODEX_WORKER_AUTH_TOKEN: z.string().min(1).optional(),
   REMOTE_CODEX_WORKER_IDENTITY_SECRET: z.string().min(1).optional(),
+  REMOTE_CODEX_CONTROL_PLANE_BASE_URL: z.string().url().optional(),
+  REMOTE_CODEX_CONTROL_PLANE_SERVICE_TOKEN: z.string().min(1).optional(),
   REMOTE_CODEX_LLM_GATEWAY_BASE_URL: z.string().url().optional(),
   REMOTE_CODEX_LLM_GATEWAY_TOKEN: z.string().min(1).optional(),
   ELAGENTE_HARNESS_BASE_URL: z.string().url().optional(),
@@ -172,6 +176,8 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
     ),
     workerAuthToken: parsed.REMOTE_CODEX_WORKER_AUTH_TOKEN ?? null,
     workerIdentitySecret: parsed.REMOTE_CODEX_WORKER_IDENTITY_SECRET ?? null,
+    controlPlaneBaseUrl: parsed.REMOTE_CODEX_CONTROL_PLANE_BASE_URL ?? null,
+    controlPlaneServiceToken: parsed.REMOTE_CODEX_CONTROL_PLANE_SERVICE_TOKEN ?? null,
     llmGatewayBaseUrl: parsed.REMOTE_CODEX_LLM_GATEWAY_BASE_URL ?? null,
     llmGatewayToken: parsed.REMOTE_CODEX_LLM_GATEWAY_TOKEN ?? null,
     harnessBaseUrl: parsed.ELAGENTE_HARNESS_BASE_URL ?? null,

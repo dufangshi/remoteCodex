@@ -199,17 +199,17 @@ Verification:
 - [x] Define worker metadata fields required by the session registry.
 - [x] Add worker metadata endpoint fields.
 - [x] Add explicit session checkpoint endpoint.
-- [ ] Add worker-to-control-plane heartbeat or checkpoint call.
-- [ ] Add session close/finalize sync behavior.
-- [ ] Reject worker session sync for the wrong user.
-- [ ] Reject worker session sync for the wrong sandbox.
-- [ ] Add retry/backoff policy for session checkpoint submission.
-- [ ] Add audit events for session sync failures.
+- [x] Add worker-to-control-plane heartbeat or checkpoint call.
+- [x] Add session close/finalize sync behavior.
+- [x] Reject worker session sync for the wrong user.
+- [x] Reject worker session sync for the wrong sandbox.
+- [x] Add retry/backoff policy for session checkpoint submission.
+- [x] Add audit events for session sync failures.
 
 Verification:
 
 - [x] Worker metadata tests cover safe metadata shape.
-- [ ] Session sync tests cover wrong-user and wrong-sandbox denial.
+- [x] Session sync tests cover wrong-user and wrong-sandbox denial.
 - [ ] Local smoke test verifies worker checkpoint reaches the control plane.
 
 ### E. Sandbox Lifecycle And AWS Adapter
@@ -832,9 +832,9 @@ runtime state.
 - [x] Define session metadata sync from worker to control plane.
 - [x] Add worker metadata fields needed by the session registry.
 - [x] Add explicit session checkpoint endpoint.
-- [ ] Add worker-to-control-plane session heartbeat or checkpoint call.
-- [ ] Add session close/finalize sync behavior.
-- [ ] Add tests that reject session sync for the wrong user or sandbox.
+- [x] Add worker-to-control-plane session heartbeat or checkpoint call.
+- [x] Add session close/finalize sync behavior.
+- [x] Add tests that reject session sync for the wrong user or sandbox.
 
 ### Verification
 
