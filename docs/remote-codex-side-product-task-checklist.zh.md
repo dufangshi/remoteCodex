@@ -14,6 +14,27 @@
 只打勾 Remote Codex 仓库内已经落地的 API、UI、worker、router、配置、部署
 wiring、contract、client、smoke 或文档。
 
+## 文档定位
+
+这份文档回答三个问题：
+
+- Remote Codex 侧到底要做哪些工程任务。
+- 每个任务完成到什么程度才可以勾选。
+- 做完后用什么测试、smoke、部署记录或人工 evidence 证明它已经完成。
+
+它不是外部系统的总项目管理文档。LLM gateway、ElAgenteHarness、Modal/AWS
+Batch/HPC worker、ORCA worker 等外部系统可以有自己的任务板；本文件只跟踪
+Remote Codex 仓库中需要实现或集成的部分。
+
+如果一个任务需要外部系统配合，Remote Codex 侧只在以下内容已经落地后勾选：
+
+- contract 或 schema 已固定；
+- client、fixture、mock 或 error mapping 已实现；
+- control-plane、worker、router、frontend 或 deployment wiring 已接好；
+- 对应本地测试、contract test、staging smoke 或真实环境证据已经存在。
+
+不要因为外部系统“计划会支持”而勾选 Remote Codex 侧任务。
+
 ## 当前优先级
 
 先不要从后面的 Phase 随机挑任务。当前推荐顺序是：
@@ -53,6 +74,123 @@ wiring、contract、client、smoke 或文档。
   - 包含：一个真实用户从登录到 sandbox、provider、harness、usage、quota、
     admin inspection 和 secret leakage review 的完整路径。
   - 对应任务：P12.01-P12.16。
+
+## Remote Codex 侧模块拆分
+
+后续实现时可以按模块分工，但 checklist 的勾选仍然以本文件中的单项任务为准。
+
+### Web / Product UI
+
+负责：
+
+- login、register、logout、auth guard；
+- project、workspace、session、sandbox 状态；
+- route-token 触发和 worker session 打开；
+- usage、quota、billing、admin inspection；
+- workflow、task、job、artifact、MCP status、diff/file review。
+
+不负责：
+
+- 保存 route token 到持久浏览器存储；
+- 持有 provider root key、gateway admin key、harness admin key；
+- 直连裸 worker public URL。
+
+### Control Plane API
+
+负责：
+
+- product auth、user、admin、account status；
+- projects、workspaces、sessions；
+- sandbox registry、lifecycle orchestration、audit events；
+- route-token issuance、quota preflight、usage import；
+- gateway credential provisioning；
+- harness credential provisioning；
+- worker endpoint registry 和 router 所需 metadata。
+
+不负责：
+
+- 执行用户 shell command；
+- 运行 Codex、Claude Code、OpenCode；
+- 启动 MCP stdio server；
+- 运行 chemistry workflow 或 ORCA 等重计算。
+
+### Sandbox Router
+
+负责：
+
+- 校验 control-plane 签发的短期 route token；
+- 解析 sandbox 到 live worker endpoint；
+- 剥离 browser-supplied identity/authorization headers；
+- 注入 internal worker token 和 signed identity envelope；
+- 代理 HTTP、SSE、WebSocket；
+- 记录非敏感 access/audit logs。
+
+不负责：
+
+- 用户注册、登录、billing；
+- provider config 渲染；
+- worker lifecycle 创建和删除。
+
+### Sandbox Worker / Supervisor API
+
+负责：
+
+- sandbox 内 worker-mode supervisor API；
+- `/workspace` 下的文件、shell、session、checkpoint、diff、artifact；
+- Codex、Claude Code、OpenCode runtime bootstrap；
+- MCP stdio/remote tool launch policy；
+- gateway-scoped model credential config；
+- `INACT_X_APP_KEY` based harness access；
+- worker health、ready、metadata、non-secret diagnostics。
+
+不负责：
+
+- product 用户身份认证；
+- 保存或暴露真实 provider root key；
+- 操作 sandbox 外文件；
+- 管理其它用户的 sandbox。
+
+### Worker Image / Runtime Bootstrap
+
+负责：
+
+- 预构建镜像，不在每个 sandbox 内现场安装基础依赖；
+- 固定 Node、pnpm、agent CLI、system packages 的版本策略；
+- 非 root 用户运行；
+- 启动时校验 sandbox/user/workspace/token/env；
+- 生成 provider、MCP、harness config；
+- redaction 和 secret leakage 防护。
+
+### Deployment / Ops
+
+负责：
+
+- Railway frontend/control-plane 部署配置；
+- ECR worker image publish；
+- AWS EKS Fargate sandbox runtime wiring；
+- S3/object storage 和 snapshot wiring；
+- secrets storage/rotation；
+- structured logs、metrics、alerts；
+- CI、staging smoke、release gates。
+
+## Phase 退出条件
+
+每个 Phase 的所有 checkbox 勾完，并不一定代表产品可发布。发布还需要 release
+gate 和 staging evidence 同时通过。下面是每个 Phase 的最小退出条件：
+
+- Phase 0: 架构、边界、证据规则和任务板清晰；`git diff --check` 通过。
+- Phase 1: 用户登录、账号状态、admin 边界、本地和 production-style auth 测试通过。
+- Phase 2: metadata API/UI、session open、route-token 获取、checkpoint sync、close/resume 可用。
+- Phase 3: 本地 sandbox adapter 和 AWS adapter 骨架可测；真实 AWS lifecycle evidence 通过后才算 staging-ready。
+- Phase 4: worker image 可构建、非 root、fail closed、metadata/redaction 可测、CI image smoke 通过。
+- Phase 5: route token、router proxy、worker auth、本地 smoke 通过；真实 router staging evidence 通过后才算 staging-ready。
+- Phase 6: gateway contract/client/config/usage/quota 本地完成；Codex/Claude Code/OpenCode 真实 provider runtime smoke 通过后才算 staging-ready。
+- Phase 7: harness contract/client/key provisioning/env injection/tool surface/UI/usage import 完成，并有 worker-to-harness staging smoke。
+- Phase 8: MCP registry、policy、config rendering、audit、status UI 完成，且工具不能逃出 sandbox/workspace。
+- Phase 9: persistence、safe file/diff API、snapshot、artifact storage/display 完成，credential files 被排除。
+- Phase 10: unified ledger、source mappers、idempotent import、quota、billing/admin UI 完成。
+- Phase 11: Railway/AWS/ECR/S3/secrets/logs/metrics/alerts/CI 部署和运维路径可复现。
+- Phase 12: 真实 staging 用户从登录到 sandbox、provider、harness、usage、quota、admin、secret review 的端到端路径通过。
 
 ## 如何使用这份清单
 

@@ -201,8 +201,10 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 - Phase 0 documentation and release baseline is complete in
   `docs/remote-codex-side-detailed-checklist.md`; live staging verification has
   not run yet.
-- `docs/remote-codex-side-detailed-checklist.md` is the active one-item-at-a-time
-  implementation checklist. Use it for task selection and checkbox updates.
+- `docs/remote-codex-side-product-task-checklist.zh.md` is the active
+  Remote Codex side product task board for one-item-at-a-time implementation.
+  `docs/remote-codex-side-detailed-checklist.md` remains the authoritative
+  Phase 0-6 evidence checklist because the evidence scripts read it directly.
   Keep `docs/remote-codex-side-work-breakdown.md` aligned for the near-term
   queue, and keep `docs/remote-codex-side-execution-checklist.md` synchronized
   when a completed item changes phase evidence or release risk.
@@ -272,15 +274,18 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 1. Run `pnpm phase-zero-six:audit` first and inspect `nextCommands`,
    `blockingGroups`, and item-level `nextEvidenceCommand` fields. Use
    `pnpm phase-zero-six:audit:report` when a human-readable text report is
-   easier than raw JSON. These fields identify whether the next collection step
-   can be AWS-only or must use the full staging/runtime/provider bundle.
+   easier than raw JSON; report commands are read-only and do not fail merely
+   because live evidence is still missing. These fields identify whether the
+   next collection step can be AWS-only or must use the full
+   staging/runtime/provider bundle.
 2. Run `pnpm phase-zero-six:template`, fill
    `.temp/phase-zero-six-evidence/phase-zero-six.env.sh` in a private operator
    shell, then `source` it. Do not commit the filled env file.
 3. Run `pnpm phase-zero-six:env`. Use `pnpm phase-zero-six:env:report` when a
-   human-readable text report is easier than raw JSON. Use `itemReadiness` and
-   `nextCommands` to fill missing AWS, staging runtime, direct-worker, and
-   provider smoke inputs.
+   human-readable text report is easier than raw JSON; report commands are
+   operator aids and do not fail just because env is incomplete. Use
+   `itemReadiness` and `nextCommands` to fill missing AWS, staging runtime,
+   direct-worker, and provider smoke inputs.
 4. Run `pnpm phase-zero-six:collect` once env readiness is complete. This
    collects AWS preflight, staging lifecycle/router smoke, provider gateway
    smoke, verifier output, artifact scans, `operator-report.txt`,
