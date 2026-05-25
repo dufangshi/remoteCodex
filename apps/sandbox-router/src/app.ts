@@ -95,11 +95,47 @@ class ControlPlaneSandboxEndpointResolver implements SandboxEndpointResolver {
 export interface SandboxRouterServices {
   config: SandboxRouterConfig;
   endpointResolver: SandboxEndpointResolver;
+  rateLimiter: FixedWindowRateLimiter;
 }
 
 declare module 'fastify' {
   interface FastifyInstance {
     services: SandboxRouterServices;
+  }
+}
+
+class FixedWindowRateLimiter {
+  private readonly buckets = new Map<string, { count: number; resetAtMs: number }>();
+
+  constructor(
+    private readonly input: {
+      limit: number;
+      windowMs: number;
+      nowMs?: () => number;
+    },
+  ) {}
+
+  consume(key: string) {
+    const now = this.input.nowMs?.() ?? Date.now();
+    const existing = this.buckets.get(key);
+    if (!existing || existing.resetAtMs <= now) {
+      this.buckets.set(key, {
+        count: 1,
+        resetAtMs: now + this.input.windowMs,
+      });
+      return { allowed: true, remaining: this.input.limit - 1, resetAtMs: now + this.input.windowMs };
+    }
+
+    if (existing.count >= this.input.limit) {
+      return { allowed: false, remaining: 0, resetAtMs: existing.resetAtMs };
+    }
+
+    existing.count += 1;
+    return {
+      allowed: true,
+      remaining: this.input.limit - existing.count,
+      resetAtMs: existing.resetAtMs,
+    };
   }
 }
 
@@ -199,8 +235,35 @@ function serializedRequestBody(request: FastifyRequest, maxBytes: number) {
   return body;
 }
 
+function enforceRateLimit(request: FastifyRequest, payload: RouteTokenPayload) {
+  const { config, rateLimiter } = request.server.services;
+  const key = `${payload.sub}:${payload.sandbox_id}`;
+  const result = rateLimiter.consume(key);
+  if (!result.allowed) {
+    const retryAfterSeconds = Math.max(
+      1,
+      Math.ceil((result.resetAtMs - Date.now()) / 1000),
+    );
+    throw new RouterHttpError(
+      429,
+      'rate_limited',
+      `Too many sandbox router requests. Retry after ${retryAfterSeconds} seconds.`,
+    );
+  }
+  request.log.debug(
+    {
+      userId: payload.sub,
+      sandboxId: payload.sandbox_id,
+      remaining: result.remaining,
+      windowMs: config.rateLimitWindowMs,
+    },
+    'sandbox router rate limit consumed',
+  );
+}
+
 async function proxyRequest(request: FastifyRequest) {
   const { payload, path } = verifyRouteTokenForRequest(request);
+  enforceRateLimit(request, payload);
   const { config, endpointResolver } = request.server.services;
   const endpoint = await endpointResolver.resolve({
     sandboxId: payload.sandbox_id,
@@ -272,6 +335,10 @@ export function buildSandboxRouterApp(options: {
   app.decorate('services', {
     config,
     endpointResolver: options.endpointResolver ?? new ControlPlaneSandboxEndpointResolver(config),
+    rateLimiter: new FixedWindowRateLimiter({
+      limit: config.rateLimitRequests,
+      windowMs: config.rateLimitWindowMs,
+    }),
   });
 
   app.get('/healthz', async () => ({ ok: true, role: 'sandbox-router' }));

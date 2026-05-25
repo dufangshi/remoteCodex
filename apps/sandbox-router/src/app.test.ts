@@ -234,6 +234,39 @@ describe('sandbox router', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('rate limits proxied requests per route-token user and sandbox', async () => {
+    vi.stubGlobal('fetch', fetchMock);
+    fetchMock.mockImplementation(
+      () =>
+        Promise.resolve(
+          new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: {
+              'content-type': 'application/json',
+            },
+          }),
+        ),
+    );
+    const app = buildApp(undefined, {
+      SANDBOX_ROUTER_RATE_LIMIT_REQUESTS: '2',
+      SANDBOX_ROUTER_RATE_LIMIT_WINDOW_MS: '60000',
+    });
+    const token = routeToken();
+    const url = `/api/sandboxes/sandbox_1/api/worker/metadata?token=${encodeURIComponent(token)}`;
+
+    const first = await app.inject({ method: 'GET', url });
+    const second = await app.inject({ method: 'GET', url });
+    const third = await app.inject({ method: 'GET', url });
+
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(200);
+    expect(third.statusCode).toBe(429);
+    expect(third.json()).toMatchObject({
+      code: 'rate_limited',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('returns a structured timeout error when the worker does not respond in time', async () => {
     vi.useFakeTimers();
     vi.stubGlobal('fetch', fetchMock);

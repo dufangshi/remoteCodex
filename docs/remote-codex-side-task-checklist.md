@@ -373,7 +373,7 @@ Verification:
 - [x] Inject signed identity envelope when worker scope checks are enabled.
 - [x] Add request size limits.
 - [x] Add idle timeouts.
-- [ ] Add rate limits.
+- [x] Add rate limits.
 - [x] Add structured proxy errors.
 - [x] Add router health endpoint.
 - [ ] Add router audit logs.
@@ -1045,7 +1045,7 @@ token.
 - [x] Strip browser-supplied identity envelope headers.
 - [x] Add request size limits.
 - [x] Add idle timeouts.
-- [ ] Add rate limits.
+- [x] Add rate limits.
 - [x] Add structured proxy errors.
 - [x] Add router health endpoint.
 - [ ] Add router audit logs.

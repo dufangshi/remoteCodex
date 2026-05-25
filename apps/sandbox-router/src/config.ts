@@ -19,6 +19,8 @@ const envSchema = z.object({
   SANDBOX_ROUTER_CONTROL_PLANE_SERVICE_TOKEN: z.string().min(16).optional(),
   SANDBOX_ROUTER_MAX_REQUEST_BYTES: z.coerce.number().int().positive().optional(),
   SANDBOX_ROUTER_UPSTREAM_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
+  SANDBOX_ROUTER_RATE_LIMIT_REQUESTS: z.coerce.number().int().positive().optional(),
+  SANDBOX_ROUTER_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().optional(),
 });
 
 export interface SandboxRouterConfig {
@@ -36,6 +38,8 @@ export interface SandboxRouterConfig {
   controlPlaneServiceToken: string | null;
   maxRequestBytes: number;
   upstreamTimeoutMs: number;
+  rateLimitRequests: number;
+  rateLimitWindowMs: number;
 }
 
 function parseBoolean(value: string | undefined, defaultValue: boolean) {
@@ -140,5 +144,7 @@ export function loadSandboxRouterConfig(
     controlPlaneServiceToken: parsed.SANDBOX_ROUTER_CONTROL_PLANE_SERVICE_TOKEN ?? null,
     maxRequestBytes: parsed.SANDBOX_ROUTER_MAX_REQUEST_BYTES ?? 1024 * 1024 * 8,
     upstreamTimeoutMs: parsed.SANDBOX_ROUTER_UPSTREAM_TIMEOUT_MS ?? 1000 * 60,
+    rateLimitRequests: parsed.SANDBOX_ROUTER_RATE_LIMIT_REQUESTS ?? 120,
+    rateLimitWindowMs: parsed.SANDBOX_ROUTER_RATE_LIMIT_WINDOW_MS ?? 1000 * 60,
   };
 }

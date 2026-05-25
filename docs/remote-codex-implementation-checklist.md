@@ -324,7 +324,7 @@ Goal: browser traffic reaches workers only through a route-token checked proxy.
 - [x] Strip browser-supplied internal worker headers.
 - [x] Add request size limits.
 - [x] Add idle timeout.
-- [ ] Add basic rate limit.
+- [x] Add basic rate limit.
 - [x] Add structured proxy errors.
 - [x] Add router health endpoint.
 
