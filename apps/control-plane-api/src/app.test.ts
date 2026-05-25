@@ -493,6 +493,9 @@ describe('control plane api', () => {
       CONTROL_PLANE_AUTH_MODE: 'jwt',
       CONTROL_PLANE_AUTH_JWT_SECRET: 'production-auth-test-secret',
       CONTROL_PLANE_AUTH_JWT_PROVIDER: 'test-jwt',
+      CONTROL_PLANE_AUTH_JWT_ISSUER: 'https://issuer.example.test',
+      CONTROL_PLANE_AUTH_JWT_AUDIENCE: 'remote-codex',
+      CONTROL_PLANE_AUTH_JWT_CLOCK_SKEW_SECONDS: '30',
       CONTROL_PLANE_ADMIN_IDENTITIES: 'test-jwt:admin',
     };
     const app = buildControlPlaneApp({ env });
@@ -501,6 +504,8 @@ describe('control plane api', () => {
     const token = createSignedToken(
       {
         sub: 'jwt-user',
+        iss: 'https://issuer.example.test',
+        aud: 'remote-codex',
         exp: Math.floor(Date.now() / 1000) + 300,
       },
       'production-auth-test-secret',
@@ -533,6 +538,92 @@ describe('control plane api', () => {
       authProvider: 'test-jwt',
       authSubject: 'jwt-user',
     });
+
+    const wrongIssuerToken = createSignedToken(
+      {
+        sub: 'jwt-user',
+        iss: 'https://other-issuer.example.test',
+        aud: 'remote-codex',
+        exp: Math.floor(Date.now() / 1000) + 300,
+      },
+      'production-auth-test-secret',
+    );
+    const wrongIssuer = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: {
+        authorization: `Bearer ${wrongIssuerToken}`,
+      },
+      payload: {
+        email: 'jwt@example.com',
+      },
+    });
+    expect(wrongIssuer.statusCode).toBe(401);
+
+    const wrongAudienceToken = createSignedToken(
+      {
+        sub: 'jwt-user',
+        iss: 'https://issuer.example.test',
+        aud: 'other-audience',
+        exp: Math.floor(Date.now() / 1000) + 300,
+      },
+      'production-auth-test-secret',
+    );
+    const wrongAudience = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: {
+        authorization: `Bearer ${wrongAudienceToken}`,
+      },
+      payload: {
+        email: 'jwt@example.com',
+      },
+    });
+    expect(wrongAudience.statusCode).toBe(401);
+
+    const skewedToken = createSignedToken(
+      {
+        sub: 'jwt-skewed-user',
+        iss: 'https://issuer.example.test',
+        aud: ['remote-codex', 'secondary'],
+        nbf: Math.floor(Date.now() / 1000) + 20,
+        exp: Math.floor(Date.now() / 1000) - 15,
+      },
+      'production-auth-test-secret',
+    );
+    const skewed = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: {
+        authorization: `Bearer ${skewedToken}`,
+      },
+      payload: {
+        email: 'jwt-skewed@example.com',
+      },
+    });
+    expect(skewed.statusCode).toBe(200);
+
+    const tooEarlyToken = createSignedToken(
+      {
+        sub: 'jwt-too-early-user',
+        iss: 'https://issuer.example.test',
+        aud: 'remote-codex',
+        nbf: Math.floor(Date.now() / 1000) + 90,
+        exp: Math.floor(Date.now() / 1000) + 300,
+      },
+      'production-auth-test-secret',
+    );
+    const tooEarly = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: {
+        authorization: `Bearer ${tooEarlyToken}`,
+      },
+      payload: {
+        email: 'jwt-too-early@example.com',
+      },
+    });
+    expect(tooEarly.statusCode).toBe(401);
   });
 
   it('exposes user management for control-plane administration', async () => {

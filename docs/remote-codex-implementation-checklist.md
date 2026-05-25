@@ -66,6 +66,8 @@ plane. Browser identity must stay outside sandbox service credentials.
 - [x] Implement production auth verifier.
 - [x] Keep `dev:<subject>` auth verifier available for local development.
 - [x] Add tests for production verifier failure paths.
+- [x] Add issuer and audience checks for production verifier.
+- [x] Add clock-skew tolerance for production verifier.
 - [x] Add tests for local dev auth success paths.
 - [x] Add user account status field.
 - [x] Add user billing identity field.

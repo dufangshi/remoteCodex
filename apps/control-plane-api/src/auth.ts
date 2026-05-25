@@ -50,8 +50,13 @@ export class DevAuthVerifier implements AuthVerifier {
 
 export class JwtAuthVerifier implements AuthVerifier {
   constructor(
-    private readonly secret: string,
-    private readonly provider = 'jwt',
+    private readonly input: {
+      secret: string;
+      provider?: string;
+      issuer?: string | null;
+      audience?: string | null;
+      clockSkewSeconds?: number;
+    },
   ) {}
 
   identityFromRequest(request: FastifyRequest): AuthIdentity | null {
@@ -61,9 +66,27 @@ export class JwtAuthVerifier implements AuthVerifier {
     }
 
     try {
-      const payload = verifySignedToken<SignedTokenPayload>(token, this.secret);
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const clockSkewSeconds = this.input.clockSkewSeconds ?? 60;
+      const payload = verifySignedToken<SignedTokenPayload>(
+        token,
+        this.input.secret,
+        nowSeconds - clockSkewSeconds,
+      );
+      if (this.input.issuer && payload.iss !== this.input.issuer) {
+        return null;
+      }
+      if (this.input.audience && !payloadHasAudience(payload.aud, this.input.audience)) {
+        return null;
+      }
+      if (typeof payload.nbf === 'number' && payload.nbf > nowSeconds + clockSkewSeconds) {
+        return null;
+      }
+      if (typeof payload.iat === 'number' && payload.iat > nowSeconds + clockSkewSeconds) {
+        return null;
+      }
       return {
-        authProvider: this.provider,
+        authProvider: this.input.provider ?? 'jwt',
         authSubject: payload.sub,
       };
     } catch {
@@ -72,16 +95,48 @@ export class JwtAuthVerifier implements AuthVerifier {
   }
 }
 
+function payloadHasAudience(value: unknown, expected: string) {
+  if (typeof value === 'string') {
+    return value === expected;
+  }
+  if (Array.isArray(value)) {
+    return value.includes(expected);
+  }
+  return false;
+}
+
 export function createAuthVerifier(input: {
   mode: 'dev' | 'jwt';
   jwtSecret: string | null;
   jwtProvider: string;
+  jwtIssuer?: string | null;
+  jwtAudience?: string | null;
+  jwtClockSkewSeconds?: number;
 }): AuthVerifier {
   if (input.mode === 'jwt') {
     if (!input.jwtSecret) {
       throw new Error('CONTROL_PLANE_AUTH_JWT_SECRET is required when CONTROL_PLANE_AUTH_MODE=jwt.');
     }
-    return new JwtAuthVerifier(input.jwtSecret, input.jwtProvider);
+    const verifierInput: {
+      secret: string;
+      provider: string;
+      issuer?: string | null;
+      audience?: string | null;
+      clockSkewSeconds?: number;
+    } = {
+      secret: input.jwtSecret,
+      provider: input.jwtProvider,
+    };
+    if (input.jwtIssuer !== undefined) {
+      verifierInput.issuer = input.jwtIssuer;
+    }
+    if (input.jwtAudience !== undefined) {
+      verifierInput.audience = input.jwtAudience;
+    }
+    if (input.jwtClockSkewSeconds !== undefined) {
+      verifierInput.clockSkewSeconds = input.jwtClockSkewSeconds;
+    }
+    return new JwtAuthVerifier(verifierInput);
   }
   return new DevAuthVerifier();
 }

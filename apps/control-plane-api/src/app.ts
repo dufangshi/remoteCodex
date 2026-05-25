@@ -231,6 +231,9 @@ export function buildControlPlaneApp(
     mode: config.authMode,
     jwtSecret: config.authJwtSecret,
     jwtProvider: config.authJwtProvider,
+    jwtIssuer: config.authJwtIssuer,
+    jwtAudience: config.authJwtAudience,
+    jwtClockSkewSeconds: config.authJwtClockSkewSeconds,
   });
 
   const app = Fastify({

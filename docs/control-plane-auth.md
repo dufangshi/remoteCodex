@@ -22,6 +22,9 @@ repository or route ownership checks.
 CONTROL_PLANE_AUTH_MODE=dev | jwt
 CONTROL_PLANE_AUTH_JWT_SECRET=<secret-for-jwt-mode>
 CONTROL_PLANE_AUTH_JWT_PROVIDER=jwt
+CONTROL_PLANE_AUTH_JWT_ISSUER=<expected-iss>
+CONTROL_PLANE_AUTH_JWT_AUDIENCE=<expected-aud>
+CONTROL_PLANE_AUTH_JWT_CLOCK_SKEW_SECONDS=60
 ```
 
 `CONTROL_PLANE_AUTH_MODE=dev` is the default for local development and tests.
@@ -43,6 +46,14 @@ X-Auth-Subject: <subject>
 
 This is only for development and tests. Production deployments should use
 `CONTROL_PLANE_AUTH_MODE=jwt` or a provider-specific verifier.
+
+The generic `jwt` verifier checks:
+
+- HMAC signature.
+- Expiry with configured clock-skew tolerance.
+- `nbf` and future `iat` with configured clock-skew tolerance.
+- `iss` when `CONTROL_PLANE_AUTH_JWT_ISSUER` is set.
+- `aud` when `CONTROL_PLANE_AUTH_JWT_AUDIENCE` is set.
 
 ## Product User Records
 

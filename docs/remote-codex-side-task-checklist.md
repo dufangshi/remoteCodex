@@ -85,8 +85,8 @@ without exposing product identity tokens to sandbox workers.
 - [ ] Document required auth provider environment variables.
 - [ ] Document how auth subjects map to Remote Codex users.
 - [ ] Add auth-provider-specific integration tests or smoke tests.
-- [ ] Add token issuer and audience checks for production mode.
-- [ ] Add clock-skew tolerance for provider JWT validation.
+- [x] Add token issuer and audience checks for production mode.
+- [x] Add clock-skew tolerance for provider JWT validation.
 - [ ] Add clear `401` and `403` error response shapes.
 
 ### User Model

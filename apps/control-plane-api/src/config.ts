@@ -21,6 +21,9 @@ const envSchema = z.object({
   CONTROL_PLANE_AUTH_MODE: z.enum(['dev', 'jwt']).optional(),
   CONTROL_PLANE_AUTH_JWT_SECRET: z.string().min(16).optional(),
   CONTROL_PLANE_AUTH_JWT_PROVIDER: z.string().min(1).optional(),
+  CONTROL_PLANE_AUTH_JWT_ISSUER: z.string().min(1).optional(),
+  CONTROL_PLANE_AUTH_JWT_AUDIENCE: z.string().min(1).optional(),
+  CONTROL_PLANE_AUTH_JWT_CLOCK_SKEW_SECONDS: z.coerce.number().int().nonnegative().optional(),
 });
 
 export interface ControlPlaneConfig {
@@ -40,6 +43,9 @@ export interface ControlPlaneConfig {
   authMode: 'dev' | 'jwt';
   authJwtSecret: string | null;
   authJwtProvider: string;
+  authJwtIssuer: string | null;
+  authJwtAudience: string | null;
+  authJwtClockSkewSeconds: number;
   routeTokenSigningKeys: Array<{ id: string; secret: string }>;
 }
 
@@ -123,6 +129,9 @@ export function loadControlPlaneConfig(
     authMode: parsed.CONTROL_PLANE_AUTH_MODE ?? 'dev',
     authJwtSecret: parsed.CONTROL_PLANE_AUTH_JWT_SECRET ?? null,
     authJwtProvider: parsed.CONTROL_PLANE_AUTH_JWT_PROVIDER ?? 'jwt',
+    authJwtIssuer: parsed.CONTROL_PLANE_AUTH_JWT_ISSUER ?? null,
+    authJwtAudience: parsed.CONTROL_PLANE_AUTH_JWT_AUDIENCE ?? null,
+    authJwtClockSkewSeconds: parsed.CONTROL_PLANE_AUTH_JWT_CLOCK_SKEW_SECONDS ?? 60,
     routeTokenSigningKeys,
   };
 }
