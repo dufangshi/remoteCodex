@@ -16,6 +16,18 @@ function testEnv(name: string) {
   };
 }
 
+function decodeTokenHeader(token: string) {
+  const [encodedHeader] = token.split('.');
+  if (!encodedHeader) {
+    throw new Error('Missing token header.');
+  }
+  const normalized = encodedHeader.replaceAll('-', '+').replaceAll('_', '/');
+  const padding = '='.repeat((4 - (normalized.length % 4)) % 4);
+  return JSON.parse(Buffer.from(`${normalized}${padding}`, 'base64').toString('utf8')) as {
+    kid?: string;
+  };
+}
+
 describe('control plane api', () => {
   const apps: ReturnType<typeof buildControlPlaneApp>[] = [];
 
@@ -145,6 +157,7 @@ describe('control plane api', () => {
     const route = tokenResponse.json();
     expect(route.routerBaseUrl).toBe('https://sandbox-gateway.test');
     expect(route.wsBaseUrl).toBe('wss://sandbox-gateway.test');
+    expect(decodeTokenHeader(route.token).kid).toBe('current');
 
     const verify = await app.inject({
       method: 'GET',
@@ -181,6 +194,81 @@ describe('control plane api', () => {
       url: `/api/route-token/verify?token=${encodeURIComponent(`${route.token}x`)}`,
     });
     expect(tamperedVerify.statusCode).toBe(401);
+  });
+
+  it('supports route-token signing key rotation', async () => {
+    const app = buildControlPlaneApp({
+      env: {
+        ...testEnv('route-token-rotation'),
+        CONTROL_PLANE_JWT_SECRET_ID: 'key-2026-05',
+        CONTROL_PLANE_JWT_SECRET: 'current-route-token-secret',
+        CONTROL_PLANE_JWT_PREVIOUS_SECRETS: 'key-2026-04:previous-route-token-secret',
+      },
+    });
+    apps.push(app);
+
+    const auth = { authorization: 'Bearer dev:rotation-user' };
+    const bootstrap = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: auth,
+      payload: {
+        email: 'rotation@example.com',
+      },
+    });
+    const sandbox = bootstrap.json().sandbox;
+    await app.inject({
+      method: 'POST',
+      url: '/api/sandbox/start',
+      headers: auth,
+    });
+
+    const route = await app.inject({
+      method: 'POST',
+      url: `/api/sandboxes/${sandbox.id}/route-token`,
+      headers: auth,
+      payload: {
+        scopes: ['worker:read'],
+      },
+    });
+    expect(route.statusCode).toBe(200);
+    expect(decodeTokenHeader(route.json().token).kid).toBe('key-2026-05');
+
+    const previousToken = createSignedToken(
+      {
+        sub: bootstrap.json().user.id,
+        sandbox_id: sandbox.id,
+        scopes: ['worker:read'],
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + 60,
+        jti: 'previous-key-token',
+      },
+      'previous-route-token-secret',
+      { kid: 'key-2026-04' },
+    );
+    const previousVerify = await app.inject({
+      method: 'GET',
+      url: `/api/route-token/verify?token=${encodeURIComponent(previousToken)}`,
+    });
+    expect(previousVerify.statusCode).toBe(200);
+
+    const unknownKeyToken = createSignedToken(
+      {
+        sub: bootstrap.json().user.id,
+        sandbox_id: sandbox.id,
+        scopes: ['worker:read'],
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + 60,
+        jti: 'unknown-key-token',
+      },
+      'unknown-route-token-secret',
+      { kid: 'unknown-key' },
+    );
+    const unknownKeyVerify = await app.inject({
+      method: 'GET',
+      url: `/api/route-token/verify?token=${encodeURIComponent(unknownKeyToken)}`,
+    });
+    expect(unknownKeyVerify.statusCode).toBe(401);
   });
 
   it('manages projects, project workspaces, session metadata, restart, and health', async () => {

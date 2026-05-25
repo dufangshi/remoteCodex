@@ -10,6 +10,8 @@ const envSchema = z.object({
   CONTROL_PLANE_DATABASE_URL: z.string().optional(),
   DATABASE_URL: z.string().optional(),
   CONTROL_PLANE_JWT_SECRET: z.string().min(16).optional(),
+  CONTROL_PLANE_JWT_SECRET_ID: z.string().min(1).optional(),
+  CONTROL_PLANE_JWT_PREVIOUS_SECRETS: z.string().optional(),
   SANDBOX_ROUTER_BASE_URL: z.string().url().optional(),
   SANDBOX_ROUTE_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().optional(),
   SANDBOX_DEFAULT_IMAGE: z.string().min(1).optional(),
@@ -38,6 +40,28 @@ export interface ControlPlaneConfig {
   authMode: 'dev' | 'jwt';
   authJwtSecret: string | null;
   authJwtProvider: string;
+  routeTokenSigningKeys: Array<{ id: string; secret: string }>;
+}
+
+function parsePreviousSigningKeys(value: string | undefined) {
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const separator = entry.indexOf(':');
+      if (separator <= 0 || separator === entry.length - 1) {
+        throw new Error('CONTROL_PLANE_JWT_PREVIOUS_SECRETS entries must use kid:secret format.');
+      }
+      return {
+        id: entry.slice(0, separator),
+        secret: entry.slice(separator + 1),
+      };
+    });
 }
 
 export function loadControlPlaneConfig(
@@ -50,6 +74,27 @@ export function loadControlPlaneConfig(
       ? nodeEnv === 'production'
       : ['1', 'true', 'yes', 'on'].includes(parsed.DISABLE_REQUEST_LOGGING.toLowerCase());
 
+  const jwtSecret =
+    parsed.CONTROL_PLANE_JWT_SECRET ??
+    'dev-control-plane-route-token-secret';
+  const routeTokenSigningKeys = [
+    {
+      id: parsed.CONTROL_PLANE_JWT_SECRET_ID ?? 'current',
+      secret: jwtSecret,
+    },
+    ...parsePreviousSigningKeys(parsed.CONTROL_PLANE_JWT_PREVIOUS_SECRETS),
+  ];
+  const signingKeyIds = new Set<string>();
+  for (const key of routeTokenSigningKeys) {
+    if (signingKeyIds.has(key.id)) {
+      throw new Error(`Duplicate route-token signing key id: ${key.id}`);
+    }
+    if (key.secret.length < 16) {
+      throw new Error(`Route-token signing key ${key.id} must be at least 16 characters.`);
+    }
+    signingKeyIds.add(key.id);
+  }
+
   return {
     nodeEnv,
     host: parsed.HOST ?? '127.0.0.1',
@@ -61,9 +106,7 @@ export function loadControlPlaneConfig(
         parsed.DATABASE_URL ??
         path.join('.local', 'control-plane-dev.sqlite'),
     ),
-    jwtSecret:
-      parsed.CONTROL_PLANE_JWT_SECRET ??
-      'dev-control-plane-route-token-secret',
+    jwtSecret,
     routerBaseUrl: parsed.SANDBOX_ROUTER_BASE_URL ?? 'http://127.0.0.1:8791',
     routeTokenTtlSeconds: parsed.SANDBOX_ROUTE_TOKEN_TTL_SECONDS ?? 300,
     sandboxDefaultImage:
@@ -80,5 +123,6 @@ export function loadControlPlaneConfig(
     authMode: parsed.CONTROL_PLANE_AUTH_MODE ?? 'dev',
     authJwtSecret: parsed.CONTROL_PLANE_AUTH_JWT_SECRET ?? null,
     authJwtProvider: parsed.CONTROL_PLANE_AUTH_JWT_PROVIDER ?? 'jwt',
+    routeTokenSigningKeys,
   };
 }

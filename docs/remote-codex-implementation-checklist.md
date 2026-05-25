@@ -174,7 +174,7 @@ user.
 - [x] Implement local no-op sandbox adapter for tests.
 - [x] Implement local worker-process adapter for development.
 - [x] Add local adapter tests.
-- [ ] Document local sandbox development environment variables.
+- [x] Document local sandbox development environment variables.
 
 ### AWS Adapter
 
@@ -288,7 +288,7 @@ Goal: browser traffic reaches workers only through a route-token checked proxy.
 - [x] Include expiry.
 - [x] Include nonce or token id.
 - [x] Sign route tokens with control-plane secret.
-- [ ] Add key rotation strategy for route-token signing.
+- [x] Add key rotation strategy for route-token signing.
 - [x] Add tests for expired route token.
 - [x] Add tests for wrong sandbox route token.
 - [x] Add tests for tampered route token.

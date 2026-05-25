@@ -37,12 +37,37 @@ export interface SignedTokenPayload {
   [key: string]: unknown;
 }
 
-export function createSignedToken(payload: SignedTokenPayload, secret: string): string {
-  const header = { alg: 'HS256', typ: 'JWT' };
+export interface SigningKey {
+  id: string;
+  secret: string;
+}
+
+export function createSignedToken(
+  payload: SignedTokenPayload,
+  secret: string,
+  options: { kid?: string } = {},
+): string {
+  const header = {
+    alg: 'HS256',
+    typ: 'JWT',
+    ...(options.kid ? { kid: options.kid } : {}),
+  };
   const encodedHeader = base64UrlEncode(JSON.stringify(header));
   const encodedPayload = base64UrlEncode(JSON.stringify(payload));
   const signingInput = `${encodedHeader}.${encodedPayload}`;
   return `${signingInput}.${sign(signingInput, secret)}`;
+}
+
+function decodeHeader(token: string) {
+  const [encodedHeader] = token.split('.');
+  if (!encodedHeader) {
+    throw new Error('Invalid token shape.');
+  }
+  return JSON.parse(base64UrlDecode(encodedHeader).toString('utf8')) as {
+    alg?: string;
+    typ?: string;
+    kid?: string;
+  };
 }
 
 export function verifySignedToken<TPayload extends { sub: string; exp: number } = RouteTokenPayload>(
@@ -72,4 +97,40 @@ export function verifySignedToken<TPayload extends { sub: string; exp: number } 
   }
 
   return payload;
+}
+
+export function verifySignedTokenWithKeys<
+  TPayload extends { sub: string; exp: number } = RouteTokenPayload,
+>(
+  token: string,
+  keys: SigningKey[],
+  nowSeconds = Math.floor(Date.now() / 1000),
+) {
+  if (keys.length === 0) {
+    throw new Error('No signing keys configured.');
+  }
+
+  const header = decodeHeader(token);
+  if (header.alg !== 'HS256') {
+    throw new Error('Unsupported token algorithm.');
+  }
+
+  if (header.kid) {
+    const key = keys.find((candidate) => candidate.id === header.kid);
+    if (!key) {
+      throw new Error('Unknown token key id.');
+    }
+    return verifySignedToken<TPayload>(token, key.secret, nowSeconds);
+  }
+
+  let lastError: unknown = null;
+  for (const key of keys) {
+    try {
+      return verifySignedToken<TPayload>(token, key.secret, nowSeconds);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('Invalid token.');
 }

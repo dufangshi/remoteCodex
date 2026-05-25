@@ -209,6 +209,56 @@ DATABASE_URL=/home/agent/.remote-codex/worker.sqlite
 REMOTE_CODEX_DISABLE_BUILD_RESTART=true
 ```
 
+## Local Sandbox Development
+
+Local development can run the control plane outside the worker and use the
+`LocalWorkerProcessSandboxManager` to start a worker process on the same
+machine. This is only for development and tests; production must use an
+isolated container or VM runtime.
+
+Control-plane environment:
+
+```text
+NODE_ENV=development
+CONTROL_PLANE_DATABASE_URL=.local/control-plane-dev.sqlite
+CONTROL_PLANE_AUTH_MODE=dev
+CONTROL_PLANE_ADMIN_IDENTITIES=dev:admin
+SANDBOX_ROUTER_BASE_URL=http://127.0.0.1:8791
+SANDBOX_ROUTE_TOKEN_TTL_SECONDS=300
+SANDBOX_DEFAULT_IMAGE=remote-codex-worker:development
+SANDBOX_DEFAULT_REGION=local
+SANDBOX_S3_PREFIX_BASE=s3://remote-codex-sandboxes/dev
+CONTROL_PLANE_JWT_SECRET_ID=local-current
+CONTROL_PLANE_JWT_SECRET=<local-route-token-secret-at-least-16-chars>
+CONTROL_PLANE_JWT_PREVIOUS_SECRETS=local-old:<old-secret-if-rotating>
+```
+
+Local worker-process adapter configuration:
+
+```text
+SANDBOX_LOCAL_WORKER_COMMAND=<node-or-script-command>
+SANDBOX_LOCAL_WORKER_ARGS=<optional-args>
+REMOTE_CODEX_WORKER_AUTH_TOKEN=<local-worker-internal-token>
+WORKSPACE_ROOT=/workspace
+HOME=/home/agent
+```
+
+The adapter injects these worker identity variables for each sandbox start:
+
+```text
+REMOTE_CODEX_RUNTIME_ROLE=worker
+REMOTE_CODEX_SANDBOX_ID=<sandbox-id>
+REMOTE_CODEX_USER_ID=<user-id>
+REMOTE_CODEX_WORKER_AUTH_TOKEN=<local-worker-internal-token>
+WORKSPACE_ROOT=/workspace
+HOME=/home/agent
+```
+
+The local adapter does not provide filesystem or process isolation by itself.
+Use it to validate control-plane API flows, route-token issuance, worker
+startup, and UI behavior. Use the worker image or an AWS adapter for isolation
+testing.
+
 Worker metadata is exposed for the router/control plane:
 
 ```text
@@ -342,6 +392,20 @@ The response contains:
 - `wsBaseUrl`
 - `token`
 - `expiresAt`
+
+Route-token signing supports key rotation:
+
+```text
+CONTROL_PLANE_JWT_SECRET_ID=<current-key-id>
+CONTROL_PLANE_JWT_SECRET=<current-secret>
+CONTROL_PLANE_JWT_PREVIOUS_SECRETS=<old-key-id>:<old-secret>,<older-key-id>:<older-secret>
+```
+
+New tokens are signed with the current key and include the current key id in the
+JWT header. Verification accepts the current key and configured previous keys.
+After all tokens signed by an old key have expired, remove that key from
+`CONTROL_PLANE_JWT_PREVIOUS_SECRETS`. Keep route-token TTLs short so rotation
+windows stay small.
 
 The AWS sandbox router validates the signed token, checks that the path
 `sandboxId` matches the token payload, and proxies HTTP/SSE/WSS to the worker

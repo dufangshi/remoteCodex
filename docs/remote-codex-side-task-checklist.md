@@ -225,7 +225,7 @@ start, stop, observe, and eventually snapshot it.
 - [x] Implement local no-op sandbox adapter for tests.
 - [x] Implement local worker-process sandbox adapter for development.
 - [x] Add local adapter tests.
-- [ ] Document local sandbox development environment variables.
+- [x] Document local sandbox development environment variables.
 - [ ] Add a local smoke script that starts control plane plus local worker.
 - [ ] Add local route-token smoke test against the worker process.
 
@@ -374,8 +374,8 @@ token.
 - [x] Add tests for expired tokens.
 - [x] Add tests for tampered tokens.
 - [x] Add tests for wrong-sandbox tokens.
-- [ ] Add key id to route token header or payload.
-- [ ] Add route-token signing key rotation strategy.
+- [x] Add key id to route token header or payload.
+- [x] Add route-token signing key rotation strategy.
 - [ ] Add route-token revocation strategy if required.
 
 ### Control-Plane Route Token API

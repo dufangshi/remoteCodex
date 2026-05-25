@@ -23,7 +23,7 @@ import {
 } from './auth';
 import { ControlPlaneConfig, loadControlPlaneConfig } from './config';
 import { ControlPlaneRepository } from './repository';
-import { createSignedToken, verifySignedToken } from './tokens';
+import { createSignedToken, verifySignedTokenWithKeys } from './tokens';
 
 class HttpError extends Error {
   constructor(
@@ -706,13 +706,18 @@ export function buildControlPlaneApp(
         exp: expiresAtSeconds,
         jti: randomUUID(),
       };
+    const signingKey = config.routeTokenSigningKeys[0];
+    if (!signingKey) {
+      throw new HttpError(500, 'route_token_config_error', 'Route token signing key is not configured.');
+    }
     const token = createSignedToken(
       {
         ...payload,
         ...(input.workspaceId ? { workspace_id: input.workspaceId } : {}),
         ...(input.sessionId ? { session_id: input.sessionId } : {}),
       },
-      config.jwtSecret,
+      signingKey.secret,
+      { kid: signingKey.id },
     );
 
     repository.audit(user.id, 'route_token.issued', 'sandbox', sandbox.id, {
@@ -733,7 +738,7 @@ export function buildControlPlaneApp(
   app.get('/api/route-token/verify', async (request) => {
     const token = z.object({ token: z.string().min(1) }).parse(request.query).token;
     try {
-      return { payload: verifySignedToken(token, config.jwtSecret) };
+      return { payload: verifySignedTokenWithKeys(token, config.routeTokenSigningKeys) };
     } catch {
       throw new HttpError(401, 'invalid_route_token', 'Route token is invalid or expired.');
     }
