@@ -132,6 +132,23 @@ function buildWorkerUrl(workerBaseUrl: string, pathSuffix: string, request: Fast
   return url;
 }
 
+function serializedRequestBody(request: FastifyRequest, maxBytes: number) {
+  if (['GET', 'HEAD'].includes(request.method)) {
+    return undefined;
+  }
+
+  const body = JSON.stringify(request.body ?? {});
+  const byteLength = Buffer.byteLength(body);
+  if (byteLength > maxBytes) {
+    throw new RouterHttpError(
+      413,
+      'request_too_large',
+      `Request body exceeds the sandbox router limit of ${maxBytes} bytes.`,
+    );
+  }
+  return body;
+}
+
 async function proxyRequest(request: FastifyRequest) {
   const { payload, path } = verifyRouteTokenForRequest(request);
   const { config, endpointResolver } = request.server.services;
@@ -161,11 +178,30 @@ async function proxyRequest(request: FastifyRequest) {
     method: request.method,
     headers,
   };
-  if (!['GET', 'HEAD'].includes(request.method)) {
-    init.body = JSON.stringify(request.body ?? {});
+  const body = serializedRequestBody(request, config.maxRequestBytes);
+  if (body !== undefined) {
+    init.body = body;
   }
 
-  return fetch(buildWorkerUrl(endpoint.workerBaseUrl, path, request), init);
+  const abortController = new AbortController();
+  const timeout = setTimeout(() => abortController.abort(), config.upstreamTimeoutMs);
+  try {
+    return await fetch(buildWorkerUrl(endpoint.workerBaseUrl, path, request), {
+      ...init,
+      signal: abortController.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new RouterHttpError(
+        504,
+        'worker_timeout',
+        'Sandbox worker did not respond before the router timeout.',
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export function buildSandboxRouterApp(options: {

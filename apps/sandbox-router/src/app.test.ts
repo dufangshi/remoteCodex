@@ -21,13 +21,14 @@ function routeToken(input: Partial<RouteTokenPayload> = {}) {
   return createSignedToken(payload, signingSecret, { kid: 'current' });
 }
 
-function testEnv() {
+function testEnv(overrides: Record<string, string> = {}) {
   return {
     NODE_ENV: 'test',
     CONTROL_PLANE_JWT_SECRET: signingSecret,
     CONTROL_PLANE_JWT_SECRET_ID: 'current',
     SANDBOX_ROUTER_WORKER_AUTH_TOKEN: 'internal-worker-token',
     SANDBOX_ROUTER_WORKER_IDENTITY_SECRET: workerIdentitySecret,
+    ...overrides,
   };
 }
 
@@ -48,9 +49,10 @@ describe('sandbox router', () => {
         return { workerBaseUrl: 'https://worker.example.test' };
       },
     },
+    envOverrides: Record<string, string> = {},
   ) {
     const app = buildSandboxRouterApp({
-      env: testEnv(),
+      env: testEnv(envOverrides),
       endpointResolver: resolver,
     });
     apps.push(app);
@@ -155,5 +157,59 @@ describe('sandbox router', () => {
     expect(response.json()).toMatchObject({
       code: 'worker_unavailable',
     });
+  });
+
+  it('rejects proxied request bodies that exceed the configured byte limit', async () => {
+    vi.stubGlobal('fetch', fetchMock);
+    const app = buildApp(undefined, {
+      SANDBOX_ROUTER_MAX_REQUEST_BYTES: '16',
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/sandboxes/sandbox_1/api/threads/thread_1/prompt?token=${encodeURIComponent(routeToken())}`,
+      headers: {
+        'content-type': 'application/json',
+      },
+      payload: {
+        prompt: 'this body is too large',
+      },
+    });
+
+    expect(response.statusCode).toBe(413);
+    expect(response.json()).toMatchObject({
+      code: 'request_too_large',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns a structured timeout error when the worker does not respond in time', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', fetchMock);
+    fetchMock.mockImplementation(
+      (_url: URL, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => {
+            const error = new Error('aborted');
+            error.name = 'AbortError';
+            reject(error);
+          });
+        }),
+    );
+    const app = buildApp(undefined, {
+      SANDBOX_ROUTER_UPSTREAM_TIMEOUT_MS: '25',
+    });
+
+    const request = app.inject({
+      method: 'GET',
+      url: `/api/sandboxes/sandbox_1/api/worker/metadata?token=${encodeURIComponent(routeToken())}`,
+    });
+    await vi.advanceTimersByTimeAsync(25);
+    const response = await request;
+
+    expect(response.statusCode).toBe(504);
+    expect(response.json()).toMatchObject({
+      code: 'worker_timeout',
+    });
+    vi.useRealTimers();
   });
 });

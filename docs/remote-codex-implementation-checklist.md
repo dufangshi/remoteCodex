@@ -322,8 +322,8 @@ Goal: browser traffic reaches workers only through a route-token checked proxy.
 - [ ] Resolve sandbox endpoint from control plane or registry.
 - [x] Inject `X-Remote-Codex-Worker-Token`.
 - [x] Strip browser-supplied internal worker headers.
-- [ ] Add request size limits.
-- [ ] Add idle timeout.
+- [x] Add request size limits.
+- [x] Add idle timeout.
 - [ ] Add basic rate limit.
 - [x] Add structured proxy errors.
 - [x] Add router health endpoint.

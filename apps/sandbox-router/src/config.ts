@@ -15,6 +15,8 @@ const envSchema = z.object({
   SANDBOX_ROUTER_WORKER_IDENTITY_SECRET: z.string().min(1).optional(),
   SANDBOX_ROUTER_STATIC_ENDPOINTS: z.string().optional(),
   SANDBOX_ROUTER_DEFAULT_WORKER_BASE_URL: z.string().url().optional(),
+  SANDBOX_ROUTER_MAX_REQUEST_BYTES: z.coerce.number().int().positive().optional(),
+  SANDBOX_ROUTER_UPSTREAM_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
 });
 
 export interface SandboxRouterConfig {
@@ -28,6 +30,8 @@ export interface SandboxRouterConfig {
   workerIdentitySecret: string | null;
   staticEndpoints: Map<string, string>;
   defaultWorkerBaseUrl: string | null;
+  maxRequestBytes: number;
+  upstreamTimeoutMs: number;
 }
 
 function parseBoolean(value: string | undefined, defaultValue: boolean) {
@@ -120,5 +124,7 @@ export function loadSandboxRouterConfig(
     workerIdentitySecret: parsed.SANDBOX_ROUTER_WORKER_IDENTITY_SECRET ?? null,
     staticEndpoints: parseStaticEndpoints(parsed.SANDBOX_ROUTER_STATIC_ENDPOINTS),
     defaultWorkerBaseUrl: parsed.SANDBOX_ROUTER_DEFAULT_WORKER_BASE_URL ?? null,
+    maxRequestBytes: parsed.SANDBOX_ROUTER_MAX_REQUEST_BYTES ?? 1024 * 1024 * 8,
+    upstreamTimeoutMs: parsed.SANDBOX_ROUTER_UPSTREAM_TIMEOUT_MS ?? 1000 * 60,
   };
 }

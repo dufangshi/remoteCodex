@@ -371,8 +371,8 @@ Verification:
 - [x] Strip browser-supplied internal worker headers.
 - [x] Strip browser-supplied identity envelope headers.
 - [x] Inject signed identity envelope when worker scope checks are enabled.
-- [ ] Add request size limits.
-- [ ] Add idle timeouts.
+- [x] Add request size limits.
+- [x] Add idle timeouts.
 - [ ] Add rate limits.
 - [x] Add structured proxy errors.
 - [x] Add router health endpoint.
@@ -1043,8 +1043,8 @@ token.
 - [x] Inject `X-Remote-Codex-Worker-Token`.
 - [x] Strip browser-supplied internal worker headers.
 - [x] Strip browser-supplied identity envelope headers.
-- [ ] Add request size limits.
-- [ ] Add idle timeouts.
+- [x] Add request size limits.
+- [x] Add idle timeouts.
 - [ ] Add rate limits.
 - [x] Add structured proxy errors.
 - [x] Add router health endpoint.
