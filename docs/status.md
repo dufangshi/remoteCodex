@@ -79,9 +79,10 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 
 - Phase 0 documentation and release baseline is complete for this branch; live
   staging verification has not run yet.
-- `docs/remote-codex-side-work-breakdown.md` is the active one-item-at-a-time
-  implementation checklist. Use it for day-to-day task selection and checkbox
-  updates; keep `docs/remote-codex-side-execution-checklist.md` synchronized
+- `docs/remote-codex-side-detailed-checklist.md` is the active one-item-at-a-time
+  implementation checklist. Use it for task selection and checkbox updates.
+  Keep `docs/remote-codex-side-work-breakdown.md` aligned for the near-term
+  queue, and keep `docs/remote-codex-side-execution-checklist.md` synchronized
   when a completed item changes phase evidence or release risk.
 - AWS sandbox adapter implementation.
 - Frontend auth shell covers the local login route, authenticated route guard,
@@ -99,8 +100,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   smoke checks remain open.
 - Worker image runtime pinning, local Docker build, local `/readyz` smoke, local
   worker auth denial/success smoke, and GitHub Actions worker image CI smoke
-  are verified. CI run `26395932692` passed on
-  `sandbox-worker-control-plane`.
+  are verified. CI run `26396842026` passed on
+  `sandbox-worker-control-plane` at commit
+  `4530b9148d9ba293d29200420d58c9ae8bba6cdb`.
 - Worker artifact register, metadata/list, download, and delete routes exist
   behind signed identity-envelope `artifact:read` and `artifact:write` scopes.
 - LLM gateway contract is fixed on a sub2api-compatible shape; provisioning,
