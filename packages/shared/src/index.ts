@@ -290,6 +290,30 @@ export interface WorkspaceTreeDto {
   nodes: WorkspaceTreeNodeDto[];
 }
 
+export interface WorkspaceFileDto {
+  path: string;
+  absPath: string;
+  kind: 'file' | 'directory';
+  size: number;
+  updatedAt: string;
+}
+
+export interface WriteWorkspaceFileInput {
+  path: string;
+  content: string;
+}
+
+export interface MoveWorkspaceFileInput {
+  fromPath: string;
+  toPath: string;
+  overwrite?: boolean;
+}
+
+export interface DeleteWorkspaceFileInput {
+  path: string;
+  recursive?: boolean;
+}
+
 export type ApprovalMode = 'yolo' | 'guarded';
 export type ReasoningEffortDto = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 export type CollaborationModeDto = 'default' | 'plan';

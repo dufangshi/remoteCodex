@@ -21,14 +21,20 @@ import {
 } from '../../../../packages/db/src/index';
 import {
   UpdateWorkspaceInput,
+  WorkspaceFileDto,
+  WriteWorkspaceFileInput,
   WorkspaceDto,
   WorkspaceTreeDto
 } from '../../../../packages/shared/src/index';
 import {
+  deleteWorkspaceFile,
+  moveWorkspaceFile,
   readWorkspaceTree,
-  validateWorkspacePath
+  validateWorkspacePath,
+  writeWorkspaceFile
 } from '../../../../packages/workspace/src/index';
 import { HttpError } from '../app';
+import { requireWorkerScope } from '../worker-identity';
 import { getWorkspaceSettings } from '../workspace-settings';
 
 const createWorkspaceSchema = z.union([
@@ -48,6 +54,21 @@ const updateFavoriteSchema = z.object({
 
 const updateWorkspaceSchema = z.object({
   label: z.string().min(1)
+});
+
+const workspaceFilePathSchema = z.string().trim().min(1).max(4096);
+const writeWorkspaceFileSchema = z.object({
+  path: workspaceFilePathSchema,
+  content: z.string()
+});
+const moveWorkspaceFileSchema = z.object({
+  fromPath: workspaceFilePathSchema,
+  toPath: workspaceFilePathSchema,
+  overwrite: z.boolean().optional()
+});
+const deleteWorkspaceFileSchema = z.object({
+  path: workspaceFilePathSchema,
+  recursive: z.boolean().optional()
 });
 
 const treeQuerySchema = z.object({
@@ -73,6 +94,35 @@ function toWorkspaceDto(record: {
     createdAt: record.createdAt,
     lastOpenedAt: record.lastOpenedAt
   };
+}
+
+function toWorkspaceFileDto(file: {
+  path: string;
+  absPath: string;
+  kind: 'file' | 'directory';
+  size: number;
+  updatedAt: string;
+}): WorkspaceFileDto {
+  return {
+    path: file.path,
+    absPath: file.absPath,
+    kind: file.kind,
+    size: file.size,
+    updatedAt: file.updatedAt,
+  };
+}
+
+function getWorkspaceOrThrow(app: FastifyInstance, id: string) {
+  const record = getWorkspaceRecordById(app.services.database.db, id);
+
+  if (!record) {
+    throw new HttpError(404, {
+      code: 'not_found',
+      message: 'Workspace was not found.'
+    });
+  }
+
+  return record;
 }
 
 function inferGitRepoName(gitUrl: string) {
@@ -235,6 +285,103 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     });
 
     return toWorkspaceDto(created);
+  });
+
+  app.put('/api/workspaces/:id/files', async (request) => {
+    requireWorkerScope(request, 'file:write');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = writeWorkspaceFileSchema.parse(request.body) satisfies WriteWorkspaceFileInput;
+    const record = getWorkspaceOrThrow(app, params.id);
+
+    const file = await writeWorkspaceFile({
+      workspacePath: record.absPath,
+      relativePath: body.path,
+      content: body.content,
+    });
+
+    return toWorkspaceFileDto(file);
+  });
+
+  app.post('/api/workspaces/:id/files/upload', async (request) => {
+    requireWorkerScope(request, 'file:write');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const record = getWorkspaceOrThrow(app, params.id);
+
+    if (!request.isMultipart()) {
+      throw new HttpError(400, {
+        code: 'bad_request',
+        message: 'File upload must use multipart/form-data.',
+      });
+    }
+
+    let relativePath: string | null = null;
+    let fileBuffer: Buffer | null = null;
+    for await (const part of request.parts()) {
+      if (part.type === 'file') {
+        if (part.fieldname !== 'file') {
+          throw new HttpError(400, {
+            code: 'bad_request',
+            message: `Unexpected multipart file field: ${part.fieldname}.`,
+          });
+        }
+        if (fileBuffer) {
+          throw new HttpError(400, {
+            code: 'bad_request',
+            message: 'Only one file can be uploaded at a time.',
+          });
+        }
+        fileBuffer = await part.toBuffer();
+        continue;
+      }
+
+      if (part.fieldname === 'path') {
+        relativePath = String(part.value ?? '').trim();
+      }
+    }
+
+    if (!relativePath || !fileBuffer) {
+      throw new HttpError(400, {
+        code: 'bad_request',
+        message: 'File upload requires path and file fields.',
+      });
+    }
+
+    const file = await writeWorkspaceFile({
+      workspacePath: record.absPath,
+      relativePath,
+      content: fileBuffer,
+    });
+
+    return toWorkspaceFileDto(file);
+  });
+
+  app.patch('/api/workspaces/:id/files/move', async (request) => {
+    requireWorkerScope(request, 'file:write');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = moveWorkspaceFileSchema.parse(request.body);
+    const record = getWorkspaceOrThrow(app, params.id);
+
+    const file = await moveWorkspaceFile({
+      workspacePath: record.absPath,
+      fromPath: body.fromPath,
+      toPath: body.toPath,
+      ...(body.overwrite !== undefined ? { overwrite: body.overwrite } : {}),
+    });
+
+    return toWorkspaceFileDto(file);
+  });
+
+  app.delete('/api/workspaces/:id/files', async (request) => {
+    requireWorkerScope(request, 'file:write');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = deleteWorkspaceFileSchema.parse(request.body);
+    const record = getWorkspaceOrThrow(app, params.id);
+
+    return deleteWorkspaceFile({
+      workspacePath: record.absPath,
+      relativePath: body.path,
+      ...(body.recursive !== undefined ? { recursive: body.recursive } : {}),
+    });
   });
 
   app.patch('/api/workspaces/:id', async (request) => {

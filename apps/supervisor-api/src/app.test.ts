@@ -904,6 +904,163 @@ describe('supervisor api', () => {
     expect(shellTerminateDenied.statusCode).toBe(403);
   });
 
+  it('enforces file:write for worker workspace file mutations', async () => {
+    await app.close();
+    app = buildTestApp(fakeCodexManager, {
+      env: {
+        REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+        REMOTE_CODEX_SANDBOX_ID: 'sbx_test',
+        REMOTE_CODEX_USER_ID: 'user_test',
+        REMOTE_CODEX_WORKER_AUTH_TOKEN: 'router-secret',
+        REMOTE_CODEX_WORKER_IDENTITY_SECRET: workerIdentitySecret,
+      },
+    });
+    await app.ready();
+
+    const baseHeaders = {
+      'x-remote-codex-worker-token': 'router-secret',
+    };
+    const fileWriteHeaders = {
+      ...baseHeaders,
+      ...makeWorkerIdentityHeaders({
+        scopes: ['file:write'],
+      }),
+    };
+    const missingScopeHeaders = {
+      ...baseHeaders,
+      ...makeWorkerIdentityHeaders({
+        scopes: ['provider:turn:create'],
+      }),
+    };
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      headers: baseHeaders,
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+    expect(workspaceResponse.statusCode).toBe(200);
+    const workspaceId = workspaceResponse.json().id;
+
+    const deniedWrite = await app.inject({
+      method: 'PUT',
+      url: `/api/workspaces/${workspaceId}/files`,
+      headers: missingScopeHeaders,
+      payload: {
+        path: 'notes.txt',
+        content: 'denied',
+      },
+    });
+    expect(deniedWrite.statusCode).toBe(403);
+
+    const writeResponse = await app.inject({
+      method: 'PUT',
+      url: `/api/workspaces/${workspaceId}/files`,
+      headers: fileWriteHeaders,
+      payload: {
+        path: 'notes.txt',
+        content: 'allowed',
+      },
+    });
+    expect(writeResponse.statusCode).toBe(200);
+    expect(writeResponse.json()).toMatchObject({
+      path: 'notes.txt',
+      kind: 'file',
+    });
+    await expect(fs.readFile(path.join(tempDir, 'workspace', 'notes.txt'), 'utf8')).resolves.toBe(
+      'allowed',
+    );
+
+    const multipart = buildMultipartPayload({
+      fields: {
+        path: 'upload.bin',
+      },
+      files: [
+        {
+          fieldName: 'file',
+          fileName: 'upload.bin',
+          contentType: 'application/octet-stream',
+          content: Buffer.from('uploaded'),
+        },
+      ],
+    });
+    const uploadResponse = await app.inject({
+      method: 'POST',
+      url: `/api/workspaces/${workspaceId}/files/upload`,
+      headers: {
+        ...fileWriteHeaders,
+        'content-type': `multipart/form-data; boundary=${multipart.boundary}`,
+      },
+      payload: multipart.payload,
+    });
+    expect(uploadResponse.statusCode).toBe(200);
+    await expect(fs.readFile(path.join(tempDir, 'workspace', 'upload.bin'), 'utf8')).resolves.toBe(
+      'uploaded',
+    );
+
+    const moveDenied = await app.inject({
+      method: 'PATCH',
+      url: `/api/workspaces/${workspaceId}/files/move`,
+      headers: missingScopeHeaders,
+      payload: {
+        fromPath: 'notes.txt',
+        toPath: 'moved.txt',
+      },
+    });
+    expect(moveDenied.statusCode).toBe(403);
+
+    const moveResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/workspaces/${workspaceId}/files/move`,
+      headers: fileWriteHeaders,
+      payload: {
+        fromPath: 'notes.txt',
+        toPath: 'moved.txt',
+      },
+    });
+    expect(moveResponse.statusCode).toBe(200);
+    expect(moveResponse.json().path).toBe('moved.txt');
+
+    const outsideWrite = await app.inject({
+      method: 'PUT',
+      url: `/api/workspaces/${workspaceId}/files`,
+      headers: fileWriteHeaders,
+      payload: {
+        path: '../outside.txt',
+        content: 'escape',
+      },
+    });
+    expect(outsideWrite.statusCode).toBe(400);
+
+    const deleteDenied = await app.inject({
+      method: 'DELETE',
+      url: `/api/workspaces/${workspaceId}/files`,
+      headers: missingScopeHeaders,
+      payload: {
+        path: 'moved.txt',
+      },
+    });
+    expect(deleteDenied.statusCode).toBe(403);
+
+    const deleteResponse = await app.inject({
+      method: 'DELETE',
+      url: `/api/workspaces/${workspaceId}/files`,
+      headers: fileWriteHeaders,
+      payload: {
+        path: 'moved.txt',
+      },
+    });
+    expect(deleteResponse.statusCode).toBe(200);
+    expect(deleteResponse.json()).toMatchObject({
+      path: 'moved.txt',
+    });
+    await expect(fs.stat(path.join(tempDir, 'workspace', 'moved.txt'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
   it('writes gateway-backed provider config during worker startup', async () => {
     await app.close();
     const claudeHome = path.join(tempDir, 'claude-home');

@@ -362,7 +362,7 @@ the worker endpoint.
 - [x] Verify signed identity envelope sandbox id.
 - [x] Verify signed identity envelope scopes.
 - [x] Add scope checks for shell write.
-- [ ] Add scope checks for file write.
+- [x] Add scope checks for file write.
 - [x] Add scope checks for provider turn creation.
 - [x] Add scope checks for provider interrupt.
 - [ ] Add scope checks for artifact read/write.
