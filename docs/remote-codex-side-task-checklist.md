@@ -364,7 +364,7 @@ Verification:
 - [x] Add router package if it lives in this repository.
 - [x] Implement HTTP proxy.
 - [x] Implement SSE proxy.
-- [ ] Implement WebSocket proxy.
+- [x] Implement WebSocket proxy.
 - [x] Verify route tokens in the router.
 - [x] Resolve sandbox endpoint from control plane or registry.
 - [x] Inject internal worker token.
@@ -1037,7 +1037,7 @@ token.
 - [x] Add router package if it lives in this repository.
 - [x] Implement HTTP proxy.
 - [x] Implement SSE proxy.
-- [ ] Implement WebSocket proxy.
+- [x] Implement WebSocket proxy.
 - [x] Verify route tokens.
 - [x] Resolve sandbox endpoint from the control plane or sandbox registry.
 - [x] Inject `X-Remote-Codex-Worker-Token`.

@@ -1,4 +1,7 @@
+import { createServer, type Server } from 'node:http';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import WebSocket, { WebSocketServer } from 'ws';
 
 import { createSignedToken, RouteTokenPayload } from '../../../packages/shared/src/index';
 import {
@@ -40,10 +43,28 @@ describe('sandbox router', () => {
   const apps: ReturnType<typeof buildSandboxRouterApp>[] = [];
   const fetchMock = vi.fn();
   const auditEvents: SandboxRouterAuditEvent[] = [];
+  const servers: Array<{ server: Server; webSocketServer?: WebSocketServer }> = [];
 
   afterEach(async () => {
     await Promise.all(apps.map((app) => app.close()));
+    await Promise.all(
+      servers.map(
+        ({ server, webSocketServer }) =>
+          new Promise<void>((resolve, reject) => {
+            webSocketServer?.clients.forEach((client) => client.terminate());
+            webSocketServer?.close();
+            server.close((error) => {
+              if (error) {
+                reject(error);
+                return;
+              }
+              resolve();
+            });
+          }),
+      ),
+    );
     apps.length = 0;
+    servers.length = 0;
     auditEvents.length = 0;
     vi.unstubAllGlobals();
     fetchMock.mockReset();
@@ -68,6 +89,12 @@ describe('sandbox router', () => {
     });
     apps.push(app);
     return app;
+  }
+
+  function timeoutAfter(ms: number, label: string) {
+    return new Promise<never>((_resolve, reject) => {
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    });
   }
 
   it('returns router health', async () => {
@@ -342,6 +369,74 @@ describe('sandbox router', () => {
         statusCode: 429,
       }),
     );
+  });
+
+  it('proxies websocket traffic with internal worker headers and signed identity', async () => {
+    const workerServer = createServer();
+    const workerWebSocketServer = new WebSocketServer({ server: workerServer });
+    servers.push({ server: workerServer, webSocketServer: workerWebSocketServer });
+    const workerMessages: string[] = [];
+    let workerRequestHeaders: Record<string, string | string[] | undefined> = {};
+    workerWebSocketServer.on('connection', (socket, request) => {
+      workerRequestHeaders = request.headers;
+      socket.on('message', (message) => {
+        workerMessages.push(message.toString());
+        socket.send(`worker:${message.toString()}`);
+      });
+    });
+    await new Promise<void>((resolve) => workerServer.listen(0, '127.0.0.1', resolve));
+    const address = workerServer.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected local worker server address.');
+    }
+    const app = buildApp({
+      async resolve() {
+        return { workerBaseUrl: `http://127.0.0.1:${address.port}` };
+      },
+    });
+    await app.ready();
+
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    const routerAddress = app.server.address();
+    if (!routerAddress || typeof routerAddress === 'string') {
+      throw new Error('Expected local router server address.');
+    }
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${routerAddress.port}/api/sandboxes/sandbox_1/ws?token=${encodeURIComponent(routeToken({
+        scopes: ['worker:read', 'worker:write'],
+      }))}`,
+    );
+    const message = await Promise.race([
+      new Promise<string>((resolve, reject) => {
+        socket.on('open', () => {
+          socket.send('hello-worker');
+        });
+        socket.on('message', (data) => resolve(data.toString()));
+        socket.on('error', reject);
+        socket.on('close', (code, reason) => {
+          reject(new Error(`client socket closed: ${code} ${reason.toString()}`));
+        });
+      }),
+      timeoutAfter(1000, 'websocket response'),
+    ]);
+
+    expect(message).toBe('worker:hello-worker');
+    expect(workerMessages).toEqual(['hello-worker']);
+    expect(workerRequestHeaders['x-remote-codex-worker-token']).toBe('internal-worker-token');
+    expect(workerRequestHeaders['x-remote-codex-user']).toBe('user_1');
+    expect(workerRequestHeaders['x-remote-codex-sandbox']).toBe('sandbox_1');
+    expect(workerRequestHeaders['x-remote-codex-scopes']).toBe('worker:read,worker:write');
+    expect(workerRequestHeaders['x-remote-codex-signature']).toEqual(expect.any(String));
+    expect(auditEvents).toContainEqual(
+      expect.objectContaining({
+        action: 'proxy.forwarded',
+        statusCode: 101,
+        workerStatusCode: 101,
+        path: 'ws',
+      }),
+    );
+    socket.terminate();
+    workerWebSocketServer.close();
   });
 
   it('returns a structured timeout error when the worker does not respond in time', async () => {

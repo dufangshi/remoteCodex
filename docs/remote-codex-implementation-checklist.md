@@ -317,7 +317,7 @@ Goal: browser traffic reaches workers only through a route-token checked proxy.
 - [x] Decide router location in this repo or separate service.
 - [x] Add router package if kept in this repo.
 - [x] Implement HTTP proxy.
-- [ ] Implement WebSocket proxy.
+- [x] Implement WebSocket proxy.
 - [x] Implement route token verification.
 - [x] Resolve sandbox endpoint from control plane or registry.
 - [x] Inject `X-Remote-Codex-Worker-Token`.

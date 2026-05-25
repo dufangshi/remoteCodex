@@ -1,6 +1,8 @@
 import { Readable } from 'node:stream';
 
+import websocket from '@fastify/websocket';
 import Fastify, { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import WebSocket from 'ws';
 import { z, ZodError } from 'zod';
 
 import type { RouteTokenPayload } from '../../../packages/shared/src/index';
@@ -31,6 +33,8 @@ export interface SandboxEndpointResolver {
     workerBaseUrl: string | null;
   }>;
 }
+
+const WEBSOCKET_OPEN = 1;
 
 class StaticSandboxEndpointResolver implements SandboxEndpointResolver {
   constructor(private readonly config: SandboxRouterConfig) {}
@@ -242,12 +246,27 @@ function copyForwardHeaders(request: FastifyRequest) {
   return headers;
 }
 
+function copyForwardHeaderObject(request: FastifyRequest) {
+  const headers: Record<string, string> = {};
+  const forwardHeaders = copyForwardHeaders(request);
+  forwardHeaders.forEach((value, name) => {
+    headers[name] = value;
+  });
+  return headers;
+}
+
 function buildWorkerUrl(workerBaseUrl: string, pathSuffix: string, request: FastifyRequest) {
   const base = workerBaseUrl.endsWith('/') ? workerBaseUrl : `${workerBaseUrl}/`;
   const url = new URL(pathSuffix, base);
   const incoming = new URL(request.url, 'http://router.local');
   incoming.searchParams.delete('token');
   url.search = incoming.searchParams.toString();
+  return url;
+}
+
+function buildWorkerWebSocketUrl(workerBaseUrl: string, pathSuffix: string, request: FastifyRequest) {
+  const url = buildWorkerUrl(workerBaseUrl, pathSuffix, request);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   return url;
 }
 
@@ -421,6 +440,65 @@ async function proxyRequest(request: FastifyRequest) {
   }
 }
 
+async function websocketProxyContext(request: FastifyRequest) {
+  const { payload, path } = verifyRouteTokenForRequest(request);
+  try {
+    enforceRateLimit(request, payload);
+  } catch (error) {
+    if (error instanceof RouterHttpError) {
+      auditRoute(request, {
+        action: 'proxy.denied',
+        userId: payload.sub,
+        sandboxId: payload.sandbox_id,
+        routeTokenId: payload.jti,
+        method: request.method,
+        path,
+        statusCode: error.statusCode,
+        code: error.code,
+        scopes: payload.scopes,
+      });
+    }
+    throw error;
+  }
+
+  const { config, endpointResolver } = request.server.services;
+  const endpoint = await endpointResolver.resolve({
+    sandboxId: payload.sandbox_id,
+    routeToken: payload,
+  });
+  if (!endpoint.workerBaseUrl) {
+    auditRoute(request, {
+      action: 'proxy.failed',
+      userId: payload.sub,
+      sandboxId: payload.sandbox_id,
+      routeTokenId: payload.jti,
+      method: request.method,
+      path,
+      statusCode: 502,
+      code: 'worker_unavailable',
+      scopes: payload.scopes,
+    });
+    throw new RouterHttpError(502, 'worker_unavailable', 'Sandbox worker endpoint is unavailable.');
+  }
+
+  const headers = copyForwardHeaderObject(request);
+  if (config.workerAuthToken) {
+    headers['x-remote-codex-worker-token'] = config.workerAuthToken;
+  }
+  if (config.workerIdentitySecret) {
+    Object.assign(
+      headers,
+      workerIdentityHeadersForRouteToken(payload, config.workerIdentitySecret),
+    );
+  }
+  return {
+    payload,
+    path,
+    upstreamUrl: buildWorkerWebSocketUrl(endpoint.workerBaseUrl, path, request),
+    headers,
+  };
+}
+
 export function buildSandboxRouterApp(options: {
   env?: NodeJS.ProcessEnv;
   endpointResolver?: SandboxEndpointResolver;
@@ -448,7 +526,7 @@ export function buildSandboxRouterApp(options: {
   });
 
   app.get('/healthz', async () => ({ ok: true, role: 'sandbox-router' }));
-  app.all('/api/sandboxes/:sandboxId/*', async (request, reply) => {
+  const httpProxyHandler = async (request: FastifyRequest, reply: FastifyReply) => {
     const response = await proxyRequest(request);
     reply.status(response.status);
     copyResponseHeaders(response, reply);
@@ -456,7 +534,110 @@ export function buildSandboxRouterApp(options: {
       return reply.send(Readable.fromWeb(response.body as unknown as Parameters<typeof Readable.fromWeb>[0]));
     }
     return reply.send(Buffer.from(await response.arrayBuffer()));
+  };
+  const websocketProxyHandler = (clientSocket: WebSocket, request: FastifyRequest) => {
+    const contextPromise = websocketProxyContext(request);
+    let upstreamSocket: WebSocket | null = null;
+    const pendingClientMessages: Array<Parameters<WebSocket['send']>[0]> = [];
+    let clientClosed = false;
+
+    const closeBoth = (code?: number, reason?: string) => {
+      if (!clientClosed && clientSocket.readyState === WEBSOCKET_OPEN) {
+        clientSocket.close(code, reason);
+      }
+      if (upstreamSocket && upstreamSocket.readyState === WebSocket.OPEN) {
+        upstreamSocket.close(code, reason);
+      }
+    };
+
+    clientSocket.on('message', (message) => {
+      if (upstreamSocket?.readyState === WebSocket.OPEN) {
+        upstreamSocket.send(message);
+        return;
+      }
+      pendingClientMessages.push(message);
+    });
+    clientSocket.on('close', () => {
+      clientClosed = true;
+      if (upstreamSocket?.readyState === WebSocket.OPEN) {
+        upstreamSocket.close();
+      }
+    });
+    clientSocket.on('error', () => {
+      closeBoth(1011, 'client websocket error');
+    });
+
+    contextPromise
+      .then((context) => {
+        if (clientClosed) {
+          return;
+        }
+        upstreamSocket = new WebSocket(context.upstreamUrl, {
+          headers: context.headers,
+        });
+        upstreamSocket.on('open', () => {
+          for (const message of pendingClientMessages.splice(0)) {
+            upstreamSocket?.send(message);
+          }
+          auditRoute(request, {
+            action: 'proxy.forwarded',
+            userId: context.payload.sub,
+            sandboxId: context.payload.sandbox_id,
+            routeTokenId: context.payload.jti,
+            method: request.method,
+            path: context.path,
+            statusCode: 101,
+            workerStatusCode: 101,
+            scopes: context.payload.scopes,
+          });
+        });
+        upstreamSocket.on('message', (message) => {
+          if (clientSocket.readyState === WEBSOCKET_OPEN) {
+            clientSocket.send(message);
+          }
+        });
+        upstreamSocket.on('close', (code, reason) => {
+          if (clientSocket.readyState === WEBSOCKET_OPEN) {
+            clientSocket.close(code, reason);
+          }
+        });
+        upstreamSocket.on('error', () => {
+          auditRoute(request, {
+            action: 'proxy.failed',
+            userId: context.payload.sub,
+            sandboxId: context.payload.sandbox_id,
+            routeTokenId: context.payload.jti,
+            method: request.method,
+            path: context.path,
+            statusCode: 502,
+            code: 'worker_websocket_error',
+            scopes: context.payload.scopes,
+          });
+          closeBoth(1011, 'worker websocket error');
+        });
+      })
+      .catch((error) => {
+        request.log.warn({ error }, 'sandbox router websocket proxy setup failed');
+        closeBoth(error instanceof RouterHttpError ? 1008 : 1011, 'websocket proxy setup failed');
+      });
+  };
+
+  app.register(async (realtimeApp) => {
+    await realtimeApp.register(websocket);
+    realtimeApp.route({
+      method: 'GET',
+      url: '/api/sandboxes/:sandboxId/*',
+      handler: httpProxyHandler,
+      wsHandler: websocketProxyHandler,
+    });
   });
+  for (const method of ['DELETE', 'PATCH', 'POST', 'PUT', 'OPTIONS'] as const) {
+    app.route({
+      method,
+      url: '/api/sandboxes/:sandboxId/*',
+      handler: httpProxyHandler,
+    });
+  }
 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof RouterHttpError) {
