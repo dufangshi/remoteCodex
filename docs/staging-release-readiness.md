@@ -262,7 +262,12 @@ The bundle runner writes:
 - `staging-phase-one-smoke.json`
 - `staging-phase-one-verification.json`
 - `phase-zero-six-verification.json`
+- `artifact-secret-scan.json`
 - `summary.json`
+
+The bundle runner also scans generated JSON artifacts for obvious secret-like
+values and sensitive fields before marking the bundle successful. This is a
+guardrail, not a replacement for operator review.
 
 After reviewing the JSON files for accidental secret exposure and confirming
 the aggregate verifier lists the expected items under `readyToCheck`, rerun

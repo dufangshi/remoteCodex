@@ -77,7 +77,8 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 - Phase 0-6 staging evidence bundle runner exists as
   `pnpm collect:phase-zero-six-evidence -- --output-dir <artifact-dir>`; it
   collects AWS preflight evidence, runs the phase-one staging smoke, runs all
-  evidence verifiers, and writes a summary JSON for the staging release record.
+  evidence verifiers, scans generated JSON artifacts for obvious secret-like
+  leakage, and writes a summary JSON for the staging release record.
 - AWS staging preflight evidence verifier exists as
   `pnpm verify:aws-staging-preflight-evidence -- <evidence-json>` with template
   `docs/aws-staging-preflight-evidence-template.json`; it audits S3.04 and

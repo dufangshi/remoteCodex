@@ -99,6 +99,7 @@ async function main() {
   const awsVerificationPath = path.join(outputDir, 'aws-staging-preflight-verification.json');
   const stagingVerificationPath = path.join(outputDir, 'staging-phase-one-verification.json');
   const phaseVerificationPath = path.join(outputDir, 'phase-zero-six-verification.json');
+  const artifactSafetyPath = path.join(outputDir, 'artifact-secret-scan.json');
   const summaryPath = path.join(outputDir, 'summary.json');
 
   const commands: CommandResult[] = [];
@@ -142,6 +143,11 @@ async function main() {
     command: phaseCommand,
     outputPath: phaseVerificationPath,
   }));
+  commands.push(await runCommand({
+    name: 'verify_phase_zero_six_artifacts_safe',
+    command: ['pnpm', 'exec', 'tsx', 'scripts/verify-phase-zero-six-artifacts-safe.ts', '--dir', outputDir],
+    outputPath: artifactSafetyPath,
+  }));
 
   const summary = {
     ok: commands.every(commandOk),
@@ -155,6 +161,7 @@ async function main() {
       awsVerification: awsVerificationPath,
       stagingVerification: hasFlag('--skip-staging-smoke') ? null : stagingVerificationPath,
       phaseZeroSixVerification: phaseVerificationPath,
+      artifactSecretScan: artifactSafetyPath,
       summary: summaryPath,
     },
     results: commands.map((result) => ({
