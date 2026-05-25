@@ -76,17 +76,23 @@ async function requestJson(input: {
 }
 
 async function runOptionalCommand(name: string, commandEnvName: string): Promise<SmokeStep | null> {
-  const command = envValue(commandEnvName);
+  const commandJsonEnvName = `${commandEnvName}_JSON`;
+  const envJsonEnvName = `${commandEnvName}_ENV_JSON`;
+  const command = parseOptionalStringArrayEnv(commandJsonEnvName) ?? legacyCommand(commandEnvName);
   if (!command) {
     return null;
   }
-  const [binary, ...args] = command.split(' ').filter(Boolean);
+  const [binary, ...args] = command;
   if (!binary) {
     throw new Error(`${commandEnvName} is empty.`);
   }
+  const envOverrides = parseOptionalStringRecordEnv(envJsonEnvName);
   const { stdout, stderr } = await execFileAsync(binary, args, {
     timeout: Number(process.env.STAGING_PROVIDER_SMOKE_TIMEOUT_MS ?? 120_000),
-    env: process.env,
+    env: {
+      ...process.env,
+      ...envOverrides,
+    },
   });
   const parsedStdout = parseOptionalJson(stdout);
   return {
@@ -97,8 +103,47 @@ async function runOptionalCommand(name: string, commandEnvName: string): Promise
       stdout: stdout.slice(0, 4000),
       stderr: stderr.slice(0, 4000),
       parsedStdout,
+      commandJsonEnv: process.env[commandJsonEnvName] ? commandJsonEnvName : null,
+      envJsonEnv: process.env[envJsonEnvName] ? envJsonEnvName : null,
+      envOverrideKeys: Object.keys(envOverrides),
     },
   };
+}
+
+function legacyCommand(commandEnvName: string) {
+  const command = envValue(commandEnvName);
+  if (!command) {
+    return null;
+  }
+  return command.split(' ').filter(Boolean);
+}
+
+function parseOptionalStringArrayEnv(name: string) {
+  const value = envValue(name);
+  if (!value) {
+    return null;
+  }
+  const parsed = JSON.parse(value) as unknown;
+  if (!Array.isArray(parsed) || parsed.length === 0 || !parsed.every((entry) => typeof entry === 'string')) {
+    throw new Error(`${name} must be a JSON string array.`);
+  }
+  return parsed;
+}
+
+function parseOptionalStringRecordEnv(name: string) {
+  const value = envValue(name);
+  if (!value) {
+    return {};
+  }
+  const parsed = JSON.parse(value) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${name} must be a JSON object with string values.`);
+  }
+  const entries = Object.entries(parsed);
+  if (!entries.every(([, entryValue]) => typeof entryValue === 'string')) {
+    throw new Error(`${name} must be a JSON object with string values.`);
+  }
+  return Object.fromEntries(entries) as Record<string, string>;
 }
 
 function parseOptionalJson(value: string): JsonObject | null {

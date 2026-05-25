@@ -837,7 +837,10 @@ the sandbox, while real provider root keys stay outside the sandbox.
   `rootKeysAbsent`, and `workerConfigUsesGateway`. Use
   `pnpm exec tsx scripts/provider-gateway-smoke.ts <provider>` inside the
   worker, with `PROVIDER_GATEWAY_SMOKE_COMMAND_JSON` pointing at the real
-  provider CLI invocation, to produce this JSON.
+  provider CLI invocation, to produce this JSON. The staging runner supports
+  `STAGING_*_GATEWAY_SMOKE_COMMAND_JSON` and
+  `STAGING_*_GATEWAY_SMOKE_COMMAND_ENV_JSON` for provider-specific command and
+  helper env injection.
 
 ## Phase 7: ElAgenteHarness Integration
 

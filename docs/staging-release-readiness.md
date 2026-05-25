@@ -159,6 +159,17 @@ STAGING_CLAUDE_GATEWAY_SMOKE_COMMAND="<command run by the operator>" \
 STAGING_OPENCODE_GATEWAY_SMOKE_COMMAND="<command run by the operator>"
 ```
 
+For commands with nested quoting or provider-specific environment, prefer the
+JSON forms:
+
+```bash
+STAGING_CODEX_GATEWAY_SMOKE_COMMAND_JSON='["pnpm","exec","tsx","scripts/provider-gateway-smoke.ts","codex"]' \
+STAGING_CODEX_GATEWAY_SMOKE_COMMAND_ENV_JSON='{"PROVIDER_GATEWAY_SMOKE_COMMAND_JSON":"[\"codex\",\"exec\",\"--\",\"echo\",\"gateway smoke\"]","PROVIDER_GATEWAY_SMOKE_USAGE_RECORDED":"1"}'
+```
+
+The staging runner records only the env var names and override keys, not the
+JSON env values.
+
 The recommended command target is the provider gateway helper inside the
 worker. Run it directly in the worker shell, or wrap it with `kubectl exec` if
 the operator launches it from outside the Pod:
@@ -172,9 +183,9 @@ pnpm exec tsx scripts/provider-gateway-smoke.ts codex
 For the phase-one staging runner, point each optional command at the helper:
 
 ```bash
-STAGING_CODEX_GATEWAY_SMOKE_COMMAND="pnpm exec tsx scripts/provider-gateway-smoke.ts codex" \
-STAGING_CLAUDE_GATEWAY_SMOKE_COMMAND="pnpm exec tsx scripts/provider-gateway-smoke.ts claude" \
-STAGING_OPENCODE_GATEWAY_SMOKE_COMMAND="pnpm exec tsx scripts/provider-gateway-smoke.ts opencode"
+STAGING_CODEX_GATEWAY_SMOKE_COMMAND_JSON='["pnpm","exec","tsx","scripts/provider-gateway-smoke.ts","codex"]' \
+STAGING_CLAUDE_GATEWAY_SMOKE_COMMAND_JSON='["pnpm","exec","tsx","scripts/provider-gateway-smoke.ts","claude"]' \
+STAGING_OPENCODE_GATEWAY_SMOKE_COMMAND_JSON='["pnpm","exec","tsx","scripts/provider-gateway-smoke.ts","opencode"]'
 ```
 
 `PROVIDER_GATEWAY_SMOKE_COMMAND_JSON` must be a JSON string array containing
