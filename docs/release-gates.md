@@ -50,7 +50,7 @@ requires staging evidence.
 
 ### LLM Gateway
 
-- [ ] Gateway deployment shape and admin endpoint contract are documented.
+- [x] Gateway deployment shape and admin endpoint contract are documented.
 - [ ] Gateway admin credentials are stored outside frontend and worker env.
 - [ ] Codex reaches the gateway in staging.
 - [ ] Claude Code reaches the gateway in staging.

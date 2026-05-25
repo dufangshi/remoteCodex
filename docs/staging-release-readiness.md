@@ -66,7 +66,8 @@ the worker.
   - private subnet free IP count;
   - AWS Fargate On-Demand vCPU quota in the sandbox region;
   - any required AWS Service Quotas request id and approval status.
-- Gateway base URL and gateway admin credential.
+- Gateway base URL and gateway admin credential, following
+  `docs/llm-gateway-contract.md`.
 - Harness base URL and harness admin credential if the harness requires admin
   provisioning.
 - Usage import schedule disabled or enabled explicitly for staging.

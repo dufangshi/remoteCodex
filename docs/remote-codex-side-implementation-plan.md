@@ -494,8 +494,8 @@ import third, then quota enforcement and UI.
 
 ### LLM Gateway Checklist
 
-- [ ] Choose the phase-one gateway implementation and deployment shape.
-- [ ] Document gateway admin credential requirements.
+- [x] Choose the phase-one gateway implementation and deployment shape.
+- [x] Document gateway admin credential requirements.
 - [ ] Add gateway provider config table or config source.
 - [x] Store gateway base URL.
 - [x] Store gateway key id per user or sandbox.

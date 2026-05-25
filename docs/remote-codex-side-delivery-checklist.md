@@ -473,12 +473,12 @@ real provider root keys stay outside the sandbox.
 
 ### Gateway Choice And Admin Contract
 
-- [ ] Choose phase-one gateway implementation: sub2api or lightweight custom
+- [x] Choose phase-one gateway implementation: sub2api or lightweight custom
   gateway.
-- [ ] Document gateway deployment shape.
-- [ ] Document gateway admin credential requirements.
-- [ ] Document gateway admin API endpoints used by Remote Codex.
-- [ ] Document required gateway usage-export API shape.
+- [x] Document gateway deployment shape.
+- [x] Document gateway admin credential requirements.
+- [x] Document gateway admin API endpoints used by Remote Codex.
+- [x] Document required gateway usage-export API shape.
 - [ ] Add gateway unavailable/degraded behavior.
 
 ### Control Plane Gateway Client

@@ -531,28 +531,28 @@ real provider root keys stay outside the sandbox.
 
 ### Gateway Contract Tasks
 
-- [ ] Choose phase-one gateway implementation: sub2api or lightweight custom
+- [x] Choose phase-one gateway implementation: sub2api or lightweight custom
   gateway.
   - Acceptance: docs name the chosen gateway, deployment location, ownership,
     and fallback plan.
   - Verification: architecture decision is linked from `docs/README.md`.
 
-- [ ] Document gateway deployment shape.
+- [x] Document gateway deployment shape.
   - Acceptance: docs cover service placement, network path, storage, secrets,
     admin access, backup, and upgrade path.
   - Verification: deployment docs include required env vars and smoke checks.
 
-- [ ] Document gateway admin credential requirements.
+- [x] Document gateway admin credential requirements.
   - Acceptance: docs list admin token storage, rotation, and least-privilege
     requirements.
   - Verification: docs are referenced from staging readiness notes.
 
-- [ ] Document gateway admin API endpoints used by Remote Codex.
+- [x] Document gateway admin API endpoints used by Remote Codex.
   - Acceptance: docs describe user create, key create, revoke, rotate,
     reconcile, and usage export endpoints.
   - Verification: gateway client tests align with documented endpoint shapes.
 
-- [ ] Document required gateway usage-export API shape.
+- [x] Document required gateway usage-export API shape.
   - Acceptance: docs define event id, external key id, model, token fields,
     cost, currency, timestamp, and pagination/watermark behavior.
   - Verification: usage importer tests use the documented fixture shape.
@@ -561,6 +561,20 @@ real provider root keys stay outside the sandbox.
   - Acceptance: control plane and frontend have stable degraded states when the
     gateway admin API or model proxy is unavailable.
   - Verification: API and frontend tests cover gateway unavailable responses.
+
+Evidence:
+
+- Files: `docs/llm-gateway-contract.md`, `docs/README.md`,
+  `docs/staging-release-readiness.md`, `docs/release-gates.md`,
+  `apps/control-plane-api/src/adapters.ts`,
+  `apps/control-plane-api/src/adapters.test.ts`,
+  `apps/control-plane-api/src/app.ts`,
+  `apps/control-plane-api/src/app.test.ts`
+- Verification:
+  `pnpm --filter @remote-codex/control-plane-api typecheck`,
+  `pnpm --filter @remote-codex/control-plane-api test`
+- Residual risk: scheduled gateway usage pulling, frontend degraded UI, and
+  staging provider-runtime smoke checks remain unchecked.
 
 ### Control Plane Tasks
 

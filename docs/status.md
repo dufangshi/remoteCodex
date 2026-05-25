@@ -74,7 +74,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 - Browser-to-worker route-token connection flow; route token issuance and
   refresh are in place, while staging router smoke checks remain open.
 - Worker image runtime pinning and smoke verification.
-- LLM gateway provisioning, worker provider config rendering, and usage import.
+- LLM gateway contract is fixed on a sub2api-compatible shape; provisioning,
+  worker provider config rendering, and manual usage import exist, while
+  scheduled import, metrics, and frontend degraded/usage UI remain open.
 - ElAgenteHarness credential provisioning and worker bootstrap.
 
 ## Immediate Next Implementation Queue
@@ -87,7 +89,7 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 4. Add staging lifecycle smokes for start, stop, idempotent restart, and
    readiness.
 5. Build and smoke-test the worker Docker image, then add CI image checks.
-6. Finish gateway usage adapter, scheduled import, metrics, and frontend usage
+6. Finish gateway scheduled import, metrics, frontend degraded state, and usage
    UI.
 
 ## Verification Commands
