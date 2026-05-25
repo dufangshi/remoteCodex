@@ -317,6 +317,9 @@ guardrail, not a replacement for operator review.
 Provider command `stdout`, `stderr`, and command errors are redacted before
 they are written to evidence JSON, and then scanned again by the artifact
 secret scanner.
+If a provider command exits non-zero, the staging smoke still emits a JSON
+report with that provider step marked `ok: false`; the verifier then leaves the
+corresponding G6 box unchecked with a concrete failure record.
 
 After reviewing the JSON files for accidental secret exposure and confirming
 the aggregate verifier lists the expected items under `readyToCheck`, rerun

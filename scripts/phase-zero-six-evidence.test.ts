@@ -534,4 +534,46 @@ describe('phase zero-six evidence tooling', () => {
     expect(result.stdout).not.toContain('eyJaaaaaaaaaaaaaaaa');
     expect(result.stdout).not.toContain('sk-testsecretvalue1234567890');
   });
+
+  it('records failed provider command as a redacted staging smoke step', async () => {
+    const dir = await tempDir();
+    const commandPath = path.join(dir, 'failing-provider-command.mjs');
+    await writeFile(
+      commandPath,
+      [
+        'console.log("Bearer eyJaaaaaaaaaaaaaaaa.eyJbbbbbbbbbbbbbbbb.cccccccccccccccccc");',
+        'console.error("sk-testsecretvalue1234567890");',
+        'process.exit(7);',
+      ].join('\n'),
+    );
+
+    await withFakeStagingServers(async ({ controlPlaneBaseUrl }) => {
+      const result = await runScriptWithEnv(
+        'scripts/staging-phase-one-smoke.ts',
+        [],
+        {
+          STAGING_CONTROL_PLANE_BASE_URL: controlPlaneBaseUrl,
+          STAGING_PRODUCT_JWT: 'secret-product-jwt-value',
+          STAGING_CODEX_GATEWAY_SMOKE_COMMAND_JSON: JSON.stringify(['node', commandPath]),
+        },
+      );
+      const parsed = JSON.parse(result.stdout);
+      const providerStep = parsed.steps.find((step: { name: string }) =>
+        step.name === 'codex_gateway_smoke',
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(parsed.ok).toBe(false);
+      expect(providerStep).toMatchObject({
+        name: 'codex_gateway_smoke',
+        ok: false,
+      });
+      expect(providerStep.details.stdout).toContain('Bearer [REDACTED]');
+      expect(providerStep.details.stderr).toContain('[REDACTED_OPENAI_KEY]');
+      expect(providerStep.details.commandError).toContain('Command failed');
+      expect(result.stdout).not.toContain('eyJaaaaaaaaaaaaaaaa');
+      expect(result.stdout).not.toContain('sk-testsecretvalue1234567890');
+      expect(result.stdout).not.toContain('secret-product-jwt-value');
+    });
+  });
 });

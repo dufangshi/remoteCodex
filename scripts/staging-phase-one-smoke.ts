@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { redactedSlice } from './secret-redaction.js';
+import { redactedSlice, redactSecretText } from './secret-redaction.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -99,21 +99,38 @@ async function runOptionalCommand(name: string, commandEnvName: string): Promise
     throw new Error(`${commandEnvName} is empty.`);
   }
   const envOverrides = parseOptionalStringRecordEnv(envJsonEnvName);
-  const { stdout, stderr } = await execFileAsync(binary, args, {
-    timeout: Number(process.env.STAGING_PROVIDER_SMOKE_TIMEOUT_MS ?? 120_000),
-    env: {
-      ...process.env,
-      ...envOverrides,
-    },
-  });
+  let stdout = '';
+  let stderr = '';
+  let commandError: string | null = null;
+  try {
+    const result = await execFileAsync(binary, args, {
+      timeout: Number(process.env.STAGING_PROVIDER_SMOKE_TIMEOUT_MS ?? 120_000),
+      env: {
+        ...process.env,
+        ...envOverrides,
+      },
+    });
+    stdout = result.stdout;
+    stderr = result.stderr;
+  } catch (error) {
+    const commandFailure = error as {
+      stdout?: string;
+      stderr?: string;
+      message?: string;
+    };
+    stdout = commandFailure.stdout ?? '';
+    stderr = commandFailure.stderr ?? '';
+    commandError = redactSecretText(commandFailure.message ?? String(error));
+  }
   const parsedStdout = parseOptionalJson(stdout);
   return {
     name,
-    ok: parsedStdout?.ok === undefined ? true : parsedStdout.ok === true,
+    ok: commandError ? false : parsedStdout?.ok === undefined ? true : parsedStdout.ok === true,
     details: {
       commandEnv: commandEnvName,
       stdout: redactedSlice(stdout),
       stderr: redactedSlice(stderr),
+      commandError,
       parsedStdout,
       commandJsonEnv: process.env[commandJsonEnvName] ? commandJsonEnvName : null,
       envJsonEnv: process.env[envJsonEnvName] ? envJsonEnvName : null,
