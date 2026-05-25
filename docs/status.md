@@ -83,6 +83,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 - The phase-one staging smoke runner supports provider command JSON and
   provider-specific env JSON, so G6.11-G6.13 smokes can pass quoted provider
   commands and usage evidence into the helper without logging raw env values.
+- Staging stop evidence now polls sandbox health until `stopped`, and direct
+  worker denial accepts `401` or `403`, aligning smoke output with the
+  checklist verifier for S3.07 and R5.11.
 - Worker mode disables host/provider management APIs that should not be exposed
   in sandbox runtime.
 - Route-token signing supports key ids and previous-key verification.

@@ -256,28 +256,31 @@ function evaluate(report: SmokeReport): ChecklistResult[] {
   const stopReady =
     stop?.ok === true &&
     ['stopping', 'stopped'].includes(String(stop.details?.state ?? '')) &&
-    typeof stop.details?.finalHealthState === 'string';
+    stop.details?.finalHealthState === 'stopped' &&
+    stop.details?.stopConverged === true;
   results.push(stopReady
     ? ready({
       item: 'S3.07',
       title: 'Stop a real worker Pod from the control plane.',
-      reason: 'Staging evidence shows stop accepted and final health state recorded.',
+      reason: 'Staging evidence shows stop accepted and final health state converged to stopped.',
       matchedSteps: ['stop_sandbox'],
       requiredEvidence: [
         'stop_sandbox.ok is true',
         'stop_sandbox.details.state is stopping or stopped',
-        'stop_sandbox.details.finalHealthState is recorded',
+        'stop_sandbox.details.finalHealthState is stopped',
+        'stop_sandbox.details.stopConverged is true',
       ],
     })
     : notReady({
       item: 'S3.07',
       title: 'Stop a real worker Pod from the control plane.',
-      reason: 'stop_sandbox is missing or does not include accepted stop state and final health state.',
+      reason: 'stop_sandbox is missing or did not converge to stopped.',
       matchedSteps: stop ? ['stop_sandbox'] : [],
       requiredEvidence: [
         'stop_sandbox.ok is true',
         'stop_sandbox.details.state is stopping or stopped',
-        'stop_sandbox.details.finalHealthState is recorded',
+        'stop_sandbox.details.finalHealthState is stopped',
+        'stop_sandbox.details.stopConverged is true',
       ],
     }));
 

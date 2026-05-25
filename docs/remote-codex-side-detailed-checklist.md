@@ -413,7 +413,8 @@ and recover it.
 
 - [ ] S3.07 Stop a real worker Pod from the control plane.
   - Done when stop moves the registry to stopped and the Pod terminates.
-  - Verify with staging smoke recording final registry state and Pod deletion.
+  - Verify with staging smoke recording accepted stop, health polling
+    convergence to `stopped`, and Pod deletion.
 
 - [ ] S3.08 Add idempotent lifecycle smoke.
   - Done when repeated start, stop, and restart calls cannot corrupt registry
@@ -632,7 +633,7 @@ router-injected worker identity.
 - [ ] R5.11 Add direct-worker-denial proof.
   - Done when direct requests to a worker public endpoint fail without the
     router-injected token.
-  - Verify with staging smoke.
+  - Verify with staging smoke recording direct worker `401` or `403`.
 
 - [ ] R5.12 Add browser-to-router-to-worker smoke.
   - Done when a real browser reaches a real worker through the router using a

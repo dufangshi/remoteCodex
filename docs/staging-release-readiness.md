@@ -199,6 +199,8 @@ Useful timing overrides for slower EKS/Fargate starts:
 ```bash
 STAGING_SANDBOX_READY_TIMEOUT_MS=900000 \
 STAGING_SANDBOX_READY_POLL_MS=15000 \
+STAGING_SANDBOX_STOP_TIMEOUT_MS=900000 \
+STAGING_SANDBOX_STOP_POLL_MS=15000 \
 STAGING_PROVIDER_SMOKE_TIMEOUT_MS=180000
 ```
 
@@ -220,13 +222,14 @@ The important step-to-checkbox mapping is:
 - `start_sandbox`, `sandbox_ready`, and `admin_sandbox_runtime_detail` prove
   real worker Pod creation, runtime identity, image, namespace, Pod name,
   worker service name, and readiness for S3.06.
-- `stop_sandbox` proves user stop convergence for S3.07 when final registry
-  and Pod state are recorded.
+- `stop_sandbox` proves user stop convergence for S3.07 when stop is accepted
+  and subsequent health polling reaches `finalHealthState: "stopped"` with
+  `stopConverged: true`.
 - `idempotent_lifecycle` proves repeated start/restart calls keep one sandbox
   id for S3.08.
 - `browser_to_router_to_worker` proves R5.12.
 - `direct_worker_denial` proves R5.11 when `STAGING_DIRECT_WORKER_BASE_URL` is
-  available.
+  available and direct worker access returns `401` or `403`.
 - `codex_gateway_smoke`, `claude_gateway_smoke`, and
   `opencode_gateway_smoke` prove G6.11-G6.13 only when the command output also
   records a successful gateway usage event and confirms no provider root key is

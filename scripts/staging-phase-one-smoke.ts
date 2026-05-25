@@ -222,6 +222,37 @@ async function waitForSandboxRunning(input: {
   return lastHealth;
 }
 
+async function waitForSandboxStopped(input: {
+  productJwt: string;
+  sandboxId: string;
+}) {
+  const timeoutMs = numericEnv('STAGING_SANDBOX_STOP_TIMEOUT_MS', 10 * 60_000);
+  const intervalMs = numericEnv('STAGING_SANDBOX_STOP_POLL_MS', 10_000);
+  const deadline = Date.now() + timeoutMs;
+  let lastHealth: Awaited<ReturnType<typeof requestJson>> | null = null;
+  while (Date.now() <= deadline) {
+    lastHealth = await requestJson({
+      path: '/api/sandbox/health',
+      token: input.productJwt,
+      expectedStatus: 200,
+    });
+    const sandbox = lastHealth.json.sandbox;
+    if (sandbox.state === 'stopped') {
+      return {
+        health: lastHealth,
+        stopped: true,
+        timeoutMs,
+      };
+    }
+    await sleep(intervalMs);
+  }
+  return {
+    health: lastHealth,
+    stopped: false,
+    timeoutMs,
+  };
+}
+
 async function optionalAdminSandboxDetail(input: {
   sandboxId: string;
   steps: SmokeStep[];
@@ -454,13 +485,14 @@ async function main() {
     const direct = await requestJson({
       baseUrl: directWorkerBaseUrl,
       path: '/api/worker/metadata',
-      expectedStatus: 401,
     });
+    const denied = direct.status === 401 || direct.status === 403;
     steps.push({
       name: 'direct_worker_denial',
-      ok: direct.status === 401,
+      ok: denied,
       details: {
         status: direct.status,
+        acceptedStatuses: [401, 403],
       },
     });
   }
@@ -483,18 +515,17 @@ async function main() {
       token: productJwt,
       expectedStatus: 200,
     });
-    const finalHealth = await requestJson({
-      path: '/api/sandbox/health',
-      token: productJwt,
-      expectedStatus: 200,
-    });
+    const final = await waitForSandboxStopped({ productJwt, sandboxId: sandbox.id });
+    const finalSandbox = final.health?.json?.sandbox;
     steps.push({
       name: 'stop_sandbox',
-      ok: ['stopping', 'stopped'].includes(stop.json.sandbox.state),
+      ok: ['stopping', 'stopped'].includes(stop.json.sandbox.state) && final.stopped,
       details: {
         sandboxId: stop.json.sandbox.id,
         state: stop.json.sandbox.state,
-        finalHealthState: finalHealth.json.sandbox.state,
+        finalHealthState: finalSandbox?.state,
+        stopConverged: final.stopped,
+        stopTimeoutMs: final.timeoutMs,
         k8sPodName: stop.json.sandbox.k8sPodName,
         workerServiceName: stop.json.sandbox.workerServiceName,
       },
