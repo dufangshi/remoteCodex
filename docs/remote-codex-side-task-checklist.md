@@ -345,18 +345,18 @@ required identity, filesystem, or token settings are missing.
 
 - [x] Keep `Dockerfile.worker` as the canonical worker image.
 - [x] Pin the Node base image version.
-- [ ] Pin `@openai/codex`.
-- [ ] Pin `@anthropic-ai/claude-code`.
-- [ ] Pin `@anthropic-ai/claude-agent-sdk`.
-- [ ] Pin `opencode-ai`.
-- [ ] Pin `@opencode-ai/sdk`.
+- [x] Pin `@openai/codex`.
+- [x] Pin `@anthropic-ai/claude-code`.
+- [x] Pin `@anthropic-ai/claude-agent-sdk`.
+- [x] Pin `opencode-ai`.
+- [x] Pin `@opencode-ai/sdk`.
 - [x] Add image labels for git SHA and image version.
 - [x] Run the image as non-root `agent`.
 - [x] Set `/workspace` as the default workspace root.
 - [x] Set provider homes under `/home/agent`.
 - [x] Ensure the worker listens on `0.0.0.0`.
-- [ ] Add a build-time version manifest for all provider runtimes.
-- [ ] Add a runtime endpoint that reports safe version metadata.
+- [x] Add a build-time version manifest for all provider runtimes.
+- [x] Add a runtime endpoint that reports safe version metadata.
 
 ### Worker Startup Validation
 

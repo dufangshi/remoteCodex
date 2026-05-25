@@ -16,6 +16,7 @@ import {
   saveWorkspaceSettings,
 } from '../workspace-settings';
 import { HttpError } from '../app';
+import { readWorkerRuntimeManifest } from '../worker-runtime-manifest';
 
 const updateProviderHostFileSchema = z.object({
   content: z.string(),
@@ -107,6 +108,9 @@ export async function registerSystemRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/worker/metadata', async () => {
+    const runtimeManifest = readWorkerRuntimeManifest(
+      app.services.config.workerRuntimeManifestPath,
+    );
     return {
       role: app.services.config.runtimeRole,
       sandboxId: app.services.config.sandboxId,
@@ -118,6 +122,7 @@ export async function registerSystemRoutes(app: FastifyInstance) {
         provider: runtime.provider,
         status: runtime.getStatus(),
       })),
+      runtimeManifest,
     };
   });
 

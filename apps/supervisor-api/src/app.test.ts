@@ -575,11 +575,31 @@ describe('supervisor api', () => {
 
   it('returns worker readiness and metadata in worker mode', async () => {
     await app.close();
+    const manifestPath = path.join(tempDir, 'worker-runtime-manifest.json');
+    await fs.writeFile(
+      manifestPath,
+      JSON.stringify({
+        imageVersion: 'staging-test',
+        gitSha: 'abc123',
+        generatedAt: '2026-05-25T00:00:00.000Z',
+        runtimes: {
+          codex: {
+            package: '@openai/codex',
+            version: '0.133.0',
+          },
+          ignoredSecret: {
+            package: 'bad',
+            token: 'must-not-leak',
+          },
+        },
+      }),
+    );
     app = buildTestApp(fakeCodexManager, {
       env: {
         REMOTE_CODEX_RUNTIME_ROLE: 'worker',
         REMOTE_CODEX_SANDBOX_ID: 'sbx_test',
         REMOTE_CODEX_USER_ID: 'user_test',
+        REMOTE_CODEX_WORKER_RUNTIME_MANIFEST: manifestPath,
       },
     });
     await app.ready();
@@ -610,7 +630,18 @@ describe('supervisor api', () => {
       userId: 'user_test',
       managementRoutesEnabled: false,
       agentRuntimeManagementEnabled: false,
+      runtimeManifest: {
+        imageVersion: 'staging-test',
+        gitSha: 'abc123',
+        runtimes: {
+          codex: {
+            package: '@openai/codex',
+            version: '0.133.0',
+          },
+        },
+      },
     });
+    expect(JSON.stringify(metadata.json())).not.toContain('must-not-leak');
   });
 
   it('requires the router token for worker API access when configured', async () => {

@@ -52,6 +52,7 @@ export interface RuntimeConfig {
   workerAuthToken: string | null;
   llmGatewayBaseUrl: string | null;
   llmGatewayToken: string | null;
+  workerRuntimeManifestPath: string | null;
   appName: string;
   appVersion: string;
   workspaceRoot: string;
@@ -73,6 +74,7 @@ const envSchema = z.object({
   REMOTE_CODEX_WORKER_AUTH_TOKEN: z.string().min(1).optional(),
   REMOTE_CODEX_LLM_GATEWAY_BASE_URL: z.string().url().optional(),
   REMOTE_CODEX_LLM_GATEWAY_TOKEN: z.string().min(1).optional(),
+  REMOTE_CODEX_WORKER_RUNTIME_MANIFEST: z.string().min(1).optional(),
   APP_NAME: z.string().min(1).optional(),
   APP_VERSION: z.string().min(1).optional(),
   WORKSPACE_ROOT: z.string().optional(),
@@ -163,6 +165,11 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
     workerAuthToken: parsed.REMOTE_CODEX_WORKER_AUTH_TOKEN ?? null,
     llmGatewayBaseUrl: parsed.REMOTE_CODEX_LLM_GATEWAY_BASE_URL ?? null,
     llmGatewayToken: parsed.REMOTE_CODEX_LLM_GATEWAY_TOKEN ?? null,
+    workerRuntimeManifestPath: parsed.REMOTE_CODEX_WORKER_RUNTIME_MANIFEST
+      ? path.resolve(parsed.REMOTE_CODEX_WORKER_RUNTIME_MANIFEST)
+      : runtimeRole === 'worker'
+        ? '/opt/remote-codex/worker-runtime-manifest.json'
+        : null,
     appName: parsed.APP_NAME ?? (runtimeRole === 'worker' ? 'Remote Codex Worker' : 'Remote Codex Supervisor'),
     appVersion: parsed.APP_VERSION ?? '0.1.0',
     workspaceRoot,

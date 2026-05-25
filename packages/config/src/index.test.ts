@@ -21,6 +21,7 @@ describe('loadRuntimeConfig', () => {
     expect(config.workerAuthToken).toBeNull();
     expect(config.llmGatewayBaseUrl).toBeNull();
     expect(config.llmGatewayToken).toBeNull();
+    expect(config.workerRuntimeManifestPath).toBeNull();
     expect(config.workspaceRoot).toBe(os.homedir());
     expect(config.databaseUrl).toBe(path.resolve('.local', 'supervisor-dev.sqlite'));
     expect(config.agentProviders.codex).toEqual({
@@ -91,6 +92,7 @@ describe('loadRuntimeConfig', () => {
     expect(config.workerAuthToken).toBe('worker-token');
     expect(config.llmGatewayBaseUrl).toBe('https://llm-gateway.example.com');
     expect(config.llmGatewayToken).toBe('gw-token');
+    expect(config.workerRuntimeManifestPath).toBe('/opt/remote-codex/worker-runtime-manifest.json');
     expect(config.appName).toBe('Remote Codex Worker');
     expect(config.agentProviders.codex.home).toBe('/home/agent/.codex');
     expect(config.agentProviders.claude.home).toBe('/home/agent/.claude');

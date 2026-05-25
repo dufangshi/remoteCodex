@@ -238,11 +238,11 @@ container deployment.
 
 - [x] Keep `Dockerfile.worker` as the canonical worker image.
 - [x] Pin Node base image version.
-- [ ] Pin `@openai/codex` version.
-- [ ] Pin `@anthropic-ai/claude-code` version.
-- [ ] Pin `@anthropic-ai/claude-agent-sdk` version.
-- [ ] Pin `opencode-ai` version.
-- [ ] Pin `@opencode-ai/sdk` version.
+- [x] Pin `@openai/codex` version.
+- [x] Pin `@anthropic-ai/claude-code` version.
+- [x] Pin `@anthropic-ai/claude-agent-sdk` version.
+- [x] Pin `opencode-ai` version.
+- [x] Pin `@opencode-ai/sdk` version.
 - [x] Add labels for git SHA and image version.
 - [x] Ensure image runs as non-root `agent`.
 - [x] Ensure default workdir is `/workspace`.
