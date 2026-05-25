@@ -21,8 +21,15 @@ on:
       - package.json
       - pnpm-lock.yaml
       - scripts/*phase-zero-six*
+      - scripts/configure-github-staging-evidence-env.ts
       - scripts/staging-phase-one-smoke.ts
       - scripts/collect-aws-staging-preflight-evidence.ts
+      - scripts/provider-gateway-smoke.ts
+      - scripts/secret-redaction.ts
+      - scripts/verify-aws-staging-preflight-evidence.ts
+      - scripts/verify-staging-phase-one-evidence.ts
+      - scripts/verify-github-staging-evidence-env.ts
+      - scripts/phase-zero-six-github-env-contract.ts
       - docs/remote-codex-side-detailed-checklist.md
       - docs/staging-release-readiness.md
       - docs/status.md
@@ -36,8 +43,15 @@ on:
       - package.json
       - pnpm-lock.yaml
       - scripts/*phase-zero-six*
+      - scripts/configure-github-staging-evidence-env.ts
       - scripts/staging-phase-one-smoke.ts
       - scripts/collect-aws-staging-preflight-evidence.ts
+      - scripts/provider-gateway-smoke.ts
+      - scripts/secret-redaction.ts
+      - scripts/verify-aws-staging-preflight-evidence.ts
+      - scripts/verify-staging-phase-one-evidence.ts
+      - scripts/verify-github-staging-evidence-env.ts
+      - scripts/phase-zero-six-github-env-contract.ts
       - docs/remote-codex-side-detailed-checklist.md
       - docs/staging-release-readiness.md
       - docs/status.md

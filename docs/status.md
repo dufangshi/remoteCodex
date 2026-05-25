@@ -146,15 +146,20 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 - Phase 0-6 evidence tooling CI workflow exists at
   `.github/workflows/phase-zero-six-evidence.yml`; it typechecks the evidence
   scripts, runs `pnpm test:phase-zero-six-evidence`, and audits the current
-  checklist state on matching branch pushes and pull requests. GitHub Actions
-  run `26400569738` passed on `sandbox-worker-control-plane` at commit
-  `2f4e4dd44caf8f1d025b1bd3a18136a39d24ba93`.
+  checklist state on matching branch pushes and pull requests. The path filters
+  include the provider gateway smoke, redaction, GitHub Environment, and
+  AWS/staging verifier helpers so evidence-helper changes do not bypass CI.
+  GitHub Actions run `26411058304` passed on `sandbox-worker-control-plane` at
+  commit `4f22d61767ed30aeaf5979e32868bee4546d5b48`.
 - Phase 0-6 manual staging evidence workflow exists at
   `.github/workflows/phase-zero-six-staging-evidence.yml`; it runs from
   `workflow_dispatch` against the `staging` GitHub Environment, supports full
   or AWS-only evidence collection, and uploads the generated evidence bundle
-  without committing checklist changes. Operators must review the artifact and
-  run the guarded apply flow before checking any remaining S3/R5/G6 boxes.
+  without committing checklist changes. Its `force_diagnostics` mode now keeps
+  the collection step non-blocking so diagnostic artifacts are still uploaded
+  when env readiness, AWS access, staging smoke, or provider runtime checks fail.
+  Operators must review the artifact and run the guarded apply flow before
+  checking any remaining S3/R5/G6 boxes.
 - The visible `Phase 0-6 Evidence Tooling` workflow also supports manual
   diagnostic collection. GitHub Actions run `26409751861` passed on
   `sandbox-worker-control-plane` at commit

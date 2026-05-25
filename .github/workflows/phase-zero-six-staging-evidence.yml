@@ -112,6 +112,7 @@ jobs:
           kubectl version --client=true
 
       - name: Collect evidence bundle
+        continue-on-error: ${{ inputs.force_diagnostics }}
         shell: bash
         run: |
           set -euo pipefail
