@@ -91,7 +91,7 @@ plane. Browser identity must stay outside sandbox service credentials.
 
 - [x] `pnpm --filter @remote-codex/control-plane-api typecheck`
 - [x] `pnpm --filter @remote-codex/control-plane-api test`
-- [ ] `pnpm --filter @remote-codex/supervisor-web typecheck`
+- [x] `pnpm --filter @remote-codex/supervisor-web typecheck`
 - [ ] Add auth e2e smoke test for login to app shell.
 
 ## Phase 2: Project, Workspace, And Session Registry
@@ -144,7 +144,7 @@ live runtime state.
 ### Verification
 
 - [x] Control-plane API tests cover CRUD and ownership.
-- [ ] Web typecheck passes.
+- [x] Web typecheck passes.
 - [ ] Add frontend tests for project/workspace/session navigation.
 
 ## Phase 3: Sandbox Lifecycle
@@ -163,13 +163,13 @@ user.
 - [x] Add `getSandboxStatus` method.
 - [x] Add `getSandboxEndpoint` method.
 - [x] Add `prepareSandboxEnvironment` method.
-- [ ] Add structured errors for quota, capacity, config, and provider failures.
+- [x] Add structured errors for quota, capacity, config, and provider failures.
 
 ### Local/Dev Adapter
 
 - [x] Implement local no-op sandbox adapter for tests.
-- [ ] Implement local worker-process adapter for development.
-- [ ] Add local adapter tests.
+- [x] Implement local worker-process adapter for development.
+- [x] Add local adapter tests.
 - [ ] Document local sandbox development environment variables.
 
 ### AWS Adapter
@@ -215,9 +215,9 @@ user.
 ### Verification
 
 - [x] Unit tests cover sandbox lifecycle transitions.
-- [ ] Local dev adapter can start a worker process.
+- [x] Local dev adapter can start a worker process.
 - [x] Control-plane typecheck passes.
-- [ ] Web typecheck passes.
+- [x] Web typecheck passes.
 
 ## Phase 4: Worker Image And Runtime Hardening
 
