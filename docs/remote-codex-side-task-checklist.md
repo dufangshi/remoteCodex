@@ -176,14 +176,14 @@ Verification:
 - [x] Add search/filter support for product lists.
 - [x] Add project list UI.
 - [x] Add project creation UI.
-- [ ] Add project detail UI.
+- [x] Add project detail UI.
 - [x] Add workspace list UI inside project context.
 - [x] Add workspace creation UI.
 - [x] Add session list UI inside workspace context.
 - [x] Add session creation UI.
 - [ ] Add session open flow that acquires a route token.
 - [x] Add empty states for project/workspace/session lists.
-- [ ] Add loading states for every project/workspace/session list.
+- [x] Add loading states for every project/workspace/session list.
 - [x] Add create/update error states.
 
 Verification:
@@ -825,7 +825,7 @@ runtime state.
 - [x] Add session creation flow.
 - [ ] Add session open flow that acquires a route token.
 - [x] Add empty states for no projects, workspaces, and sessions.
-- [ ] Add loading states for every list.
+- [x] Add loading states for every list.
 - [x] Add error states for failed create/update requests.
 
 ### Worker Contract

@@ -293,13 +293,13 @@ sandbox-local execution state.
 
 ### Frontend Tasks
 
-- [ ] Add project detail UI.
+- [x] Add project detail UI.
   - Acceptance: project detail shows project metadata, workspaces, and primary
     actions without needing direct worker access.
   - Verification: frontend tests cover loading, empty, populated, and error
     states.
 
-- [ ] Add loading states for every product metadata list.
+- [x] Add loading states for every product metadata list.
   - Acceptance: project, workspace, and session lists have explicit pending
     states.
   - Verification: frontend tests cover each pending state.
@@ -324,7 +324,7 @@ sandbox-local execution state.
   `pnpm --filter @remote-codex/supervisor-api test`;
   `pnpm --filter @remote-codex/config typecheck`;
   `pnpm --filter @remote-codex/config test`
-- Residual risk: frontend project detail/loading/open-session tasks remain
+- Residual risk: the open-session router/worker connection task remains
   unchecked; no staging worker-to-control-plane smoke has run.
 
 ## Phase 3: Sandbox Lifecycle And AWS Runtime

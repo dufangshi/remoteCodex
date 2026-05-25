@@ -239,14 +239,14 @@ execution state inside the sandbox.
 
 - [x] Add project list UI.
 - [x] Add project creation UI.
-- [ ] Add project detail UI.
+- [x] Add project detail UI.
 - [x] Add workspace list UI inside project context.
 - [x] Add workspace creation UI.
 - [x] Add session list UI inside workspace context.
 - [x] Add session creation UI.
 - [x] Add empty states for project/workspace/session lists.
 - [x] Add create/update error states.
-- [ ] Add loading states for every list.
+- [x] Add loading states for every list.
 - [ ] Add open-session flow that obtains a route token and connects through the
   router.
 

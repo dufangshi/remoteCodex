@@ -71,6 +71,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   staging verification has not run yet.
 - AWS sandbox adapter implementation.
 - Frontend auth shell, login states, and admin user management.
+- Project detail and product metadata loading states are implemented in the
+  control-plane panel; the real worker connection step after route-token issue
+  remains open.
 - Browser-to-worker route-token connection flow; route token issuance and
   refresh are in place, while staging router smoke checks remain open.
 - Worker image runtime pinning and smoke verification.
@@ -86,7 +89,7 @@ gateway, ElAgenteHarness, or chemistry compute workers.
    expired, unauthorized, and disabled-account states.
 2. Add production auth-provider smoke coverage or staging smoke procedure for
    valid, expired, wrong-issuer, and wrong-audience tokens.
-3. Add frontend project detail/loading/open-session flows.
+3. Add real open-session worker connection flow after route-token issue.
 4. Add staging lifecycle smokes for start, stop, idempotent restart, and
    readiness.
 5. Build and smoke-test the worker Docker image, then add CI image checks.

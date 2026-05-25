@@ -209,13 +209,13 @@ live sandbox-local execution state.
 
 - [x] Add project list UI.
 - [x] Add project creation UI.
-- [ ] Add project detail UI.
+- [x] Add project detail UI.
 - [x] Add workspace list UI inside project context.
 - [x] Add workspace creation UI.
 - [x] Add session list UI inside workspace context.
 - [x] Add session creation UI.
 - [x] Add empty states for project, workspace, and session lists.
-- [ ] Add loading states for all product metadata lists.
+- [x] Add loading states for all product metadata lists.
 - [x] Add create/update error states.
 - [ ] Add open-session flow that obtains a route token and connects through the
   router.

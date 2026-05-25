@@ -285,6 +285,9 @@ describe('ControlPlanePage', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Computational chemistry/i })).toBeInTheDocument();
     });
+    expect(screen.getByText('Project detail')).toBeInTheDocument();
+    expect(screen.getAllByText('computational-chemistry').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('Workspaces:')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Create workspace' }));
 
@@ -618,5 +621,58 @@ describe('ControlPlanePage', () => {
       expect(screen.getAllByText('Cannot pull worker image.').length).toBeGreaterThan(0);
     });
     expect(screen.getByText('image_pull')).toBeInTheDocument();
+  });
+
+  it('shows loading states for product metadata lists', async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
+
+      if (path === '/api/me/bootstrap' && init?.method === 'POST') {
+        return jsonResponse({ user, sandbox: runningSandbox, gatewayKey: null });
+      }
+
+      if (path === '/api/me' && !init?.method) {
+        return jsonResponse({ user, sandbox: runningSandbox, usage });
+      }
+
+      if (path === '/api/projects' && !init?.method) {
+        return new Promise<Response>((resolve) => {
+          setTimeout(() => resolve(jsonResponse({ projects: [project] })), 25);
+        });
+      }
+
+      if (path === '/api/workspaces?projectId=project-1' && !init?.method) {
+        return new Promise<Response>((resolve) => {
+          setTimeout(() => resolve(jsonResponse({ workspaces: [workspace] })), 25);
+        });
+      }
+
+      if (path === '/api/workspaces/workspace-1/sessions' && !init?.method) {
+        return new Promise<Response>((resolve) => {
+          setTimeout(() => resolve(jsonResponse({ sessions: [session] })), 25);
+        });
+      }
+
+      return jsonResponse({
+        code: 'not_found',
+        message: `Unhandled request: ${path}`,
+      }, 404);
+    });
+
+    render(<ControlPlanePage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
+
+    expect(await screen.findByText('Loading projects...')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Loading workspaces...')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Loading sessions...')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Plan calculation/i })).toBeInTheDocument();
+    });
   });
 });

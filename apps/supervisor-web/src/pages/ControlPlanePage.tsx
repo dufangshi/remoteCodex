@@ -215,6 +215,15 @@ export function ControlPlanePage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [metadataLoading, setMetadataLoading] = useState<{
+    projects: boolean;
+    workspaces: boolean;
+    sessions: boolean;
+  }>({
+    projects: false,
+    workspaces: false,
+    sessions: false,
+  });
   const [workerConnectionState, setWorkerConnectionState] = useState<'idle' | 'ready' | 'reconnecting'>('idle');
   const routeTokenRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -249,14 +258,19 @@ export function ControlPlanePage() {
       return;
     }
 
-    const me = await fetchControlPlaneMe(nextAuth);
-    const projectResult = await fetchControlPlaneProjects(nextAuth);
-    setUser(me.user);
-    setSandbox(me.sandbox);
-    setUsage(me.usage);
-    setProjects(projectResult.projects);
-    if (!selectedProjectId && projectResult.projects[0]) {
-      setSelectedProjectId(projectResult.projects[0].id);
+    setMetadataLoading((current) => ({ ...current, projects: true }));
+    try {
+      const me = await fetchControlPlaneMe(nextAuth);
+      const projectResult = await fetchControlPlaneProjects(nextAuth);
+      setUser(me.user);
+      setSandbox(me.sandbox);
+      setUsage(me.usage);
+      setProjects(projectResult.projects);
+      if (!selectedProjectId && projectResult.projects[0]) {
+        setSelectedProjectId(projectResult.projects[0].id);
+      }
+    } finally {
+      setMetadataLoading((current) => ({ ...current, projects: false }));
     }
   }
 
@@ -266,14 +280,19 @@ export function ControlPlanePage() {
       return;
     }
 
+    setMetadataLoading((current) => ({ ...current, sessions: true }));
     void run('Load sessions', async () => {
-      const result = await fetchControlPlaneSessions(auth, selectedWorkspaceId);
-      setSessions(result.sessions);
-      setSelectedSessionId((current) =>
-        result.sessions.some((session) => session.id === current)
-          ? current
-          : result.sessions[0]?.id ?? '',
-      );
+      try {
+        const result = await fetchControlPlaneSessions(auth, selectedWorkspaceId);
+        setSessions(result.sessions);
+        setSelectedSessionId((current) =>
+          result.sessions.some((session) => session.id === current)
+            ? current
+            : result.sessions[0]?.id ?? '',
+        );
+      } finally {
+        setMetadataLoading((current) => ({ ...current, sessions: false }));
+      }
     });
   }, [auth, selectedWorkspaceId]);
 
@@ -286,14 +305,19 @@ export function ControlPlanePage() {
       return;
     }
 
+    setMetadataLoading((current) => ({ ...current, workspaces: true }));
     void run('Load workspaces', async () => {
-      const result = await fetchControlPlaneWorkspaces(auth, selectedProjectId);
-      setWorkspaces(result.workspaces);
-      setSelectedWorkspaceId((current) =>
-        result.workspaces.some((workspace) => workspace.id === current)
-          ? current
-          : result.workspaces[0]?.id ?? '',
-      );
+      try {
+        const result = await fetchControlPlaneWorkspaces(auth, selectedProjectId);
+        setWorkspaces(result.workspaces);
+        setSelectedWorkspaceId((current) =>
+          result.workspaces.some((workspace) => workspace.id === current)
+            ? current
+            : result.workspaces[0]?.id ?? '',
+        );
+      } finally {
+        setMetadataLoading((current) => ({ ...current, workspaces: false }));
+      }
     });
   }, [auth, selectedProjectId]);
 
@@ -739,7 +763,9 @@ export function ControlPlanePage() {
           </div>
         </form>
         <div className="grid gap-2">
-          {projects.length === 0 ? (
+          {metadataLoading.projects ? (
+            <p className="text-sm text-[var(--theme-fg-muted)]">Loading projects...</p>
+          ) : projects.length === 0 ? (
             <p className="text-sm text-[var(--theme-fg-muted)]">No projects yet.</p>
           ) : (
             projects.map((project) => (
@@ -759,6 +785,15 @@ export function ControlPlanePage() {
             ))
           )}
         </div>
+        {selectedProject ? (
+          <div className="mt-4 grid gap-2 rounded-[0.85rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] p-3 text-sm text-[var(--theme-fg-muted)]">
+            <h3 className="text-sm font-semibold text-[var(--theme-fg)]">Project detail</h3>
+            <p><span className="text-[var(--theme-fg)]">Name:</span> {selectedProject.name}</p>
+            <p><span className="text-[var(--theme-fg)]">Slug:</span> {selectedProject.slug}</p>
+            <p><span className="text-[var(--theme-fg)]">Status:</span> {selectedProject.status}</p>
+            <p><span className="text-[var(--theme-fg)]">Workspaces:</span> {workspaces.length}</p>
+          </div>
+        ) : null}
       </Section>
 
       <Section title="Workspaces">
@@ -771,7 +806,9 @@ export function ControlPlanePage() {
           </div>
         </form>
         <div className="grid gap-2">
-          {workspaces.length === 0 ? (
+          {metadataLoading.workspaces ? (
+            <p className="text-sm text-[var(--theme-fg-muted)]">Loading workspaces...</p>
+          ) : workspaces.length === 0 ? (
             <p className="text-sm text-[var(--theme-fg-muted)]">No workspaces yet.</p>
           ) : (
             workspaces.map((workspace) => (
@@ -822,7 +859,9 @@ export function ControlPlanePage() {
           </div>
         </form>
         <div className="grid gap-2">
-          {sessions.length === 0 ? (
+          {metadataLoading.sessions ? (
+            <p className="text-sm text-[var(--theme-fg-muted)]">Loading sessions...</p>
+          ) : sessions.length === 0 ? (
             <p className="text-sm text-[var(--theme-fg-muted)]">No sessions for this workspace.</p>
           ) : (
             sessions.map((session) => (
