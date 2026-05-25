@@ -528,7 +528,7 @@ real provider root keys stay outside the sandbox.
 ### Frontend
 
 - [x] Add LLM usage summary UI.
-- [ ] Add LLM usage detail UI.
+- [x] Add LLM usage detail UI.
 - [x] Add gateway unavailable UI.
 - [x] Add quota exceeded UI for LLM usage.
 

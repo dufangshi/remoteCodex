@@ -10,6 +10,7 @@ import {
   fetchControlPlaneMe,
   fetchControlPlaneAdminSandboxDetail,
   fetchControlPlaneProjects,
+  fetchControlPlaneUsageEvents,
   fetchControlPlaneSandboxHealth,
   fetchControlPlaneSessions,
   fetchControlPlaneWorkspaces,
@@ -24,6 +25,7 @@ import {
   type ControlPlaneRouteToken,
   type ControlPlaneSandbox,
   type ControlPlaneSession,
+  type ControlPlaneUsageEvent,
   type ControlPlaneUsageSummary,
   type ControlPlaneUser,
   type ControlPlaneWorkspace,
@@ -202,6 +204,7 @@ export function ControlPlanePage() {
   const [sandbox, setSandbox] = useState<ControlPlaneSandbox | null>(null);
   const [adminSandboxDetail, setAdminSandboxDetail] = useState<ControlPlaneSandboxDetail | null>(null);
   const [usage, setUsage] = useState<ControlPlaneUsageSummary | null>(null);
+  const [usageEvents, setUsageEvents] = useState<ControlPlaneUsageEvent[]>([]);
   const [projects, setProjects] = useState<ControlPlaneProject[]>([]);
   const [workspaces, setWorkspaces] = useState<ControlPlaneWorkspace[]>([]);
   const [sessions, setSessions] = useState<ControlPlaneSession[]>([]);
@@ -222,10 +225,12 @@ export function ControlPlanePage() {
     projects: boolean;
     workspaces: boolean;
     sessions: boolean;
+    usageEvents: boolean;
   }>({
     projects: false,
     workspaces: false,
     sessions: false,
+    usageEvents: false,
   });
   const [workerConnectionState, setWorkerConnectionState] = useState<'idle' | 'ready' | 'reconnecting'>('idle');
   const routeTokenRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -278,19 +283,23 @@ export function ControlPlanePage() {
       return;
     }
 
-    setMetadataLoading((current) => ({ ...current, projects: true }));
+    setMetadataLoading((current) => ({ ...current, projects: true, usageEvents: true }));
     try {
       const me = await fetchControlPlaneMe(nextAuth);
-      const projectResult = await fetchControlPlaneProjects(nextAuth);
+      const [projectResult, usageEventResult] = await Promise.all([
+        fetchControlPlaneProjects(nextAuth),
+        fetchControlPlaneUsageEvents(nextAuth, 10),
+      ]);
       setUser(me.user);
       setSandbox(me.sandbox);
       setUsage(me.usage);
+      setUsageEvents(usageEventResult.events);
       setProjects(projectResult.projects);
       if (!selectedProjectId && projectResult.projects[0]) {
         setSelectedProjectId(projectResult.projects[0].id);
       }
     } finally {
-      setMetadataLoading((current) => ({ ...current, projects: false }));
+      setMetadataLoading((current) => ({ ...current, projects: false, usageEvents: false }));
     }
   }
 
@@ -401,6 +410,7 @@ export function ControlPlanePage() {
     setSandbox(null);
     setAdminSandboxDetail(null);
     setUsage(null);
+    setUsageEvents([]);
     setProjects([]);
     setWorkspaces([]);
     setSessions([]);
@@ -679,6 +689,39 @@ export function ControlPlanePage() {
             <p><span className="text-[var(--theme-fg)]">LLM cost:</span> ${Number(usage?.costUsd ?? 0).toFixed(2)}</p>
           </div>
         ) : null}
+      </Section>
+
+      <Section title="LLM usage">
+        {metadataLoading.usageEvents ? (
+          <p className="text-sm text-[var(--theme-fg-muted)]">Loading LLM usage...</p>
+        ) : !user ? (
+          <p className="text-sm text-[var(--theme-fg-muted)]">Login to inspect LLM usage.</p>
+        ) : usageEvents.length === 0 ? (
+          <p className="text-sm text-[var(--theme-fg-muted)]">No LLM usage events yet.</p>
+        ) : (
+          <div className="grid gap-2">
+            {usageEvents.map((event) => (
+              <div
+                key={event.id}
+                className="grid gap-2 rounded-[0.85rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-2 text-sm text-[var(--theme-fg-muted)] md:grid-cols-[1.1fr_0.8fr_0.8fr_0.7fr]"
+              >
+                <div>
+                  <p className="font-medium text-[var(--theme-fg)]">{event.model}</p>
+                  <p className="text-xs">{event.provider}</p>
+                </div>
+                <p>
+                  <span className="text-[var(--theme-fg)]">Tokens:</span>{' '}
+                  {event.inputTokens + event.outputTokens} total
+                </p>
+                <p>
+                  <span className="text-[var(--theme-fg)]">Cost:</span>{' '}
+                  ${Number(event.costUsd).toFixed(2)}
+                </p>
+                <p className="text-xs">{event.occurredAt}</p>
+              </div>
+            ))}
+          </div>
+        )}
       </Section>
 
       <Section

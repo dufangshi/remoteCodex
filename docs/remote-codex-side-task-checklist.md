@@ -434,7 +434,7 @@ Verification:
 - [x] Add user usage summary endpoint.
 - [x] Add user usage events endpoint.
 - [x] Add LLM usage summary UI.
-- [ ] Add LLM usage detail UI.
+- [x] Add LLM usage detail UI.
 - [x] Add gateway unavailable UI.
 - [x] Add quota exceeded UI for LLM usage.
 
@@ -1136,7 +1136,7 @@ Real provider root keys stay outside the sandbox.
 ### Frontend
 
 - [x] Add LLM usage summary card.
-- [ ] Add LLM usage detail table.
+- [x] Add LLM usage detail table.
 - [x] Add gateway unavailable state.
 - [x] Add quota exceeded state.
 

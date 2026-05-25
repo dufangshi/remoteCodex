@@ -259,6 +259,24 @@ export interface ControlPlaneUsageSummary {
   costUsd: number;
 }
 
+export interface ControlPlaneUsageEvent {
+  id: string;
+  userId: string;
+  sandboxId: string;
+  workspaceId: string | null;
+  sessionId: string | null;
+  gatewayKeyId: string | null;
+  provider: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  costUsd: number;
+  externalRequestId: string | null;
+  occurredAt: string;
+  importedAt: string;
+}
+
 export interface ControlPlaneAuditLog {
   id: string;
   userId: string | null;
@@ -330,6 +348,17 @@ export function fetchControlPlaneMe(auth: ControlPlaneAuth) {
   }>(auth, '/api/me', {
     cache: 'no-store',
   });
+}
+
+export function fetchControlPlaneUsageEvents(auth: ControlPlaneAuth, limit = 10) {
+  const search = new URLSearchParams({ limit: String(limit) });
+  return controlPlaneRequest<{ events: ControlPlaneUsageEvent[] }>(
+    auth,
+    `/api/usage/events?${search.toString()}`,
+    {
+      cache: 'no-store',
+    },
+  );
 }
 
 export function updateControlPlaneMe(

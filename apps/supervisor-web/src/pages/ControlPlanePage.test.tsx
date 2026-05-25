@@ -139,6 +139,24 @@ const usageWithSpend = {
   costUsd: 1.25,
 };
 
+const usageEvent = {
+  id: 'usage-1',
+  userId: 'user-1',
+  sandboxId: 'sandbox-1',
+  workspaceId: 'workspace-1',
+  sessionId: 'session-1',
+  gatewayKeyId: 'gateway-key-1',
+  provider: 'sub2api',
+  model: 'gpt-5.1-codex',
+  inputTokens: 1200,
+  outputTokens: 300,
+  cachedTokens: 100,
+  costUsd: 1.25,
+  externalRequestId: 'req_1',
+  occurredAt: '2026-05-25T00:02:00.000Z',
+  importedAt: '2026-05-25T00:03:00.000Z',
+};
+
 const adminSandboxDetail = {
   sandbox: {
     ...runningSandbox,
@@ -181,6 +199,10 @@ function jsonResponse(body: unknown, status = 200) {
   } as Response;
 }
 
+function usageEventsResponse(path: string, events: unknown[] = []) {
+  return path === '/api/usage/events?limit=10' ? jsonResponse({ events }) : null;
+}
+
 describe('ControlPlanePage', () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -212,6 +234,10 @@ describe('ControlPlanePage', () => {
 
         if (path === '/api/projects' && !init?.method) {
           return jsonResponse({ projects: projectCreated ? [project] : [] });
+        }
+
+        if (path === '/api/usage/events?limit=10' && !init?.method) {
+          return jsonResponse({ events: [] });
         }
 
         if (path === '/api/projects' && init?.method === 'POST') {
@@ -267,6 +293,11 @@ describe('ControlPlanePage', () => {
             token: 'route-token',
             expiresAt: '2026-05-25T00:05:00.000Z',
           });
+        }
+
+        const usageEvents = usageEventsResponse(path);
+        if (usageEvents) {
+          return usageEvents;
         }
 
         return jsonResponse({
@@ -394,6 +425,11 @@ describe('ControlPlanePage', () => {
         }, 409);
       }
 
+      const usageEvents = usageEventsResponse(path);
+      if (usageEvents) {
+        return usageEvents;
+      }
+
       return jsonResponse({
         code: 'not_found',
         message: `Unhandled request: ${path}`,
@@ -458,6 +494,11 @@ describe('ControlPlanePage', () => {
           });
         }
         return response;
+      }
+
+      const usageEvents = usageEventsResponse(path);
+      if (usageEvents) {
+        return usageEvents;
       }
 
       return jsonResponse({
@@ -533,6 +574,11 @@ describe('ControlPlanePage', () => {
         return jsonResponse({ workspaces: [] });
       }
 
+      const usageEvents = usageEventsResponse(path, [usageEvent]);
+      if (usageEvents) {
+        return usageEvents;
+      }
+
       return jsonResponse({
         code: 'not_found',
         message: `Unhandled request: ${path}`,
@@ -551,9 +597,22 @@ describe('ControlPlanePage', () => {
     expect(screen.getByText('LLM requests:')).toBeInTheDocument();
     expect(screen.getByText('3')).toBeInTheDocument();
     expect(screen.getByText('LLM tokens:')).toBeInTheDocument();
-    expect(screen.getByText('1500 total')).toBeInTheDocument();
+    expect(screen.getAllByText('1500 total').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('LLM cost:')).toBeInTheDocument();
-    expect(screen.getByText('$1.25')).toBeInTheDocument();
+    expect(screen.getAllByText('$1.25').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('gpt-5.1-codex')).toBeInTheDocument();
+    expect(screen.getByText('sub2api')).toBeInTheDocument();
+    expect(screen.getByText('2026-05-25T00:02:00.000Z')).toBeInTheDocument();
+  });
+
+  it('shows an empty LLM usage detail state', async () => {
+    render(<ControlPlanePage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('No LLM usage events yet.')).toBeInTheDocument();
+    });
   });
 
   it('shows API errors from failed actions', async () => {
@@ -582,6 +641,11 @@ describe('ControlPlanePage', () => {
           code: 'bad_request',
           message: 'Project slug is already in use.',
         }, 400);
+      }
+
+      const usageEvents = usageEventsResponse(path);
+      if (usageEvents) {
+        return usageEvents;
       }
 
       return jsonResponse({
@@ -615,6 +679,11 @@ describe('ControlPlanePage', () => {
           code: 'gateway_unavailable',
           message: 'gateway unavailable',
         }, 503);
+      }
+
+      const usageEvents = usageEventsResponse(path);
+      if (usageEvents) {
+        return usageEvents;
       }
 
       return jsonResponse({
@@ -675,6 +744,11 @@ describe('ControlPlanePage', () => {
             used: 25,
           },
         }, 402);
+      }
+
+      const usageEvents = usageEventsResponse(path);
+      if (usageEvents) {
+        return usageEvents;
       }
 
       return jsonResponse({
@@ -741,6 +815,11 @@ describe('ControlPlanePage', () => {
         return jsonResponse({ sandbox: currentSandbox });
       }
 
+      const usageEvents = usageEventsResponse(path);
+      if (usageEvents) {
+        return usageEvents;
+      }
+
       return jsonResponse({
         code: 'not_found',
         message: `Unhandled request: ${path}`,
@@ -802,6 +881,12 @@ describe('ControlPlanePage', () => {
         });
       }
 
+      if (path === '/api/usage/events?limit=10' && !init?.method) {
+        return new Promise<Response>((resolve) => {
+          setTimeout(() => resolve(jsonResponse({ events: [usageEvent] })), 25);
+        });
+      }
+
       return jsonResponse({
         code: 'not_found',
         message: `Unhandled request: ${path}`,
@@ -813,6 +898,9 @@ describe('ControlPlanePage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
 
     expect(await screen.findByText('Loading projects...')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Loading LLM usage...')).toBeInTheDocument();
+    });
     await waitFor(() => {
       expect(screen.getByText('Loading workspaces...')).toBeInTheDocument();
     });

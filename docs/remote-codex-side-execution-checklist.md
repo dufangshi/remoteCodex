@@ -634,7 +634,7 @@ Evidence:
   - Verification: frontend tests cover loading, populated, empty, and error
     states.
 
-- [ ] Add LLM usage detail UI.
+- [x] Add LLM usage detail UI.
   - Acceptance: users can inspect usage events by time, model, and provider.
   - Verification: frontend tests cover event list and pagination/filtering if
     available.
@@ -656,8 +656,8 @@ Evidence:
 - Verification: `pnpm --filter @remote-codex/supervisor-web typecheck`;
   `pnpm --filter @remote-codex/supervisor-web test`;
   `pnpm --filter @remote-codex/shared typecheck`
-- Residual risk: LLM usage detail UI, scheduled gateway usage import, import
-  metrics, and staging provider-runtime gateway smokes remain unchecked.
+- Residual risk: scheduled gateway usage import, import metrics, and staging
+  provider-runtime gateway smokes remain unchecked.
 
 ## Phase 7: ElAgenteHarness Integration
 
