@@ -433,17 +433,17 @@ Verification:
 - [x] Store model, prompt tokens, completion tokens, cached tokens, and cost.
 - [x] Add user usage summary endpoint.
 - [x] Add user usage events endpoint.
-- [ ] Add LLM usage summary UI.
+- [x] Add LLM usage summary UI.
 - [ ] Add LLM usage detail UI.
 - [x] Add gateway unavailable UI.
-- [ ] Add quota exceeded UI for LLM usage.
+- [x] Add quota exceeded UI for LLM usage.
 
 Verification:
 
 - [x] Gateway client tests pass with mocked gateway API.
 - [x] Worker provider bootstrap tests pass for Codex, Claude Code, and OpenCode.
 - [x] Usage import tests pass.
-- [ ] Frontend usage UI tests pass.
+- [x] Frontend usage UI tests pass.
 
 ### J. ElAgenteHarness Integration
 
@@ -1135,17 +1135,17 @@ Real provider root keys stay outside the sandbox.
 
 ### Frontend
 
-- [ ] Add LLM usage summary card.
+- [x] Add LLM usage summary card.
 - [ ] Add LLM usage detail table.
 - [x] Add gateway unavailable state.
-- [ ] Add quota exceeded state.
+- [x] Add quota exceeded state.
 
 ### Verification
 
 - [ ] Control-plane gateway tests pass.
 - [ ] Worker gateway bootstrap tests pass.
 - [x] Usage import tests pass.
-- [ ] Frontend usage UI tests pass.
+- [x] Frontend usage UI tests pass.
 
 ## Phase 7: ElAgenteHarness Integration
 

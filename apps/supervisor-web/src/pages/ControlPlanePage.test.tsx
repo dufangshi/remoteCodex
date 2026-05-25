@@ -131,6 +131,14 @@ const usage = {
   costUsd: 0,
 };
 
+const usageWithSpend = {
+  requestCount: 3,
+  inputTokens: 1200,
+  outputTokens: 300,
+  cachedTokens: 100,
+  costUsd: 1.25,
+};
+
 const adminSandboxDetail = {
   sandbox: {
     ...runningSandbox,
@@ -504,6 +512,50 @@ describe('ControlPlanePage', () => {
     });
   });
 
+  it('shows LLM usage summary after account bootstrap', async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
+
+      if (path === '/api/me/bootstrap' && init?.method === 'POST') {
+        return jsonResponse({ user, sandbox: stoppedSandbox, gatewayKey: null });
+      }
+
+      if (path === '/api/me' && !init?.method) {
+        return jsonResponse({ user, sandbox: stoppedSandbox, usage: usageWithSpend });
+      }
+
+      if (path === '/api/projects' && !init?.method) {
+        return jsonResponse({ projects: [] });
+      }
+
+      if (path === '/api/workspaces' && !init?.method) {
+        return jsonResponse({ workspaces: [] });
+      }
+
+      return jsonResponse({
+        code: 'not_found',
+        message: `Unhandled request: ${path}`,
+      }, 404);
+    });
+
+    render(<ControlPlanePage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('dev@example.com')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Quota:')).toBeInTheDocument();
+    expect(screen.getByText('default')).toBeInTheDocument();
+    expect(screen.getByText('LLM requests:')).toBeInTheDocument();
+    expect(screen.getByText('3')).toBeInTheDocument();
+    expect(screen.getByText('LLM tokens:')).toBeInTheDocument();
+    expect(screen.getByText('1500 total')).toBeInTheDocument();
+    expect(screen.getByText('LLM cost:')).toBeInTheDocument();
+    expect(screen.getByText('$1.25')).toBeInTheDocument();
+  });
+
   it('shows API errors from failed actions', async () => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -578,6 +630,75 @@ describe('ControlPlanePage', () => {
     await waitFor(() => {
       expect(screen.getByText('LLM gateway unavailable: gateway unavailable')).toBeInTheDocument();
     });
+  });
+
+  it('shows a quota exceeded state when session opening is blocked by LLM quota', async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
+
+      if (path === '/api/me/bootstrap' && init?.method === 'POST') {
+        return jsonResponse({ user, sandbox: runningSandbox, gatewayKey: null });
+      }
+
+      if (path === '/api/me' && !init?.method) {
+        return jsonResponse({
+          user: {
+            ...user,
+            quotaProfile: 'developer',
+          },
+          sandbox: runningSandbox,
+          usage,
+        });
+      }
+
+      if (path === '/api/projects' && !init?.method) {
+        return jsonResponse({ projects: [project] });
+      }
+
+      if (path === '/api/workspaces?projectId=project-1' && !init?.method) {
+        return jsonResponse({ workspaces: [workspace] });
+      }
+
+      if (path === '/api/workspaces/workspace-1/sessions' && !init?.method) {
+        return jsonResponse({ sessions: [session] });
+      }
+
+      if (path === '/api/sandboxes/sandbox-1/route-token' && init?.method === 'POST') {
+        return jsonResponse({
+          code: 'quota_exceeded',
+          message: 'Quota exceeded.',
+          details: {
+            reason: 'llm_spend_quota_exceeded',
+            quotaProfile: 'developer',
+            limit: 25,
+            used: 25,
+          },
+        }, 402);
+      }
+
+      return jsonResponse({
+        code: 'not_found',
+        message: `Unhandled request: ${path}`,
+      }, 404);
+    });
+
+    render(<ControlPlanePage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Plan calculation/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Plan calculation/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('LLM quota exceeded: developer quota exhausted (25/25).'),
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByText('Quota exceeded.')).toBeInTheDocument();
   });
 
   it('shows sandbox startup, degraded, and failure states', async () => {

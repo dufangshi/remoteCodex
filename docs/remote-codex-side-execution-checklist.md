@@ -628,7 +628,7 @@ Evidence:
 
 ### Frontend Tasks
 
-- [ ] Add LLM usage summary UI.
+- [x] Add LLM usage summary UI.
   - Acceptance: users can see total LLM spend/tokens for the current billing
     period.
   - Verification: frontend tests cover loading, populated, empty, and error
@@ -644,15 +644,20 @@ Evidence:
     product state.
   - Verification: frontend tests cover gateway degraded responses.
 
-- [ ] Add quota exceeded UI for LLM usage.
+- [x] Add quota exceeded UI for LLM usage.
   - Acceptance: users see a clear blocked state when LLM quota is exceeded.
   - Verification: frontend tests cover quota exceeded response shape.
 
 ### Evidence
 
-- Files:
-- Verification:
-- Residual risk:
+- Files: `apps/supervisor-web/src/pages/ControlPlanePage.tsx`,
+  `apps/supervisor-web/src/pages/ControlPlanePage.test.tsx`,
+  `packages/shared/src/index.ts`
+- Verification: `pnpm --filter @remote-codex/supervisor-web typecheck`;
+  `pnpm --filter @remote-codex/supervisor-web test`;
+  `pnpm --filter @remote-codex/shared typecheck`
+- Residual risk: LLM usage detail UI, scheduled gateway usage import, import
+  metrics, and staging provider-runtime gateway smokes remain unchecked.
 
 ## Phase 7: ElAgenteHarness Integration
 

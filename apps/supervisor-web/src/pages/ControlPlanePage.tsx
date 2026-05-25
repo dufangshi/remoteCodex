@@ -217,6 +217,7 @@ export function ControlPlanePage() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [gatewayUnavailable, setGatewayUnavailable] = useState<string | null>(null);
+  const [quotaExceeded, setQuotaExceeded] = useState<string | null>(null);
   const [metadataLoading, setMetadataLoading] = useState<{
     projects: boolean;
     workspaces: boolean;
@@ -246,11 +247,24 @@ export function ControlPlanePage() {
     setError(null);
     setMessage(null);
     setGatewayUnavailable(null);
+    setQuotaExceeded(null);
     try {
       return await action();
     } catch (caught) {
       if (caught instanceof ApiError && caught.payload.code === 'gateway_unavailable') {
         setGatewayUnavailable(caught.message);
+      }
+      if (caught instanceof ApiError && caught.payload.code === 'quota_exceeded') {
+        const details = caught.payload.details ?? {};
+        const limit = typeof details.limit === 'number' ? details.limit : null;
+        const used = typeof details.used === 'number' ? details.used : null;
+        const quotaProfile =
+          typeof details.quotaProfile === 'string' ? details.quotaProfile : user?.quotaProfile ?? 'current';
+        setQuotaExceeded(
+          limit !== null && used !== null
+            ? `${quotaProfile} quota exhausted (${used}/${limit}).`
+            : 'Quota exceeded.',
+        );
       }
       setError(caught instanceof Error ? caught.message : `${label} failed.`);
       return null;
@@ -584,6 +598,11 @@ export function ControlPlanePage() {
           LLM gateway unavailable: {gatewayUnavailable}
         </div>
       ) : null}
+      {quotaExceeded ? (
+        <div className="rounded-[0.9rem] border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-4 py-3 text-sm text-[var(--status-danger-fg)]">
+          LLM quota exceeded: {quotaExceeded}
+        </div>
+      ) : null}
       {workerConnectionState === 'reconnecting' ? (
         <div className="rounded-[0.9rem] border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-4 py-3 text-sm text-[var(--status-warning-fg)]">
           Reconnecting worker route.
@@ -654,7 +673,10 @@ export function ControlPlanePage() {
           <div className="mt-4 grid gap-2 text-sm text-[var(--theme-fg-muted)] sm:grid-cols-3">
             <p><span className="text-[var(--theme-fg)]">User:</span> {user.email}</p>
             <p><span className="text-[var(--theme-fg)]">Plan:</span> {user.plan}</p>
-            <p><span className="text-[var(--theme-fg)]">Usage:</span> {usage?.requestCount ?? 0} requests</p>
+            <p><span className="text-[var(--theme-fg)]">Quota:</span> {user.quotaProfile ?? 'default'}</p>
+            <p><span className="text-[var(--theme-fg)]">LLM requests:</span> {usage?.requestCount ?? 0}</p>
+            <p><span className="text-[var(--theme-fg)]">LLM tokens:</span> {(usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0)} total</p>
+            <p><span className="text-[var(--theme-fg)]">LLM cost:</span> ${Number(usage?.costUsd ?? 0).toFixed(2)}</p>
           </div>
         ) : null}
       </Section>

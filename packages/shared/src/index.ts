@@ -30,6 +30,7 @@ export type ApiErrorCode =
   | 'conflict'
   | 'provider_goal_error'
   | 'gateway_unavailable'
+  | 'quota_exceeded'
   | 'forbidden'
   | 'goal_feature_disabled'
   | 'internal_error'

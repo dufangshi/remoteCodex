@@ -603,10 +603,10 @@ import third, then quota enforcement and UI.
 
 ### Frontend Checklist
 
-- [ ] Add LLM usage summary UI.
+- [x] Add LLM usage summary UI.
 - [ ] Add LLM usage detail UI.
 - [x] Add gateway unavailable UI.
-- [ ] Add quota exceeded UI for LLM usage.
+- [x] Add quota exceeded UI for LLM usage.
 - [ ] Add workflow catalog UI.
 - [ ] Add task status UI.
 - [ ] Add job status UI.

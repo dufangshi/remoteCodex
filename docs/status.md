@@ -81,9 +81,10 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   refresh are in place, while staging router smoke checks remain open.
 - Worker image runtime pinning and smoke verification.
 - LLM gateway contract is fixed on a sub2api-compatible shape; provisioning,
-  provider selection config, worker provider config rendering, and manual usage
-  import exist, while scheduled import, metrics, and frontend degraded/usage UI
-  remain open.
+  provider selection config, worker provider config rendering, manual usage
+  import, frontend degraded state, LLM usage summary, and quota-exceeded UI
+  exist, while scheduled import, metrics, usage detail UI, and staging
+  provider-runtime smokes remain open.
 - Gateway token storage is documented as metadata plus optional encrypted
   ciphertext only; raw provider keys and raw gateway tokens are not returned by
   Remote Codex APIs.
@@ -101,8 +102,8 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 4. Add staging lifecycle smokes for start, stop, idempotent restart, and
    readiness.
 5. Build and smoke-test the worker Docker image, then add CI image checks.
-6. Finish gateway scheduled import, metrics, frontend degraded state, and usage
-   UI.
+6. Finish gateway scheduled import, metrics, LLM usage detail UI, and staging
+   provider-runtime gateway smokes.
 
 ## Verification Commands
 
