@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   applyProviderHostConfigArchive,
+  bootstrapControlPlaneUser,
   createThreadShell,
   createProviderHostConfigArchive,
+  createControlPlaneWorkspace,
   createWorkspace,
   disconnectThread,
   fetchAgentBackendModels,
@@ -145,5 +147,43 @@ describe('api request helper', () => {
     expect(calls[2]?.[0]).toBe('/api/agent-runtimes/codex/models');
     expect(calls[3]?.[0]).toBe('/api/service/build-restart');
     expect(calls[3]?.[1]?.method).toBe('POST');
+  });
+
+  it('keeps control-plane auth headers and JSON request shape', async () => {
+    const auth = {
+      baseUrl: 'https://control.example.test/',
+      token: 'dev:user-1',
+    };
+
+    await bootstrapControlPlaneUser(auth, {
+      email: 'user@example.com',
+      displayName: 'User',
+    });
+    await createControlPlaneWorkspace(auth, {
+      projectId: 'project-1',
+      name: 'Molecule study',
+      slug: 'molecule-study',
+    });
+
+    const calls = vi.mocked(fetch).mock.calls;
+    expect(calls[0]?.[0]).toBe('https://control.example.test/api/me/bootstrap');
+    expect(calls[0]?.[1]?.method).toBe('POST');
+    expect(JSON.parse(String(calls[0]?.[1]?.body))).toEqual({
+      email: 'user@example.com',
+      displayName: 'User',
+    });
+    expect(new Headers(calls[0]?.[1]?.headers).get('Authorization')).toBe('Bearer dev:user-1');
+    expect(new Headers(calls[0]?.[1]?.headers).get('Content-Type')).toBe('application/json');
+
+    expect(calls[1]?.[0]).toBe(
+      'https://control.example.test/api/projects/project-1/workspaces',
+    );
+    expect(calls[1]?.[1]?.method).toBe('POST');
+    expect(JSON.parse(String(calls[1]?.[1]?.body))).toEqual({
+      name: 'Molecule study',
+      slug: 'molecule-study',
+    });
+    expect(new Headers(calls[1]?.[1]?.headers).get('Authorization')).toBe('Bearer dev:user-1');
+    expect(new Headers(calls[1]?.[1]?.headers).get('Content-Type')).toBe('application/json');
   });
 });

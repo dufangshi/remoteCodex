@@ -5447,12 +5447,9 @@ describe('ThreadDetailPage', () => {
 
     const slashMenu = document.querySelector('[data-composer-menu-surface="true"]');
     expect(slashMenu).toBeInTheDocument();
-    expect(slashMenu).toHaveClass('bottom-full');
-    let composerLayer = slashMenu?.parentElement;
-    while (composerLayer && !composerLayer.classList.contains('z-[80]')) {
-      composerLayer = composerLayer.parentElement;
-    }
-    expect(composerLayer).toHaveClass('z-[80]');
+    expect(slashMenu).toHaveClass('fixed', 'z-[120]');
+    expect(slashMenu?.parentElement).toBe(document.body);
+    expect(composerHost?.contains(slashMenu)).toBe(false);
   });
 
 });

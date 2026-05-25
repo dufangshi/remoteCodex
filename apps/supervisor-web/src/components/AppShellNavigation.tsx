@@ -288,6 +288,7 @@ export function AppShellNavigationMenu({
   const navigate = useNavigate();
   const menuRef = useRef<HTMLDivElement | null>(null);
   const isWorkspacesRoute = location.pathname === '/workspaces';
+  const isControlPlaneRoute = location.pathname === '/control-plane';
 
   useEffect(() => {
     if (!shellNav?.navOpen) {
@@ -365,6 +366,21 @@ export function AppShellNavigationMenu({
           className={menuItemClassName(isWorkspacesRoute)}
         >
           Workspaces
+        </button>
+        <button
+          type="button"
+          disabled={isControlPlaneRoute}
+          onClick={() => {
+            if (isControlPlaneRoute) {
+              return;
+            }
+
+            shellNav.closeNav();
+            navigate('/control-plane');
+          }}
+          className={menuItemClassName(isControlPlaneRoute)}
+        >
+          Control Plane
         </button>
         <button
           type="button"

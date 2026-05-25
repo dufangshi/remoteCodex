@@ -110,13 +110,13 @@ without exposing product identity tokens to sandbox workers.
 ### Frontend Auth Surface
 
 - [ ] Add login route.
-- [ ] Add registration or signup route.
-- [ ] Add logout action.
+- [x] Add registration or signup route.
+- [x] Add logout action.
 - [ ] Add authenticated app-shell guard.
 - [ ] Add loading state while product auth resolves.
 - [ ] Add expired-session state.
 - [ ] Add unauthorized or disabled-account state.
-- [ ] Add account/profile page.
+- [x] Add account/profile page.
 - [ ] Add admin-only user table or user management route.
 - [ ] Ensure product user JWT is never passed to worker APIs.
 
@@ -171,17 +171,17 @@ runtime state.
 
 ### Frontend Product Flow
 
-- [ ] Add project list route.
-- [ ] Add project creation flow.
+- [x] Add project list route.
+- [x] Add project creation flow.
 - [ ] Add project detail route.
-- [ ] Add workspace list inside project context.
-- [ ] Add workspace creation flow.
-- [ ] Add session list inside workspace context.
-- [ ] Add session creation flow.
+- [x] Add workspace list inside project context.
+- [x] Add workspace creation flow.
+- [x] Add session list inside workspace context.
+- [x] Add session creation flow.
 - [ ] Add session open flow that acquires a route token.
-- [ ] Add empty states for no projects, workspaces, and sessions.
+- [x] Add empty states for no projects, workspaces, and sessions.
 - [ ] Add loading states for every list.
-- [ ] Add error states for failed create/update requests.
+- [x] Add error states for failed create/update requests.
 
 ### Worker Contract
 
@@ -197,7 +197,7 @@ runtime state.
 
 - [x] Control-plane API tests cover CRUD and ownership.
 - [x] Web typecheck passes.
-- [ ] Frontend tests cover project, workspace, and session navigation.
+- [x] Frontend tests cover project, workspace, and session navigation.
 - [ ] End-to-end smoke test covers create project to open session.
 
 ## Phase 3: Sandbox Lifecycle
@@ -270,10 +270,10 @@ start, stop, observe, and eventually snapshot it.
 
 ### Frontend Sandbox Surface
 
-- [ ] Add sandbox status indicator.
-- [ ] Add start sandbox action.
-- [ ] Add stop sandbox action.
-- [ ] Add restart sandbox action.
+- [x] Add sandbox status indicator.
+- [x] Add start sandbox action.
+- [x] Add stop sandbox action.
+- [x] Add restart sandbox action.
 - [ ] Add degraded/offline banner.
 - [ ] Add startup progress state.
 - [ ] Add failure reason display.
@@ -415,7 +415,7 @@ token.
 ### Frontend Worker Connection
 
 - [ ] Fetch a route token before opening a worker session.
-- [ ] Store route token only in memory.
+- [x] Store route token only in memory.
 - [ ] Refresh route token before expiry.
 - [ ] Reconnect WebSocket after token refresh.
 - [ ] Show sandbox offline state.

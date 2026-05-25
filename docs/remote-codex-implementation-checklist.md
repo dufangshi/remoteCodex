@@ -82,12 +82,12 @@ plane. Browser identity must stay outside sandbox service credentials.
 ### Frontend
 
 - [ ] Add login page.
-- [ ] Add register/signup entry.
-- [ ] Add logout action.
+- [x] Add register/signup entry.
+- [x] Add logout action.
 - [ ] Add authenticated app shell guard.
 - [ ] Add loading state while product auth is resolving.
 - [ ] Add unauthorized state for expired or invalid sessions.
-- [ ] Add account/profile page.
+- [x] Add account/profile page.
 - [ ] Add admin user management page or admin-only minimal table.
 - [x] Ensure frontend never sends product user JWT directly to worker APIs.
 
@@ -128,14 +128,14 @@ live runtime state.
 
 ### Frontend
 
-- [ ] Add projects list page.
-- [ ] Add project creation flow.
+- [x] Add projects list page.
+- [x] Add project creation flow.
 - [ ] Add project detail route.
-- [ ] Add workspaces list inside a project.
-- [ ] Add workspace creation flow.
-- [ ] Add sessions list inside a workspace.
-- [ ] Add session creation flow.
-- [ ] Add empty states for no projects, no workspaces, and no sessions.
+- [x] Add workspaces list inside a project.
+- [x] Add workspace creation flow.
+- [x] Add sessions list inside a workspace.
+- [x] Add session creation flow.
+- [x] Add empty states for no projects, no workspaces, and no sessions.
 - [ ] Add clear loading and error states.
 
 ### Worker Contract
@@ -149,7 +149,7 @@ live runtime state.
 
 - [x] Control-plane API tests cover CRUD and ownership.
 - [x] Web typecheck passes.
-- [ ] Add frontend tests for project/workspace/session navigation.
+- [x] Add frontend tests for project/workspace/session navigation.
 
 ## Phase 3: Sandbox Lifecycle
 
@@ -209,10 +209,10 @@ user.
 
 ### Frontend
 
-- [ ] Add sandbox status indicator.
-- [ ] Add start sandbox action.
-- [ ] Add stop sandbox action.
-- [ ] Add restart sandbox action.
+- [x] Add sandbox status indicator.
+- [x] Add start sandbox action.
+- [x] Add stop sandbox action.
+- [x] Add restart sandbox action.
 - [ ] Add degraded/offline banner.
 - [ ] Add sandbox startup progress state.
 
@@ -323,7 +323,7 @@ Goal: browser traffic reaches workers only through a route-token checked proxy.
 ### Frontend
 
 - [ ] Fetch route token before connecting to a worker.
-- [ ] Store route token only in memory.
+- [x] Store route token only in memory.
 - [ ] Refresh route token before expiry.
 - [ ] Reconnect WebSocket after token refresh.
 - [ ] Show sandbox offline state.

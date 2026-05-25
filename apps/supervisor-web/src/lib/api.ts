@@ -78,8 +78,8 @@ async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   }
 
   const response = await fetch(input, {
+    ...init,
     headers,
-    ...init
   });
 
   if (!response.ok) {
@@ -158,6 +158,261 @@ export interface PromptAttachmentUpload
 
 export interface SendThreadPromptRequestInput extends SendThreadPromptInput {
   attachments?: PromptAttachmentUpload[];
+}
+
+export interface ControlPlaneAuth {
+  baseUrl: string;
+  token: string;
+}
+
+export interface ControlPlaneUser {
+  id: string;
+  authProvider: string;
+  authSubject: string;
+  email: string;
+  displayName: string | null;
+  status: string;
+  plan: string;
+  billingCustomerId?: string | null;
+  quotaProfile?: string;
+  createdAt: string;
+  updatedAt: string;
+  lastSeenAt: string | null;
+}
+
+export interface ControlPlaneSandbox {
+  id: string;
+  userId: string;
+  state: string;
+  image: string;
+  region: string;
+  routerBaseUrl: string | null;
+  workerServiceName: string | null;
+  s3Prefix: string;
+  gatewayKeyId: string | null;
+  lastStartedAt: string | null;
+  lastSeenAt: string | null;
+  idleTimeoutAt: string | null;
+  statusReason?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ControlPlaneProject {
+  id: string;
+  userId: string;
+  name: string;
+  slug: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ControlPlaneWorkspace {
+  id: string;
+  userId: string;
+  projectId: string | null;
+  sandboxId: string;
+  name: string;
+  slug: string;
+  path: string;
+  sourceType: string;
+  gitUrl: string | null;
+  defaultBranch: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ControlPlaneSession {
+  id: string;
+  userId: string;
+  sandboxId: string;
+  workspaceId: string;
+  provider: AgentBackendIdDto;
+  workerSessionId: string | null;
+  title: string;
+  status: string;
+  lastActivityAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ControlPlaneRouteToken {
+  sandboxId: string;
+  routerBaseUrl: string;
+  wsBaseUrl: string;
+  token: string;
+  expiresAt: string;
+}
+
+export interface ControlPlaneUsageSummary {
+  requestCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  costUsd: number;
+}
+
+function controlPlaneUrl(auth: ControlPlaneAuth, path: string) {
+  return `${auth.baseUrl.replace(/\/+$/, '')}${path}`;
+}
+
+function controlPlaneHeaders(auth: ControlPlaneAuth, init?: RequestInit) {
+  const headers = new Headers(init?.headers);
+  headers.set('Authorization', `Bearer ${auth.token}`);
+  return headers;
+}
+
+async function controlPlaneRequest<T>(
+  auth: ControlPlaneAuth,
+  path: string,
+  init?: RequestInit,
+): Promise<T> {
+  return request<T>(controlPlaneUrl(auth, path), {
+    ...init,
+    headers: controlPlaneHeaders(auth, init),
+  });
+}
+
+export function bootstrapControlPlaneUser(
+  auth: ControlPlaneAuth,
+  input: { email: string; displayName?: string | null },
+) {
+  return controlPlaneRequest<{
+    user: ControlPlaneUser;
+    sandbox: ControlPlaneSandbox;
+    gatewayKey: unknown;
+  }>(auth, '/api/me/bootstrap', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function fetchControlPlaneMe(auth: ControlPlaneAuth) {
+  return controlPlaneRequest<{
+    user: ControlPlaneUser;
+    sandbox: ControlPlaneSandbox;
+    usage: ControlPlaneUsageSummary;
+  }>(auth, '/api/me', {
+    cache: 'no-store',
+  });
+}
+
+export function updateControlPlaneMe(
+  auth: ControlPlaneAuth,
+  input: { displayName?: string | null },
+) {
+  return controlPlaneRequest<{ user: ControlPlaneUser }>(auth, '/api/me', {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export function fetchControlPlaneProjects(auth: ControlPlaneAuth) {
+  return controlPlaneRequest<{ projects: ControlPlaneProject[] }>(auth, '/api/projects', {
+    cache: 'no-store',
+  });
+}
+
+export function createControlPlaneProject(
+  auth: ControlPlaneAuth,
+  input: { name: string; slug: string },
+) {
+  return controlPlaneRequest<{ project: ControlPlaneProject }>(auth, '/api/projects', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function fetchControlPlaneWorkspaces(auth: ControlPlaneAuth, projectId?: string) {
+  const suffix = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+  return controlPlaneRequest<{ workspaces: ControlPlaneWorkspace[] }>(
+    auth,
+    `/api/workspaces${suffix}`,
+    { cache: 'no-store' },
+  );
+}
+
+export function createControlPlaneWorkspace(
+  auth: ControlPlaneAuth,
+  input: { projectId?: string | null; name: string; slug: string },
+) {
+  const path = input.projectId
+    ? `/api/projects/${encodeURIComponent(input.projectId)}/workspaces`
+    : '/api/workspaces';
+  const body = input.projectId
+    ? { name: input.name, slug: input.slug }
+    : input;
+  return controlPlaneRequest<{ workspace: ControlPlaneWorkspace }>(auth, path, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function fetchControlPlaneSessions(auth: ControlPlaneAuth, workspaceId: string) {
+  return controlPlaneRequest<{ sessions: ControlPlaneSession[] }>(
+    auth,
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/sessions`,
+    { cache: 'no-store' },
+  );
+}
+
+export function createControlPlaneSession(
+  auth: ControlPlaneAuth,
+  workspaceId: string,
+  input: { provider: AgentBackendIdDto; title: string },
+) {
+  return controlPlaneRequest<{ session: ControlPlaneSession }>(
+    auth,
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/sessions`,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function startControlPlaneSandbox(auth: ControlPlaneAuth) {
+  return controlPlaneRequest<{ sandbox: ControlPlaneSandbox }>(auth, '/api/sandbox/start', {
+    method: 'POST',
+  });
+}
+
+export function stopControlPlaneSandbox(auth: ControlPlaneAuth) {
+  return controlPlaneRequest<{ sandbox: ControlPlaneSandbox }>(auth, '/api/sandbox/stop', {
+    method: 'POST',
+  });
+}
+
+export function restartControlPlaneSandbox(auth: ControlPlaneAuth) {
+  return controlPlaneRequest<{ sandbox: ControlPlaneSandbox }>(auth, '/api/sandbox/restart', {
+    method: 'POST',
+  });
+}
+
+export function fetchControlPlaneSandboxHealth(auth: ControlPlaneAuth) {
+  return controlPlaneRequest<{
+    sandbox: ControlPlaneSandbox;
+    status: { state: string; routerBaseUrl?: string | null };
+    endpoint: { routerBaseUrl: string | null };
+  }>(auth, '/api/sandbox/health', {
+    cache: 'no-store',
+  });
+}
+
+export function createControlPlaneRouteToken(
+  auth: ControlPlaneAuth,
+  sandboxId: string,
+  input: { workspaceId?: string; sessionId?: string; scopes?: string[] },
+) {
+  return controlPlaneRequest<ControlPlaneRouteToken>(
+    auth,
+    `/api/sandboxes/${encodeURIComponent(sandboxId)}/route-token`,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  );
 }
 
 function normalizedUploadFileName(attachment: PromptAttachmentUpload, index: number) {
