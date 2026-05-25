@@ -201,8 +201,14 @@ function minimalChecklist() {
     '- [ ] S3.04 Finalize AWS staging configuration.',
     '- [ ] S3.05 Add least-privilege Kubernetes credentials.',
     '- [ ] S3.06 Create a real worker Pod from the control plane.',
+    '- [ ] S3.07 Stop a real worker Pod from the control plane.',
+    '- [ ] S3.08 Add idempotent lifecycle smoke.',
     '- [ ] R5.10 Deploy sandbox-router in staging.',
+    '- [ ] R5.11 Add direct-worker-denial proof.',
+    '- [ ] R5.12 Add browser-to-router-to-worker smoke.',
     '- [ ] G6.11 Run staging Codex gateway smoke.',
+    '- [ ] G6.12 Run staging Claude Code gateway smoke.',
+    '- [ ] G6.13 Run staging OpenCode gateway smoke.',
   ].join('\n');
 }
 
@@ -259,6 +265,123 @@ function completeAwsEvidence() {
       ],
       credentialReviewPassed: true,
     },
+  };
+}
+
+function completeStagingSmokeEvidence() {
+  return {
+    ok: true,
+    generatedAt: '2026-05-25T12:30:00.000Z',
+    controlPlaneBaseUrl: 'https://control-plane.example.test',
+    steps: [
+      {
+        name: 'start_sandbox',
+        ok: true,
+        details: {
+          sandboxId: 'sandbox-smoke',
+          state: 'running',
+          image: 'remote-codex-worker:sha-abc123',
+        },
+      },
+      {
+        name: 'sandbox_ready',
+        ok: true,
+        details: {
+          sandboxId: 'sandbox-smoke',
+          state: 'running',
+          k8sPodName: 'worker-pod',
+          workerServiceName: 'worker-service',
+          k8sNamespace: 'remote-codex-sandboxes',
+        },
+      },
+      {
+        name: 'admin_sandbox_runtime_detail',
+        ok: true,
+        details: {
+          sandboxId: 'sandbox-smoke',
+          runtimeState: 'running',
+          k8sPodName: 'worker-pod',
+          workerServiceName: 'worker-service',
+          k8sNamespace: 'remote-codex-sandboxes',
+        },
+      },
+      {
+        name: 'stop_sandbox',
+        ok: true,
+        details: {
+          sandboxId: 'sandbox-smoke',
+          state: 'stopping',
+          finalHealthState: 'stopped',
+          stopConverged: true,
+        },
+      },
+      {
+        name: 'idempotent_lifecycle',
+        ok: true,
+        details: {
+          sandboxId: 'sandbox-smoke',
+          firstStartState: 'running',
+          secondStartState: 'running',
+          restartState: 'running',
+        },
+      },
+      {
+        name: 'issue_route_token',
+        ok: true,
+        details: {
+          sandboxId: 'sandbox-smoke',
+          routerBaseUrl: 'https://router.example.test',
+        },
+      },
+      {
+        name: 'router_health',
+        ok: true,
+        details: {
+          routerBaseUrl: 'https://router.example.test',
+          role: 'sandbox-router',
+          status: 200,
+        },
+      },
+      {
+        name: 'browser_to_router_to_worker',
+        ok: true,
+        details: {
+          role: 'worker',
+          sandboxId: 'sandbox-smoke',
+          userId: 'user-smoke',
+          requestDiagnostics: {
+            authorizationHeaderPresent: false,
+            workerTokenHeaderPresent: true,
+          },
+        },
+      },
+      {
+        name: 'direct_worker_denial',
+        ok: true,
+        details: {
+          status: 403,
+          acceptedStatuses: [401, 403],
+        },
+      },
+      ...[
+        ['codex_gateway_smoke', 'codex'],
+        ['claude_gateway_smoke', 'claude'],
+        ['opencode_gateway_smoke', 'opencode'],
+      ].map(([name, provider]) => ({
+        name,
+        ok: true,
+        details: {
+          parsedStdout: {
+            ok: true,
+            provider,
+            gatewayUsageRecorded: true,
+            rootKeysAbsent: true,
+            workerConfigUsesGateway: true,
+            requestId: `${provider}-request-id`,
+          },
+        },
+      })),
+    ],
   };
 }
 
@@ -327,8 +450,60 @@ describe('phase zero-six evidence tooling', () => {
     expect(checklist).toContain('- [x] S3.04 Finalize AWS staging configuration.');
     expect(checklist).toContain('- [x] S3.05 Add least-privilege Kubernetes credentials.');
     expect(checklist).toContain('- [ ] S3.06 Create a real worker Pod from the control plane.');
+    expect(checklist).toContain('- [ ] S3.07 Stop a real worker Pod from the control plane.');
+    expect(checklist).toContain('- [ ] S3.08 Add idempotent lifecycle smoke.');
     expect(checklist).toContain('- [ ] R5.10 Deploy sandbox-router in staging.');
+    expect(checklist).toContain('- [ ] R5.11 Add direct-worker-denial proof.');
+    expect(checklist).toContain('- [ ] R5.12 Add browser-to-router-to-worker smoke.');
     expect(checklist).toContain('- [ ] G6.11 Run staging Codex gateway smoke.');
+    expect(checklist).toContain('- [ ] G6.12 Run staging Claude Code gateway smoke.');
+    expect(checklist).toContain('- [ ] G6.13 Run staging OpenCode gateway smoke.');
+  });
+
+  it('applies all remaining phase zero-six boxes from complete AWS and staging evidence', async () => {
+    const dir = await tempDir();
+    const checklistPath = path.join(dir, 'checklist.md');
+    const awsPath = path.join(dir, 'aws.json');
+    const stagingPath = path.join(dir, 'staging.json');
+    await writeFile(checklistPath, minimalChecklist());
+    await writeFile(awsPath, JSON.stringify(completeAwsEvidence(), null, 2));
+    await writeFile(stagingPath, JSON.stringify(completeStagingSmokeEvidence(), null, 2));
+
+    const result = await runScript('scripts/verify-phase-zero-six-evidence.ts', [
+      '--checklist',
+      checklistPath,
+      '--aws-preflight',
+      awsPath,
+      '--staging-smoke',
+      stagingPath,
+      '--apply-ready',
+    ]);
+    const parsed = JSON.parse(result.stdout);
+    const checklist = await readFile(checklistPath, 'utf8');
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.apply.applied).toBe(true);
+    expect(parsed.apply.appliedItems).toEqual([
+      'S3.04',
+      'S3.05',
+      'S3.06',
+      'S3.07',
+      'S3.08',
+      'R5.10',
+      'R5.11',
+      'R5.12',
+      'G6.11',
+      'G6.12',
+      'G6.13',
+    ]);
+    expect(parsed.readyToCheck.map((entry: { item: string }) => entry.item)).toEqual(
+      parsed.apply.appliedItems,
+    );
+    expect(parsed.stillMissing).toEqual([]);
+    for (const item of parsed.apply.appliedItems as string[]) {
+      expect(checklist).toContain(`- [x] ${item} `);
+    }
   });
 
   it('fails artifact safety scan when evidence files contain obvious secrets', async () => {
