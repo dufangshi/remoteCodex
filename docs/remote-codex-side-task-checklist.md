@@ -342,7 +342,7 @@ Verification:
 - [x] Worker token auth tests pass.
 - [x] Disabled management-route tests pass.
 - [x] Scope-denial tests cover every checked scope-protected route.
-- [ ] `pnpm --filter @remote-codex/supervisor-api test`
+- [x] `pnpm --filter @remote-codex/supervisor-api test`
 
 ### H. Sandbox Router And Route Tokens
 
@@ -988,7 +988,7 @@ required identity, filesystem, or token settings are missing.
 
 - [x] `pnpm --filter @remote-codex/supervisor-api typecheck`
 - [x] `pnpm --filter @remote-codex/config typecheck`
-- [ ] `pnpm --filter @remote-codex/supervisor-api test`
+- [x] `pnpm --filter @remote-codex/supervisor-api test`
 - [ ] `docker build -f Dockerfile.worker -t remote-codex-worker:verify .`
 - [ ] Run the worker container locally and verify `/readyz`.
 - [ ] Verify the worker rejects non-health requests without token.

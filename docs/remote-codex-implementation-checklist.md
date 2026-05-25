@@ -379,7 +379,7 @@ Verification:
 - [x] Add worker auth tests.
 - [x] Add disabled-management-route tests.
 - [x] Add scope-denial tests for checked scope-protected routes.
-- [ ] `pnpm --filter @remote-codex/supervisor-api test`
+- [x] `pnpm --filter @remote-codex/supervisor-api test`
 
 ## Phase 7: LLM Gateway Integration
 

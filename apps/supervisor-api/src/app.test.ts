@@ -6453,21 +6453,25 @@ describe('supervisor api', () => {
       hookScope: 'turn',
       hookSource: 'project',
       hookStatusMessage: 'Checking Bash command',
-      hookOutputEntries: [
-        {
-          kind: 'context',
-          text: 'Hook printed command details.',
-        },
-        {
-          kind: 'warning',
-          text: 'Hook system message.',
-        },
-      ],
+      hookOutputEntries: null,
+      detailText: null,
+      hasDeferredDetail: true,
     });
-    expect(hookItem.detailText).toContain(
+    const hookDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}/items/hook:hook-run-1/detail`
+    });
+
+    expect(hookDetailResponse.statusCode).toBe(200);
+    expect(hookDetailResponse.json()).toMatchObject({
+      id: 'hook:hook-run-1',
+      kind: 'hook',
+      title: 'PreToolUse Hook Details',
+    });
+    expect(hookDetailResponse.json().text).toContain(
       'Hook printed command details.',
     );
-    expect(hookItem.detailText).toContain(
+    expect(hookDetailResponse.json().text).toContain(
       'Hook system message.',
     );
   });
@@ -6545,18 +6549,27 @@ describe('supervisor api', () => {
           kind: 'hook',
           text: 'Stop hook',
           hookEventLabel: 'Stop',
-          hookOutputEntries: [
-            {
-              kind: 'warning',
-              text: 'remote-codex hook ran',
-            },
-          ],
+          previewText: 'remote-codex hook ran',
+          hookOutputEntries: null,
+          detailText: null,
+          hasDeferredDetail: true,
         }),
       ]),
     );
     expect(JSON.stringify(detailResponse.json().turns.at(-1).items)).not.toContain(
       '<hook_prompt',
     );
+    const hookDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}/items/${encodeURIComponent('hook-prompt:stop:0:/tmp/demo/.codex/hooks.json')}/detail`
+    });
+
+    expect(hookDetailResponse.statusCode).toBe(200);
+    expect(hookDetailResponse.json()).toMatchObject({
+      kind: 'hook',
+      title: 'Stop Hook Details',
+      text: 'remote-codex hook ran',
+    });
   });
 
   it('uses persisted command snapshots when final history contains only command placeholders', async () => {
