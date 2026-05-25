@@ -334,7 +334,10 @@ values and sensitive fields before marking the bundle successful. This is a
 guardrail, not a replacement for operator review.
 Provider command `stdout`, `stderr`, and command errors are redacted before
 they are written to evidence JSON, and then scanned again by the artifact
-secret scanner.
+secret scanner. The provider gateway helper preserves redacted stdout and
+stderr even when the provider command exits non-zero, so operators can debug a
+failed Codex, Claude Code, or OpenCode smoke without storing raw secrets in the
+evidence bundle.
 If a provider command exits non-zero, the staging smoke still emits a JSON
 report with that provider step marked `ok: false`; the verifier then leaves the
 corresponding G6 box unchecked with a concrete failure record.

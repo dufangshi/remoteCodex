@@ -123,7 +123,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   JSON fields required by the G6.11-G6.13 staging verifier.
 - Provider command `stdout`, `stderr`, and command errors are redacted before
   they enter staging evidence JSON; the artifact secret scanner still runs as a
-  second guardrail on the generated bundle.
+  second guardrail on the generated bundle. Provider gateway smoke now preserves
+  redacted stdout/stderr even when the provider command exits non-zero, making
+  failed G6.11-G6.13 runtime smokes easier to debug without storing raw secrets.
 - Provider command failures are captured as failed staging smoke steps instead
   of aborting the whole JSON report, so G6.11-G6.13 verifier output can show
   exactly which runtime smoke failed.

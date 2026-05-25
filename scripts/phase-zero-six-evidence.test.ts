@@ -959,6 +959,47 @@ describe('phase zero-six evidence tooling', () => {
     expect(result.stdout).not.toContain('sk-testsecretvalue1234567890');
   });
 
+  it('keeps redacted provider command output when provider gateway smoke command fails', async () => {
+    const dir = await tempDir();
+    const configPath = path.join(dir, 'config.toml');
+    const commandPath = path.join(dir, 'provider-command-fails.mjs');
+    await writeFile(
+      configPath,
+      [
+        'base_url = "https://gateway.example.test"',
+        'token_env = "REMOTE_CODEX_LLM_GATEWAY_TOKEN"',
+      ].join('\n'),
+    );
+    await writeFile(
+      commandPath,
+      [
+        'console.log("Bearer eyJaaaaaaaaaaaaaaaa.eyJbbbbbbbbbbbbbbbb.cccccccccccccccccc");',
+        'console.error("sk-testsecretvalue1234567890");',
+        'process.exit(9);',
+      ].join('\n'),
+    );
+
+    const result = await runScriptWithEnv(
+      'scripts/provider-gateway-smoke.ts',
+      ['codex'],
+      {
+        PROVIDER_GATEWAY_SMOKE_CONFIG_PATH: configPath,
+        PROVIDER_GATEWAY_SMOKE_COMMAND_JSON: JSON.stringify(['node', commandPath]),
+        PROVIDER_GATEWAY_SMOKE_USAGE_RECORDED: '1',
+        REMOTE_CODEX_LLM_GATEWAY_BASE_URL: 'https://gateway.example.test',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.details.commandStdout).toContain('Bearer [REDACTED]');
+    expect(parsed.details.commandStderr).toContain('[REDACTED_OPENAI_KEY]');
+    expect(parsed.details.commandError).toContain('Command failed');
+    expect(result.stdout).not.toContain('eyJaaaaaaaaaaaaaaaa');
+    expect(result.stdout).not.toContain('sk-testsecretvalue1234567890');
+  });
+
   it('records failed provider command as a redacted staging smoke step', async () => {
     const dir = await tempDir();
     const commandPath = path.join(dir, 'failing-provider-command.mjs');

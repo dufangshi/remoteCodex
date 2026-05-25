@@ -155,8 +155,8 @@ async function runProviderCommand() {
     return {
       ran: true,
       ok: false,
-      stdout: '',
-      stderr: '',
+      stdout: redactedSlice((error as { stdout?: string }).stdout ?? ''),
+      stderr: redactedSlice((error as { stderr?: string }).stderr ?? ''),
       parsedStdout: null,
       error: redactSecretText(error instanceof Error ? error.message : String(error)),
     };
