@@ -772,4 +772,90 @@ describe('control plane api', () => {
     expect(tokenResponse.statusCode).toBe(409);
     expect(tokenResponse.json().code).toBe('sandbox_not_running');
   });
+
+  it('refuses route tokens for inactive accounts and archived sessions', async () => {
+    const app = buildControlPlaneApp({ env: testEnv('route-token-state') });
+    apps.push(app);
+
+    const userAuth = { authorization: 'Bearer dev:state-user' };
+    const adminAuth = { authorization: 'Bearer dev:admin' };
+    await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: adminAuth,
+      payload: { email: 'admin-state@example.com' },
+    });
+    const bootstrap = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: userAuth,
+      payload: { email: 'state@example.com' },
+    });
+    const user = bootstrap.json().user;
+    const sandbox = bootstrap.json().sandbox;
+    await app.inject({
+      method: 'POST',
+      url: '/api/sandbox/start',
+      headers: userAuth,
+    });
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      headers: userAuth,
+      payload: {
+        name: 'State Workspace',
+        slug: 'state-workspace',
+      },
+    });
+    const sessionResponse = await app.inject({
+      method: 'POST',
+      url: `/api/workspaces/${workspaceResponse.json().workspace.id}/sessions`,
+      headers: userAuth,
+      payload: {
+        provider: 'codex',
+        title: 'State Session',
+      },
+    });
+    const session = sessionResponse.json().session;
+
+    const archivedSession = await app.inject({
+      method: 'PATCH',
+      url: `/api/sessions/${session.id}`,
+      headers: userAuth,
+      payload: {
+        status: 'archived',
+      },
+    });
+    expect(archivedSession.statusCode).toBe(200);
+
+    const archivedToken = await app.inject({
+      method: 'POST',
+      url: `/api/sandboxes/${sandbox.id}/route-token`,
+      headers: userAuth,
+      payload: {
+        sessionId: session.id,
+      },
+    });
+    expect(archivedToken.statusCode).toBe(409);
+    expect(archivedToken.json().code).toBe('session_not_active');
+
+    const suspended = await app.inject({
+      method: 'PATCH',
+      url: `/api/admin/users/${user.id}`,
+      headers: adminAuth,
+      payload: {
+        status: 'suspended',
+      },
+    });
+    expect(suspended.statusCode).toBe(200);
+
+    const suspendedToken = await app.inject({
+      method: 'POST',
+      url: `/api/sandboxes/${sandbox.id}/route-token`,
+      headers: userAuth,
+      payload: {},
+    });
+    expect(suspendedToken.statusCode).toBe(401);
+    expect(suspendedToken.json().code).toBe('unauthorized');
+  });
 });

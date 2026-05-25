@@ -388,9 +388,9 @@ token.
 - [x] Return `expiresAt`.
 - [x] Audit route-token issuance.
 - [ ] Check user quota before issuing route tokens.
-- [ ] Check account status before issuing route tokens.
+- [x] Check account status before issuing route tokens.
 - [ ] Include project, workspace, and session scopes when requested.
-- [ ] Reject route-token requests for archived sessions.
+- [x] Reject route-token requests for archived sessions.
 
 ### Router Implementation
 

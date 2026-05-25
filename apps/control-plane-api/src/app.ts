@@ -694,6 +694,9 @@ export function buildControlPlaneApp(
       if (!session || session.userId !== user.id || session.sandboxId !== sandbox.id) {
         throw new HttpError(404, 'not_found', 'Session not found.');
       }
+      if (session.status === 'archived' || session.status === 'deleted') {
+        throw new HttpError(409, 'session_not_active', 'Session must be active before issuing a route token.');
+      }
     }
 
     const nowSeconds = Math.floor(Date.now() / 1000);

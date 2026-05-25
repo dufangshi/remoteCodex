@@ -303,6 +303,8 @@ Goal: browser traffic reaches workers only through a route-token checked proxy.
 - [x] Return `wsBaseUrl`.
 - [x] Return `expiresAt`.
 - [x] Audit route-token issuance.
+- [x] Check account status before issuing route token.
+- [x] Reject route-token requests for archived sessions.
 
 ### Router
 
