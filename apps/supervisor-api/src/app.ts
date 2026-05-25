@@ -52,6 +52,22 @@ import { WorkerIdentityError } from './worker-identity';
 const MAX_PROMPT_ATTACHMENTS = 10;
 const MAX_PROMPT_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const WORKER_AUTH_EXEMPT_PATHS = new Set(['/healthz', '/readyz']);
+export const SUPERVISOR_LOG_REDACTION_PATHS = [
+  'req.headers.authorization',
+  'req.headers.cookie',
+  'req.headers["x-remote-codex-worker-token"]',
+  'res.headers["set-cookie"]',
+  'REMOTE_CODEX_WORKER_AUTH_TOKEN',
+  'REMOTE_CODEX_WORKER_IDENTITY_SECRET',
+  'REMOTE_CODEX_LLM_GATEWAY_TOKEN',
+  'ANTHROPIC_AUTH_TOKEN',
+  'INACT_X_APP_KEY',
+  'workerAuthToken',
+  'workerIdentitySecret',
+  'llmGatewayToken',
+  'keyCiphertext',
+  '*.keyCiphertext',
+];
 
 class HttpError extends Error {
   constructor(
@@ -186,7 +202,11 @@ export function buildApp(
       config.nodeEnv === 'test'
         ? false
         : {
-            level: config.logLevel
+            level: config.logLevel,
+            redact: {
+              paths: SUPERVISOR_LOG_REDACTION_PATHS,
+              censor: '[redacted]',
+            },
           },
     disableRequestLogging: config.disableRequestLogging
   });

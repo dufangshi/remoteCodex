@@ -419,7 +419,7 @@ Verification:
 - [x] Render OpenCode config pointing to the gateway.
 - [x] Prove OpenCode config never contains real provider root keys.
 - [x] Add startup check that gateway env is present when providers are enabled.
-- [ ] Redact gateway tokens from logs.
+- [x] Redact gateway tokens from logs.
 - [x] Redact gateway tokens from API responses.
 - [ ] Define normalized LLM usage event schema.
 - [ ] Add usage import adapter for the chosen gateway.
@@ -1107,7 +1107,7 @@ Real provider root keys stay outside the sandbox.
 - [x] Add regression test for generated Codex config.
 - [x] Add regression test for generated Claude config.
 - [x] Add regression test for generated OpenCode config.
-- [ ] Redact gateway tokens from logs and API responses.
+- [x] Redact gateway tokens from logs and API responses.
 
 ### Usage Import
 

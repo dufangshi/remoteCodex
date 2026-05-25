@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { buildApp } from './app';
+import { SUPERVISOR_LOG_REDACTION_PATHS, buildApp } from './app';
 import {
   AgentRuntime,
   AgentRuntimeEvent,
@@ -439,6 +439,20 @@ describe('supervisor api', () => {
       },
     });
   }
+
+  it('configures log redaction for worker gateway credentials', () => {
+    expect(SUPERVISOR_LOG_REDACTION_PATHS).toEqual(
+      expect.arrayContaining([
+        'req.headers.authorization',
+        'req.headers["x-remote-codex-worker-token"]',
+        'REMOTE_CODEX_LLM_GATEWAY_TOKEN',
+        'ANTHROPIC_AUTH_TOKEN',
+        'INACT_X_APP_KEY',
+        'llmGatewayToken',
+        '*.keyCiphertext',
+      ]),
+    );
+  });
 
   beforeEach(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'remote-codex-api-'));

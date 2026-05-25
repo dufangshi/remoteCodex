@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { createSignedToken } from '../../../packages/shared/src/index';
 import type { SandboxManager, SandboxProvisionResult, SandboxStartInput } from './adapters';
-import { buildControlPlaneApp } from './app';
+import { CONTROL_PLANE_LOG_REDACTION_PATHS, buildControlPlaneApp } from './app';
 
 function testEnv(name: string) {
   return {
@@ -80,6 +80,20 @@ describe('control plane api', () => {
   afterEach(async () => {
     await Promise.all(apps.map((app) => app.close()));
     apps.length = 0;
+  });
+
+  it('configures log redaction for gateway credentials', () => {
+    expect(CONTROL_PLANE_LOG_REDACTION_PATHS).toEqual(
+      expect.arrayContaining([
+        'req.headers.authorization',
+        'req.headers["x-remote-codex-service-token"]',
+        'LLM_GATEWAY_ADMIN_TOKEN',
+        'llmGatewayAdminToken',
+        'gatewayKey.keyCiphertext',
+        '*.gatewayKey.keyCiphertext',
+        '*.keyCiphertext',
+      ]),
+    );
   });
 
   it('bootstraps a user, sandbox, and gateway key', async () => {

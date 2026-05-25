@@ -51,6 +51,21 @@ export interface ControlPlaneServices {
   authVerifier: AuthVerifier;
 }
 
+export const CONTROL_PLANE_LOG_REDACTION_PATHS = [
+  'req.headers.authorization',
+  'req.headers.cookie',
+  'req.headers["x-remote-codex-service-token"]',
+  'res.headers["set-cookie"]',
+  'LLM_GATEWAY_ADMIN_TOKEN',
+  'llmGatewayAdminToken',
+  'gatewayKey.keyCiphertext',
+  '*.gatewayKey.keyCiphertext',
+  'body.gatewayKey.keyCiphertext',
+  'payload.gatewayKey.keyCiphertext',
+  '*.keyCiphertext',
+  'keyCiphertext',
+];
+
 declare module 'fastify' {
   interface FastifyInstance {
     services: ControlPlaneServices;
@@ -348,6 +363,10 @@ export function buildControlPlaneApp(
         ? false
         : {
             level: config.logLevel,
+            redact: {
+              paths: CONTROL_PLANE_LOG_REDACTION_PATHS,
+              censor: '[redacted]',
+            },
           },
     disableRequestLogging: config.disableRequestLogging,
   });

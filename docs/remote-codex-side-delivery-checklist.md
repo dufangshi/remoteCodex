@@ -504,7 +504,7 @@ real provider root keys stay outside the sandbox.
 - [x] Render OpenCode config pointing to the gateway.
 - [x] Prove OpenCode config never contains real provider root keys.
 - [x] Add startup check that gateway env is present when providers are enabled.
-- [ ] Redact gateway tokens from logs.
+- [x] Redact gateway tokens from logs.
 - [x] Redact gateway tokens from API responses.
 - [ ] Add staging smoke where Codex reaches the gateway.
 - [ ] Add staging smoke where Claude Code reaches the gateway.

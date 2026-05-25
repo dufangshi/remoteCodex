@@ -501,7 +501,7 @@ import third, then quota enforcement and UI.
 - [x] Implement gateway key rotation.
 - [x] Attach gateway credential to sandbox provisioning.
 - [x] Add admin endpoint to reconcile gateway keys.
-- [ ] Redact gateway tokens from logs.
+- [x] Redact gateway tokens from logs.
 - [x] Redact gateway tokens from API responses.
 
 ### Provider Bootstrap Checklist
