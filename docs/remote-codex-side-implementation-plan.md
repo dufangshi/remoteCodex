@@ -281,6 +281,7 @@ user.
 - [x] Add idle-timeout policy.
 - [x] Add sandbox reaper job for stale `starting`, `stopping`, and orphaned
   runtime records.
+- [x] Define scaling and capacity request process.
 - [ ] Add snapshot hooks before stop/restart if persistence is enabled.
 
 ### API And UI Checklist
@@ -291,6 +292,7 @@ user.
 - [x] Add `POST /api/sandbox/restart`.
 - [x] Add `GET /api/sandbox/health`.
 - [x] Add admin sandbox list API.
+- [x] Add admin sandbox detail API.
 - [x] Add admin force-stop API.
 - [x] Track sandbox heartbeat timestamp.
 - [x] Track image version.

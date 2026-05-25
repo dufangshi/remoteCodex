@@ -1562,6 +1562,30 @@ describe('control plane api', () => {
     expect(list.statusCode).toBe(200);
     expect(list.json().sandboxes.some((sandbox: { id: string }) => sandbox.id === sandboxId)).toBe(true);
 
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/admin/sandboxes/${sandboxId}`,
+      headers: {
+        authorization: 'Bearer dev:admin',
+      },
+    });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json()).toMatchObject({
+      sandbox: {
+        id: sandboxId,
+        userId: bootstrap.json().user.id,
+        image: 'remote-codex-worker:development',
+        region: 'us-east-1',
+      },
+      runtimeStatus: {
+        state: 'running',
+      },
+      endpoint: {
+        routerBaseUrl: 'https://sandbox-gateway.test',
+      },
+      recentLifecycleErrors: expect.any(Array),
+    });
+
     const restart = await app.inject({
       method: 'POST',
       url: `/api/admin/sandboxes/${sandboxId}/restart`,
@@ -1595,6 +1619,13 @@ describe('control plane api', () => {
       state: 'stopped',
       statusReason: 'admin requested stop',
     });
+
+    const forbiddenDetail = await app.inject({
+      method: 'GET',
+      url: `/api/admin/sandboxes/${sandboxId}`,
+      headers: userAuth,
+    });
+    expect(forbiddenDetail.statusCode).toBe(403);
   });
 
   it('reaps stale sandbox lifecycle states through the internal API', async () => {

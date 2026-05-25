@@ -896,6 +896,7 @@ start, stop, observe, and eventually snapshot it.
 - [x] Add idle-timeout policy.
 - [x] Add sandbox reaper job for stale `starting`, `stopping`, and orphaned
   runtime records.
+- [x] Define scaling and capacity request process.
 
 ### Control-Plane Sandbox API
 
@@ -905,6 +906,7 @@ start, stop, observe, and eventually snapshot it.
 - [x] Add `POST /api/sandbox/restart`.
 - [x] Add `GET /api/sandbox/health`.
 - [x] Add admin sandbox list endpoint.
+- [x] Add admin sandbox detail endpoint.
 - [x] Add admin sandbox force-stop endpoint.
 - [x] Track sandbox heartbeat timestamp.
 - [x] Track sandbox image version.

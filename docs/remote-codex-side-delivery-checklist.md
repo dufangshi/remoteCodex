@@ -280,7 +280,8 @@ user.
 - [x] Implement local worker-process adapter for development.
 - [x] Add sandbox idle-timeout policy.
 - [x] Add sandbox reaper job.
-- [ ] Add admin sandbox detail view/API.
+- [x] Add admin sandbox detail API.
+- [ ] Add admin sandbox detail UI.
 
 ### AWS EKS Fargate Adapter
 
@@ -301,7 +302,7 @@ user.
 - [x] Handle worker readiness timeout.
 - [x] Define namespace and label strategy for hundreds of users.
 - [x] Define Pod TTL/cleanup behavior.
-- [ ] Define scaling and capacity request process.
+- [x] Define scaling and capacity request process.
 - [ ] Add staging start-one-sandbox smoke test.
 - [ ] Add staging stop-one-sandbox smoke test.
 
@@ -312,7 +313,8 @@ user.
 - [x] Add degraded/offline UI.
 - [x] Add startup progress UI.
 - [x] Add failure reason UI.
-- [ ] Add admin sandbox view.
+- [x] Add admin sandbox detail API.
+- [ ] Add admin sandbox detail UI.
 
 ### Verification
 

@@ -132,6 +132,57 @@ CPU and memory:
 Heavy chemistry compute should go through ElAgenteHarness and the job pool, not
 through the interactive sandbox profile by default.
 
+## Scaling And Capacity Process
+
+Phase-one scale target:
+
+- Initial staging target: 1-5 active sandboxes.
+- Initial production target: 100 active sandboxes.
+- Near-term production planning target: 300 active sandboxes.
+- Each active sandbox is one EKS Fargate Pod with one worker container.
+- One registered user owns one sandbox in phase one; workspaces and sessions
+  share that sandbox.
+
+Capacity planning should use resource profiles instead of per-user custom
+resources. The default profile is `standard`, so 100 active production sandboxes
+means planning for roughly 100 vCPU, 200 GiB memory, and 4 TiB ephemeral storage
+requests before router, gateway, database, and observability overhead. `large`
+users should be explicitly counted because each one consumes twice the default
+vCPU and memory.
+
+Fargate and networking constraints to check before increasing capacity:
+
+- The EKS Fargate profile must match the sandbox namespace and worker labels.
+- Private subnets must have enough available IP addresses for the target active
+  sandbox count plus rollout/retry headroom.
+- NAT or controlled egress must have enough throughput for package installs,
+  LLM gateway calls, harness calls, and remote MCP endpoints.
+- The worker security group must allow router-to-worker traffic only on the
+  worker API port.
+- ECR pull throughput and image size must support burst starts.
+- CloudWatch log ingestion limits must cover worker stdout/stderr.
+- AWS regional Fargate On-Demand vCPU quotas must cover the target active
+  profile mix with at least 30 percent headroom.
+
+Capacity request process:
+
+1. Estimate target active sandboxes by profile: `small`, `standard`, `large`.
+2. Convert the mix to total requested vCPU and memory using the resource profile
+   table above.
+3. Add 30 percent headroom for restart storms, failed image pulls, rolling image
+   updates, and short-lived duplicate Pods during retries.
+4. Confirm subnet free IP capacity exceeds the headroom-adjusted Pod target.
+5. Confirm AWS regional Fargate vCPU quota exceeds the headroom-adjusted vCPU
+   target.
+6. If quota is insufficient, file an AWS Service Quotas request for Fargate
+   On-Demand vCPU in the sandbox region and record the requested target in the
+   staging readiness notes.
+7. Run the staging lifecycle smoke before raising production limits.
+
+The control plane should treat unschedulable Pods and `FailedScheduling` as
+capacity failures. Those failures surface as `lastFailureCode=capacity` and
+should be visible in admin sandbox detail.
+
 ## Namespace And Label Strategy
 
 Phase one uses one Kubernetes namespace per Remote Codex environment:

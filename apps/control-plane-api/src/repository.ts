@@ -132,6 +132,24 @@ export class ControlPlaneRepository {
       .all();
   }
 
+  listRecentAuditLogs(input: {
+    resourceId: string;
+    actionPrefix?: string | undefined;
+    limit: number;
+  }) {
+    const filters = [
+      eq(controlAuditLogs.resourceId, input.resourceId),
+      input.actionPrefix ? like(controlAuditLogs.action, `${escapeLike(input.actionPrefix)}%`) : null,
+    ].filter((filter): filter is NonNullable<typeof filter> => Boolean(filter));
+    return this.db
+      .select()
+      .from(controlAuditLogs)
+      .where(and(...filters))
+      .orderBy(desc(controlAuditLogs.createdAt))
+      .limit(input.limit)
+      .all();
+  }
+
   getUserById(id: string) {
     return this.db.select().from(controlUsers).where(eq(controlUsers.id, id)).get();
   }

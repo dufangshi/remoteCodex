@@ -58,6 +58,14 @@ the worker.
   security group settings.
 - Worker image repository and immutable image tag.
 - Worker resource profile defaults.
+- Capacity preflight:
+  - target active sandbox count for the staging run;
+  - expected production active sandbox count for the release;
+  - profile mix for `small`, `standard`, and `large`;
+  - headroom-adjusted Fargate vCPU requirement;
+  - private subnet free IP count;
+  - AWS Fargate On-Demand vCPU quota in the sandbox region;
+  - any required AWS Service Quotas request id and approval status.
 - Gateway base URL and gateway admin credential.
 - Harness base URL and harness admin credential if the harness requires admin
   provisioning.

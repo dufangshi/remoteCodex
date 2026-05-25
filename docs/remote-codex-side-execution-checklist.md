@@ -345,7 +345,7 @@ user on EKS Fargate.
   - Verification: reaper tests cover orphaned Pod, stale starting state, and
     stale stopping state.
 
-- [ ] Define scaling and capacity request process.
+- [x] Define scaling and capacity request process.
   - Acceptance: docs state expected active sandbox counts, resource profiles,
     Fargate profile/subnet constraints, and AWS quota request process.
   - Verification: staging readiness notes include capacity preflight.
@@ -361,7 +361,7 @@ user on EKS Fargate.
     minutes.
   - Verification: job tests cover stale states and idempotency.
 
-- [ ] Add admin sandbox detail API.
+- [x] Add admin sandbox detail API.
   - Acceptance: admins can inspect one sandbox registry entry, runtime status,
     endpoint status, and recent lifecycle errors.
   - Verification: API tests cover admin success and non-admin denial.

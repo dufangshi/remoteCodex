@@ -662,6 +662,36 @@ export function buildControlPlaneApp(
     };
   });
 
+  app.get('/api/admin/sandboxes/:sandboxId', async (request) => {
+    requireAdmin(app, request);
+    const params = z.object({ sandboxId: z.string().uuid() }).parse(request.params);
+    const sandbox = repository.getSandboxById(params.sandboxId);
+    if (!sandbox) {
+      throw new HttpError(404, 'not_found', 'Sandbox not found.');
+    }
+    const [runtimeStatus, endpoint] = await Promise.all([
+      app.services.sandboxManager.getSandboxStatus({
+        sandboxId: sandbox.id,
+        userId: sandbox.userId,
+      }),
+      app.services.sandboxManager.getSandboxEndpoint({
+        sandboxId: sandbox.id,
+        userId: sandbox.userId,
+      }),
+    ]);
+    return {
+      sandbox,
+      runtimeStatus,
+      endpoint,
+      workerBaseUrl: workerBaseUrlForSandbox(app, sandbox),
+      recentLifecycleErrors: repository.listRecentAuditLogs({
+        resourceId: sandbox.id,
+        actionPrefix: 'sandbox.',
+        limit: 20,
+      }),
+    };
+  });
+
   app.post('/api/admin/sandboxes/:sandboxId/force-stop', async (request) => {
     requireAdmin(app, request);
     const params = z.object({ sandboxId: z.string().uuid() }).parse(request.params);
