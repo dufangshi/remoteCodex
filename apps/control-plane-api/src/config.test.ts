@@ -17,6 +17,7 @@ describe('control plane config', () => {
       LLM_GATEWAY_TOKEN_SECRET_NAME: 'remote-codex-gateway-tokens',
       ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
       ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: 'remote-codex-harness-app-keys',
+      REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
     });
 
     expect(config.authMode).toBe('jwt');
@@ -29,5 +30,16 @@ describe('control plane config', () => {
     expect(config.llmGatewayTokenSecretName).toBe('remote-codex-gateway-tokens');
     expect(config.harnessBaseUrl).toBe('https://harness.example.test');
     expect(config.harnessAppKeySecretName).toBe('remote-codex-harness-app-keys');
+    expect(config.chemistryToolsEnabled).toBe(true);
+  });
+
+  it('requires a harness base URL when chemistry tools are enabled', () => {
+    expect(() =>
+      loadControlPlaneConfig({
+        NODE_ENV: 'test',
+        CONTROL_PLANE_DATABASE_URL: ':memory:',
+        REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
+      }),
+    ).toThrow('ELAGENTE_HARNESS_BASE_URL is required when chemistry tools are enabled.');
   });
 });

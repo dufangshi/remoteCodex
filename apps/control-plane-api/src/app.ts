@@ -281,6 +281,7 @@ function harnessStartInput(app: FastifyInstance): SandboxStartInput['harness'] {
   return {
     baseUrl: app.services.config.harnessBaseUrl,
     appKeySecretName: app.services.config.harnessAppKeySecretName,
+    chemistryToolsEnabled: app.services.config.chemistryToolsEnabled,
   };
 }
 
@@ -610,6 +611,8 @@ export function buildControlPlaneApp(
       image: sandbox.image,
       region: sandbox.region,
       s3Prefix: sandbox.s3Prefix,
+      gateway: gatewayStartInput(app, sandbox),
+      harness: harnessStartInput(app),
     });
     return {
       sandbox: repository.updateSandboxState(sandbox.id, result),

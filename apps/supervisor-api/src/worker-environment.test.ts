@@ -75,4 +75,43 @@ describe('worker entrypoint environment validation', () => {
       ),
     ).not.toThrow();
   });
+
+  it('requires harness credentials when chemistry tools are enabled', () => {
+    expect(() =>
+      validateWorkerEntrypointEnvironment(
+        baseWorkerEnv({
+          REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
+          ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.com',
+          INACT_X_APP_KEY: '',
+        }),
+        fakeFilesystem,
+      ),
+    ).toThrow('INACT_X_APP_KEY is required in worker mode.');
+  });
+
+  it('requires a valid harness base URL when chemistry tools are enabled', () => {
+    expect(() =>
+      validateWorkerEntrypointEnvironment(
+        baseWorkerEnv({
+          REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
+          ELAGENTE_HARNESS_BASE_URL: 'not-a-url',
+          INACT_X_APP_KEY: 'harness-app-key',
+        }),
+        fakeFilesystem,
+      ),
+    ).toThrow('ELAGENTE_HARNESS_BASE_URL must be a valid URL.');
+  });
+
+  it('allows missing harness credentials when chemistry tools are disabled', () => {
+    expect(() =>
+      validateWorkerEntrypointEnvironment(
+        baseWorkerEnv({
+          REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'false',
+          ELAGENTE_HARNESS_BASE_URL: '',
+          INACT_X_APP_KEY: '',
+        }),
+        fakeFilesystem,
+      ),
+    ).not.toThrow();
+  });
 });

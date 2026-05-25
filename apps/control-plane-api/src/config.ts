@@ -23,6 +23,7 @@ const envSchema = z.object({
   LLM_GATEWAY_TOKEN_SECRET_NAME: z.string().min(1).optional(),
   ELAGENTE_HARNESS_BASE_URL: z.string().url().optional(),
   ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: z.string().min(1).optional(),
+  REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: z.string().optional(),
   CONTROL_PLANE_ADMIN_IDENTITIES: z.string().optional(),
   CONTROL_PLANE_AUTH_MODE: z.enum(['dev', 'jwt']).optional(),
   CONTROL_PLANE_AUTH_JWT_SECRET: z.string().min(16).optional(),
@@ -51,6 +52,7 @@ export interface ControlPlaneConfig {
   llmGatewayTokenSecretName: string | null;
   harnessBaseUrl: string | null;
   harnessAppKeySecretName: string | null;
+  chemistryToolsEnabled: boolean;
   adminIdentities: Set<string>;
   authMode: 'dev' | 'jwt';
   authJwtSecret: string | null;
@@ -91,6 +93,15 @@ export function loadControlPlaneConfig(
     parsed.DISABLE_REQUEST_LOGGING === undefined
       ? nodeEnv === 'production'
       : ['1', 'true', 'yes', 'on'].includes(parsed.DISABLE_REQUEST_LOGGING.toLowerCase());
+  const chemistryToolsEnabled =
+    parsed.REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED === undefined
+      ? false
+      : ['1', 'true', 'yes', 'on'].includes(
+          parsed.REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED.toLowerCase(),
+        );
+  if (chemistryToolsEnabled && !parsed.ELAGENTE_HARNESS_BASE_URL) {
+    throw new Error('ELAGENTE_HARNESS_BASE_URL is required when chemistry tools are enabled.');
+  }
 
   const jwtSecret =
     parsed.CONTROL_PLANE_JWT_SECRET ??
@@ -138,6 +149,7 @@ export function loadControlPlaneConfig(
     llmGatewayTokenSecretName: parsed.LLM_GATEWAY_TOKEN_SECRET_NAME ?? null,
     harnessBaseUrl: parsed.ELAGENTE_HARNESS_BASE_URL ?? null,
     harnessAppKeySecretName: parsed.ELAGENTE_HARNESS_APP_KEY_SECRET_NAME ?? null,
+    chemistryToolsEnabled,
     adminIdentities: new Set(
       (parsed.CONTROL_PLANE_ADMIN_IDENTITIES ?? '')
         .split(',')

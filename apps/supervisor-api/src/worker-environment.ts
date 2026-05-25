@@ -43,6 +43,10 @@ function enabledProviderRuntimes(env: NodeJS.ProcessEnv) {
     .filter(Boolean);
 }
 
+function parseBoolean(value: string | undefined) {
+  return value !== undefined && ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
+}
+
 function validateGatewayEnvironment(env: NodeJS.ProcessEnv) {
   if (enabledProviderRuntimes(env).length === 0) {
     return;
@@ -53,6 +57,19 @@ function validateGatewayEnvironment(env: NodeJS.ProcessEnv) {
     new URL(baseUrl);
   } catch {
     throw new Error('REMOTE_CODEX_LLM_GATEWAY_BASE_URL must be a valid URL.');
+  }
+}
+
+function validateHarnessEnvironment(env: NodeJS.ProcessEnv) {
+  if (!parseBoolean(env.REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED)) {
+    return;
+  }
+  const baseUrl = requireEnv(env, 'ELAGENTE_HARNESS_BASE_URL');
+  requireEnv(env, 'INACT_X_APP_KEY');
+  try {
+    new URL(baseUrl);
+  } catch {
+    throw new Error('ELAGENTE_HARNESS_BASE_URL must be a valid URL.');
   }
 }
 
@@ -74,4 +91,5 @@ export function validateWorkerEntrypointEnvironment(
   ensureDirectory(filesystem, env.CLAUDE_HOME ?? '/home/agent/.claude', 'CLAUDE_HOME');
   ensureDirectory(filesystem, env.OPENCODE_HOME ?? '/home/agent/.opencode', 'OPENCODE_HOME');
   validateGatewayEnvironment(env);
+  validateHarnessEnvironment(env);
 }

@@ -364,7 +364,7 @@ Goal: the sandbox worker image is reproducible, non-root, scoped to
 - [x] Redact service tokens from startup logs.
 - [x] Add startup metadata logs without secrets.
 - [x] Validate gateway environment when provider runtimes are enabled.
-- [ ] Validate ElAgenteHarness environment when chemistry tools are enabled.
+- [x] Validate ElAgenteHarness environment when chemistry tools are enabled.
 - [ ] Validate MCP config path and permissions.
 
 ### Worker Authorization Checklist
@@ -532,7 +532,7 @@ import third, then quota enforcement and UI.
 - [ ] Add harness key revocation endpoint.
 - [x] Inject `ELAGENTE_HARNESS_BASE_URL` into the worker.
 - [x] Inject `INACT_X_APP_KEY` into the worker.
-- [ ] Validate harness env in worker mode when chemistry tools are enabled.
+- [x] Validate harness env in worker mode when chemistry tools are enabled.
 - [ ] Redact harness key from logs.
 - [x] Report harness integration status in worker metadata without exposing the
   raw key.
@@ -614,7 +614,7 @@ import third, then quota enforcement and UI.
 - [ ] Gateway client tests pass with mocked gateway API.
 - [x] Worker provider bootstrap tests pass for Codex, Claude Code, and OpenCode.
 - [ ] Harness credential tests pass.
-- [ ] Harness bootstrap tests pass.
+- [x] Harness bootstrap tests pass.
 - [ ] Harness tool config tests pass.
 - [ ] MCP config rendering tests pass.
 - [ ] MCP startup audit tests pass.

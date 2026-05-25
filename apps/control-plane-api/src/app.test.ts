@@ -120,6 +120,7 @@ describe('control plane api', () => {
         LLM_GATEWAY_TOKEN_SECRET_NAME: 'remote-codex-gateway-tokens',
         ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
         ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: 'remote-codex-harness-app-keys',
+        REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
       },
       sandboxManager,
     });
@@ -153,6 +154,55 @@ describe('control plane api', () => {
       harness: {
         baseUrl: 'https://harness.example.test',
         appKeySecretName: 'remote-codex-harness-app-keys',
+        chemistryToolsEnabled: true,
+      },
+    });
+  });
+
+  it('attaches gateway and harness metadata when restarting a sandbox', async () => {
+    const sandboxManager = new RecordingSandboxManager();
+    const app = buildControlPlaneApp({
+      env: {
+        ...testEnv('gateway-restart'),
+        LLM_GATEWAY_BASE_URL: 'https://llm-gateway.example.test',
+        LLM_GATEWAY_TOKEN_SECRET_NAME: 'remote-codex-gateway-tokens',
+        ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
+        ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: 'remote-codex-harness-app-keys',
+        REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
+      },
+      sandboxManager,
+    });
+    apps.push(app);
+
+    const auth = { authorization: 'Bearer dev:gateway-restart-user' };
+    const bootstrap = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: auth,
+      payload: {
+        email: 'gateway-restart@example.com',
+      },
+    });
+    expect(bootstrap.statusCode).toBe(200);
+
+    const restarted = await app.inject({
+      method: 'POST',
+      url: '/api/sandbox/restart',
+      headers: auth,
+    });
+    expect(restarted.statusCode).toBe(200);
+    expect(sandboxManager.starts).toHaveLength(1);
+    expect(sandboxManager.starts[0]).toMatchObject({
+      sandboxId: bootstrap.json().sandbox.id,
+      gateway: {
+        baseUrl: 'https://llm-gateway.example.test',
+        keyId: `sub2api-key-${bootstrap.json().sandbox.id}`,
+        tokenSecretName: 'remote-codex-gateway-tokens',
+      },
+      harness: {
+        baseUrl: 'https://harness.example.test',
+        appKeySecretName: 'remote-codex-harness-app-keys',
+        chemistryToolsEnabled: true,
       },
     });
   });

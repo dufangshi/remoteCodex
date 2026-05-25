@@ -360,7 +360,7 @@ required identity, filesystem, gateway, or harness settings are unsafe.
 - [x] Fail fast on unwritable workspace.
 - [x] Add startup metadata logs without secrets.
 - [x] Validate gateway env when provider runtimes are enabled.
-- [ ] Validate ElAgenteHarness env when chemistry tools are enabled.
+- [x] Validate ElAgenteHarness env when chemistry tools are enabled.
 - [ ] Validate MCP config path and permissions.
 - [ ] Redact harness key from startup logs.
 - [ ] Redact gateway token from startup logs.
@@ -564,7 +564,7 @@ ElAgenteHarness using scoped `INACT_X_APP_KEY` credentials.
 - [x] Inject `INACT_X_APP_KEY` into the worker.
 - [x] Report harness integration status in worker metadata without exposing raw
   key.
-- [ ] Validate harness env in worker mode when chemistry tools are enabled.
+- [x] Validate harness env in worker mode when chemistry tools are enabled.
 - [ ] Redact harness key from logs.
 - [ ] Redact harness key from API responses.
 - [ ] Add staging smoke where worker calls harness with injected key.
@@ -606,7 +606,7 @@ ElAgenteHarness using scoped `INACT_X_APP_KEY` credentials.
 ### Verification
 
 - [ ] Harness credential tests pass.
-- [ ] Harness bootstrap tests pass.
+- [x] Harness bootstrap tests pass.
 - [ ] Harness tool config tests pass.
 - [ ] Harness usage import tests pass.
 - [ ] Frontend workflow/task UI tests pass.
@@ -869,7 +869,7 @@ The first usable product phase is complete only when all of these are checked:
 - [ ] 1. Finish frontend auth shell and provider auth smoke.
 - [ ] 2. Finish project detail and open-session flow.
 - [ ] 3. Add worker session checkpoint caller and wrong-user/wrong-sandbox tests.
-- [ ] 4. Validate harness env when chemistry tools are enabled.
+- [x] 4. Validate harness env when chemistry tools are enabled.
 - [ ] 5. Add gateway client interface and mocked gateway admin tests.
 - [ ] 6. Decide and document gateway deployment shape.
 - [ ] 7. Implement gateway user/key create, revoke, rotate, and reconcile APIs.

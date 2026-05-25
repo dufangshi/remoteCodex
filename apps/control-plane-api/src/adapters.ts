@@ -27,6 +27,7 @@ export interface SandboxStartInput {
   harness?: {
     baseUrl: string;
     appKeySecretName?: string | null;
+    chemistryToolsEnabled?: boolean;
   } | undefined;
 }
 
@@ -210,6 +211,9 @@ export class LocalWorkerProcessSandboxManager implements SandboxManager {
         ...(input.harness
           ? {
               ELAGENTE_HARNESS_BASE_URL: input.harness.baseUrl,
+              REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: input.harness.chemistryToolsEnabled
+                ? 'true'
+                : 'false',
               ...(this.input.workerEnv?.INACT_X_APP_KEY
                 ? {
                     INACT_X_APP_KEY: this.input.workerEnv.INACT_X_APP_KEY,
@@ -471,6 +475,9 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
         ...(input.harness
           ? {
               ELAGENTE_HARNESS_BASE_URL: input.harness.baseUrl,
+              REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: input.harness.chemistryToolsEnabled
+                ? 'true'
+                : 'false',
             }
           : {}),
         WORKSPACE_ROOT: '/workspace',

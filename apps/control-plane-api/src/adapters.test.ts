@@ -177,6 +177,7 @@ describe('sandbox manager adapters', () => {
       harness: {
         baseUrl: 'https://harness.example.test',
         appKeySecretName: 'remote-codex-harness-app-keys',
+        chemistryToolsEnabled: true,
       },
     });
     expect(env.env).toMatchObject({
@@ -189,6 +190,7 @@ describe('sandbox manager adapters', () => {
       REMOTE_CODEX_LLM_GATEWAY_BASE_URL: 'https://llm-gateway.example.test',
       REMOTE_CODEX_LLM_GATEWAY_KEY_ID: 'gw-key-sbx-test',
       ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
+      REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
       WORKSPACE_ROOT: '/workspace',
       HOME: '/home/agent',
     });

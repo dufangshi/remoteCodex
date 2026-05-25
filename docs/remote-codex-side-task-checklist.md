@@ -301,7 +301,7 @@ Verification:
 - [x] Redact service tokens from startup logs.
 - [x] Add startup metadata logs without secrets.
 - [x] Validate gateway environment when provider runtimes are enabled.
-- [ ] Validate ElAgenteHarness environment when chemistry tools are enabled.
+- [x] Validate ElAgenteHarness environment when chemistry tools are enabled.
 - [ ] Validate MCP config path and permissions.
 - [ ] Build the worker image locally from a clean checkout.
 - [ ] Run the worker container locally and verify `/readyz`.
@@ -458,7 +458,7 @@ Verification:
 - [ ] Add harness key revocation endpoint.
 - [x] Inject `ELAGENTE_HARNESS_BASE_URL` into the worker.
 - [x] Inject `INACT_X_APP_KEY` into the worker.
-- [ ] Validate harness env in worker mode when chemistry tools are enabled.
+- [x] Validate harness env in worker mode when chemistry tools are enabled.
 - [ ] Redact harness key from logs.
 - [x] Report harness integration status in worker metadata without exposing the
   raw key.
@@ -486,7 +486,7 @@ Verification:
 Verification:
 
 - [ ] Harness credential tests pass.
-- [ ] Harness bootstrap tests pass.
+- [x] Harness bootstrap tests pass.
 - [ ] Harness tool config tests pass.
 - [ ] Harness usage import tests pass.
 - [ ] Frontend workflow/task UI tests pass.
@@ -967,7 +967,7 @@ required identity, filesystem, or token settings are missing.
 - [x] Redact service tokens from startup logs.
 - [x] Add startup metadata logs without secrets.
 - [x] Validate gateway env when provider runtimes are enabled.
-- [ ] Validate ElAgenteHarness env when chemistry tools are enabled.
+- [x] Validate ElAgenteHarness env when chemistry tools are enabled.
 - [ ] Validate MCP config path and permissions.
 
 ### Worker API Hardening
@@ -1161,7 +1161,7 @@ ElAgenteHarness using scoped, revocable `INACT_X_APP_KEY` credentials.
 
 - [x] Inject `ELAGENTE_HARNESS_BASE_URL`.
 - [x] Inject `INACT_X_APP_KEY`.
-- [ ] Validate harness env in worker mode when chemistry tools are enabled.
+- [x] Validate harness env in worker mode when chemistry tools are enabled.
 - [ ] Redact harness key from logs.
 - [x] Add worker metadata that reports harness integration status without the
   raw key.
@@ -1199,7 +1199,7 @@ ElAgenteHarness using scoped, revocable `INACT_X_APP_KEY` credentials.
 ### Verification
 
 - [ ] Harness credential tests pass.
-- [ ] Harness bootstrap tests pass.
+- [x] Harness bootstrap tests pass.
 - [ ] Harness usage import tests pass.
 - [ ] Frontend workflow and task UI tests pass.
 
