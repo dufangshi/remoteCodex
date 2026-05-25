@@ -363,7 +363,7 @@ Goal: the sandbox worker image is reproducible, non-root, scoped to
 - [x] Fail fast on unwritable workspace.
 - [x] Redact service tokens from startup logs.
 - [x] Add startup metadata logs without secrets.
-- [ ] Validate gateway environment when provider runtimes are enabled.
+- [x] Validate gateway environment when provider runtimes are enabled.
 - [ ] Validate ElAgenteHarness environment when chemistry tools are enabled.
 - [ ] Validate MCP config path and permissions.
 
@@ -512,7 +512,7 @@ import third, then quota enforcement and UI.
 - [ ] Prove Claude Code config never contains real provider root keys.
 - [ ] Render OpenCode config pointing to the gateway.
 - [ ] Prove OpenCode config never contains real provider root keys.
-- [ ] Add startup check that gateway env is present when providers are enabled.
+- [x] Add startup check that gateway env is present when providers are enabled.
 - [ ] Add provider bootstrap tests for Codex.
 - [ ] Add provider bootstrap tests for Claude Code.
 - [ ] Add provider bootstrap tests for OpenCode.

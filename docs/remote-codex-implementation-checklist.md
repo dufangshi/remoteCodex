@@ -410,7 +410,7 @@ real provider keys stay outside the sandbox.
 - [ ] Confirm Claude Code config does not write real provider key.
 - [ ] Confirm OpenCode config uses gateway provider.
 - [ ] Confirm OpenCode config does not write real provider key.
-- [ ] Add startup check that gateway env is present when providers are enabled.
+- [x] Add startup check that gateway env is present when providers are enabled.
 - [ ] Add regression test for generated Codex config.
 - [ ] Add regression test for generated Claude config.
 - [ ] Add regression test for generated OpenCode config.

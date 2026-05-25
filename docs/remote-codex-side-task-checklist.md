@@ -300,7 +300,7 @@ Verification:
 - [x] Fail fast on unwritable workspace.
 - [x] Redact service tokens from startup logs.
 - [x] Add startup metadata logs without secrets.
-- [ ] Validate gateway environment when provider runtimes are enabled.
+- [x] Validate gateway environment when provider runtimes are enabled.
 - [ ] Validate ElAgenteHarness environment when chemistry tools are enabled.
 - [ ] Validate MCP config path and permissions.
 - [ ] Build the worker image locally from a clean checkout.
@@ -418,7 +418,7 @@ Verification:
 - [ ] Prove Claude Code config never contains real provider root keys.
 - [ ] Render OpenCode config pointing to the gateway.
 - [ ] Prove OpenCode config never contains real provider root keys.
-- [ ] Add startup check that gateway env is present when providers are enabled.
+- [x] Add startup check that gateway env is present when providers are enabled.
 - [ ] Redact gateway tokens from logs.
 - [ ] Redact gateway tokens from API responses.
 - [ ] Define normalized LLM usage event schema.
@@ -966,7 +966,7 @@ required identity, filesystem, or token settings are missing.
 - [x] Fail fast on unwritable workspace.
 - [x] Redact service tokens from startup logs.
 - [x] Add startup metadata logs without secrets.
-- [ ] Validate gateway env when provider runtimes are enabled.
+- [x] Validate gateway env when provider runtimes are enabled.
 - [ ] Validate ElAgenteHarness env when chemistry tools are enabled.
 - [ ] Validate MCP config path and permissions.
 
@@ -1103,7 +1103,7 @@ Real provider root keys stay outside the sandbox.
 - [ ] Ensure Claude Code config never contains a real provider root key.
 - [ ] Render OpenCode config that points to the gateway.
 - [ ] Ensure OpenCode config never contains a real provider root key.
-- [ ] Add startup check that gateway env is present when providers are enabled.
+- [x] Add startup check that gateway env is present when providers are enabled.
 - [ ] Add regression test for generated Codex config.
 - [ ] Add regression test for generated Claude config.
 - [ ] Add regression test for generated OpenCode config.
