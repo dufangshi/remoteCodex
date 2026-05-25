@@ -411,7 +411,7 @@ Verification:
 - [x] Implement gateway key revocation.
 - [x] Implement gateway key rotation.
 - [x] Attach gateway credential to sandbox provisioning.
-- [ ] Add admin endpoint to reconcile gateway keys.
+- [x] Add admin endpoint to reconcile gateway keys.
 - [x] Render Codex config pointing to the gateway `/v1` endpoint.
 - [x] Prove Codex config never contains real provider root keys.
 - [x] Render Claude Code config pointing to the gateway.
@@ -1092,7 +1092,7 @@ Real provider root keys stay outside the sandbox.
 - [x] Implement gateway key revocation.
 - [x] Implement gateway key rotation.
 - [x] Attach gateway credential to sandbox provisioning.
-- [ ] Add admin endpoint to reconcile gateway keys.
+- [x] Add admin endpoint to reconcile gateway keys.
 - [x] Add tests with mocked gateway client.
 
 ### Worker Provider Bootstrap

@@ -233,6 +233,73 @@ describe('control plane api', () => {
     }
   });
 
+  it('reconciles gateway keys from the admin sandbox API', async () => {
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      const urlText = String(url);
+      if (urlText.endsWith('/api/admin/users/ensure')) {
+        return Response.json({ externalUserId: 'gw-user-reconcile' });
+      }
+      if (urlText.endsWith('/keys/ensure')) {
+        return Response.json({ externalKeyId: 'gw-key-before-reconcile' });
+      }
+      return Response.json({
+        externalKeyId: 'gw-key-reconciled',
+        keyCiphertext: 'encrypted-reconciled-token',
+      });
+    }) as typeof fetch;
+
+    try {
+      const app = buildControlPlaneApp({
+        env: {
+          ...testEnv('gateway-admin-reconcile'),
+          LLM_GATEWAY_ADMIN_BASE_URL: 'https://gateway-admin.example.test',
+          LLM_GATEWAY_ADMIN_TOKEN: 'gateway-admin-token',
+        },
+      });
+      apps.push(app);
+
+      const bootstrap = await app.inject({
+        method: 'POST',
+        url: '/api/me/bootstrap',
+        headers: { authorization: 'Bearer dev:admin' },
+        payload: {
+          email: 'admin-gateway-reconcile@example.com',
+        },
+      });
+      expect(bootstrap.statusCode).toBe(200);
+      const sandboxId = bootstrap.json().sandbox.id;
+
+      const reconcile = await app.inject({
+        method: 'POST',
+        url: `/api/admin/sandboxes/${sandboxId}/gateway-key/reconcile`,
+        headers: { authorization: 'Bearer dev:admin' },
+      });
+      expect(reconcile.statusCode).toBe(200);
+      expect(reconcile.json().gatewayKey).toMatchObject({
+        externalKeyId: 'gw-key-reconciled',
+        keyCiphertext: 'encrypted-reconciled-token',
+        status: 'active',
+        revokedAt: null,
+      });
+      expect(reconcile.json().gatewayKey.rotatedAt).toEqual(expect.any(String));
+      expect(requests.map((request) => request.url)).toContain(
+        'https://gateway-admin.example.test/api/admin/users/gw-user-reconcile/keys/reconcile',
+      );
+      const reconcileRequest = requests.find((request) =>
+        request.url.endsWith('/keys/reconcile'),
+      );
+      expect(JSON.parse(String(reconcileRequest!.init!.body))).toMatchObject({
+        externalKeyId: 'gw-key-before-reconcile',
+        sandboxId,
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('attaches gateway credential metadata when starting a sandbox', async () => {
     const sandboxManager = new RecordingSandboxManager();
     const app = buildControlPlaneApp({

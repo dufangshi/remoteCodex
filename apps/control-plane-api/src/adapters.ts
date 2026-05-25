@@ -692,6 +692,12 @@ export interface LlmGatewayAdmin {
     externalUserId: string;
     externalKeyId: string;
   }): Promise<void>;
+  reconcileSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId?: string | null;
+  }): Promise<GatewayKeyResult>;
 }
 
 type GatewayFetch = typeof fetch;
@@ -867,6 +873,41 @@ export class HttpLlmGatewayAdmin implements LlmGatewayAdmin {
     );
     await parseGatewayResponse<unknown>(response);
   }
+
+  async reconcileSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId?: string | null;
+  }): Promise<GatewayKeyResult> {
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/api/admin/users/${encodeURIComponent(input.externalUserId)}/keys/reconcile`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${this.adminToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          externalId: input.sandboxId,
+          userId: input.userId,
+          sandboxId: input.sandboxId,
+          externalKeyId: input.externalKeyId ?? null,
+        }),
+      },
+    );
+    const payload = await parseGatewayResponse<unknown>(response);
+    return {
+      externalKeyId: externalIdFromPayload(payload, 'external key id'),
+      keyCiphertext:
+        payload &&
+        typeof payload === 'object' &&
+        'keyCiphertext' in payload &&
+        typeof payload.keyCiphertext === 'string'
+          ? payload.keyCiphertext
+          : null,
+    };
+  }
 }
 
 export class NoopLlmGatewayAdmin implements LlmGatewayAdmin {
@@ -891,4 +932,11 @@ export class NoopLlmGatewayAdmin implements LlmGatewayAdmin {
   }
 
   async revokeSandboxKey(): Promise<void> {}
+
+  async reconcileSandboxKey(input: { sandboxId: string }): Promise<GatewayKeyResult> {
+    return {
+      externalKeyId: `sub2api-key-${input.sandboxId}`,
+      keyCiphertext: null,
+    };
+  }
 }

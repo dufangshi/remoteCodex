@@ -492,7 +492,7 @@ real provider root keys stay outside the sandbox.
 - [x] Implement gateway key revocation.
 - [x] Implement gateway key rotation.
 - [x] Attach gateway credential to sandbox provisioning.
-- [ ] Add admin endpoint to reconcile gateway keys.
+- [x] Add admin endpoint to reconcile gateway keys.
 - [x] Add mocked gateway client tests.
 
 ### Worker Provider Bootstrap
@@ -872,7 +872,7 @@ The first usable product phase is complete only when all of these are checked:
 - [x] 4. Validate harness env when chemistry tools are enabled.
 - [x] 5. Add gateway client interface and mocked gateway admin tests.
 - [ ] 6. Decide and document gateway deployment shape.
-- [ ] 7. Implement gateway user/key create, revoke, rotate, and reconcile APIs.
+- [x] 7. Implement gateway user/key create, revoke, rotate, and reconcile APIs.
 - [ ] 8. Implement harness credential table, key generation, rotation, and
   revocation.
 - [ ] 9. Define MCP registry and render provider MCP configs.

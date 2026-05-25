@@ -601,6 +601,51 @@ export function buildControlPlaneApp(
     };
   });
 
+  app.post('/api/admin/sandboxes/:sandboxId/gateway-key/reconcile', async (request) => {
+    requireAdmin(app, request);
+    const params = z.object({ sandboxId: z.string().uuid() }).parse(request.params);
+    const sandbox = repository.getSandboxById(params.sandboxId);
+    if (!sandbox) {
+      throw new HttpError(404, 'not_found', 'Sandbox not found.');
+    }
+    const user = repository.getUserById(sandbox.userId);
+    if (!user) {
+      throw new HttpError(409, 'user_missing', 'Sandbox user is missing.');
+    }
+    const gatewayUser = await app.services.llmGatewayAdmin.ensureUser({
+      userId: user.id,
+      email: user.email,
+      displayName: user.displayName,
+    });
+    repository.upsertGatewayUser({
+      userId: user.id,
+      provider: 'sub2api',
+      externalUserId: gatewayUser.externalUserId,
+    });
+    const existingGatewayKey = repository.getGatewayKeyForSandbox(sandbox.id);
+    const reconciled = await app.services.llmGatewayAdmin.reconcileSandboxKey({
+      userId: user.id,
+      sandboxId: sandbox.id,
+      externalUserId: gatewayUser.externalUserId,
+      externalKeyId: existingGatewayKey?.externalKeyId ?? null,
+    });
+    const gatewayKey = existingGatewayKey
+      ? repository.updateGatewayKeyRotation({
+          sandboxId: sandbox.id,
+          provider: existingGatewayKey.provider,
+          externalKeyId: reconciled.externalKeyId,
+          keyCiphertext: reconciled.keyCiphertext ?? null,
+        })
+      : repository.upsertGatewayKey({
+          userId: user.id,
+          sandboxId: sandbox.id,
+          provider: 'sub2api',
+          externalKeyId: reconciled.externalKeyId,
+          keyCiphertext: reconciled.keyCiphertext ?? null,
+        });
+    return { gatewayKey };
+  });
+
   app.get('/api/sandbox', async (request) => {
     const user = requireUser(app, request);
     const sandbox = repository.ensureSandboxForUser(user.id, {

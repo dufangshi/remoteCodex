@@ -562,6 +562,50 @@ describe('HTTP LLM gateway admin', () => {
     });
   });
 
+  it('reconciles a gateway sandbox key through the admin API', async () => {
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      return Response.json({
+        externalKeyId: 'gw-key-reconciled',
+        keyCiphertext: 'encrypted-reconciled-token',
+      });
+    };
+    const admin = new HttpLlmGatewayAdmin({
+      baseUrl: 'https://gateway-admin.example.test',
+      adminToken: 'admin-token',
+      fetchImpl,
+    });
+
+    await expect(
+      admin.reconcileSandboxKey({
+        userId: 'user-123',
+        sandboxId: 'sbx-123',
+        externalUserId: 'gw-user-123',
+        externalKeyId: 'gw-key-old',
+      }),
+    ).resolves.toEqual({
+      externalKeyId: 'gw-key-reconciled',
+      keyCiphertext: 'encrypted-reconciled-token',
+    });
+    expect(requests[0]).toMatchObject({
+      url: 'https://gateway-admin.example.test/api/admin/users/gw-user-123/keys/reconcile',
+      init: {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer admin-token',
+          'content-type': 'application/json',
+        },
+      },
+    });
+    expect(JSON.parse(String(requests[0]!.init!.body))).toEqual({
+      externalId: 'sbx-123',
+      userId: 'user-123',
+      sandboxId: 'sbx-123',
+      externalKeyId: 'gw-key-old',
+    });
+  });
+
   it('maps gateway admin errors to provider sandbox manager errors', async () => {
     const fetchImpl = async () =>
       Response.json({ message: 'gateway unavailable' }, { status: 503 });

@@ -500,7 +500,7 @@ import third, then quota enforcement and UI.
 - [x] Implement gateway key revocation.
 - [x] Implement gateway key rotation.
 - [x] Attach gateway credential to sandbox provisioning.
-- [ ] Add admin endpoint to reconcile gateway keys.
+- [x] Add admin endpoint to reconcile gateway keys.
 - [ ] Redact gateway tokens from logs.
 - [ ] Redact gateway tokens from API responses.
 
