@@ -6,7 +6,7 @@ multi-tenant control plane plus a per-sandbox workspace worker.
 Recommended reading order:
 
 1. [Agente Product Architecture](./agente-product-architecture.md)
-2. [Remote Codex Side Action Checklist](./remote-codex-side-action-checklist.zh.md)
+2. [Remote Codex Side Product Task Checklist](./remote-codex-side-product-task-checklist.zh.md)
 3. [Current Branch Status](./status.md)
 4. [Staging Release Readiness](./staging-release-readiness.md)
 5. [Release Gates](./release-gates.md)
@@ -18,17 +18,21 @@ Recommended reading order:
 11. [Control Plane Session To Worker Contract](./control-plane-session-worker-contract.md)
 12. [Local Control Plane, Router, And Worker Smoke](./local-control-plane-worker-smoke.md)
 13. [Remote Codex Side Detailed Checklist](./remote-codex-side-detailed-checklist.md)
-14. [Remote Codex Side Work Breakdown And Checklist](./remote-codex-side-work-breakdown.md)
+14. [Remote Codex Side Action Checklist](./remote-codex-side-action-checklist.zh.md)
+15. [Remote Codex Side Work Breakdown And Checklist](./remote-codex-side-work-breakdown.md)
 
-Use the Chinese action checklist as the primary step-by-step task board for
-new Remote Codex side work. Each checkbox is intended to be small enough to
-implement, verify, check off, and commit as a standalone slice.
+Use the Chinese product task checklist as the primary step-by-step task board
+for new Remote Codex side work. Each checkbox is intended to be small enough to
+implement, verify, check off, and commit as a standalone slice. It covers the
+current product direction from Phase 0-6 staging evidence through
+ElAgenteHarness, MCP/tool policy, persistence, billing, deployment, and
+end-to-end acceptance.
 
 Use the detailed checklist as the authoritative Phase 0-6 evidence board
 because the Phase 0-6 verification scripts read it directly. The work breakdown
-keeps the near-term queue, while the execution checklist and status document
-keep phase evidence and current release risk. Older delivery, implementation,
-product-task, and task checklist files are historical references unless a
+keeps the near-term queue, while the execution checklist, action checklist, and
+status document keep phase evidence and current release risk. Older delivery,
+implementation, and task checklist files are historical references unless a
 current status note explicitly points to them.
 
 The control plane owns users, projects, sandbox lifecycle, routing, secrets,

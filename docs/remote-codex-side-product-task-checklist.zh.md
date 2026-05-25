@@ -9,6 +9,51 @@
 任务对应英文清单中的某个 staging/AWS/provider-runtime checkbox，也必须等
 真实环境证据存在后再去英文清单里勾选。
 
+本文件是 Remote Codex 侧后续产品化工作的中文主任务板。每个任务都应该能被
+单独领取、实现、验证、勾选和提交。外部系统的内部任务不在这里打勾；这里
+只打勾 Remote Codex 仓库内已经落地的 API、UI、worker、router、配置、部署
+wiring、contract、client、smoke 或文档。
+
+## 当前优先级
+
+先不要从后面的 Phase 随机挑任务。当前推荐顺序是：
+
+- [ ] 完成 Phase 0-6 剩余真实环境 evidence。
+  - 包含：AWS/EKS lifecycle、staging router、direct-worker denial、
+    browser-to-router-to-worker、Codex/Claude Code/OpenCode gateway runtime smoke。
+  - 对应任务：P3.04-P3.08、P5.07-P5.09、P6.10-P6.13。
+  - 勾选条件：真实 AWS/staging/provider runtime evidence，不能用本地 mock。
+
+- [ ] 启动 Phase 7 ElAgenteHarness integration。
+  - 包含：harness admin contract、scoped `INACT_X_APP_KEY`、worker env 注入、
+    harness tool surface、task/job/artifact UI、harness usage import。
+  - 对应任务：P7.01-P7.17。
+  - 勾选条件：Remote Codex 侧 contract/client/schema/bootstrap/UI/importer/smoke
+    已实现；ElAgenteHarness 内部实现不在本仓库勾选。
+
+- [ ] 启动 Phase 8 MCP 和 tool policy。
+  - 包含：approved MCP registry、stdio/remote MCP policy、env/path containment、
+    Codex/Claude Code/OpenCode config rendering、audit、status UI。
+  - 对应任务：P8.01-P8.12。
+
+- [ ] 启动 Phase 9 workspace persistence、files、diffs、artifacts。
+  - 包含：snapshot 策略、safe file API、diff API、credential exclusion、
+    chemistry artifact display。
+  - 对应任务：P9.01-P9.14。
+
+- [ ] 启动 Phase 10 billing、quota 和 unified usage。
+  - 包含：LLM、Harness、Compute、Storage、Sandbox runtime 的统一 ledger 和 quota。
+  - 对应任务：P10.01-P10.10。
+
+- [ ] 启动 Phase 11 deployment、operations 和 CI。
+  - 包含：Railway、ECR、EKS Fargate、S3、secrets、logs、metrics、alerts、CI smoke。
+  - 对应任务：P11.01-P11.12。
+
+- [ ] 最后执行 Phase 12 staging end-to-end acceptance。
+  - 包含：一个真实用户从登录到 sandbox、provider、harness、usage、quota、
+    admin inspection 和 secret leakage review 的完整路径。
+  - 对应任务：P12.01-P12.16。
+
 ## 如何使用这份清单
 
 这份文档是 Remote Codex 侧的日常任务看板。推荐执行方式是一次只拿一个
@@ -61,6 +106,30 @@ Evidence:
 - Verification: <commands, smoke output, deploy record, or docs review>
 - Residual risk: <remaining unchecked risk>
 ```
+
+## 单任务执行协议
+
+每个 checkbox 都按同一个流程推进，避免“写了代码但没有证据”或“勾了未来任务”：
+
+```markdown
+- [ ] Scope: 明确本任务会改哪些 package、API route、UI route、worker behavior、
+      runtime config、deployment wiring 或 docs。
+- [ ] Contract: 如果涉及 gateway、ElAgenteHarness、AWS、router、provider runtime
+      或 billing，先固定输入、输出、错误格式、身份边界和 secret 边界。
+- [ ] Implement: 完成最小可用切片，不把无关 refactor 混进同一次提交。
+- [ ] Tests: 增加或更新 unit、API、frontend、worker、policy、contract 或 importer tests。
+- [ ] Smoke: 跑本任务指定 smoke；真实环境任务必须保留 staging/deploy evidence。
+- [ ] Secret review: 确认 raw key、gateway token、`INACT_X_APP_KEY`、product JWT、
+      worker token 不进入日志、响应、artifact、browser state、route token 或 docs。
+- [ ] Docs/status: 如果影响架构、release gate、staging 状态或当前 focus，同步
+      `docs/status.md`、`docs/staging-release-readiness.md` 或相关架构文档。
+- [ ] Checklist: 只勾选已经满足完成标准且有证据的 checkbox。
+- [ ] Commit: 提交实现、测试和 checklist/evidence 引用。
+```
+
+本地实现任务可以用本仓库测试、typecheck、local smoke 或 docs review 作为证据。
+真实 AWS、Railway、gateway、provider runtime、ElAgenteHarness、billing、production
+readiness 任务必须用真实目标环境证据，不能用 synthetic JSON 或本地 mock 勾选。
 
 ## Remote Codex 侧交付边界
 
