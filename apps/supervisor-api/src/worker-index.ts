@@ -1,7 +1,10 @@
 import fs from 'node:fs';
 
 import { buildApp } from './app';
-import { validateWorkerEntrypointEnvironment } from './worker-environment';
+import {
+  validateWorkerEntrypointEnvironment,
+  workerStartupLogPayload,
+} from './worker-environment';
 
 if (fs.existsSync('.env')) {
   process.loadEnvFile?.('.env');
@@ -26,11 +29,7 @@ app
   .listen({ host, port })
   .then(() => {
     app.log.info(
-      {
-        sandboxId: app.services.config.sandboxId,
-        userId: app.services.config.userId,
-        workspaceRoot: app.services.config.workspaceRoot,
-      },
+      workerStartupLogPayload(process.env),
       `Remote Codex Worker listening on http://${host}:${port}`,
     );
   })

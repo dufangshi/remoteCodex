@@ -364,6 +364,8 @@ Goal: the sandbox worker image is reproducible, non-root, scoped to
 - [x] Fail fast on missing provider home directories.
 - [x] Fail fast on unwritable workspace.
 - [x] Redact service tokens from startup logs.
+- [x] Redact harness key from startup logs.
+- [x] Redact gateway token from startup logs.
 - [x] Add startup metadata logs without secrets.
 - [x] Validate gateway environment when provider runtimes are enabled.
 - [x] Validate ElAgenteHarness environment when chemistry tools are enabled.

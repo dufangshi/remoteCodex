@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   validateWorkerEntrypointEnvironment,
+  workerStartupLogPayload,
   type WorkerEnvironmentFilesystem,
 } from './worker-environment';
 
@@ -113,5 +114,32 @@ describe('worker entrypoint environment validation', () => {
         fakeFilesystem,
       ),
     ).not.toThrow();
+  });
+
+  it('redacts gateway token and harness key from startup log payload', () => {
+    const payload = workerStartupLogPayload(
+      baseWorkerEnv({
+        REMOTE_CODEX_LLM_GATEWAY_BASE_URL: 'https://llm-gateway.example.com',
+        REMOTE_CODEX_LLM_GATEWAY_TOKEN: 'must-not-leak-gateway-token',
+        REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
+        ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.com',
+        INACT_X_APP_KEY: 'must-not-leak-harness-key',
+      }),
+    );
+
+    expect(payload).toEqual({
+      sandboxId: 'sbx_test',
+      userId: 'user_test',
+      workspaceRoot: '/workspace',
+      home: '/home/agent',
+      gatewayConfigured: true,
+      harnessConfigured: true,
+      chemistryToolsEnabled: true,
+    });
+    const serialized = JSON.stringify(payload);
+    expect(serialized).not.toContain('must-not-leak-gateway-token');
+    expect(serialized).not.toContain('must-not-leak-harness-key');
+    expect(serialized).not.toContain('REMOTE_CODEX_LLM_GATEWAY_TOKEN');
+    expect(serialized).not.toContain('INACT_X_APP_KEY');
   });
 });

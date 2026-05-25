@@ -93,3 +93,15 @@ export function validateWorkerEntrypointEnvironment(
   validateGatewayEnvironment(env);
   validateHarnessEnvironment(env);
 }
+
+export function workerStartupLogPayload(env: NodeJS.ProcessEnv = process.env) {
+  return {
+    sandboxId: env.REMOTE_CODEX_SANDBOX_ID ?? null,
+    userId: env.REMOTE_CODEX_USER_ID ?? null,
+    workspaceRoot: env.WORKSPACE_ROOT ?? null,
+    home: env.HOME ?? null,
+    gatewayConfigured: Boolean(env.REMOTE_CODEX_LLM_GATEWAY_BASE_URL),
+    harnessConfigured: Boolean(env.ELAGENTE_HARNESS_BASE_URL),
+    chemistryToolsEnabled: parseBoolean(env.REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED),
+  };
+}

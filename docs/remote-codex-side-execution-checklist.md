@@ -428,12 +428,12 @@ identity, filesystem, provider, MCP, gateway, or harness settings are unsafe.
     MCP config paths when MCP is enabled.
   - Verification: supervisor-api tests cover valid and invalid config paths.
 
-- [ ] Redact harness key from startup logs.
+- [x] Redact harness key from startup logs.
   - Acceptance: `INACT_X_APP_KEY` and equivalent harness secrets never appear in
     startup logs.
   - Verification: tests assert redacted startup output.
 
-- [ ] Redact gateway token from startup logs.
+- [x] Redact gateway token from startup logs.
   - Acceptance: gateway tokens never appear in startup logs.
   - Verification: tests assert redacted startup output.
 

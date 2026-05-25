@@ -364,8 +364,8 @@ required identity, filesystem, gateway, or harness settings are unsafe.
 - [x] Validate gateway env when provider runtimes are enabled.
 - [x] Validate ElAgenteHarness env when chemistry tools are enabled.
 - [ ] Validate MCP config path and permissions.
-- [ ] Redact harness key from startup logs.
-- [ ] Redact gateway token from startup logs.
+- [x] Redact harness key from startup logs.
+- [x] Redact gateway token from startup logs.
 
 ### Worker API Authorization
 
