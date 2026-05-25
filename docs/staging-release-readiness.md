@@ -143,6 +143,12 @@ non-secret environment readiness check:
 pnpm phase-zero-six:env
 ```
 
+For a human-readable report of the same readiness state, use:
+
+```bash
+pnpm phase-zero-six:env:report
+```
+
 To generate a private shell template for the missing staging inputs, use:
 
 ```bash
@@ -162,6 +168,8 @@ For AWS-only S3.04/S3.05 preflight work, generate a smaller template:
 
 ```bash
 pnpm phase-zero-six:template:aws
+pnpm phase-zero-six:env:aws
+pnpm phase-zero-six:env:aws:report
 ```
 
 This command reports readiness by evidence group:
@@ -198,6 +206,8 @@ collecting evidence, and applying reviewed evidence.
 When the bundle stops at env readiness, the same `itemReadiness` and
 `nextCommands` fields are copied into `summary.envReadiness`, so the operator
 can continue from `summary.json` without opening `env-readiness.json`.
+Use the JSON command for machine-readable review and the `:report` command for
+operator-readable text. Both forms print environment variable names only.
 The bundle also writes `operator-report.txt`, a text summary of checklist
 readiness, env item readiness, next commands, and artifact paths. It is for
 operator review only; the JSON verifiers remain the authority for checking

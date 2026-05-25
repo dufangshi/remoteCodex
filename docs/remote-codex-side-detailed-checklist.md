@@ -179,6 +179,7 @@ pnpm phase-zero-six:audit
 pnpm phase-zero-six:audit:report
 pnpm phase-zero-six:template
 pnpm phase-zero-six:env
+pnpm phase-zero-six:env:report
 pnpm phase-zero-six:collect
 pnpm phase-zero-six:apply
 pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id>
@@ -1511,6 +1512,7 @@ pnpm phase-zero-six:audit
 pnpm phase-zero-six:audit:report
 pnpm phase-zero-six:template
 pnpm phase-zero-six:env
+pnpm phase-zero-six:env:report
 pnpm phase-zero-six:collect
 pnpm phase-zero-six:apply
 pnpm exec tsx scripts/collect-aws-staging-preflight-evidence.ts > <evidence-json>

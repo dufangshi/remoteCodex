@@ -949,6 +949,33 @@ describe('phase zero-six evidence tooling', () => {
     expect(result.stdout).not.toContain('secret-admin-jwt-value');
   });
 
+  it('renders env readiness as a text report without printing secret values', async () => {
+    const result = await runScriptWithEnv(
+      'scripts/verify-phase-zero-six-env-ready.ts',
+      ['--format', 'text'],
+      {
+        STAGING_CONTROL_PLANE_BASE_URL: 'https://control-plane.example.test',
+        STAGING_PRODUCT_JWT: 'secret-product-jwt-value',
+        STAGING_ADMIN_JWT: 'secret-admin-jwt-value',
+      },
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('# Remote Codex Phase 0-6 Env Readiness');
+    expect(result.stdout).toContain('Ready: false');
+    expect(result.stdout).toContain('Mode: full staging');
+    expect(result.stdout).toContain('## Next Commands');
+    expect(result.stdout).toContain('collectEvidence: pnpm phase-zero-six:collect');
+    expect(result.stdout).toContain('## Groups');
+    expect(result.stdout).toContain('runtime-smoke: not ready');
+    expect(result.stdout).toContain('STAGING_IDEMPOTENT_LIFECYCLE_SMOKE=true');
+    expect(result.stdout).toContain('## Item Readiness');
+    expect(result.stdout).toContain('S3.06 [runtime-smoke]: envReady=false');
+    expect(result.stdout).toContain('This report prints environment variable names only');
+    expect(result.stdout).not.toContain('secret-product-jwt-value');
+    expect(result.stdout).not.toContain('secret-admin-jwt-value');
+  });
+
   it('writes a placeholder env template without leaking current secret values', async () => {
     const dir = await tempDir();
     const templatePath = path.join(dir, 'phase-zero-six.env.sh');

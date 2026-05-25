@@ -277,8 +277,10 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 2. Run `pnpm phase-zero-six:template`, fill
    `.temp/phase-zero-six-evidence/phase-zero-six.env.sh` in a private operator
    shell, then `source` it. Do not commit the filled env file.
-3. Run `pnpm phase-zero-six:env`. Use `itemReadiness` and `nextCommands` to
-   fill missing AWS, staging runtime, direct-worker, and provider smoke inputs.
+3. Run `pnpm phase-zero-six:env`. Use `pnpm phase-zero-six:env:report` when a
+   human-readable text report is easier than raw JSON. Use `itemReadiness` and
+   `nextCommands` to fill missing AWS, staging runtime, direct-worker, and
+   provider smoke inputs.
 4. Run `pnpm phase-zero-six:collect` once env readiness is complete. This
    collects AWS preflight, staging lifecycle/router smoke, provider gateway
    smoke, verifier output, artifact scans, `operator-report.txt`,

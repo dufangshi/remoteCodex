@@ -27,6 +27,33 @@ interface EnvGroup {
   };
 }
 
+interface EnvReadinessReport {
+  ok: boolean;
+  generatedAt: string;
+  skippedStagingSmoke: boolean;
+  envTemplatePath: string | null;
+  readyGroups: string[];
+  notReadyGroups: string[];
+  groups: ReturnType<typeof evaluateGroup>[];
+  itemReadiness: Array<{
+    item: string;
+    groupId: string;
+    groupTitle: string;
+    envReady: boolean;
+    missingEnv: string[];
+    missingRecommendedEnv: string[];
+    blockedUntil: string;
+    nextEvidenceCommand: string;
+  }>;
+  nextCommands: ReturnType<typeof buildNextCommands>;
+  missingEnvExportTemplate: string[];
+  missingRecommendedEnvExportTemplate: string[];
+  secretSafety: {
+    valuesPrinted: boolean;
+    note: string;
+  };
+}
+
 function envValue(name: string) {
   const value = process.env[name]?.trim();
   return value ? value : null;
@@ -95,6 +122,14 @@ function argValue(name: string) {
     throw new Error(`${name} requires a value.`);
   }
   return value;
+}
+
+function outputFormat() {
+  const format = argValue('--format') ?? 'json';
+  if (format !== 'json' && format !== 'text') {
+    throw new Error('--format must be json or text.');
+  }
+  return format;
 }
 
 const groups: EnvGroup[] = [
@@ -511,9 +546,57 @@ function buildNextCommands(input: {
   };
 }
 
+function renderTextReport(report: EnvReadinessReport) {
+  const lines = [
+    '# Remote Codex Phase 0-6 Env Readiness',
+    '',
+    `Generated at: ${report.generatedAt}`,
+    `Ready: ${String(report.ok)}`,
+    `Mode: ${report.skippedStagingSmoke ? 'AWS preflight only' : 'full staging'}`,
+    `Env template path: ${report.envTemplatePath ?? '(not written)'}`,
+    '',
+    '## Next Commands',
+  ];
+
+  for (const [name, command] of Object.entries(report.nextCommands)) {
+    lines.push(`- ${name}: ${command}`);
+  }
+
+  lines.push('');
+  lines.push('## Groups');
+  for (const group of report.groups) {
+    lines.push(`- ${group.id}: ${group.ready ? 'ready' : 'not ready'}`);
+    lines.push(`  Items: ${group.items.join(', ')}`);
+    if (group.missingEnv.length > 0) {
+      lines.push(`  Missing required env: ${group.missingEnv.join(', ')}`);
+    }
+    if (group.missingRecommendedEnv.length > 0) {
+      lines.push(`  Missing recommended env: ${group.missingRecommendedEnv.join(', ')}`);
+    }
+    for (const warning of group.warnings) {
+      lines.push(`  Warning: ${warning}`);
+    }
+  }
+
+  lines.push('');
+  lines.push('## Item Readiness');
+  for (const item of report.itemReadiness) {
+    lines.push(`- ${item.item} [${item.groupId}]: envReady=${String(item.envReady)}`);
+    if (item.missingEnv.length > 0) {
+      lines.push(`  Missing env: ${item.missingEnv.join(', ')}`);
+    }
+    lines.push(`  Next evidence command: ${item.nextEvidenceCommand}`);
+  }
+
+  lines.push('');
+  lines.push(report.secretSafety.note);
+  return `${lines.join('\n')}\n`;
+}
+
 async function main() {
   const skipStagingSmoke = hasFlag('--skip-staging-smoke');
   const envTemplatePath = argValue('--write-env-template');
+  const format = outputFormat();
   const selectedGroups = skipStagingSmoke
     ? groups.filter((group) => group.id === 'aws-preflight')
     : groups;
@@ -538,7 +621,7 @@ async function main() {
     }));
   }
 
-  console.log(JSON.stringify({
+  const report: EnvReadinessReport = {
     ok: notReadyGroups.length === 0,
     generatedAt,
     skippedStagingSmoke: skipStagingSmoke,
@@ -564,7 +647,9 @@ async function main() {
       valuesPrinted: false,
       note: 'This report prints environment variable names only; it never prints JWTs, API keys, tokens, or command JSON values.',
     },
-  }, null, 2));
+  };
+
+  console.log(format === 'text' ? renderTextReport(report) : JSON.stringify(report, null, 2));
 
   if (notReadyGroups.length > 0) {
     process.exitCode = 1;
