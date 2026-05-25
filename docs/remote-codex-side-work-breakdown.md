@@ -1,13 +1,18 @@
-# Remote Codex Side Work Breakdown
+# Remote Codex Side Work Breakdown And Checklist
 
-This document is the detailed execution checklist for the work that must happen
-inside the `remoteCodex` repository to support the Agente sandbox-worker product
-architecture.
+This document is the detailed one-step-at-a-time checklist for the work that
+must happen inside the `remoteCodex` repository to support the Agente
+sandbox-worker product architecture.
 
-Use this as the day-to-day implementation board for future work. It is focused
-on Remote Codex deliverables only. Completed historical baseline work remains
-tracked in `docs/remote-codex-side-delivery-checklist.md`,
-`docs/remote-codex-side-execution-checklist.md`, and `docs/status.md`.
+Use this as the day-to-day implementation board for future work. A developer
+should be able to pick the first unchecked item in a milestone, implement it,
+run the named verification, update the checkbox, and commit that small slice.
+
+This document is focused on Remote Codex deliverables only. Historical phase
+status and evidence are still tracked in
+`docs/remote-codex-side-execution-checklist.md` and `docs/status.md`; when a
+task is completed here, update those files if the task changes release status
+or phase evidence.
 
 ## Scope
 
@@ -37,11 +42,15 @@ Remote Codex does not own:
 
 - Check a box only when the code, tests, smoke check, deployment wiring, or
   deliberately scoped documentation deliverable exists on this branch.
-- Do not check staging or production tasks until the named environment has
-  actually been exercised.
+- Do not check staging, production, CI-pass, or AWS-live tasks until the named
+  environment or CI job has actually run and passed.
 - For every checked group, add a short evidence note in the relevant status,
   release, or checklist doc.
 - Prefer one commit per coherent group of checked items.
+- If the implementation proves a task should be split, split it before checking
+  the original task.
+- If a task is intentionally deferred, leave it unchecked and add the deferral
+  reason to `docs/status.md`.
 - Keep raw provider keys, gateway tokens, harness keys, product JWTs, and worker
   internal tokens out of logs, browser storage, API responses, and task output.
 
@@ -53,6 +62,81 @@ Evidence:
 - Verification: <commands, smoke checks, or deployment checks>
 - Residual risk: <remaining unchecked edge>
 ```
+
+## Checkbox Workflow
+
+For every implementation slice:
+
+1. Pick one unchecked task or a tightly related group of unchecked tasks.
+2. Confirm whether it is local, CI, staging, production, or external-service
+   work.
+3. Implement only the Remote Codex side of that slice.
+4. Add or update tests, smoke scripts, deployment wiring, or docs required by
+   the task.
+5. Run the verification named under the task.
+6. Check the box only if verification passes.
+7. Add an evidence note when the completion affects a phase or release gate.
+8. Update `docs/status.md` when the next implementation focus or residual risk
+   changes materially.
+9. Commit the checked slice with a message that names the completed task.
+
+Task types:
+
+- Local code: check after tests/typechecks pass in this repository.
+- CI: check after the workflow exists and a CI run has passed.
+- Staging: check after the staging smoke has actually run.
+- Production: check after production deployment or production smoke evidence
+  exists.
+- External integration: check only after the Remote Codex contract, client,
+  fixture, mock, or deployment wiring exists here.
+
+## Current Priority Queue
+
+This queue is the recommended order for the next small commits. The detailed
+milestone sections below remain the full backlog.
+
+- [ ] Add worker Docker CI workflow.
+  - Done when CI builds `Dockerfile.worker` on branch or PR push.
+  - Verify with a passing CI run.
+
+- [ ] Add CI worker `/readyz` smoke.
+  - Done when CI starts the built worker image and verifies readiness.
+  - Verify with CI logs showing `/readyz` success.
+
+- [ ] Add CI worker auth denial smoke.
+  - Done when CI proves non-health worker routes reject requests without the
+    internal worker token.
+  - Verify with CI logs showing the expected `401` or `403`.
+
+- [ ] Add CI worker auth success smoke.
+  - Done when CI proves worker metadata is reachable with the internal worker
+    token.
+  - Verify with CI logs showing successful metadata response.
+
+- [ ] Add local worker checkpoint-to-control-plane smoke.
+  - Done when a worker-mode supervisor sends a checkpoint and the control-plane
+    session record changes.
+  - Verify with documented command output or automated smoke.
+
+- [ ] Add selected production auth-provider smoke.
+  - Done when staging-like config validates a real provider-issued token and
+    rejects expired, wrong-issuer, and wrong-audience tokens.
+  - Verify with an integration smoke or documented staging run.
+
+- [ ] Run staging sandbox lifecycle smoke.
+  - Done when start, stop, restart, readiness, and idempotency have been tested
+    against a real sandbox runtime.
+  - Verify with Pod name, sandbox id, final registry state, and `/readyz`.
+
+- [ ] Run staging browser-to-router-to-worker smoke.
+  - Done when a real browser reaches a real worker through the router using a
+    route token.
+  - Verify with route-token issue, router connection, and worker response.
+
+- [ ] Run staging Codex, Claude Code, and OpenCode gateway smokes.
+  - Done when each provider runtime makes one model request through the gateway
+    and no provider root key exists inside the worker.
+  - Verify with staging smoke records for each runtime.
 
 ## Target Runtime Shape
 

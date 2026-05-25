@@ -72,6 +72,10 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 
 - Phase 0 documentation and release baseline is complete for this branch; live
   staging verification has not run yet.
+- `docs/remote-codex-side-work-breakdown.md` is the active one-item-at-a-time
+  implementation checklist. Use it for day-to-day task selection and checkbox
+  updates; keep `docs/remote-codex-side-execution-checklist.md` synchronized
+  when a completed item changes phase evidence or release risk.
 - AWS sandbox adapter implementation.
 - Frontend auth shell covers the local login route, authenticated route guard,
   loading state, expired-session state, disabled-account state, and admin user
@@ -104,11 +108,11 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 
 ## Immediate Next Implementation Queue
 
-1. Add production auth-provider smoke coverage or staging smoke procedure for
+1. Add CI worker image build plus CI `/readyz` and worker auth smokes.
+2. Add production auth-provider smoke coverage or staging smoke procedure for
    valid, expired, wrong-issuer, and wrong-audience tokens.
-2. Add staging lifecycle smokes for start, stop, idempotent restart, and
+3. Add staging lifecycle smokes for start, stop, idempotent restart, and
    readiness.
-3. Add CI worker image build plus CI `/readyz` and worker auth smokes.
 4. Run staging provider-runtime gateway smokes for Codex, Claude Code, and
    OpenCode.
 
