@@ -22,6 +22,15 @@ export interface SandboxEnvironment {
   env: Record<string, string>;
 }
 
+export interface SandboxSecretEnvRef {
+  secretName: string;
+  key: string;
+}
+
+export interface SandboxEnvironmentSpec extends SandboxEnvironment {
+  secretEnv?: Record<string, SandboxSecretEnvRef>;
+}
+
 export type SandboxManagerErrorCode = 'quota' | 'capacity' | 'config' | 'provider';
 
 export class SandboxManagerError extends Error {
@@ -218,6 +227,54 @@ export interface AwsSandboxAdapterConfig {
   resourceProfile: 'small' | 'standard' | 'large';
 }
 
+export interface AwsWorkerPodSpec {
+  namespace: string;
+  podName: string;
+  serviceName: string;
+  image: string;
+  serviceAccountName: string;
+  labels: Record<string, string>;
+  env: Record<string, string>;
+  secretEnv: Record<string, SandboxSecretEnvRef>;
+  subnetIds: string[];
+  securityGroupIds: string[];
+  resourceProfile: AwsSandboxAdapterConfig['resourceProfile'];
+  resources: {
+    cpu: string;
+    memory: string;
+    ephemeralStorage: string;
+  };
+}
+
+export interface AwsWorkerPodStatus {
+  phase: 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Unknown' | string;
+  ready: boolean;
+  reason?: string | null;
+  message?: string | null;
+}
+
+export interface AwsWorkerEndpoint {
+  routerBaseUrl?: string | null;
+  workerServiceName?: string | null;
+}
+
+export interface AwsSandboxKubernetesClient {
+  applyWorkerPod(spec: AwsWorkerPodSpec): Promise<void>;
+  deleteWorkerPod(input: {
+    namespace: string;
+    podName: string;
+    serviceName: string;
+  }): Promise<{ deleted: boolean }>;
+  getWorkerPod(input: {
+    namespace: string;
+    podName: string;
+  }): Promise<AwsWorkerPodStatus | null>;
+  getWorkerEndpoint(input: {
+    namespace: string;
+    serviceName: string;
+  }): Promise<AwsWorkerEndpoint>;
+}
+
 function commaList(value: string) {
   return value
     .split(',')
@@ -256,32 +313,67 @@ export function loadAwsSandboxAdapterConfig(
   };
 }
 
+const awsResourceProfiles: Record<
+  AwsSandboxAdapterConfig['resourceProfile'],
+  AwsWorkerPodSpec['resources']
+> = {
+  small: {
+    cpu: '500m',
+    memory: '1Gi',
+    ephemeralStorage: '20Gi',
+  },
+  standard: {
+    cpu: '1000m',
+    memory: '2Gi',
+    ephemeralStorage: '40Gi',
+  },
+  large: {
+    cpu: '2000m',
+    memory: '4Gi',
+    ephemeralStorage: '80Gi',
+  },
+};
+
 export class AwsEksFargateSandboxManager implements SandboxManager {
-  constructor(readonly config: AwsSandboxAdapterConfig) {}
+  constructor(
+    readonly config: AwsSandboxAdapterConfig,
+    private readonly kubernetesClient?: AwsSandboxKubernetesClient,
+  ) {}
 
   async createSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
     return this.startSandbox(input);
   }
 
   async startSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
+    const podSpec = await this.buildWorkerPodSpec(input);
+    await this.requireKubernetesClient('start sandboxes').applyWorkerPod(podSpec);
     return {
       state: 'starting',
       routerBaseUrl: this.config.routerBaseUrl,
-      workerServiceName: this.workerServiceName(input.sandboxId),
+      workerServiceName: podSpec.serviceName,
       k8sNamespace: this.config.namespace,
-      k8sPodName: this.podName(input.sandboxId),
-      statusReason: 'AWS EKS Fargate adapter is configured; Pod creation is not implemented yet.',
+      k8sPodName: podSpec.podName,
+      statusReason: 'Worker Pod has been applied and is waiting for readiness.',
     };
   }
 
   async stopSandbox(input: { sandboxId: string }): Promise<SandboxProvisionResult> {
+    const podName = this.podName(input.sandboxId);
+    const workerServiceName = this.workerServiceName(input.sandboxId);
+    const result = await this.requireKubernetesClient('stop sandboxes').deleteWorkerPod({
+      namespace: this.config.namespace,
+      podName,
+      serviceName: workerServiceName,
+    });
     return {
-      state: 'stopping',
+      state: result.deleted ? 'stopping' : 'stopped',
       routerBaseUrl: this.config.routerBaseUrl,
-      workerServiceName: this.workerServiceName(input.sandboxId),
+      workerServiceName,
       k8sNamespace: this.config.namespace,
-      k8sPodName: this.podName(input.sandboxId),
-      statusReason: 'AWS EKS Fargate adapter is configured; Pod stop is not implemented yet.',
+      k8sPodName: podName,
+      statusReason: result.deleted
+        ? 'Worker Pod deletion has been requested.'
+        : 'Worker Pod was already absent.',
     };
   }
 
@@ -293,7 +385,7 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
   async deleteSandbox(input: { sandboxId: string }): Promise<SandboxProvisionResult> {
     await this.stopSandbox(input);
     return {
-      state: 'deleting',
+      state: 'deleted',
       routerBaseUrl: this.config.routerBaseUrl,
       workerServiceName: this.workerServiceName(input.sandboxId),
       k8sNamespace: this.config.namespace,
@@ -302,38 +394,181 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
   }
 
   async getSandboxStatus(input: { sandboxId: string }): Promise<SandboxProvisionResult> {
+    const podName = this.podName(input.sandboxId);
+    const workerServiceName = this.workerServiceName(input.sandboxId);
+    const podStatus = await this.requireKubernetesClient('poll sandbox status').getWorkerPod({
+      namespace: this.config.namespace,
+      podName,
+    });
+    return this.resultFromPodStatus({
+      podStatus,
+      podName,
+      workerServiceName,
+    });
+  }
+
+  async getSandboxEndpoint(input: { sandboxId: string }): Promise<{ routerBaseUrl: string | null }> {
+    const endpoint = await this.requireKubernetesClient('discover sandbox endpoints').getWorkerEndpoint({
+      namespace: this.config.namespace,
+      serviceName: this.workerServiceName(input.sandboxId),
+    });
     return {
-      state: 'unknown',
-      routerBaseUrl: this.config.routerBaseUrl,
-      workerServiceName: this.workerServiceName(input.sandboxId),
-      k8sNamespace: this.config.namespace,
-      k8sPodName: this.podName(input.sandboxId),
-      statusReason: 'AWS EKS Fargate status polling is not implemented yet.',
+      routerBaseUrl: endpoint.routerBaseUrl ?? this.config.routerBaseUrl,
     };
   }
 
-  async getSandboxEndpoint(): Promise<{ routerBaseUrl: string | null }> {
-    return { routerBaseUrl: this.config.routerBaseUrl };
-  }
-
-  async prepareSandboxEnvironment(input: SandboxStartInput): Promise<SandboxEnvironment> {
+  async prepareSandboxEnvironment(input: SandboxStartInput): Promise<SandboxEnvironmentSpec> {
     return {
       env: {
         REMOTE_CODEX_RUNTIME_ROLE: 'worker',
         REMOTE_CODEX_SANDBOX_ID: input.sandboxId,
         REMOTE_CODEX_USER_ID: input.userId,
+        REMOTE_CODEX_SANDBOX_REGION: input.region,
+        REMOTE_CODEX_SANDBOX_S3_PREFIX: input.s3Prefix,
+        SANDBOX_ROUTER_BASE_URL: this.config.routerBaseUrl,
         WORKSPACE_ROOT: '/workspace',
         HOME: '/home/agent',
+      },
+      secretEnv: {
+        REMOTE_CODEX_WORKER_AUTH_TOKEN: {
+          secretName: this.config.workerAuthTokenSecretName,
+          key: 'token',
+        },
       },
     };
   }
 
+  private async buildWorkerPodSpec(input: SandboxStartInput): Promise<AwsWorkerPodSpec> {
+    const env = await this.prepareSandboxEnvironment(input);
+    const image = `${this.config.imageRepository}:${this.config.imageTag}`;
+    return {
+      namespace: this.config.namespace,
+      podName: this.podName(input.sandboxId),
+      serviceName: this.workerServiceName(input.sandboxId),
+      image,
+      serviceAccountName: this.config.serviceAccountName,
+      labels: {
+        'app.kubernetes.io/name': 'remote-codex-worker',
+        'remote-codex/runtime-role': 'worker',
+        'remote-codex/sandbox-id': input.sandboxId,
+        'remote-codex/user-id': input.userId,
+        'remote-codex/image-tag': this.config.imageTag,
+        'remote-codex/resource-profile': this.config.resourceProfile,
+      },
+      env: env.env,
+      secretEnv: env.secretEnv ?? {},
+      subnetIds: this.config.subnetIds,
+      securityGroupIds: this.config.securityGroupIds,
+      resourceProfile: this.config.resourceProfile,
+      resources: awsResourceProfiles[this.config.resourceProfile],
+    };
+  }
+
+  private resultFromPodStatus(input: {
+    podStatus: AwsWorkerPodStatus | null;
+    podName: string;
+    workerServiceName: string;
+  }): SandboxProvisionResult {
+    const base = {
+      routerBaseUrl: this.config.routerBaseUrl,
+      workerServiceName: input.workerServiceName,
+      k8sNamespace: this.config.namespace,
+      k8sPodName: input.podName,
+    };
+
+    if (!input.podStatus) {
+      return {
+        ...base,
+        state: 'stopped',
+        statusReason: 'Worker Pod is absent.',
+      };
+    }
+
+    const reason = input.podStatus.reason ?? undefined;
+    const message = input.podStatus.message ?? undefined;
+    const statusReason = message ?? reason ?? undefined;
+
+    if (input.podStatus.phase === 'Running' && input.podStatus.ready) {
+      return {
+        ...base,
+        state: 'running',
+        statusReason: 'Worker Pod is running and ready.',
+      };
+    }
+
+    if (input.podStatus.phase === 'Running') {
+      return {
+        ...base,
+        state: reason === 'ReadinessTimeout' ? 'failed' : 'degraded',
+        statusReason: statusReason ?? 'Worker Pod is running but not ready.',
+      };
+    }
+
+    if (input.podStatus.phase === 'Pending') {
+      if (reason === 'Unschedulable' || reason === 'FailedScheduling') {
+        return {
+          ...base,
+          state: 'failed',
+          statusReason: statusReason ?? 'Worker Pod cannot be scheduled.',
+        };
+      }
+      if (reason === 'ErrImagePull' || reason === 'ImagePullBackOff') {
+        return {
+          ...base,
+          state: 'failed',
+          statusReason: statusReason ?? 'Worker image cannot be pulled.',
+        };
+      }
+      return {
+        ...base,
+        state: 'starting',
+        statusReason: statusReason ?? 'Worker Pod is pending.',
+      };
+    }
+
+    if (input.podStatus.phase === 'Succeeded') {
+      return {
+        ...base,
+        state: 'stopped',
+        statusReason: statusReason ?? 'Worker Pod completed.',
+      };
+    }
+
+    if (input.podStatus.phase === 'Failed') {
+      return {
+        ...base,
+        state: 'failed',
+        statusReason: statusReason ?? 'Worker Pod failed.',
+      };
+    }
+
+    return {
+      ...base,
+      state: 'unknown',
+      statusReason: statusReason ?? 'Worker Pod state is unknown.',
+    };
+  }
+
   private podName(sandboxId: string) {
-    return `remote-codex-worker-${sandboxId}`;
+    const safeSandboxId = sandboxId
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, '-')
+      .replace(/^-+|-+$/g, '');
+    return `remote-codex-worker-${safeSandboxId}`.slice(0, 63);
   }
 
   private workerServiceName(sandboxId: string) {
-    return `remote-codex-worker-${sandboxId}`;
+    return this.podName(sandboxId);
+  }
+
+  private requireKubernetesClient(operation: string) {
+    if (!this.kubernetesClient) {
+      throw new SandboxManagerError(
+        'config',
+        `AWS Kubernetes client is required to ${operation}.`,
+      );
+    }
+    return this.kubernetesClient;
   }
 }
 

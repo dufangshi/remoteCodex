@@ -285,16 +285,16 @@ start, stop, observe, and eventually snapshot it.
 - [x] Define CPU, memory, and ephemeral storage profiles.
 - [x] Define VPC, subnet, security group, and egress requirements.
 - [x] Implement AWS adapter configuration loading.
-- [ ] Implement Pod/task creation.
-- [ ] Implement Pod/task stop.
-- [ ] Implement Pod/task status polling.
-- [ ] Implement worker endpoint discovery.
-- [ ] Implement worker environment injection.
-- [ ] Implement worker secret injection.
-- [ ] Add AWS adapter tests with mocked AWS clients.
-- [ ] Add failure handling for AWS capacity errors.
-- [ ] Add failure handling for image pull errors.
-- [ ] Add failure handling for worker readiness timeout.
+- [x] Implement Pod/task creation.
+- [x] Implement Pod/task stop.
+- [x] Implement Pod/task status polling.
+- [x] Implement worker endpoint discovery.
+- [x] Implement worker environment injection.
+- [x] Implement worker secret injection.
+- [x] Add AWS adapter tests with mocked AWS clients.
+- [x] Add failure handling for AWS capacity errors.
+- [x] Add failure handling for image pull errors.
+- [x] Add failure handling for worker readiness timeout.
 
 ### Control-Plane Sandbox API
 
@@ -332,7 +332,7 @@ start, stop, observe, and eventually snapshot it.
 - [x] Local dev adapter can start a worker process.
 - [x] Control-plane typecheck passes.
 - [x] Web typecheck passes.
-- [ ] AWS adapter unit tests pass.
+- [x] AWS adapter unit tests pass.
 - [ ] Staging can start one sandbox from the control plane.
 - [ ] Staging can stop one sandbox from the control plane.
 

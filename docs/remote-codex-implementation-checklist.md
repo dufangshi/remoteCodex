@@ -190,13 +190,13 @@ user.
 - [x] Define CPU/memory/storage resource profiles.
 - [x] Define VPC/subnet/security group requirements.
 - [x] Implement AWS adapter configuration loading.
-- [ ] Implement sandbox Pod/task creation.
-- [ ] Implement sandbox Pod/task stop.
-- [ ] Implement sandbox status polling.
-- [ ] Implement sandbox endpoint discovery.
-- [ ] Implement worker secret injection.
-- [ ] Implement worker environment injection.
-- [ ] Add AWS adapter tests with mocked AWS clients.
+- [x] Implement sandbox Pod/task creation.
+- [x] Implement sandbox Pod/task stop.
+- [x] Implement sandbox status polling.
+- [x] Implement sandbox endpoint discovery.
+- [x] Implement worker secret injection.
+- [x] Implement worker environment injection.
+- [x] Add AWS adapter tests with mocked AWS clients.
 
 ### Control Plane API
 
