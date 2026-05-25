@@ -310,10 +310,10 @@ start, stop, observe, and eventually snapshot it.
 - [x] Track sandbox resource profile.
 - [x] Track sandbox endpoint.
 - [x] Track sandbox status reason.
-- [ ] Add startup progress fields.
-- [ ] Add last failure code and last failure message.
+- [x] Add startup progress fields.
+- [x] Add last failure code and last failure message.
 - [ ] Add sandbox idle-timeout policy.
-- [ ] Add admin restart with reason audit event.
+- [x] Add admin restart with reason audit event.
 
 ### Frontend Sandbox Surface
 

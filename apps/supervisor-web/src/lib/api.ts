@@ -194,6 +194,9 @@ export interface ControlPlaneSandbox {
   lastSeenAt: string | null;
   idleTimeoutAt: string | null;
   statusReason?: string | null;
+  startupProgress?: number | null;
+  lastFailureCode?: string | null;
+  lastFailureMessage?: string | null;
   createdAt: string;
   updatedAt: string;
 }

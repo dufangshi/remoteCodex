@@ -270,6 +270,9 @@ describe('sandbox manager adapters', () => {
     await expect(ready.getSandboxStatus(sandboxInput)).resolves.toMatchObject({
       state: 'running',
       statusReason: 'Worker Pod is running and ready.',
+      startupProgress: 100,
+      lastFailureCode: null,
+      lastFailureMessage: null,
     });
 
     const pending = new AwsEksFargateSandboxManager(
@@ -295,6 +298,9 @@ describe('sandbox manager adapters', () => {
     await expect(imagePullFailure.getSandboxStatus(sandboxInput)).resolves.toMatchObject({
       state: 'failed',
       statusReason: 'Cannot pull worker image.',
+      startupProgress: 25,
+      lastFailureCode: 'image_pull',
+      lastFailureMessage: 'Cannot pull worker image.',
     });
 
     const capacityFailure = new AwsEksFargateSandboxManager(
@@ -311,6 +317,9 @@ describe('sandbox manager adapters', () => {
     await expect(capacityFailure.getSandboxStatus(sandboxInput)).resolves.toMatchObject({
       state: 'failed',
       statusReason: 'No Fargate capacity is currently available.',
+      startupProgress: 25,
+      lastFailureCode: 'capacity',
+      lastFailureMessage: 'No Fargate capacity is currently available.',
     });
 
     const readinessFailure = new AwsEksFargateSandboxManager(
@@ -327,6 +336,9 @@ describe('sandbox manager adapters', () => {
     await expect(readinessFailure.getSandboxStatus(sandboxInput)).resolves.toMatchObject({
       state: 'failed',
       statusReason: 'Worker did not become ready before timeout.',
+      startupProgress: 100,
+      lastFailureCode: 'readiness_timeout',
+      lastFailureMessage: 'Worker did not become ready before timeout.',
     });
 
     const absent = new AwsEksFargateSandboxManager(

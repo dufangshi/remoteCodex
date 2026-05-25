@@ -8,6 +8,9 @@ export interface SandboxProvisionResult {
   k8sNamespace?: string | null;
   k8sPodName?: string | null;
   statusReason?: string | null;
+  startupProgress?: number;
+  lastFailureCode?: string | null;
+  lastFailureMessage?: string | null;
 }
 
 export interface SandboxStartInput {
@@ -354,6 +357,7 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
       k8sNamespace: this.config.namespace,
       k8sPodName: podSpec.podName,
       statusReason: 'Worker Pod has been applied and is waiting for readiness.',
+      startupProgress: 25,
     };
   }
 
@@ -374,6 +378,7 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
       statusReason: result.deleted
         ? 'Worker Pod deletion has been requested.'
         : 'Worker Pod was already absent.',
+      startupProgress: result.deleted ? 25 : 0,
     };
   }
 
@@ -493,6 +498,9 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
         ...base,
         state: 'running',
         statusReason: 'Worker Pod is running and ready.',
+        startupProgress: 100,
+        lastFailureCode: null,
+        lastFailureMessage: null,
       };
     }
 
@@ -501,6 +509,9 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
         ...base,
         state: reason === 'ReadinessTimeout' ? 'failed' : 'degraded',
         statusReason: statusReason ?? 'Worker Pod is running but not ready.',
+        startupProgress: reason === 'ReadinessTimeout' ? 100 : 75,
+        lastFailureCode: reason === 'ReadinessTimeout' ? 'readiness_timeout' : null,
+        lastFailureMessage: reason === 'ReadinessTimeout' ? statusReason ?? null : null,
       };
     }
 
@@ -510,6 +521,9 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
           ...base,
           state: 'failed',
           statusReason: statusReason ?? 'Worker Pod cannot be scheduled.',
+          startupProgress: 25,
+          lastFailureCode: 'capacity',
+          lastFailureMessage: statusReason ?? null,
         };
       }
       if (reason === 'ErrImagePull' || reason === 'ImagePullBackOff') {
@@ -517,12 +531,16 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
           ...base,
           state: 'failed',
           statusReason: statusReason ?? 'Worker image cannot be pulled.',
+          startupProgress: 25,
+          lastFailureCode: 'image_pull',
+          lastFailureMessage: statusReason ?? null,
         };
       }
       return {
         ...base,
         state: 'starting',
         statusReason: statusReason ?? 'Worker Pod is pending.',
+        startupProgress: 50,
       };
     }
 
@@ -531,6 +549,7 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
         ...base,
         state: 'stopped',
         statusReason: statusReason ?? 'Worker Pod completed.',
+        startupProgress: 0,
       };
     }
 
@@ -539,6 +558,9 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
         ...base,
         state: 'failed',
         statusReason: statusReason ?? 'Worker Pod failed.',
+        startupProgress: 100,
+        lastFailureCode: reason ?? 'pod_failed',
+        lastFailureMessage: statusReason ?? null,
       };
     }
 
@@ -546,6 +568,7 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
       ...base,
       state: 'unknown',
       statusReason: statusReason ?? 'Worker Pod state is unknown.',
+      startupProgress: 0,
     };
   }
 

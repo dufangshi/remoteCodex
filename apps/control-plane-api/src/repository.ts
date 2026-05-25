@@ -241,6 +241,9 @@ export class ControlPlaneRepository {
       lastSeenAt: null,
       idleTimeoutAt: null,
       statusReason: null,
+      startupProgress: 0,
+      lastFailureCode: null,
+      lastFailureMessage: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -274,6 +277,9 @@ export class ControlPlaneRepository {
       k8sNamespace?: string | null;
       k8sPodName?: string | null;
       statusReason?: string | null;
+      startupProgress?: number;
+      lastFailureCode?: string | null;
+      lastFailureMessage?: string | null;
     },
   ) {
     const now = new Date().toISOString();

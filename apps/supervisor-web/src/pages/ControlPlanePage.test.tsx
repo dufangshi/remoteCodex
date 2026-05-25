@@ -34,6 +34,9 @@ const stoppedSandbox = {
   lastSeenAt: null,
   idleTimeoutAt: null,
   statusReason: null,
+  startupProgress: 0,
+  lastFailureCode: null,
+  lastFailureMessage: null,
   createdAt: '2026-05-25T00:00:00.000Z',
   updatedAt: '2026-05-25T00:00:00.000Z',
 };

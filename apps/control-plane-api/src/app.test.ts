@@ -57,6 +57,11 @@ describe('control plane api', () => {
     expect(body.user.authProvider).toBe('dev');
     expect(body.user.authSubject).toBe('user-1');
     expect(body.sandbox.userId).toBe(body.user.id);
+    expect(body.sandbox).toMatchObject({
+      startupProgress: 0,
+      lastFailureCode: null,
+      lastFailureMessage: null,
+    });
     expect(body.gatewayKey.externalKeyId).toBe(`sub2api-key-${body.sandbox.id}`);
   });
 
@@ -819,18 +824,38 @@ describe('control plane api', () => {
     expect(list.statusCode).toBe(200);
     expect(list.json().sandboxes.some((sandbox: { id: string }) => sandbox.id === sandboxId)).toBe(true);
 
+    const restart = await app.inject({
+      method: 'POST',
+      url: `/api/admin/sandboxes/${sandboxId}/restart`,
+      headers: {
+        authorization: 'Bearer dev:admin',
+      },
+      payload: {
+        reason: 'admin requested restart for image refresh',
+      },
+    });
+    expect(restart.statusCode).toBe(200);
+    expect(restart.json().sandbox).toMatchObject({
+      id: sandboxId,
+      state: 'running',
+      statusReason: 'admin requested restart for image refresh',
+    });
+
     const forceStop = await app.inject({
       method: 'POST',
       url: `/api/admin/sandboxes/${sandboxId}/force-stop`,
       headers: {
         authorization: 'Bearer dev:admin',
       },
+      payload: {
+        reason: 'admin requested stop',
+      },
     });
     expect(forceStop.statusCode).toBe(200);
     expect(forceStop.json().sandbox).toMatchObject({
       id: sandboxId,
       state: 'stopped',
-      statusReason: 'force-stopped by administrator',
+      statusReason: 'admin requested stop',
     });
   });
 

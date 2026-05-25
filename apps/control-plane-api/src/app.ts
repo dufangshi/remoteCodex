@@ -125,6 +125,10 @@ const importUsageSchema = z.object({
   ),
 });
 
+const adminSandboxReasonSchema = z.object({
+  reason: z.string().min(1).max(500).optional(),
+});
+
 function toErrorPayload(error: unknown) {
   if (error instanceof HttpError) {
     return {
@@ -399,6 +403,7 @@ export function buildControlPlaneApp(
   app.post('/api/admin/sandboxes/:sandboxId/force-stop', async (request) => {
     requireAdmin(app, request);
     const params = z.object({ sandboxId: z.string().uuid() }).parse(request.params);
+    const input = adminSandboxReasonSchema.parse(request.body ?? {});
     const sandbox = repository.getSandboxById(params.sandboxId);
     if (!sandbox) {
       throw new HttpError(404, 'not_found', 'Sandbox not found.');
@@ -410,7 +415,30 @@ export function buildControlPlaneApp(
     return {
       sandbox: repository.updateSandboxState(sandbox.id, {
         ...result,
-        statusReason: result.statusReason ?? 'force-stopped by administrator',
+        statusReason: input.reason ?? result.statusReason ?? 'force-stopped by administrator',
+      }),
+    };
+  });
+
+  app.post('/api/admin/sandboxes/:sandboxId/restart', async (request) => {
+    requireAdmin(app, request);
+    const params = z.object({ sandboxId: z.string().uuid() }).parse(request.params);
+    const input = adminSandboxReasonSchema.parse(request.body ?? {});
+    const sandbox = repository.getSandboxById(params.sandboxId);
+    if (!sandbox) {
+      throw new HttpError(404, 'not_found', 'Sandbox not found.');
+    }
+    const result = await app.services.sandboxManager.restartSandbox({
+      sandboxId: sandbox.id,
+      userId: sandbox.userId,
+      image: sandbox.image,
+      region: sandbox.region,
+      s3Prefix: sandbox.s3Prefix,
+    });
+    return {
+      sandbox: repository.updateSandboxState(sandbox.id, {
+        ...result,
+        statusReason: input.reason ?? result.statusReason ?? 'restarted by administrator',
       }),
     };
   });

@@ -227,6 +227,9 @@ export const controlSandboxes = sqliteTable('control_sandboxes', {
   lastSeenAt: text('last_seen_at'),
   idleTimeoutAt: text('idle_timeout_at'),
   statusReason: text('status_reason'),
+  startupProgress: integer('startup_progress').notNull().default(0),
+  lastFailureCode: text('last_failure_code'),
+  lastFailureMessage: text('last_failure_message'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });
