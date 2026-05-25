@@ -112,8 +112,7 @@ function presentOptionalSecretNames(values: Map<string, string>) {
 }
 
 function isPlaceholderValue(value: string) {
-  const trimmed = value.trim();
-  return trimmed.startsWith('<') && trimmed.endsWith('>');
+  return /<[^>]+>/.test(value.trim());
 }
 
 function hasFilledValue(values: Map<string, string>, name: string) {
@@ -133,10 +132,10 @@ function templateValue(name: string) {
     return '120000';
   }
   if (name.startsWith('AWS_STAGING_CONFIG_REVIEWED')) {
-    return 'true';
+    return '<aws-staging-config-reviewed>';
   }
   if (name.startsWith('AWS_STAGING_CREDENTIAL_REVIEW_PASSED')) {
-    return 'true';
+    return '<aws-staging-credential-review-passed>';
   }
   if (name === 'STAGING_IDEMPOTENT_LIFECYCLE_SMOKE') {
     return 'true';

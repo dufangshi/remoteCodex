@@ -980,8 +980,8 @@ describe('phase zero-six evidence tooling', () => {
     );
     expect(parsed.missingEnvExportTemplate).toEqual(
       expect.arrayContaining([
-        "# runtime-smoke\nexport STAGING_IDEMPOTENT_LIFECYCLE_SMOKE='true'",
-        "# runtime-smoke\nexport STAGING_STOP_SANDBOX_AFTER_SMOKE='true'",
+        "# runtime-smoke\nexport STAGING_IDEMPOTENT_LIFECYCLE_SMOKE='<idempotent-smoke>'",
+        "# runtime-smoke\nexport STAGING_STOP_SANDBOX_AFTER_SMOKE='<stop-after-smoke>'",
       ]),
     );
     expect(result.stdout).not.toContain('secret-product-jwt-value');
@@ -1048,12 +1048,46 @@ describe('phase zero-six evidence tooling', () => {
     expect(parsed.envTemplatePath).toBe(templatePath);
     expect(template).toContain('Phase 0-6 staging evidence environment template');
     expect(template).toContain('# runtime-smoke: Runtime staging smoke for S3.06-S3.08 and R5.10/R5.12');
-    expect(template).toContain("export STAGING_IDEMPOTENT_LIFECYCLE_SMOKE='true'");
+    expect(template).toContain("export STAGING_IDEMPOTENT_LIFECYCLE_SMOKE='<idempotent-smoke>'");
     expect(template).toContain("export AWS_STAGING_REVIEWED_BY='operator@example.com'");
     expect(template).not.toContain('secret-product-jwt-value');
     expect(template).not.toContain('secret-admin-jwt-value');
     expect(result.stdout).not.toContain('secret-product-jwt-value');
     expect(result.stdout).not.toContain('secret-admin-jwt-value');
+  });
+
+  it('does not treat sourced placeholder env template values as ready', async () => {
+    const dir = await tempDir();
+    const templatePath = path.join(dir, 'phase-zero-six.env.sh');
+    await runScript(
+      'scripts/verify-phase-zero-six-env-ready.ts',
+      ['--write-env-template', templatePath],
+    );
+    const template = await readFile(templatePath, 'utf8');
+    const env: Record<string, string> = {};
+    for (const line of template.split(/\r?\n/)) {
+      const match = /^export ([A-Z0-9_]+)='(.*)'$/.exec(line);
+      if (match) {
+        env[match[1]] = match[2];
+      }
+    }
+
+    const result = await runScriptWithEnv(
+      'scripts/verify-phase-zero-six-env-ready.ts',
+      [],
+      env,
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.notReadyGroups).toContain('runtime-smoke');
+    expect(parsed.groups.find((group: { id: string }) => group.id === 'runtime-smoke').missingEnv)
+      .toContain('STAGING_PRODUCT_JWT');
+    expect(parsed.groups.find((group: { id: string }) => group.id === 'aws-preflight').missingEnv)
+      .toContain('AWS_STAGING_WORKER_IMAGE_TAG | SANDBOX_WORKER_IMAGE_TAG');
+    expect(parsed.groups.find((group: { id: string }) => group.id === 'aws-preflight').missingEnv)
+      .toContain('AWS_STAGING_CONFIG_REVIEWED=true');
   });
 
   it('writes a GitHub staging Environment template without leaking current secret values', async () => {
@@ -1075,6 +1109,8 @@ describe('phase zero-six evidence tooling', () => {
     expect(parsed.action).toBe('write-template');
     expect(template).toContain('Phase 0-6 GitHub staging Environment configuration template');
     expect(template).toContain('export AWS_STAGING_REVIEWED_BY=');
+    expect(template).toContain("export AWS_STAGING_CONFIG_REVIEWED='<aws-staging-config-reviewed>'");
+    expect(template).toContain("export AWS_STAGING_CREDENTIAL_REVIEW_PASSED='<aws-staging-credential-review-passed>'");
     expect(template).toContain('export STAGING_DIRECT_WORKER_PRIVATE_PROOF=');
     expect(template).toContain(`# export ${kubeconfigSecretAlternatives[0]}=`);
     expect(template).toContain(`export ${kubeconfigSecretAlternatives[1]}=`);

@@ -75,9 +75,13 @@ interface HostToolReadiness {
   missing: string[];
 }
 
+function isPlaceholderValue(value: string) {
+  return /<[^>]+>/.test(value.trim());
+}
+
 function envValue(name: string) {
   const value = process.env[name]?.trim();
-  return value ? value : null;
+  return value && !isPlaceholderValue(value) ? value : null;
 }
 
 function envTruthy(name: string) {
@@ -107,9 +111,6 @@ function canonicalEnvName(requirement: EnvRequirement) {
 }
 
 function placeholderValue(requirement: EnvRequirement) {
-  if (requirement.kind === 'truthy') {
-    return 'true';
-  }
   return requirement.example ?? `<${requirement.id}>`;
 }
 
