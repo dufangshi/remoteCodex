@@ -252,7 +252,7 @@ describe('ControlPlanePage', () => {
       expect(screen.getByText('https://router.example.test')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create route token' }));
+    fireEvent.click(screen.getByRole('button', { name: /Plan calculation/i }));
 
     await waitFor(() => {
       expect(screen.getByText('wss://router.example.test')).toBeInTheDocument();
@@ -285,6 +285,61 @@ describe('ControlPlanePage', () => {
 
     await waitFor(() => {
       expect(screen.getByText('running')).toBeInTheDocument();
+    });
+  });
+
+  it('shows a route authorization failure when session opening cannot acquire a route token', async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
+
+      if (path === '/api/me/bootstrap' && init?.method === 'POST') {
+        return jsonResponse({ user, sandbox: runningSandbox, gatewayKey: null });
+      }
+
+      if (path === '/api/me' && !init?.method) {
+        return jsonResponse({ user, sandbox: runningSandbox, usage });
+      }
+
+      if (path === '/api/projects' && !init?.method) {
+        return jsonResponse({ projects: [project] });
+      }
+
+      if (path === '/api/workspaces?projectId=project-1' && !init?.method) {
+        return jsonResponse({ workspaces: [workspace] });
+      }
+
+      if (path === '/api/workspaces/workspace-1/sessions' && !init?.method) {
+        return jsonResponse({ sessions: [session] });
+      }
+
+      if (path === '/api/sandboxes/sandbox-1/route-token' && init?.method === 'POST') {
+        return jsonResponse({
+          code: 'sandbox_not_running',
+          message: 'Sandbox must be running before issuing a route token.',
+        }, 409);
+      }
+
+      return jsonResponse({
+        code: 'not_found',
+        message: `Unhandled request: ${path}`,
+      }, 404);
+    });
+
+    render(<ControlPlanePage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Plan calculation/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Plan calculation/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('Sandbox must be running before issuing a route token.'),
+      ).toBeInTheDocument();
     });
   });
 

@@ -410,9 +410,9 @@ export function ControlPlanePage() {
 
   async function handleRouteToken() {
     if (!auth || !sandbox) {
-      return;
+      return null;
     }
-    await run('Create route token', async () => {
+    return run('Create route token', async () => {
       const routeTokenInput: {
         workspaceId?: string;
         sessionId?: string;
@@ -429,7 +429,18 @@ export function ControlPlanePage() {
       const token = await createControlPlaneRouteToken(auth, sandbox.id, routeTokenInput);
       setRouteToken(token);
       setMessage('Route token is available in memory.');
+      return token;
     });
+  }
+
+  async function handleOpenSession(session: ControlPlaneSession) {
+    setSelectedSessionId(session.id);
+    if (!sandbox || sandbox.state !== 'running') {
+      setRouteToken(null);
+      setError('Sandbox must be running before opening a worker session.');
+      return;
+    }
+    await handleRouteToken();
   }
 
   return (
@@ -687,7 +698,7 @@ export function ControlPlanePage() {
               <button
                 key={session.id}
                 type="button"
-                onClick={() => setSelectedSessionId(session.id)}
+                onClick={() => void handleOpenSession(session)}
                 className={`rounded-[0.85rem] border px-3 py-2 text-left text-sm transition ${
                   selectedSessionId === session.id
                     ? 'border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)] text-[var(--theme-accent-strong)]'

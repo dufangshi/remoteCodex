@@ -377,11 +377,11 @@ Verification:
 - [x] Add structured proxy errors.
 - [x] Add router health endpoint.
 - [x] Add router audit logs.
-- [ ] Fetch route token before opening a worker session from the frontend.
+- [x] Fetch route token before opening a worker session from the frontend.
 - [x] Store route token only in memory.
 - [ ] Refresh route token before expiry.
 - [ ] Reconnect WebSocket after token refresh.
-- [ ] Show route authorization failure state.
+- [x] Show route authorization failure state.
 - [ ] Show reconnecting state.
 
 Verification:
@@ -1052,12 +1052,12 @@ token.
 
 ### Frontend Worker Connection
 
-- [ ] Fetch a route token before opening a worker session.
+- [x] Fetch a route token before opening a worker session.
 - [x] Store route token only in memory.
 - [ ] Refresh route token before expiry.
 - [ ] Reconnect WebSocket after token refresh.
 - [ ] Show sandbox offline state.
-- [ ] Show route authorization failure state.
+- [x] Show route authorization failure state.
 - [ ] Show reconnecting state.
 - [ ] Avoid persisting route tokens in local storage.
 
