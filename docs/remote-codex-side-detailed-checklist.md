@@ -653,54 +653,54 @@ the sandbox, while real provider root keys stay outside the sandbox.
 
 ### Gateway Control-Plane Integration
 
-- [ ] G6.01 Finalize gateway contract.
+- [x] G6.01 Finalize gateway contract.
   - Done when Remote Codex knows the gateway base URL, admin auth shape,
     user/key provisioning API, usage export API, and failure response shape.
   - Verify with gateway contract docs and fixture tests.
 
-- [ ] G6.02 Add gateway admin client.
+- [x] G6.02 Add gateway admin client.
   - Done when the control plane can create users, create keys, rotate keys,
     revoke keys, and reconcile key status against the gateway.
   - Verify with mocked gateway client tests.
 
-- [ ] G6.03 Provision gateway keys on user or sandbox creation.
+- [x] G6.03 Provision gateway keys on user or sandbox creation.
   - Done when a scoped gateway credential exists before worker startup.
   - Verify with provisioning tests.
 
-- [ ] G6.04 Store gateway key metadata safely.
+- [x] G6.04 Store gateway key metadata safely.
   - Done when Remote Codex stores external key id, user id, sandbox id,
     provider/model scopes, status, timestamps, and optional encrypted
     ciphertext only if raw recovery is required.
   - Verify with migration and repository tests.
 
-- [ ] G6.05 Redact gateway tokens everywhere.
+- [x] G6.05 Redact gateway tokens everywhere.
   - Done when raw tokens never appear in API responses, logs, frontend state,
     route tokens, identity envelopes, audit events, or smoke output.
   - Verify with redaction tests.
 
-- [ ] G6.06 Add gateway degraded API and UI states.
+- [x] G6.06 Add gateway degraded API and UI states.
   - Done when provisioning or usage-import failures return stable errors and
     the UI shows a non-secret degraded state.
   - Verify with API and frontend tests.
 
 ### Provider Config Rendering
 
-- [ ] G6.07 Render Codex gateway config.
+- [x] G6.07 Render Codex gateway config.
   - Done when Codex inside the worker uses the gateway base URL and scoped
     token, not a provider root key.
   - Verify with provider bootstrap tests.
 
-- [ ] G6.08 Render Claude Code gateway config.
+- [x] G6.08 Render Claude Code gateway config.
   - Done when Claude Code inside the worker uses the gateway base URL and
     scoped token, not a provider root key.
   - Verify with provider bootstrap tests.
 
-- [ ] G6.09 Render OpenCode gateway config.
+- [x] G6.09 Render OpenCode gateway config.
   - Done when OpenCode inside the worker uses the gateway base URL and scoped
     token, not a provider root key.
   - Verify with provider bootstrap tests.
 
-- [ ] G6.10 Add provider runtime startup diagnostics.
+- [x] G6.10 Add provider runtime startup diagnostics.
   - Done when worker startup can report whether provider configs are present
     and safe without exposing tokens.
   - Verify with worker metadata tests.
@@ -724,25 +724,69 @@ the sandbox, while real provider root keys stay outside the sandbox.
 
 ### LLM Usage And Quota
 
-- [ ] G6.14 Add gateway usage import adapter.
+- [x] G6.14 Add gateway usage import adapter.
   - Done when usage import maps gateway events to product user, sandbox,
     provider, model, tokens, cost, currency, timestamps, and dedupe key.
   - Verify with import tests covering pagination, malformed responses, and
     duplicates.
 
-- [ ] G6.15 Add scheduled and manual usage import.
+- [x] G6.15 Add scheduled and manual usage import.
   - Done when imports run on a schedule with watermarks and admins can trigger
     a bounded manual import.
   - Verify with job tests.
 
-- [ ] G6.16 Add LLM quota preflight.
+- [x] G6.16 Add LLM quota preflight.
   - Done when over-quota users are blocked before avoidable paid model use.
   - Verify with quota tests.
 
-- [ ] G6.17 Add LLM usage UI.
+- [x] G6.17 Add LLM usage UI.
   - Done when users can see current-period summary, usage details, gateway
     unavailable state, and quota exceeded state.
   - Verify with frontend tests.
+
+### Phase 6 Evidence
+
+- Files: `docs/llm-gateway-contract.md`,
+  `apps/control-plane-api/src/adapters.ts`,
+  `apps/control-plane-api/src/app.ts`,
+  `apps/control-plane-api/src/app.test.ts`,
+  `apps/control-plane-api/src/adapters.test.ts`,
+  `packages/db/src/schema.ts`,
+  `apps/supervisor-api/src/worker-bootstrap.ts`,
+  `apps/supervisor-api/src/worker-environment.ts`,
+  `apps/supervisor-api/src/app.test.ts`,
+  `apps/supervisor-api/src/worker-environment.test.ts`,
+  `apps/supervisor-web/src/pages/ControlPlanePage.tsx`,
+  `apps/supervisor-web/src/pages/ControlPlanePage.test.tsx`,
+  `packages/config/src/index.test.ts`.
+- Verification:
+  - `pnpm --filter @remote-codex/control-plane-api test -- --runInBand`
+    passed: 4 files, 62 tests.
+  - `pnpm --filter @remote-codex/supervisor-api test -- app.test.ts`
+    passed: 9 files, 160 tests.
+  - `pnpm --filter @remote-codex/supervisor-web test -- ControlPlanePage`
+    passed: 16 files, 250 tests.
+- Coverage:
+  - Gateway contract, admin auth shape, user/key provisioning, key
+    rotate/revoke/reconcile, usage export, and degraded failure shape are
+    documented and covered by control-plane tests.
+  - Gateway key metadata is stored against product user/sandbox/provider
+    records; raw gateway token ciphertext is never returned through Remote
+    Codex APIs, and log redaction paths cover gateway credential fields.
+  - Sandbox start and restart attach gateway metadata for worker bootstrap.
+  - Worker bootstrap writes Codex, Claude Code, and OpenCode config files that
+    point to the gateway and reference scoped environment credentials instead
+    of provider root keys.
+  - Worker startup diagnostics report gateway presence without logging the
+    token value.
+  - Usage import supports manual events, gateway export adapter pulls,
+    deduplication, import metrics, scheduled import watermarks, and quota
+    preflight.
+  - The control-plane panel covers gateway unavailable, LLM usage summary,
+    usage detail, and quota exceeded states.
+- Residual risk: G6.11-G6.13 remain unchecked because Codex, Claude Code, and
+  OpenCode have not yet made real staging model requests through the deployed
+  gateway from real worker sandboxes.
 
 ## Phase 7: ElAgenteHarness Integration
 

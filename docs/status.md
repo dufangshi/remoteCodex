@@ -122,12 +122,18 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   worker image/runtime guardrails and CI worker image smoke.
 - Worker artifact register, metadata/list, download, and delete routes exist
   behind signed identity-envelope `artifact:read` and `artifact:write` scopes.
+- `docs/remote-codex-side-detailed-checklist.md` Phase 6 is complete for local
+  LLM gateway integration: the gateway contract, admin client,
+  provisioning/reconciliation, safe key metadata storage, redaction, degraded
+  API/UI states, worker provider config rendering for Codex/Claude
+  Code/OpenCode, startup diagnostics, usage import, scheduled import, LLM quota
+  preflight, and usage UI are verified by local tests. Staging
+  provider-runtime gateway smokes remain open.
 - LLM gateway contract is fixed on a sub2api-compatible shape; provisioning,
   provider selection config, worker provider config rendering, manual usage
   import, gateway usage-export adapter, frontend degraded state, LLM usage
   summary, LLM usage detail UI, quota-exceeded UI, scheduled usage-import job,
-  and usage import metrics exist, while staging provider-runtime smokes remain
-  open.
+  and usage import metrics exist.
 - Gateway token storage is documented as metadata plus optional encrypted
   ciphertext only; raw provider keys and raw gateway tokens are not returned by
   Remote Codex APIs.
