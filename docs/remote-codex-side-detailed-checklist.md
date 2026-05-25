@@ -150,7 +150,7 @@ worker credential.
     and non-admin requests have stable `401` or `403` response shapes.
   - Verify with control-plane API tests.
 
-- [ ] A1.05 Prove product JWTs do not reach workers.
+- [x] A1.05 Prove product JWTs do not reach workers.
   - Done when router or worker diagnostics prove browser `Authorization`
     headers are stripped before worker traffic.
   - Verify with local or staging smoke output; staging proof remains required
@@ -227,15 +227,21 @@ worker credential.
     wrong-audience JWT-compatible tokens.
   - `pnpm --filter @remote-codex/control-plane-api test -- --runInBand`
     passed: 4 files, 62 tests.
-  - `pnpm --filter @remote-codex/sandbox-router test` passed: 1 file, 10 tests.
+  - `pnpm --filter @remote-codex/sandbox-router test` passed: 1 file, 10
+    tests, including HTTP and WebSocket assertions that browser
+    `Authorization` and forged worker headers are stripped before upstream
+    worker traffic.
+  - `pnpm --filter @remote-codex/sandbox-router typecheck` passed.
   - `pnpm --filter @remote-codex/supervisor-web test -- ControlPlanePage`
     passed: 16 files, 250 tests, including ControlPlanePage login/register,
     route-token memory handling, expired session, disabled account, admin user
     management, and non-admin denial cases.
-- Residual risk: A1.05 remains unchecked because staging proof that product
-  JWTs never reach real worker requests has not run. The local router test does
-  prove browser `Authorization` is stripped before the upstream worker in local
-  proxying, but the staging release gate still requires real staging evidence.
+  - `pnpm smoke:local-route-token` passed and exercised a browser-style
+    request with `Authorization: Bearer browser-product-jwt-that-must-not-reach-worker`
+    through control plane, router, and worker metadata.
+- Residual risk: Phase 1 is complete locally. Staging proof that product JWTs
+  never reach real worker requests remains a production release gate under
+  Phase 5 and staging readiness.
 
 ## Phase 2: Projects, Workspaces, Sessions, And Session Open
 

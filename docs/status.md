@@ -93,8 +93,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   management for list/status/quota/non-admin denial. Production-style
   JWT-compatible auth smoke passes for valid, expired, wrong-issuer, and
   wrong-audience tokens. `docs/remote-codex-side-detailed-checklist.md` Phase 1
-  is complete except for staging proof that product JWTs do not reach real
-  worker requests.
+  is complete locally, including router tests and local route-token smoke
+  proving browser `Authorization` is stripped before upstream worker traffic.
+  Staging proof remains a release gate.
 - Project detail and product metadata loading states are implemented in the
   control-plane panel; opening a session now gets an in-memory route token,
   opens a sandbox-router WebSocket, reconnects after token refresh, and shows
