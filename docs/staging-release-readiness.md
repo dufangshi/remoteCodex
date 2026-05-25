@@ -201,6 +201,10 @@ collecting evidence, and applying reviewed evidence.
 When the bundle stops at env readiness, the same `itemReadiness` and
 `nextCommands` fields are copied into `summary.envReadiness`, so the operator
 can continue from `summary.json` without opening `env-readiness.json`.
+The bundle also writes `operator-report.txt`, a text summary of checklist
+readiness, env item readiness, next commands, and artifact paths. It is for
+operator review only; the JSON verifiers remain the authority for checking
+boxes.
 
 ### Phase-One Runtime Smoke
 
@@ -385,6 +389,7 @@ The bundle runner writes:
 - `phase-zero-six-verification.json`
 - `phase-zero-six-apply.json` when `--apply-ready` is requested and allowed
 - `artifact-secret-scan.json`
+- `operator-report.txt`
 - `summary.json`
 
 The bundle runner also scans generated JSON artifacts for obvious secret-like

@@ -976,6 +976,7 @@ describe('phase zero-six evidence tooling', () => {
     const parsed = JSON.parse(result.stdout);
     const files = await readdir(dir);
     const template = await readFile(path.join(dir, 'phase-zero-six.env.sh'), 'utf8');
+    const operatorReport = await readFile(path.join(dir, 'operator-report.txt'), 'utf8');
 
     expect(result.exitCode).toBe(1);
     expect(parsed.ok).toBe(false);
@@ -1017,10 +1018,12 @@ describe('phase zero-six evidence tooling', () => {
     expect(parsed.artifacts.envReadiness).toBe(path.join(dir, 'env-readiness.json'));
     expect(parsed.artifacts.envTemplate).toBe(path.join(dir, 'phase-zero-six.env.sh'));
     expect(parsed.artifacts.artifactSecretScan).toBe(path.join(dir, 'artifact-secret-scan.json'));
+    expect(parsed.artifacts.operatorReport).toBe(path.join(dir, 'operator-report.txt'));
     expect(parsed.artifacts.awsPreflight).toBeNull();
     expect(files.sort()).toEqual([
       'artifact-secret-scan.json',
       'env-readiness.json',
+      'operator-report.txt',
       'phase-zero-six.env.sh',
       'summary.json',
     ]);
@@ -1030,6 +1033,10 @@ describe('phase zero-six evidence tooling', () => {
     ]);
     expect(template).toContain('Phase 0-6 staging evidence environment template');
     expect(template).not.toContain('secret-product-jwt-value');
+    expect(operatorReport).toContain('Remote Codex Phase 0-6 Evidence Operator Report');
+    expect(operatorReport).toContain('S3.04 [aws-preflight]: envReady=false');
+    expect(operatorReport).toContain('G6.13 [opencode-provider-smoke]: envReady=false');
+    expect(operatorReport).not.toContain('secret-product-jwt-value');
     expect(result.stdout).not.toContain('secret-product-jwt-value');
   });
 
@@ -1130,8 +1137,10 @@ describe('phase zero-six evidence tooling', () => {
     expect(parsed.postApplyScanPassed).toBe(true);
     expect(parsed.artifacts.phaseZeroSixApply).toBe(path.join(dir, 'phase-zero-six-apply.json'));
     expect(parsed.artifacts.postApplyArtifactSecretScan).toBe(path.join(dir, 'artifact-secret-scan-post-apply.json'));
+    expect(parsed.artifacts.operatorReport).toBe(path.join(dir, 'operator-report.txt'));
     expect(files).toContain('phase-zero-six-apply.json');
     expect(files).toContain('artifact-secret-scan-post-apply.json');
+    expect(files).toContain('operator-report.txt');
     expect(checklist).toContain('- [x] S3.04 Finalize AWS staging configuration.');
     expect(checklist).toContain('- [x] S3.05 Add least-privilege Kubernetes credentials.');
     expect(checklist).toContain('- [ ] S3.06 Create a real worker Pod from the control plane.');

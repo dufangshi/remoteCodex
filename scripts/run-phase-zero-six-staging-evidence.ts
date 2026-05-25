@@ -258,6 +258,149 @@ function nextSteps(input: {
   };
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function stringList(value: unknown): string {
+  const entries = asArray(value)
+    .filter((entry): entry is string => typeof entry === 'string');
+  return entries.length > 0 ? entries.join(', ') : '(none)';
+}
+
+function renderOperatorReport(summary: Record<string, unknown>) {
+  const readiness = asRecord(summary.checklistReadiness);
+  const envReadiness = asRecord(summary.envReadiness);
+  const nextStepsRecord = asRecord(summary.nextSteps);
+  const artifacts = asRecord(summary.artifacts);
+  const lines = [
+    '# Remote Codex Phase 0-6 Evidence Operator Report',
+    '',
+    `Generated at: ${String(summary.generatedAt ?? '(unknown)')}`,
+    `Output directory: ${String(summary.outputDir ?? '(unknown)')}`,
+    `Reused artifacts: ${String(summary.reuseExistingArtifacts ?? false)}`,
+    `Skipped staging smoke: ${String(summary.skippedStagingSmoke ?? false)}`,
+    `Apply requested: ${String(summary.applyReady ?? false)}`,
+    `Bundle ok: ${String(summary.ok ?? false)}`,
+    `Phase 0-6 complete: ${String(summary.phaseZeroSixComplete ?? false)}`,
+    '',
+  ];
+
+  const reason = typeof summary.reason === 'string' ? summary.reason : null;
+  const applySkippedReason = typeof summary.applySkippedReason === 'string'
+    ? summary.applySkippedReason
+    : null;
+  if (reason || applySkippedReason) {
+    lines.push('## Current reason');
+    if (reason) {
+      lines.push(`- ${reason}`);
+    }
+    if (applySkippedReason) {
+      lines.push(`- ${applySkippedReason}`);
+    }
+    lines.push('');
+  }
+
+  lines.push('## Checklist readiness');
+  lines.push(`Checked count: ${String(readiness.checkedCount ?? '(unknown)')}`);
+  lines.push(`Unchecked count: ${String(readiness.uncheckedCount ?? '(unknown)')}`);
+  lines.push(`Ready to check: ${asArray(readiness.readyToCheck).length}`);
+  lines.push(`Still missing: ${asArray(readiness.stillMissing).length}`);
+  lines.push(`Checked but contradicted: ${asArray(readiness.checkedButContradicted).length}`);
+  lines.push('');
+
+  const readyToCheck = asArray(readiness.readyToCheck);
+  if (readyToCheck.length > 0) {
+    lines.push('## Ready checklist items');
+    for (const entry of readyToCheck) {
+      const item = asRecord(entry);
+      lines.push(`- ${String(item.item ?? '(unknown)')}: ${String(item.title ?? '(untitled)')}`);
+    }
+    lines.push('');
+  }
+
+  const stillMissing = asArray(readiness.stillMissing);
+  if (stillMissing.length > 0) {
+    lines.push('## Missing checklist items');
+    for (const entry of stillMissing) {
+      const item = asRecord(entry);
+      lines.push(`- ${String(item.item ?? '(unknown)')}: ${String(item.title ?? '(untitled)')}`);
+      if (typeof item.reason === 'string') {
+        lines.push(`  Reason: ${item.reason}`);
+      }
+    }
+    lines.push('');
+  }
+
+  lines.push('## Environment readiness');
+  lines.push(`Ready groups: ${stringList(envReadiness.readyGroups)}`);
+  lines.push(`Not ready groups: ${stringList(envReadiness.notReadyGroups)}`);
+  const itemReadiness = asArray(envReadiness.itemReadiness);
+  if (itemReadiness.length > 0) {
+    lines.push('');
+    lines.push('### Item readiness');
+    for (const entry of itemReadiness) {
+      const item = asRecord(entry);
+      lines.push(`- ${String(item.item ?? '(unknown)')} [${String(item.groupId ?? '(unknown-group)')}]: envReady=${String(item.envReady ?? false)}`);
+      const missingEnv = asArray(item.missingEnv);
+      if (missingEnv.length > 0) {
+        lines.push(`  Missing env: ${stringList(missingEnv)}`);
+      }
+      if (typeof item.nextEvidenceCommand === 'string') {
+        lines.push(`  Next evidence command: ${item.nextEvidenceCommand}`);
+      }
+    }
+  }
+  lines.push('');
+
+  lines.push('## Next steps');
+  for (const [key, value] of Object.entries(nextStepsRecord)) {
+    lines.push(`- ${key}: ${String(value)}`);
+  }
+  const envNextCommands = asRecord(envReadiness.nextCommands);
+  if (Object.keys(envNextCommands).length > 0) {
+    lines.push('');
+    lines.push('### Env readiness next commands');
+    for (const [key, value] of Object.entries(envNextCommands)) {
+      lines.push(`- ${key}: ${String(value)}`);
+    }
+  }
+  lines.push('');
+
+  lines.push('## Artifacts');
+  for (const [key, value] of Object.entries(artifacts)) {
+    lines.push(`- ${key}: ${value === null ? '(none)' : String(value)}`);
+  }
+  lines.push('');
+  lines.push('Do not check remaining staging/AWS/provider boxes until the JSON verifiers report them under readyToCheck.');
+  lines.push('');
+
+  return `${lines.join('\n')}\n`;
+}
+
+async function writeSummaryAndOperatorReport(input: {
+  summary: Record<string, unknown>;
+  summaryPath: string;
+  operatorReportPath: string;
+}) {
+  const summaryWithReport = {
+    ...input.summary,
+    artifacts: {
+      ...asRecord(input.summary.artifacts),
+      operatorReport: input.operatorReportPath,
+    },
+  };
+  await writeFile(input.summaryPath, JSON.stringify(summaryWithReport, null, 2));
+  await writeFile(input.operatorReportPath, renderOperatorReport(summaryWithReport));
+  return summaryWithReport;
+}
+
 async function missingRequiredEvidenceFiles(input: {
   awsPath: string;
   stagingPath: string;
@@ -306,6 +449,7 @@ async function main() {
   const outputArtifactSafetyPath = path.join(outputDir, 'artifact-secret-scan-output.json');
   const postApplyArtifactSafetyPath = path.join(outputDir, 'artifact-secret-scan-post-apply.json');
   const summaryPath = path.join(outputDir, 'summary.json');
+  const operatorReportPath = path.join(outputDir, 'operator-report.txt');
 
   const commands: CommandResult[] = [];
 
@@ -348,12 +492,17 @@ async function main() {
           phaseZeroSixVerification: null,
           phaseZeroSixApply: null,
           artifactSecretScan: null,
+          operatorReport: operatorReportPath,
           summary: summaryPath,
         },
         results: [],
       };
-      await writeFile(summaryPath, JSON.stringify(summary, null, 2));
-      console.log(JSON.stringify(summary, null, 2));
+      const summaryWithReport = await writeSummaryAndOperatorReport({
+        summary,
+        summaryPath,
+        operatorReportPath,
+      });
+      console.log(JSON.stringify(summaryWithReport, null, 2));
       process.exitCode = 1;
       return;
     }
@@ -407,11 +556,16 @@ async function main() {
         phaseZeroSixVerification: null,
         phaseZeroSixApply: null,
         artifactSecretScan: artifactSafetyPath,
+        operatorReport: operatorReportPath,
         summary: preScanSummaryPath,
       },
       results: commands.map(commandSummary),
     };
-    await writeFile(preScanSummaryPath, JSON.stringify(summary, null, 2));
+    await writeSummaryAndOperatorReport({
+      summary,
+      summaryPath: preScanSummaryPath,
+      operatorReportPath,
+    });
     commands.push(await runCommand({
       name: 'verify_phase_zero_six_artifacts_safe',
       command: ['pnpm', 'exec', 'tsx', 'scripts/verify-phase-zero-six-artifacts-safe.ts', '--dir', outputDir],
@@ -427,8 +581,12 @@ async function main() {
         : 'Environment readiness failed and artifact secret scan found unsafe evidence files.',
       results: commands.map(commandSummary),
     };
-    await writeFile(summaryPath, JSON.stringify(finalSummary, null, 2));
-    console.log(JSON.stringify(finalSummary, null, 2));
+    const finalSummaryWithReport = await writeSummaryAndOperatorReport({
+      summary: finalSummary,
+      summaryPath,
+      operatorReportPath,
+    });
+    console.log(JSON.stringify(finalSummaryWithReport, null, 2));
     process.exitCode = 1;
     return;
   }
@@ -574,13 +732,18 @@ async function main() {
       inputArtifactSecretScan: reuseExistingArtifacts ? inputArtifactSafetyPath : null,
       outputArtifactSecretScan: reuseExistingArtifacts ? outputArtifactSafetyPath : null,
       postApplyArtifactSecretScan: postApplyScanResult ? postApplyArtifactSafetyPath : null,
+      operatorReport: operatorReportPath,
       summary: summaryPath,
     },
     results: commands.map(commandSummary),
   };
 
-  await writeFile(summaryPath, JSON.stringify(summary, null, 2));
-  console.log(JSON.stringify(summary, null, 2));
+  const summaryWithReport = await writeSummaryAndOperatorReport({
+    summary,
+    summaryPath,
+    operatorReportPath,
+  });
+  console.log(JSON.stringify(summaryWithReport, null, 2));
 
   if (!summary.ok) {
     process.exitCode = 1;
