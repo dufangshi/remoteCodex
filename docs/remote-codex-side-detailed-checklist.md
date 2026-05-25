@@ -85,6 +85,104 @@ docs review can be enough. For staging, AWS-live, provider-runtime,
 ElAgenteHarness-live, billing, or production-readiness items, local mocks are
 not enough; keep the box unchecked until the real target has passed.
 
+### One-Checkbox Execution Protocol
+
+Every checked item should correspond to one concrete product capability,
+guardrail, deployment proof, or documented decision. Use this protocol for each
+unchecked box:
+
+- Scope: identify the exact files, APIs, UI routes, runtime config, deployment
+  resources, or docs that must change for the box.
+- Implement: make the smallest complete change that satisfies the `Done when`
+  line without pulling unrelated refactors into the same slice.
+- Prove: run the `Verify with` command or capture the named staging evidence.
+  If the item names a real provider, real AWS resource, real harness, or real
+  deployment target, synthetic local evidence does not satisfy it.
+- Record: add an evidence note in this document, `docs/status.md`, or the
+  release-readiness doc when the proof is not obvious from tests.
+- Check: change `[ ]` to `[x]` only after the proof exists and is reviewed.
+- Commit: commit the implementation, checklist update, and evidence reference
+  together so the checkbox can be audited later.
+
+Do not batch-check future work. If one implementation slice proves several
+boxes, list the evidence for each box explicitly in the commit or PR notes.
+
+### Remote Codex Side Workstreams
+
+Remote Codex side work is split by ownership boundary rather than by deployment
+component. A task belongs in this repository when it changes the product
+frontend, control-plane API, sandbox-router integration, worker supervisor API,
+worker image bootstrap, local/staging smoke tooling, or the Remote Codex side of
+an integration contract.
+
+| Phase | Workstream | Remote Codex deliverables | Completion proof |
+| --- | --- | --- | --- |
+| 0 | Documentation and release baseline | Current architecture docs, decision records, release gates, and this active checklist | Docs review and `git diff --check` |
+| 1 | Auth, users, and admin boundary | Product auth validation, user/admin APIs, login shell, disabled-account behavior, user-data policy | API/frontend tests and auth smoke |
+| 2 | Projects, workspaces, sessions | Durable metadata APIs/UI, route-token session open, worker checkpoint sync, close/resume flow | API/frontend/worker tests and local checkpoint smoke |
+| 3 | Sandbox lifecycle and AWS runtime | Sandbox manager interface, local adapter, AWS EKS Fargate adapter, lifecycle audit, idle/admin stop | Local tests plus real AWS staging lifecycle evidence for live boxes |
+| 4 | Worker image and runtime guardrails | Reproducible worker image, non-root runtime, env/root validation, MCP config validation, redaction | Worker tests, image build, container smoke, CI image run |
+| 5 | Router and worker authorization | Route-token schema/signing, router proxy, worker-token injection, identity envelope, scoped worker APIs | Router/worker tests plus real staging router smoke for live boxes |
+| 6 | LLM gateway and provider bootstrap | Gateway admin client, key metadata, provider config rendering, diagnostics, usage import, quota UI | Local gateway tests plus real provider-runtime staging smokes for live boxes |
+| 7 | ElAgenteHarness integration | Harness admin contract, scoped `INACT_X_APP_KEY`, worker bootstrap, tool surface, task/job UI, harness usage import | Contract tests, worker tests, frontend tests, staging harness smoke |
+| 8 | MCP and tool policy | Approved MCP registry, stdio/remote policy, env/path containment, provider MCP rendering, MCP audit/UI | Policy tests, bootstrap tests, worker audit tests, frontend tests |
+| 9 | Workspace persistence, files, diffs, artifacts | Persistence decision, snapshot model, restore/save flows, safe file/diff APIs, artifact paths and previews | Architecture decision, DB/API/worker/frontend tests, storage smoke where enabled |
+| 10 | Billing, quotas, and unified usage | Unified ledger, source mappers, idempotent imports, quota service, billing/admin usage UI | Mapper/API/job/frontend tests and usage import smoke |
+| 11 | Deployment, operations, and CI | Railway deploy wiring, ECR/EKS/S3/secrets runbooks, logs/metrics/alerts, CI jobs | Staging deployments, CI runs, operations review |
+| 12 | End-to-end acceptance | One real user path from login to sandbox, providers, harness, usage, quota, admin inspection, and secret review | Staging browser/API/provider/harness smokes and release evidence |
+
+### Phase Ordering And Dependencies
+
+The normal build order is:
+
+1. Finish Phase 0 through Phase 6 staging proof before treating phase-one as
+   releaseable. Most code is already implemented locally, but the remaining
+   unchecked S3, R5, and G6 boxes require real staging evidence.
+2. Build Phase 7 before deep MCP work when the first production MCP tools are
+   ElAgenteHarness workflow tools.
+3. Build Phase 8 before exposing broad tool configuration to users or agents.
+   Tool policy must exist before agent-visible MCP expansion.
+4. Build Phase 9 before relying on sandbox restarts for long-running user work
+   or chemistry outputs.
+5. Build Phase 10 once LLM, harness, compute, storage, and runtime usage events
+   have stable source contracts.
+6. Build Phase 11 continuously alongside the first deployed staging slice, but
+   do not check live deployment items without deployment logs or staging smoke.
+7. Run Phase 12 only after the underlying phase boxes it depends on have their
+   own evidence.
+
+If a later phase exposes a gap in an earlier phase, add the missing earlier
+phase box or update its `Done when` line before implementing around it.
+
+### Current Phase-One Evidence Gap
+
+The local Phase 0 through Phase 6 implementation is mostly complete, but
+release-readiness still depends on real staging evidence. These boxes must stay
+unchecked until the named proof is captured:
+
+- S3.04 Finalize AWS staging configuration.
+- S3.05 Add least-privilege Kubernetes credentials.
+- S3.06 Create a real worker Pod from the control plane.
+- S3.07 Stop a real worker Pod from the control plane.
+- S3.08 Add idempotent lifecycle smoke.
+- R5.10 Deploy sandbox-router in staging.
+- R5.11 Add direct-worker-denial proof.
+- R5.12 Add browser-to-router-to-worker smoke.
+- G6.11 Run staging Codex gateway smoke.
+- G6.12 Run staging Claude Code gateway smoke.
+- G6.13 Run staging OpenCode gateway smoke.
+
+Use the Phase 0-6 evidence tooling before checking any of these boxes:
+
+```bash
+pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id>
+pnpm verify:phase-zero-six-evidence -- --aws-preflight <evidence-json> --staging-smoke <smoke-json>
+pnpm verify:phase-zero-six-evidence -- --aws-preflight <evidence-json> --staging-smoke <smoke-json> --apply-ready
+```
+
+Run `--apply-ready` only after reviewing the read-only report. The guarded
+apply mode updates only boxes that are proven by the supplied evidence.
+
 ## Current Open Priority Queue
 
 The immediate priority is to finish the already implemented phase-one path with
