@@ -219,17 +219,17 @@ worker credential.
     auth session is being resolved.
   - Verify with frontend test coverage.
 
-- [ ] Add expired-session state.
+- [x] Add expired-session state.
   - Done when expired or invalid auth prompts re-login without silently losing
     the intended destination.
   - Verify with frontend tests for expired token responses.
 
-- [ ] Add disabled-account state.
+- [x] Add disabled-account state.
   - Done when disabled users see an account-blocked state and cannot open
     sandbox sessions.
   - Verify with frontend tests for disabled-account API responses.
 
-- [ ] Add admin user management UI.
+- [x] Add admin user management UI.
   - Done when admins can list users, update account status, and update quota
     profile from the product UI.
   - Verify with frontend tests for admin success and non-admin denial.

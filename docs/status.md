@@ -90,8 +90,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   loading state, expired-session state, disabled-account state, and admin user
   management for list/status/quota/non-admin denial. Production-style
   JWT-compatible auth smoke passes for valid, expired, wrong-issuer, and
-  wrong-audience tokens; live vendor/auth-service token issuance remains a
-  staging check when that service is selected.
+  wrong-audience tokens. `docs/remote-codex-side-detailed-checklist.md` Phase 1
+  is complete except for staging proof that product JWTs do not reach real
+  worker requests.
 - Project detail and product metadata loading states are implemented in the
   control-plane panel; opening a session now gets an in-memory route token,
   opens a sandbox-router WebSocket, reconnects after token refresh, and shows
@@ -123,9 +124,11 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 
 1. Run `pnpm smoke:staging-phase-one` against the real staging control plane and
    worker runtime, then attach the JSON output to release evidence.
-2. Add staging lifecycle smokes for start, stop, idempotent restart, and
+2. Capture staging proof that browser product JWTs are stripped before worker
+   requests.
+3. Add staging lifecycle smokes for start, stop, idempotent restart, and
    readiness.
-3. Run staging provider-runtime gateway smokes for Codex, Claude Code, and
+4. Run staging provider-runtime gateway smokes for Codex, Claude Code, and
    OpenCode.
 
 ## Verification Commands

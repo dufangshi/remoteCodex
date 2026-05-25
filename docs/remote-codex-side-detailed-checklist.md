@@ -130,22 +130,22 @@ worker credential.
 
 ### Auth Provider And Session Boundary
 
-- [ ] A1.01 Finalize the phase-one product auth provider.
+- [x] A1.01 Finalize the phase-one product auth provider.
   - Done when the selected provider or JWT-compatible issuer is named with
     required issuer, audience, JWKS, and local-dev fallback settings.
   - Verify with auth config docs and control-plane config tests.
 
-- [ ] A1.02 Keep local `dev:<subject>` auth for development.
+- [x] A1.02 Keep local `dev:<subject>` auth for development.
   - Done when local development can bootstrap a product user without a live
     auth provider.
   - Verify with control-plane auth tests.
 
-- [ ] A1.03 Validate production-style JWTs.
+- [x] A1.03 Validate production-style JWTs.
   - Done when issuer, audience, expiry, not-before, issued-at, and clock skew
     are validated.
   - Verify with `pnpm smoke:production-auth` and auth unit tests.
 
-- [ ] A1.04 Normalize auth error responses.
+- [x] A1.04 Normalize auth error responses.
   - Done when missing, expired, wrong-audience, wrong-issuer, disabled-user,
     and non-admin requests have stable `401` or `403` response shapes.
   - Verify with control-plane API tests.
@@ -158,63 +158,84 @@ worker credential.
 
 ### User And Admin Model
 
-- [ ] A1.06 Bootstrap product users idempotently.
+- [x] A1.06 Bootstrap product users idempotently.
   - Done when repeated authenticated requests map to one durable user record.
   - Verify with account bootstrap tests.
 
-- [ ] A1.07 Store user account status.
+- [x] A1.07 Store user account status.
   - Done when active, disabled, and deleted/anonymized or deferred policy
     states are represented.
   - Verify with DB migration and repository tests.
 
-- [ ] A1.08 Store billing and quota identifiers on users.
+- [x] A1.08 Store billing and quota identifiers on users.
   - Done when billing customer id and quota profile are persisted and returned
     only to authorized callers.
   - Verify with user API tests.
 
-- [ ] A1.09 Add user profile APIs.
+- [x] A1.09 Add user profile APIs.
   - Done when `GET /api/me` and allowed profile updates are implemented.
   - Verify with control-plane API tests.
 
-- [ ] A1.10 Add admin user management APIs.
+- [x] A1.10 Add admin user management APIs.
   - Done when admins can list users, update account status, and update quota
     profile; non-admin users are denied.
   - Verify with admin API tests.
 
-- [ ] A1.11 Add user-data export or explicit deferral.
+- [x] A1.11 Add user-data export or explicit deferral.
   - Done when launch policy states whether export is implemented or deferred.
   - Verify with `docs/user-data-policy.md` or API tests.
 
-- [ ] A1.12 Add user deletion/anonymization or explicit deferral.
+- [x] A1.12 Add user deletion/anonymization or explicit deferral.
   - Done when launch policy states whether deletion/anonymization is
     implemented or deferred.
   - Verify with `docs/user-data-policy.md` or API tests.
 
 ### Frontend Auth Surface
 
-- [ ] A1.13 Add login and registration entry points.
+- [x] A1.13 Add login and registration entry points.
   - Done when unauthenticated users have clear routes into the auth provider.
   - Verify with frontend tests.
 
-- [ ] A1.14 Add authenticated app-shell guard.
+- [x] A1.14 Add authenticated app-shell guard.
   - Done when protected routes do not render product data before auth resolves.
   - Verify with frontend tests for anonymous, loading, authenticated, and
     expired states.
 
-- [ ] A1.15 Add logout and expired-session behavior.
+- [x] A1.15 Add logout and expired-session behavior.
   - Done when users can log out and expired sessions prompt re-auth without
     leaking stale data.
   - Verify with frontend tests.
 
-- [ ] A1.16 Add disabled-account UI.
+- [x] A1.16 Add disabled-account UI.
   - Done when disabled users see a blocked account state and cannot open
     sandbox sessions.
   - Verify with frontend tests using disabled-account API responses.
 
-- [ ] A1.17 Add admin user management UI.
+- [x] A1.17 Add admin user management UI.
   - Done when admins can inspect users, status, and quota profile from the
     product UI.
   - Verify with frontend tests for admin and non-admin paths.
+
+### Phase 1 Evidence
+
+- Files: `docs/control-plane-auth.md`, `docs/user-data-policy.md`,
+  `apps/control-plane-api/src/auth.ts`, `apps/control-plane-api/src/app.test.ts`,
+  `apps/sandbox-router/src/app.test.ts`,
+  `apps/supervisor-web/src/pages/ControlPlanePage.test.tsx`.
+- Verification:
+  - `pnpm smoke:production-auth` passed for valid, expired, wrong-issuer, and
+    wrong-audience JWT-compatible tokens.
+  - `pnpm --filter @remote-codex/control-plane-api test -- --runInBand`
+    passed: 4 files, 62 tests.
+  - `pnpm --filter @remote-codex/sandbox-router test` passed: 1 file, 10 tests.
+  - `pnpm --filter @remote-codex/supervisor-web test -- ControlPlanePage`
+    passed: 16 files, 250 tests, including ControlPlanePage login/register,
+    route-token memory handling, expired session, disabled account, admin user
+    management, and non-admin denial cases.
+- Residual risk: A1.05 remains unchecked because staging proof that product
+  JWTs never reach real worker requests has not run. The local router test does
+  prove browser `Authorization` is stripped before the upstream worker in local
+  proxying, but the staging release gate still requires real staging evidence.
 
 ## Phase 2: Projects, Workspaces, Sessions, And Session Open
 
