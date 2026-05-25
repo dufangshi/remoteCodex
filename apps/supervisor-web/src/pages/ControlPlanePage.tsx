@@ -31,7 +31,7 @@ import {
   type ControlPlaneWorkspace,
 } from '../lib/api';
 
-const AUTH_STORAGE_KEY = 'remote-codex-control-plane-auth';
+export const CONTROL_PLANE_AUTH_STORAGE_KEY = 'remote-codex-control-plane-auth';
 const ROUTE_TOKEN_REFRESH_SKEW_MS = 60_000;
 const ROUTE_TOKEN_MIN_REFRESH_MS = 5_000;
 
@@ -61,7 +61,7 @@ function readStoredAuth(): StoredControlPlaneAuth {
     };
   }
 
-  const raw = window.localStorage.getItem(AUTH_STORAGE_KEY);
+  const raw = window.localStorage.getItem(CONTROL_PLANE_AUTH_STORAGE_KEY);
   if (raw) {
     try {
       const parsed = JSON.parse(raw) as Partial<StoredControlPlaneAuth>;
@@ -221,6 +221,8 @@ export function ControlPlanePage() {
   const [message, setMessage] = useState<string | null>(null);
   const [gatewayUnavailable, setGatewayUnavailable] = useState<string | null>(null);
   const [quotaExceeded, setQuotaExceeded] = useState<string | null>(null);
+  const [disabledAccount, setDisabledAccount] = useState<string | null>(null);
+  const [expiredSession, setExpiredSession] = useState<string | null>(null);
   const [metadataLoading, setMetadataLoading] = useState<{
     projects: boolean;
     workspaces: boolean;
@@ -253,6 +255,8 @@ export function ControlPlanePage() {
     setMessage(null);
     setGatewayUnavailable(null);
     setQuotaExceeded(null);
+    setDisabledAccount(null);
+    setExpiredSession(null);
     try {
       return await action();
     } catch (caught) {
@@ -270,6 +274,15 @@ export function ControlPlanePage() {
             ? `${quotaProfile} quota exhausted (${used}/${limit}).`
             : 'Quota exceeded.',
         );
+      }
+      if (caught instanceof ApiError && caught.payload.code === 'account_inactive') {
+        setDisabledAccount(caught.message);
+      }
+      if (
+        caught instanceof ApiError &&
+        (caught.statusCode === 401 || caught.payload.code === 'unauthorized')
+      ) {
+        setExpiredSession(caught.message);
       }
       setError(caught instanceof Error ? caught.message : `${label} failed.`);
       return null;
@@ -395,7 +408,7 @@ export function ControlPlanePage() {
         email: storedAuth.email,
         displayName: storedAuth.displayName,
       });
-      window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(storedAuth));
+      window.localStorage.setItem(CONTROL_PLANE_AUTH_STORAGE_KEY, JSON.stringify(storedAuth));
       setAuth(nextAuth);
       setUser(bootstrapped.user);
       setSandbox(bootstrapped.sandbox);
@@ -611,6 +624,16 @@ export function ControlPlanePage() {
       {quotaExceeded ? (
         <div className="rounded-[0.9rem] border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-4 py-3 text-sm text-[var(--status-danger-fg)]">
           LLM quota exceeded: {quotaExceeded}
+        </div>
+      ) : null}
+      {disabledAccount ? (
+        <div className="rounded-[0.9rem] border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-4 py-3 text-sm text-[var(--status-danger-fg)]">
+          Account disabled: {disabledAccount}
+        </div>
+      ) : null}
+      {expiredSession ? (
+        <div className="rounded-[0.9rem] border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-4 py-3 text-sm text-[var(--status-warning-fg)]">
+          Session expired: {expiredSession}
         </div>
       ) : null}
       {workerConnectionState === 'reconnecting' ? (

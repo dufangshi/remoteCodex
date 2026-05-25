@@ -186,28 +186,28 @@ credential.
 
 ### Frontend Tasks
 
-- [ ] Add dedicated login route or provider redirect entry.
+- [x] Add dedicated login route or provider redirect entry.
   - Acceptance: unauthenticated users have a clear entry point into the selected
     auth provider.
   - Verification: frontend test covers rendering and redirect/action behavior.
 
-- [ ] Add authenticated app-shell guard.
+- [x] Add authenticated app-shell guard.
   - Acceptance: protected product routes cannot render product data before auth
     resolves.
   - Verification: frontend tests cover unauthenticated and authenticated
     routing.
 
-- [ ] Add auth loading state.
+- [x] Add auth loading state.
   - Acceptance: the app shows a non-destructive loading state while the product
     auth session is being resolved.
   - Verification: frontend test covers pending auth.
 
-- [ ] Add expired-session state.
+- [x] Add expired-session state.
   - Acceptance: expired auth redirects or prompts re-login without losing local
     route state unexpectedly.
   - Verification: frontend test covers expired session behavior.
 
-- [ ] Add disabled-account state.
+- [x] Add disabled-account state.
   - Acceptance: disabled users see a clear account state and cannot open
     sandbox sessions.
   - Verification: frontend test covers disabled response handling.
@@ -227,13 +227,23 @@ credential.
 ### Evidence
 
 - Files: `apps/control-plane-api/src/app.ts`,
-  `apps/control-plane-api/src/app.test.ts`, `docs/user-data-policy.md`,
+  `apps/control-plane-api/src/app.test.ts`,
+  `apps/supervisor-web/src/app.tsx`,
+  `apps/supervisor-web/src/app.test.tsx`,
+  `apps/supervisor-web/src/pages/ControlPlaneLoginPage.tsx`,
+  `apps/supervisor-web/src/pages/ControlPlanePage.tsx`,
+  `apps/supervisor-web/src/pages/ControlPlanePage.test.tsx`,
+  `packages/shared/src/index.ts`, `docs/user-data-policy.md`,
   `docs/status.md`
 - Verification: `pnpm --filter @remote-codex/control-plane-api typecheck`;
-  `pnpm --filter @remote-codex/control-plane-api test`; `git diff --check`
-- Residual risk: production auth-provider and frontend disabled-account UI
-  tasks remain unchecked. User data export and deletion/anonymization APIs are
-  explicitly deferred and are not implemented.
+  `pnpm --filter @remote-codex/control-plane-api test`;
+  `pnpm --filter @remote-codex/supervisor-web typecheck`;
+  `pnpm --filter @remote-codex/supervisor-web test`;
+  `pnpm --filter @remote-codex/shared typecheck`; `git diff --check`
+- Residual risk: production auth-provider integration smoke, admin user
+  management UI, and staging worker JWT proof remain unchecked. User data
+  export and deletion/anonymization APIs are explicitly deferred and are not
+  implemented.
 
 ## Phase 2: Projects, Workspaces, Sessions, And Worker Session Contract
 
@@ -656,8 +666,7 @@ Evidence:
 - Verification: `pnpm --filter @remote-codex/supervisor-web typecheck`;
   `pnpm --filter @remote-codex/supervisor-web test`;
   `pnpm --filter @remote-codex/shared typecheck`
-- Residual risk: scheduled gateway usage import, import metrics, and staging
-  provider-runtime gateway smokes remain unchecked.
+- Residual risk: staging provider-runtime gateway smokes remain unchecked.
 
 ## Phase 7: ElAgenteHarness Integration
 
@@ -1500,10 +1509,10 @@ checked.
 Use this order for small, reviewable increments. Check an item only after the
 corresponding implementation and verification land.
 
-- [ ] 1. Finish frontend login route, authenticated shell guard, auth loading,
+- [x] 1. Finish frontend login route, authenticated shell guard, auth loading,
   expired-session, and disabled-account states.
 - [ ] 2. Add production auth-provider smoke test.
-- [ ] 3. Enforce disabled-user behavior across route tokens, sandbox lifecycle,
+- [x] 3. Enforce disabled-user behavior across route tokens, sandbox lifecycle,
   and usage import.
 - [ ] 4. Add project detail UI, list loading states, and open-session flow.
 - [x] 5. Add worker checkpoint caller, wrong-user/wrong-sandbox denial, retry,
@@ -1514,8 +1523,8 @@ corresponding implementation and verification land.
 - [ ] 8. Add worker MCP config validation and artifact read/write scopes.
 - [ ] 9. Add route-token session scopes, WebSocket reconnect after token
   refresh, and direct-worker-denial staging smoke.
-- [ ] 10. Choose and document the phase-one LLM gateway deployment shape.
-- [ ] 11. Add gateway usage adapter, scheduled import job, import metrics, and
+- [x] 10. Choose and document the phase-one LLM gateway deployment shape.
+- [x] 11. Add gateway usage adapter, scheduled import job, import metrics, and
   frontend LLM usage UI.
 - [ ] 12. Add harness credential table, key generation, rotation, revocation,
   and redaction.

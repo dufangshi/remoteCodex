@@ -114,17 +114,17 @@ worker credential.
 
 ### Frontend App Shell
 
-- [ ] Add a dedicated login route.
+- [x] Add a dedicated login route.
   - Done when unauthenticated users have a stable route that starts the chosen
     auth-provider flow.
   - Verify with frontend tests for anonymous render and redirect/action.
 
-- [ ] Add an authenticated app-shell guard.
+- [x] Add an authenticated app-shell guard.
   - Done when protected product routes do not render user, project, sandbox, or
     usage data before auth resolves.
   - Verify with tests for unauthenticated, pending, and authenticated states.
 
-- [ ] Add auth loading state.
+- [x] Add auth loading state.
   - Done when the app shows a non-destructive loading state while the product
     auth session is being resolved.
   - Verify with frontend test coverage.

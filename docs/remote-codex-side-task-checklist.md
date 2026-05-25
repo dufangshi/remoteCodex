@@ -130,13 +130,13 @@ Verification:
 - [x] Add user data export policy.
 - [ ] Add email verification state only if the chosen auth provider does not
   own it.
-- [ ] Add frontend login route.
+- [x] Add frontend login route.
 - [x] Add frontend registration/signup entry.
 - [x] Add frontend logout action.
-- [ ] Add authenticated app-shell guard.
-- [ ] Add auth-loading state.
-- [ ] Add expired-session state.
-- [ ] Add disabled-account state.
+- [x] Add authenticated app-shell guard.
+- [x] Add auth-loading state.
+- [x] Add expired-session state.
+- [x] Add disabled-account state.
 - [x] Add account/profile page.
 - [ ] Add admin user management UI.
 - [x] Prove product user JWTs are never forwarded to worker APIs.
@@ -754,13 +754,13 @@ without exposing product identity tokens to sandbox workers.
 
 ### Frontend Auth Surface
 
-- [ ] Add login route.
+- [x] Add login route.
 - [x] Add registration or signup route.
 - [x] Add logout action.
-- [ ] Add authenticated app-shell guard.
-- [ ] Add loading state while product auth resolves.
-- [ ] Add expired-session state.
-- [ ] Add unauthorized or disabled-account state.
+- [x] Add authenticated app-shell guard.
+- [x] Add loading state while product auth resolves.
+- [x] Add expired-session state.
+- [x] Add unauthorized or disabled-account state.
 - [x] Add account/profile page.
 - [ ] Add admin-only user table or user management route.
 - [ ] Ensure product user JWT is never passed to worker APIs.

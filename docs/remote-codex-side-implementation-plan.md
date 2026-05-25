@@ -131,13 +131,13 @@ worker credentials.
 
 ### Frontend Checklist
 
-- [ ] Add dedicated login route or auth-provider redirect entry.
+- [x] Add dedicated login route or auth-provider redirect entry.
 - [x] Add registration/signup entry.
 - [x] Add logout action.
-- [ ] Add authenticated app-shell guard.
-- [ ] Add auth loading state.
-- [ ] Add expired-session state.
-- [ ] Add disabled-account state.
+- [x] Add authenticated app-shell guard.
+- [x] Add auth loading state.
+- [x] Add expired-session state.
+- [x] Add disabled-account state.
 - [x] Add account/profile page.
 - [ ] Add admin user management UI.
 

@@ -73,7 +73,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 - Phase 0 documentation and release baseline is complete for this branch; live
   staging verification has not run yet.
 - AWS sandbox adapter implementation.
-- Frontend auth shell, login states, and admin user management.
+- Frontend auth shell covers the local login route, authenticated route guard,
+  loading state, expired-session state, and disabled-account state. Production
+  auth-provider smoke coverage and admin user management remain open.
 - Project detail and product metadata loading states are implemented in the
   control-plane panel; the real worker connection step after route-token issue
   remains open.
@@ -95,10 +97,10 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 
 ## Immediate Next Implementation Queue
 
-1. Finish frontend auth shell: login route, authenticated app guard, loading,
-   expired, unauthorized, and disabled-account states.
-2. Add production auth-provider smoke coverage or staging smoke procedure for
+1. Add production auth-provider smoke coverage or staging smoke procedure for
    valid, expired, wrong-issuer, and wrong-audience tokens.
+2. Add admin user management UI for list, status update, quota update, and
+   non-admin denial states.
 3. Add real open-session worker connection flow after route-token issue.
 4. Add staging lifecycle smokes for start, stop, idempotent restart, and
    readiness.

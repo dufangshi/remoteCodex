@@ -26,11 +26,13 @@ export type {
 
 export type ApiErrorCode =
   | 'bad_request'
+  | 'unauthorized'
   | 'not_found'
   | 'conflict'
   | 'provider_goal_error'
   | 'gateway_unavailable'
   | 'quota_exceeded'
+  | 'account_inactive'
   | 'forbidden'
   | 'goal_feature_disabled'
   | 'internal_error'

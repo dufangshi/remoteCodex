@@ -22,6 +22,10 @@ import {
   AppShellSettingsDialog,
 } from './components/AppShellNavigation';
 import { ControlPlanePage } from './pages/ControlPlanePage';
+import {
+  ControlPlaneAuthGuard,
+  ControlPlaneLoginPage,
+} from './pages/ControlPlaneLoginPage';
 import { LandingPage } from './pages/LandingPage';
 import { ThreadDetailPage } from './pages/ThreadDetailPage';
 import { ThreadImportPage } from './pages/ThreadImportPage';
@@ -87,7 +91,7 @@ function AppShell({
   const isThreadWorkspaceRoute =
     isThreadsRoute || isThreadDetailRoute;
   const isWorkspacesRoute = location.pathname === '/workspaces';
-  const isControlPlaneRoute = location.pathname === '/control-plane';
+  const isControlPlaneRoute = location.pathname.startsWith('/control-plane');
   const usesInlineTopbar = isWorkspacesRoute || isThreadsRoute || isControlPlaneRoute;
 
   useEffect(() => {
@@ -238,7 +242,15 @@ export function App() {
             >
               <Route path="/workspaces" element={<WorkspacesPage />} />
               <Route path="/workspaces/new" element={<WorkspaceNewPage />} />
-              <Route path="/control-plane" element={<ControlPlanePage />} />
+              <Route path="/control-plane/login" element={<ControlPlaneLoginPage />} />
+              <Route
+                path="/control-plane"
+                element={
+                  <ControlPlaneAuthGuard>
+                    <ControlPlanePage />
+                  </ControlPlaneAuthGuard>
+                }
+              />
               <Route path="/threads" element={<ThreadsPage />} />
               <Route path="/threads/import" element={<ThreadImportPage />} />
               <Route path="/threads/new" element={<ThreadNewPage />} />

@@ -165,13 +165,13 @@ credential.
 
 ### Frontend
 
-- [ ] Add dedicated login route or provider redirect entry.
+- [x] Add dedicated login route or provider redirect entry.
 - [x] Add signup/registration entry.
 - [x] Add logout action.
-- [ ] Add authenticated app-shell guard.
-- [ ] Add auth loading state.
-- [ ] Add expired-session state.
-- [ ] Add disabled-account state.
+- [x] Add authenticated app-shell guard.
+- [x] Add auth loading state.
+- [x] Add expired-session state.
+- [x] Add disabled-account state.
 - [x] Add account/profile page.
 - [ ] Add admin user management UI.
 
@@ -873,14 +873,14 @@ The first usable product phase is complete only when all of these are checked:
 - [x] 3. Add worker session checkpoint caller and wrong-user/wrong-sandbox tests.
 - [x] 4. Validate harness env when chemistry tools are enabled.
 - [x] 5. Add gateway client interface and mocked gateway admin tests.
-- [ ] 6. Decide and document gateway deployment shape.
+- [x] 6. Decide and document gateway deployment shape.
 - [x] 7. Implement gateway user/key create, revoke, rotate, and reconcile APIs.
 - [ ] 8. Implement harness credential table, key generation, rotation, and
   revocation.
 - [ ] 9. Define MCP registry and render provider MCP configs.
 - [ ] 10. Build and smoke-test the worker Docker image.
 - [ ] 11. Add staging start/stop sandbox smoke.
-- [ ] 12. Add LLM usage import and user usage UI.
+- [x] 12. Add LLM usage import and user usage UI.
 - [ ] 13. Add harness workflow/task UI and harness usage import.
 - [ ] 14. Add workspace persistence, diffs, snapshots, and artifacts.
 - [ ] 15. Add Railway/AWS deployment definitions and CI smoke jobs.
