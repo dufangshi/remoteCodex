@@ -411,24 +411,24 @@ and recover it.
     state or create duplicate active sandboxes.
   - Verify with staging smoke logs and final registry state.
 
-- [ ] S3.09 Add capacity preflight.
+- [x] S3.09 Add capacity preflight.
   - Done when AWS Fargate quota, subnet IP capacity, and image-pull failure
     modes are mapped to predictable API errors.
   - Verify with tests for error mapping and staging readiness notes.
 
 ### Sandbox Operations
 
-- [ ] S3.10 Add sandbox runtime event log.
+- [x] S3.10 Add sandbox runtime event log.
   - Done when lifecycle transitions, readiness failures, image-pull failures,
     capacity failures, and admin actions are auditable without secrets.
   - Verify with API tests and log review.
 
-- [ ] S3.11 Add idle warning and idle stop.
+- [x] S3.11 Add idle warning and idle stop.
   - Done when users get a warning before idle timeout and idle sandboxes stop
     according to policy.
   - Verify with job tests and frontend tests.
 
-- [ ] S3.12 Add admin force-stop with audit trail.
+- [x] S3.12 Add admin force-stop with audit trail.
   - Done when admins can force-stop a sandbox with reason and operator id.
   - Verify with API tests and audit assertions.
 
@@ -437,6 +437,10 @@ and recover it.
 - Files: `apps/control-plane-api/src/adapters.ts`,
   `apps/control-plane-api/src/adapters.test.ts`,
   `apps/control-plane-api/src/app.test.ts`,
+  `apps/control-plane-api/src/repository.ts`,
+  `apps/control-plane-api/src/sandbox-reaper.ts`,
+  `apps/supervisor-web/src/pages/ControlPlanePage.tsx`,
+  `apps/supervisor-web/src/pages/ControlPlanePage.test.tsx`,
   `scripts/local-route-token-smoke.ts`,
   `docs/local-control-plane-worker-smoke.md`,
   `docs/control-plane-sandbox-worker.md`.
@@ -446,18 +450,22 @@ and recover it.
     proxy through the router, strip browser `Authorization`, inject worker
     identity, and read worker metadata.
   - `pnpm --filter @remote-codex/control-plane-api test -- adapters` passed:
-    4 files, 62 tests, covering NoopSandboxManager, LocalWorkerProcess
+    4 files, 63 tests, covering NoopSandboxManager, LocalWorkerProcess
     start/stop, AWS adapter config loading, mock Pod apply/delete/status,
-    deterministic labels, endpoint discovery, and fail-closed missing
-    Kubernetes client behavior.
+    deterministic labels, endpoint discovery, capacity/image-pull/readiness
+    failure mapping, and fail-closed missing Kubernetes client behavior.
   - `pnpm --filter @remote-codex/control-plane-api test -- --runInBand`
-    passed: 4 files, 62 tests, including sandbox lifecycle API and reaper
+    passed: 4 files, 63 tests, including sandbox lifecycle API, admin detail,
+    runtime audit log, admin force-stop operator/reason audit, and reaper
     coverage.
+  - `pnpm --filter @remote-codex/control-plane-api typecheck` passed.
+  - `pnpm --filter @remote-codex/supervisor-web test -- ControlPlanePage`
+    passed: 16 files, 251 tests, including idle-timeout warning UI.
+  - `pnpm --filter @remote-codex/supervisor-web typecheck` passed.
 - Residual risk: S3.04-S3.08 remain unchecked because no real staging AWS/EKS
-  environment has been exercised. S3.09-S3.12 remain unchecked because current
-  evidence covers pieces of error mapping, reaping, idle stop, and admin
-  force-stop, but not the full checklist acceptance for preflight, runtime event
-  log, idle warning, or force-stop audit assertions.
+  environment has been exercised. Capacity preflight is implemented as
+  documented quota/subnet review plus deterministic runtime failure mapping;
+  it still needs staging AWS access smoke before production.
 
 ## Phase 4: Worker Image And Runtime Guardrails
 

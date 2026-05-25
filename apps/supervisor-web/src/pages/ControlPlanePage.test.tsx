@@ -92,6 +92,11 @@ const runningSandbox: ControlPlaneSandbox = {
   lastSeenAt: '2026-05-25T00:01:30.000Z',
 };
 
+const idleWarningSandbox: ControlPlaneSandbox = {
+  ...runningSandbox,
+  idleTimeoutAt: '2026-05-25T01:00:00.000Z',
+};
+
 const startingSandbox: ControlPlaneSandbox = {
   ...stoppedSandbox,
   state: 'starting',
@@ -1226,6 +1231,46 @@ describe('ControlPlanePage', () => {
       expect(screen.getAllByText('Cannot pull worker image.').length).toBeGreaterThan(0);
     });
     expect(screen.getByText('image_pull')).toBeInTheDocument();
+  });
+
+  it('shows an idle-stop warning before the sandbox timeout', async () => {
+    vi.setSystemTime(new Date('2026-05-25T00:30:00.000Z'));
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
+
+      if (path === '/api/me/bootstrap' && init?.method === 'POST') {
+        return jsonResponse({ user, sandbox: idleWarningSandbox, gatewayKey: null });
+      }
+
+      if (path === '/api/me' && !init?.method) {
+        return jsonResponse({ user, sandbox: idleWarningSandbox, usage });
+      }
+
+      if (path === '/api/projects' && !init?.method) {
+        return jsonResponse({ projects: [] });
+      }
+
+      const usageEvents = usageEventsResponse(path);
+      if (usageEvents) {
+        return usageEvents;
+      }
+
+      return jsonResponse({
+        code: 'not_found',
+        message: `Unhandled request: ${path}`,
+      }, 404);
+    });
+
+    render(<ControlPlanePage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('Sandbox will stop after idle timeout at 2026-05-25T01:00:00.000Z.'),
+      ).toBeInTheDocument();
+    });
   });
 
   it('shows loading states for product metadata lists', async () => {

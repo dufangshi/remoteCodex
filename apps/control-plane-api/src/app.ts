@@ -924,7 +924,7 @@ export function buildControlPlaneApp(
   });
 
   app.post('/api/admin/sandboxes/:sandboxId/force-stop', async (request) => {
-    requireAdmin(app, request);
+    const admin = requireAdmin(app, request);
     const params = z.object({ sandboxId: z.string().uuid() }).parse(request.params);
     const input = adminSandboxReasonSchema.parse(request.body ?? {});
     const sandbox = repository.getSandboxById(params.sandboxId);
@@ -939,12 +939,18 @@ export function buildControlPlaneApp(
       sandbox: repository.updateSandboxState(sandbox.id, {
         ...result,
         statusReason: input.reason ?? result.statusReason ?? 'force-stopped by administrator',
+        auditMetadata: {
+          operatorUserId: admin.id,
+          operatorIdentity: identityKey(admin.authProvider, admin.authSubject),
+          reason: input.reason ?? null,
+          adminAction: 'force-stop',
+        },
       }),
     };
   });
 
   app.post('/api/admin/sandboxes/:sandboxId/restart', async (request) => {
-    requireAdmin(app, request);
+    const admin = requireAdmin(app, request);
     const params = z.object({ sandboxId: z.string().uuid() }).parse(request.params);
     const input = adminSandboxReasonSchema.parse(request.body ?? {});
     const sandbox = repository.getSandboxById(params.sandboxId);
@@ -964,6 +970,12 @@ export function buildControlPlaneApp(
       sandbox: repository.updateSandboxState(sandbox.id, {
         ...result,
         statusReason: input.reason ?? result.statusReason ?? 'restarted by administrator',
+        auditMetadata: {
+          operatorUserId: admin.id,
+          operatorIdentity: identityKey(admin.authProvider, admin.authSubject),
+          reason: input.reason ?? null,
+          adminAction: 'restart',
+        },
       }),
     };
   });

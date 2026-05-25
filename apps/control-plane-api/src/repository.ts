@@ -359,13 +359,15 @@ export class ControlPlaneRepository {
       startupProgress?: number;
       lastFailureCode?: string | null;
       lastFailureMessage?: string | null;
+      auditMetadata?: Record<string, unknown>;
     },
   ) {
     const now = new Date().toISOString();
+    const { auditMetadata: _auditMetadata, ...stateInput } = input;
     this.db
       .update(controlSandboxes)
       .set({
-        ...input,
+        ...stateInput,
         lastStartedAt: input.state === 'running' ? now : undefined,
         updatedAt: now,
       })
@@ -373,7 +375,11 @@ export class ControlPlaneRepository {
       .run();
     const sandbox = this.getSandboxById(sandboxId);
     if (sandbox) {
-      this.audit(sandbox.userId, `sandbox.${input.state}`, 'sandbox', sandboxId, input);
+      this.audit(sandbox.userId, `sandbox.${input.state}`, 'sandbox', sandboxId, {
+        ...input,
+        ...(input.auditMetadata ?? {}),
+        auditMetadata: undefined,
+      });
     }
     return sandbox;
   }

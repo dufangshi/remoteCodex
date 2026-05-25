@@ -108,6 +108,15 @@ function sandboxBanner(sandbox: ControlPlaneSandbox | null) {
   if (!sandbox) {
     return null;
   }
+  if (sandbox.state === 'running' && sandbox.idleTimeoutAt) {
+    const timeoutMs = Date.parse(sandbox.idleTimeoutAt);
+    if (Number.isFinite(timeoutMs) && timeoutMs > Date.now()) {
+      return {
+        tone: 'warning',
+        text: `Sandbox will stop after idle timeout at ${sandbox.idleTimeoutAt}.`,
+      };
+    }
+  }
   if (sandbox.state === 'degraded') {
     return {
       tone: 'warning',

@@ -1904,6 +1904,20 @@ describe('control plane api', () => {
       state: 'stopped',
       statusReason: 'admin requested stop',
     });
+    const forceStopAudit = app.services.repository
+      .listRecentAuditLogs({
+        resourceId: sandboxId,
+        actionPrefix: 'sandbox.',
+        limit: 20,
+      })
+      .find((entry) => entry.action === 'sandbox.stopped');
+    expect(forceStopAudit).toBeDefined();
+    expect(JSON.parse(forceStopAudit!.metadataJson)).toMatchObject({
+      adminAction: 'force-stop',
+      operatorIdentity: 'dev:admin',
+      reason: 'admin requested stop',
+      state: 'stopped',
+    });
 
     const forbiddenDetail = await app.inject({
       method: 'GET',

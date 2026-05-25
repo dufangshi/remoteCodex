@@ -112,10 +112,11 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   route-token contract, router proxying, and worker authorization. Staging
   router deployment, direct-worker-denial proof, and browser-to-router-to-worker
   smoke remain unchecked.
-- `docs/remote-codex-side-detailed-checklist.md` Phase 3 is complete through
-  local sandbox manager and local route-token smoke. Real staging AWS/EKS
-  configuration, credentials, Pod start/stop, and lifecycle idempotency remain
-  unchecked.
+- `docs/remote-codex-side-detailed-checklist.md` Phase 3 is complete locally
+  through local sandbox manager, local route-token smoke, capacity/image-pull
+  failure mapping, runtime lifecycle audit, idle warning and idle stop policy,
+  and admin force-stop audit. Real staging AWS/EKS configuration, credentials,
+  Pod start/stop, and lifecycle idempotency remain unchecked.
 - Worker image runtime pinning, local Docker build, local `/readyz` smoke, local
   worker auth denial/success smoke, and GitHub Actions worker image CI smoke
   are verified. CI run `26396842026` passed on
