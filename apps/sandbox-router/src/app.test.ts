@@ -157,6 +157,7 @@ describe('sandbox router', () => {
       url: `/api/sandboxes/sandbox_1/api/threads/thread_1/prompt?token=${encodeURIComponent(token)}&trace=1`,
       headers: {
         'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
         'x-remote-codex-worker-token': 'browser-forged-token',
         'x-remote-codex-user': 'browser-forged-user',
       },
@@ -173,6 +174,7 @@ describe('sandbox router', () => {
     expect(init.method).toBe('POST');
     expect(init.body).toBe(JSON.stringify({ prompt: 'hello' }));
     const headers = init.headers as Headers;
+    expect(headers.get('authorization')).toBeNull();
     expect(headers.get('x-remote-codex-worker-token')).toBe('internal-worker-token');
     expect(headers.get('x-remote-codex-user')).toBe('user_1');
     expect(headers.get('x-remote-codex-sandbox')).toBe('sandbox_1');
@@ -405,6 +407,13 @@ describe('sandbox router', () => {
       `ws://127.0.0.1:${routerAddress.port}/api/sandboxes/sandbox_1/ws?token=${encodeURIComponent(routeToken({
         scopes: ['worker:read', 'worker:write'],
       }))}`,
+      {
+        headers: {
+          authorization: 'Bearer browser-product-jwt',
+          'x-remote-codex-worker-token': 'browser-forged-token',
+          'x-remote-codex-user': 'browser-forged-user',
+        },
+      },
     );
     const message = await Promise.race([
       new Promise<string>((resolve, reject) => {
@@ -422,6 +431,7 @@ describe('sandbox router', () => {
 
     expect(message).toBe('worker:hello-worker');
     expect(workerMessages).toEqual(['hello-worker']);
+    expect(workerRequestHeaders.authorization).toBeUndefined();
     expect(workerRequestHeaders['x-remote-codex-worker-token']).toBe('internal-worker-token');
     expect(workerRequestHeaders['x-remote-codex-user']).toBe('user_1');
     expect(workerRequestHeaders['x-remote-codex-sandbox']).toBe('sandbox_1');

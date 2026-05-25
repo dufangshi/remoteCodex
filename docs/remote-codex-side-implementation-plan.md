@@ -127,7 +127,7 @@ worker credentials.
   sandbox lifecycle, and usage import.
 - [ ] Add user data export policy and API shape if required for launch.
 - [ ] Add user deletion or anonymization policy if required for launch.
-- [ ] Prove product JWTs are stripped before router-to-worker traffic.
+- [x] Prove product JWTs are stripped before router-to-worker traffic.
 
 ### Frontend Checklist
 
@@ -150,7 +150,7 @@ worker credentials.
   disabled account.
 - [ ] Local or staging e2e smoke test covers login into the authenticated app
   shell.
-- [ ] Router or worker tests prove browser product JWT headers do not reach the
+- [x] Router or worker tests prove browser product JWT headers do not reach the
   worker.
 
 ## Phase 2: Projects, Workspaces, Sessions, And Worker Session Contract

@@ -136,7 +136,7 @@ Verification:
 - [ ] Add disabled-account state.
 - [x] Add account/profile page.
 - [ ] Add admin user management UI.
-- [ ] Prove product user JWTs are never forwarded to worker APIs.
+- [x] Prove product user JWTs are never forwarded to worker APIs.
 
 Verification:
 

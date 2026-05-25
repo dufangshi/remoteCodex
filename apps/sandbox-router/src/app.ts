@@ -182,7 +182,7 @@ function readRouteToken(request: FastifyRequest) {
     ? /^Bearer\s+(.+)$/i.exec(header)?.[1]
     : null;
   const query = z.object({ token: z.string().min(1).optional() }).parse(request.query);
-  return bearer ?? query.token ?? null;
+  return query.token ?? bearer ?? null;
 }
 
 function parseProxyParams(params: unknown) {
