@@ -78,6 +78,7 @@ Control-plane API:
 
 ```text
 LLM_GATEWAY_BASE_URL=https://llm-gateway.example.com
+LLM_GATEWAY_PROVIDER=sub2api
 LLM_GATEWAY_ADMIN_BASE_URL=https://llm-gateway-admin.example.com
 LLM_GATEWAY_ADMIN_TOKEN=<admin-token>
 LLM_GATEWAY_TOKEN_SECRET_NAME=<aws-secret-containing-sandbox-key-material>
@@ -113,6 +114,16 @@ Requirements:
 
 Current code redacts `LLM_GATEWAY_ADMIN_TOKEN`, `llmGatewayAdminToken`, and
 gateway key ciphertext fields from control-plane logs and API responses.
+
+## Provider Config Source
+
+`LLM_GATEWAY_PROVIDER` is the Remote Codex provider key for gateway user, key,
+and usage records. It defaults to `sub2api`.
+
+Use a different value only when the replacement gateway implements this
+contract and should be tracked separately in Remote Codex records. The value is
+stored with `control_gateway_users`, `control_gateway_keys`, and usage import
+events, and it is part of usage dedupe with `externalRequestId`.
 
 ## Admin API Endpoints
 

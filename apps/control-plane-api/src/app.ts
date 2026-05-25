@@ -353,7 +353,7 @@ async function ensureGateway(app: FastifyInstance, user: { id: string; email: st
   });
   app.services.repository.upsertGatewayUser({
     userId: user.id,
-    provider: 'sub2api',
+    provider: app.services.config.llmGatewayProvider,
     externalUserId: gatewayUser.externalUserId,
   });
 
@@ -365,7 +365,7 @@ async function ensureGateway(app: FastifyInstance, user: { id: string; email: st
   return app.services.repository.upsertGatewayKey({
     userId: user.id,
     sandboxId: sandbox.id,
-    provider: 'sub2api',
+    provider: app.services.config.llmGatewayProvider,
     externalKeyId: gatewayKey.externalKeyId,
     keyCiphertext: gatewayKey.keyCiphertext ?? null,
   });
@@ -801,7 +801,7 @@ export function buildControlPlaneApp(
     });
     repository.upsertGatewayUser({
       userId: user.id,
-      provider: 'sub2api',
+      provider: config.llmGatewayProvider,
       externalUserId: gatewayUser.externalUserId,
     });
     const existingGatewayKey = repository.getGatewayKeyForSandbox(sandbox.id);
@@ -821,7 +821,7 @@ export function buildControlPlaneApp(
       : repository.upsertGatewayKey({
           userId: user.id,
           sandboxId: sandbox.id,
-          provider: 'sub2api',
+          provider: config.llmGatewayProvider,
           externalKeyId: reconciled.externalKeyId,
           keyCiphertext: reconciled.keyCiphertext ?? null,
         });

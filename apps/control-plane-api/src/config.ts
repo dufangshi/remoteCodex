@@ -21,6 +21,7 @@ const envSchema = z.object({
   SANDBOX_WORKER_INTERNAL_PORT: z.coerce.number().int().positive().optional(),
   CONTROL_PLANE_INTERNAL_SERVICE_TOKEN: z.string().min(16).optional(),
   LLM_GATEWAY_BASE_URL: z.string().url().optional(),
+  LLM_GATEWAY_PROVIDER: z.string().trim().min(1).optional(),
   LLM_GATEWAY_TOKEN_SECRET_NAME: z.string().min(1).optional(),
   LLM_GATEWAY_ADMIN_BASE_URL: z.string().url().optional(),
   LLM_GATEWAY_ADMIN_TOKEN: z.string().min(1).optional(),
@@ -53,6 +54,7 @@ export interface ControlPlaneConfig {
   sandboxWorkerInternalPort: number;
   internalServiceToken: string | null;
   llmGatewayBaseUrl: string | null;
+  llmGatewayProvider: string;
   llmGatewayTokenSecretName: string | null;
   llmGatewayAdminBaseUrl: string | null;
   llmGatewayAdminToken: string | null;
@@ -153,6 +155,7 @@ export function loadControlPlaneConfig(
     sandboxWorkerInternalPort: parsed.SANDBOX_WORKER_INTERNAL_PORT ?? 8787,
     internalServiceToken: parsed.CONTROL_PLANE_INTERNAL_SERVICE_TOKEN ?? null,
     llmGatewayBaseUrl: parsed.LLM_GATEWAY_BASE_URL ?? null,
+    llmGatewayProvider: parsed.LLM_GATEWAY_PROVIDER ?? 'sub2api',
     llmGatewayTokenSecretName: parsed.LLM_GATEWAY_TOKEN_SECRET_NAME ?? null,
     llmGatewayAdminBaseUrl: parsed.LLM_GATEWAY_ADMIN_BASE_URL ?? null,
     llmGatewayAdminToken: parsed.LLM_GATEWAY_ADMIN_TOKEN ?? null,

@@ -14,6 +14,7 @@ describe('control plane config', () => {
       CONTROL_PLANE_AUTH_JWT_AUDIENCE: 'remote-codex',
       CONTROL_PLANE_AUTH_JWT_CLOCK_SKEW_SECONDS: '45',
       LLM_GATEWAY_BASE_URL: 'https://llm-gateway.example.test',
+      LLM_GATEWAY_PROVIDER: 'custom-compatible',
       LLM_GATEWAY_TOKEN_SECRET_NAME: 'remote-codex-gateway-tokens',
       LLM_GATEWAY_ADMIN_BASE_URL: 'https://llm-gateway-admin.example.test',
       LLM_GATEWAY_ADMIN_TOKEN: 'gateway-admin-token',
@@ -30,6 +31,7 @@ describe('control plane config', () => {
     expect(config.authJwtAudience).toBe('remote-codex');
     expect(config.authJwtClockSkewSeconds).toBe(45);
     expect(config.llmGatewayBaseUrl).toBe('https://llm-gateway.example.test');
+    expect(config.llmGatewayProvider).toBe('custom-compatible');
     expect(config.llmGatewayTokenSecretName).toBe('remote-codex-gateway-tokens');
     expect(config.llmGatewayAdminBaseUrl).toBe('https://llm-gateway-admin.example.test');
     expect(config.llmGatewayAdminToken).toBe('gateway-admin-token');
@@ -37,6 +39,15 @@ describe('control plane config', () => {
     expect(config.harnessBaseUrl).toBe('https://harness.example.test');
     expect(config.harnessAppKeySecretName).toBe('remote-codex-harness-app-keys');
     expect(config.chemistryToolsEnabled).toBe(true);
+  });
+
+  it('defaults the gateway provider to sub2api', () => {
+    const config = loadControlPlaneConfig({
+      NODE_ENV: 'test',
+      CONTROL_PLANE_DATABASE_URL: ':memory:',
+    });
+
+    expect(config.llmGatewayProvider).toBe('sub2api');
   });
 
   it('requires a harness base URL when chemistry tools are enabled', () => {

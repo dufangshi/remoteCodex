@@ -403,7 +403,7 @@ Verification:
 
 - [x] Choose the phase-one gateway implementation and deployment shape.
 - [x] Document gateway admin credential requirements.
-- [ ] Add gateway provider config table or config source.
+- [x] Add gateway provider config table or config source.
 - [x] Store gateway base URL.
 - [x] Store gateway key id per user or sandbox.
 - [ ] Store encrypted gateway token only if raw recovery is required.
@@ -1092,7 +1092,7 @@ Real provider root keys stay outside the sandbox.
 
 ### Control-Plane Gateway Client
 
-- [ ] Add gateway provider config table or config source.
+- [x] Add gateway provider config table or config source.
 - [x] Store gateway base URL.
 - [x] Store gateway key id per user or sandbox.
 - [ ] Store encrypted gateway token only if raw recovery is required.

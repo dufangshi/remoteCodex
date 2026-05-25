@@ -75,8 +75,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   refresh are in place, while staging router smoke checks remain open.
 - Worker image runtime pinning and smoke verification.
 - LLM gateway contract is fixed on a sub2api-compatible shape; provisioning,
-  worker provider config rendering, and manual usage import exist, while
-  scheduled import, metrics, and frontend degraded/usage UI remain open.
+  provider selection config, worker provider config rendering, and manual usage
+  import exist, while scheduled import, metrics, and frontend degraded/usage UI
+  remain open.
 - ElAgenteHarness credential provisioning and worker bootstrap.
 
 ## Immediate Next Implementation Queue

@@ -578,7 +578,7 @@ Evidence:
 
 ### Control Plane Tasks
 
-- [ ] Add gateway provider config table or config source.
+- [x] Add gateway provider config table or config source.
   - Acceptance: gateway provider config is not hard-coded when multiple
     environments or gateways are expected.
   - Verification: config tests cover missing and valid gateway provider config.

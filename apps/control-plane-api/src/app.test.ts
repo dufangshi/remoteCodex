@@ -205,6 +205,30 @@ describe('control plane api', () => {
     }
   });
 
+  it('stores gateway keys under the configured gateway provider', async () => {
+    const app = buildControlPlaneApp({
+      env: {
+        ...testEnv('gateway-provider'),
+        LLM_GATEWAY_PROVIDER: 'custom-compatible',
+      },
+    });
+    apps.push(app);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: { authorization: 'Bearer dev:custom-gateway-user' },
+      payload: {
+        email: 'custom-gateway@example.com',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().gatewayKey).toMatchObject({
+      provider: 'custom-compatible',
+    });
+  });
+
   it('rotates and revokes gateway keys from admin sandbox APIs', async () => {
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
     const originalFetch = globalThis.fetch;
