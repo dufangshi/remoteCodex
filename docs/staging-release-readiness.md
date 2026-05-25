@@ -243,6 +243,17 @@ bundle as an artifact so an operator can review `summary.json`,
 `operator-report.txt`, `release-review.json`, and the verifier JSON files
 before applying any checkbox changes.
 
+Before triggering the workflow, verify that the GitHub Environment exists and
+has the required variable and secret names configured:
+
+```bash
+pnpm phase-zero-six:github-env
+pnpm phase-zero-six:github-env:report
+```
+
+This checker uses GitHub metadata APIs through `gh`. It prints variable and
+secret names only; GitHub does not return secret values.
+
 Required GitHub Environment variables:
 
 - `AWS_STAGING_REVIEWED_BY`

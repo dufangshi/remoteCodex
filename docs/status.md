@@ -155,6 +155,10 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   or AWS-only evidence collection, and uploads the generated evidence bundle
   without committing checklist changes. Operators must review the artifact and
   run the guarded apply flow before checking any remaining S3/R5/G6 boxes.
+- GitHub Environment readiness for the manual staging evidence workflow can be
+  checked with `pnpm phase-zero-six:github-env` or the human-readable
+  `pnpm phase-zero-six:github-env:report`; the checker uses `gh` metadata APIs
+  and prints only variable and secret names, never values.
 - AWS staging preflight evidence verifier exists as
   `pnpm verify:aws-staging-preflight-evidence -- <evidence-json>` with template
   `docs/aws-staging-preflight-evidence-template.json`; it audits S3.04 and

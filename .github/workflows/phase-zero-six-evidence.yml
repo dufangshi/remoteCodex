@@ -78,6 +78,7 @@ jobs:
             scripts/verify-phase-zero-six-env-ready.ts \
             scripts/verify-phase-zero-six-evidence.ts \
             scripts/verify-phase-zero-six-artifacts-safe.ts \
+            scripts/verify-github-staging-evidence-env.ts \
             scripts/phase-zero-six-evidence.test.ts
 
       - name: Test evidence tooling
