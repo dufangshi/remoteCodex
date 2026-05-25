@@ -110,6 +110,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   `scripts/provider-gateway-smoke.ts`; it wraps a real provider CLI command,
   checks generated provider config, checks raw root-key absence, and emits the
   JSON fields required by the G6.11-G6.13 staging verifier.
+- Provider command `stdout`, `stderr`, and command errors are redacted before
+  they enter staging evidence JSON; the artifact secret scanner still runs as a
+  second guardrail on the generated bundle.
 - The phase-one staging smoke runner supports provider command JSON and
   provider-specific env JSON, so G6.11-G6.13 smokes can pass quoted provider
   commands and usage evidence into the helper without logging raw env values.

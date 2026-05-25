@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
+import { redactSecretText } from './secret-redaction.js';
 
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -262,6 +263,28 @@ function completeAwsEvidence() {
 }
 
 describe('phase zero-six evidence tooling', () => {
+  it('redacts obvious secrets before evidence stdout is stored', () => {
+    const raw = [
+      'Authorization: Bearer eyJaaaaaaaaaaaaaaaa.eyJbbbbbbbbbbbbbbbb.cccccccccccccccccc',
+      'openai sk-testsecretvalue1234567890',
+      'anthropic sk-ant-testsecretvalue1234567890',
+      'aws AKIAABCDEFGHIJKLMNOP',
+      'github ghp_abcdefghijklmnopqrstuvwxyz',
+    ].join('\n');
+    const redacted = redactSecretText(raw);
+
+    expect(redacted).toContain('Bearer [REDACTED]');
+    expect(redacted).toContain('[REDACTED_OPENAI_KEY]');
+    expect(redacted).toContain('[REDACTED_ANTHROPIC_KEY]');
+    expect(redacted).toContain('[REDACTED_AWS_ACCESS_KEY]');
+    expect(redacted).toContain('[REDACTED_GITHUB_TOKEN]');
+    expect(redacted).not.toContain('eyJaaaaaaaaaaaaaaaa');
+    expect(redacted).not.toContain('sk-testsecretvalue1234567890');
+    expect(redacted).not.toContain('sk-ant-testsecretvalue1234567890');
+    expect(redacted).not.toContain('AKIAABCDEFGHIJKLMNOP');
+    expect(redacted).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz');
+  });
+
   it('refuses to apply checklist changes without ready evidence', async () => {
     const dir = await tempDir();
     const checklistPath = path.join(dir, 'checklist.md');
@@ -471,5 +494,44 @@ describe('phase zero-six evidence tooling', () => {
       expect(result.stdout).not.toContain('forbidden without worker token');
       expect(result.stdout).not.toContain('secret-product-jwt-value');
     });
+  });
+
+  it('redacts provider command output in provider gateway smoke evidence', async () => {
+    const dir = await tempDir();
+    const configPath = path.join(dir, 'config.toml');
+    const commandPath = path.join(dir, 'provider-command.mjs');
+    await writeFile(
+      configPath,
+      [
+        'base_url = "https://gateway.example.test"',
+        'token_env = "REMOTE_CODEX_LLM_GATEWAY_TOKEN"',
+      ].join('\n'),
+    );
+    await writeFile(
+      commandPath,
+      [
+        'console.log("Bearer eyJaaaaaaaaaaaaaaaa.eyJbbbbbbbbbbbbbbbb.cccccccccccccccccc");',
+        'console.error("sk-testsecretvalue1234567890");',
+      ].join('\n'),
+    );
+
+    const result = await runScriptWithEnv(
+      'scripts/provider-gateway-smoke.ts',
+      ['codex'],
+      {
+        PROVIDER_GATEWAY_SMOKE_CONFIG_PATH: configPath,
+        PROVIDER_GATEWAY_SMOKE_COMMAND_JSON: JSON.stringify(['node', commandPath]),
+        PROVIDER_GATEWAY_SMOKE_USAGE_RECORDED: '1',
+        REMOTE_CODEX_LLM_GATEWAY_BASE_URL: 'https://gateway.example.test',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.details.commandStdout).toContain('Bearer [REDACTED]');
+    expect(parsed.details.commandStderr).toContain('[REDACTED_OPENAI_KEY]');
+    expect(result.stdout).not.toContain('eyJaaaaaaaaaaaaaaaa');
+    expect(result.stdout).not.toContain('sk-testsecretvalue1234567890');
   });
 });

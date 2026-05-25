@@ -69,6 +69,8 @@ jobs:
             scripts/collect-aws-staging-preflight-evidence.ts \
             scripts/staging-phase-one-smoke.ts \
             scripts/run-phase-zero-six-staging-evidence.ts \
+            scripts/provider-gateway-smoke.ts \
+            scripts/secret-redaction.ts \
             scripts/verify-aws-staging-preflight-evidence.ts \
             scripts/verify-staging-phase-one-evidence.ts \
             scripts/verify-phase-zero-six-env-ready.ts \

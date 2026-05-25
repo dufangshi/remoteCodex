@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { redactedSlice } from './secret-redaction.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -111,8 +112,8 @@ async function runOptionalCommand(name: string, commandEnvName: string): Promise
     ok: parsedStdout?.ok === undefined ? true : parsedStdout.ok === true,
     details: {
       commandEnv: commandEnvName,
-      stdout: stdout.slice(0, 4000),
-      stderr: stderr.slice(0, 4000),
+      stdout: redactedSlice(stdout),
+      stderr: redactedSlice(stderr),
       parsedStdout,
       commandJsonEnv: process.env[commandJsonEnvName] ? commandJsonEnvName : null,
       envJsonEnv: process.env[envJsonEnvName] ? envJsonEnvName : null,

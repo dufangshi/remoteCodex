@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { redactedSlice, redactSecretText } from './secret-redaction.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -145,8 +146,8 @@ async function runProviderCommand() {
     return {
       ran: true,
       ok: true,
-      stdout: stdout.slice(0, 4000),
-      stderr: stderr.slice(0, 4000),
+      stdout: redactedSlice(stdout),
+      stderr: redactedSlice(stderr),
       parsedStdout: parseOptionalJson(stdout),
       error: null,
     };
@@ -157,7 +158,7 @@ async function runProviderCommand() {
       stdout: '',
       stderr: '',
       parsedStdout: null,
-      error: error instanceof Error ? error.message : String(error),
+      error: redactSecretText(error instanceof Error ? error.message : String(error)),
     };
   }
 }
