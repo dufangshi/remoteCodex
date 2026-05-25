@@ -168,6 +168,13 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   `phase-zero-six-staging-evidence-26409751861`. The artifact is diagnostic
   only because the `staging` Environment still lacks real Phase 0-6
   vars/secrets, so it must not be used to check S3/R5/G6 boxes.
+- GitHub Actions run `26411418044` verified the current visible workflow's
+  `evidence_mode=aws-only` plus `force_diagnostics=true` path at commit
+  `5ca9686c2ad95c6ce670cec1ba05938b15f28af8`. It completed successfully and
+  uploaded artifact `phase-zero-six-staging-evidence-26411418044`. The artifact
+  secret scans passed, but `phase-zero-six-verification.json` reported
+  `readyToCheck=0` and `stillMissing=11`, so this artifact is diagnostic only
+  and must not be used to check S3/R5/G6 boxes.
 - GitHub currently exposes only the visible `Phase 0-6 Evidence Tooling`
   workflow for manual dispatch from this branch; the standalone
   `.github/workflows/phase-zero-six-staging-evidence.yml` file remains a
