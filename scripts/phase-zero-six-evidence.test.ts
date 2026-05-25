@@ -981,6 +981,7 @@ describe('phase zero-six evidence tooling', () => {
     const files = await readdir(dir);
     const template = await readFile(path.join(dir, 'phase-zero-six.env.sh'), 'utf8');
     const operatorReport = await readFile(path.join(dir, 'operator-report.txt'), 'utf8');
+    const releaseReview = JSON.parse(await readFile(path.join(dir, 'release-review.json'), 'utf8'));
 
     expect(result.exitCode).toBe(1);
     expect(parsed.ok).toBe(false);
@@ -1023,6 +1024,7 @@ describe('phase zero-six evidence tooling', () => {
     expect(parsed.artifacts.envTemplate).toBe(path.join(dir, 'phase-zero-six.env.sh'));
     expect(parsed.artifacts.artifactSecretScan).toBe(path.join(dir, 'artifact-secret-scan.json'));
     expect(parsed.artifacts.operatorReport).toBe(path.join(dir, 'operator-report.txt'));
+    expect(parsed.artifacts.releaseReview).toBe(path.join(dir, 'release-review.json'));
     expect(parsed.artifacts.finalArtifactSecretScan).toBe(path.join(dir, 'artifact-secret-scan-final.json'));
     expect(parsed.finalArtifactScanPassed).toBe(true);
     expect(parsed.artifacts.awsPreflight).toBeNull();
@@ -1032,6 +1034,7 @@ describe('phase zero-six evidence tooling', () => {
       'env-readiness.json',
       'operator-report.txt',
       'phase-zero-six.env.sh',
+      'release-review.json',
       'summary.json',
     ]);
     expect(parsed.results.map((entry: { name: string }) => entry.name)).toEqual([
@@ -1045,6 +1048,17 @@ describe('phase zero-six evidence tooling', () => {
     expect(operatorReport).toContain('S3.04 [aws-preflight]: envReady=false');
     expect(operatorReport).toContain('G6.13 [opencode-provider-smoke]: envReady=false');
     expect(operatorReport).not.toContain('secret-product-jwt-value');
+    expect(releaseReview.ok).toBe(false);
+    expect(releaseReview.phaseZeroSixComplete).toBe(false);
+    expect(releaseReview.envReadiness.notReadyGroups).toEqual([
+      'aws-preflight',
+      'runtime-smoke',
+      'direct-worker-denial',
+      'codex-provider-smoke',
+      'claude-provider-smoke',
+      'opencode-provider-smoke',
+    ]);
+    expect(JSON.stringify(releaseReview)).not.toContain('secret-product-jwt-value');
     expect(result.stdout).not.toContain('secret-product-jwt-value');
   });
 
@@ -1146,12 +1160,14 @@ describe('phase zero-six evidence tooling', () => {
     expect(parsed.artifacts.phaseZeroSixApply).toBe(path.join(dir, 'phase-zero-six-apply.json'));
     expect(parsed.artifacts.postApplyArtifactSecretScan).toBe(path.join(dir, 'artifact-secret-scan-post-apply.json'));
     expect(parsed.artifacts.operatorReport).toBe(path.join(dir, 'operator-report.txt'));
+    expect(parsed.artifacts.releaseReview).toBe(path.join(dir, 'release-review.json'));
     expect(parsed.artifacts.finalArtifactSecretScan).toBe(path.join(dir, 'artifact-secret-scan-final.json'));
     expect(parsed.finalArtifactScanPassed).toBe(true);
     expect(files).toContain('phase-zero-six-apply.json');
     expect(files).toContain('artifact-secret-scan-post-apply.json');
     expect(files).toContain('artifact-secret-scan-final.json');
     expect(files).toContain('operator-report.txt');
+    expect(files).toContain('release-review.json');
     expect(checklist).toContain('- [x] S3.04 Finalize AWS staging configuration.');
     expect(checklist).toContain('- [x] S3.05 Add least-privilege Kubernetes credentials.');
     expect(checklist).toContain('- [ ] S3.06 Create a real worker Pod from the control plane.');

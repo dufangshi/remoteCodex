@@ -205,6 +205,10 @@ The bundle also writes `operator-report.txt`, a text summary of checklist
 readiness, env item readiness, next commands, and artifact paths. It is for
 operator review only; the JSON verifiers remain the authority for checking
 boxes.
+For release automation or PR review, the bundle writes `release-review.json`
+with a compact stable summary of checklist readiness, env readiness, artifact
+scan status, and artifact paths. This manifest is derived from the verifier
+outputs and is not a replacement for the raw evidence JSON.
 
 ### Phase-One Runtime Smoke
 
@@ -391,6 +395,7 @@ The bundle runner writes:
 - `artifact-secret-scan.json`
 - `artifact-secret-scan-final.json`
 - `operator-report.txt`
+- `release-review.json`
 - `summary.json`
 
 The bundle runner also scans generated JSON artifacts for obvious secret-like

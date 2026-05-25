@@ -384,20 +384,77 @@ function renderOperatorReport(summary: Record<string, unknown>) {
   return `${lines.join('\n')}\n`;
 }
 
+function buildReleaseReview(summary: Record<string, unknown>) {
+  const readiness = asRecord(summary.checklistReadiness);
+  const artifacts = asRecord(summary.artifacts);
+  const envReadiness = asRecord(summary.envReadiness);
+  const stillMissing = asArray(readiness.stillMissing).map((entry) => {
+    const item = asRecord(entry);
+    return {
+      item: typeof item.item === 'string' ? item.item : null,
+      title: typeof item.title === 'string' ? item.title : null,
+      reason: typeof item.reason === 'string' ? item.reason : null,
+    };
+  });
+  const readyToCheck = asArray(readiness.readyToCheck).map((entry) => {
+    const item = asRecord(entry);
+    return {
+      item: typeof item.item === 'string' ? item.item : null,
+      title: typeof item.title === 'string' ? item.title : null,
+      source: typeof item.source === 'string' ? item.source : null,
+    };
+  });
+
+  return {
+    generatedAt: summary.generatedAt ?? null,
+    ok: summary.ok === true,
+    phaseZeroSixComplete: summary.phaseZeroSixComplete === true,
+    applyReady: summary.applyReady === true,
+    reuseExistingArtifacts: summary.reuseExistingArtifacts === true,
+    skippedStagingSmoke: summary.skippedStagingSmoke === true,
+    finalArtifactScanPassed: summary.finalArtifactScanPassed === true,
+    postApplyScanPassed: summary.postApplyScanPassed ?? null,
+    checklist: {
+      checkedCount: typeof readiness.checkedCount === 'number' ? readiness.checkedCount : null,
+      uncheckedCount: typeof readiness.uncheckedCount === 'number' ? readiness.uncheckedCount : null,
+      readyToCheck,
+      stillMissing,
+      checkedButContradicted: asArray(readiness.checkedButContradicted),
+    },
+    envReadiness: {
+      readyGroups: asArray(envReadiness.readyGroups),
+      notReadyGroups: asArray(envReadiness.notReadyGroups),
+      itemReadiness: asArray(envReadiness.itemReadiness).map((entry) => {
+        const item = asRecord(entry);
+        return {
+          item: typeof item.item === 'string' ? item.item : null,
+          groupId: typeof item.groupId === 'string' ? item.groupId : null,
+          envReady: item.envReady === true,
+          missingEnv: asArray(item.missingEnv),
+        };
+      }),
+    },
+    artifacts,
+  };
+}
+
 async function writeSummaryAndOperatorReport(input: {
   summary: Record<string, unknown>;
   summaryPath: string;
   operatorReportPath: string;
+  releaseReviewPath: string;
 }): Promise<Record<string, unknown>> {
   const summaryWithReport = {
     ...input.summary,
     artifacts: {
       ...asRecord(input.summary.artifacts),
       operatorReport: input.operatorReportPath,
+      releaseReview: input.releaseReviewPath,
     },
   };
   await writeFile(input.summaryPath, JSON.stringify(summaryWithReport, null, 2));
   await writeFile(input.operatorReportPath, renderOperatorReport(summaryWithReport));
+  await writeFile(input.releaseReviewPath, JSON.stringify(buildReleaseReview(summaryWithReport), null, 2));
   return summaryWithReport;
 }
 
@@ -405,6 +462,7 @@ async function writeFinalSummaryWithArtifactScan(input: {
   summary: Record<string, unknown>;
   summaryPath: string;
   operatorReportPath: string;
+  releaseReviewPath: string;
   finalArtifactSafetyPath: string;
   commands: CommandResult[];
 }): Promise<Record<string, unknown>> {
@@ -412,6 +470,7 @@ async function writeFinalSummaryWithArtifactScan(input: {
     summary: input.summary,
     summaryPath: input.summaryPath,
     operatorReportPath: input.operatorReportPath,
+    releaseReviewPath: input.releaseReviewPath,
   });
   const scanResult = await runCommand({
     name: 'verify_phase_zero_six_final_artifacts_safe',
@@ -437,6 +496,7 @@ async function writeFinalSummaryWithArtifactScan(input: {
     summary: finalSummary,
     summaryPath: input.summaryPath,
     operatorReportPath: input.operatorReportPath,
+    releaseReviewPath: input.releaseReviewPath,
   });
   return finalSummary;
 }
@@ -491,6 +551,7 @@ async function main() {
   const finalArtifactSafetyPath = path.join(outputDir, 'artifact-secret-scan-final.json');
   const summaryPath = path.join(outputDir, 'summary.json');
   const operatorReportPath = path.join(outputDir, 'operator-report.txt');
+  const releaseReviewPath = path.join(outputDir, 'release-review.json');
 
   const commands: CommandResult[] = [];
 
@@ -534,6 +595,7 @@ async function main() {
           phaseZeroSixApply: null,
           artifactSecretScan: null,
           operatorReport: operatorReportPath,
+          releaseReview: releaseReviewPath,
           finalArtifactSecretScan: finalArtifactSafetyPath,
           summary: summaryPath,
         },
@@ -543,6 +605,7 @@ async function main() {
         summary,
         summaryPath,
         operatorReportPath,
+        releaseReviewPath,
         finalArtifactSafetyPath,
         commands,
       });
@@ -601,6 +664,7 @@ async function main() {
         phaseZeroSixApply: null,
         artifactSecretScan: artifactSafetyPath,
         operatorReport: operatorReportPath,
+        releaseReview: releaseReviewPath,
         finalArtifactSecretScan: finalArtifactSafetyPath,
         summary: preScanSummaryPath,
       },
@@ -610,6 +674,7 @@ async function main() {
       summary,
       summaryPath: preScanSummaryPath,
       operatorReportPath,
+      releaseReviewPath,
     });
     commands.push(await runCommand({
       name: 'verify_phase_zero_six_artifacts_safe',
@@ -630,6 +695,7 @@ async function main() {
       summary: finalSummary,
       summaryPath,
       operatorReportPath,
+      releaseReviewPath,
       finalArtifactSafetyPath,
       commands,
     });
@@ -780,6 +846,7 @@ async function main() {
       outputArtifactSecretScan: reuseExistingArtifacts ? outputArtifactSafetyPath : null,
       postApplyArtifactSecretScan: postApplyScanResult ? postApplyArtifactSafetyPath : null,
       operatorReport: operatorReportPath,
+      releaseReview: releaseReviewPath,
       finalArtifactSecretScan: finalArtifactSafetyPath,
       summary: summaryPath,
     },
@@ -790,6 +857,7 @@ async function main() {
     summary,
     summaryPath,
     operatorReportPath,
+    releaseReviewPath,
     finalArtifactSafetyPath,
     commands,
   });

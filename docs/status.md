@@ -121,8 +121,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   item plus `nextCommands`, so staging operators can see the exact S3/R5/G6
   boxes blocked by each missing evidence group. The bundle summary preserves
   these fields under `summary.envReadiness` on early env failure, and the
-  bundle writes a non-authoritative `operator-report.txt` for quick staging
-  handoff. It is not checklist-completion evidence by itself.
+  bundle writes a non-authoritative `operator-report.txt` plus
+  `release-review.json` for quick staging handoff and release review. It is not
+  checklist-completion evidence by itself.
 - Phase 0-6 evidence tooling has CLI-level tests via
   `pnpm test:phase-zero-six-evidence`, covering guarded checklist application
   and obvious artifact secret leakage detection in JSON and shell/env evidence
