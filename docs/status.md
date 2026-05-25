@@ -159,6 +159,10 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   checked with `pnpm phase-zero-six:github-env` or the human-readable
   `pnpm phase-zero-six:github-env:report`; the checker uses `gh` metadata APIs
   and prints only variable and secret names, never values.
+- The GitHub `staging` Environment now exists and allows the
+  `sandbox-worker-control-plane` branch. It still has no required Phase 0-6
+  evidence variables or secrets configured, so the manual staging evidence
+  workflow cannot yet produce checklist-completion evidence.
 - AWS staging preflight evidence verifier exists as
   `pnpm verify:aws-staging-preflight-evidence -- <evidence-json>` with template
   `docs/aws-staging-preflight-evidence-template.json`; it audits S3.04 and
