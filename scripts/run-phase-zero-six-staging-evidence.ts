@@ -296,6 +296,7 @@ async function main() {
   const artifactSafetyPath = path.join(outputDir, 'artifact-secret-scan.json');
   const inputArtifactSafetyPath = path.join(outputDir, 'artifact-secret-scan-input.json');
   const outputArtifactSafetyPath = path.join(outputDir, 'artifact-secret-scan-output.json');
+  const postApplyArtifactSafetyPath = path.join(outputDir, 'artifact-secret-scan-post-apply.json');
   const summaryPath = path.join(outputDir, 'summary.json');
 
   const commands: CommandResult[] = [];
@@ -510,10 +511,18 @@ async function main() {
         outputPath: phaseApplyPath,
       });
       commands.push(phaseApplyResult);
+      commands.push(await runCommand({
+        name: 'verify_phase_zero_six_post_apply_artifacts_safe',
+        command: ['pnpm', 'exec', 'tsx', 'scripts/verify-phase-zero-six-artifacts-safe.ts', '--dir', outputDir],
+        outputPath: postApplyArtifactSafetyPath,
+      }));
     }
   }
 
   const applyCompletedOrNotRequested = !applyReady || Boolean(phaseApplyResult);
+  const postApplyScanResult = commands.find((result) =>
+    result.name === 'verify_phase_zero_six_post_apply_artifacts_safe');
+  const postApplyScanPassed = postApplyScanResult ? commandOk(postApplyScanResult) : null;
   const requiredCommandsOk = commands
     .filter(commandRequiredForBundleSuccess)
     .every(commandOkForBundle);
@@ -535,6 +544,7 @@ async function main() {
     phaseZeroSixComplete,
     checklistReadiness: checklistReadinessSummary(phaseVerification),
     applySkippedReason,
+    postApplyScanPassed,
     envReadiness: readinessSummary,
     nextSteps: nextSteps({
       outputDir,
@@ -555,6 +565,7 @@ async function main() {
       artifactSecretScan: reuseExistingArtifacts ? null : artifactSafetyPath,
       inputArtifactSecretScan: reuseExistingArtifacts ? inputArtifactSafetyPath : null,
       outputArtifactSecretScan: reuseExistingArtifacts ? outputArtifactSafetyPath : null,
+      postApplyArtifactSecretScan: postApplyScanResult ? postApplyArtifactSafetyPath : null,
       summary: summaryPath,
     },
     results: commands.map(commandSummary),

@@ -420,6 +420,9 @@ directory with `verify-phase-zero-six-artifacts-safe`, and only then runs a
 second `verify-phase-zero-six-evidence --apply-ready` command. If the artifact
 scan fails, `summary.json` records `applySkippedReason` and no checklist file is
 edited.
+When apply runs, the bundle writes `phase-zero-six-apply.json` and then runs a
+post-apply artifact scan over the output directory. The result is recorded as
+`postApplyScanPassed` and `postApplyArtifactSecretScan` in `summary.json`.
 
 After reviewing the JSON files for accidental secret exposure and confirming
 the aggregate verifier lists the expected items under `readyToCheck`, rerun the

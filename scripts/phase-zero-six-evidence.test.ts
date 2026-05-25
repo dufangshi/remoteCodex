@@ -701,7 +701,12 @@ describe('phase zero-six evidence tooling', () => {
         artifacts: {
           envReadiness: '.temp/phase-zero-six-evidence/latest-local-template-check/env-readiness.json',
           envTemplate: '.temp/phase-zero-six-evidence/latest-local-template-check/phase-zero-six.env.sh',
+          absoluteEnvReadiness: path.join(safeDir, '.temp/phase-zero-six-evidence/latest/env-readiness.json'),
+          testArtifact: path.join(safeDir, 'artifact-secret-scan.json'),
         },
+        scannedFiles: [
+          path.join(safeDir, 'aws-staging-preflight-verification.json'),
+        ],
       }),
     );
     const safeResult = await runScript('scripts/verify-phase-zero-six-artifacts-safe.ts', [
@@ -1054,8 +1059,19 @@ describe('phase zero-six evidence tooling', () => {
       rawOk: false,
       parsedOk: false,
     });
+    expect(
+      parsed.results.find((entry: { name: string }) =>
+        entry.name === 'verify_phase_zero_six_post_apply_artifacts_safe'),
+    ).toMatchObject({
+      ok: true,
+      rawOk: true,
+      parsedOk: true,
+    });
+    expect(parsed.postApplyScanPassed).toBe(true);
     expect(parsed.artifacts.phaseZeroSixApply).toBe(path.join(dir, 'phase-zero-six-apply.json'));
+    expect(parsed.artifacts.postApplyArtifactSecretScan).toBe(path.join(dir, 'artifact-secret-scan-post-apply.json'));
     expect(files).toContain('phase-zero-six-apply.json');
+    expect(files).toContain('artifact-secret-scan-post-apply.json');
     expect(checklist).toContain('- [x] S3.04 Finalize AWS staging configuration.');
     expect(checklist).toContain('- [x] S3.05 Add least-privilege Kubernetes credentials.');
     expect(checklist).toContain('- [ ] S3.06 Create a real worker Pod from the control plane.');
@@ -1120,12 +1136,15 @@ describe('phase zero-six evidence tooling', () => {
       'verify_phase_zero_six_input_artifacts_safe',
       'verify_phase_zero_six_output_artifacts_safe',
       'verify_phase_zero_six_evidence_apply',
+      'verify_phase_zero_six_post_apply_artifacts_safe',
     ]);
     expect(parsed.envReadiness.readyGroups).toEqual(['aws-preflight']);
     expect(parsed.artifacts.awsPreflight).toBe(path.join(evidenceDir, 'aws-staging-preflight.json'));
     expect(parsed.artifacts.artifactSecretScan).toBeNull();
     expect(parsed.artifacts.inputArtifactSecretScan).toBe(path.join(applyDir, 'artifact-secret-scan-input.json'));
     expect(parsed.artifacts.outputArtifactSecretScan).toBe(path.join(applyDir, 'artifact-secret-scan-output.json'));
+    expect(parsed.artifacts.postApplyArtifactSecretScan).toBe(path.join(applyDir, 'artifact-secret-scan-post-apply.json'));
+    expect(parsed.postApplyScanPassed).toBe(true);
     expect(checklist).toContain('- [x] S3.04 Finalize AWS staging configuration.');
     expect(checklist).toContain('- [x] S3.05 Add least-privilege Kubernetes credentials.');
   });

@@ -56,10 +56,13 @@ function preview(value: string) {
 }
 
 function isLikelyArtifactPath(value: string) {
+  const normalized = value.replaceAll('\\', '/');
   return (
-    /^\.?\/?(?:\.temp|temp)\/phase-zero-six-evidence\//.test(value) ||
-    /^\.?\/?artifacts\/phase-zero-six-evidence\//.test(value) ||
-    /^[A-Za-z]:[\\/].*[\\/]phase-zero-six-evidence[\\/]/.test(value)
+    /^\.?\/?(?:\.temp|temp)\/phase-zero-six-evidence\//.test(normalized) ||
+    /^\.?\/?artifacts\/phase-zero-six-evidence\//.test(normalized) ||
+    /\/(?:\.temp|temp|artifacts)\/phase-zero-six-evidence\//.test(normalized) ||
+    /\/phase-zero-six-evidence-test-[^/]+(?:\/|$)/.test(normalized) ||
+    /^[A-Za-z]:\/.*\/phase-zero-six-evidence\//.test(normalized)
   );
 }
 
