@@ -94,6 +94,7 @@ async function main() {
   const applyReady = hasFlag('--apply-ready');
   await mkdir(outputDir, { recursive: true });
 
+  const envReadinessPath = path.join(outputDir, 'env-readiness.json');
   const awsPath = path.join(outputDir, 'aws-staging-preflight.json');
   const stagingPath = path.join(outputDir, 'staging-phase-one-smoke.json');
   const awsVerificationPath = path.join(outputDir, 'aws-staging-preflight-verification.json');
@@ -104,6 +105,11 @@ async function main() {
 
   const commands: CommandResult[] = [];
 
+  commands.push(await runCommand({
+    name: 'verify_phase_zero_six_env_ready',
+    command: ['pnpm', 'exec', 'tsx', 'scripts/verify-phase-zero-six-env-ready.ts'],
+    outputPath: envReadinessPath,
+  }));
   commands.push(await runCommand({
     name: 'collect_aws_staging_preflight_evidence',
     command: ['pnpm', 'exec', 'tsx', 'scripts/collect-aws-staging-preflight-evidence.ts'],
@@ -156,6 +162,7 @@ async function main() {
     applyReady,
     skippedStagingSmoke: hasFlag('--skip-staging-smoke'),
     artifacts: {
+      envReadiness: envReadinessPath,
       awsPreflight: awsPath,
       stagingSmoke: hasFlag('--skip-staging-smoke') ? null : stagingPath,
       awsVerification: awsVerificationPath,

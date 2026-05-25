@@ -76,10 +76,16 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   checked box is contradicted.
 - Phase 0-6 staging evidence bundle runner exists as
   `pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id>`;
-  it collects AWS preflight evidence, runs the phase-one staging smoke, runs
-  all evidence verifiers, scans generated JSON artifacts for obvious
-  secret-like leakage, and writes a summary JSON for the staging release
-  record. The recommended `.temp` output path is ignored by Git.
+  it checks non-secret env readiness, collects AWS preflight evidence, runs the
+  phase-one staging smoke, runs all evidence verifiers, scans generated JSON
+  artifacts for obvious secret-like leakage, and writes a summary JSON for the
+  staging release record. The recommended `.temp` output path is ignored by
+  Git.
+- Phase 0-6 staging env readiness verifier exists as
+  `pnpm verify:phase-zero-six-env-ready`; it reports only environment variable
+  names by evidence group and helps operators see which AWS, runtime, router,
+  and provider smoke inputs are still missing before running the live bundle.
+  It is not checklist-completion evidence by itself.
 - Phase 0-6 evidence tooling has CLI-level tests via
   `pnpm test:phase-zero-six-evidence`, covering guarded checklist application
   and obvious artifact secret leakage detection.
@@ -218,11 +224,14 @@ gateway, ElAgenteHarness, or chemistry compute workers.
    `pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id>`,
    adding `--apply-ready` only after the first read-only bundle has been
    reviewed.
-7. Capture staging AWS/EKS proof for sandbox start, readiness, stop, and
+7. If the bundle fails before live evidence collection, run
+   `pnpm verify:phase-zero-six-env-ready` and fill the missing env names it
+   reports before retrying.
+8. Capture staging AWS/EKS proof for sandbox start, readiness, stop, and
    idempotent lifecycle.
-8. Capture staging router proof for direct-worker denial and
+9. Capture staging router proof for direct-worker denial and
    browser-to-router-to-worker traffic.
-9. Run staging provider-runtime gateway smokes for Codex, Claude Code, and
+10. Run staging provider-runtime gateway smokes for Codex, Claude Code, and
    OpenCode, including gateway usage records and worker env/config root-key
    absence. Use `pnpm exec tsx scripts/provider-gateway-smoke.ts <provider>`
    inside the worker to produce the required evidence JSON.

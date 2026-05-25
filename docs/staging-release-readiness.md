@@ -136,6 +136,27 @@ check those boxes. It deliberately requires separate review evidence because
 the runtime smoke cannot prove account naming, VPC selection, log groups, or
 least-privilege RBAC by itself.
 
+Before collecting the full Phase 0 through Phase 6 bundle, operators can run a
+non-secret environment readiness check:
+
+```bash
+pnpm verify:phase-zero-six-env-ready
+```
+
+This command reports readiness by evidence group:
+
+- AWS preflight env for S3.04 and S3.05.
+- Runtime smoke env for S3.06 through S3.08 and R5.10/R5.12.
+- Direct-worker-denial env for R5.11.
+- Codex, Claude Code, and OpenCode provider smoke commands for G6.11 through
+  G6.13.
+
+The readiness report prints only environment variable names. It does not print
+JWTs, API keys, provider command JSON values, gateway tokens, or harness keys.
+It is an operator convenience check only; it does not prove AWS access, staging
+lifecycle, router behavior, or provider runtime success, and it must not be
+used to check any checklist box by itself.
+
 ### Phase-One Runtime Smoke
 
 The scripted entry point for the phase-one Remote Codex staging path is:
@@ -257,6 +278,7 @@ pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evid
 
 The bundle runner writes:
 
+- `env-readiness.json`
 - `aws-staging-preflight.json`
 - `aws-staging-preflight-verification.json`
 - `staging-phase-one-smoke.json`

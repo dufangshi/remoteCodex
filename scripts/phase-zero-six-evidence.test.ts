@@ -10,10 +10,22 @@ const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 async function runScript(script: string, args: string[] = []) {
+  return runScriptWithEnv(script, args);
+}
+
+async function runScriptWithEnv(
+  script: string,
+  args: string[] = [],
+  env: Record<string, string | undefined> = {},
+) {
   try {
     const result = await execFileAsync('pnpm', ['exec', 'tsx', script, ...args], {
       cwd: repoRoot,
       timeout: 30_000,
+      env: {
+        ...process.env,
+        ...env,
+      },
     });
     return {
       exitCode: 0,
@@ -170,5 +182,69 @@ describe('phase zero-six evidence tooling', () => {
     expect(parsed.ok).toBe(false);
     expect(parsed.findings.map((finding: { kind: string }) => finding.kind)).toContain('bearer_token');
     expect(parsed.findings.map((finding: { kind: string }) => finding.kind)).toContain('jwt_value');
+  });
+
+  it('reports env readiness without printing secret values', async () => {
+    const result = await runScriptWithEnv(
+      'scripts/verify-phase-zero-six-env-ready.ts',
+      [],
+      {
+        STAGING_CONTROL_PLANE_BASE_URL: 'https://control-plane.example.test',
+        STAGING_PRODUCT_JWT: 'secret-product-jwt-value',
+        STAGING_ADMIN_JWT: 'secret-admin-jwt-value',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.secretSafety.valuesPrinted).toBe(false);
+    expect(result.stdout).toContain('STAGING_PRODUCT_JWT');
+    expect(result.stdout).toContain('STAGING_ADMIN_JWT');
+    expect(result.stdout).not.toContain('secret-product-jwt-value');
+    expect(result.stdout).not.toContain('secret-admin-jwt-value');
+  });
+
+  it('marks all phase zero-six env groups ready when required env names are set', async () => {
+    const result = await runScriptWithEnv(
+      'scripts/verify-phase-zero-six-env-ready.ts',
+      [],
+      {
+        AWS_STAGING_REVIEWED_BY: 'operator@example.test',
+        AWS_STAGING_EKS_CLUSTER_NAME: 'remote-codex-staging',
+        AWS_STAGING_K8S_NAMESPACE: 'remote-codex-sandboxes',
+        AWS_STAGING_FARGATE_PROFILE_NAME: 'sandbox-workers',
+        AWS_STAGING_K8S_SERVICE_ACCOUNT: 'remote-codex-sandbox-manager',
+        AWS_STAGING_WORKER_IMAGE_REPOSITORY: 'example/remote-codex-worker',
+        AWS_STAGING_WORKER_IMAGE_TAG: 'sha-abc123',
+        AWS_STAGING_LOG_GROUP_NAMES: '/aws/eks/remote-codex-staging',
+        AWS_STAGING_CONFIG_REVIEWED: 'true',
+        AWS_STAGING_CREDENTIAL_REVIEW_PASSED: 'true',
+        STAGING_CONTROL_PLANE_BASE_URL: 'https://control-plane.example.test',
+        STAGING_PRODUCT_JWT: 'secret-product-jwt-value',
+        STAGING_ADMIN_JWT: 'secret-admin-jwt-value',
+        STAGING_IDEMPOTENT_LIFECYCLE_SMOKE: '1',
+        STAGING_STOP_SANDBOX_AFTER_SMOKE: '1',
+        STAGING_DIRECT_WORKER_BASE_URL: 'https://worker.example.test',
+        STAGING_CODEX_GATEWAY_SMOKE_COMMAND_JSON: '["echo","codex"]',
+        STAGING_CLAUDE_GATEWAY_SMOKE_COMMAND_JSON: '["echo","claude"]',
+        STAGING_OPENCODE_GATEWAY_SMOKE_COMMAND_JSON: '["echo","opencode"]',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.notReadyGroups).toEqual([]);
+    expect(parsed.readyGroups).toEqual([
+      'aws-preflight',
+      'runtime-smoke',
+      'direct-worker-denial',
+      'codex-provider-smoke',
+      'claude-provider-smoke',
+      'opencode-provider-smoke',
+    ]);
+    expect(result.stdout).not.toContain('secret-product-jwt-value');
+    expect(result.stdout).not.toContain('secret-admin-jwt-value');
   });
 });

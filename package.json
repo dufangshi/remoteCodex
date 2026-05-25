@@ -51,6 +51,7 @@
     "collect:phase-zero-six-evidence": "tsx scripts/run-phase-zero-six-staging-evidence.ts",
     "verify:aws-staging-preflight-evidence": "tsx scripts/verify-aws-staging-preflight-evidence.ts",
     "verify:staging-phase-one-evidence": "tsx scripts/verify-staging-phase-one-evidence.ts",
+    "verify:phase-zero-six-env-ready": "tsx scripts/verify-phase-zero-six-env-ready.ts",
     "verify:phase-zero-six-evidence": "tsx scripts/verify-phase-zero-six-evidence.ts",
     "verify:phase-zero-six-artifacts-safe": "tsx scripts/verify-phase-zero-six-artifacts-safe.ts",
     "service:start": "node scripts/service-manager.mjs start",
