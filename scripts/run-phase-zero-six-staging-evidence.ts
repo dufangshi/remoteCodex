@@ -92,6 +92,7 @@ async function main() {
     argValue('--output-dir') ??
     path.join('artifacts', 'phase-zero-six-evidence', timestampForPath());
   const applyReady = hasFlag('--apply-ready');
+  const force = hasFlag('--force');
   await mkdir(outputDir, { recursive: true });
 
   const envReadinessPath = path.join(outputDir, 'env-readiness.json');
@@ -110,6 +111,42 @@ async function main() {
     command: ['pnpm', 'exec', 'tsx', 'scripts/verify-phase-zero-six-env-ready.ts'],
     outputPath: envReadinessPath,
   }));
+
+  if (!commandOk(commands[0]) && !force) {
+    const summary = {
+      ok: false,
+      generatedAt: new Date().toISOString(),
+      outputDir,
+      applyReady,
+      force,
+      skippedStagingSmoke: hasFlag('--skip-staging-smoke'),
+      stoppedAfterEnvReadiness: true,
+      reason: 'Environment readiness failed. Fill missing env names or rerun with --force for diagnostic collection.',
+      artifacts: {
+        envReadiness: envReadinessPath,
+        awsPreflight: null,
+        stagingSmoke: null,
+        awsVerification: null,
+        stagingVerification: null,
+        phaseZeroSixVerification: null,
+        artifactSecretScan: null,
+        summary: summaryPath,
+      },
+      results: commands.map((result) => ({
+        name: result.name,
+        exitCode: result.exitCode,
+        ok: commandOk(result),
+        outputPath: result.outputPath,
+        parsedOk: (parseJsonOutput(result) as { ok?: unknown } | null)?.ok ?? null,
+        stderr: result.stderr.slice(0, 4000),
+      })),
+    };
+    await writeFile(summaryPath, JSON.stringify(summary, null, 2));
+    console.log(JSON.stringify(summary, null, 2));
+    process.exitCode = 1;
+    return;
+  }
+
   commands.push(await runCommand({
     name: 'collect_aws_staging_preflight_evidence',
     command: ['pnpm', 'exec', 'tsx', 'scripts/collect-aws-staging-preflight-evidence.ts'],
@@ -160,7 +197,9 @@ async function main() {
     generatedAt: new Date().toISOString(),
     outputDir,
     applyReady,
+    force,
     skippedStagingSmoke: hasFlag('--skip-staging-smoke'),
+    stoppedAfterEnvReadiness: false,
     artifacts: {
       envReadiness: envReadinessPath,
       awsPreflight: awsPath,

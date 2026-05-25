@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
@@ -246,5 +246,49 @@ describe('phase zero-six evidence tooling', () => {
     ]);
     expect(result.stdout).not.toContain('secret-product-jwt-value');
     expect(result.stdout).not.toContain('secret-admin-jwt-value');
+  });
+
+  it('stops bundle collection after env readiness failure unless forced', async () => {
+    const dir = await tempDir();
+    const result = await runScript('scripts/run-phase-zero-six-staging-evidence.ts', [
+      '--output-dir',
+      dir,
+    ]);
+    const parsed = JSON.parse(result.stdout);
+    const files = await readdir(dir);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.stoppedAfterEnvReadiness).toBe(true);
+    expect(parsed.artifacts.envReadiness).toBe(path.join(dir, 'env-readiness.json'));
+    expect(parsed.artifacts.awsPreflight).toBeNull();
+    expect(files.sort()).toEqual(['env-readiness.json', 'summary.json']);
+  });
+
+  it('force mode continues bundle collection after env readiness failure', async () => {
+    const dir = await tempDir();
+    const result = await runScriptWithEnv(
+      'scripts/run-phase-zero-six-staging-evidence.ts',
+      [
+        '--output-dir',
+        dir,
+        '--skip-staging-smoke',
+        '--force',
+      ],
+      {
+        AWS_STAGING_PREFLIGHT_SKIP_COMMANDS: '1',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+    const files = await readdir(dir);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.stoppedAfterEnvReadiness).toBe(false);
+    expect(files).toContain('env-readiness.json');
+    expect(files).toContain('aws-staging-preflight.json');
+    expect(files).toContain('aws-staging-preflight-verification.json');
+    expect(files).toContain('phase-zero-six-verification.json');
+    expect(files).toContain('artifact-secret-scan.json');
+    expect(files).toContain('summary.json');
   });
 });

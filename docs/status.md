@@ -79,8 +79,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   it checks non-secret env readiness, collects AWS preflight evidence, runs the
   phase-one staging smoke, runs all evidence verifiers, scans generated JSON
   artifacts for obvious secret-like leakage, and writes a summary JSON for the
-  staging release record. The recommended `.temp` output path is ignored by
-  Git.
+  staging release record. It now stops after env readiness failure by default;
+  `--force` is available only for diagnostic collection. The recommended
+  `.temp` output path is ignored by Git.
 - Phase 0-6 staging env readiness verifier exists as
   `pnpm verify:phase-zero-six-env-ready`; it reports only environment variable
   names by evidence group and helps operators see which AWS, runtime, router,

@@ -276,6 +276,22 @@ directory:
 pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id>
 ```
 
+The bundle runner checks `env-readiness.json` first. If required environment
+inputs are missing, it stops before running AWS, Kubernetes, control-plane, or
+provider smoke commands. This avoids accidental partial live runs with the
+wrong staging inputs.
+
+For diagnostic collection only, operators can override that guard:
+
+```bash
+pnpm collect:phase-zero-six-evidence -- \
+  --output-dir ./.temp/phase-zero-six-evidence/<run-id>-diagnostic \
+  --force
+```
+
+Do not use `--force` output to check boxes unless the normal evidence verifiers
+also report those boxes under `readyToCheck`.
+
 The bundle runner writes:
 
 - `env-readiness.json`
