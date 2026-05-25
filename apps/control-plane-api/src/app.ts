@@ -131,6 +131,7 @@ const checkpointSessionSchema = z.object({
 });
 
 const routeTokenSchema = z.object({
+  projectId: z.string().uuid().optional(),
   workspaceId: z.string().uuid().optional(),
   sessionId: z.string().uuid().optional(),
   scopes: z.array(z.string().min(1)).default(['worker:read', 'worker:write']),
@@ -1171,9 +1172,20 @@ export function buildControlPlaneApp(
     }
 
     const input = routeTokenSchema.parse(request.body ?? {});
+    if (input.projectId) {
+      const project = repository.getProjectById(input.projectId);
+      if (!project || project.userId !== user.id) {
+        throw new HttpError(404, 'not_found', 'Project not found.');
+      }
+    }
+    let workspaceProjectId: string | null = null;
     if (input.workspaceId) {
       const workspace = repository.getWorkspaceById(input.workspaceId);
       if (!workspace || workspace.userId !== user.id || workspace.sandboxId !== sandbox.id) {
+        throw new HttpError(404, 'not_found', 'Workspace not found.');
+      }
+      workspaceProjectId = workspace.projectId;
+      if (input.projectId && workspace.projectId !== input.projectId) {
         throw new HttpError(404, 'not_found', 'Workspace not found.');
       }
     }
@@ -1185,7 +1197,18 @@ export function buildControlPlaneApp(
       if (session.status === 'archived' || session.status === 'deleted') {
         throw new HttpError(409, 'session_not_active', 'Session must be active before issuing a route token.');
       }
+      if (input.workspaceId && session.workspaceId !== input.workspaceId) {
+        throw new HttpError(404, 'not_found', 'Session not found.');
+      }
+      if (input.projectId && !input.workspaceId) {
+        const sessionWorkspace = repository.getWorkspaceById(session.workspaceId);
+        if (!sessionWorkspace || sessionWorkspace.projectId !== input.projectId) {
+          throw new HttpError(404, 'not_found', 'Session not found.');
+        }
+        workspaceProjectId = sessionWorkspace.projectId;
+      }
     }
+    const projectId = input.projectId ?? workspaceProjectId ?? undefined;
 
     const nowSeconds = Math.floor(Date.now() / 1000);
     const expiresAtSeconds = nowSeconds + config.routeTokenTtlSeconds;
@@ -1204,6 +1227,7 @@ export function buildControlPlaneApp(
     const token = createSignedToken(
       {
         ...payload,
+        ...(projectId ? { project_id: projectId } : {}),
         ...(input.workspaceId ? { workspace_id: input.workspaceId } : {}),
         ...(input.sessionId ? { session_id: input.sessionId } : {}),
       },
@@ -1212,6 +1236,7 @@ export function buildControlPlaneApp(
     );
 
     repository.audit(user.id, 'route_token.issued', 'sandbox', sandbox.id, {
+      projectId: projectId ?? null,
       workspaceId: input.workspaceId ?? null,
       sessionId: input.sessionId ?? null,
       scopes: input.scopes,

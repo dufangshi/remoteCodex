@@ -22,6 +22,7 @@ function routeToken(input: Partial<RouteTokenPayload> = {}) {
     iat: input.iat ?? nowSeconds,
     exp: input.exp ?? nowSeconds + 300,
     jti: input.jti ?? 'token_1',
+    ...(input.project_id ? { project_id: input.project_id } : {}),
     ...(input.workspace_id ? { workspace_id: input.workspace_id } : {}),
     ...(input.session_id ? { session_id: input.session_id } : {}),
   };
@@ -149,6 +150,7 @@ describe('sandbox router', () => {
     );
     const app = buildApp();
     const token = routeToken({
+      project_id: 'project_1',
       scopes: ['provider:turn:create', 'file:write'],
     });
 
@@ -177,6 +179,7 @@ describe('sandbox router', () => {
     expect(headers.get('authorization')).toBeNull();
     expect(headers.get('x-remote-codex-worker-token')).toBe('internal-worker-token');
     expect(headers.get('x-remote-codex-user')).toBe('user_1');
+    expect(headers.get('x-remote-codex-project')).toBe('project_1');
     expect(headers.get('x-remote-codex-sandbox')).toBe('sandbox_1');
     expect(headers.get('x-remote-codex-scopes')).toBe('file:write,provider:turn:create');
     expect(headers.get('x-remote-codex-signature')).toEqual(expect.any(String));

@@ -20,6 +20,7 @@ function sign(input: string, secret: string): string {
 
 export interface RouteTokenPayload extends SignedTokenPayload {
   sandbox_id: string;
+  project_id?: string;
   workspace_id?: string;
   session_id?: string;
   scopes: string[];

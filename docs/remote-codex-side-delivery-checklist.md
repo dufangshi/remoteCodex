@@ -415,7 +415,7 @@ router-injected internal worker token.
 - [x] Add route-token signing key rotation strategy.
 - [x] Add expiry/tamper/wrong-sandbox tests.
 - [ ] Add revocation strategy if required before launch.
-- [ ] Include project/workspace/session scopes when opening a session.
+- [x] Include project/workspace/session scopes when opening a session.
 
 ### Control Plane API
 
@@ -456,7 +456,7 @@ router-injected internal worker token.
 - [x] Show reconnecting state.
 - [ ] Reconnect WebSocket after token refresh.
 - [ ] Show sandbox offline state from router failures.
-- [ ] Add tests proving route tokens are not persisted in local storage.
+- [x] Add tests proving route tokens are not persisted in local storage.
 
 ### Verification
 

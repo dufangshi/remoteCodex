@@ -44,7 +44,7 @@ export function workerIdentityHeadersForRouteToken(
 ) {
   const envelope: WorkerIdentityEnvelope = {
     userId: payload.sub,
-    projectId: null,
+    projectId: payload.project_id ?? null,
     sandboxId: payload.sandbox_id,
     scopes: [...payload.scopes].sort(),
     expiresAt: new Date(payload.exp * 1000).toISOString(),
@@ -53,6 +53,7 @@ export function workerIdentityHeadersForRouteToken(
 
   return {
     [WORKER_IDENTITY_HEADERS.user]: envelope.userId,
+    ...(envelope.projectId ? { [WORKER_IDENTITY_HEADERS.project]: envelope.projectId } : {}),
     [WORKER_IDENTITY_HEADERS.sandbox]: envelope.sandboxId,
     [WORKER_IDENTITY_HEADERS.scopes]: envelope.scopes.join(','),
     [WORKER_IDENTITY_HEADERS.expiresAt]: envelope.expiresAt,

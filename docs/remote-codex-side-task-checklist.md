@@ -1043,7 +1043,7 @@ token.
 - [x] Audit route-token issuance.
 - [x] Check user quota before issuing route tokens.
 - [x] Check account status before issuing route tokens.
-- [ ] Include project, workspace, and session scopes when requested.
+- [x] Include project, workspace, and session scopes when requested.
 - [x] Reject route-token requests for archived sessions.
 
 ### Router Implementation
@@ -1075,7 +1075,7 @@ token.
 - [ ] Show sandbox offline state.
 - [x] Show route authorization failure state.
 - [x] Show reconnecting state.
-- [ ] Avoid persisting route tokens in local storage.
+- [x] Avoid persisting route tokens in local storage.
 
 ### Verification
 

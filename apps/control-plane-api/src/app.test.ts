@@ -540,18 +540,31 @@ describe('control plane api', () => {
     expect(start.statusCode).toBe(200);
     expect(start.json().sandbox.state).toBe('running');
 
-    const workspaceResponse = await app.inject({
+    const projectResponse = await app.inject({
       method: 'POST',
-      url: '/api/workspaces',
+      url: '/api/projects',
       headers: auth,
       payload: {
         name: 'Project A',
         slug: 'project-a',
       },
     });
+    expect(projectResponse.statusCode).toBe(200);
+    const project = projectResponse.json().project;
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${project.id}/workspaces`,
+      headers: auth,
+      payload: {
+        name: 'Workspace A',
+        slug: 'workspace-a',
+      },
+    });
     expect(workspaceResponse.statusCode).toBe(200);
     const workspace = workspaceResponse.json().workspace;
-    expect(workspace.path).toBe('/workspace/project-a');
+    expect(workspace.projectId).toBe(project.id);
+    expect(workspace.path).toBe('/workspace/workspace-a');
 
     const sessionResponse = await app.inject({
       method: 'POST',
@@ -571,6 +584,7 @@ describe('control plane api', () => {
       url: `/api/sandboxes/${sandbox.id}/route-token`,
       headers: auth,
       payload: {
+        projectId: project.id,
         workspaceId: workspace.id,
         sessionId: session.id,
         scopes: ['worker:read', 'worker:write', 'session:prompt'],
@@ -590,6 +604,7 @@ describe('control plane api', () => {
     expect(verify.json().payload).toMatchObject({
       sub: user.id,
       sandbox_id: sandbox.id,
+      project_id: project.id,
       workspace_id: workspace.id,
       session_id: session.id,
       scopes: ['worker:read', 'worker:write', 'session:prompt'],
@@ -617,6 +632,101 @@ describe('control plane api', () => {
       url: `/api/route-token/verify?token=${encodeURIComponent(`${route.token}x`)}`,
     });
     expect(tamperedVerify.statusCode).toBe(401);
+  });
+
+  it('refuses route tokens when project, workspace, and session scopes do not match', async () => {
+    const app = buildControlPlaneApp({ env: testEnv('route-token-scope-mismatch') });
+    apps.push(app);
+
+    const auth = { authorization: 'Bearer dev:scope-user' };
+    const bootstrap = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: auth,
+      payload: {
+        email: 'scope@example.com',
+      },
+    });
+    const sandbox = bootstrap.json().sandbox;
+    await app.inject({
+      method: 'POST',
+      url: '/api/sandbox/start',
+      headers: auth,
+    });
+
+    const projectA = await app.inject({
+      method: 'POST',
+      url: '/api/projects',
+      headers: auth,
+      payload: {
+        name: 'Project A',
+        slug: 'project-a',
+      },
+    });
+    const projectB = await app.inject({
+      method: 'POST',
+      url: '/api/projects',
+      headers: auth,
+      payload: {
+        name: 'Project B',
+        slug: 'project-b',
+      },
+    });
+
+    const workspaceA = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectA.json().project.id}/workspaces`,
+      headers: auth,
+      payload: {
+        name: 'Workspace A',
+        slug: 'workspace-a',
+      },
+    });
+    const workspaceB = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectB.json().project.id}/workspaces`,
+      headers: auth,
+      payload: {
+        name: 'Workspace B',
+        slug: 'workspace-b',
+      },
+    });
+
+    const sessionA = await app.inject({
+      method: 'POST',
+      url: `/api/workspaces/${workspaceA.json().workspace.id}/sessions`,
+      headers: auth,
+      payload: {
+        provider: 'codex',
+        title: 'Session A',
+      },
+    });
+
+    const wrongProject = await app.inject({
+      method: 'POST',
+      url: `/api/sandboxes/${sandbox.id}/route-token`,
+      headers: auth,
+      payload: {
+        projectId: projectB.json().project.id,
+        workspaceId: workspaceA.json().workspace.id,
+        sessionId: sessionA.json().session.id,
+      },
+    });
+    expect(wrongProject.statusCode).toBe(404);
+    expect(wrongProject.json().message).toBe('Workspace not found.');
+
+    const wrongWorkspace = await app.inject({
+      method: 'POST',
+      url: `/api/sandboxes/${sandbox.id}/route-token`,
+      headers: auth,
+      payload: {
+        projectId: projectA.json().project.id,
+        workspaceId: workspaceB.json().workspace.id,
+        sessionId: sessionA.json().session.id,
+      },
+    });
+    expect(wrongWorkspace.statusCode).toBe(404);
+    expect(wrongWorkspace.json().message).toBe('Workspace not found.');
   });
 
   it('supports route-token signing key rotation', async () => {

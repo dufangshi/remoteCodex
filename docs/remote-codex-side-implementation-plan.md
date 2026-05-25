@@ -438,6 +438,7 @@ control-plane-issued route tokens and router-injected worker identity.
 - [x] Return `routerBaseUrl`, `wsBaseUrl`, and `expiresAt`.
 - [x] Audit route-token issuance.
 - [x] Check user quota before issuing route tokens.
+- [x] Include project, workspace, and session scopes when requested.
 - [x] Return a stable quota-exceeded API error shape.
 
 ### Router Checklist
@@ -466,6 +467,7 @@ control-plane-issued route tokens and router-injected worker identity.
 - [x] Fetch route token before opening a worker session.
 - [x] Store route token only in memory.
 - [x] Refresh route token before expiry.
+- [x] Avoid persisting route tokens in local storage.
 - [ ] Reconnect worker WebSocket after token refresh.
 - [x] Show route authorization failure state.
 - [x] Show reconnecting state during route refresh or WebSocket reconnect.

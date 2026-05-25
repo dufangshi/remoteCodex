@@ -471,12 +471,12 @@ router-injected internal worker identity.
     deferred with a short TTL risk note.
   - Verification: revocation tests pass, or release notes document deferral.
 
-- [ ] Include project/workspace/session scopes when opening a session.
+- [x] Include project/workspace/session scopes when opening a session.
   - Acceptance: route tokens can be scoped to the selected project, workspace,
     and session.
   - Verification: control-plane and router tests cover session-scoped tokens.
 
-- [ ] Add tests proving route tokens are not persisted in local storage.
+- [x] Add tests proving route tokens are not persisted in local storage.
   - Acceptance: frontend stores route tokens only in memory.
   - Verification: frontend tests assert no local/session storage writes.
 
@@ -507,9 +507,22 @@ router-injected internal worker identity.
 
 ### Evidence
 
-- Files:
+- Files: `packages/shared/src/tokens.ts`,
+  `apps/control-plane-api/src/app.ts`,
+  `apps/control-plane-api/src/app.test.ts`,
+  `apps/sandbox-router/src/worker-identity.ts`,
+  `apps/sandbox-router/src/app.test.ts`,
+  `apps/supervisor-web/src/pages/ControlPlanePage.tsx`,
+  `apps/supervisor-web/src/pages/ControlPlanePage.test.tsx`
 - Verification:
-- Residual risk:
+  `pnpm --filter @remote-codex/control-plane-api typecheck`,
+  `pnpm --filter @remote-codex/control-plane-api test`,
+  `pnpm --filter @remote-codex/sandbox-router typecheck`,
+  `pnpm --filter @remote-codex/sandbox-router test`,
+  `pnpm --filter @remote-codex/supervisor-web typecheck`,
+  `pnpm --filter @remote-codex/supervisor-web test`
+- Residual risk: staging direct-worker-denial and browser-to-router-to-worker
+  smoke checks are still unchecked until a staging environment is exercised.
 
 ## Phase 6: LLM Gateway Integration
 

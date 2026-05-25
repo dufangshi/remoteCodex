@@ -448,7 +448,7 @@ export function fetchControlPlaneAdminSandboxDetail(
 export function createControlPlaneRouteToken(
   auth: ControlPlaneAuth,
   sandboxId: string,
-  input: { workspaceId?: string; sessionId?: string; scopes?: string[] },
+  input: { projectId?: string; workspaceId?: string; sessionId?: string; scopes?: string[] },
 ) {
   return controlPlaneRequest<ControlPlaneRouteToken>(
     auth,

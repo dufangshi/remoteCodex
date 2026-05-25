@@ -59,6 +59,8 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 - Worker mode disables host/provider management APIs that should not be exposed
   in sandbox runtime.
 - Route-token signing supports key ids and previous-key verification.
+- Route tokens carry validated project, workspace, and session scopes, and the
+  sandbox router forwards project scope in the signed worker identity envelope.
 - Local worker-process sandbox adapter exists for development.
 - Phase-one AWS runtime decision is EKS Fargate with one Pod per active user
   sandbox.
@@ -69,7 +71,8 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   staging verification has not run yet.
 - AWS sandbox adapter implementation.
 - Frontend auth shell, login states, and admin user management.
-- Browser-to-worker route-token connection flow.
+- Browser-to-worker route-token connection flow; route token issuance and
+  refresh are in place, while staging router smoke checks remain open.
 - Worker image runtime pinning and smoke verification.
 - LLM gateway provisioning, worker provider config rendering, and usage import.
 - ElAgenteHarness credential provisioning and worker bootstrap.

@@ -473,12 +473,16 @@ export function ControlPlanePage() {
     }
     return run('Create route token', async () => {
       const routeTokenInput: {
+        projectId?: string;
         workspaceId?: string;
         sessionId?: string;
         scopes: string[];
       } = {
         scopes: ['worker:read', 'worker:write', 'session:prompt'],
       };
+      if (selectedProject?.id) {
+        routeTokenInput.projectId = selectedProject.id;
+      }
       if (selectedWorkspaceId) {
         routeTokenInput.workspaceId = selectedWorkspaceId;
       }

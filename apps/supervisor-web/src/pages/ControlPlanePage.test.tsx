@@ -6,6 +6,13 @@ import { ControlPlanePage } from './ControlPlanePage';
 
 const baseUrl = 'http://127.0.0.1:8790';
 
+function storageSnapshot(storage: Storage) {
+  return Array.from({ length: storage.length }, (_, index) => {
+    const key = storage.key(index);
+    return key ? [key, storage.getItem(key)] : null;
+  }).filter(Boolean);
+}
+
 const user = {
   id: 'user-1',
   authProvider: 'dev',
@@ -314,15 +321,15 @@ describe('ControlPlanePage', () => {
       expect(screen.getByText('wss://router.example.test')).toBeInTheDocument();
     });
 
-    expect(window.localStorage.getItem('remote-codex-control-plane-auth')).not.toContain(
-      'route-token',
-    );
+    expect(JSON.stringify(storageSnapshot(window.localStorage))).not.toContain('route-token');
+    expect(JSON.stringify(storageSnapshot(window.sessionStorage))).not.toContain('route-token');
 
     const routeTokenCall = vi.mocked(fetch).mock.calls.find(
       ([input]) => String(input) === `${baseUrl}/api/sandboxes/sandbox-1/route-token`,
     );
     expect(routeTokenCall).toBeDefined();
     expect(JSON.parse(String(routeTokenCall?.[1]?.body))).toEqual({
+      projectId: 'project-1',
       workspaceId: 'workspace-1',
       sessionId: 'session-1',
       scopes: ['worker:read', 'worker:write', 'session:prompt'],
@@ -470,9 +477,8 @@ describe('ControlPlanePage', () => {
     await waitFor(() => {
       expect(screen.getByText('Route token is available in memory.')).toBeInTheDocument();
     });
-    expect(window.localStorage.getItem('remote-codex-control-plane-auth')).not.toContain(
-      'route-token-2',
-    );
+    expect(JSON.stringify(storageSnapshot(window.localStorage))).not.toContain('route-token-2');
+    expect(JSON.stringify(storageSnapshot(window.sessionStorage))).not.toContain('route-token-2');
   }, 9000);
 
   it('stores only local dev auth settings and keeps route tokens in memory', async () => {
