@@ -305,15 +305,15 @@ Verification:
 - [x] Validate gateway environment when provider runtimes are enabled.
 - [x] Validate ElAgenteHarness environment when chemistry tools are enabled.
 - [x] Validate MCP config path and permissions.
-- [ ] Build the worker image locally from a clean checkout.
-- [ ] Run the worker container locally and verify `/readyz`.
+- [x] Build the worker image locally from a clean checkout.
+- [x] Run the worker container locally and verify `/readyz`.
 
 Verification:
 
 - [x] Supervisor API typecheck passes.
 - [x] Config typecheck passes.
-- [ ] `docker build -f Dockerfile.worker -t remote-codex-worker:verify .`
-- [ ] Local worker container smoke test passes.
+- [x] `docker build -f Dockerfile.worker -t remote-codex-worker:verify .`
+- [x] Local worker container smoke test passes.
 
 ### G. Worker API Authorization And Scope Policy
 
@@ -1005,10 +1005,10 @@ required identity, filesystem, or token settings are missing.
 - [x] `pnpm --filter @remote-codex/supervisor-api typecheck`
 - [x] `pnpm --filter @remote-codex/config typecheck`
 - [x] `pnpm --filter @remote-codex/supervisor-api test`
-- [ ] `docker build -f Dockerfile.worker -t remote-codex-worker:verify .`
-- [ ] Run the worker container locally and verify `/readyz`.
-- [ ] Verify the worker rejects non-health requests without token.
-- [ ] Verify the worker accepts non-health requests with the internal token.
+- [x] `docker build -f Dockerfile.worker -t remote-codex-worker:verify .`
+- [x] Run the worker container locally and verify `/readyz`.
+- [x] Verify the worker rejects non-health requests without token.
+- [x] Verify the worker accepts non-health requests with the internal token.
 
 ## Phase 5: Sandbox Router And Route Tokens
 

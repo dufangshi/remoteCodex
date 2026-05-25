@@ -348,8 +348,8 @@ Goal: the sandbox worker image is reproducible, non-root, scoped to
 - [x] Put provider homes under `/home/agent`.
 - [x] Listen on `0.0.0.0`.
 - [x] Add build-time provider runtime manifest.
-- [ ] Build the worker image locally from a clean checkout.
-- [ ] Run the worker container locally and verify `/readyz`.
+- [x] Build the worker image locally from a clean checkout.
+- [x] Run the worker container locally and verify `/readyz`.
 - [ ] Push an immutable image tag to the chosen registry.
 
 ### Startup Guardrail Checklist
@@ -404,9 +404,9 @@ Goal: the sandbox worker image is reproducible, non-root, scoped to
 - [x] Worker token auth tests pass.
 - [x] Disabled management-route tests pass.
 - [x] Scope-denial tests cover checked protected routes.
-- [ ] `docker build -f Dockerfile.worker -t remote-codex-worker:verify .`
+- [x] `docker build -f Dockerfile.worker -t remote-codex-worker:verify .`
   passes.
-- [ ] Local worker container smoke test passes.
+- [x] Local worker container smoke test passes.
 
 ## Phase 5: Sandbox Router And Route Tokens
 

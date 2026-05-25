@@ -272,11 +272,11 @@ configuration is unsafe.
 
 ### Image Build And Smoke
 
-- [ ] Build the worker image locally from a clean checkout.
+- [x] Build the worker image locally from a clean checkout.
   - Done when `Dockerfile.worker` builds without relying on local dirty files.
   - Verify with `docker build -f Dockerfile.worker -t remote-codex-worker:verify .`.
 
-- [ ] Run the worker image locally and verify `/readyz`.
+- [x] Run the worker image locally and verify `/readyz`.
   - Done when the built image starts in worker mode with minimal required env
     and returns healthy readiness.
   - Verify with local container smoke output.
@@ -311,12 +311,12 @@ configuration is unsafe.
   - Done when worker APIs cannot resolve project paths outside `/workspace`.
   - Verify with path traversal tests, including symlink cases if supported.
 
-- [ ] Add local worker auth denial smoke.
+- [x] Add local worker auth denial smoke.
   - Done when non-health worker routes reject requests without the internal
     worker token.
   - Verify with local container smoke.
 
-- [ ] Add local worker auth success smoke.
+- [x] Add local worker auth success smoke.
   - Done when non-health worker routes accept the router-injected worker token
     and valid identity envelope.
   - Verify with local container smoke.

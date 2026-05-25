@@ -345,8 +345,8 @@ required identity, filesystem, gateway, or harness settings are unsafe.
 - [x] Listen on `0.0.0.0`.
 - [x] Add build-time provider runtime manifest.
 - [x] Add safe worker runtime metadata endpoint.
-- [ ] Build the worker image locally from a clean checkout.
-- [ ] Run the worker container locally and verify `/readyz`.
+- [x] Build the worker image locally from a clean checkout.
+- [x] Run the worker container locally and verify `/readyz`.
 - [ ] Add CI worker image build.
 - [ ] Add CI worker `/readyz` smoke.
 
@@ -393,9 +393,9 @@ required identity, filesystem, gateway, or harness settings are unsafe.
 - [x] Supervisor API typecheck passes.
 - [x] Config typecheck passes.
 - [x] Worker auth and scope tests pass.
-- [ ] `docker build -f Dockerfile.worker -t remote-codex-worker:verify .`
-- [ ] Local worker container smoke verifies `/readyz`.
-- [ ] Local worker container smoke verifies non-health auth denial/success.
+- [x] `docker build -f Dockerfile.worker -t remote-codex-worker:verify .`
+- [x] Local worker container smoke verifies `/readyz`.
+- [x] Local worker container smoke verifies non-health auth denial/success.
 
 ## Phase 5: Sandbox Router And Route Tokens
 
@@ -878,7 +878,7 @@ The first usable product phase is complete only when all of these are checked:
 - [ ] 8. Implement harness credential table, key generation, rotation, and
   revocation.
 - [ ] 9. Define MCP registry and render provider MCP configs.
-- [ ] 10. Build and smoke-test the worker Docker image.
+- [x] 10. Build and smoke-test the worker Docker image.
 - [ ] 11. Add staging start/stop sandbox smoke.
 - [x] 12. Add LLM usage import and user usage UI.
 - [ ] 13. Add harness workflow/task UI and harness usage import.

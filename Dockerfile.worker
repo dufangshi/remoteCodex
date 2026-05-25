@@ -57,7 +57,7 @@ RUN pnpm install --frozen-lockfile \
 
 RUN useradd --create-home --home-dir /home/agent --shell /bin/bash agent \
   && mkdir -p /workspace /home/agent/.remote-codex /home/agent/.codex /home/agent/.claude /home/agent/.opencode \
-  && chown -R agent:agent /workspace /home/agent/.remote-codex /home/agent/.codex /home/agent/.claude /home/agent/.opencode
+  && chown -R agent:agent /workspace /home/agent
 
 RUN npm install -g \
     "@openai/codex@${OPENAI_CODEX_VERSION}" \

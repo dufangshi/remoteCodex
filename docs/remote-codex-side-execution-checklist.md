@@ -417,12 +417,12 @@ identity, filesystem, provider, MCP, gateway, or harness settings are unsafe.
 
 ### Image Tasks
 
-- [ ] Build the worker image locally from a clean checkout.
+- [x] Build the worker image locally from a clean checkout.
   - Acceptance: `Dockerfile.worker` builds without depending on local dirty
     files.
   - Verification: `docker build -f Dockerfile.worker -t remote-codex-worker:verify .`
 
-- [ ] Run the worker container locally and verify `/readyz`.
+- [x] Run the worker container locally and verify `/readyz`.
   - Acceptance: the built image starts in worker mode with minimal required
     env and returns healthy readiness.
   - Verification: local container smoke captures `/readyz`.
@@ -458,20 +458,27 @@ identity, filesystem, provider, MCP, gateway, or harness settings are unsafe.
     the appropriate identity-envelope scopes.
   - Verification: worker tests cover missing, wrong, and valid scopes.
 
-- [ ] Add local worker container auth denial smoke.
+- [x] Add local worker container auth denial smoke.
   - Acceptance: non-health routes reject requests without an internal token.
   - Verification: local smoke captures `401` or `403`.
 
-- [ ] Add local worker container auth success smoke.
+- [x] Add local worker container auth success smoke.
   - Acceptance: non-health routes accept the internal worker token and valid
     identity envelope where required.
   - Verification: local smoke captures successful response.
 
 ### Evidence
 
-- Files:
-- Verification:
-- Residual risk:
+- Files: `Dockerfile.worker`, `apps/supervisor-api/src/worker-index.ts`,
+  `apps/supervisor-api/src/worker-environment.ts`,
+  `apps/supervisor-api/src/app.ts`
+- Verification: `docker build -f Dockerfile.worker -t remote-codex-worker:verify .`;
+  `docker run -d --name remote-codex-worker-verify-smoke -p 127.0.0.1:18787:8787 ... remote-codex-worker:verify`;
+  `curl -fsS http://127.0.0.1:18787/readyz`;
+  `curl -sS -o /tmp/remote-codex-worker-denied.json -w '%{http_code}' http://127.0.0.1:18787/api/worker/metadata`;
+  `curl -sS -H 'x-remote-codex-worker-token: router-secret' http://127.0.0.1:18787/api/worker/metadata`
+- Residual risk: CI worker image build and CI worker `/readyz` smoke remain
+  unchecked; artifact read/write scope checks are still open.
 
 ## Phase 5: Sandbox Router And Route Tokens
 

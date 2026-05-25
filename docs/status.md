@@ -84,7 +84,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 - Browser-to-worker route-token connection flow; route token issuance, refresh,
   browser WebSocket connection, and reconnect are in place, while staging router
   smoke checks remain open.
-- Worker image runtime pinning and smoke verification.
+- Worker image runtime pinning, local Docker build, local `/readyz` smoke, and
+  local worker auth denial/success smoke are verified. CI image checks remain
+  open.
 - LLM gateway contract is fixed on a sub2api-compatible shape; provisioning,
   provider selection config, worker provider config rendering, manual usage
   import, gateway usage-export adapter, frontend degraded state, LLM usage
@@ -104,7 +106,7 @@ gateway, ElAgenteHarness, or chemistry compute workers.
    valid, expired, wrong-issuer, and wrong-audience tokens.
 2. Add staging lifecycle smokes for start, stop, idempotent restart, and
    readiness.
-3. Build and smoke-test the worker Docker image, then add CI image checks.
+3. Add CI worker image build plus CI `/readyz` and worker auth smokes.
 4. Run staging provider-runtime gateway smokes for Codex, Claude Code, and
    OpenCode.
 
