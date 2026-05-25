@@ -597,6 +597,64 @@ describe('phase zero-six evidence tooling', () => {
     expect(result.stdout).not.toContain('secret-admin-jwt-value');
   });
 
+  it('accepts private router-only worker denial readiness without a public worker URL', async () => {
+    const result = await runScriptWithEnv(
+      'scripts/verify-phase-zero-six-env-ready.ts',
+      [],
+      {
+        STAGING_DIRECT_WORKER_PRIVATE_REVIEWED_BY: 'operator@example.test',
+        STAGING_DIRECT_WORKER_NETWORK_MODE: 'private',
+        STAGING_DIRECT_WORKER_INGRESS_POLICY: 'router-only',
+        STAGING_DIRECT_WORKER_PRIVATE_PROOF: 'eks private service has no public ingress',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+    const directGroup = parsed.groups.find((group: { id: string }) =>
+      group.id === 'direct-worker-denial',
+    );
+
+    expect(directGroup.ready).toBe(true);
+    expect(directGroup.missingEnv).toEqual([]);
+    expect(directGroup.presentEnvNamesOnly).toEqual([
+      'STAGING_DIRECT_WORKER_INGRESS_POLICY',
+      'STAGING_DIRECT_WORKER_NETWORK_MODE',
+      'STAGING_DIRECT_WORKER_PRIVATE_PROOF',
+      'STAGING_DIRECT_WORKER_PRIVATE_REVIEWED_BY',
+    ]);
+    expect(result.stdout).not.toContain('eks private service has no public ingress');
+  });
+
+  it('accepts private router-only direct worker denial evidence for R5.11', async () => {
+    const dir = await tempDir();
+    const stagingPath = path.join(dir, 'staging.json');
+    const evidence = completeStagingSmokeEvidence();
+    evidence.steps = evidence.steps.filter((step) => step.name !== 'direct_worker_denial');
+    const steps = evidence.steps as Array<{
+      name: string;
+      ok: boolean;
+      details?: Record<string, unknown>;
+    }>;
+    steps.push({
+      name: 'direct_worker_private_denial',
+      ok: true,
+      details: {
+        reviewedBy: 'operator@example.test',
+        networkMode: 'private',
+        ingressPolicy: 'router-only',
+        proof: 'EKS worker service is ClusterIP-only and reachable only through sandbox-router.',
+      },
+    });
+    await writeFile(stagingPath, JSON.stringify(evidence, null, 2));
+
+    const result = await runScript('scripts/verify-staging-phase-one-evidence.ts', [stagingPath]);
+    const parsed = JSON.parse(result.stdout);
+    const r511 = parsed.results.find((entry: { item: string }) => entry.item === 'R5.11');
+
+    expect(result.exitCode).toBe(0);
+    expect(r511.readyToCheck).toBe(true);
+    expect(r511.matchedSteps).toEqual(['direct_worker_private_denial']);
+  });
+
   it('stops bundle collection after env readiness failure unless forced', async () => {
     const dir = await tempDir();
     const result = await runScript('scripts/run-phase-zero-six-staging-evidence.ts', [

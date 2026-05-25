@@ -14,6 +14,14 @@ interface EnvGroup {
   required: EnvRequirement[];
   recommended?: EnvRequirement[];
   warnings?: string[];
+  readinessOverride?: (input: {
+    missingRequired: EnvRequirement[];
+    presentEnvNamesOnly: string[];
+  }) => {
+    ready: boolean;
+    missingRequired: EnvRequirement[];
+    presentEnvNamesOnly?: string[];
+  };
 }
 
 function envValue(name: string) {
@@ -243,13 +251,42 @@ const groups: EnvGroup[] = [
     required: [
       {
         id: 'direct-worker-url',
-        description: 'Worker base URL used only to prove direct access is denied.',
-        names: ['STAGING_DIRECT_WORKER_BASE_URL'],
+        description: 'Worker base URL used to prove direct access is denied, or private-network proof env when no worker public endpoint exists.',
+        names: [
+          'STAGING_DIRECT_WORKER_BASE_URL',
+          'STAGING_DIRECT_WORKER_PRIVATE_REVIEWED_BY',
+          'STAGING_DIRECT_WORKER_NETWORK_MODE',
+          'STAGING_DIRECT_WORKER_INGRESS_POLICY',
+          'STAGING_DIRECT_WORKER_PRIVATE_PROOF',
+        ],
+        mode: 'any',
         example: 'https://<direct-worker-endpoint>',
       },
     ],
+    readinessOverride(input) {
+      const directUrlReady = Boolean(envValue('STAGING_DIRECT_WORKER_BASE_URL'));
+      const privateProofReady =
+        Boolean(envValue('STAGING_DIRECT_WORKER_PRIVATE_REVIEWED_BY')) &&
+        envValue('STAGING_DIRECT_WORKER_NETWORK_MODE') === 'private' &&
+        envValue('STAGING_DIRECT_WORKER_INGRESS_POLICY') === 'router-only' &&
+        Boolean(envValue('STAGING_DIRECT_WORKER_PRIVATE_PROOF'));
+      const privateNames = [
+        'STAGING_DIRECT_WORKER_PRIVATE_REVIEWED_BY',
+        'STAGING_DIRECT_WORKER_NETWORK_MODE',
+        'STAGING_DIRECT_WORKER_INGRESS_POLICY',
+        'STAGING_DIRECT_WORKER_PRIVATE_PROOF',
+      ].filter((name) => Boolean(envValue(name)));
+      return {
+        ready: directUrlReady || privateProofReady,
+        missingRequired: directUrlReady || privateProofReady ? [] : input.missingRequired,
+        presentEnvNamesOnly: Array.from(new Set([
+          ...input.presentEnvNamesOnly,
+          ...privateNames,
+        ])).sort(),
+      };
+    },
     warnings: [
-      'If workers are not publicly addressable by design, capture equivalent ingress/security-group denial evidence before checking R5.11.',
+      'When workers are public, set STAGING_DIRECT_WORKER_BASE_URL and capture a 401/403 direct request. When workers are private by design, set STAGING_DIRECT_WORKER_PRIVATE_REVIEWED_BY, STAGING_DIRECT_WORKER_NETWORK_MODE=private, STAGING_DIRECT_WORKER_INGRESS_POLICY=router-only, and STAGING_DIRECT_WORKER_PRIVATE_PROOF.',
     ],
   },
   {
@@ -329,19 +366,25 @@ function evaluateGroup(group: EnvGroup) {
   ])).sort();
   const missingRequiredTemplate = missingRequired.map(exportLine);
   const missingRecommendedTemplate = missingRecommended.map(exportLine);
+  const override = group.readinessOverride?.({
+    missingRequired,
+    presentEnvNamesOnly,
+  });
+  const effectiveMissingRequired = override?.missingRequired ?? missingRequired;
+  const effectivePresentEnvNamesOnly = override?.presentEnvNamesOnly ?? presentEnvNamesOnly;
 
   return {
     id: group.id,
     title: group.title,
     items: group.items,
-    ready: missingRequired.length === 0,
+    ready: override?.ready ?? missingRequired.length === 0,
     requiredEnv,
-    missingEnv: missingRequired.map(requirementLabel),
+    missingEnv: effectiveMissingRequired.map(requirementLabel),
     recommendedEnv,
     missingRecommendedEnv: missingRecommended.map(requirementLabel),
-    missingRequiredExportTemplate: missingRequiredTemplate,
+    missingRequiredExportTemplate: effectiveMissingRequired.map(exportLine),
     missingRecommendedExportTemplate: missingRecommendedTemplate,
-    presentEnvNamesOnly,
+    presentEnvNamesOnly: effectivePresentEnvNamesOnly,
     warnings: group.warnings ?? [],
   };
 }

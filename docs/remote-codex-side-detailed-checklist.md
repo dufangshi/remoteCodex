@@ -847,7 +847,10 @@ router-injected worker identity.
   non-secret worker request diagnostics proving browser `Authorization`
   stripping and worker-token injection.
   Run `pnpm verify:staging-phase-one-evidence -- <smoke-json>` before marking
-  these staging router boxes complete.
+  these staging router boxes complete. R5.11 can be proven either by
+  `direct_worker_denial` returning `401` or `403` from a public worker endpoint,
+  or by `direct_worker_private_denial` showing workers are private and ingress
+  is router-only when there is intentionally no public worker endpoint.
 
 ## Phase 6: LLM Gateway And Provider Runtime Bootstrap
 

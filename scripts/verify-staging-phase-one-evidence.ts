@@ -197,6 +197,7 @@ export function evaluateStagingPhaseOneEvidence(report: SmokeReport): ChecklistR
   const routerHealth = steps.get('router_health');
   const browserProxy = steps.get('browser_to_router_to_worker');
   const directDenial = steps.get('direct_worker_denial');
+  const privateDirectDenial = steps.get('direct_worker_private_denial');
 
   const results: ChecklistResult[] = [];
 
@@ -356,25 +357,36 @@ export function evaluateStagingPhaseOneEvidence(report: SmokeReport): ChecklistR
 
   const directStatus = directDenial?.details?.status;
   const directReady = directDenial?.ok === true && (directStatus === 401 || directStatus === 403);
-  results.push(directReady
+  const privateDirectReady =
+    privateDirectDenial?.ok === true &&
+    privateDirectDenial.details?.networkMode === 'private' &&
+    privateDirectDenial.details?.ingressPolicy === 'router-only' &&
+    typeof privateDirectDenial.details?.reviewedBy === 'string' &&
+    typeof privateDirectDenial.details?.proof === 'string';
+  results.push(directReady || privateDirectReady
     ? ready({
       item: 'R5.11',
       title: 'Add direct-worker-denial proof.',
-      reason: 'Staging evidence shows direct worker access denied without router-injected token.',
-      matchedSteps: ['direct_worker_denial'],
+      reason: directReady
+        ? 'Staging evidence shows direct worker access denied without router-injected token.'
+        : 'Staging evidence shows workers are private and ingress is router-only.',
+      matchedSteps: directReady ? ['direct_worker_denial'] : ['direct_worker_private_denial'],
       requiredEvidence: [
-        'direct_worker_denial.ok is true',
-        'direct_worker_denial.details.status is 401 or 403',
+        'Either direct_worker_denial.ok is true with status 401 or 403',
+        'Or direct_worker_private_denial.ok is true with networkMode private, ingressPolicy router-only, reviewedBy, and proof',
       ],
     })
     : notReady({
       item: 'R5.11',
       title: 'Add direct-worker-denial proof.',
-      reason: 'direct_worker_denial is missing or did not record a 401/403 denial.',
-      matchedSteps: directDenial ? ['direct_worker_denial'] : [],
+      reason: 'Direct worker denial evidence is missing or incomplete.',
+      matchedSteps: [
+        ...(directDenial ? ['direct_worker_denial'] : []),
+        ...(privateDirectDenial ? ['direct_worker_private_denial'] : []),
+      ],
       requiredEvidence: [
-        'direct_worker_denial.ok is true',
-        'direct_worker_denial.details.status is 401 or 403',
+        'Either direct_worker_denial.ok is true with status 401 or 403',
+        'Or direct_worker_private_denial.ok is true with networkMode private, ingressPolicy router-only, reviewedBy, and proof',
       ],
     }));
 

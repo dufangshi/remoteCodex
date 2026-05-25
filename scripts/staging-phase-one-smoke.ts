@@ -190,6 +190,22 @@ function parseOptionalJson(value: string): JsonObject | null {
   }
 }
 
+function privateWorkerDenialEvidence() {
+  const reviewedBy = envValue('STAGING_DIRECT_WORKER_PRIVATE_REVIEWED_BY');
+  const networkMode = envValue('STAGING_DIRECT_WORKER_NETWORK_MODE');
+  const ingressPolicy = envValue('STAGING_DIRECT_WORKER_INGRESS_POLICY');
+  const proof = envValue('STAGING_DIRECT_WORKER_PRIVATE_PROOF');
+  if (!reviewedBy && !networkMode && !ingressPolicy && !proof) {
+    return null;
+  }
+  return {
+    reviewedBy,
+    networkMode,
+    ingressPolicy,
+    proof,
+  };
+}
+
 async function waitForSandboxRunning(input: {
   productJwt: string;
   sandboxId: string;
@@ -543,6 +559,19 @@ async function main() {
         acceptedStatuses: [401, 403],
       },
     });
+  } else {
+    const privateProof = privateWorkerDenialEvidence();
+    if (privateProof) {
+      steps.push({
+        name: 'direct_worker_private_denial',
+        ok:
+          Boolean(privateProof.reviewedBy) &&
+          privateProof.networkMode === 'private' &&
+          privateProof.ingressPolicy === 'router-only' &&
+          Boolean(privateProof.proof),
+        details: privateProof,
+      });
+    }
   }
 
   for (const optional of [

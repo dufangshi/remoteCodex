@@ -147,7 +147,8 @@ This command reports readiness by evidence group:
 
 - AWS preflight env for S3.04 and S3.05.
 - Runtime smoke env for S3.06 through S3.08 and R5.10/R5.12.
-- Direct-worker-denial env for R5.11.
+- Direct-worker-denial env for R5.11, either direct worker URL denial or
+  private-network router-only proof.
 - Codex, Claude Code, and OpenCode provider smoke commands for G6.11 through
   G6.13.
 
@@ -178,6 +179,22 @@ STAGING_IDEMPOTENT_LIFECYCLE_SMOKE=1 \
 STAGING_STOP_SANDBOX_AFTER_SMOKE=1 \
 pnpm smoke:staging-phase-one
 ```
+
+If worker services are intentionally private and have no public worker endpoint,
+replace `STAGING_DIRECT_WORKER_BASE_URL` with private ingress proof:
+
+```bash
+STAGING_DIRECT_WORKER_PRIVATE_REVIEWED_BY=<operator-email> \
+STAGING_DIRECT_WORKER_NETWORK_MODE=private \
+STAGING_DIRECT_WORKER_INGRESS_POLICY=router-only \
+STAGING_DIRECT_WORKER_PRIVATE_PROOF="<non-secret cluster/service/ingress evidence>"
+```
+
+This emits `direct_worker_private_denial` instead of
+`direct_worker_denial`. The verifier accepts it for R5.11 only when the proof
+states that the worker network mode is private, ingress policy is router-only,
+and an operator identity reviewed the evidence. Do not put kubeconfig contents,
+AWS credentials, JWTs, or service tokens in the proof string.
 
 Optional provider runtime commands can be attached when the worker/gateway path
 is ready:
@@ -369,6 +386,11 @@ The important step-to-checkbox mapping is:
   available and direct worker access returns `401` or `403`. The response body
   may be JSON, plain text, HTML, or empty; the smoke records only status and
   accepted statuses for this proof.
+- `direct_worker_private_denial` proves R5.11 when workers are intentionally
+  private: it must record `networkMode: "private"`,
+  `ingressPolicy: "router-only"`, `reviewedBy`, and a non-secret proof string.
+  This is the expected proof path when EKS/Fargate workers have no public
+  endpoint and are reachable only through sandbox-router.
 - `codex_gateway_smoke`, `claude_gateway_smoke`, and
   `opencode_gateway_smoke` prove G6.11-G6.13 only when the command output also
   records a successful gateway usage event and confirms no provider root key is

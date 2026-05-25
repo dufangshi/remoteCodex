@@ -126,6 +126,10 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 - Staging stop evidence now polls sandbox health until `stopped`, and direct
   worker denial accepts `401` or `403`, including non-JSON denial bodies,
   aligning smoke output with the checklist verifier for S3.07 and R5.11.
+- R5.11 staging evidence also supports private router-only workers via
+  `direct_worker_private_denial`, so deployments that intentionally expose no
+  public worker endpoint can still prove direct-worker denial with reviewed
+  private ingress evidence.
 - Staging router deployment evidence now includes an explicit `router_health`
   step before browser-to-router-to-worker metadata resolution, strengthening
   R5.10 proof.
