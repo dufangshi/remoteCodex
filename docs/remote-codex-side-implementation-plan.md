@@ -369,7 +369,7 @@ Goal: the sandbox worker image is reproducible, non-root, scoped to
 - [x] Add startup metadata logs without secrets.
 - [x] Validate gateway environment when provider runtimes are enabled.
 - [x] Validate ElAgenteHarness environment when chemistry tools are enabled.
-- [ ] Validate MCP config path and permissions.
+- [x] Validate MCP config path and permissions.
 
 ### Worker Authorization Checklist
 

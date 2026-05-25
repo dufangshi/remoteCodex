@@ -363,7 +363,7 @@ required identity, filesystem, gateway, or harness settings are unsafe.
 - [x] Add startup metadata logs without secrets.
 - [x] Validate gateway env when provider runtimes are enabled.
 - [x] Validate ElAgenteHarness env when chemistry tools are enabled.
-- [ ] Validate MCP config path and permissions.
+- [x] Validate MCP config path and permissions.
 - [x] Redact harness key from startup logs.
 - [x] Redact gateway token from startup logs.
 

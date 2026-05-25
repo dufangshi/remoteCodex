@@ -6,6 +6,7 @@ const DEFAULT_ENABLED_PROVIDER_RUNTIMES = ['codex', 'claude', 'opencode'];
 export interface WorkerEnvironmentFilesystem {
   mkdirSync(path: string, options: { recursive: true; mode: number }): void;
   statSync(path: string): { isDirectory(): boolean };
+  existsSync(path: string): boolean;
   accessSync(path: string, mode: number): void;
 }
 
@@ -32,6 +33,29 @@ function ensureDirectory(filesystem: WorkerEnvironmentFilesystem, dir: string, n
   filesystem.accessSync(dir, fs.constants.R_OK | fs.constants.W_OK);
 }
 
+function assertPathInside(parent: string, child: string, name: string) {
+  const resolvedParent = path.resolve(parent);
+  const resolvedChild = path.resolve(child);
+  const relative = path.relative(resolvedParent, resolvedChild);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error(`${name} must be inside ${resolvedParent} in worker mode.`);
+  }
+}
+
+function ensureNotWorldWritable(
+  filesystem: WorkerEnvironmentFilesystem,
+  filePath: string,
+  name: string,
+) {
+  if (!filesystem.existsSync(filePath)) {
+    return;
+  }
+  const stat = filesystem.statSync(filePath);
+  if ('mode' in stat && typeof stat.mode === 'number' && (stat.mode & 0o002) !== 0) {
+    throw new Error(`${name} must not be world-writable in worker mode: ${filePath}`);
+  }
+}
+
 function enabledProviderRuntimes(env: NodeJS.ProcessEnv) {
   const raw = env.REMOTE_CODEX_ENABLED_AGENT_PROVIDERS;
   if (raw === undefined) {
@@ -45,6 +69,42 @@ function enabledProviderRuntimes(env: NodeJS.ProcessEnv) {
 
 function parseBoolean(value: string | undefined) {
   return value !== undefined && ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
+}
+
+function validateMcpConfigPaths(env: NodeJS.ProcessEnv, filesystem: WorkerEnvironmentFilesystem) {
+  const home = env.HOME ?? '/home/agent';
+  const providerConfigs = [
+    {
+      enabled: enabledProviderRuntimes(env).includes('codex'),
+      home: env.CODEX_HOME ?? path.join(home, '.codex'),
+      file: 'config.toml',
+      name: 'Codex MCP config path',
+    },
+    {
+      enabled: enabledProviderRuntimes(env).includes('claude'),
+      home: env.CLAUDE_HOME ?? path.join(home, '.claude'),
+      file: 'settings.json',
+      name: 'Claude MCP config path',
+    },
+    {
+      enabled: enabledProviderRuntimes(env).includes('opencode'),
+      home: env.OPENCODE_HOME ?? path.join(home, '.opencode'),
+      file: 'opencode.json',
+      name: 'OpenCode MCP config path',
+    },
+  ];
+
+  for (const config of providerConfigs) {
+    if (!config.enabled) {
+      continue;
+    }
+    assertPathInside(home, config.home, config.name);
+    ensureNotWorldWritable(
+      filesystem,
+      path.join(config.home, config.file),
+      config.name,
+    );
+  }
 }
 
 function validateGatewayEnvironment(env: NodeJS.ProcessEnv) {
@@ -90,6 +150,7 @@ export function validateWorkerEntrypointEnvironment(
   ensureDirectory(filesystem, env.CODEX_HOME ?? '/home/agent/.codex', 'CODEX_HOME');
   ensureDirectory(filesystem, env.CLAUDE_HOME ?? '/home/agent/.claude', 'CLAUDE_HOME');
   ensureDirectory(filesystem, env.OPENCODE_HOME ?? '/home/agent/.opencode', 'OPENCODE_HOME');
+  validateMcpConfigPaths(env, filesystem);
   validateGatewayEnvironment(env);
   validateHarnessEnvironment(env);
 }

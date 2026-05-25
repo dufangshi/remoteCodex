@@ -423,7 +423,7 @@ identity, filesystem, provider, MCP, gateway, or harness settings are unsafe.
 
 ### Startup Guardrail Tasks
 
-- [ ] Validate MCP config path and permissions.
+- [x] Validate MCP config path and permissions.
   - Acceptance: worker startup rejects missing, world-writable, or outside-home
     MCP config paths when MCP is enabled.
   - Verification: supervisor-api tests cover valid and invalid config paths.

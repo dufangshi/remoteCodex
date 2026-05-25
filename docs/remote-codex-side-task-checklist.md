@@ -304,7 +304,7 @@ Verification:
 - [x] Add startup metadata logs without secrets.
 - [x] Validate gateway environment when provider runtimes are enabled.
 - [x] Validate ElAgenteHarness environment when chemistry tools are enabled.
-- [ ] Validate MCP config path and permissions.
+- [x] Validate MCP config path and permissions.
 - [ ] Build the worker image locally from a clean checkout.
 - [ ] Run the worker container locally and verify `/readyz`.
 
@@ -979,7 +979,7 @@ required identity, filesystem, or token settings are missing.
 - [x] Add startup metadata logs without secrets.
 - [x] Validate gateway env when provider runtimes are enabled.
 - [x] Validate ElAgenteHarness env when chemistry tools are enabled.
-- [ ] Validate MCP config path and permissions.
+- [x] Validate MCP config path and permissions.
 
 ### Worker API Hardening
 

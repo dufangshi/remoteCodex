@@ -10,10 +10,14 @@ const fakeFilesystem: WorkerEnvironmentFilesystem = {
   mkdirSync() {},
   statSync() {
     return {
+      mode: 0o600,
       isDirectory() {
         return true;
       },
     };
+  },
+  existsSync() {
+    return false;
   },
   accessSync() {},
 };
@@ -75,6 +79,40 @@ describe('worker entrypoint environment validation', () => {
         fakeFilesystem,
       ),
     ).not.toThrow();
+  });
+
+  it('rejects worker MCP config homes outside HOME', () => {
+    expect(() =>
+      validateWorkerEntrypointEnvironment(
+        baseWorkerEnv({
+          CODEX_HOME: '/tmp/outside-codex',
+        }),
+        fakeFilesystem,
+      ),
+    ).toThrow('Codex MCP config path must be inside /home/agent in worker mode.');
+  });
+
+  it('rejects world-writable MCP provider config files', () => {
+    const filesystem: WorkerEnvironmentFilesystem = {
+      ...fakeFilesystem,
+      existsSync(filePath) {
+        return filePath === '/home/agent/.codex/config.toml';
+      },
+      statSync(filePath) {
+        return {
+          mode: filePath === '/home/agent/.codex/config.toml' ? 0o666 : 0o700,
+          isDirectory() {
+            return true;
+          },
+        };
+      },
+    };
+
+    expect(() =>
+      validateWorkerEntrypointEnvironment(baseWorkerEnv(), filesystem),
+    ).toThrow(
+      'Codex MCP config path must not be world-writable in worker mode: /home/agent/.codex/config.toml',
+    );
   });
 
   it('requires harness credentials when chemistry tools are enabled', () => {
