@@ -115,8 +115,10 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   It also emits placeholder-only shell export templates for missing required
   and recommended env. Operators can now pass `--write-env-template <path>` to
   write those placeholder exports to a private shell file under `.temp` before
-  filling real staging values. It is not checklist-completion evidence by
-  itself.
+  filling real staging values. It now also reports `itemReadiness` by checklist
+  item plus `nextCommands`, so staging operators can see the exact S3/R5/G6
+  boxes blocked by each missing evidence group. It is not
+  checklist-completion evidence by itself.
 - Phase 0-6 evidence tooling has CLI-level tests via
   `pnpm test:phase-zero-six-evidence`, covering guarded checklist application
   and obvious artifact secret leakage detection in JSON and shell/env evidence
@@ -270,8 +272,8 @@ gateway, ElAgenteHarness, or chemistry compute workers.
    adding `--apply-ready` only after the first read-only bundle has been
    reviewed.
 7. If the bundle fails before live evidence collection, run
-   `pnpm verify:phase-zero-six-env-ready` and fill the missing env names it
-   reports before retrying.
+   `pnpm verify:phase-zero-six-env-ready` and use `itemReadiness` plus
+   `nextCommands` to fill the missing env names before retrying.
 8. Capture staging AWS/EKS proof for sandbox start, readiness, stop, and
    idempotent lifecycle.
 9. Capture staging router proof for direct-worker denial and

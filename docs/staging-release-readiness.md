@@ -191,6 +191,14 @@ placeholder exports to a private shell file. Do not commit a filled env file or
 paste real JWTs, gateway tokens, provider command env JSON, or AWS credentials
 into release docs.
 
+The JSON also includes `itemReadiness`, which expands each remaining S3/R5/G6
+checkbox into its evidence group, current env readiness, missing env labels,
+and the next evidence command to run. Use that field as the operator worklist:
+it explains why a specific checkbox still cannot be checked without opening
+the larger group summary. `nextCommands` gives the matching copyable command
+sequence for writing a private env template, sourcing it, verifying readiness,
+collecting evidence, and applying reviewed evidence.
+
 ### Phase-One Runtime Smoke
 
 The scripted entry point for the phase-one Remote Codex staging path is:

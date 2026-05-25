@@ -752,6 +752,28 @@ describe('phase zero-six evidence tooling', () => {
     expect(parsed.secretSafety.valuesPrinted).toBe(false);
     expect(result.stdout).toContain('STAGING_PRODUCT_JWT');
     expect(result.stdout).toContain('STAGING_ADMIN_JWT');
+    expect(parsed.itemReadiness).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          item: 'S3.06',
+          groupId: 'runtime-smoke',
+          envReady: false,
+          missingEnv: expect.arrayContaining([
+            'STAGING_IDEMPOTENT_LIFECYCLE_SMOKE=true',
+            'STAGING_STOP_SANDBOX_AFTER_SMOKE=true',
+          ]),
+          nextEvidenceCommand: 'pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id>',
+        }),
+        expect.objectContaining({
+          item: 'G6.11',
+          groupId: 'codex-provider-smoke',
+          envReady: false,
+        }),
+      ]),
+    );
+    expect(parsed.nextCommands.collectEvidence).toBe(
+      'pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id>',
+    );
     expect(parsed.missingEnvExportTemplate).toEqual(
       expect.arrayContaining([
         "# runtime-smoke\nexport STAGING_IDEMPOTENT_LIFECYCLE_SMOKE='true'",
@@ -828,6 +850,20 @@ describe('phase zero-six evidence tooling', () => {
       'codex-provider-smoke',
       'claude-provider-smoke',
       'opencode-provider-smoke',
+    ]);
+    expect(parsed.itemReadiness.every((entry: { envReady: boolean }) => entry.envReady)).toBe(true);
+    expect(parsed.itemReadiness.map((entry: { item: string }) => entry.item)).toEqual([
+      'S3.04',
+      'S3.05',
+      'S3.06',
+      'S3.07',
+      'S3.08',
+      'R5.10',
+      'R5.12',
+      'R5.11',
+      'G6.11',
+      'G6.12',
+      'G6.13',
     ]);
     expect(result.stdout).not.toContain('secret-product-jwt-value');
     expect(result.stdout).not.toContain('secret-admin-jwt-value');
@@ -916,6 +952,10 @@ describe('phase zero-six evidence tooling', () => {
     expect(parsed.readyGroups).toEqual(['aws-preflight']);
     expect(parsed.notReadyGroups).toEqual([]);
     expect(parsed.groups.map((group: { id: string }) => group.id)).toEqual(['aws-preflight']);
+    expect(parsed.itemReadiness.map((entry: { item: string }) => entry.item)).toEqual(['S3.04', 'S3.05']);
+    expect(parsed.nextCommands.collectEvidence).toBe(
+      'pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id> --skip-staging-smoke',
+    );
   });
 
   it('stops bundle collection after env readiness failure unless forced', async () => {

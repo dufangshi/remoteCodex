@@ -453,6 +453,49 @@ function buildShellTemplate(input: {
   return `${lines.join('\n')}\n`;
 }
 
+function groupEvidenceCommand(groupId: string, skipStagingSmoke: boolean) {
+  if (groupId === 'aws-preflight' || skipStagingSmoke) {
+    return 'pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id> --skip-staging-smoke';
+  }
+  return 'pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id>';
+}
+
+function buildItemReadiness(input: {
+  groups: ReturnType<typeof evaluateGroup>[];
+  skippedStagingSmoke: boolean;
+}) {
+  return input.groups.flatMap((group) =>
+    group.items.map((item) => ({
+      item,
+      groupId: group.id,
+      groupTitle: group.title,
+      envReady: group.ready,
+      missingEnv: group.missingEnv,
+      missingRecommendedEnv: group.missingRecommendedEnv,
+      blockedUntil: group.ready
+        ? 'Environment inputs are present; run the live evidence bundle and review verifier output before checking this item.'
+        : 'Set the missing environment inputs, then rerun pnpm verify:phase-zero-six-env-ready.',
+      nextEvidenceCommand: groupEvidenceCommand(group.id, input.skippedStagingSmoke),
+    })),
+  );
+}
+
+function buildNextCommands(input: {
+  envTemplatePath: string | null;
+  skippedStagingSmoke: boolean;
+}) {
+  const modeFlag = input.skippedStagingSmoke ? ' --skip-staging-smoke' : '';
+  const templatePath = input.envTemplatePath ??
+    `./.temp/phase-zero-six-evidence/${input.skippedStagingSmoke ? 'aws-preflight.env.sh' : 'phase-zero-six.env.sh'}`;
+  return {
+    writeEnvTemplate: `pnpm verify:phase-zero-six-env-ready${modeFlag} -- --write-env-template ${templatePath}`,
+    sourceEnvTemplate: `source ${templatePath}`,
+    verifyEnvReadiness: `pnpm verify:phase-zero-six-env-ready${modeFlag}`,
+    collectEvidence: `pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id>${modeFlag}`,
+    applyReviewedEvidence: `pnpm collect:phase-zero-six-evidence -- --from-output-dir ./.temp/phase-zero-six-evidence/<run-id> --output-dir ./.temp/phase-zero-six-evidence/<run-id>-apply --apply-ready${modeFlag}`,
+  };
+}
+
 async function main() {
   const skipStagingSmoke = hasFlag('--skip-staging-smoke');
   const envTemplatePath = argValue('--write-env-template');
@@ -488,6 +531,14 @@ async function main() {
     readyGroups,
     notReadyGroups,
     groups: evaluatedGroups,
+    itemReadiness: buildItemReadiness({
+      groups: evaluatedGroups,
+      skippedStagingSmoke: skipStagingSmoke,
+    }),
+    nextCommands: buildNextCommands({
+      envTemplatePath,
+      skippedStagingSmoke: skipStagingSmoke,
+    }),
     missingEnvExportTemplate: evaluatedGroups.flatMap((group) =>
       group.missingRequiredExportTemplate.map((line) => `# ${group.id}\n${line}`),
     ),
