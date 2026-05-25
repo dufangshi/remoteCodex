@@ -424,7 +424,7 @@ Verification:
 - [x] Redact gateway tokens from logs.
 - [x] Redact gateway tokens from API responses.
 - [x] Define normalized LLM usage event schema.
-- [ ] Add usage import adapter for the chosen gateway.
+- [x] Add usage import adapter for the chosen gateway.
 - [ ] Add scheduled usage import job.
 - [x] Add manual admin usage import endpoint.
 - [x] Deduplicate usage events by gateway event id.
@@ -1123,7 +1123,7 @@ Real provider root keys stay outside the sandbox.
 ### Usage Import
 
 - [x] Define normalized LLM usage event schema.
-- [ ] Add usage import adapter for the chosen gateway.
+- [x] Add usage import adapter for the chosen gateway.
 - [ ] Add scheduled usage import job.
 - [x] Add manual admin usage import endpoint.
 - [x] Deduplicate usage events by gateway event id.

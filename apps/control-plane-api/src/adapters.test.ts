@@ -661,6 +661,60 @@ describe('HTTP LLM gateway admin', () => {
     });
   });
 
+  it('exports gateway usage through the admin API', async () => {
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      return Response.json({
+        events: [
+          {
+            eventId: 'gateway_req_1',
+            externalKeyId: 'gw-key-123',
+            model: 'gpt-5.1-codex',
+            inputTokens: 200,
+            outputTokens: 50,
+            cachedTokens: 25,
+            costUsd: 0.42,
+            currency: 'USD',
+            occurredAt: '2026-05-23T01:00:00.000Z',
+          },
+        ],
+        nextCursor: 'cursor-2',
+      });
+    };
+    const admin = new HttpLlmGatewayAdmin({
+      baseUrl: 'https://gateway-admin.example.test',
+      adminToken: 'admin-token',
+      fetchImpl,
+    });
+
+    await expect(admin.exportUsage({ cursor: 'cursor-1', limit: 25 })).resolves.toEqual({
+      events: [
+        {
+          eventId: 'gateway_req_1',
+          externalKeyId: 'gw-key-123',
+          model: 'gpt-5.1-codex',
+          inputTokens: 200,
+          outputTokens: 50,
+          cachedTokens: 25,
+          costUsd: 0.42,
+          currency: 'USD',
+          occurredAt: '2026-05-23T01:00:00.000Z',
+        },
+      ],
+      nextCursor: 'cursor-2',
+    });
+    expect(requests[0]).toMatchObject({
+      url: 'https://gateway-admin.example.test/api/admin/usage/export?cursor=cursor-1&limit=25',
+      init: {
+        method: 'GET',
+        headers: {
+          authorization: 'Bearer admin-token',
+        },
+      },
+    });
+  });
+
   it('maps gateway admin errors to provider sandbox manager errors', async () => {
     const fetchImpl = async () =>
       Response.json({ message: 'gateway unavailable' }, { status: 503 });

@@ -2115,6 +2115,131 @@ describe('control plane api', () => {
     });
   });
 
+  it('imports usage pulled from the configured gateway export adapter', async () => {
+    const exportedUsage = {
+      events: [
+        {
+          eventId: 'gateway_export_req_1',
+          externalKeyId: '',
+          model: 'gpt-5.1-codex',
+          inputTokens: 300,
+          outputTokens: 75,
+          cachedTokens: 30,
+          costUsd: 0.55,
+          currency: 'USD',
+          occurredAt: '2026-05-24T01:00:00.000Z',
+        },
+        {
+          eventId: 'gateway_export_req_1',
+          externalKeyId: '',
+          model: 'gpt-5.1-codex',
+          inputTokens: 999,
+          outputTokens: 999,
+          costUsd: 9.99,
+          currency: 'USD',
+          occurredAt: '2026-05-24T01:01:00.000Z',
+        },
+      ],
+      nextCursor: 'cursor-next',
+    };
+    const exportCalls: Array<{ cursor?: string | null; limit?: number }> = [];
+    const app = buildControlPlaneApp({
+      env: testEnv('gateway-export-usage-import'),
+      llmGatewayAdmin: {
+        async ensureUser(input) {
+          return { externalUserId: `sub2api-user-${input.userId}` };
+        },
+        async ensureSandboxKey(input) {
+          return {
+            externalKeyId: `sub2api-key-${input.sandboxId}`,
+            keyCiphertext: null,
+          };
+        },
+        async rotateSandboxKey(input) {
+          return {
+            externalKeyId: `sub2api-key-${input.sandboxId}-rotated`,
+            keyCiphertext: null,
+          };
+        },
+        async revokeSandboxKey() {},
+        async reconcileSandboxKey(input) {
+          return {
+            externalKeyId: `sub2api-key-${input.sandboxId}`,
+            keyCiphertext: null,
+          };
+        },
+        async exportUsage(input = {}) {
+          exportCalls.push(input);
+          return exportedUsage;
+        },
+      },
+    });
+    apps.push(app);
+
+    const auth = { authorization: 'Bearer dev:gateway-export-user' };
+    const bootstrap = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: auth,
+      payload: {
+        email: 'gateway-export@example.com',
+      },
+    });
+    expect(bootstrap.statusCode).toBe(200);
+    const { gatewayKey } = bootstrap.json();
+    exportedUsage.events[0]!.externalKeyId = gatewayKey.externalKeyId;
+    exportedUsage.events[1]!.externalKeyId = gatewayKey.externalKeyId;
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: {
+        authorization: 'Bearer dev:admin',
+      },
+      payload: {
+        email: 'admin-gateway-export@example.com',
+      },
+    });
+
+    const imported = await app.inject({
+      method: 'POST',
+      url: '/api/admin/usage/import',
+      headers: {
+        authorization: 'Bearer dev:admin',
+      },
+      payload: {
+        cursor: 'cursor-current',
+        limit: 50,
+      },
+    });
+    expect(imported.statusCode).toBe(200);
+    expect(exportCalls).toEqual([{ cursor: 'cursor-current', limit: 50 }]);
+    expect(imported.json().events).toHaveLength(2);
+    expect(imported.json().events[1].id).toBe(imported.json().events[0].id);
+    expect(imported.json().import).toEqual({
+      source: 'gateway',
+      sourceCount: 2,
+      importedCount: 2,
+      duplicateCount: 1,
+      failureCount: 0,
+      nextCursor: 'cursor-next',
+    });
+
+    const summary = await app.inject({
+      method: 'GET',
+      url: '/api/usage/summary',
+      headers: auth,
+    });
+    expect(summary.statusCode).toBe(200);
+    expect(summary.json().usage).toMatchObject({
+      requestCount: 1,
+      inputTokens: 300,
+      outputTokens: 75,
+      cachedTokens: 30,
+      costUsd: 0.55,
+    });
+  });
+
   it('rejects gateway usage import when identity cannot be resolved', async () => {
     const app = buildControlPlaneApp({ env: testEnv('gateway-usage-unresolved') });
     apps.push(app);

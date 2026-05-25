@@ -147,28 +147,34 @@ const productListQuerySchema = paginationQuerySchema.extend({
   status: z.string().trim().min(1).max(50).optional(),
 });
 
-const importUsageSchema = z.object({
-  events: z.array(
-    z.object({
-      userId: z.string().uuid().optional(),
-      sandboxId: z.string().uuid().optional(),
-      workspaceId: z.string().uuid().nullable().optional(),
-      sessionId: z.string().uuid().nullable().optional(),
-      gatewayKeyId: z.string().uuid().nullable().optional(),
-      gatewayExternalKeyId: z.string().min(1).optional(),
-      provider: z.string().min(1),
-      model: z.string().min(1),
-      inputTokens: z.number().int().nonnegative().optional(),
-      outputTokens: z.number().int().nonnegative().optional(),
-      cachedTokens: z.number().int().nonnegative().optional(),
-      costUsd: z.number().nonnegative().optional(),
-      externalRequestId: z.string().min(1).nullable().optional(),
-      occurredAt: z.string().datetime().optional(),
-    }),
-  ),
+const usageImportEventSchema = z.object({
+  userId: z.string().uuid().optional(),
+  sandboxId: z.string().uuid().optional(),
+  workspaceId: z.string().uuid().nullable().optional(),
+  sessionId: z.string().uuid().nullable().optional(),
+  gatewayKeyId: z.string().uuid().nullable().optional(),
+  gatewayExternalKeyId: z.string().min(1).optional(),
+  provider: z.string().min(1),
+  model: z.string().min(1),
+  inputTokens: z.number().int().nonnegative().optional(),
+  outputTokens: z.number().int().nonnegative().optional(),
+  cachedTokens: z.number().int().nonnegative().optional(),
+  costUsd: z.number().nonnegative().optional(),
+  externalRequestId: z.string().min(1).nullable().optional(),
+  occurredAt: z.string().datetime().optional(),
 });
 
-type UsageImportEvent = z.infer<typeof importUsageSchema>['events'][number];
+const importUsageSchema = z.object({
+  cursor: z.string().min(1).nullable().optional(),
+  limit: z.number().int().positive().max(500).optional(),
+  events: z
+    .array(
+      usageImportEventSchema,
+    )
+    .optional(),
+});
+
+type UsageImportEvent = z.infer<typeof usageImportEventSchema>;
 
 const adminSandboxReasonSchema = z.object({
   reason: z.string().min(1).max(500).optional(),
@@ -351,6 +357,32 @@ function normalizeUsageImportEvent(
     userId,
     sandboxId,
     gatewayKeyId: event.gatewayKeyId ?? gatewayKey?.id ?? null,
+  };
+}
+
+function gatewayUsageExportEventToImportEvent(
+  provider: string,
+  event: {
+    eventId: string;
+    externalKeyId: string;
+    model: string;
+    inputTokens?: number;
+    outputTokens?: number;
+    cachedTokens?: number;
+    costUsd?: number;
+    occurredAt?: string;
+  },
+): UsageImportEvent {
+  return {
+    gatewayExternalKeyId: event.externalKeyId,
+    provider,
+    model: event.model,
+    inputTokens: event.inputTokens,
+    outputTokens: event.outputTokens,
+    cachedTokens: event.cachedTokens,
+    costUsd: event.costUsd,
+    externalRequestId: event.eventId,
+    occurredAt: event.occurredAt,
   };
 }
 
@@ -596,10 +628,29 @@ export function buildControlPlaneApp(
   app.post('/api/admin/usage/import', async (request) => {
     requireAdmin(app, request);
     const input = importUsageSchema.parse(request.body);
-    const events = input.events.map((event) =>
+    const gatewayExport = input.events
+      ? null
+      : await app.services.llmGatewayAdmin.exportUsage({
+          cursor: input.cursor ?? null,
+          limit: input.limit ?? 100,
+        });
+    const inputEvents = input.events ?? gatewayExport?.events.map((event) =>
+      gatewayUsageExportEventToImportEvent(config.llmGatewayProvider, event),
+    ) ?? [];
+    const events = inputEvents.map((event) =>
       repository.recordUsageEvent(normalizeUsageImportEvent(repository, event)),
     );
-    return { events };
+    return {
+      events,
+      import: {
+        source: input.events ? 'manual' : 'gateway',
+        sourceCount: inputEvents.length,
+        importedCount: events.length,
+        duplicateCount: Math.max(0, inputEvents.length - new Set(events.map((event) => event.id)).size),
+        failureCount: 0,
+        nextCursor: gatewayExport?.nextCursor ?? null,
+      },
+    };
   });
 
   app.get('/api/internal/sandboxes/:sandboxId/endpoint', async (request) => {

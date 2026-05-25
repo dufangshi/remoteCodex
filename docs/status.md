@@ -82,9 +82,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 - Worker image runtime pinning and smoke verification.
 - LLM gateway contract is fixed on a sub2api-compatible shape; provisioning,
   provider selection config, worker provider config rendering, manual usage
-  import, frontend degraded state, LLM usage summary, LLM usage detail UI, and
-  quota-exceeded UI exist, while scheduled import, metrics, and staging
-  provider-runtime smokes remain open.
+  import, gateway usage-export adapter, frontend degraded state, LLM usage
+  summary, LLM usage detail UI, and quota-exceeded UI exist, while scheduled
+  import, metrics, and staging provider-runtime smokes remain open.
 - Gateway token storage is documented as metadata plus optional encrypted
   ciphertext only; raw provider keys and raw gateway tokens are not returned by
   Remote Codex APIs.

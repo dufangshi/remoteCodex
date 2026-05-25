@@ -806,6 +806,23 @@ export interface GatewayKeyResult {
   keyCiphertext?: string | null;
 }
 
+export interface GatewayUsageExportEvent {
+  eventId: string;
+  externalKeyId: string;
+  model: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedTokens?: number;
+  costUsd?: number;
+  currency?: string;
+  occurredAt?: string;
+}
+
+export interface GatewayUsageExportResult {
+  events: GatewayUsageExportEvent[];
+  nextCursor?: string | null;
+}
+
 export interface LlmGatewayAdmin {
   ensureUser(input: {
     userId: string;
@@ -835,6 +852,10 @@ export interface LlmGatewayAdmin {
     externalUserId: string;
     externalKeyId?: string | null;
   }): Promise<GatewayKeyResult>;
+  exportUsage(input?: {
+    cursor?: string | null;
+    limit?: number;
+  }): Promise<GatewayUsageExportResult>;
 }
 
 type GatewayFetch = typeof fetch;
@@ -879,6 +900,65 @@ function externalIdFromPayload(payload: unknown, fallbackName: string) {
     throw new SandboxManagerError('provider', `Gateway admin response missing ${fallbackName}.`);
   }
   return candidate;
+}
+
+function gatewayUsageEventsFromPayload(payload: unknown): GatewayUsageExportResult {
+  if (!payload || typeof payload !== 'object' || !('events' in payload) || !Array.isArray(payload.events)) {
+    throw new SandboxManagerError('provider', 'Gateway usage export response missing events.');
+  }
+  const nextCursor =
+    'nextCursor' in payload && typeof payload.nextCursor === 'string'
+      ? payload.nextCursor
+      : null;
+  return {
+    events: payload.events.map((entry) => {
+      if (!entry || typeof entry !== 'object') {
+        throw new SandboxManagerError('provider', 'Gateway usage export event is invalid.');
+      }
+      const eventId = 'eventId' in entry ? entry.eventId : null;
+      const externalKeyId = 'externalKeyId' in entry ? entry.externalKeyId : null;
+      const model = 'model' in entry ? entry.model : null;
+      if (typeof eventId !== 'string' || !eventId.trim()) {
+        throw new SandboxManagerError('provider', 'Gateway usage export event missing event id.');
+      }
+      if (typeof externalKeyId !== 'string' || !externalKeyId.trim()) {
+        throw new SandboxManagerError('provider', 'Gateway usage export event missing external key id.');
+      }
+      if (typeof model !== 'string' || !model.trim()) {
+        throw new SandboxManagerError('provider', 'Gateway usage export event missing model.');
+      }
+      return {
+        eventId,
+        externalKeyId,
+        model,
+        inputTokens:
+          'inputTokens' in entry && typeof entry.inputTokens === 'number'
+            ? entry.inputTokens
+            : undefined,
+        outputTokens:
+          'outputTokens' in entry && typeof entry.outputTokens === 'number'
+            ? entry.outputTokens
+            : undefined,
+        cachedTokens:
+          'cachedTokens' in entry && typeof entry.cachedTokens === 'number'
+            ? entry.cachedTokens
+            : undefined,
+        costUsd:
+          'costUsd' in entry && typeof entry.costUsd === 'number'
+            ? entry.costUsd
+            : undefined,
+        currency:
+          'currency' in entry && typeof entry.currency === 'string'
+            ? entry.currency
+            : undefined,
+        occurredAt:
+          'occurredAt' in entry && typeof entry.occurredAt === 'string'
+            ? entry.occurredAt
+            : undefined,
+      };
+    }),
+    nextCursor,
+  };
 }
 
 export class HttpLlmGatewayAdmin implements LlmGatewayAdmin {
@@ -1045,6 +1125,31 @@ export class HttpLlmGatewayAdmin implements LlmGatewayAdmin {
           : null,
     };
   }
+
+  async exportUsage(input: {
+    cursor?: string | null;
+    limit?: number;
+  } = {}): Promise<GatewayUsageExportResult> {
+    const search = new URLSearchParams();
+    if (input.cursor) {
+      search.set('cursor', input.cursor);
+    }
+    if (input.limit) {
+      search.set('limit', String(input.limit));
+    }
+    const query = search.toString();
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/api/admin/usage/export${query ? `?${query}` : ''}`,
+      {
+        method: 'GET',
+        headers: {
+          authorization: `Bearer ${this.adminToken}`,
+        },
+      },
+    );
+    const payload = await parseGatewayResponse<unknown>(response);
+    return gatewayUsageEventsFromPayload(payload);
+  }
 }
 
 export class NoopLlmGatewayAdmin implements LlmGatewayAdmin {
@@ -1074,6 +1179,13 @@ export class NoopLlmGatewayAdmin implements LlmGatewayAdmin {
     return {
       externalKeyId: `sub2api-key-${input.sandboxId}`,
       keyCiphertext: null,
+    };
+  }
+
+  async exportUsage(): Promise<GatewayUsageExportResult> {
+    return {
+      events: [],
+      nextCursor: null,
     };
   }
 }

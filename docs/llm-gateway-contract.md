@@ -355,8 +355,9 @@ Pagination/watermark requirements for the gateway export:
 - Keep already exported events stable for at least the billing reconciliation
   window.
 
-The scheduled puller is not implemented yet. Until then, imports use the
-admin-only Remote Codex endpoint and a staging script or operator task.
+Remote Codex implements a gateway usage-export adapter through the admin usage
+import path. The scheduled puller is not implemented yet. Until then, imports
+use the admin-only Remote Codex endpoint and a staging script or operator task.
 
 ## Degraded Behavior
 

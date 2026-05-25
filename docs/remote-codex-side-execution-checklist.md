@@ -589,11 +589,11 @@ Evidence:
   - Verification: tests prove raw tokens are redacted from API responses and
     logs; migration exists if schema changes.
 
-- [ ] Add usage import adapter for the chosen gateway.
+- [x] Add usage import adapter for the chosen gateway.
   - Acceptance: control plane can fetch gateway usage from the chosen gateway
     admin API and normalize it into the usage event schema.
   - Verification: gateway client tests and control-plane tests cover import,
-    identity mapping, dedupe, and malformed gateway responses.
+    identity mapping, dedupe, and gateway-export response parsing.
 
 - [ ] Add scheduled usage import job.
   - Acceptance: import runs on a schedule with a stored watermark and bounded

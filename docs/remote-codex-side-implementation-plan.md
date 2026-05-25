@@ -593,8 +593,8 @@ import third, then quota enforcement and UI.
   Codex.
 - [x] Add quota exceeded API response shape.
 - [ ] Add scheduled LLM gateway usage import job.
-- [ ] Add manual admin LLM usage import endpoint.
-- [ ] Deduplicate gateway usage events by gateway event id.
+- [x] Add manual admin LLM usage import endpoint.
+- [x] Deduplicate gateway usage events by gateway event id.
 - [x] Map gateway key id to user id.
 - [x] Map gateway key id to sandbox id when available.
 - [ ] Add harness webhook receiver or polling importer.
