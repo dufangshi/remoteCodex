@@ -159,6 +159,58 @@ describe('sandbox router', () => {
     });
   });
 
+  it('resolves sandbox endpoints from the control-plane registry when configured', async () => {
+    vi.stubGlobal('fetch', fetchMock);
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            sandboxId: 'sandbox_1',
+            userId: 'user_1',
+            workerBaseUrl: 'http://worker.svc.cluster.local:8787',
+          }),
+          {
+            status: 200,
+            headers: {
+              'content-type': 'application/json',
+            },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+          },
+        }),
+      );
+    const app = buildSandboxRouterApp({
+      env: testEnv({
+        SANDBOX_ROUTER_CONTROL_PLANE_BASE_URL: 'https://control-plane.example.test',
+        SANDBOX_ROUTER_CONTROL_PLANE_SERVICE_TOKEN: 'internal-router-service-token',
+      }),
+    });
+    apps.push(app);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/sandboxes/sandbox_1/api/worker/metadata?token=${encodeURIComponent(routeToken())}`,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [registryUrl, registryInit] = fetchMock.mock.calls[0] as [URL, RequestInit];
+    expect(registryUrl.toString()).toBe(
+      'https://control-plane.example.test/api/internal/sandboxes/sandbox_1/endpoint?userId=user_1',
+    );
+    expect((registryInit.headers as Record<string, string>)['x-remote-codex-service-token']).toBe(
+      'internal-router-service-token',
+    );
+    const [workerUrl] = fetchMock.mock.calls[1] as [URL, RequestInit];
+    expect(workerUrl.toString()).toBe('http://worker.svc.cluster.local:8787/api/worker/metadata');
+  });
+
   it('rejects proxied request bodies that exceed the configured byte limit', async () => {
     vi.stubGlobal('fetch', fetchMock);
     const app = buildApp(undefined, {

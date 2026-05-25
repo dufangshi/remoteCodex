@@ -42,6 +42,56 @@ class StaticSandboxEndpointResolver implements SandboxEndpointResolver {
   }
 }
 
+class ControlPlaneSandboxEndpointResolver implements SandboxEndpointResolver {
+  constructor(private readonly config: SandboxRouterConfig) {}
+
+  async resolve(input: { sandboxId: string; routeToken: RouteTokenPayload }) {
+    if (!this.config.controlPlaneBaseUrl || !this.config.controlPlaneServiceToken) {
+      return new StaticSandboxEndpointResolver(this.config).resolve(input);
+    }
+
+    const base = this.config.controlPlaneBaseUrl.endsWith('/')
+      ? this.config.controlPlaneBaseUrl
+      : `${this.config.controlPlaneBaseUrl}/`;
+    const url = new URL(
+      `api/internal/sandboxes/${encodeURIComponent(input.sandboxId)}/endpoint`,
+      base,
+    );
+    url.searchParams.set('userId', input.routeToken.sub);
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'x-remote-codex-service-token': this.config.controlPlaneServiceToken,
+      },
+    });
+    if (response.status === 404 || response.status === 409) {
+      return { workerBaseUrl: null };
+    }
+    if (!response.ok) {
+      throw new RouterHttpError(
+        502,
+        'sandbox_registry_error',
+        'Sandbox registry lookup failed.',
+      );
+    }
+
+    const body = z.object({
+      sandboxId: z.string().min(1),
+      userId: z.string().min(1),
+      workerBaseUrl: z.string().url(),
+    }).parse(await response.json());
+    if (body.sandboxId !== input.sandboxId || body.userId !== input.routeToken.sub) {
+      throw new RouterHttpError(
+        502,
+        'sandbox_registry_mismatch',
+        'Sandbox registry returned a mismatched endpoint.',
+      );
+    }
+    return { workerBaseUrl: body.workerBaseUrl };
+  }
+}
+
 export interface SandboxRouterServices {
   config: SandboxRouterConfig;
   endpointResolver: SandboxEndpointResolver;
@@ -221,7 +271,7 @@ export function buildSandboxRouterApp(options: {
 
   app.decorate('services', {
     config,
-    endpointResolver: options.endpointResolver ?? new StaticSandboxEndpointResolver(config),
+    endpointResolver: options.endpointResolver ?? new ControlPlaneSandboxEndpointResolver(config),
   });
 
   app.get('/healthz', async () => ({ ok: true, role: 'sandbox-router' }));

@@ -17,6 +17,8 @@ const envSchema = z.object({
   SANDBOX_DEFAULT_IMAGE: z.string().min(1).optional(),
   SANDBOX_DEFAULT_REGION: z.string().min(1).optional(),
   SANDBOX_S3_PREFIX_BASE: z.string().min(1).optional(),
+  SANDBOX_WORKER_INTERNAL_PORT: z.coerce.number().int().positive().optional(),
+  CONTROL_PLANE_INTERNAL_SERVICE_TOKEN: z.string().min(16).optional(),
   CONTROL_PLANE_ADMIN_IDENTITIES: z.string().optional(),
   CONTROL_PLANE_AUTH_MODE: z.enum(['dev', 'jwt']).optional(),
   CONTROL_PLANE_AUTH_JWT_SECRET: z.string().min(16).optional(),
@@ -39,6 +41,8 @@ export interface ControlPlaneConfig {
   sandboxDefaultImage: string;
   sandboxDefaultRegion: string;
   sandboxS3PrefixBase: string;
+  sandboxWorkerInternalPort: number;
+  internalServiceToken: string | null;
   adminIdentities: Set<string>;
   authMode: 'dev' | 'jwt';
   authJwtSecret: string | null;
@@ -120,6 +124,8 @@ export function loadControlPlaneConfig(
     sandboxDefaultRegion: parsed.SANDBOX_DEFAULT_REGION ?? 'us-east-1',
     sandboxS3PrefixBase:
       parsed.SANDBOX_S3_PREFIX_BASE ?? 's3://remote-codex-sandboxes/dev',
+    sandboxWorkerInternalPort: parsed.SANDBOX_WORKER_INTERNAL_PORT ?? 8787,
+    internalServiceToken: parsed.CONTROL_PLANE_INTERNAL_SERVICE_TOKEN ?? null,
     adminIdentities: new Set(
       (parsed.CONTROL_PLANE_ADMIN_IDENTITIES ?? '')
         .split(',')

@@ -197,6 +197,29 @@ function requireAdmin(app: FastifyInstance, request: FastifyRequest) {
   return user;
 }
 
+function requireInternalService(app: FastifyInstance, request: FastifyRequest) {
+  if (!app.services.config.internalServiceToken) {
+    throw new HttpError(404, 'not_found', 'Internal API is not configured.');
+  }
+  const token = request.headers['x-remote-codex-service-token'];
+  if (token !== app.services.config.internalServiceToken) {
+    throw new HttpError(403, 'forbidden', 'Internal service access is required.');
+  }
+}
+
+function workerBaseUrlForSandbox(app: FastifyInstance, sandbox: {
+  k8sNamespace: string | null;
+  workerServiceName: string | null;
+}) {
+  if (!sandbox.workerServiceName) {
+    return null;
+  }
+  if (sandbox.k8sNamespace) {
+    return `http://${sandbox.workerServiceName}.${sandbox.k8sNamespace}.svc.cluster.local:${app.services.config.sandboxWorkerInternalPort}`;
+  }
+  return `http://${sandbox.workerServiceName}:${app.services.config.sandboxWorkerInternalPort}`;
+}
+
 async function ensureGateway(app: FastifyInstance, user: { id: string; email: string; displayName: string | null }, sandbox: { id: string }) {
   const gatewayUser = await app.services.llmGatewayAdmin.ensureUser({
     userId: user.id,
@@ -394,6 +417,28 @@ export function buildControlPlaneApp(
     const input = importUsageSchema.parse(request.body);
     const events = input.events.map((event) => repository.recordUsageEvent(event));
     return { events };
+  });
+
+  app.get('/api/internal/sandboxes/:sandboxId/endpoint', async (request) => {
+    requireInternalService(app, request);
+    const params = z.object({ sandboxId: z.string().uuid() }).parse(request.params);
+    const query = z.object({ userId: z.string().uuid() }).parse(request.query);
+    const sandbox = repository.getSandboxById(params.sandboxId);
+    if (!sandbox || sandbox.userId !== query.userId) {
+      throw new HttpError(404, 'not_found', 'Sandbox endpoint not found.');
+    }
+    if (sandbox.state !== 'running') {
+      throw new HttpError(409, 'sandbox_not_running', 'Sandbox is not running.');
+    }
+    const workerBaseUrl = workerBaseUrlForSandbox(app, sandbox);
+    if (!workerBaseUrl) {
+      throw new HttpError(409, 'worker_endpoint_unavailable', 'Sandbox worker endpoint is unavailable.');
+    }
+    return {
+      sandboxId: sandbox.id,
+      userId: sandbox.userId,
+      workerBaseUrl,
+    };
   });
 
   app.get('/api/admin/sandboxes', async (request) => {

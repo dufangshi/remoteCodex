@@ -366,7 +366,7 @@ Verification:
 - [ ] Implement SSE proxy.
 - [ ] Implement WebSocket proxy.
 - [x] Verify route tokens in the router.
-- [ ] Resolve sandbox endpoint from control plane or registry.
+- [x] Resolve sandbox endpoint from control plane or registry.
 - [x] Inject internal worker token.
 - [x] Strip browser-supplied internal worker headers.
 - [x] Strip browser-supplied identity envelope headers.
@@ -1039,7 +1039,7 @@ token.
 - [ ] Implement SSE proxy.
 - [ ] Implement WebSocket proxy.
 - [x] Verify route tokens.
-- [ ] Resolve sandbox endpoint from the control plane or sandbox registry.
+- [x] Resolve sandbox endpoint from the control plane or sandbox registry.
 - [x] Inject `X-Remote-Codex-Worker-Token`.
 - [x] Strip browser-supplied internal worker headers.
 - [x] Strip browser-supplied identity envelope headers.

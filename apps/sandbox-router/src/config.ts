@@ -15,6 +15,8 @@ const envSchema = z.object({
   SANDBOX_ROUTER_WORKER_IDENTITY_SECRET: z.string().min(1).optional(),
   SANDBOX_ROUTER_STATIC_ENDPOINTS: z.string().optional(),
   SANDBOX_ROUTER_DEFAULT_WORKER_BASE_URL: z.string().url().optional(),
+  SANDBOX_ROUTER_CONTROL_PLANE_BASE_URL: z.string().url().optional(),
+  SANDBOX_ROUTER_CONTROL_PLANE_SERVICE_TOKEN: z.string().min(16).optional(),
   SANDBOX_ROUTER_MAX_REQUEST_BYTES: z.coerce.number().int().positive().optional(),
   SANDBOX_ROUTER_UPSTREAM_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
 });
@@ -30,6 +32,8 @@ export interface SandboxRouterConfig {
   workerIdentitySecret: string | null;
   staticEndpoints: Map<string, string>;
   defaultWorkerBaseUrl: string | null;
+  controlPlaneBaseUrl: string | null;
+  controlPlaneServiceToken: string | null;
   maxRequestBytes: number;
   upstreamTimeoutMs: number;
 }
@@ -112,6 +116,14 @@ export function loadSandboxRouterConfig(
 ): SandboxRouterConfig {
   const parsed = envSchema.parse(env);
   const nodeEnv = parsed.NODE_ENV ?? 'development';
+  if (
+    Boolean(parsed.SANDBOX_ROUTER_CONTROL_PLANE_BASE_URL) !==
+    Boolean(parsed.SANDBOX_ROUTER_CONTROL_PLANE_SERVICE_TOKEN)
+  ) {
+    throw new Error(
+      'SANDBOX_ROUTER_CONTROL_PLANE_BASE_URL and SANDBOX_ROUTER_CONTROL_PLANE_SERVICE_TOKEN must be configured together.',
+    );
+  }
 
   return {
     nodeEnv,
@@ -124,6 +136,8 @@ export function loadSandboxRouterConfig(
     workerIdentitySecret: parsed.SANDBOX_ROUTER_WORKER_IDENTITY_SECRET ?? null,
     staticEndpoints: parseStaticEndpoints(parsed.SANDBOX_ROUTER_STATIC_ENDPOINTS),
     defaultWorkerBaseUrl: parsed.SANDBOX_ROUTER_DEFAULT_WORKER_BASE_URL ?? null,
+    controlPlaneBaseUrl: parsed.SANDBOX_ROUTER_CONTROL_PLANE_BASE_URL ?? null,
+    controlPlaneServiceToken: parsed.SANDBOX_ROUTER_CONTROL_PLANE_SERVICE_TOKEN ?? null,
     maxRequestBytes: parsed.SANDBOX_ROUTER_MAX_REQUEST_BYTES ?? 1024 * 1024 * 8,
     upstreamTimeoutMs: parsed.SANDBOX_ROUTER_UPSTREAM_TIMEOUT_MS ?? 1000 * 60,
   };

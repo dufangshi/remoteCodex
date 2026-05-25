@@ -311,6 +311,63 @@ describe('control plane api', () => {
     expect(unknownKeyVerify.statusCode).toBe(401);
   });
 
+  it('exposes running sandbox worker endpoints to internal router services only', async () => {
+    const app = buildControlPlaneApp({
+      env: {
+        ...testEnv('internal-sandbox-endpoint'),
+        CONTROL_PLANE_INTERNAL_SERVICE_TOKEN: 'internal-router-service-token',
+        SANDBOX_WORKER_INTERNAL_PORT: '8788',
+      },
+    });
+    apps.push(app);
+
+    const auth = { authorization: 'Bearer dev:internal-endpoint-user' };
+    const bootstrap = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: auth,
+      payload: {
+        email: 'internal-endpoint@example.com',
+      },
+    });
+    const { user, sandbox } = bootstrap.json();
+
+    const unauthenticated = await app.inject({
+      method: 'GET',
+      url: `/api/internal/sandboxes/${sandbox.id}/endpoint?userId=${user.id}`,
+    });
+    expect(unauthenticated.statusCode).toBe(403);
+
+    const stopped = await app.inject({
+      method: 'GET',
+      url: `/api/internal/sandboxes/${sandbox.id}/endpoint?userId=${user.id}`,
+      headers: {
+        'x-remote-codex-service-token': 'internal-router-service-token',
+      },
+    });
+    expect(stopped.statusCode).toBe(409);
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/sandbox/start',
+      headers: auth,
+    });
+
+    const endpoint = await app.inject({
+      method: 'GET',
+      url: `/api/internal/sandboxes/${sandbox.id}/endpoint?userId=${user.id}`,
+      headers: {
+        'x-remote-codex-service-token': 'internal-router-service-token',
+      },
+    });
+    expect(endpoint.statusCode).toBe(200);
+    expect(endpoint.json()).toMatchObject({
+      sandboxId: sandbox.id,
+      userId: user.id,
+      workerBaseUrl: `http://sandbox-worker-${sandbox.id}.remote-codex-sandboxes.svc.cluster.local:8788`,
+    });
+  });
+
   it('manages projects, project workspaces, session metadata, restart, and health', async () => {
     const app = buildControlPlaneApp({ env: testEnv('projects') });
     apps.push(app);

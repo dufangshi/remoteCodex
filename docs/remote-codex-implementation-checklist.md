@@ -319,7 +319,7 @@ Goal: browser traffic reaches workers only through a route-token checked proxy.
 - [x] Implement HTTP proxy.
 - [ ] Implement WebSocket proxy.
 - [x] Implement route token verification.
-- [ ] Resolve sandbox endpoint from control plane or registry.
+- [x] Resolve sandbox endpoint from control plane or registry.
 - [x] Inject `X-Remote-Codex-Worker-Token`.
 - [x] Strip browser-supplied internal worker headers.
 - [x] Add request size limits.
