@@ -676,6 +676,11 @@ describe('supervisor api', () => {
         enabled: true,
         baseUrl: 'https://harness.example.test',
       },
+      requestDiagnostics: {
+        authorizationHeaderPresent: false,
+        workerTokenHeaderPresent: false,
+        identityEnvelopePresent: false,
+      },
       runtimeManifest: {
         imageVersion: 'staging-test',
         gitSha: 'abc123',
@@ -721,6 +726,10 @@ describe('supervisor api', () => {
       },
     });
     expect(authorized.statusCode).toBe(200);
+    expect(authorized.json().requestDiagnostics).toMatchObject({
+      authorizationHeaderPresent: false,
+      workerTokenHeaderPresent: true,
+    });
 
     const bearerAuthorized = await app.inject({
       method: 'GET',
@@ -730,6 +739,10 @@ describe('supervisor api', () => {
       },
     });
     expect(bearerAuthorized.statusCode).toBe(200);
+    expect(bearerAuthorized.json().requestDiagnostics).toMatchObject({
+      authorizationHeaderPresent: true,
+      workerTokenHeaderPresent: false,
+    });
   });
 
   it('enforces signed worker identity envelopes on scoped worker routes', async () => {

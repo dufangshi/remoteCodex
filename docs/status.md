@@ -89,6 +89,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 - Staging router deployment evidence now includes an explicit `router_health`
   step before browser-to-router-to-worker metadata resolution, strengthening
   R5.10 proof.
+- Worker metadata now returns non-secret request diagnostics, allowing staging
+  `browser_to_router_to_worker` evidence to prove browser `Authorization`
+  stripping and router worker-token injection for R5.12.
 - Worker mode disables host/provider management APIs that should not be exposed
   in sandbox runtime.
 - Route-token signing supports key ids and previous-key verification.

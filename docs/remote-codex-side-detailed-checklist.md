@@ -639,8 +639,9 @@ router-injected worker identity.
 - [ ] R5.12 Add browser-to-router-to-worker smoke.
   - Done when a real browser reaches a real worker through the router using a
     control-plane-issued route token.
-  - Verify with staging smoke recording route-token issue, router proxy, and
-    worker response.
+  - Verify with staging smoke recording route-token issue, router proxy, worker
+    response, browser `Authorization` stripping, and router worker-token
+    injection.
 
 ### Worker Scope Enforcement
 
@@ -687,7 +688,10 @@ router-injected worker identity.
   been deployed and smoked against real staging workers. Direct worker denial
   and browser-to-router-to-worker staging evidence still need
   `pnpm smoke:staging-phase-one` output. The runner now emits
-  `browser_to_router_to_worker` and optional `direct_worker_denial` evidence.
+  `browser_to_router_to_worker`, `router_health`, and optional
+  `direct_worker_denial` evidence; `browser_to_router_to_worker` includes
+  non-secret worker request diagnostics proving browser `Authorization`
+  stripping and worker-token injection.
   Run `pnpm verify:staging-phase-one-evidence -- <smoke-json>` before marking
   these staging router boxes complete.
 

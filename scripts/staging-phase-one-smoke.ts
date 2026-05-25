@@ -486,12 +486,16 @@ async function main() {
   const proxiedBody = proxiedMetadata.json;
   steps.push({
     name: 'browser_to_router_to_worker',
-    ok: proxiedBody.role === 'worker',
+    ok:
+      proxiedBody.role === 'worker' &&
+      proxiedBody.requestDiagnostics?.authorizationHeaderPresent === false &&
+      proxiedBody.requestDiagnostics?.workerTokenHeaderPresent === true,
     details: {
       role: proxiedBody.role,
       sandboxId: proxiedBody.sandboxId,
       userId: proxiedBody.userId,
       managementRoutesEnabled: proxiedBody.managementRoutesEnabled,
+      requestDiagnostics: proxiedBody.requestDiagnostics,
     },
   });
 

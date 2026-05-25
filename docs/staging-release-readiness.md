@@ -229,7 +229,10 @@ The important step-to-checkbox mapping is:
   id for S3.08.
 - `router_health` proves the deployed staging router health endpoint is
   reachable and reports `role: "sandbox-router"` for R5.10.
-- `browser_to_router_to_worker` proves R5.12.
+- `browser_to_router_to_worker` proves R5.12 when worker metadata reports
+  `requestDiagnostics.authorizationHeaderPresent: false` and
+  `requestDiagnostics.workerTokenHeaderPresent: true`, proving browser
+  `Authorization` was stripped and router worker-token injection happened.
 - `direct_worker_denial` proves R5.11 when `STAGING_DIRECT_WORKER_BASE_URL` is
   available and direct worker access returns `401` or `403`.
 - `codex_gateway_smoke`, `claude_gateway_smoke`, and

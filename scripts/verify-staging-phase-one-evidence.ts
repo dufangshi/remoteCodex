@@ -87,6 +87,11 @@ function booleanEvidence(value: unknown) {
   return value === true;
 }
 
+function requestDiagnostics(step: SmokeStep | undefined) {
+  const value = step?.details?.requestDiagnostics;
+  return isRecord(value) ? value : {};
+}
+
 function ready(input: {
   item: string;
   title: string;
@@ -308,6 +313,8 @@ function evaluate(report: SmokeReport): ChecklistResult[] {
     }));
 
   const routerReady =
+    requestDiagnostics(browserProxy).authorizationHeaderPresent === false &&
+    requestDiagnostics(browserProxy).workerTokenHeaderPresent === true &&
     issueRouteToken?.ok === true &&
     routerHealth?.ok === true &&
     browserProxy?.ok === true &&
@@ -328,6 +335,8 @@ function evaluate(report: SmokeReport): ChecklistResult[] {
         'router_health.ok is true with role sandbox-router',
         'browser_to_router_to_worker.ok is true',
         'Worker metadata reports role, sandboxId, and userId',
+        'Worker metadata requestDiagnostics shows browser authorization stripped',
+        'Worker metadata requestDiagnostics shows worker token header present',
       ],
     })
     : notReady({
@@ -340,6 +349,8 @@ function evaluate(report: SmokeReport): ChecklistResult[] {
         'router_health.ok is true with role sandbox-router',
         'browser_to_router_to_worker.ok is true',
         'Worker metadata reports role, sandboxId, and userId',
+        'Worker metadata requestDiagnostics shows browser authorization stripped',
+        'Worker metadata requestDiagnostics shows worker token header present',
       ],
     }));
 
@@ -367,27 +378,36 @@ function evaluate(report: SmokeReport): ChecklistResult[] {
       ],
     }));
 
-  results.push(browserProxy?.ok === true && browserProxy.details?.role === 'worker'
+  const browserProxyReady =
+    browserProxy?.ok === true &&
+    browserProxy.details?.role === 'worker' &&
+    requestDiagnostics(browserProxy).authorizationHeaderPresent === false &&
+    requestDiagnostics(browserProxy).workerTokenHeaderPresent === true;
+  results.push(browserProxyReady
     ? ready({
       item: 'R5.12',
       title: 'Add browser-to-router-to-worker smoke.',
-      reason: 'Staging evidence shows browser-style router traffic reached worker metadata.',
+      reason: 'Staging evidence shows browser-style router traffic reached worker metadata without forwarding browser authorization.',
       matchedSteps: ['browser_to_router_to_worker'],
       requiredEvidence: [
         'browser_to_router_to_worker.ok is true',
         'Worker metadata role is worker',
         'Worker metadata includes sandboxId and userId',
+        'Worker metadata requestDiagnostics.authorizationHeaderPresent is false',
+        'Worker metadata requestDiagnostics.workerTokenHeaderPresent is true',
       ],
     })
     : notReady({
       item: 'R5.12',
       title: 'Add browser-to-router-to-worker smoke.',
-      reason: 'browser_to_router_to_worker is missing or did not reach worker metadata.',
+      reason: 'browser_to_router_to_worker is missing, did not reach worker metadata, or did not prove header stripping.',
       matchedSteps: browserProxy ? ['browser_to_router_to_worker'] : [],
       requiredEvidence: [
         'browser_to_router_to_worker.ok is true',
         'Worker metadata role is worker',
         'Worker metadata includes sandboxId and userId',
+        'Worker metadata requestDiagnostics.authorizationHeaderPresent is false',
+        'Worker metadata requestDiagnostics.workerTokenHeaderPresent is true',
       ],
     }));
 

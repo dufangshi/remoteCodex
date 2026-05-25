@@ -113,7 +113,7 @@ export async function registerSystemRoutes(app: FastifyInstance) {
     } satisfies RuntimeConfigDto;
   });
 
-  app.get('/api/worker/metadata', async () => {
+  app.get('/api/worker/metadata', async (request) => {
     const runtimeManifest = readWorkerRuntimeManifest(
       app.services.config.workerRuntimeManifestPath,
     );
@@ -132,6 +132,11 @@ export async function registerSystemRoutes(app: FastifyInstance) {
         provider: runtime.provider,
         status: runtime.getStatus(),
       })),
+      requestDiagnostics: {
+        authorizationHeaderPresent: Boolean(request.headers.authorization),
+        workerTokenHeaderPresent: Boolean(request.headers['x-remote-codex-worker-token']),
+        identityEnvelopePresent: Boolean(request.headers['x-remote-codex-signature']),
+      },
       runtimeManifest,
     };
   });
