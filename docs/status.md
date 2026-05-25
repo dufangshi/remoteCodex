@@ -269,32 +269,37 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 
 ## Immediate Next Implementation Queue
 
-1. Run `pnpm phase-zero-six:template`, fill
+1. Run `pnpm phase-zero-six:audit` first and inspect `nextCommands`,
+   `blockingGroups`, and item-level `nextEvidenceCommand` fields. These fields
+   identify whether the next collection step can be AWS-only or must use the
+   full staging/runtime/provider bundle.
+2. Run `pnpm phase-zero-six:template`, fill
    `.temp/phase-zero-six-evidence/phase-zero-six.env.sh` in a private operator
    shell, then `source` it. Do not commit the filled env file.
-2. Run `pnpm phase-zero-six:env`. Use `itemReadiness` and `nextCommands` to
+3. Run `pnpm phase-zero-six:env`. Use `itemReadiness` and `nextCommands` to
    fill missing AWS, staging runtime, direct-worker, and provider smoke inputs.
-3. Run `pnpm phase-zero-six:collect` once env readiness is complete. This
+4. Run `pnpm phase-zero-six:collect` once env readiness is complete. This
    collects AWS preflight, staging lifecycle/router smoke, provider gateway
    smoke, verifier output, artifact scans, `operator-report.txt`,
    `release-review.json`, and `summary.json`.
-4. Review `.temp/phase-zero-six-evidence/latest/summary.json`,
+5. Review `.temp/phase-zero-six-evidence/latest/summary.json`,
    `operator-report.txt`, `release-review.json`, and raw evidence JSON for
    accidental secret exposure and expected live staging targets.
-5. Run `pnpm phase-zero-six:audit` for the current checklist state, and inspect
-   the bundle's `checklistReadiness.readyToCheck` before editing boxes.
-6. If the bundle reports proven items under `readyToCheck`, run
+6. Run `pnpm phase-zero-six:audit` again for the current checklist state, and
+   inspect `readyToCheck`, `stillMissing`, `blockingGroups`, and `nextCommands`
+   before editing boxes.
+7. If the bundle reports proven items under `readyToCheck`, run
    `pnpm phase-zero-six:apply`, then review and commit the checklist changes
    with the evidence artifacts referenced in the commit message.
-7. For AWS-only S3.04/S3.05 work before runtime smoke exists, use
+8. For AWS-only S3.04/S3.05 work before runtime smoke exists, use
    `pnpm phase-zero-six:template:aws`, `pnpm phase-zero-six:env:aws`,
    `pnpm phase-zero-six:collect:aws`, and after review
    `pnpm phase-zero-six:apply:aws`.
-8. Capture staging AWS/EKS proof for sandbox start, readiness, stop, and
+9. Capture staging AWS/EKS proof for sandbox start, readiness, stop, and
    idempotent lifecycle.
-9. Capture staging router proof for direct-worker denial and
+10. Capture staging router proof for direct-worker denial and
    browser-to-router-to-worker traffic.
-10. Run staging provider-runtime gateway smokes for Codex, Claude Code, and
+11. Run staging provider-runtime gateway smokes for Codex, Claude Code, and
    OpenCode, including gateway usage records and worker env/config root-key
    absence. Use `pnpm exec tsx scripts/provider-gateway-smoke.ts <provider>`
    inside the worker to produce the required evidence JSON.

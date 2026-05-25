@@ -313,6 +313,22 @@ pnpm verify:phase-zero-six-evidence -- \
   --staging-smoke ./.temp/phase-zero-six-evidence/<run-id>/staging-phase-one-smoke.json
 ```
 
+For the current checklist state without supplying new evidence, use the
+convenience audit command:
+
+```bash
+pnpm phase-zero-six:audit
+```
+
+The read-only audit emits:
+
+- `stillMissing`, with item-level `groupId` and `nextEvidenceCommand`.
+- `blockingGroups`, grouped as `aws-preflight`, `runtime-smoke`,
+  `router-smoke`, and `provider-smoke`.
+- `nextCommands`, which tells the operator whether to run the AWS-only
+  `template:aws/env:aws/collect:aws/apply:aws` flow or the full
+  `template/env/collect/apply` staging flow.
+
 After the aggregate report shows one or more remaining Phase 0 through Phase 6
 items under `readyToCheck`, the same tool can update those proven checklist
 items in one guarded step:
