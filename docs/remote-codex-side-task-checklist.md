@@ -127,7 +127,7 @@ Verification:
 - [x] Add audit events for admin user updates.
 - [ ] Add provider-specific auth integration or smoke tests.
 - [x] Add explicit user deactivation policy.
-- [ ] Add user data export policy.
+- [x] Add user data export policy.
 - [ ] Add email verification state only if the chosen auth provider does not
   own it.
 - [ ] Add frontend login route.
@@ -745,8 +745,8 @@ without exposing product identity tokens to sandbox workers.
 - [x] Add admin user status update endpoint.
 - [x] Add admin user quota profile update endpoint.
 - [x] Add audit events for admin user updates.
-- [ ] Add user deletion or deactivation policy.
-- [ ] Add user data export policy.
+- [x] Add user deletion or deactivation policy.
+- [x] Add user data export policy.
 - [ ] Add user email verification state if the provider does not own it.
 - [x] Add account bootstrap idempotency tests.
 

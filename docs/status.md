@@ -42,6 +42,11 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   skew checks.
 - Control-plane schema and APIs cover users, projects, workspaces, sessions,
   sandboxes, route tokens, and admin user/sandbox operations.
+- Inactive account behavior is implemented for route-token issuance, sandbox
+  start/restart, and usage import.
+- User data export and deletion/anonymization APIs are explicitly deferred in
+  `docs/user-data-policy.md`; account suspension is the implemented phase-one
+  control.
 - Project, workspace, session, and sandbox ownership tests exist.
 - Worker mode validates required sandbox identity and internal worker token
   settings.
@@ -69,14 +74,12 @@ gateway, ElAgenteHarness, or chemistry compute workers.
    expired, unauthorized, and disabled-account states.
 2. Add production auth-provider smoke coverage or staging smoke procedure for
    valid, expired, wrong-issuer, and wrong-audience tokens.
-3. Enforce disabled-user behavior across route-token issuance, sandbox
-   start/restart, and usage import.
-4. Add project detail, list loading states, and open-session flow.
-5. Add worker checkpoint caller plus wrong-user and wrong-sandbox denial tests.
-6. Add AWS namespace/label strategy, Pod cleanup policy, idle timeout, and
+3. Add project detail, list loading states, and open-session flow.
+4. Add worker checkpoint caller plus wrong-user and wrong-sandbox denial tests.
+5. Add AWS namespace/label strategy, Pod cleanup policy, idle timeout, and
    sandbox reaper.
-7. Build and smoke-test the worker Docker image, then add CI image checks.
-8. Finish gateway usage adapter, scheduled import, metrics, and frontend usage
+6. Build and smoke-test the worker Docker image, then add CI image checks.
+7. Finish gateway usage adapter, scheduled import, metrics, and frontend usage
    UI.
 
 ## Verification Commands

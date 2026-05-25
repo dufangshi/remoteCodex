@@ -160,8 +160,8 @@ credential.
 - [x] Define and implement disabled-user behavior for route-token issuance.
 - [x] Define and implement disabled-user behavior for sandbox start/restart.
 - [x] Define and implement disabled-user behavior for usage import.
-- [ ] Add user data export API or explicitly document deferral.
-- [ ] Add user deletion/anonymization API or explicitly document deferral.
+- [x] Add user data export API or explicitly document deferral.
+- [x] Add user deletion/anonymization API or explicitly document deferral.
 
 ### Frontend
 

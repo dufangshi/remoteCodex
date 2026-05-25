@@ -125,8 +125,8 @@ worker credentials.
 - [ ] Add integration smoke tests for the selected production auth provider.
 - [x] Add explicit user deactivation behavior for route-token issuance,
   sandbox lifecycle, and usage import.
-- [ ] Add user data export policy and API shape if required for launch.
-- [ ] Add user deletion or anonymization policy if required for launch.
+- [x] Add user data export policy and API shape if required for launch.
+- [x] Add user deletion or anonymization policy if required for launch.
 - [x] Prove product JWTs are stripped before router-to-worker traffic.
 
 ### Frontend Checklist

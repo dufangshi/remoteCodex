@@ -174,12 +174,12 @@ credential.
     visibility follows the documented account policy.
   - Verification: usage import tests cover disabled-user records.
 
-- [ ] Add user data export API or explicitly document deferral.
+- [x] Add user data export API or explicitly document deferral.
   - Acceptance: either an API returns exportable user/project/session/usage
     data, or `docs/status.md` documents why this is deferred.
   - Verification: API tests pass, or deferral is linked from release notes.
 
-- [ ] Add user deletion/anonymization API or explicitly document deferral.
+- [x] Add user deletion/anonymization API or explicitly document deferral.
   - Acceptance: either an API anonymizes/deletes product user data according to
     policy, or deferral is explicit before launch.
   - Verification: API tests pass, or deferral is linked from release notes.
@@ -227,11 +227,13 @@ credential.
 ### Evidence
 
 - Files: `apps/control-plane-api/src/app.ts`,
-  `apps/control-plane-api/src/app.test.ts`
+  `apps/control-plane-api/src/app.test.ts`, `docs/user-data-policy.md`,
+  `docs/status.md`
 - Verification: `pnpm --filter @remote-codex/control-plane-api typecheck`;
-  `pnpm --filter @remote-codex/control-plane-api test`
+  `pnpm --filter @remote-codex/control-plane-api test`; `git diff --check`
 - Residual risk: production auth-provider and frontend disabled-account UI
-  tasks remain unchecked.
+  tasks remain unchecked. User data export and deletion/anonymization APIs are
+  explicitly deferred and are not implemented.
 
 ## Phase 2: Projects, Workspaces, Sessions, And Worker Session Contract
 
