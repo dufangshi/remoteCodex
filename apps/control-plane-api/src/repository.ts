@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { and, desc, eq, like, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, like, sql } from 'drizzle-orm';
 
 import { DatabaseClient } from '../../../packages/db/src/index';
 import {
@@ -311,6 +311,10 @@ export class ControlPlaneRepository {
     return this.db.select().from(controlSandboxes).where(eq(controlSandboxes.id, id)).get();
   }
 
+  hasSandbox(id: string) {
+    return Boolean(this.getSandboxById(id));
+  }
+
   updateSandboxState(
     sandboxId: string,
     input: {
@@ -340,6 +344,53 @@ export class ControlPlaneRepository {
       this.audit(sandbox.userId, `sandbox.${input.state}`, 'sandbox', sandboxId, input);
     }
     return sandbox;
+  }
+
+  patchSandbox(
+    sandboxId: string,
+    input: Partial<{
+      state: string;
+      routerBaseUrl: string | null;
+      workerServiceName: string | null;
+      k8sNamespace: string | null;
+      k8sPodName: string | null;
+      lastStartedAt: string | null;
+      lastSeenAt: string | null;
+      idleTimeoutAt: string | null;
+      statusReason: string | null;
+      startupProgress: number;
+      lastFailureCode: string | null;
+      lastFailureMessage: string | null;
+      updatedAt: string;
+    }>,
+  ) {
+    const sandbox = this.getSandboxById(sandboxId);
+    if (!sandbox) {
+      return null;
+    }
+    const updatedAt = input.updatedAt ?? new Date().toISOString();
+    this.db
+      .update(controlSandboxes)
+      .set({
+        ...input,
+        updatedAt,
+      })
+      .where(eq(controlSandboxes.id, sandboxId))
+      .run();
+    this.audit(sandbox.userId, 'sandbox.patched', 'sandbox', sandboxId, input);
+    return this.getSandboxById(sandboxId);
+  }
+
+  markSandboxSeen(sandboxId: string, seenAt = new Date().toISOString()) {
+    this.db
+      .update(controlSandboxes)
+      .set({
+        lastSeenAt: seenAt,
+        updatedAt: seenAt,
+      })
+      .where(eq(controlSandboxes.id, sandboxId))
+      .run();
+    return this.getSandboxById(sandboxId);
   }
 
   createWorkspace(input: {
@@ -502,6 +553,18 @@ export class ControlPlaneRepository {
     return this.db
       .select()
       .from(controlSandboxes)
+      .orderBy(desc(controlSandboxes.updatedAt))
+      .all();
+  }
+
+  listSandboxesByStates(states: string[]) {
+    if (states.length === 0) {
+      return [];
+    }
+    return this.db
+      .select()
+      .from(controlSandboxes)
+      .where(inArray(controlSandboxes.state, states))
       .orderBy(desc(controlSandboxes.updatedAt))
       .all();
   }

@@ -81,7 +81,7 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 2. Add production auth-provider smoke coverage or staging smoke procedure for
    valid, expired, wrong-issuer, and wrong-audience tokens.
 3. Add frontend project detail/loading/open-session flows.
-4. Add AWS Pod cleanup policy, idle timeout, and sandbox reaper.
+4. Define AWS scaling/capacity request process and staging lifecycle smokes.
 5. Build and smoke-test the worker Docker image, then add CI image checks.
 6. Finish gateway usage adapter, scheduled import, metrics, and frontend usage
    UI.

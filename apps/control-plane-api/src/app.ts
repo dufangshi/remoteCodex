@@ -30,6 +30,7 @@ import {
 import { ControlPlaneConfig, loadControlPlaneConfig } from './config';
 import { checkRouteTokenQuota, QuotaDenial } from './quota';
 import { ControlPlaneRepository, type UsageEventInput } from './repository';
+import { SandboxReaper } from './sandbox-reaper';
 
 class HttpError extends Error {
   constructor(
@@ -49,6 +50,7 @@ export interface ControlPlaneServices {
   sandboxManager: SandboxManager;
   llmGatewayAdmin: LlmGatewayAdmin;
   authVerifier: AuthVerifier;
+  sandboxReaper: SandboxReaper;
 }
 
 export const CONTROL_PLANE_LOG_REDACTION_PATHS = [
@@ -428,11 +430,12 @@ export function buildControlPlaneApp(
     disableRequestLogging: config.disableRequestLogging,
   });
 
-  app.decorate('services', {
+  const sandboxManager = options.sandboxManager ?? new NoopSandboxManager(config.routerBaseUrl);
+  const services: ControlPlaneServices = {
     config,
     database,
     repository,
-    sandboxManager: options.sandboxManager ?? new NoopSandboxManager(config.routerBaseUrl),
+    sandboxManager,
     llmGatewayAdmin:
       options.llmGatewayAdmin ??
       (config.llmGatewayAdminBaseUrl && config.llmGatewayAdminToken
@@ -442,7 +445,13 @@ export function buildControlPlaneApp(
           })
         : new NoopLlmGatewayAdmin()),
     authVerifier,
-  });
+    sandboxReaper: new SandboxReaper({
+      repository,
+      sandboxManager,
+    }),
+  };
+
+  app.decorate('services', services);
 
   app.setErrorHandler((error, _request, reply) => {
     const { statusCode, payload } = toErrorPayload(error);
@@ -636,6 +645,13 @@ export function buildControlPlaneApp(
         workerSessionId: input.workerSessionId,
         status: input.status,
       }),
+    };
+  });
+
+  app.post('/api/internal/sandboxes/reap', async (request) => {
+    requireInternalService(app, request);
+    return {
+      reaper: await app.services.sandboxReaper.runOnce(),
     };
   });
 

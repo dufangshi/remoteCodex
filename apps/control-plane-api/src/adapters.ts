@@ -14,6 +14,13 @@ export interface SandboxProvisionResult {
   lastFailureMessage?: string | null;
 }
 
+export interface SandboxRuntimeResource {
+  sandboxId: string;
+  userId?: string | null;
+  state?: string | null;
+  labels?: Record<string, string>;
+}
+
 export interface SandboxStartInput {
   sandboxId: string;
   userId: string;
@@ -65,6 +72,12 @@ export interface SandboxManager {
   getSandboxStatus(input: { sandboxId: string; userId: string }): Promise<SandboxProvisionResult>;
   getSandboxEndpoint(input: { sandboxId: string; userId: string }): Promise<{ routerBaseUrl: string | null }>;
   prepareSandboxEnvironment(input: SandboxStartInput): Promise<SandboxEnvironment>;
+  listRuntimeResources?(): Promise<SandboxRuntimeResource[]>;
+  cleanupRuntimeResource?(input: {
+    sandboxId: string;
+    userId?: string | null;
+    reason: string;
+  }): Promise<SandboxProvisionResult>;
 }
 
 export class NoopSandboxManager implements SandboxManager {
@@ -112,6 +125,18 @@ export class NoopSandboxManager implements SandboxManager {
         REMOTE_CODEX_USER_ID: input.userId,
         WORKSPACE_ROOT: '/workspace',
       },
+    };
+  }
+
+  async listRuntimeResources(): Promise<SandboxRuntimeResource[]> {
+    return [];
+  }
+
+  async cleanupRuntimeResource(input: { sandboxId: string }): Promise<SandboxProvisionResult> {
+    return {
+      state: 'deleted',
+      k8sNamespace: 'remote-codex-sandboxes',
+      k8sPodName: `sandbox-${input.sandboxId}`,
     };
   }
 
@@ -228,6 +253,20 @@ export class LocalWorkerProcessSandboxManager implements SandboxManager {
     };
   }
 
+  async listRuntimeResources(): Promise<SandboxRuntimeResource[]> {
+    return [...this.processes.keys()].map((sandboxId) => ({
+      sandboxId,
+      state: 'running',
+      labels: {
+        'remote-codex.dev/sandbox-id': sandboxId,
+      },
+    }));
+  }
+
+  async cleanupRuntimeResource(input: { sandboxId: string }): Promise<SandboxProvisionResult> {
+    return this.stopSandbox({ sandboxId: input.sandboxId });
+  }
+
   private runningResult(sandboxId: string): SandboxProvisionResult {
     return {
       state: 'running',
@@ -300,6 +339,11 @@ export interface AwsWorkerEndpoint {
   workerServiceName?: string | null;
 }
 
+export interface AwsWorkerRuntimeResource extends SandboxRuntimeResource {
+  podName: string;
+  serviceName?: string | null;
+}
+
 export interface AwsSandboxKubernetesClient {
   applyWorkerPod(spec: AwsWorkerPodSpec): Promise<void>;
   deleteWorkerPod(input: {
@@ -315,6 +359,10 @@ export interface AwsSandboxKubernetesClient {
     namespace: string;
     serviceName: string;
   }): Promise<AwsWorkerEndpoint>;
+  listWorkerPods?(input: {
+    namespace: string;
+    selector: Record<string, string>;
+  }): Promise<AwsWorkerRuntimeResource[]>;
 }
 
 function commaList(value: string) {
@@ -524,6 +572,27 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
     return {
       routerBaseUrl: endpoint.routerBaseUrl ?? this.config.routerBaseUrl,
     };
+  }
+
+  async listRuntimeResources(): Promise<SandboxRuntimeResource[]> {
+    if (!this.kubernetesClient?.listWorkerPods) {
+      return [];
+    }
+    return this.kubernetesClient.listWorkerPods({
+      namespace: this.config.namespace,
+      selector: awsSandboxWorkerCleanupSelector({
+        environmentName: this.config.environmentName,
+      }),
+    });
+  }
+
+  async cleanupRuntimeResource(input: {
+    sandboxId: string;
+    userId?: string | null;
+  }): Promise<SandboxProvisionResult> {
+    return this.stopSandbox({
+      sandboxId: input.sandboxId,
+    });
   }
 
   async prepareSandboxEnvironment(input: SandboxStartInput): Promise<SandboxEnvironmentSpec> {

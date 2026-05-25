@@ -260,7 +260,7 @@ Verification:
 - [x] Add degraded/offline UI.
 - [x] Add startup progress UI.
 - [x] Add failure reason UI.
-- [ ] Add sandbox idle-timeout policy.
+- [x] Add sandbox idle-timeout policy.
 - [ ] Add admin sandbox view.
 - [ ] Add local smoke script that starts control plane plus local worker.
 - [x] Add local route-token smoke test against the worker process.
@@ -892,6 +892,10 @@ start, stop, observe, and eventually snapshot it.
 - [x] Add failure handling for AWS capacity errors.
 - [x] Add failure handling for image pull errors.
 - [x] Add failure handling for worker readiness timeout.
+- [x] Add Pod TTL and cleanup behavior.
+- [x] Add idle-timeout policy.
+- [x] Add sandbox reaper job for stale `starting`, `stopping`, and orphaned
+  runtime records.
 
 ### Control-Plane Sandbox API
 
@@ -909,7 +913,7 @@ start, stop, observe, and eventually snapshot it.
 - [x] Track sandbox status reason.
 - [x] Add startup progress fields.
 - [x] Add last failure code and last failure message.
-- [ ] Add sandbox idle-timeout policy.
+- [x] Add sandbox idle-timeout policy.
 - [x] Add admin restart with reason audit event.
 
 ### Frontend Sandbox Surface

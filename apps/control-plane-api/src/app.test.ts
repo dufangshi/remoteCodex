@@ -4,7 +4,12 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { createSignedToken } from '../../../packages/shared/src/index';
-import type { SandboxManager, SandboxProvisionResult, SandboxStartInput } from './adapters';
+import type {
+  SandboxManager,
+  SandboxProvisionResult,
+  SandboxRuntimeResource,
+  SandboxStartInput,
+} from './adapters';
 import { CONTROL_PLANE_LOG_REDACTION_PATHS, buildControlPlaneApp } from './app';
 
 function testEnv(name: string) {
@@ -38,6 +43,11 @@ function decodeTokenHeader(token: string) {
 
 class RecordingSandboxManager implements SandboxManager {
   readonly starts: SandboxStartInput[] = [];
+  readonly stops: Array<{ sandboxId: string; userId: string }> = [];
+  readonly cleanupRequests: Array<{ sandboxId: string; userId?: string | null; reason: string }> = [];
+  runtimeResources: SandboxRuntimeResource[] = [];
+  statusResult: SandboxProvisionResult = { state: 'running' };
+  stopResult: SandboxProvisionResult = { state: 'stopped' };
 
   async createSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
     return this.startSandbox(input);
@@ -52,8 +62,9 @@ class RecordingSandboxManager implements SandboxManager {
     };
   }
 
-  async stopSandbox(): Promise<SandboxProvisionResult> {
-    return { state: 'stopped' };
+  async stopSandbox(input: { sandboxId: string; userId: string }): Promise<SandboxProvisionResult> {
+    this.stops.push(input);
+    return this.stopResult;
   }
 
   async restartSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
@@ -65,7 +76,7 @@ class RecordingSandboxManager implements SandboxManager {
   }
 
   async getSandboxStatus(): Promise<SandboxProvisionResult> {
-    return { state: 'running' };
+    return this.statusResult;
   }
 
   async getSandboxEndpoint() {
@@ -78,6 +89,19 @@ class RecordingSandboxManager implements SandboxManager {
         REMOTE_CODEX_SANDBOX_ID: input.sandboxId,
       },
     };
+  }
+
+  async listRuntimeResources(): Promise<SandboxRuntimeResource[]> {
+    return this.runtimeResources;
+  }
+
+  async cleanupRuntimeResource(input: {
+    sandboxId: string;
+    userId?: string | null;
+    reason: string;
+  }): Promise<SandboxProvisionResult> {
+    this.cleanupRequests.push(input);
+    return this.stopResult;
   }
 }
 
@@ -1571,6 +1595,131 @@ describe('control plane api', () => {
       state: 'stopped',
       statusReason: 'admin requested stop',
     });
+  });
+
+  it('reaps stale sandbox lifecycle states through the internal API', async () => {
+    const sandboxManager = new RecordingSandboxManager();
+    sandboxManager.statusResult = {
+      state: 'stopped',
+      statusReason: 'Worker Pod is absent.',
+    };
+    sandboxManager.runtimeResources = [
+      {
+        sandboxId: '00000000-0000-4000-8000-000000000099',
+        userId: '00000000-0000-4000-8000-000000000098',
+        state: 'running',
+        labels: {
+          'remote-codex.dev/cleanup-scope': 'sandbox-worker',
+          'remote-codex.dev/environment': 'test',
+        },
+      },
+    ];
+    const app = buildControlPlaneApp({
+      env: testEnvWithInternalService('sandbox-reaper'),
+      sandboxManager,
+    });
+    apps.push(app);
+
+    const oldDate = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const activeDate = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString();
+
+    const starting = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: { authorization: 'Bearer dev:stale-starting' },
+      payload: { email: 'stale-starting@example.com' },
+    });
+    const startingSandbox = starting.json().sandbox;
+    app.services.repository.patchSandbox(startingSandbox.id, {
+      state: 'starting',
+      updatedAt: oldDate,
+      statusReason: 'start requested',
+    });
+
+    const stopping = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: { authorization: 'Bearer dev:stale-stopping' },
+      payload: { email: 'stale-stopping@example.com' },
+    });
+    const stoppingSandbox = stopping.json().sandbox;
+    app.services.repository.patchSandbox(stoppingSandbox.id, {
+      state: 'stopping',
+      updatedAt: oldDate,
+      statusReason: 'stop requested',
+    });
+
+    const idle = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: { authorization: 'Bearer dev:idle-running' },
+      payload: { email: 'idle-running@example.com' },
+    });
+    const idleSandbox = idle.json().sandbox;
+    app.services.repository.patchSandbox(idleSandbox.id, {
+      state: 'running',
+      updatedAt: activeDate,
+      lastSeenAt: activeDate,
+      statusReason: 'worker last heartbeat',
+    });
+
+    const run = await app.inject({
+      method: 'POST',
+      url: '/api/internal/sandboxes/reap',
+      headers: {
+        'x-remote-codex-service-token': 'test-internal-service-token',
+      },
+    });
+
+    expect(run.statusCode).toBe(200);
+    expect(run.json().reaper.decisions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sandboxId: startingSandbox.id,
+          action: 'status_checked',
+          reason: 'stale_starting',
+          state: 'stopped',
+        }),
+        expect.objectContaining({
+          sandboxId: stoppingSandbox.id,
+          action: 'marked_stopped',
+          reason: 'stale_stopping_runtime_absent',
+          state: 'stopped',
+        }),
+        expect.objectContaining({
+          sandboxId: idleSandbox.id,
+          action: 'stop_requested',
+          reason: 'idle_timeout',
+        }),
+        expect.objectContaining({
+          sandboxId: '00000000-0000-4000-8000-000000000099',
+          action: 'stop_requested',
+          reason: 'orphan_runtime',
+          state: 'stopped',
+        }),
+      ]),
+    );
+    expect(app.services.repository.getSandboxById(startingSandbox.id)).toMatchObject({
+      state: 'stopped',
+      statusReason: 'Worker Pod is absent.',
+    });
+    expect(app.services.repository.getSandboxById(stoppingSandbox.id)).toMatchObject({
+      state: 'stopped',
+      statusReason: 'Worker Pod is absent.',
+    });
+    expect(sandboxManager.stops).toEqual([
+      {
+        sandboxId: idleSandbox.id,
+        userId: idleSandbox.userId,
+      },
+    ]);
+    expect(sandboxManager.cleanupRequests).toEqual([
+      {
+        sandboxId: '00000000-0000-4000-8000-000000000099',
+        userId: '00000000-0000-4000-8000-000000000098',
+        reason: 'orphan_runtime',
+      },
+    ]);
   });
 
   it('forbids non-admin users from control-plane administration', async () => {

@@ -191,6 +191,50 @@ use these selectors instead of scanning the full namespace. This keeps the
 runtime model viable for hundreds of users while leaving room to move large
 customers or high-risk workloads into dedicated namespaces later.
 
+## Pod TTL, Cleanup, And Reaper
+
+Sandbox cleanup is owned by the control plane. Runtime resources are treated as
+repairable state derived from the sandbox registry, not as the source of truth.
+
+The phase-one cleanup policy is:
+
+| Case | Default threshold | Action |
+| --- | ---: | --- |
+| `starting` too long | 15 minutes since `updatedAt` | Poll runtime status and update the registry to `running`, `starting`, `failed`, or `stopped`. |
+| `stopping` too long | 10 minutes since `updatedAt` | Poll runtime status. If absent, mark `stopped`; otherwise request stop again. |
+| `running` or `degraded` idle | 4 hours since `lastSeenAt`, or fallback `lastStartedAt`/`updatedAt` | Request stop and move registry toward `stopping` or `stopped`. |
+| `failed` runtime retained | 1 hour since `updatedAt` | Request runtime cleanup after operators have had time to inspect failure metadata. |
+| Runtime resource with no registry row | immediate when listed by cleanup selector | Request runtime cleanup and audit `sandbox.orphan_runtime_cleaned`. |
+
+`lastSeenAt` is the worker heartbeat/activity timestamp used for idle timeout.
+If a worker has never reported heartbeat, the reaper falls back to
+`lastStartedAt` and then `updatedAt`.
+
+The first implementation exposes:
+
+```text
+POST /api/internal/sandboxes/reap
+```
+
+The endpoint requires `X-Remote-Codex-Service-Token` and runs one bounded reaper
+pass. This shape supports Railway cron, an AWS scheduled job, or a future
+control-plane worker process without changing the cleanup logic.
+
+Reaper behavior is intentionally idempotent:
+
+- Repeated stale `starting` checks only poll and rewrite registry state.
+- Repeated stale `stopping` checks either keep retrying stop or keep the row
+  converged at `stopped`.
+- Repeated idle checks use the normal `stopSandbox` path and do not create a new
+  runtime.
+- Orphan runtime cleanup uses `SandboxManager.cleanupRuntimeResource` when the
+  adapter supports runtime listing. Adapters that cannot list runtime resources
+  simply skip orphan cleanup while still repairing registry rows.
+
+Before production, the internal endpoint should be triggered every 1-5 minutes.
+The interval is deployment policy, not business logic; the thresholds above
+remain inside the reaper policy.
+
 ## AWS Network Requirements
 
 Minimum phase-one AWS requirements:

@@ -339,7 +339,7 @@ user on EKS Fargate.
     environment names, and cleanup selectors.
   - Verification: AWS adapter tests assert required labels on created Pods.
 
-- [ ] Define Pod TTL and cleanup behavior.
+- [x] Define Pod TTL and cleanup behavior.
   - Acceptance: stale Pods and orphaned registry records have a documented and
     implemented cleanup path.
   - Verification: reaper tests cover orphaned Pod, stale starting state, and
@@ -350,14 +350,15 @@ user on EKS Fargate.
     Fargate profile/subnet constraints, and AWS quota request process.
   - Verification: staging readiness notes include capacity preflight.
 
-- [ ] Add sandbox idle-timeout policy.
+- [x] Add sandbox idle-timeout policy.
   - Acceptance: idle criteria, warning behavior, snapshot behavior, and stop
     behavior are explicit.
   - Verification: lifecycle tests cover idle timeout decisions.
 
-- [ ] Add sandbox reaper job.
-  - Acceptance: a scheduled job repairs stale sandbox states and cleans orphaned
-    runtime resources.
+- [x] Add sandbox reaper job.
+  - Acceptance: an internal reaper job endpoint repairs stale sandbox states and
+    cleans orphaned runtime resources; deployment can schedule it every 1-5
+    minutes.
   - Verification: job tests cover stale states and idempotency.
 
 - [ ] Add admin sandbox detail API.
@@ -1475,7 +1476,7 @@ corresponding implementation and verification land.
 - [ ] 4. Add project detail UI, list loading states, and open-session flow.
 - [x] 5. Add worker checkpoint caller, wrong-user/wrong-sandbox denial, retry,
   and session finalize behavior.
-- [ ] 6. Add AWS namespace/label strategy, Pod cleanup policy, idle timeout, and
+- [x] 6. Add AWS namespace/label strategy, Pod cleanup policy, idle timeout, and
   sandbox reaper.
 - [ ] 7. Build the worker image locally, run `/readyz`, and add worker Docker CI.
 - [ ] 8. Add worker MCP config validation and artifact read/write scopes.

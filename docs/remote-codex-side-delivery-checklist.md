@@ -278,8 +278,8 @@ user.
 - [x] Add structured errors for quota, capacity, config, and provider failures.
 - [x] Implement local no-op adapter for tests.
 - [x] Implement local worker-process adapter for development.
-- [ ] Add sandbox idle-timeout policy.
-- [ ] Add sandbox reaper job.
+- [x] Add sandbox idle-timeout policy.
+- [x] Add sandbox reaper job.
 - [ ] Add admin sandbox detail view/API.
 
 ### AWS EKS Fargate Adapter
@@ -300,7 +300,7 @@ user.
 - [x] Handle image pull errors.
 - [x] Handle worker readiness timeout.
 - [x] Define namespace and label strategy for hundreds of users.
-- [ ] Define Pod TTL/cleanup behavior.
+- [x] Define Pod TTL/cleanup behavior.
 - [ ] Define scaling and capacity request process.
 - [ ] Add staging start-one-sandbox smoke test.
 - [ ] Add staging stop-one-sandbox smoke test.

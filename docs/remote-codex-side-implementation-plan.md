@@ -278,8 +278,8 @@ user.
 - [x] Handle image pull errors.
 - [x] Handle worker readiness timeout.
 - [x] Add namespace or label strategy for production multi-user isolation.
-- [ ] Add idle-timeout policy.
-- [ ] Add sandbox reaper job for stale `starting`, `stopping`, and orphaned
+- [x] Add idle-timeout policy.
+- [x] Add sandbox reaper job for stale `starting`, `stopping`, and orphaned
   runtime records.
 - [ ] Add snapshot hooks before stop/restart if persistence is enabled.
 
