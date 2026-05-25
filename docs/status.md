@@ -155,6 +155,14 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   or AWS-only evidence collection, and uploads the generated evidence bundle
   without committing checklist changes. Operators must review the artifact and
   run the guarded apply flow before checking any remaining S3/R5/G6 boxes.
+- The visible `Phase 0-6 Evidence Tooling` workflow also supports manual
+  diagnostic collection. GitHub Actions run `26409751861` passed on
+  `sandbox-worker-control-plane` at commit
+  `4153a7f8b2dd58de18a73983f5086c75dab8e5a2` with `evidence_mode=aws-only`
+  and `force_diagnostics=true`; it uploaded artifact
+  `phase-zero-six-staging-evidence-26409751861`. The artifact is diagnostic
+  only because the `staging` Environment still lacks real Phase 0-6
+  vars/secrets, so it must not be used to check S3/R5/G6 boxes.
 - GitHub Environment readiness for the manual staging evidence workflow can be
   checked with `pnpm phase-zero-six:github-env` or the human-readable
   `pnpm phase-zero-six:github-env:report`; the checker uses `gh` metadata APIs
