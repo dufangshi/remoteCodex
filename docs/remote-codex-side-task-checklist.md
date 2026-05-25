@@ -376,7 +376,7 @@ Verification:
 - [x] Add rate limits.
 - [x] Add structured proxy errors.
 - [x] Add router health endpoint.
-- [ ] Add router audit logs.
+- [x] Add router audit logs.
 - [ ] Fetch route token before opening a worker session from the frontend.
 - [x] Store route token only in memory.
 - [ ] Refresh route token before expiry.
@@ -1048,7 +1048,7 @@ token.
 - [x] Add rate limits.
 - [x] Add structured proxy errors.
 - [x] Add router health endpoint.
-- [ ] Add router audit logs.
+- [x] Add router audit logs.
 
 ### Frontend Worker Connection
 

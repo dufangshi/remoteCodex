@@ -96,6 +96,7 @@ export interface SandboxRouterServices {
   config: SandboxRouterConfig;
   endpointResolver: SandboxEndpointResolver;
   rateLimiter: FixedWindowRateLimiter;
+  auditSink: SandboxRouterAuditSink;
 }
 
 declare module 'fastify' {
@@ -136,6 +137,36 @@ class FixedWindowRateLimiter {
       remaining: this.input.limit - existing.count,
       resetAtMs: existing.resetAtMs,
     };
+  }
+}
+
+export interface SandboxRouterAuditEvent {
+  action: 'proxy.forwarded' | 'proxy.denied' | 'proxy.failed';
+  userId: string | null;
+  sandboxId: string | null;
+  routeTokenId: string | null;
+  method: string;
+  path: string;
+  statusCode: number;
+  code?: string | undefined;
+  workerStatusCode?: number | undefined;
+  scopes?: string[] | undefined;
+}
+
+export interface SandboxRouterAuditSink {
+  record(event: SandboxRouterAuditEvent, request: FastifyRequest): void;
+}
+
+class LoggingSandboxRouterAuditSink implements SandboxRouterAuditSink {
+  record(event: SandboxRouterAuditEvent, request: FastifyRequest) {
+    request.log.info(
+      {
+        audit: true,
+        service: 'sandbox-router',
+        ...event,
+      },
+      'sandbox router audit event',
+    );
   }
 }
 
@@ -235,6 +266,13 @@ function serializedRequestBody(request: FastifyRequest, maxBytes: number) {
   return body;
 }
 
+function auditRoute(
+  request: FastifyRequest,
+  event: SandboxRouterAuditEvent,
+) {
+  request.server.services.auditSink.record(event, request);
+}
+
 function enforceRateLimit(request: FastifyRequest, payload: RouteTokenPayload) {
   const { config, rateLimiter } = request.server.services;
   const key = `${payload.sub}:${payload.sandbox_id}`;
@@ -263,13 +301,41 @@ function enforceRateLimit(request: FastifyRequest, payload: RouteTokenPayload) {
 
 async function proxyRequest(request: FastifyRequest) {
   const { payload, path } = verifyRouteTokenForRequest(request);
-  enforceRateLimit(request, payload);
+  try {
+    enforceRateLimit(request, payload);
+  } catch (error) {
+    if (error instanceof RouterHttpError) {
+      auditRoute(request, {
+        action: 'proxy.denied',
+        userId: payload.sub,
+        sandboxId: payload.sandbox_id,
+        routeTokenId: payload.jti,
+        method: request.method,
+        path,
+        statusCode: error.statusCode,
+        code: error.code,
+        scopes: payload.scopes,
+      });
+    }
+    throw error;
+  }
   const { config, endpointResolver } = request.server.services;
   const endpoint = await endpointResolver.resolve({
     sandboxId: payload.sandbox_id,
     routeToken: payload,
   });
   if (!endpoint.workerBaseUrl) {
+    auditRoute(request, {
+      action: 'proxy.failed',
+      userId: payload.sub,
+      sandboxId: payload.sandbox_id,
+      routeTokenId: payload.jti,
+      method: request.method,
+      path,
+      statusCode: 502,
+      code: 'worker_unavailable',
+      scopes: payload.scopes,
+    });
     throw new RouterHttpError(502, 'worker_unavailable', 'Sandbox worker endpoint is unavailable.');
   }
 
@@ -299,12 +365,35 @@ async function proxyRequest(request: FastifyRequest) {
   const abortController = new AbortController();
   const timeout = setTimeout(() => abortController.abort(), config.upstreamTimeoutMs);
   try {
-    return await fetch(buildWorkerUrl(endpoint.workerBaseUrl, path, request), {
+    const response = await fetch(buildWorkerUrl(endpoint.workerBaseUrl, path, request), {
       ...init,
       signal: abortController.signal,
     });
+    auditRoute(request, {
+      action: 'proxy.forwarded',
+      userId: payload.sub,
+      sandboxId: payload.sandbox_id,
+      routeTokenId: payload.jti,
+      method: request.method,
+      path,
+      statusCode: response.status,
+      workerStatusCode: response.status,
+      scopes: payload.scopes,
+    });
+    return response;
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
+      auditRoute(request, {
+        action: 'proxy.failed',
+        userId: payload.sub,
+        sandboxId: payload.sandbox_id,
+        routeTokenId: payload.jti,
+        method: request.method,
+        path,
+        statusCode: 504,
+        code: 'worker_timeout',
+        scopes: payload.scopes,
+      });
       throw new RouterHttpError(
         504,
         'worker_timeout',
@@ -320,6 +409,7 @@ async function proxyRequest(request: FastifyRequest) {
 export function buildSandboxRouterApp(options: {
   env?: NodeJS.ProcessEnv;
   endpointResolver?: SandboxEndpointResolver;
+  auditSink?: SandboxRouterAuditSink;
 } = {}) {
   const config = loadSandboxRouterConfig(options.env);
   const app = Fastify({
@@ -339,6 +429,7 @@ export function buildSandboxRouterApp(options: {
       limit: config.rateLimitRequests,
       windowMs: config.rateLimitWindowMs,
     }),
+    auditSink: options.auditSink ?? new LoggingSandboxRouterAuditSink(),
   });
 
   app.get('/healthz', async () => ({ ok: true, role: 'sandbox-router' }));

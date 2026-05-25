@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createSignedToken, RouteTokenPayload } from '../../../packages/shared/src/index';
-import { buildSandboxRouterApp, SandboxEndpointResolver } from './app';
+import {
+  buildSandboxRouterApp,
+  SandboxEndpointResolver,
+  SandboxRouterAuditEvent,
+} from './app';
 
 const signingSecret = 'test-control-plane-secret-key';
 const workerIdentitySecret = 'test-worker-identity-secret';
@@ -35,10 +39,12 @@ function testEnv(overrides: Record<string, string> = {}) {
 describe('sandbox router', () => {
   const apps: ReturnType<typeof buildSandboxRouterApp>[] = [];
   const fetchMock = vi.fn();
+  const auditEvents: SandboxRouterAuditEvent[] = [];
 
   afterEach(async () => {
     await Promise.all(apps.map((app) => app.close()));
     apps.length = 0;
+    auditEvents.length = 0;
     vi.unstubAllGlobals();
     fetchMock.mockReset();
   });
@@ -54,6 +60,11 @@ describe('sandbox router', () => {
     const app = buildSandboxRouterApp({
       env: testEnv(envOverrides),
       endpointResolver: resolver,
+      auditSink: {
+        record(event) {
+          auditEvents.push(event);
+        },
+      },
     });
     apps.push(app);
     return app;
@@ -140,6 +151,19 @@ describe('sandbox router', () => {
     expect(headers.get('x-remote-codex-sandbox')).toBe('sandbox_1');
     expect(headers.get('x-remote-codex-scopes')).toBe('file:write,provider:turn:create');
     expect(headers.get('x-remote-codex-signature')).toEqual(expect.any(String));
+    expect(auditEvents).toContainEqual(
+      expect.objectContaining({
+        action: 'proxy.forwarded',
+        userId: 'user_1',
+        sandboxId: 'sandbox_1',
+        routeTokenId: 'token_1',
+        method: 'POST',
+        path: 'api/threads/thread_1/prompt',
+        statusCode: 201,
+        workerStatusCode: 201,
+        scopes: ['provider:turn:create', 'file:write'],
+      }),
+    );
   });
 
   it('returns 502 when the sandbox endpoint cannot be resolved', async () => {
@@ -157,6 +181,16 @@ describe('sandbox router', () => {
     expect(response.json()).toMatchObject({
       code: 'worker_unavailable',
     });
+    expect(auditEvents).toContainEqual(
+      expect.objectContaining({
+        action: 'proxy.failed',
+        code: 'worker_unavailable',
+        userId: 'user_1',
+        sandboxId: 'sandbox_1',
+        routeTokenId: 'token_1',
+        statusCode: 502,
+      }),
+    );
   });
 
   it('resolves sandbox endpoints from the control-plane registry when configured', async () => {
@@ -265,6 +299,16 @@ describe('sandbox router', () => {
       code: 'rate_limited',
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(auditEvents).toContainEqual(
+      expect.objectContaining({
+        action: 'proxy.denied',
+        code: 'rate_limited',
+        userId: 'user_1',
+        sandboxId: 'sandbox_1',
+        routeTokenId: 'token_1',
+        statusCode: 429,
+      }),
+    );
   });
 
   it('returns a structured timeout error when the worker does not respond in time', async () => {
