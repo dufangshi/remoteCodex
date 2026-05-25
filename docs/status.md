@@ -85,7 +85,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   Keep `docs/remote-codex-side-work-breakdown.md` aligned for the near-term
   queue, and keep `docs/remote-codex-side-execution-checklist.md` synchronized
   when a completed item changes phase evidence or release risk.
-- AWS sandbox adapter implementation.
+- AWS sandbox adapter implementation exists with local manager and mocked
+  EKS/Fargate adapter tests; real staging AWS/EKS lifecycle verification has not
+  run yet.
 - Frontend auth shell covers the local login route, authenticated route guard,
   loading state, expired-session state, disabled-account state, and admin user
   management for list/status/quota/non-admin denial. Production-style
@@ -103,6 +105,10 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 - Browser-to-worker route-token connection flow; route token issuance, refresh,
   browser WebSocket connection, and reconnect are in place, while staging router
   smoke checks remain open.
+- `docs/remote-codex-side-detailed-checklist.md` Phase 3 is complete through
+  local sandbox manager and local route-token smoke. Real staging AWS/EKS
+  configuration, credentials, Pod start/stop, and lifecycle idempotency remain
+  unchecked.
 - Worker image runtime pinning, local Docker build, local `/readyz` smoke, local
   worker auth denial/success smoke, and GitHub Actions worker image CI smoke
   are verified. CI run `26396842026` passed on

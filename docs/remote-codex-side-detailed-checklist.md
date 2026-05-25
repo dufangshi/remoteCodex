@@ -357,17 +357,17 @@ and recover it.
 
 ### Sandbox Manager
 
-- [ ] S3.01 Keep the `SandboxManager` interface stable.
+- [x] S3.01 Keep the `SandboxManager` interface stable.
   - Done when create, start, stop, restart, delete, status, endpoint, and env
     preparation methods exist behind one interface.
   - Verify with control-plane typecheck and adapter tests.
 
-- [ ] S3.02 Keep local sandbox adapters working.
+- [x] S3.02 Keep local sandbox adapters working.
   - Done when tests can use a no-op adapter and local development can spawn a
     worker-process adapter.
   - Verify with local adapter tests.
 
-- [ ] S3.03 Add local lifecycle smoke.
+- [x] S3.03 Add local lifecycle smoke.
   - Done when one command starts control plane plus local worker and verifies
     route-token to worker connectivity.
   - Verify with the local smoke command and documented output.
@@ -420,6 +420,33 @@ and recover it.
 - [ ] S3.12 Add admin force-stop with audit trail.
   - Done when admins can force-stop a sandbox with reason and operator id.
   - Verify with API tests and audit assertions.
+
+### Phase 3 Evidence
+
+- Files: `apps/control-plane-api/src/adapters.ts`,
+  `apps/control-plane-api/src/adapters.test.ts`,
+  `apps/control-plane-api/src/app.test.ts`,
+  `scripts/local-route-token-smoke.ts`,
+  `docs/local-control-plane-worker-smoke.md`,
+  `docs/control-plane-sandbox-worker.md`.
+- Verification:
+  - `pnpm smoke:local-route-token` passed and proved a local control plane can
+    start the sandbox through the local manager path, issue a route token,
+    proxy through the router, strip browser `Authorization`, inject worker
+    identity, and read worker metadata.
+  - `pnpm --filter @remote-codex/control-plane-api test -- adapters` passed:
+    4 files, 62 tests, covering NoopSandboxManager, LocalWorkerProcess
+    start/stop, AWS adapter config loading, mock Pod apply/delete/status,
+    deterministic labels, endpoint discovery, and fail-closed missing
+    Kubernetes client behavior.
+  - `pnpm --filter @remote-codex/control-plane-api test -- --runInBand`
+    passed: 4 files, 62 tests, including sandbox lifecycle API and reaper
+    coverage.
+- Residual risk: S3.04-S3.08 remain unchecked because no real staging AWS/EKS
+  environment has been exercised. S3.09-S3.12 remain unchecked because current
+  evidence covers pieces of error mapping, reaping, idle stop, and admin
+  force-stop, but not the full checklist acceptance for preflight, runtime event
+  log, idle warning, or force-stop audit assertions.
 
 ## Phase 4: Worker Image And Runtime Guardrails
 
