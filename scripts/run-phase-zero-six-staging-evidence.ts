@@ -333,6 +333,12 @@ function renderOperatorReport(summary: Record<string, unknown>) {
     for (const entry of stillMissing) {
       const item = asRecord(entry);
       lines.push(`- ${String(item.item ?? '(unknown)')}: ${String(item.title ?? '(untitled)')}`);
+      if (typeof item.groupId === 'string') {
+        lines.push(`  Group: ${item.groupId}`);
+      }
+      if (typeof item.nextEvidenceCommand === 'string') {
+        lines.push(`  Next evidence command: ${item.nextEvidenceCommand}`);
+      }
       if (typeof item.reason === 'string') {
         lines.push(`  Reason: ${item.reason}`);
       }
@@ -412,6 +418,10 @@ function buildReleaseReview(summary: Record<string, unknown>) {
     return {
       item: typeof item.item === 'string' ? item.item : null,
       title: typeof item.title === 'string' ? item.title : null,
+      groupId: typeof item.groupId === 'string' ? item.groupId : null,
+      nextEvidenceCommand: typeof item.nextEvidenceCommand === 'string'
+        ? item.nextEvidenceCommand
+        : null,
       reason: typeof item.reason === 'string' ? item.reason : null,
     };
   });
@@ -420,6 +430,10 @@ function buildReleaseReview(summary: Record<string, unknown>) {
     return {
       item: typeof item.item === 'string' ? item.item : null,
       title: typeof item.title === 'string' ? item.title : null,
+      groupId: typeof item.groupId === 'string' ? item.groupId : null,
+      nextEvidenceCommand: typeof item.nextEvidenceCommand === 'string'
+        ? item.nextEvidenceCommand
+        : null,
       source: typeof item.source === 'string' ? item.source : null,
     };
   });

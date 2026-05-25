@@ -1388,6 +1388,27 @@ describe('phase zero-six evidence tooling', () => {
       'S3.04',
       'S3.05',
     ]);
+    expect(parsed.checklistReadiness.readyToCheck).toEqual([
+      expect.objectContaining({
+        item: 'S3.04',
+        groupId: 'aws-preflight',
+        nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
+      }),
+      expect.objectContaining({
+        item: 'S3.05',
+        groupId: 'aws-preflight',
+        nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
+      }),
+    ]);
+    expect(parsed.checklistReadiness.stillMissing).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          item: 'S3.06',
+          groupId: 'runtime-smoke',
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+      ]),
+    );
     expect(parsed.checklistReadiness.blockingGroups).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1443,11 +1464,30 @@ describe('phase zero-six evidence tooling', () => {
     expect(operatorReport).toContain('## Checklist blocking groups');
     expect(operatorReport).toContain('runtime-smoke');
     expect(operatorReport).toContain('Next evidence command: pnpm phase-zero-six:collect');
+    expect(operatorReport).toContain('Group: runtime-smoke');
     expect(releaseReview.checklist.blockingGroups).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           id: 'runtime-smoke',
           notReadyItems: ['S3.06', 'S3.07', 'S3.08'],
+        }),
+      ]),
+    );
+    expect(releaseReview.checklist.readyToCheck).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          item: 'S3.04',
+          groupId: 'aws-preflight',
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
+        }),
+      ]),
+    );
+    expect(releaseReview.checklist.stillMissing).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          item: 'S3.06',
+          groupId: 'runtime-smoke',
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
         }),
       ]),
     );
