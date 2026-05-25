@@ -234,6 +234,15 @@ function toErrorPayload(error: unknown) {
   }
 
   if (error instanceof SandboxManagerError) {
+    if (error.code === 'provider') {
+      return {
+        statusCode: 503,
+        payload: {
+          code: 'gateway_unavailable',
+          message: error.message,
+        },
+      };
+    }
     return {
       statusCode: error.code === 'quota' ? 402 : error.code === 'config' ? 400 : 503,
       payload: {

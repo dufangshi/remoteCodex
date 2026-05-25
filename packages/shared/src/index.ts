@@ -29,6 +29,7 @@ export type ApiErrorCode =
   | 'not_found'
   | 'conflict'
   | 'provider_goal_error'
+  | 'gateway_unavailable'
   | 'forbidden'
   | 'goal_feature_disabled'
   | 'internal_error'

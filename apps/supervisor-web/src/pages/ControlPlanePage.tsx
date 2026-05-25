@@ -17,6 +17,7 @@ import {
   startControlPlaneSandbox,
   stopControlPlaneSandbox,
   updateControlPlaneMe,
+  ApiError,
   type ControlPlaneAuth,
   type ControlPlaneSandboxDetail,
   type ControlPlaneProject,
@@ -215,6 +216,7 @@ export function ControlPlanePage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [gatewayUnavailable, setGatewayUnavailable] = useState<string | null>(null);
   const [metadataLoading, setMetadataLoading] = useState<{
     projects: boolean;
     workspaces: boolean;
@@ -243,9 +245,13 @@ export function ControlPlanePage() {
     setBusy(label);
     setError(null);
     setMessage(null);
+    setGatewayUnavailable(null);
     try {
       return await action();
     } catch (caught) {
+      if (caught instanceof ApiError && caught.payload.code === 'gateway_unavailable') {
+        setGatewayUnavailable(caught.message);
+      }
       setError(caught instanceof Error ? caught.message : `${label} failed.`);
       return null;
     } finally {
@@ -571,6 +577,11 @@ export function ControlPlanePage() {
       {message ? (
         <div className="rounded-[0.9rem] border border-[var(--status-success-border)] bg-[var(--status-success-bg)] px-4 py-3 text-sm text-[var(--status-success-fg)]">
           {message}
+        </div>
+      ) : null}
+      {gatewayUnavailable ? (
+        <div className="rounded-[0.9rem] border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-4 py-3 text-sm text-[var(--status-warning-fg)]">
+          LLM gateway unavailable: {gatewayUnavailable}
         </div>
       ) : null}
       {workerConnectionState === 'reconnecting' ? (

@@ -553,6 +553,33 @@ describe('ControlPlanePage', () => {
     });
   });
 
+  it('shows a gateway degraded state when bootstrap cannot provision gateway credentials', async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
+
+      if (path === '/api/me/bootstrap' && init?.method === 'POST') {
+        return jsonResponse({
+          code: 'gateway_unavailable',
+          message: 'gateway unavailable',
+        }, 503);
+      }
+
+      return jsonResponse({
+        code: 'not_found',
+        message: `Unhandled request: ${path}`,
+      }, 404);
+    });
+
+    render(<ControlPlanePage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('LLM gateway unavailable: gateway unavailable')).toBeInTheDocument();
+    });
+  });
+
   it('shows sandbox startup, degraded, and failure states', async () => {
     let currentSandbox: ControlPlaneSandbox = startingSandbox;
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {

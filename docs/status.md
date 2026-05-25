@@ -87,6 +87,8 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 - Gateway token storage is documented as metadata plus optional encrypted
   ciphertext only; raw provider keys and raw gateway tokens are not returned by
   Remote Codex APIs.
+- Gateway admin/provider failures return stable `gateway_unavailable` API
+  errors and the control-plane panel shows a dedicated gateway degraded state.
 - ElAgenteHarness credential provisioning and worker bootstrap.
 
 ## Immediate Next Implementation Queue

@@ -557,7 +557,7 @@ real provider root keys stay outside the sandbox.
     cost, currency, timestamp, and pagination/watermark behavior.
   - Verification: usage importer tests use the documented fixture shape.
 
-- [ ] Add gateway unavailable/degraded behavior.
+- [x] Add gateway unavailable/degraded behavior.
   - Acceptance: control plane and frontend have stable degraded states when the
     gateway admin API or model proxy is unavailable.
   - Verification: API and frontend tests cover gateway unavailable responses.
@@ -573,8 +573,8 @@ Evidence:
 - Verification:
   `pnpm --filter @remote-codex/control-plane-api typecheck`,
   `pnpm --filter @remote-codex/control-plane-api test`
-- Residual risk: scheduled gateway usage pulling, frontend degraded UI, and
-  staging provider-runtime smoke checks remain unchecked.
+- Residual risk: scheduled gateway usage pulling and staging provider-runtime
+  smoke checks remain unchecked.
 
 ### Control Plane Tasks
 
@@ -639,7 +639,7 @@ Evidence:
   - Verification: frontend tests cover event list and pagination/filtering if
     available.
 
-- [ ] Add gateway unavailable UI.
+- [x] Add gateway unavailable UI.
   - Acceptance: gateway provisioning or usage import failures show a clear
     product state.
   - Verification: frontend tests cover gateway degraded responses.

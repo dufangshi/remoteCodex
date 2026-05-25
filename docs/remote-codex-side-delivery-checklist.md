@@ -479,7 +479,7 @@ real provider root keys stay outside the sandbox.
 - [x] Document gateway admin credential requirements.
 - [x] Document gateway admin API endpoints used by Remote Codex.
 - [x] Document required gateway usage-export API shape.
-- [ ] Add gateway unavailable/degraded behavior.
+- [x] Add gateway unavailable/degraded behavior.
 
 ### Control Plane Gateway Client
 
@@ -529,7 +529,7 @@ real provider root keys stay outside the sandbox.
 
 - [ ] Add LLM usage summary UI.
 - [ ] Add LLM usage detail UI.
-- [ ] Add gateway unavailable UI.
+- [x] Add gateway unavailable UI.
 - [ ] Add quota exceeded UI for LLM usage.
 
 ### Verification

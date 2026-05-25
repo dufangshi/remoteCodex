@@ -205,6 +205,40 @@ describe('control plane api', () => {
     }
   });
 
+  it('returns stable gateway unavailable errors when gateway provisioning fails', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      Response.json({ message: 'gateway unavailable' }, { status: 503 })) as typeof fetch;
+
+    try {
+      const app = buildControlPlaneApp({
+        env: {
+          ...testEnv('gateway-unavailable'),
+          LLM_GATEWAY_ADMIN_BASE_URL: 'https://gateway-admin.example.test',
+          LLM_GATEWAY_ADMIN_TOKEN: 'gateway-admin-token',
+        },
+      });
+      apps.push(app);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/me/bootstrap',
+        headers: { authorization: 'Bearer dev:gateway-unavailable-user' },
+        payload: {
+          email: 'gateway-unavailable@example.com',
+        },
+      });
+
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toMatchObject({
+        code: 'gateway_unavailable',
+        message: 'gateway unavailable',
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('stores gateway keys under the configured gateway provider', async () => {
     const app = buildControlPlaneApp({
       env: {
