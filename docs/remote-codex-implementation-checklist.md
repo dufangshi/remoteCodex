@@ -38,7 +38,7 @@ Goal: keep this branch as the control-plane and sandbox-worker foundation.
 - [x] Add worker image build script.
 - [x] Document control-plane to sandbox-worker architecture.
 - [x] Document Agente product architecture.
-- [ ] Commit and push the architecture docs update.
+- [x] Commit and push the architecture docs update.
 
 Acceptance criteria:
 
