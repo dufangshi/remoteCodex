@@ -114,4 +114,3 @@ describe('WorkerControlPlaneSyncClient', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
-

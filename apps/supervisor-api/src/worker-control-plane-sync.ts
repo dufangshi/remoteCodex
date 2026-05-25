@@ -7,7 +7,6 @@ export interface WorkerSessionCheckpointInput {
   workerSessionId?: string | null | undefined;
   status?: 'created' | 'active' | 'idle' | 'archived' | 'deleted' | undefined;
 }
-
 export interface WorkerSessionCheckpointResult {
   session: {
     id: string;
@@ -124,4 +123,3 @@ export class WorkerControlPlaneSyncClient {
     );
   }
 }
-
