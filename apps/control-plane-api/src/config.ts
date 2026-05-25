@@ -21,6 +21,8 @@ const envSchema = z.object({
   CONTROL_PLANE_INTERNAL_SERVICE_TOKEN: z.string().min(16).optional(),
   LLM_GATEWAY_BASE_URL: z.string().url().optional(),
   LLM_GATEWAY_TOKEN_SECRET_NAME: z.string().min(1).optional(),
+  LLM_GATEWAY_ADMIN_BASE_URL: z.string().url().optional(),
+  LLM_GATEWAY_ADMIN_TOKEN: z.string().min(1).optional(),
   ELAGENTE_HARNESS_BASE_URL: z.string().url().optional(),
   ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: z.string().min(1).optional(),
   REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: z.string().optional(),
@@ -50,6 +52,8 @@ export interface ControlPlaneConfig {
   internalServiceToken: string | null;
   llmGatewayBaseUrl: string | null;
   llmGatewayTokenSecretName: string | null;
+  llmGatewayAdminBaseUrl: string | null;
+  llmGatewayAdminToken: string | null;
   harnessBaseUrl: string | null;
   harnessAppKeySecretName: string | null;
   chemistryToolsEnabled: boolean;
@@ -147,6 +151,8 @@ export function loadControlPlaneConfig(
     internalServiceToken: parsed.CONTROL_PLANE_INTERNAL_SERVICE_TOKEN ?? null,
     llmGatewayBaseUrl: parsed.LLM_GATEWAY_BASE_URL ?? null,
     llmGatewayTokenSecretName: parsed.LLM_GATEWAY_TOKEN_SECRET_NAME ?? null,
+    llmGatewayAdminBaseUrl: parsed.LLM_GATEWAY_ADMIN_BASE_URL ?? null,
+    llmGatewayAdminToken: parsed.LLM_GATEWAY_ADMIN_TOKEN ?? null,
     harnessBaseUrl: parsed.ELAGENTE_HARNESS_BASE_URL ?? null,
     harnessAppKeySecretName: parsed.ELAGENTE_HARNESS_APP_KEY_SECRET_NAME ?? null,
     chemistryToolsEnabled,

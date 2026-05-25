@@ -13,6 +13,7 @@ import {
   verifySignedTokenWithKeys,
 } from '../../../packages/shared/src/index';
 import {
+  HttpLlmGatewayAdmin,
   LlmGatewayAdmin,
   NoopLlmGatewayAdmin,
   NoopSandboxManager,
@@ -320,7 +321,14 @@ export function buildControlPlaneApp(
     database,
     repository,
     sandboxManager: options.sandboxManager ?? new NoopSandboxManager(config.routerBaseUrl),
-    llmGatewayAdmin: options.llmGatewayAdmin ?? new NoopLlmGatewayAdmin(),
+    llmGatewayAdmin:
+      options.llmGatewayAdmin ??
+      (config.llmGatewayAdminBaseUrl && config.llmGatewayAdminToken
+        ? new HttpLlmGatewayAdmin({
+            baseUrl: config.llmGatewayAdminBaseUrl,
+            adminToken: config.llmGatewayAdminToken,
+          })
+        : new NoopLlmGatewayAdmin()),
     authVerifier,
   });
 

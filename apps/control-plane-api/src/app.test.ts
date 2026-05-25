@@ -111,6 +111,50 @@ describe('control plane api', () => {
     expect(body.gatewayKey.externalKeyId).toBe(`sub2api-key-${body.sandbox.id}`);
   });
 
+  it('uses configured gateway admin credentials during bootstrap', async () => {
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      if (String(url).endsWith('/api/admin/users/ensure')) {
+        return Response.json({ externalUserId: 'gw-user-from-http' });
+      }
+      return Response.json({ externalKeyId: 'gw-key-from-http' });
+    }) as typeof fetch;
+
+    try {
+      const app = buildControlPlaneApp({
+        env: {
+          ...testEnv('gateway-http-admin'),
+          LLM_GATEWAY_ADMIN_BASE_URL: 'https://gateway-admin.example.test',
+          LLM_GATEWAY_ADMIN_TOKEN: 'gateway-admin-token',
+        },
+      });
+      apps.push(app);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/me/bootstrap',
+        headers: { authorization: 'Bearer dev:http-gateway-user' },
+        payload: {
+          email: 'http-gateway@example.com',
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().gatewayKey.externalKeyId).toBe('gw-key-from-http');
+      expect(requests.map((request) => request.url)).toEqual([
+        'https://gateway-admin.example.test/api/admin/users/ensure',
+        'https://gateway-admin.example.test/api/admin/users/gw-user-from-http/keys/ensure',
+      ]);
+      expect(requests[0]!.init!.headers).toMatchObject({
+        authorization: 'Bearer gateway-admin-token',
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('attaches gateway credential metadata when starting a sandbox', async () => {
     const sandboxManager = new RecordingSandboxManager();
     const app = buildControlPlaneApp({

@@ -682,6 +682,125 @@ export interface LlmGatewayAdmin {
   }): Promise<GatewayKeyResult>;
 }
 
+type GatewayFetch = typeof fetch;
+
+function trimTrailingSlash(value: string) {
+  return value.replace(/\/+$/, '');
+}
+
+async function parseGatewayResponse<T>(response: Response): Promise<T> {
+  let payload: unknown = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+  if (!response.ok) {
+    const message =
+      payload &&
+      typeof payload === 'object' &&
+      'message' in payload &&
+      typeof payload.message === 'string'
+        ? payload.message
+        : `Gateway admin request failed with status ${response.status}.`;
+    throw new SandboxManagerError('provider', message);
+  }
+  return payload as T;
+}
+
+function externalIdFromPayload(payload: unknown, fallbackName: string) {
+  if (!payload || typeof payload !== 'object') {
+    throw new SandboxManagerError('provider', `Gateway admin response missing ${fallbackName}.`);
+  }
+  const candidate =
+    'externalUserId' in payload
+      ? payload.externalUserId
+      : 'externalKeyId' in payload
+        ? payload.externalKeyId
+        : 'id' in payload
+          ? payload.id
+          : null;
+  if (typeof candidate !== 'string' || !candidate.trim()) {
+    throw new SandboxManagerError('provider', `Gateway admin response missing ${fallbackName}.`);
+  }
+  return candidate;
+}
+
+export class HttpLlmGatewayAdmin implements LlmGatewayAdmin {
+  private readonly baseUrl: string;
+
+  constructor(
+    input: {
+      baseUrl: string;
+      adminToken: string;
+      fetchImpl?: GatewayFetch;
+    },
+  ) {
+    this.baseUrl = trimTrailingSlash(input.baseUrl);
+    this.adminToken = input.adminToken;
+    this.fetchImpl = input.fetchImpl ?? fetch;
+  }
+
+  private readonly adminToken: string;
+  private readonly fetchImpl: GatewayFetch;
+
+  async ensureUser(input: {
+    userId: string;
+    email: string;
+    displayName?: string | null;
+  }): Promise<GatewayUserResult> {
+    const response = await this.fetchImpl(`${this.baseUrl}/api/admin/users/ensure`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${this.adminToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        externalId: input.userId,
+        email: input.email,
+        displayName: input.displayName ?? null,
+      }),
+    });
+    const payload = await parseGatewayResponse<unknown>(response);
+    return {
+      externalUserId: externalIdFromPayload(payload, 'external user id'),
+    };
+  }
+
+  async ensureSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+  }): Promise<GatewayKeyResult> {
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/api/admin/users/${encodeURIComponent(input.externalUserId)}/keys/ensure`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${this.adminToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          externalId: input.sandboxId,
+          userId: input.userId,
+          sandboxId: input.sandboxId,
+        }),
+      },
+    );
+    const payload = await parseGatewayResponse<unknown>(response);
+    return {
+      externalKeyId: externalIdFromPayload(payload, 'external key id'),
+      keyCiphertext:
+        payload &&
+        typeof payload === 'object' &&
+        'keyCiphertext' in payload &&
+        typeof payload.keyCiphertext === 'string'
+          ? payload.keyCiphertext
+          : null,
+    };
+  }
+}
+
 export class NoopLlmGatewayAdmin implements LlmGatewayAdmin {
   async ensureUser(input: { userId: string }): Promise<GatewayUserResult> {
     return { externalUserId: `sub2api-user-${input.userId}` };

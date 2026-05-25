@@ -5,6 +5,7 @@ import {
   AwsSandboxKubernetesClient,
   AwsWorkerPodSpec,
   AwsWorkerPodStatus,
+  HttpLlmGatewayAdmin,
   LocalWorkerProcessSandboxManager,
   NoopSandboxManager,
   SandboxManagerError,
@@ -398,6 +399,108 @@ describe('sandbox manager adapters', () => {
     await expect(manager.startSandbox(sandboxInput)).rejects.toMatchObject({
       code: 'config',
       message: 'AWS Kubernetes client is required to start sandboxes.',
+    });
+  });
+});
+
+describe('HTTP LLM gateway admin', () => {
+  it('ensures a gateway user through the admin API', async () => {
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      return Response.json({ externalUserId: 'gw-user-123' });
+    };
+    const admin = new HttpLlmGatewayAdmin({
+      baseUrl: 'https://gateway-admin.example.test/',
+      adminToken: 'admin-token',
+      fetchImpl,
+    });
+
+    await expect(
+      admin.ensureUser({
+        userId: 'user-123',
+        email: 'user@example.test',
+        displayName: 'User Test',
+      }),
+    ).resolves.toEqual({ externalUserId: 'gw-user-123' });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      url: 'https://gateway-admin.example.test/api/admin/users/ensure',
+      init: {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer admin-token',
+          'content-type': 'application/json',
+        },
+      },
+    });
+    expect(JSON.parse(String(requests[0]!.init!.body))).toEqual({
+      externalId: 'user-123',
+      email: 'user@example.test',
+      displayName: 'User Test',
+    });
+  });
+
+  it('ensures a gateway sandbox key through the admin API', async () => {
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      return Response.json({
+        externalKeyId: 'gw-key-123',
+        keyCiphertext: 'encrypted-gateway-token',
+      });
+    };
+    const admin = new HttpLlmGatewayAdmin({
+      baseUrl: 'https://gateway-admin.example.test',
+      adminToken: 'admin-token',
+      fetchImpl,
+    });
+
+    await expect(
+      admin.ensureSandboxKey({
+        userId: 'user-123',
+        sandboxId: 'sbx-123',
+        externalUserId: 'gw-user-123',
+      }),
+    ).resolves.toEqual({
+      externalKeyId: 'gw-key-123',
+      keyCiphertext: 'encrypted-gateway-token',
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      url: 'https://gateway-admin.example.test/api/admin/users/gw-user-123/keys/ensure',
+      init: {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer admin-token',
+          'content-type': 'application/json',
+        },
+      },
+    });
+    expect(JSON.parse(String(requests[0]!.init!.body))).toEqual({
+      externalId: 'sbx-123',
+      userId: 'user-123',
+      sandboxId: 'sbx-123',
+    });
+  });
+
+  it('maps gateway admin errors to provider sandbox manager errors', async () => {
+    const fetchImpl = async () =>
+      Response.json({ message: 'gateway unavailable' }, { status: 503 });
+    const admin = new HttpLlmGatewayAdmin({
+      baseUrl: 'https://gateway-admin.example.test',
+      adminToken: 'admin-token',
+      fetchImpl,
+    });
+
+    await expect(
+      admin.ensureUser({
+        userId: 'user-123',
+        email: 'user@example.test',
+      }),
+    ).rejects.toMatchObject({
+      code: 'provider',
+      message: 'gateway unavailable',
     });
   });
 });

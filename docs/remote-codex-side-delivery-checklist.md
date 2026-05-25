@@ -485,15 +485,15 @@ real provider root keys stay outside the sandbox.
 - [x] Store gateway base URL.
 - [x] Store gateway key id per user or sandbox.
 - [ ] Store encrypted gateway token only if raw recovery is required.
-- [ ] Add gateway admin credential config.
-- [ ] Add gateway client interface.
-- [ ] Implement gateway user creation.
-- [ ] Implement gateway key creation.
+- [x] Add gateway admin credential config.
+- [x] Add gateway client interface.
+- [x] Implement gateway user creation.
+- [x] Implement gateway key creation.
 - [ ] Implement gateway key revocation.
 - [ ] Implement gateway key rotation.
 - [x] Attach gateway credential to sandbox provisioning.
 - [ ] Add admin endpoint to reconcile gateway keys.
-- [ ] Add mocked gateway client tests.
+- [x] Add mocked gateway client tests.
 
 ### Worker Provider Bootstrap
 
@@ -532,7 +532,7 @@ real provider root keys stay outside the sandbox.
 
 ### Verification
 
-- [ ] Gateway client tests pass with mocked gateway API.
+- [x] Gateway client tests pass with mocked gateway API.
 - [x] Worker provider bootstrap tests pass for Codex, Claude Code, and OpenCode.
 - [ ] Usage import tests pass.
 - [ ] Frontend usage UI tests pass.
@@ -870,7 +870,7 @@ The first usable product phase is complete only when all of these are checked:
 - [ ] 2. Finish project detail and open-session flow.
 - [ ] 3. Add worker session checkpoint caller and wrong-user/wrong-sandbox tests.
 - [x] 4. Validate harness env when chemistry tools are enabled.
-- [ ] 5. Add gateway client interface and mocked gateway admin tests.
+- [x] 5. Add gateway client interface and mocked gateway admin tests.
 - [ ] 6. Decide and document gateway deployment shape.
 - [ ] 7. Implement gateway user/key create, revoke, rotate, and reconcile APIs.
 - [ ] 8. Implement harness credential table, key generation, rotation, and

@@ -494,9 +494,9 @@ import third, then quota enforcement and UI.
 - [x] Store gateway base URL.
 - [x] Store gateway key id per user or sandbox.
 - [ ] Store encrypted gateway token only if raw recovery is required.
-- [ ] Add gateway client interface.
-- [ ] Implement gateway user creation.
-- [ ] Implement gateway key creation.
+- [x] Add gateway client interface.
+- [x] Implement gateway user creation.
+- [x] Implement gateway key creation.
 - [ ] Implement gateway key revocation.
 - [ ] Implement gateway key rotation.
 - [x] Attach gateway credential to sandbox provisioning.
@@ -611,7 +611,7 @@ import third, then quota enforcement and UI.
 
 ### Verification
 
-- [ ] Gateway client tests pass with mocked gateway API.
+- [x] Gateway client tests pass with mocked gateway API.
 - [x] Worker provider bootstrap tests pass for Codex, Claude Code, and OpenCode.
 - [ ] Harness credential tests pass.
 - [x] Harness bootstrap tests pass.

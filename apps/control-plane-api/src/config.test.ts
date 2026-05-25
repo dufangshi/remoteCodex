@@ -15,6 +15,8 @@ describe('control plane config', () => {
       CONTROL_PLANE_AUTH_JWT_CLOCK_SKEW_SECONDS: '45',
       LLM_GATEWAY_BASE_URL: 'https://llm-gateway.example.test',
       LLM_GATEWAY_TOKEN_SECRET_NAME: 'remote-codex-gateway-tokens',
+      LLM_GATEWAY_ADMIN_BASE_URL: 'https://llm-gateway-admin.example.test',
+      LLM_GATEWAY_ADMIN_TOKEN: 'gateway-admin-token',
       ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
       ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: 'remote-codex-harness-app-keys',
       REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
@@ -28,6 +30,8 @@ describe('control plane config', () => {
     expect(config.authJwtClockSkewSeconds).toBe(45);
     expect(config.llmGatewayBaseUrl).toBe('https://llm-gateway.example.test');
     expect(config.llmGatewayTokenSecretName).toBe('remote-codex-gateway-tokens');
+    expect(config.llmGatewayAdminBaseUrl).toBe('https://llm-gateway-admin.example.test');
+    expect(config.llmGatewayAdminToken).toBe('gateway-admin-token');
     expect(config.harnessBaseUrl).toBe('https://harness.example.test');
     expect(config.harnessAppKeySecretName).toBe('remote-codex-harness-app-keys');
     expect(config.chemistryToolsEnabled).toBe(true);

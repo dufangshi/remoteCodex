@@ -405,9 +405,9 @@ Verification:
 - [x] Store gateway base URL.
 - [x] Store gateway key id per user or sandbox.
 - [ ] Store encrypted gateway token only if raw recovery is required.
-- [ ] Add gateway client interface.
-- [ ] Implement gateway user creation.
-- [ ] Implement gateway key creation.
+- [x] Add gateway client interface.
+- [x] Implement gateway user creation.
+- [x] Implement gateway key creation.
 - [ ] Implement gateway key revocation.
 - [ ] Implement gateway key rotation.
 - [x] Attach gateway credential to sandbox provisioning.
@@ -438,7 +438,7 @@ Verification:
 
 Verification:
 
-- [ ] Gateway client tests pass with mocked gateway API.
+- [x] Gateway client tests pass with mocked gateway API.
 - [x] Worker provider bootstrap tests pass for Codex, Claude Code, and OpenCode.
 - [ ] Usage import tests pass.
 - [ ] Frontend usage UI tests pass.
@@ -1085,15 +1085,15 @@ Real provider root keys stay outside the sandbox.
 - [x] Store gateway base URL.
 - [x] Store gateway key id per user or sandbox.
 - [ ] Store encrypted gateway token only if raw recovery is required.
-- [ ] Add gateway admin credential configuration.
-- [ ] Add gateway client interface.
-- [ ] Implement gateway user creation.
-- [ ] Implement gateway key creation.
+- [x] Add gateway admin credential configuration.
+- [x] Add gateway client interface.
+- [x] Implement gateway user creation.
+- [x] Implement gateway key creation.
 - [ ] Implement gateway key revocation.
 - [ ] Implement gateway key rotation.
 - [x] Attach gateway credential to sandbox provisioning.
 - [ ] Add admin endpoint to reconcile gateway keys.
-- [ ] Add tests with mocked gateway client.
+- [x] Add tests with mocked gateway client.
 
 ### Worker Provider Bootstrap
 
