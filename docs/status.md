@@ -105,6 +105,10 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 - Browser-to-worker route-token connection flow; route token issuance, refresh,
   browser WebSocket connection, and reconnect are in place, while staging router
   smoke checks remain open.
+- `docs/remote-codex-side-detailed-checklist.md` Phase 5 is complete for local
+  route-token contract, router proxying, and worker authorization. Staging
+  router deployment, direct-worker-denial proof, and browser-to-router-to-worker
+  smoke remain unchecked.
 - `docs/remote-codex-side-detailed-checklist.md` Phase 3 is complete through
   local sandbox manager and local route-token smoke. Real staging AWS/EKS
   configuration, credentials, Pod start/stop, and lifecycle idempotency remain

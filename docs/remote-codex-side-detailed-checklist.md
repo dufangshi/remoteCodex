@@ -535,22 +535,22 @@ router-injected worker identity.
 
 ### Route Token Contract
 
-- [ ] R5.01 Define route-token payload schema.
+- [x] R5.01 Define route-token payload schema.
   - Done when tokens include user id, sandbox id, project/workspace/session
     ids, scopes, expiry, nonce or token id, and signing key id.
   - Verify with schema tests.
 
-- [ ] R5.02 Sign and verify route tokens.
+- [x] R5.02 Sign and verify route tokens.
   - Done when expiry, tampering, wrong sandbox, wrong scope, and previous-key
     verification are tested.
   - Verify with control-plane and router tests.
 
-- [ ] R5.03 Add signing-key rotation runbook.
+- [x] R5.03 Add signing-key rotation runbook.
   - Done when operators can rotate active and previous route-token keys without
     unexpectedly breaking valid short-lived sessions.
   - Verify with docs and rotation tests or smoke.
 
-- [ ] R5.04 Enforce account, sandbox, session, and quota checks before token
+- [x] R5.04 Enforce account, sandbox, session, and quota checks before token
   issue.
   - Done when disabled users, stopped sandboxes, archived sessions, wrong
     owners, and over-quota users cannot receive a route token.
@@ -558,28 +558,28 @@ router-injected worker identity.
 
 ### Sandbox Router
 
-- [ ] R5.05 Keep router package deployable.
+- [x] R5.05 Keep router package deployable.
   - Done when sandbox-router has health checks, config validation, and
     deployment env documentation.
   - Verify with router typecheck and tests.
 
-- [ ] R5.06 Implement HTTP, SSE, and WebSocket proxying.
+- [x] R5.06 Implement HTTP, SSE, and WebSocket proxying.
   - Done when all worker traffic modes proxy through the router with route-token
     verification.
   - Verify with router tests and local smoke.
 
-- [ ] R5.07 Inject internal worker token.
+- [x] R5.07 Inject internal worker token.
   - Done when the router injects `X-Remote-Codex-Worker-Token` and the browser
     never receives that token.
   - Verify with router tests.
 
-- [ ] R5.08 Inject signed identity envelope.
+- [x] R5.08 Inject signed identity envelope.
   - Done when the router strips browser-supplied identity headers and injects a
     signed envelope with user, sandbox, project, workspace, session, scopes, and
     expiry.
   - Verify with router and worker tests.
 
-- [ ] R5.09 Add router limits and audits.
+- [x] R5.09 Add router limits and audits.
   - Done when request size limits, idle timeouts, rate limits, structured
     errors, and secret-safe audit logs exist.
   - Verify with router tests.
@@ -602,20 +602,49 @@ router-injected worker identity.
 
 ### Worker Scope Enforcement
 
-- [ ] R5.13 Verify worker token on non-health APIs.
+- [x] R5.13 Verify worker token on non-health APIs.
   - Done when `/healthz` and `/readyz` stay public, but all other worker-mode
     APIs require the internal worker token.
   - Verify with worker auth tests and container smoke.
 
-- [ ] R5.14 Verify identity envelopes on scoped APIs.
+- [x] R5.14 Verify identity envelopes on scoped APIs.
   - Done when shell, file, provider-turn, artifact, and session operations
     reject missing, expired, wrong-sandbox, or wrong-scope envelopes.
   - Verify with worker scope tests.
 
-- [ ] R5.15 Enforce project/workspace/session scope on worker APIs.
+- [x] R5.15 Enforce project/workspace/session scope on worker APIs.
   - Done when worker endpoints cannot cross into another control-plane project,
     workspace, or session.
   - Verify with worker tests.
+
+### Phase 5 Evidence
+
+- Files: `apps/control-plane-api/src/app.ts`,
+  `apps/control-plane-api/src/app.test.ts`, `apps/sandbox-router/src/app.ts`,
+  `apps/sandbox-router/src/app.test.ts`,
+  `apps/sandbox-router/src/worker-identity.ts`,
+  `apps/sandbox-router/src/config.ts`, `apps/supervisor-api/src/app.test.ts`,
+  `scripts/local-route-token-smoke.ts`.
+- Verification:
+  - `pnpm --filter @remote-codex/sandbox-router typecheck` passed.
+  - `pnpm --filter @remote-codex/sandbox-router test` passed: 1 file, 10
+    tests, covering route-token denial, HTTP proxying, SSE streaming,
+    WebSocket proxying, worker-token injection, identity-envelope injection,
+    header stripping, request limits, rate limits, endpoint resolution, and
+    audit events.
+  - `pnpm --filter @remote-codex/supervisor-api test -- app.test.ts` passed: 9
+    files, 160 tests, including worker token auth and scoped worker identity
+    envelope denial/success for provider, shell, file, and artifact routes.
+  - `pnpm smoke:local-route-token` passed and proved local browser-style
+    request to router to worker metadata with browser `Authorization` stripped.
+  - Earlier Phase 2 control-plane tests verified route-token payload,
+    tampering/expiry, previous-key verification, wrong project/workspace/session
+    denial, stopped sandbox denial, archived session denial, inactive account
+    denial, and quota denial.
+- Residual risk: R5.10-R5.12 remain unchecked because sandbox-router has not
+  been deployed and smoked against real staging workers. Direct worker denial
+  and browser-to-router-to-worker staging evidence still need
+  `pnpm smoke:staging-phase-one` output.
 
 ## Phase 6: LLM Gateway And Provider Runtime Bootstrap
 
