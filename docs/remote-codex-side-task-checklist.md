@@ -420,7 +420,7 @@ Verification:
 - [x] Prove OpenCode config never contains real provider root keys.
 - [x] Add startup check that gateway env is present when providers are enabled.
 - [ ] Redact gateway tokens from logs.
-- [ ] Redact gateway tokens from API responses.
+- [x] Redact gateway tokens from API responses.
 - [ ] Define normalized LLM usage event schema.
 - [ ] Add usage import adapter for the chosen gateway.
 - [ ] Add scheduled usage import job.

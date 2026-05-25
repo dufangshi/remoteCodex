@@ -136,6 +136,19 @@ const adminSandboxReasonSchema = z.object({
   reason: z.string().min(1).max(500).optional(),
 });
 
+function redactGatewayKey<T extends { keyCiphertext?: string | null } | null | undefined>(
+  gatewayKey: T,
+) {
+  if (!gatewayKey) {
+    return gatewayKey;
+  }
+  return {
+    ...gatewayKey,
+    keyCiphertext: null,
+    hasEncryptedKey: Boolean(gatewayKey.keyCiphertext),
+  };
+}
+
 function requireGatewayKeyContext(app: FastifyInstance, sandboxId: string) {
   const sandbox = app.services.repository.getSandboxById(sandboxId);
   if (!sandbox) {
@@ -386,7 +399,7 @@ export function buildControlPlaneApp(
       s3PrefixBase: config.sandboxS3PrefixBase,
     });
     const gatewayKey = await ensureGateway(app, user, sandbox);
-    return { user, sandbox, gatewayKey };
+    return { user, sandbox, gatewayKey: redactGatewayKey(gatewayKey) };
   });
 
   app.post('/api/me/bootstrap', async (request) => {
@@ -414,7 +427,7 @@ export function buildControlPlaneApp(
       s3PrefixBase: config.sandboxS3PrefixBase,
     });
     const gatewayKey = await ensureGateway(app, user, sandbox);
-    return { user, sandbox, gatewayKey };
+    return { user, sandbox, gatewayKey: redactGatewayKey(gatewayKey) };
   });
 
   app.get('/api/me', async (request) => {
@@ -574,12 +587,14 @@ export function buildControlPlaneApp(
       externalKeyId: gatewayKey.externalKeyId,
     });
     return {
-      gatewayKey: repository.updateGatewayKeyRotation({
-        sandboxId: sandbox.id,
-        provider: gatewayKey.provider,
-        externalKeyId: rotated.externalKeyId,
-        keyCiphertext: rotated.keyCiphertext ?? null,
-      }),
+      gatewayKey: redactGatewayKey(
+        repository.updateGatewayKeyRotation({
+          sandboxId: sandbox.id,
+          provider: gatewayKey.provider,
+          externalKeyId: rotated.externalKeyId,
+          keyCiphertext: rotated.keyCiphertext ?? null,
+        }),
+      ),
     };
   });
 
@@ -594,10 +609,12 @@ export function buildControlPlaneApp(
       externalKeyId: gatewayKey.externalKeyId,
     });
     return {
-      gatewayKey: repository.revokeGatewayKey({
-        sandboxId: sandbox.id,
-        provider: gatewayKey.provider,
-      }),
+      gatewayKey: redactGatewayKey(
+        repository.revokeGatewayKey({
+          sandboxId: sandbox.id,
+          provider: gatewayKey.provider,
+        }),
+      ),
     };
   });
 
@@ -643,7 +660,7 @@ export function buildControlPlaneApp(
           externalKeyId: reconciled.externalKeyId,
           keyCiphertext: reconciled.keyCiphertext ?? null,
         });
-    return { gatewayKey };
+    return { gatewayKey: redactGatewayKey(gatewayKey) };
   });
 
   app.get('/api/sandbox', async (request) => {

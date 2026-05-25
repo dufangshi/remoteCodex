@@ -119,7 +119,10 @@ describe('control plane api', () => {
       if (String(url).endsWith('/api/admin/users/ensure')) {
         return Response.json({ externalUserId: 'gw-user-from-http' });
       }
-      return Response.json({ externalKeyId: 'gw-key-from-http' });
+      return Response.json({
+        externalKeyId: 'gw-key-from-http',
+        keyCiphertext: 'encrypted-bootstrap-token',
+      });
     }) as typeof fetch;
 
     try {
@@ -143,6 +146,8 @@ describe('control plane api', () => {
 
       expect(response.statusCode).toBe(200);
       expect(response.json().gatewayKey.externalKeyId).toBe('gw-key-from-http');
+      expect(response.json().gatewayKey.keyCiphertext).toBeNull();
+      expect(response.json().gatewayKey.hasEncryptedKey).toBe(true);
       expect(requests.map((request) => request.url)).toEqual([
         'https://gateway-admin.example.test/api/admin/users/ensure',
         'https://gateway-admin.example.test/api/admin/users/gw-user-from-http/keys/ensure',
@@ -205,7 +210,8 @@ describe('control plane api', () => {
       expect(rotate.statusCode).toBe(200);
       expect(rotate.json().gatewayKey).toMatchObject({
         externalKeyId: 'gw-key-rotated',
-        keyCiphertext: 'encrypted-rotated-token',
+        keyCiphertext: null,
+        hasEncryptedKey: true,
         status: 'active',
         revokedAt: null,
       });
@@ -280,7 +286,8 @@ describe('control plane api', () => {
       expect(reconcile.statusCode).toBe(200);
       expect(reconcile.json().gatewayKey).toMatchObject({
         externalKeyId: 'gw-key-reconciled',
-        keyCiphertext: 'encrypted-reconciled-token',
+        keyCiphertext: null,
+        hasEncryptedKey: true,
         status: 'active',
         revokedAt: null,
       });
