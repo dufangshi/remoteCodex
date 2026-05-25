@@ -590,6 +590,32 @@ describe('phase zero-six evidence tooling', () => {
     expect(checklist).toContain('- [ ] G6.13 Run staging OpenCode gateway smoke.');
   });
 
+  it('summarizes AWS preflight evidence gaps by blocking group', async () => {
+    const dir = await tempDir();
+    const awsPath = path.join(dir, 'aws.json');
+    const evidence = completeAwsEvidence();
+    evidence.aws.configReviewed = false;
+    evidence.kubernetesCredentials.credentialReviewPassed = false;
+    await writeFile(awsPath, JSON.stringify(evidence, null, 2));
+
+    const result = await runScript('scripts/verify-aws-staging-preflight-evidence.ts', [awsPath]);
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.readyItems).toEqual([]);
+    expect(parsed.notReadyItems).toEqual(['S3.04', 'S3.05']);
+    expect(parsed.blockingGroups).toEqual([
+      {
+        id: 'aws-preflight',
+        items: ['S3.04', 'S3.05'],
+        readyItems: [],
+        notReadyItems: ['S3.04', 'S3.05'],
+        nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
+      },
+    ]);
+  });
+
   it('applies all remaining phase zero-six boxes from complete AWS and staging evidence', async () => {
     const dir = await tempDir();
     const checklistPath = path.join(dir, 'checklist.md');

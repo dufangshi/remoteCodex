@@ -9,6 +9,14 @@ export interface AwsPreflightCheckResult {
   matchedEvidence: string[];
 }
 
+export interface AwsPreflightBlockingGroup {
+  id: string;
+  items: string[];
+  readyItems: string[];
+  notReadyItems: string[];
+  nextEvidenceCommand: string;
+}
+
 export interface CanIResult {
   verb?: string;
   resource?: string;
@@ -268,12 +276,38 @@ export function evaluateAwsStagingPreflightEvidence(
   return [verifyS304(evidence), verifyS305(evidence)];
 }
 
+function buildBlockingGroups(results: AwsPreflightCheckResult[]): AwsPreflightBlockingGroup[] {
+  const items = ['S3.04', 'S3.05'];
+  const groupResults = results.filter((result) => items.includes(result.item));
+  const readyItems = groupResults
+    .filter((result) => result.readyToCheck)
+    .map((result) => result.item);
+  const notReadyItems = groupResults
+    .filter((result) => !result.readyToCheck)
+    .map((result) => result.item);
+
+  if (notReadyItems.length === 0) {
+    return [];
+  }
+
+  return [
+    {
+      id: 'aws-preflight',
+      items,
+      readyItems,
+      notReadyItems,
+      nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
+    },
+  ];
+}
+
 async function main() {
   const input = await readInput();
   const evidence = parseAwsStagingPreflightEvidence(input);
   const results = evaluateAwsStagingPreflightEvidence(evidence);
   const readyItems = results.filter((result) => result.readyToCheck).map((result) => result.item);
   const notReadyItems = results.filter((result) => !result.readyToCheck).map((result) => result.item);
+  const blockingGroups = buildBlockingGroups(results);
 
   console.log(JSON.stringify({
     ok: notReadyItems.length === 0,
@@ -282,6 +316,7 @@ async function main() {
     reviewSource: evidence.reviewSource ?? null,
     readyItems,
     notReadyItems,
+    blockingGroups,
     results,
   }, null, 2));
 }
