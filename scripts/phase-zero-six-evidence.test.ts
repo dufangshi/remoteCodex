@@ -683,6 +683,33 @@ describe('phase zero-six evidence tooling', () => {
     expect(result.stdout).not.toContain('secret-admin-jwt-value');
   });
 
+  it('writes a placeholder env template without leaking current secret values', async () => {
+    const dir = await tempDir();
+    const templatePath = path.join(dir, 'phase-zero-six.env.sh');
+    const result = await runScriptWithEnv(
+      'scripts/verify-phase-zero-six-env-ready.ts',
+      ['--write-env-template', templatePath],
+      {
+        STAGING_CONTROL_PLANE_BASE_URL: 'https://control-plane.example.test',
+        STAGING_PRODUCT_JWT: 'secret-product-jwt-value',
+        STAGING_ADMIN_JWT: 'secret-admin-jwt-value',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+    const template = await readFile(templatePath, 'utf8');
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.envTemplatePath).toBe(templatePath);
+    expect(template).toContain('Phase 0-6 staging evidence environment template');
+    expect(template).toContain('# runtime-smoke: Runtime staging smoke for S3.06-S3.08 and R5.10/R5.12');
+    expect(template).toContain("export STAGING_IDEMPOTENT_LIFECYCLE_SMOKE='true'");
+    expect(template).toContain("export AWS_STAGING_REVIEWED_BY='operator@example.com'");
+    expect(template).not.toContain('secret-product-jwt-value');
+    expect(template).not.toContain('secret-admin-jwt-value');
+    expect(result.stdout).not.toContain('secret-product-jwt-value');
+    expect(result.stdout).not.toContain('secret-admin-jwt-value');
+  });
+
   it('marks all phase zero-six env groups ready when required env names are set', async () => {
     const result = await runScriptWithEnv(
       'scripts/verify-phase-zero-six-env-ready.ts',

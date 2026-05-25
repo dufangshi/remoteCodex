@@ -143,6 +143,30 @@ non-secret environment readiness check:
 pnpm verify:phase-zero-six-env-ready
 ```
 
+To generate a private shell template for the missing staging inputs, use:
+
+```bash
+pnpm verify:phase-zero-six-env-ready -- \
+  --write-env-template ./.temp/phase-zero-six-evidence/phase-zero-six.env.sh
+```
+
+The generated template contains only placeholder values and non-secret
+examples. Fill it in inside the operator shell, keep it out of Git, and then
+run:
+
+```bash
+source ./.temp/phase-zero-six-evidence/phase-zero-six.env.sh
+pnpm verify:phase-zero-six-env-ready
+```
+
+For AWS-only S3.04/S3.05 preflight work, generate a smaller template:
+
+```bash
+pnpm verify:phase-zero-six-env-ready -- \
+  --skip-staging-smoke \
+  --write-env-template ./.temp/phase-zero-six-evidence/aws-preflight.env.sh
+```
+
 This command reports readiness by evidence group:
 
 - AWS preflight env for S3.04 and S3.05.
@@ -162,9 +186,10 @@ The JSON includes `missingEnvExportTemplate` and
 `missingRecommendedEnvExportTemplate` arrays. These contain shell `export`
 lines with placeholders or non-secret examples only, grouped by evidence area.
 Operators can copy those lines into a private staging shell, replace
-placeholders with real values, and rerun the readiness check. Do not commit a
-filled env file or paste real JWTs, gateway tokens, provider command env JSON,
-or AWS credentials into release docs.
+placeholders with real values, or use `--write-env-template` to write the same
+placeholder exports to a private shell file. Do not commit a filled env file or
+paste real JWTs, gateway tokens, provider command env JSON, or AWS credentials
+into release docs.
 
 ### Phase-One Runtime Smoke
 

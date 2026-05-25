@@ -99,7 +99,10 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   names by evidence group and helps operators see which AWS, runtime, router,
   and provider smoke inputs are still missing before running the live bundle.
   It also emits placeholder-only shell export templates for missing required
-  and recommended env. It is not checklist-completion evidence by itself.
+  and recommended env. Operators can now pass `--write-env-template <path>` to
+  write those placeholder exports to a private shell file under `.temp` before
+  filling real staging values. It is not checklist-completion evidence by
+  itself.
 - Phase 0-6 evidence tooling has CLI-level tests via
   `pnpm test:phase-zero-six-evidence`, covering guarded checklist application
   and obvious artifact secret leakage detection, including bundle-level refusal

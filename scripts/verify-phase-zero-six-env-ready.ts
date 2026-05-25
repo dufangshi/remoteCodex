@@ -1,3 +1,6 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+
 interface EnvRequirement {
   id: string;
   description: string;
@@ -80,6 +83,18 @@ function presentNames(requirements: EnvRequirement[]) {
 
 function hasFlag(name: string) {
   return process.argv.includes(name);
+}
+
+function argValue(name: string) {
+  const index = process.argv.indexOf(name);
+  if (index === -1) {
+    return null;
+  }
+  const value = process.argv[index + 1];
+  if (!value || value.startsWith('--')) {
+    throw new Error(`${name} requires a value.`);
+  }
+  return value;
 }
 
 const groups: EnvGroup[] = [
@@ -393,8 +408,54 @@ function evaluateGroup(group: EnvGroup) {
   };
 }
 
-function main() {
+function buildShellTemplate(input: {
+  generatedAt: string;
+  skippedStagingSmoke: boolean;
+  groups: ReturnType<typeof evaluateGroup>[];
+}) {
+  const lines = [
+    '# Phase 0-6 staging evidence environment template',
+    `# Generated at ${input.generatedAt}`,
+    '# Fill this file in a private operator shell. Do not commit filled values.',
+    '# Placeholder values below are examples only; no current environment values are printed.',
+    input.skippedStagingSmoke
+      ? '# Mode: AWS preflight only (--skip-staging-smoke).'
+      : '# Mode: full AWS, runtime, router, and provider smoke.',
+    '',
+  ];
+
+  for (const group of input.groups) {
+    lines.push(`# ${group.id}: ${group.title}`);
+    lines.push(`# Checklist items: ${group.items.join(', ')}`);
+    if (group.missingRequiredExportTemplate.length > 0) {
+      lines.push('# Required');
+      lines.push(...group.missingRequiredExportTemplate);
+    } else {
+      lines.push('# Required env appears present in the current shell; no placeholder emitted.');
+    }
+    if (group.missingRecommendedExportTemplate.length > 0) {
+      lines.push('# Recommended');
+      lines.push(...group.missingRecommendedExportTemplate);
+    }
+    if (group.warnings.length > 0) {
+      lines.push('# Warnings');
+      lines.push(...group.warnings.map((warning) => `# - ${warning}`));
+    }
+    lines.push('');
+  }
+
+  lines.push('# After filling values, run:');
+  lines.push('# source <this-file>');
+  lines.push('# pnpm verify:phase-zero-six-env-ready');
+  lines.push('# pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id>');
+  lines.push('');
+
+  return `${lines.join('\n')}\n`;
+}
+
+async function main() {
   const skipStagingSmoke = hasFlag('--skip-staging-smoke');
+  const envTemplatePath = argValue('--write-env-template');
   const selectedGroups = skipStagingSmoke
     ? groups.filter((group) => group.id === 'aws-preflight')
     : groups;
@@ -405,11 +466,25 @@ function main() {
   const notReadyGroups = evaluatedGroups
     .filter((group) => !group.ready)
     .map((group) => group.id);
+  const generatedAt = new Date().toISOString();
+
+  if (envTemplatePath) {
+    const parent = path.dirname(envTemplatePath);
+    if (parent && parent !== '.') {
+      await mkdir(parent, { recursive: true });
+    }
+    await writeFile(envTemplatePath, buildShellTemplate({
+      generatedAt,
+      skippedStagingSmoke: skipStagingSmoke,
+      groups: evaluatedGroups,
+    }));
+  }
 
   console.log(JSON.stringify({
     ok: notReadyGroups.length === 0,
-    generatedAt: new Date().toISOString(),
+    generatedAt,
     skippedStagingSmoke: skipStagingSmoke,
+    envTemplatePath,
     readyGroups,
     notReadyGroups,
     groups: evaluatedGroups,
@@ -430,4 +505,10 @@ function main() {
   }
 }
 
-main();
+main().catch((error) => {
+  console.error(JSON.stringify({
+    ok: false,
+    error: error instanceof Error ? error.message : String(error),
+  }, null, 2));
+  process.exit(1);
+});
