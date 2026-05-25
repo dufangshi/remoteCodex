@@ -131,6 +131,7 @@ function checklistReadinessSummary(result: CommandResult | undefined) {
     uncheckedCount?: unknown;
     readyToCheck?: unknown;
     stillMissing?: unknown;
+    blockingGroups?: unknown;
     checkedButContradicted?: unknown;
   } | null : null;
   return {
@@ -138,6 +139,7 @@ function checklistReadinessSummary(result: CommandResult | undefined) {
     uncheckedCount: typeof parsed?.uncheckedCount === 'number' ? parsed.uncheckedCount : null,
     readyToCheck: Array.isArray(parsed?.readyToCheck) ? parsed.readyToCheck : [],
     stillMissing: Array.isArray(parsed?.stillMissing) ? parsed.stillMissing : [],
+    blockingGroups: Array.isArray(parsed?.blockingGroups) ? parsed.blockingGroups : [],
     checkedButContradicted: Array.isArray(parsed?.checkedButContradicted)
       ? parsed.checkedButContradicted
       : [],
@@ -338,6 +340,22 @@ function renderOperatorReport(summary: Record<string, unknown>) {
     lines.push('');
   }
 
+  const checklistBlockingGroups = asArray(readiness.blockingGroups);
+  if (checklistBlockingGroups.length > 0) {
+    lines.push('## Checklist blocking groups');
+    for (const entry of checklistBlockingGroups) {
+      const group = asRecord(entry);
+      lines.push(`- ${String(group.id ?? '(unknown-group)')}`);
+      lines.push(`  Items: ${stringList(group.items)}`);
+      lines.push(`  Ready items: ${stringList(group.readyItems)}`);
+      lines.push(`  Not ready items: ${stringList(group.notReadyItems)}`);
+      if (typeof group.nextEvidenceCommand === 'string') {
+        lines.push(`  Next evidence command: ${group.nextEvidenceCommand}`);
+      }
+    }
+    lines.push('');
+  }
+
   lines.push('## Environment readiness');
   lines.push(`Ready groups: ${stringList(envReadiness.readyGroups)}`);
   lines.push(`Not ready groups: ${stringList(envReadiness.notReadyGroups)}`);
@@ -449,6 +467,7 @@ function buildReleaseReview(summary: Record<string, unknown>) {
       uncheckedCount: typeof readiness.uncheckedCount === 'number' ? readiness.uncheckedCount : null,
       readyToCheck,
       stillMissing,
+      blockingGroups: asArray(readiness.blockingGroups),
       checkedButContradicted: asArray(readiness.checkedButContradicted),
     },
     envReadiness: {

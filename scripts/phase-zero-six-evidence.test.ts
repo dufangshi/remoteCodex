@@ -1280,6 +1280,25 @@ describe('phase zero-six evidence tooling', () => {
       'S3.04',
       'S3.05',
     ]);
+    expect(parsed.checklistReadiness.blockingGroups).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'runtime-smoke',
+          notReadyItems: ['S3.06', 'S3.07', 'S3.08'],
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+        expect.objectContaining({
+          id: 'router-smoke',
+          notReadyItems: ['R5.10', 'R5.11', 'R5.12'],
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+        expect.objectContaining({
+          id: 'provider-smoke',
+          notReadyItems: ['G6.11', 'G6.12', 'G6.13'],
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+      ]),
+    );
     expect(parsed.checklistReadiness.checkedButContradicted).toEqual([]);
     expect(parsed.applySkippedReason).toBeNull();
     expect(
@@ -1311,6 +1330,19 @@ describe('phase zero-six evidence tooling', () => {
     expect(parsed.artifacts.releaseReview).toBe(path.join(dir, 'release-review.json'));
     expect(parsed.artifacts.finalArtifactSecretScan).toBe(path.join(dir, 'artifact-secret-scan-final.json'));
     expect(parsed.finalArtifactScanPassed).toBe(true);
+    const operatorReport = await readFile(path.join(dir, 'operator-report.txt'), 'utf8');
+    const releaseReview = JSON.parse(await readFile(path.join(dir, 'release-review.json'), 'utf8'));
+    expect(operatorReport).toContain('## Checklist blocking groups');
+    expect(operatorReport).toContain('runtime-smoke');
+    expect(operatorReport).toContain('Next evidence command: pnpm phase-zero-six:collect');
+    expect(releaseReview.checklist.blockingGroups).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'runtime-smoke',
+          notReadyItems: ['S3.06', 'S3.07', 'S3.08'],
+        }),
+      ]),
+    );
     expect(files).toContain('phase-zero-six-apply.json');
     expect(files).toContain('artifact-secret-scan-post-apply.json');
     expect(files).toContain('artifact-secret-scan-final.json');
