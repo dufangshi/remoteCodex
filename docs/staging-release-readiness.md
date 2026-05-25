@@ -351,7 +351,9 @@ The important step-to-checkbox mapping is:
   `requestDiagnostics.workerTokenHeaderPresent: true`, proving browser
   `Authorization` was stripped and router worker-token injection happened.
 - `direct_worker_denial` proves R5.11 when `STAGING_DIRECT_WORKER_BASE_URL` is
-  available and direct worker access returns `401` or `403`.
+  available and direct worker access returns `401` or `403`. The response body
+  may be JSON, plain text, HTML, or empty; the smoke records only status and
+  accepted statuses for this proof.
 - `codex_gateway_smoke`, `claude_gateway_smoke`, and
   `opencode_gateway_smoke` prove G6.11-G6.13 only when the command output also
   records a successful gateway usage event and confirms no provider root key is

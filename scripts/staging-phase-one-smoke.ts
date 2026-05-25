@@ -9,7 +9,7 @@ interface SmokeStep {
   details?: Record<string, unknown>;
 }
 
-type JsonObject = Record<string, unknown>;
+type JsonObject = Record<string, any>;
 
 const requiredEnv = [
   'STAGING_CONTROL_PLANE_BASE_URL',
@@ -64,13 +64,24 @@ async function requestJson(input: {
     body: input.body === undefined ? undefined : JSON.stringify(input.body),
   });
   const text = await response.text();
-  const json = text ? JSON.parse(text) : null;
+  let json: JsonObject | null = null;
+  if (text) {
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      json = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed as JsonObject
+        : null;
+    } catch {
+      json = null;
+    }
+  }
   if (input.expectedStatus !== undefined && response.status !== input.expectedStatus) {
     throw new Error(`${input.method ?? 'GET'} ${url} expected ${input.expectedStatus}, got ${response.status}: ${text}`);
   }
   return {
     status: response.status,
     json,
+    text,
     url: url.toString(),
   };
 }

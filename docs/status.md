@@ -114,8 +114,8 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   provider-specific env JSON, so G6.11-G6.13 smokes can pass quoted provider
   commands and usage evidence into the helper without logging raw env values.
 - Staging stop evidence now polls sandbox health until `stopped`, and direct
-  worker denial accepts `401` or `403`, aligning smoke output with the
-  checklist verifier for S3.07 and R5.11.
+  worker denial accepts `401` or `403`, including non-JSON denial bodies,
+  aligning smoke output with the checklist verifier for S3.07 and R5.11.
 - Staging router deployment evidence now includes an explicit `router_health`
   step before browser-to-router-to-worker metadata resolution, strengthening
   R5.10 proof.

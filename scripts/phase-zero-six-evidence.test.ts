@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
+import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
@@ -48,6 +49,149 @@ async function runScriptWithEnv(
 
 async function tempDir() {
   return mkdtemp(path.join(os.tmpdir(), 'phase-zero-six-evidence-test-'));
+}
+
+async function withFakeStagingServers(
+  handler: (input: { controlPlaneBaseUrl: string; directWorkerBaseUrl: string }) => Promise<void>,
+) {
+  const state = {
+    sandboxStarted: false,
+    sandboxStopped: false,
+  };
+  const directWorker = http.createServer((request, response) => {
+    if (request.url === '/api/worker/metadata') {
+      response.writeHead(403, { 'content-type': 'text/plain' });
+      response.end('forbidden without worker token');
+      return;
+    }
+    response.writeHead(404, { 'content-type': 'text/plain' });
+    response.end('not found');
+  });
+  const directWorkerBaseUrl = await listen(directWorker);
+
+  let controlPlaneBaseUrlValue = '';
+  const controlPlane = http.createServer((request, response) => {
+    const url = new URL(request.url ?? '/', 'http://127.0.0.1');
+    function json(body: unknown, status = 200) {
+      response.writeHead(status, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(body));
+    }
+    if (request.method === 'POST' && url.pathname === '/api/me/bootstrap') {
+      json({
+        user: { id: 'user-smoke' },
+        sandbox: { id: 'sandbox-smoke', state: 'stopped' },
+      });
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/api/sandbox/start') {
+      state.sandboxStarted = true;
+      json({
+        sandbox: {
+          id: 'sandbox-smoke',
+          state: 'running',
+          image: 'remote-codex-worker:staging',
+          resourceProfile: 'fargate-small',
+          routerBaseUrl: '',
+          workerServiceName: 'worker-svc',
+          k8sNamespace: 'remote-codex-sandboxes',
+          k8sPodName: 'worker-pod',
+          startupProgress: 'ready',
+        },
+      });
+      return;
+    }
+    if (request.method === 'GET' && url.pathname === '/api/sandbox/health') {
+      json({
+        sandbox: {
+          id: 'sandbox-smoke',
+          state: state.sandboxStopped ? 'stopped' : state.sandboxStarted ? 'running' : 'stopped',
+          lastSeenAt: '2026-05-25T12:00:00.000Z',
+          statusReason: 'ready',
+          routerBaseUrl: '',
+          workerServiceName: 'worker-svc',
+          k8sNamespace: 'remote-codex-sandboxes',
+          k8sPodName: 'worker-pod',
+          startupProgress: 'ready',
+        },
+      });
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/api/projects') {
+      json({ project: { id: 'project-smoke' } });
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/api/projects/project-smoke/workspaces') {
+      json({ workspace: { id: 'workspace-smoke' } });
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/api/workspaces/workspace-smoke/sessions') {
+      json({ session: { id: 'session-smoke' } });
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/api/sandboxes/sandbox-smoke/route-token') {
+      json({
+        token: 'route-token',
+        sandboxId: 'sandbox-smoke',
+        routerBaseUrl: controlPlaneBaseUrlValue,
+        expiresAt: '2026-05-25T12:05:00.000Z',
+      });
+      return;
+    }
+    if (request.method === 'GET' && url.pathname === '/healthz') {
+      json({ ok: true, role: 'sandbox-router' });
+      return;
+    }
+    if (
+      request.method === 'GET' &&
+      url.pathname === '/api/sandboxes/sandbox-smoke/api/worker/metadata'
+    ) {
+      json({
+        role: 'worker',
+        sandboxId: 'sandbox-smoke',
+        userId: 'user-smoke',
+        managementRoutesEnabled: false,
+        requestDiagnostics: {
+          authorizationHeaderPresent: false,
+          workerTokenHeaderPresent: true,
+        },
+      });
+      return;
+    }
+    response.writeHead(404, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ error: 'not_found', path: url.pathname }));
+  });
+  const controlPlaneBaseUrl = await listen(controlPlane);
+  controlPlaneBaseUrlValue = controlPlaneBaseUrl;
+
+  try {
+    await handler({ controlPlaneBaseUrl, directWorkerBaseUrl });
+  } finally {
+    await Promise.all([closeServer(controlPlane), closeServer(directWorker)]);
+  }
+}
+
+function listen(server: http.Server) {
+  return new Promise<string>((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        throw new Error('Expected TCP server address.');
+      }
+      resolve(`http://127.0.0.1:${address.port}`);
+    });
+  });
+}
+
+function closeServer(server: http.Server) {
+  return new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
 }
 
 function minimalChecklist() {
@@ -297,5 +441,35 @@ describe('phase zero-six evidence tooling', () => {
     expect(files).toContain('phase-zero-six-verification.json');
     expect(files).toContain('artifact-secret-scan.json');
     expect(files).toContain('summary.json');
+  });
+
+  it('records direct worker denial when direct worker returns non-json 403', async () => {
+    await withFakeStagingServers(async ({ controlPlaneBaseUrl, directWorkerBaseUrl }) => {
+      const result = await runScriptWithEnv(
+        'scripts/staging-phase-one-smoke.ts',
+        [],
+        {
+          STAGING_CONTROL_PLANE_BASE_URL: controlPlaneBaseUrl,
+          STAGING_PRODUCT_JWT: 'secret-product-jwt-value',
+          STAGING_DIRECT_WORKER_BASE_URL: directWorkerBaseUrl,
+        },
+      );
+      const parsed = JSON.parse(result.stdout);
+      const directStep = parsed.steps.find((step: { name: string }) =>
+        step.name === 'direct_worker_denial',
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(directStep).toMatchObject({
+        name: 'direct_worker_denial',
+        ok: true,
+        details: {
+          status: 403,
+          acceptedStatuses: [401, 403],
+        },
+      });
+      expect(result.stdout).not.toContain('forbidden without worker token');
+      expect(result.stdout).not.toContain('secret-product-jwt-value');
+    });
   });
 });
