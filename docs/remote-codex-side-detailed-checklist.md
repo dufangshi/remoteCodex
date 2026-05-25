@@ -455,57 +455,78 @@ configuration is unsafe.
 
 ### Worker Image
 
-- [ ] W4.01 Keep `Dockerfile.worker` as the canonical worker image.
+- [x] W4.01 Keep `Dockerfile.worker` as the canonical worker image.
   - Done when the image builds from a clean checkout without relying on local
     dirty files.
   - Verify with `docker build -f Dockerfile.worker -t remote-codex-worker:verify .`.
 
-- [ ] W4.02 Pin runtime dependency versions.
+- [x] W4.02 Pin runtime dependency versions.
   - Done when Node, package manager, Codex, Claude Code, OpenCode, SDKs, and
     required system packages are pinned or intentionally floated with an update
     policy.
   - Verify with image manifest review and image build logs.
 
-- [ ] W4.03 Run the worker as a non-root user.
+- [x] W4.03 Run the worker as a non-root user.
   - Done when the image runs as `agent`, uses `/workspace`, and places provider
     homes under `/home/agent`.
   - Verify with container smoke and image inspection.
 
-- [ ] W4.04 Add safe runtime metadata.
+- [x] W4.04 Add safe runtime metadata.
   - Done when the worker can report image version and provider runtime versions
     without secrets.
   - Verify with worker metadata tests and container smoke.
 
-- [ ] W4.05 Add CI worker image build and smoke.
+- [x] W4.05 Add CI worker image build and smoke.
   - Done when CI builds the image, starts it, checks `/readyz`, verifies auth
     denial, and verifies auth success.
   - Verify with passing GitHub Actions run.
 
 ### Worker Startup Safety
 
-- [ ] W4.06 Validate required worker identity env.
+- [x] W4.06 Validate required worker identity env.
   - Done when worker mode refuses to start without sandbox id, user id, worker
     token, and expected runtime role.
   - Verify with supervisor-api startup tests.
 
-- [ ] W4.07 Validate filesystem roots.
+- [x] W4.07 Validate filesystem roots.
   - Done when worker mode requires `WORKSPACE_ROOT=/workspace`,
     `HOME=/home/agent`, safe provider homes, and a writable workspace.
   - Verify with startup tests.
 
-- [ ] W4.08 Validate gateway and harness env only when enabled.
+- [x] W4.08 Validate gateway and harness env only when enabled.
   - Done when provider runtimes require gateway env and chemistry tools require
     harness env, while disabled features do not block startup.
   - Verify with config tests.
 
-- [ ] W4.09 Redact secrets from startup logs and metadata.
+- [x] W4.09 Redact secrets from startup logs and metadata.
   - Done when service tokens, gateway tokens, harness keys, product JWTs, and
     worker tokens cannot appear in logs or metadata responses.
   - Verify with redaction tests.
 
-- [ ] W4.10 Validate MCP config path and permissions.
+- [x] W4.10 Validate MCP config path and permissions.
   - Done when missing, unsafe, or externally writable MCP configs are rejected.
   - Verify with startup tests.
+
+### Phase 4 Evidence
+
+- Files: `Dockerfile.worker`, `.github/workflows/worker-image.yml`,
+  `apps/supervisor-api/src/worker-environment.ts`,
+  `apps/supervisor-api/src/worker-environment.test.ts`,
+  `apps/supervisor-api/src/app.test.ts`,
+  `apps/supervisor-api/src/worker-runtime-manifest.ts`.
+- Verification:
+  - GitHub Actions `Worker Image` run `26396842026` passed at commit
+    `4530b9148d9ba293d29200420d58c9ae8bba6cdb`, building
+    `Dockerfile.worker`, starting the worker container, checking `/readyz`,
+    proving worker auth denial, and proving worker auth success.
+  - `pnpm --filter @remote-codex/supervisor-api typecheck` passed.
+  - `pnpm --filter @remote-codex/supervisor-api test -- worker-environment`
+    passed: 9 files, 160 tests, covering worker environment validation,
+    metadata, redaction, and worker auth behavior.
+  - `pnpm --filter @remote-codex/config typecheck` passed.
+- Residual risk: this phase proves local image/runtime guardrails and CI image
+  smoke. It does not prove a real EKS Fargate Pod was started from the image in
+  staging; that remains a Phase 3 and release-gate item.
 
 ## Phase 5: Router, Route Tokens, And Worker Authorization
 

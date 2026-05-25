@@ -114,6 +114,8 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   are verified. CI run `26396842026` passed on
   `sandbox-worker-control-plane` at commit
   `4530b9148d9ba293d29200420d58c9ae8bba6cdb`.
+- `docs/remote-codex-side-detailed-checklist.md` Phase 4 is complete for local
+  worker image/runtime guardrails and CI worker image smoke.
 - Worker artifact register, metadata/list, download, and delete routes exist
   behind signed identity-envelope `artifact:read` and `artifact:write` scopes.
 - LLM gateway contract is fixed on a sub2api-compatible shape; provisioning,
