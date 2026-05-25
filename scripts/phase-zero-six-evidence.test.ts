@@ -1034,6 +1034,11 @@ describe('phase zero-six evidence tooling', () => {
     expect(result.exitCode).toBe(0);
     expect(parsed.ok).toBe(true);
     expect(parsed.phaseZeroSixComplete).toBe(false);
+    expect(parsed.checklistReadiness.readyToCheck.map((entry: { item: string }) => entry.item)).toEqual([
+      'S3.04',
+      'S3.05',
+    ]);
+    expect(parsed.checklistReadiness.checkedButContradicted).toEqual([]);
     expect(parsed.applySkippedReason).toBeNull();
     expect(
       parsed.results.find((entry: { name: string }) => entry.name === 'verify_phase_zero_six_evidence'),
@@ -1101,6 +1106,11 @@ describe('phase zero-six evidence tooling', () => {
     expect(result.exitCode).toBe(0);
     expect(parsed.reuseExistingArtifacts).toBe(true);
     expect(parsed.fromOutputDir).toBe(evidenceDir);
+    expect(parsed.checklistReadiness.readyToCheck.map((entry: { item: string }) => entry.item)).toEqual([
+      'S3.04',
+      'S3.05',
+    ]);
+    expect(parsed.checklistReadiness.checkedButContradicted).toEqual([]);
     expect(commandNames).not.toContain('verify_phase_zero_six_env_ready');
     expect(commandNames).not.toContain('collect_aws_staging_preflight_evidence');
     expect(commandNames).not.toContain('run_staging_phase_one_smoke');

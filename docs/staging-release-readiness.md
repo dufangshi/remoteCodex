@@ -408,6 +408,11 @@ commands can have `ok: true` and `rawOk: false`, meaning the command ran and
 applied the ready boxes successfully, while the full Phase 0 through Phase 6
 checklist still has missing staging evidence.
 
+The summary also includes `checklistReadiness`, copied from the aggregate
+Phase 0-6 verifier. Use `checklistReadiness.readyToCheck` to see which boxes
+are proven by the supplied evidence, `stillMissing` to see what remains, and
+`checkedButContradicted` to catch evidence regressions before apply.
+
 Checklist apply inside the bundle is intentionally ordered after read-only
 verification and artifact scanning. Even when `--apply-ready` is present, the
 bundle first writes `phase-zero-six-verification.json`, then scans the artifact

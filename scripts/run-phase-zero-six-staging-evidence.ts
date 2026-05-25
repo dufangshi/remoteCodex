@@ -125,6 +125,25 @@ function phaseVerificationComplete(result: CommandResult | undefined) {
   return result?.exitCode === 0 && parsed?.ok === true;
 }
 
+function checklistReadinessSummary(result: CommandResult | undefined) {
+  const parsed = result ? parseJsonOutput(result) as {
+    checkedCount?: unknown;
+    uncheckedCount?: unknown;
+    readyToCheck?: unknown;
+    stillMissing?: unknown;
+    checkedButContradicted?: unknown;
+  } | null : null;
+  return {
+    checkedCount: typeof parsed?.checkedCount === 'number' ? parsed.checkedCount : null,
+    uncheckedCount: typeof parsed?.uncheckedCount === 'number' ? parsed.uncheckedCount : null,
+    readyToCheck: Array.isArray(parsed?.readyToCheck) ? parsed.readyToCheck : [],
+    stillMissing: Array.isArray(parsed?.stillMissing) ? parsed.stillMissing : [],
+    checkedButContradicted: Array.isArray(parsed?.checkedButContradicted)
+      ? parsed.checkedButContradicted
+      : [],
+  };
+}
+
 function successfulCommandNamesForPartialEvidence() {
   return new Set([
     'verify_phase_zero_six_evidence',
@@ -494,6 +513,7 @@ async function main() {
     skippedStagingSmoke: hasFlag('--skip-staging-smoke'),
     stoppedAfterEnvReadiness: false,
     phaseZeroSixComplete,
+    checklistReadiness: checklistReadinessSummary(phaseVerification),
     applySkippedReason,
     envReadiness: readinessSummary,
     nextSteps: nextSteps({

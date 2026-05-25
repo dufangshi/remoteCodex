@@ -98,7 +98,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   evidence can succeed without claiming full release readiness. Summary result
   entries expose both bundle-level `ok` and command-level `rawOk` so operators
   can distinguish successful partial collection from complete checklist
-  readiness. Its `--skip-staging-smoke` mode limits env readiness to AWS
+  readiness, and `summary.checklistReadiness` exposes ready-to-check,
+  still-missing, and contradicted checklist items without opening the raw
+  verifier JSON. Its `--skip-staging-smoke` mode limits env readiness to AWS
   preflight inputs. It stops after env readiness failure by default; `--force`
   is available only for diagnostic collection. The recommended `.temp` output
   path is ignored by Git.
