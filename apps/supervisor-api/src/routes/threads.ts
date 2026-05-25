@@ -28,6 +28,7 @@ import {
 } from '../../../../packages/shared/src/index';
 import { HttpError } from '../app';
 import { agentBackendIdSchema } from '../provider-schemas';
+import { requireWorkerScope } from '../worker-identity';
 
 const createThreadSchema = z.object({
   workspaceId: z.string().uuid(),
@@ -710,6 +711,7 @@ export async function registerThreadRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/threads/:id/prompt', async (request) => {
+    requireWorkerScope(request, 'provider:turn:create');
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const parsed = request.isMultipart()
       ? await parseMultipartPromptRequest(request)
@@ -750,6 +752,7 @@ export async function registerThreadRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/threads/:id/interrupt', async (request) => {
+    requireWorkerScope(request, 'provider:turn:interrupt');
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const body = interruptSchema.parse(request.body ?? {});
     return app.services.threadService.interruptThread(params.id, body.turnId);

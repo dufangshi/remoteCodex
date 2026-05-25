@@ -357,14 +357,14 @@ the worker endpoint.
 - [x] Support `Authorization: Bearer <token>` for internal calls if needed.
 - [x] Support `X-Remote-Codex-Worker-Token`.
 - [x] Strip or ignore browser-supplied user identity headers.
-- [ ] Add optional signed identity envelope schema.
-- [ ] Verify signed identity envelope expiry.
-- [ ] Verify signed identity envelope sandbox id.
-- [ ] Verify signed identity envelope scopes.
-- [ ] Add scope checks for shell write.
+- [x] Add optional signed identity envelope schema.
+- [x] Verify signed identity envelope expiry.
+- [x] Verify signed identity envelope sandbox id.
+- [x] Verify signed identity envelope scopes.
+- [x] Add scope checks for shell write.
 - [ ] Add scope checks for file write.
-- [ ] Add scope checks for provider turn creation.
-- [ ] Add scope checks for provider interrupt.
+- [x] Add scope checks for provider turn creation.
+- [x] Add scope checks for provider interrupt.
 - [ ] Add scope checks for artifact read/write.
 - [x] Keep provider host config read disabled in worker mode.
 - [x] Keep provider host config write disabled in worker mode.
@@ -378,7 +378,7 @@ Verification:
 
 - [x] Add worker auth tests.
 - [x] Add disabled-management-route tests.
-- [ ] Add scope-denial tests.
+- [x] Add scope-denial tests for checked scope-protected routes.
 - [ ] `pnpm --filter @remote-codex/supervisor-api test`
 
 ## Phase 7: LLM Gateway Integration

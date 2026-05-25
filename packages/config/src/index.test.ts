@@ -19,6 +19,7 @@ describe('loadRuntimeConfig', () => {
     expect(config.managementRoutesEnabled).toBe(true);
     expect(config.agentRuntimeManagementEnabled).toBe(true);
     expect(config.workerAuthToken).toBeNull();
+    expect(config.workerIdentitySecret).toBeNull();
     expect(config.llmGatewayBaseUrl).toBeNull();
     expect(config.llmGatewayToken).toBeNull();
     expect(config.workerRuntimeManifestPath).toBeNull();
@@ -77,6 +78,7 @@ describe('loadRuntimeConfig', () => {
       REMOTE_CODEX_SANDBOX_ID: 'sbx_123',
       REMOTE_CODEX_USER_ID: 'user_123',
       REMOTE_CODEX_WORKER_AUTH_TOKEN: 'worker-token',
+      REMOTE_CODEX_WORKER_IDENTITY_SECRET: 'identity-secret',
       REMOTE_CODEX_LLM_GATEWAY_BASE_URL: 'https://llm-gateway.example.com',
       REMOTE_CODEX_LLM_GATEWAY_TOKEN: 'gw-token',
     });
@@ -90,6 +92,7 @@ describe('loadRuntimeConfig', () => {
     expect(config.managementRoutesEnabled).toBe(false);
     expect(config.agentRuntimeManagementEnabled).toBe(false);
     expect(config.workerAuthToken).toBe('worker-token');
+    expect(config.workerIdentitySecret).toBe('identity-secret');
     expect(config.llmGatewayBaseUrl).toBe('https://llm-gateway.example.com');
     expect(config.llmGatewayToken).toBe('gw-token');
     expect(config.workerRuntimeManifestPath).toBe('/opt/remote-codex/worker-runtime-manifest.json');

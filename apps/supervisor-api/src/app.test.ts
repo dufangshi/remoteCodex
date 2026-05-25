@@ -23,6 +23,10 @@ import {
   LocalCodexSessionStore,
 } from '../../../packages/codex/src/index';
 import { FakeCodexManager } from './test/fakeCodexManager';
+import {
+  signWorkerIdentityEnvelope,
+  type WorkerIdentityEnvelope,
+} from './worker-identity';
 
 vi.mock('puppeteer-core', () => ({
   default: {
@@ -31,6 +35,28 @@ vi.mock('puppeteer-core', () => ({
 }));
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const workerIdentitySecret = 'worker-identity-secret';
+
+function makeWorkerIdentityHeaders(
+  input: Partial<WorkerIdentityEnvelope> = {},
+  secret = workerIdentitySecret,
+) {
+  const envelope: WorkerIdentityEnvelope = {
+    userId: input.userId ?? 'user_test',
+    projectId: input.projectId ?? null,
+    sandboxId: input.sandboxId ?? 'sbx_test',
+    scopes: input.scopes ?? [],
+    expiresAt: input.expiresAt ?? new Date(Date.now() + 60_000).toISOString(),
+  };
+  return {
+    'x-remote-codex-user': envelope.userId,
+    ...(envelope.projectId ? { 'x-remote-codex-project': envelope.projectId } : {}),
+    'x-remote-codex-sandbox': envelope.sandboxId,
+    'x-remote-codex-scopes': envelope.scopes.join(','),
+    'x-remote-codex-expires-at': envelope.expiresAt,
+    'x-remote-codex-signature': signWorkerIdentityEnvelope(envelope, secret),
+  };
+}
 
 class FakeClaudeRuntime extends EventEmitter implements AgentRuntime {
   readonly provider = 'claude' as const;
@@ -683,6 +709,199 @@ describe('supervisor api', () => {
       },
     });
     expect(bearerAuthorized.statusCode).toBe(200);
+  });
+
+  it('enforces signed worker identity envelopes on scoped worker routes', async () => {
+    await app.close();
+    app = buildTestApp(fakeCodexManager, {
+      env: {
+        REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+        REMOTE_CODEX_SANDBOX_ID: 'sbx_test',
+        REMOTE_CODEX_USER_ID: 'user_test',
+        REMOTE_CODEX_WORKER_AUTH_TOKEN: 'router-secret',
+        REMOTE_CODEX_WORKER_IDENTITY_SECRET: workerIdentitySecret,
+      },
+    });
+    await app.ready();
+
+    const baseHeaders = {
+      'x-remote-codex-worker-token': 'router-secret',
+    };
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      headers: baseHeaders,
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+    expect(workspaceResponse.statusCode).toBe(200);
+    const createThreadResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      headers: baseHeaders,
+      payload: {
+        workspaceId: workspaceResponse.json().id,
+        model: 'gpt-5.4',
+        approvalMode: 'guarded',
+      },
+    });
+    expect(createThreadResponse.statusCode).toBe(200);
+    const threadId = createThreadResponse.json().id;
+
+    const missingEnvelope = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${threadId}/prompt`,
+      headers: baseHeaders,
+      payload: {
+        prompt: 'missing envelope',
+      },
+    });
+    expect(missingEnvelope.statusCode).toBe(403);
+
+    const wrongSandbox = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${threadId}/prompt`,
+      headers: {
+        ...baseHeaders,
+        ...makeWorkerIdentityHeaders({
+          sandboxId: 'sbx_other',
+          scopes: ['provider:turn:create'],
+        }),
+      },
+      payload: {
+        prompt: 'wrong sandbox',
+      },
+    });
+    expect(wrongSandbox.statusCode).toBe(403);
+
+    const expiredEnvelope = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${threadId}/prompt`,
+      headers: {
+        ...baseHeaders,
+        ...makeWorkerIdentityHeaders({
+          scopes: ['provider:turn:create'],
+          expiresAt: new Date(Date.now() - 1_000).toISOString(),
+        }),
+      },
+      payload: {
+        prompt: 'expired envelope',
+      },
+    });
+    expect(expiredEnvelope.statusCode).toBe(403);
+
+    const missingScope = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${threadId}/prompt`,
+      headers: {
+        ...baseHeaders,
+        ...makeWorkerIdentityHeaders({
+          scopes: ['provider:turn:interrupt'],
+        }),
+      },
+      payload: {
+        prompt: 'missing scope',
+      },
+    });
+    expect(missingScope.statusCode).toBe(403);
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${threadId}/prompt`,
+      headers: {
+        ...baseHeaders,
+        ...makeWorkerIdentityHeaders({
+          scopes: ['provider:turn:create'],
+        }),
+      },
+      payload: {
+        prompt: 'allowed prompt',
+      },
+    });
+    expect(promptResponse.statusCode).toBe(200);
+
+    const interruptDenied = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${threadId}/interrupt`,
+      headers: {
+        ...baseHeaders,
+        ...makeWorkerIdentityHeaders({
+          scopes: ['provider:turn:create'],
+        }),
+      },
+    });
+    expect(interruptDenied.statusCode).toBe(403);
+
+    const interruptAllowed = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${threadId}/interrupt`,
+      headers: {
+        ...baseHeaders,
+        ...makeWorkerIdentityHeaders({
+          scopes: ['provider:turn:interrupt'],
+        }),
+      },
+    });
+    expect(interruptAllowed.statusCode).toBe(200);
+
+    const shellDenied = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${threadId}/shell`,
+      headers: {
+        ...baseHeaders,
+        ...makeWorkerIdentityHeaders({
+          scopes: ['provider:turn:create'],
+        }),
+      },
+      payload: {
+        label: 'Denied shell',
+      },
+    });
+    expect(shellDenied.statusCode).toBe(403);
+
+    const shellAllowed = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${threadId}/shell`,
+      headers: {
+        ...baseHeaders,
+        ...makeWorkerIdentityHeaders({
+          scopes: ['shell:write'],
+        }),
+      },
+      payload: {
+        label: 'Allowed shell',
+      },
+    });
+    expect(shellAllowed.statusCode).toBe(200);
+    const shellId = shellAllowed.json().shell.id;
+
+    const shellRenameDenied = await app.inject({
+      method: 'PATCH',
+      url: `/api/shells/${shellId}`,
+      headers: {
+        ...baseHeaders,
+        ...makeWorkerIdentityHeaders({
+          scopes: ['provider:turn:create'],
+        }),
+      },
+      payload: {
+        label: 'Denied rename',
+      },
+    });
+    expect(shellRenameDenied.statusCode).toBe(403);
+
+    const shellTerminateDenied = await app.inject({
+      method: 'POST',
+      url: `/api/shells/${shellId}/terminate`,
+      headers: {
+        ...baseHeaders,
+        ...makeWorkerIdentityHeaders({
+          scopes: ['provider:turn:create'],
+        }),
+      },
+    });
+    expect(shellTerminateDenied.statusCode).toBe(403);
   });
 
   it('writes gateway-backed provider config during worker startup', async () => {

@@ -320,28 +320,28 @@ Verification:
 - [x] Disable build restart in worker mode.
 - [x] Disable runtime install/update in worker mode.
 - [x] Strip or ignore browser-supplied user identity headers.
-- [ ] Define signed identity envelope headers.
-- [ ] Sign identity envelope in the router or local test client.
-- [ ] Verify identity envelope signature in the worker.
-- [ ] Verify identity envelope expiry.
-- [ ] Verify identity envelope sandbox id matches `REMOTE_CODEX_SANDBOX_ID`.
-- [ ] Verify identity envelope scopes.
-- [ ] Add `shell:write` checks to shell write, terminate, and update routes.
+- [x] Define signed identity envelope headers.
+- [x] Sign identity envelope in the router or local test client.
+- [x] Verify identity envelope signature in the worker.
+- [x] Verify identity envelope expiry.
+- [x] Verify identity envelope sandbox id matches `REMOTE_CODEX_SANDBOX_ID`.
+- [x] Verify identity envelope scopes.
+- [x] Add `shell:write` checks to shell write, terminate, and update routes.
 - [ ] Add `file:write` checks to file write, move, delete, and upload routes.
-- [ ] Add `provider:turn:create` checks to provider turn creation routes.
-- [ ] Add `provider:turn:interrupt` checks to provider interrupt routes.
+- [x] Add `provider:turn:create` checks to provider turn creation routes.
+- [x] Add `provider:turn:interrupt` checks to provider interrupt routes.
 - [ ] Add artifact read/write scopes to artifact routes once the artifact model
   is finalized.
-- [ ] Deny scope-protected routes when the envelope is missing.
-- [ ] Deny scope-protected routes when the envelope is expired.
-- [ ] Deny scope-protected routes when the envelope sandbox is wrong.
-- [ ] Deny scope-protected routes when required scope is missing.
+- [x] Deny scope-protected routes when the envelope is missing.
+- [x] Deny scope-protected routes when the envelope is expired.
+- [x] Deny scope-protected routes when the envelope sandbox is wrong.
+- [x] Deny scope-protected routes when required scope is missing.
 
 Verification:
 
 - [x] Worker token auth tests pass.
 - [x] Disabled management-route tests pass.
-- [ ] Scope-denial tests cover every checked scope-protected route.
+- [x] Scope-denial tests cover every checked scope-protected route.
 - [ ] `pnpm --filter @remote-codex/supervisor-api test`
 
 ### H. Sandbox Router And Route Tokens
@@ -976,13 +976,13 @@ required identity, filesystem, or token settings are missing.
 - [x] Disable provider host config write in worker mode.
 - [x] Disable build restart in worker mode.
 - [x] Disable runtime install/update in worker mode.
-- [ ] Add signed identity envelope verification.
-- [ ] Add scope checks for shell write.
+- [x] Add signed identity envelope verification.
+- [x] Add scope checks for shell write.
 - [ ] Add scope checks for file write.
-- [ ] Add scope checks for provider turn creation.
-- [ ] Add scope checks for provider interrupt.
+- [x] Add scope checks for provider turn creation.
+- [x] Add scope checks for provider interrupt.
 - [ ] Add scope checks for artifact read/write.
-- [ ] Add denial tests for every scope-protected route.
+- [x] Add denial tests for every checked scope-protected route.
 
 ### Verification
 

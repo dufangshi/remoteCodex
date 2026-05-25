@@ -47,6 +47,7 @@ import {
   createTerminalShellBackend,
   createTerminalPluginBackendContribution,
 } from './plugins/terminal-plugin-backend';
+import { WorkerIdentityError } from './worker-identity';
 
 const MAX_PROMPT_ATTACHMENTS = 10;
 const MAX_PROMPT_ATTACHMENT_BYTES = 25 * 1024 * 1024;
@@ -334,6 +335,11 @@ export function buildApp(
 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof HttpError) {
+      reply.status(error.statusCode).send(error.payload);
+      return;
+    }
+
+    if (error instanceof WorkerIdentityError) {
       reply.status(error.statusCode).send(error.payload);
       return;
     }

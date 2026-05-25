@@ -50,6 +50,7 @@ export interface RuntimeConfig {
   managementRoutesEnabled: boolean;
   agentRuntimeManagementEnabled: boolean;
   workerAuthToken: string | null;
+  workerIdentitySecret: string | null;
   llmGatewayBaseUrl: string | null;
   llmGatewayToken: string | null;
   workerRuntimeManifestPath: string | null;
@@ -72,6 +73,7 @@ const envSchema = z.object({
   REMOTE_CODEX_MANAGEMENT_ROUTES_ENABLED: z.string().optional(),
   REMOTE_CODEX_AGENT_RUNTIME_MANAGEMENT_ENABLED: z.string().optional(),
   REMOTE_CODEX_WORKER_AUTH_TOKEN: z.string().min(1).optional(),
+  REMOTE_CODEX_WORKER_IDENTITY_SECRET: z.string().min(1).optional(),
   REMOTE_CODEX_LLM_GATEWAY_BASE_URL: z.string().url().optional(),
   REMOTE_CODEX_LLM_GATEWAY_TOKEN: z.string().min(1).optional(),
   REMOTE_CODEX_WORKER_RUNTIME_MANIFEST: z.string().min(1).optional(),
@@ -163,6 +165,7 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
       runtimeRole !== 'worker',
     ),
     workerAuthToken: parsed.REMOTE_CODEX_WORKER_AUTH_TOKEN ?? null,
+    workerIdentitySecret: parsed.REMOTE_CODEX_WORKER_IDENTITY_SECRET ?? null,
     llmGatewayBaseUrl: parsed.REMOTE_CODEX_LLM_GATEWAY_BASE_URL ?? null,
     llmGatewayToken: parsed.REMOTE_CODEX_LLM_GATEWAY_TOKEN ?? null,
     workerRuntimeManifestPath: parsed.REMOTE_CODEX_WORKER_RUNTIME_MANIFEST
