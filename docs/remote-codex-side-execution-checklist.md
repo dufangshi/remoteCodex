@@ -366,7 +366,7 @@ user on EKS Fargate.
     endpoint status, and recent lifecycle errors.
   - Verification: API tests cover admin success and non-admin denial.
 
-- [ ] Add admin sandbox detail UI.
+- [x] Add admin sandbox detail UI.
   - Acceptance: admins can inspect sandbox status, owner, image, resource
     profile, endpoint, and last failure.
   - Verification: frontend tests cover admin and non-admin behavior.

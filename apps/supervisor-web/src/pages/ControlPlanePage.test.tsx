@@ -27,6 +27,9 @@ const stoppedSandbox: ControlPlaneSandbox = {
   state: 'stopped',
   image: 'remote-codex-worker:dev',
   region: 'local',
+  resourceProfile: 'standard',
+  k8sNamespace: null,
+  k8sPodName: null,
   routerBaseUrl: null,
   workerServiceName: null,
   s3Prefix: 's3://bucket/users/user-1',
@@ -121,6 +124,40 @@ const usage = {
   costUsd: 0,
 };
 
+const adminSandboxDetail = {
+  sandbox: {
+    ...runningSandbox,
+    k8sNamespace: 'remote-codex-sandboxes',
+    k8sPodName: 'remote-codex-worker-sandbox-1',
+  },
+  runtimeStatus: {
+    state: 'running',
+    routerBaseUrl: 'https://router.example.test',
+    workerServiceName: 'worker-user-1',
+    k8sNamespace: 'remote-codex-sandboxes',
+    k8sPodName: 'remote-codex-worker-sandbox-1',
+    statusReason: 'Worker Pod is running and ready.',
+    startupProgress: 100,
+    lastFailureCode: null,
+    lastFailureMessage: null,
+  },
+  endpoint: {
+    routerBaseUrl: 'https://router.example.test',
+  },
+  workerBaseUrl: 'http://worker-user-1.remote-codex-sandboxes.svc.cluster.local:8787',
+  recentLifecycleErrors: [
+    {
+      id: 'audit-1',
+      userId: 'user-1',
+      action: 'sandbox.running',
+      resourceType: 'sandbox',
+      resourceId: 'sandbox-1',
+      metadataJson: '{}',
+      createdAt: '2026-05-25T00:01:00.000Z',
+    },
+  ],
+};
+
 function jsonResponse(body: unknown, status = 200) {
   return {
     ok: status >= 200 && status < 300,
@@ -194,6 +231,10 @@ describe('ControlPlanePage', () => {
           return jsonResponse({ sandbox: runningSandbox });
         }
 
+        if (path === '/api/admin/sandboxes/sandbox-1' && !init?.method) {
+          return jsonResponse(adminSandboxDetail);
+        }
+
         if (path === '/api/workspaces/workspace-1/sessions' && !init?.method) {
           return jsonResponse({ sessions: sessionCreated ? [session] : [] });
         }
@@ -255,6 +296,17 @@ describe('ControlPlanePage', () => {
     await waitFor(() => {
       expect(screen.getByText('https://router.example.test')).toBeInTheDocument();
     });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Admin inspection')).toBeInTheDocument();
+    });
+    expect(screen.getByText('remote-codex-sandboxes')).toBeInTheDocument();
+    expect(screen.getByText('remote-codex-worker-sandbox-1')).toBeInTheDocument();
+    expect(screen.getByText('http://worker-user-1.remote-codex-sandboxes.svc.cluster.local:8787')).toBeInTheDocument();
+    expect(screen.getByText('Worker Pod is running and ready.')).toBeInTheDocument();
+    expect(screen.getByText('sandbox.running')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Plan calculation/i }));
 

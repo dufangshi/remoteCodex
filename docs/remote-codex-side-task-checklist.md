@@ -261,7 +261,7 @@ Verification:
 - [x] Add startup progress UI.
 - [x] Add failure reason UI.
 - [x] Add sandbox idle-timeout policy.
-- [ ] Add admin sandbox view.
+- [x] Add admin sandbox detail view.
 - [ ] Add local smoke script that starts control plane plus local worker.
 - [x] Add local route-token smoke test against the worker process.
 - [ ] Run staging start-one-sandbox smoke test.

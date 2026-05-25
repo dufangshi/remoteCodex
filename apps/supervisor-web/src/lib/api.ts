@@ -186,6 +186,9 @@ export interface ControlPlaneSandbox {
   state: string;
   image: string;
   region: string;
+  resourceProfile: string;
+  k8sNamespace?: string | null;
+  k8sPodName?: string | null;
   routerBaseUrl: string | null;
   workerServiceName: string | null;
   s3Prefix: string;
@@ -254,6 +257,34 @@ export interface ControlPlaneUsageSummary {
   outputTokens: number;
   cachedTokens: number;
   costUsd: number;
+}
+
+export interface ControlPlaneAuditLog {
+  id: string;
+  userId: string | null;
+  action: string;
+  resourceType: string;
+  resourceId: string | null;
+  metadataJson: string;
+  createdAt: string;
+}
+
+export interface ControlPlaneSandboxDetail {
+  sandbox: ControlPlaneSandbox;
+  runtimeStatus: {
+    state: string;
+    routerBaseUrl?: string | null;
+    workerServiceName?: string | null;
+    k8sNamespace?: string | null;
+    k8sPodName?: string | null;
+    statusReason?: string | null;
+    startupProgress?: number | null;
+    lastFailureCode?: string | null;
+    lastFailureMessage?: string | null;
+  };
+  endpoint: { routerBaseUrl: string | null };
+  workerBaseUrl: string | null;
+  recentLifecycleErrors: ControlPlaneAuditLog[];
 }
 
 function controlPlaneUrl(auth: ControlPlaneAuth, path: string) {
@@ -401,6 +432,17 @@ export function fetchControlPlaneSandboxHealth(auth: ControlPlaneAuth) {
   }>(auth, '/api/sandbox/health', {
     cache: 'no-store',
   });
+}
+
+export function fetchControlPlaneAdminSandboxDetail(
+  auth: ControlPlaneAuth,
+  sandboxId: string,
+) {
+  return controlPlaneRequest<ControlPlaneSandboxDetail>(
+    auth,
+    `/api/admin/sandboxes/${encodeURIComponent(sandboxId)}`,
+    { cache: 'no-store' },
+  );
 }
 
 export function createControlPlaneRouteToken(

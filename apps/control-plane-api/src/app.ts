@@ -481,6 +481,7 @@ export function buildControlPlaneApp(
     const sandbox = repository.ensureSandboxForUser(user.id, {
       image: config.sandboxDefaultImage,
       region: config.sandboxDefaultRegion,
+      resourceProfile: config.sandboxDefaultResourceProfile,
       s3PrefixBase: config.sandboxS3PrefixBase,
     });
     const gatewayKey = await ensureGateway(app, user, sandbox);
@@ -509,6 +510,7 @@ export function buildControlPlaneApp(
     const sandbox = repository.ensureSandboxForUser(user.id, {
       image: config.sandboxDefaultImage,
       region: config.sandboxDefaultRegion,
+      resourceProfile: config.sandboxDefaultResourceProfile,
       s3PrefixBase: config.sandboxS3PrefixBase,
     });
     const gatewayKey = await ensureGateway(app, user, sandbox);
@@ -520,6 +522,7 @@ export function buildControlPlaneApp(
     const sandbox = repository.ensureSandboxForUser(user.id, {
       image: config.sandboxDefaultImage,
       region: config.sandboxDefaultRegion,
+      resourceProfile: config.sandboxDefaultResourceProfile,
       s3PrefixBase: config.sandboxS3PrefixBase,
     });
     return {
@@ -829,6 +832,7 @@ export function buildControlPlaneApp(
     const sandbox = repository.ensureSandboxForUser(user.id, {
       image: config.sandboxDefaultImage,
       region: config.sandboxDefaultRegion,
+      resourceProfile: config.sandboxDefaultResourceProfile,
       s3PrefixBase: config.sandboxS3PrefixBase,
     });
     return { sandbox };
@@ -860,6 +864,7 @@ export function buildControlPlaneApp(
     const sandbox = repository.ensureSandboxForUser(user.id, {
       image: config.sandboxDefaultImage,
       region: config.sandboxDefaultRegion,
+      resourceProfile: config.sandboxDefaultResourceProfile,
       s3PrefixBase: config.sandboxS3PrefixBase,
     });
     const result = await app.services.sandboxManager.startSandbox({
@@ -1008,6 +1013,7 @@ export function buildControlPlaneApp(
     const sandbox = repository.ensureSandboxForUser(user.id, {
       image: config.sandboxDefaultImage,
       region: config.sandboxDefaultRegion,
+      resourceProfile: config.sandboxDefaultResourceProfile,
       s3PrefixBase: config.sandboxS3PrefixBase,
     });
     const input = createWorkspaceSchema.omit({ projectId: true }).parse(request.body);
@@ -1056,6 +1062,7 @@ export function buildControlPlaneApp(
     const sandbox = repository.ensureSandboxForUser(user.id, {
       image: config.sandboxDefaultImage,
       region: config.sandboxDefaultRegion,
+      resourceProfile: config.sandboxDefaultResourceProfile,
       s3PrefixBase: config.sandboxS3PrefixBase,
     });
     const input = createWorkspaceSchema.parse(request.body);

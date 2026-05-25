@@ -281,7 +281,7 @@ user.
 - [x] Add sandbox idle-timeout policy.
 - [x] Add sandbox reaper job.
 - [x] Add admin sandbox detail API.
-- [ ] Add admin sandbox detail UI.
+- [x] Add admin sandbox detail UI.
 
 ### AWS EKS Fargate Adapter
 
@@ -314,7 +314,7 @@ user.
 - [x] Add startup progress UI.
 - [x] Add failure reason UI.
 - [x] Add admin sandbox detail API.
-- [ ] Add admin sandbox detail UI.
+- [x] Add admin sandbox detail UI.
 
 ### Verification
 

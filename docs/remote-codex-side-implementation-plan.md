@@ -306,7 +306,7 @@ user.
 - [x] Add degraded/offline UI.
 - [x] Add startup progress UI.
 - [x] Add failure reason UI.
-- [ ] Add admin sandbox detail UI.
+- [x] Add admin sandbox detail UI.
 - [ ] Add local smoke script that starts control plane plus local worker.
 - [x] Add local route-token smoke test against the worker-process adapter.
 

@@ -41,6 +41,7 @@ export interface UsageEventInput {
 export interface SandboxDefaults {
   image: string;
   region: string;
+  resourceProfile: string;
   s3PrefixBase: string;
 }
 
@@ -292,6 +293,7 @@ export class ControlPlaneRepository {
       state: 'stopped',
       image: defaults.image,
       region: defaults.region,
+      resourceProfile: defaults.resourceProfile,
       k8sNamespace: null,
       k8sPodName: null,
       routerBaseUrl: null,

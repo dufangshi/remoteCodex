@@ -16,6 +16,7 @@ const envSchema = z.object({
   SANDBOX_ROUTE_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().optional(),
   SANDBOX_DEFAULT_IMAGE: z.string().min(1).optional(),
   SANDBOX_DEFAULT_REGION: z.string().min(1).optional(),
+  SANDBOX_DEFAULT_RESOURCE_PROFILE: z.enum(['small', 'standard', 'large']).optional(),
   SANDBOX_S3_PREFIX_BASE: z.string().min(1).optional(),
   SANDBOX_WORKER_INTERNAL_PORT: z.coerce.number().int().positive().optional(),
   CONTROL_PLANE_INTERNAL_SERVICE_TOKEN: z.string().min(16).optional(),
@@ -47,6 +48,7 @@ export interface ControlPlaneConfig {
   routeTokenTtlSeconds: number;
   sandboxDefaultImage: string;
   sandboxDefaultRegion: string;
+  sandboxDefaultResourceProfile: 'small' | 'standard' | 'large';
   sandboxS3PrefixBase: string;
   sandboxWorkerInternalPort: number;
   internalServiceToken: string | null;
@@ -145,6 +147,7 @@ export function loadControlPlaneConfig(
     sandboxDefaultImage:
       parsed.SANDBOX_DEFAULT_IMAGE ?? 'remote-codex-worker:development',
     sandboxDefaultRegion: parsed.SANDBOX_DEFAULT_REGION ?? 'us-east-1',
+    sandboxDefaultResourceProfile: parsed.SANDBOX_DEFAULT_RESOURCE_PROFILE ?? 'standard',
     sandboxS3PrefixBase:
       parsed.SANDBOX_S3_PREFIX_BASE ?? 's3://remote-codex-sandboxes/dev',
     sandboxWorkerInternalPort: parsed.SANDBOX_WORKER_INTERNAL_PORT ?? 8787,

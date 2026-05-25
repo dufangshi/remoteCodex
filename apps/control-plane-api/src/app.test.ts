@@ -1576,6 +1576,7 @@ describe('control plane api', () => {
         userId: bootstrap.json().user.id,
         image: 'remote-codex-worker:development',
         region: 'us-east-1',
+        resourceProfile: 'standard',
       },
       runtimeStatus: {
         state: 'running',

@@ -217,6 +217,7 @@ export const controlSandboxes = sqliteTable('control_sandboxes', {
   state: text('state').notNull(),
   image: text('image').notNull(),
   region: text('region').notNull(),
+  resourceProfile: text('resource_profile').notNull().default('standard'),
   k8sNamespace: text('k8s_namespace'),
   k8sPodName: text('k8s_pod_name'),
   routerBaseUrl: text('router_base_url'),

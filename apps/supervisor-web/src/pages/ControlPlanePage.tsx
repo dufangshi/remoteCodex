@@ -8,6 +8,7 @@ import {
   createControlPlaneSession,
   createControlPlaneWorkspace,
   fetchControlPlaneMe,
+  fetchControlPlaneAdminSandboxDetail,
   fetchControlPlaneProjects,
   fetchControlPlaneSandboxHealth,
   fetchControlPlaneSessions,
@@ -17,6 +18,7 @@ import {
   stopControlPlaneSandbox,
   updateControlPlaneMe,
   type ControlPlaneAuth,
+  type ControlPlaneSandboxDetail,
   type ControlPlaneProject,
   type ControlPlaneRouteToken,
   type ControlPlaneSandbox,
@@ -197,6 +199,7 @@ export function ControlPlanePage() {
   const [auth, setAuth] = useState<ControlPlaneAuth | null>(null);
   const [user, setUser] = useState<ControlPlaneUser | null>(null);
   const [sandbox, setSandbox] = useState<ControlPlaneSandbox | null>(null);
+  const [adminSandboxDetail, setAdminSandboxDetail] = useState<ControlPlaneSandboxDetail | null>(null);
   const [usage, setUsage] = useState<ControlPlaneUsageSummary | null>(null);
   const [projects, setProjects] = useState<ControlPlaneProject[]>([]);
   const [workspaces, setWorkspaces] = useState<ControlPlaneWorkspace[]>([]);
@@ -352,6 +355,7 @@ export function ControlPlanePage() {
     setAuth(null);
     setUser(null);
     setSandbox(null);
+    setAdminSandboxDetail(null);
     setUsage(null);
     setProjects([]);
     setWorkspaces([]);
@@ -449,6 +453,17 @@ export function ControlPlanePage() {
         setSandbox(health.sandbox);
         setMessage(`Sandbox manager reports ${health.status.state}.`);
       }
+    });
+  }
+
+  async function handleInspectSandbox() {
+    if (!auth || !sandbox) {
+      return;
+    }
+    await run('Inspect sandbox', async () => {
+      const detail = await fetchControlPlaneAdminSandboxDetail(auth, sandbox.id);
+      setAdminSandboxDetail(detail);
+      setMessage('Sandbox detail loaded.');
     });
   }
 
@@ -621,6 +636,9 @@ export function ControlPlanePage() {
             <ActionButton onClick={() => void sandboxAction('health')} disabled={!canUseControlPlane}>
               Health
             </ActionButton>
+            <ActionButton onClick={handleInspectSandbox} disabled={!canUseControlPlane || !sandbox}>
+              Inspect
+            </ActionButton>
           </div>
         }
       >
@@ -629,7 +647,10 @@ export function ControlPlanePage() {
             <div className="grid gap-3 text-sm text-[var(--theme-fg-muted)] md:grid-cols-2">
               <p><span className="text-[var(--theme-fg)]">Sandbox id:</span> {sandbox.id}</p>
               <p><span className="text-[var(--theme-fg)]">Image:</span> {sandbox.image}</p>
+              <p><span className="text-[var(--theme-fg)]">Resource:</span> {sandbox.resourceProfile}</p>
+              <p><span className="text-[var(--theme-fg)]">Owner:</span> {sandbox.userId}</p>
               <p><span className="text-[var(--theme-fg)]">Router:</span> {sandbox.routerBaseUrl ?? 'not assigned'}</p>
+              <p><span className="text-[var(--theme-fg)]">Worker:</span> {sandbox.workerServiceName ?? 'not assigned'}</p>
               <p><span className="text-[var(--theme-fg)]">S3 prefix:</span> {sandbox.s3Prefix}</p>
               {sandbox.statusReason ? (
                 <p><span className="text-[var(--theme-fg)]">Status:</span> {sandbox.statusReason}</p>
@@ -649,6 +670,52 @@ export function ControlPlanePage() {
                     className="h-full rounded-full bg-[var(--theme-accent-solid)]"
                     style={{ width: `${sandbox.startupProgress}%` }}
                   />
+                </div>
+              </div>
+            ) : null}
+            {adminSandboxDetail ? (
+              <div className="grid gap-4 border-t border-[var(--theme-border)] pt-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-[var(--theme-fg)]">Admin inspection</h3>
+                    <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
+                      Runtime status, endpoint, and recent lifecycle audit for this sandbox.
+                    </p>
+                  </div>
+                  <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${statusTone(adminSandboxDetail.runtimeStatus.state)}`}>
+                    {adminSandboxDetail.runtimeStatus.state}
+                  </span>
+                </div>
+                <div className="grid gap-3 text-sm text-[var(--theme-fg-muted)] md:grid-cols-2">
+                  <p><span className="text-[var(--theme-fg)]">Namespace:</span> {adminSandboxDetail.sandbox.k8sNamespace ?? adminSandboxDetail.runtimeStatus.k8sNamespace ?? 'not assigned'}</p>
+                  <p><span className="text-[var(--theme-fg)]">Pod:</span> {adminSandboxDetail.sandbox.k8sPodName ?? adminSandboxDetail.runtimeStatus.k8sPodName ?? 'not assigned'}</p>
+                  <p><span className="text-[var(--theme-fg)]">Endpoint:</span> {adminSandboxDetail.endpoint.routerBaseUrl ?? 'not assigned'}</p>
+                  <p><span className="text-[var(--theme-fg)]">Worker URL:</span> {adminSandboxDetail.workerBaseUrl ?? 'not assigned'}</p>
+                  <p><span className="text-[var(--theme-fg)]">Last seen:</span> {adminSandboxDetail.sandbox.lastSeenAt ?? 'never'}</p>
+                  <p><span className="text-[var(--theme-fg)]">Failure:</span> {adminSandboxDetail.runtimeStatus.lastFailureCode ?? adminSandboxDetail.sandbox.lastFailureCode ?? 'none'}</p>
+                </div>
+                {adminSandboxDetail.runtimeStatus.statusReason ? (
+                  <p className="rounded-[0.75rem] border border-[var(--status-neutral-border)] bg-[var(--status-neutral-bg)] px-3 py-2 text-sm text-[var(--status-neutral-fg)]">
+                    {adminSandboxDetail.runtimeStatus.statusReason}
+                  </p>
+                ) : null}
+                <div className="grid gap-2">
+                  <h4 className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--theme-fg-muted)]">
+                    Lifecycle audit
+                  </h4>
+                  {adminSandboxDetail.recentLifecycleErrors.length === 0 ? (
+                    <p className="text-sm text-[var(--theme-fg-muted)]">No lifecycle audit entries.</p>
+                  ) : (
+                    adminSandboxDetail.recentLifecycleErrors.slice(0, 5).map((entry) => (
+                      <div
+                        key={entry.id}
+                        className="rounded-[0.75rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-2 text-xs text-[var(--theme-fg-muted)]"
+                      >
+                        <p className="font-medium text-[var(--theme-fg)]">{entry.action}</p>
+                        <p>{entry.createdAt}</p>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             ) : null}
