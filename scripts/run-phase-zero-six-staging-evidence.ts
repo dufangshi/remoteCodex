@@ -1,0 +1,184 @@
+import { spawn } from 'node:child_process';
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+
+interface CommandResult {
+  name: string;
+  command: string[];
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  outputPath?: string;
+}
+
+function argValue(name: string) {
+  const index = process.argv.indexOf(name);
+  if (index === -1) {
+    return null;
+  }
+  const value = process.argv[index + 1];
+  if (!value || value.startsWith('--')) {
+    throw new Error(`${name} requires a value.`);
+  }
+  return value;
+}
+
+function hasFlag(name: string) {
+  return process.argv.includes(name);
+}
+
+function timestampForPath() {
+  return new Date().toISOString().replace(/[:.]/g, '-');
+}
+
+async function runCommand(input: {
+  name: string;
+  command: string[];
+  outputPath?: string;
+}) {
+  const [binary, ...args] = input.command;
+  if (!binary) {
+    throw new Error(`${input.name} command is empty.`);
+  }
+
+  const child = spawn(binary, args, {
+    env: process.env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk;
+  });
+
+  const exitCode = await new Promise<number | null>((resolve) => {
+    child.on('close', resolve);
+  });
+
+  if (input.outputPath) {
+    await writeFile(input.outputPath, stdout);
+  }
+
+  return {
+    name: input.name,
+    command: input.command,
+    exitCode,
+    stdout,
+    stderr,
+    outputPath: input.outputPath,
+  } satisfies CommandResult;
+}
+
+function parseJsonOutput(result: CommandResult) {
+  try {
+    return JSON.parse(result.stdout) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function commandOk(result: CommandResult) {
+  const parsed = parseJsonOutput(result) as { ok?: unknown } | null;
+  return result.exitCode === 0 && parsed?.ok !== false;
+}
+
+async function main() {
+  const outputDir =
+    argValue('--output-dir') ??
+    path.join('artifacts', 'phase-zero-six-evidence', timestampForPath());
+  const applyReady = hasFlag('--apply-ready');
+  await mkdir(outputDir, { recursive: true });
+
+  const awsPath = path.join(outputDir, 'aws-staging-preflight.json');
+  const stagingPath = path.join(outputDir, 'staging-phase-one-smoke.json');
+  const awsVerificationPath = path.join(outputDir, 'aws-staging-preflight-verification.json');
+  const stagingVerificationPath = path.join(outputDir, 'staging-phase-one-verification.json');
+  const phaseVerificationPath = path.join(outputDir, 'phase-zero-six-verification.json');
+  const summaryPath = path.join(outputDir, 'summary.json');
+
+  const commands: CommandResult[] = [];
+
+  commands.push(await runCommand({
+    name: 'collect_aws_staging_preflight_evidence',
+    command: ['pnpm', 'exec', 'tsx', 'scripts/collect-aws-staging-preflight-evidence.ts'],
+    outputPath: awsPath,
+  }));
+  commands.push(await runCommand({
+    name: 'verify_aws_staging_preflight_evidence',
+    command: ['pnpm', 'exec', 'tsx', 'scripts/verify-aws-staging-preflight-evidence.ts', awsPath],
+    outputPath: awsVerificationPath,
+  }));
+
+  if (!hasFlag('--skip-staging-smoke')) {
+    commands.push(await runCommand({
+      name: 'run_staging_phase_one_smoke',
+      command: ['pnpm', 'exec', 'tsx', 'scripts/staging-phase-one-smoke.ts'],
+      outputPath: stagingPath,
+    }));
+    commands.push(await runCommand({
+      name: 'verify_staging_phase_one_evidence',
+      command: ['pnpm', 'exec', 'tsx', 'scripts/verify-staging-phase-one-evidence.ts', stagingPath],
+      outputPath: stagingVerificationPath,
+    }));
+  }
+
+  const phaseCommand = [
+    'pnpm',
+    'exec',
+    'tsx',
+    'scripts/verify-phase-zero-six-evidence.ts',
+    '--aws-preflight',
+    awsPath,
+    ...(hasFlag('--skip-staging-smoke') ? [] : ['--staging-smoke', stagingPath]),
+    ...(applyReady ? ['--apply-ready'] : []),
+  ];
+  commands.push(await runCommand({
+    name: 'verify_phase_zero_six_evidence',
+    command: phaseCommand,
+    outputPath: phaseVerificationPath,
+  }));
+
+  const summary = {
+    ok: commands.every(commandOk),
+    generatedAt: new Date().toISOString(),
+    outputDir,
+    applyReady,
+    skippedStagingSmoke: hasFlag('--skip-staging-smoke'),
+    artifacts: {
+      awsPreflight: awsPath,
+      stagingSmoke: hasFlag('--skip-staging-smoke') ? null : stagingPath,
+      awsVerification: awsVerificationPath,
+      stagingVerification: hasFlag('--skip-staging-smoke') ? null : stagingVerificationPath,
+      phaseZeroSixVerification: phaseVerificationPath,
+      summary: summaryPath,
+    },
+    results: commands.map((result) => ({
+      name: result.name,
+      exitCode: result.exitCode,
+      ok: commandOk(result),
+      outputPath: result.outputPath,
+      parsedOk: (parseJsonOutput(result) as { ok?: unknown } | null)?.ok ?? null,
+      stderr: result.stderr.slice(0, 4000),
+    })),
+  };
+
+  await writeFile(summaryPath, JSON.stringify(summary, null, 2));
+  console.log(JSON.stringify(summary, null, 2));
+
+  if (!summary.ok) {
+    process.exitCode = 1;
+  }
+}
+
+main().catch((error) => {
+  console.error(JSON.stringify({
+    ok: false,
+    error: error instanceof Error ? error.message : String(error),
+  }, null, 2));
+  process.exit(1);
+});

@@ -1392,6 +1392,7 @@ pnpm smoke:production-auth
 pnpm smoke:provider-gateway -- <codex|claude|opencode>
 pnpm smoke:staging-phase-one
 pnpm exec tsx scripts/collect-aws-staging-preflight-evidence.ts > <evidence-json>
+pnpm collect:phase-zero-six-evidence -- --output-dir <artifact-dir>
 pnpm verify:aws-staging-preflight-evidence -- <evidence-json>
 pnpm verify:staging-phase-one-evidence -- <smoke-json>
 pnpm verify:phase-zero-six-evidence -- --aws-preflight <evidence-json> --staging-smoke <smoke-json>

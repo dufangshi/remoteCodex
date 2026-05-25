@@ -48,6 +48,7 @@
     "smoke:provider-gateway": "tsx scripts/provider-gateway-smoke.ts",
     "smoke:staging-phase-one": "tsx scripts/staging-phase-one-smoke.ts",
     "collect:aws-staging-preflight-evidence": "tsx scripts/collect-aws-staging-preflight-evidence.ts",
+    "collect:phase-zero-six-evidence": "tsx scripts/run-phase-zero-six-staging-evidence.ts",
     "verify:aws-staging-preflight-evidence": "tsx scripts/verify-aws-staging-preflight-evidence.ts",
     "verify:staging-phase-one-evidence": "tsx scripts/verify-staging-phase-one-evidence.ts",
     "verify:phase-zero-six-evidence": "tsx scripts/verify-phase-zero-six-evidence.ts",

@@ -244,6 +244,39 @@ checkboxes have enough evidence to check and which proof fields are missing.
 Only the explicit `--apply-ready` mode updates checklist files, and only after
 the boxes it changes are backed by evidence.
 
+### One-Command Evidence Bundle
+
+When the staging operator environment has AWS, Kubernetes, product JWT, admin
+JWT, router, direct-worker, and provider smoke env configured, use the bundle
+runner to collect and verify the Phase 0 through Phase 6 evidence in one
+directory:
+
+```bash
+pnpm collect:phase-zero-six-evidence -- --output-dir ./artifacts/phase-zero-six-evidence/<run-id>
+```
+
+The bundle runner writes:
+
+- `aws-staging-preflight.json`
+- `aws-staging-preflight-verification.json`
+- `staging-phase-one-smoke.json`
+- `staging-phase-one-verification.json`
+- `phase-zero-six-verification.json`
+- `summary.json`
+
+After reviewing the JSON files for accidental secret exposure and confirming
+the aggregate verifier lists the expected items under `readyToCheck`, rerun
+with the guarded checklist update:
+
+```bash
+pnpm collect:phase-zero-six-evidence -- \
+  --output-dir ./artifacts/phase-zero-six-evidence/<run-id>-apply \
+  --apply-ready
+```
+
+For AWS-only preflight work, such as checking only S3.04/S3.05 before the
+runtime smoke is available, pass `--skip-staging-smoke`.
+
 The important step-to-checkbox mapping is:
 
 - `start_sandbox`, `sandbox_ready`, and `admin_sandbox_runtime_detail` prove
