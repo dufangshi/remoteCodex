@@ -932,10 +932,21 @@ describe('phase zero-six evidence tooling', () => {
     expect(result.exitCode).toBe(1);
     expect(parsed.ok).toBe(false);
     expect(parsed.stoppedAfterEnvReadiness).toBe(true);
+    expect(parsed.artifactScanPassed).toBe(true);
     expect(parsed.artifacts.envReadiness).toBe(path.join(dir, 'env-readiness.json'));
     expect(parsed.artifacts.envTemplate).toBe(path.join(dir, 'phase-zero-six.env.sh'));
+    expect(parsed.artifacts.artifactSecretScan).toBe(path.join(dir, 'artifact-secret-scan.json'));
     expect(parsed.artifacts.awsPreflight).toBeNull();
-    expect(files.sort()).toEqual(['env-readiness.json', 'phase-zero-six.env.sh', 'summary.json']);
+    expect(files.sort()).toEqual([
+      'artifact-secret-scan.json',
+      'env-readiness.json',
+      'phase-zero-six.env.sh',
+      'summary.json',
+    ]);
+    expect(parsed.results.map((entry: { name: string }) => entry.name)).toEqual([
+      'verify_phase_zero_six_env_ready',
+      'verify_phase_zero_six_artifacts_safe',
+    ]);
     expect(template).toContain('Phase 0-6 staging evidence environment template');
     expect(template).not.toContain('secret-product-jwt-value');
     expect(result.stdout).not.toContain('secret-product-jwt-value');

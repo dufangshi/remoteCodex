@@ -188,6 +188,7 @@ async function main() {
   }));
 
   if (!commandOk(commands[0]) && !force) {
+    const preScanSummaryPath = summaryPath;
     const summary = {
       ok: false,
       generatedAt: new Date().toISOString(),
@@ -207,13 +208,29 @@ async function main() {
         stagingVerification: null,
         phaseZeroSixVerification: null,
         phaseZeroSixApply: null,
-        artifactSecretScan: null,
-        summary: summaryPath,
+        artifactSecretScan: artifactSafetyPath,
+        summary: preScanSummaryPath,
       },
       results: commands.map(commandSummary),
     };
-    await writeFile(summaryPath, JSON.stringify(summary, null, 2));
-    console.log(JSON.stringify(summary, null, 2));
+    await writeFile(preScanSummaryPath, JSON.stringify(summary, null, 2));
+    commands.push(await runCommand({
+      name: 'verify_phase_zero_six_artifacts_safe',
+      command: ['pnpm', 'exec', 'tsx', 'scripts/verify-phase-zero-six-artifacts-safe.ts', '--dir', outputDir],
+      outputPath: artifactSafetyPath,
+    }));
+    const artifactScanPassed = commandOk(commands[commands.length - 1] as CommandResult);
+    const finalSummary = {
+      ...summary,
+      ok: false,
+      artifactScanPassed,
+      reason: artifactScanPassed
+        ? summary.reason
+        : 'Environment readiness failed and artifact secret scan found unsafe evidence files.',
+      results: commands.map(commandSummary),
+    };
+    await writeFile(summaryPath, JSON.stringify(finalSummary, null, 2));
+    console.log(JSON.stringify(finalSummary, null, 2));
     process.exitCode = 1;
     return;
   }

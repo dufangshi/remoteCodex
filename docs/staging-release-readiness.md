@@ -344,7 +344,9 @@ template into the output directory:
 Fill that file in outside Git, `source` it, rerun
 `pnpm verify:phase-zero-six-env-ready`, and then rerun the bundle. The template
 contains placeholders and non-secret examples only; it is not completion
-evidence.
+evidence. Even in this early-stop path, the bundle writes
+`artifact-secret-scan.json` and scans the generated readiness JSON, summary,
+and shell template before returning.
 
 For diagnostic collection only, operators can override that guard:
 

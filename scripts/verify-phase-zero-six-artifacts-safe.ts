@@ -13,6 +13,7 @@ const sensitiveKeyPattern =
 
 const allowedSensitiveKeys = new Set([
   'acceptedStatuses',
+  'artifactSecretScan',
   'authMode',
   'awsPreflight',
   'credentialReviewPassed',
