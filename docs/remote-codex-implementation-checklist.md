@@ -404,16 +404,16 @@ real provider keys stay outside the sandbox.
 
 ### Worker Bootstrap
 
-- [ ] Confirm Codex gateway config uses gateway `/v1`.
-- [ ] Confirm Codex config does not write real provider key.
-- [ ] Confirm Claude Code config uses gateway base URL.
-- [ ] Confirm Claude Code config does not write real provider key.
-- [ ] Confirm OpenCode config uses gateway provider.
-- [ ] Confirm OpenCode config does not write real provider key.
+- [x] Confirm Codex gateway config uses gateway `/v1`.
+- [x] Confirm Codex config does not write real provider key.
+- [x] Confirm Claude Code config uses gateway base URL.
+- [x] Confirm Claude Code config does not write real provider key.
+- [x] Confirm OpenCode config uses gateway provider.
+- [x] Confirm OpenCode config does not write real provider key.
 - [x] Add startup check that gateway env is present when providers are enabled.
-- [ ] Add regression test for generated Codex config.
-- [ ] Add regression test for generated Claude config.
-- [ ] Add regression test for generated OpenCode config.
+- [x] Add regression test for generated Codex config.
+- [x] Add regression test for generated Claude config.
+- [x] Add regression test for generated OpenCode config.
 
 ### Usage Import
 

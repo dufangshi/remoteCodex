@@ -506,16 +506,16 @@ import third, then quota enforcement and UI.
 
 ### Provider Bootstrap Checklist
 
-- [ ] Render Codex config pointing to the gateway `/v1` endpoint.
-- [ ] Prove Codex config never contains real provider root keys.
-- [ ] Render Claude Code config pointing to the gateway.
-- [ ] Prove Claude Code config never contains real provider root keys.
-- [ ] Render OpenCode config pointing to the gateway.
-- [ ] Prove OpenCode config never contains real provider root keys.
+- [x] Render Codex config pointing to the gateway `/v1` endpoint.
+- [x] Prove Codex config never contains real provider root keys.
+- [x] Render Claude Code config pointing to the gateway.
+- [x] Prove Claude Code config never contains real provider root keys.
+- [x] Render OpenCode config pointing to the gateway.
+- [x] Prove OpenCode config never contains real provider root keys.
 - [x] Add startup check that gateway env is present when providers are enabled.
-- [ ] Add provider bootstrap tests for Codex.
-- [ ] Add provider bootstrap tests for Claude Code.
-- [ ] Add provider bootstrap tests for OpenCode.
+- [x] Add provider bootstrap tests for Codex.
+- [x] Add provider bootstrap tests for Claude Code.
+- [x] Add provider bootstrap tests for OpenCode.
 
 ### ElAgenteHarness Checklist
 
@@ -612,7 +612,7 @@ import third, then quota enforcement and UI.
 ### Verification
 
 - [ ] Gateway client tests pass with mocked gateway API.
-- [ ] Worker provider bootstrap tests pass for Codex, Claude Code, and OpenCode.
+- [x] Worker provider bootstrap tests pass for Codex, Claude Code, and OpenCode.
 - [ ] Harness credential tests pass.
 - [ ] Harness bootstrap tests pass.
 - [ ] Harness tool config tests pass.

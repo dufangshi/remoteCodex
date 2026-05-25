@@ -1084,13 +1084,28 @@ describe('supervisor api', () => {
     await expect(fs.readFile(path.join(codexHome, 'config.toml'), 'utf8')).resolves.toContain(
       'env_key = "REMOTE_CODEX_LLM_GATEWAY_TOKEN"',
     );
-    await expect(fs.readFile(path.join(claudeHome, 'settings.json'), 'utf8')).resolves.toContain(
+    const codexConfig = await fs.readFile(path.join(codexHome, 'config.toml'), 'utf8');
+    const claudeConfig = await fs.readFile(path.join(claudeHome, 'settings.json'), 'utf8');
+    const opencodeConfig = await fs.readFile(path.join(opencodeHome, 'opencode.json'), 'utf8');
+    expect(claudeConfig).toContain(
       '"ANTHROPIC_BASE_URL": "https://llm-gateway.example.com/anthropic"',
     );
-    await expect(fs.readFile(path.join(opencodeHome, 'opencode.json'), 'utf8')).resolves.toContain(
+    expect(claudeConfig).not.toContain('ANTHROPIC_AUTH_TOKEN');
+    expect(opencodeConfig).toContain(
       '"baseURL": "https://llm-gateway.example.com/v1"',
     );
+    expect(opencodeConfig).toContain(
+      '"apiKey": "{env:REMOTE_CODEX_LLM_GATEWAY_TOKEN}"',
+    );
+    for (const providerConfig of [codexConfig, claudeConfig, opencodeConfig]) {
+      expect(providerConfig).not.toContain('OPENAI_API_KEY');
+      expect(providerConfig).not.toContain('ANTHROPIC_API_KEY');
+      expect(providerConfig).not.toContain('sk-');
+      expect(providerConfig).not.toContain('real-provider-root-key');
+    }
     expect(process.env.REMOTE_CODEX_LLM_GATEWAY_TOKEN).toBe('sandbox-gateway-token');
+    expect(process.env.ANTHROPIC_AUTH_TOKEN).toBe('sandbox-gateway-token');
+    expect(process.env.ANTHROPIC_BASE_URL).toBe('https://llm-gateway.example.com/anthropic');
   });
 
   it('restarts the selected agent runtime on demand', async () => {

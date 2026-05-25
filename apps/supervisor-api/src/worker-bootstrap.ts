@@ -29,6 +29,8 @@ export async function configureWorkerProviderGateway(config: RuntimeConfig) {
   const openAiBaseUrl = joinUrl(config.llmGatewayBaseUrl, '/v1');
   const anthropicBaseUrl = joinUrl(config.llmGatewayBaseUrl, '/anthropic');
   process.env.REMOTE_CODEX_LLM_GATEWAY_TOKEN = config.llmGatewayToken;
+  process.env.ANTHROPIC_AUTH_TOKEN = config.llmGatewayToken;
+  process.env.ANTHROPIC_BASE_URL = anthropicBaseUrl;
 
   await writePrivateFile(
     path.join(config.agentProviders.codex.home, 'config.toml'),
@@ -53,7 +55,6 @@ export async function configureWorkerProviderGateway(config: RuntimeConfig) {
       {
         env: {
           ANTHROPIC_BASE_URL: anthropicBaseUrl,
-          ANTHROPIC_AUTH_TOKEN: config.llmGatewayToken,
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
         },
       },

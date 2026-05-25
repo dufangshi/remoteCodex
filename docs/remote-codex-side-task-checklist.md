@@ -412,12 +412,12 @@ Verification:
 - [ ] Implement gateway key rotation.
 - [ ] Attach gateway credential to sandbox provisioning.
 - [ ] Add admin endpoint to reconcile gateway keys.
-- [ ] Render Codex config pointing to the gateway `/v1` endpoint.
-- [ ] Prove Codex config never contains real provider root keys.
-- [ ] Render Claude Code config pointing to the gateway.
-- [ ] Prove Claude Code config never contains real provider root keys.
-- [ ] Render OpenCode config pointing to the gateway.
-- [ ] Prove OpenCode config never contains real provider root keys.
+- [x] Render Codex config pointing to the gateway `/v1` endpoint.
+- [x] Prove Codex config never contains real provider root keys.
+- [x] Render Claude Code config pointing to the gateway.
+- [x] Prove Claude Code config never contains real provider root keys.
+- [x] Render OpenCode config pointing to the gateway.
+- [x] Prove OpenCode config never contains real provider root keys.
 - [x] Add startup check that gateway env is present when providers are enabled.
 - [ ] Redact gateway tokens from logs.
 - [ ] Redact gateway tokens from API responses.
@@ -439,7 +439,7 @@ Verification:
 Verification:
 
 - [ ] Gateway client tests pass with mocked gateway API.
-- [ ] Worker provider bootstrap tests pass for Codex, Claude Code, and OpenCode.
+- [x] Worker provider bootstrap tests pass for Codex, Claude Code, and OpenCode.
 - [ ] Usage import tests pass.
 - [ ] Frontend usage UI tests pass.
 
@@ -1097,16 +1097,16 @@ Real provider root keys stay outside the sandbox.
 
 ### Worker Provider Bootstrap
 
-- [ ] Render Codex config that points to the gateway `/v1` endpoint.
-- [ ] Ensure Codex config never contains a real provider root key.
-- [ ] Render Claude Code config that points to the gateway.
-- [ ] Ensure Claude Code config never contains a real provider root key.
-- [ ] Render OpenCode config that points to the gateway.
-- [ ] Ensure OpenCode config never contains a real provider root key.
+- [x] Render Codex config that points to the gateway `/v1` endpoint.
+- [x] Ensure Codex config never contains a real provider root key.
+- [x] Render Claude Code config that points to the gateway.
+- [x] Ensure Claude Code config never contains a real provider root key.
+- [x] Render OpenCode config that points to the gateway.
+- [x] Ensure OpenCode config never contains a real provider root key.
 - [x] Add startup check that gateway env is present when providers are enabled.
-- [ ] Add regression test for generated Codex config.
-- [ ] Add regression test for generated Claude config.
-- [ ] Add regression test for generated OpenCode config.
+- [x] Add regression test for generated Codex config.
+- [x] Add regression test for generated Claude config.
+- [x] Add regression test for generated OpenCode config.
 - [ ] Redact gateway tokens from logs and API responses.
 
 ### Usage Import
