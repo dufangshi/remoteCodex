@@ -60,6 +60,41 @@ describe('control plane api', () => {
     expect(body.gatewayKey.externalKeyId).toBe(`sub2api-key-${body.sandbox.id}`);
   });
 
+  it('keeps account bootstrap idempotent for the authenticated identity', async () => {
+    const app = buildControlPlaneApp({ env: testEnv('bootstrap-idempotent') });
+    apps.push(app);
+
+    const auth = { authorization: 'Bearer dev:idempotent-user' };
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: auth,
+      payload: {
+        email: 'first@example.com',
+        displayName: 'First Name',
+      },
+    });
+    expect(first.statusCode).toBe(200);
+
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: auth,
+      payload: {
+        email: 'second@example.com',
+        displayName: 'Second Name',
+      },
+    });
+    expect(second.statusCode).toBe(200);
+    expect(second.json().user.id).toBe(first.json().user.id);
+    expect(second.json().sandbox.id).toBe(first.json().sandbox.id);
+    expect(second.json().gatewayKey.id).toBe(first.json().gatewayKey.id);
+    expect(second.json().user).toMatchObject({
+      email: 'second@example.com',
+      displayName: 'Second Name',
+    });
+  });
+
   it('registers the authenticated identity only', async () => {
     const app = buildControlPlaneApp({ env: testEnv('register') });
     apps.push(app);
@@ -681,6 +716,45 @@ describe('control plane api', () => {
     });
     expect(filtered.statusCode).toBe(200);
     expect(filtered.json().users).toHaveLength(1);
+  });
+
+  it('returns clear 401 and 403 error response shapes', async () => {
+    const app = buildControlPlaneApp({ env: testEnv('auth-errors') });
+    apps.push(app);
+
+    const unauthorized = await app.inject({
+      method: 'GET',
+      url: '/api/me',
+    });
+    expect(unauthorized.statusCode).toBe(401);
+    expect(unauthorized.json()).toEqual({
+      code: 'unauthorized',
+      message: 'Authentication is required.',
+    });
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: {
+        authorization: 'Bearer dev:not-admin',
+      },
+      payload: {
+        email: 'not-admin@example.com',
+      },
+    });
+
+    const forbidden = await app.inject({
+      method: 'GET',
+      url: '/api/admin/users',
+      headers: {
+        authorization: 'Bearer dev:not-admin',
+      },
+    });
+    expect(forbidden.statusCode).toBe(403);
+    expect(forbidden.json()).toEqual({
+      code: 'forbidden',
+      message: 'Administrator access is required.',
+    });
   });
 
   it('exposes sandbox management for control-plane administration', async () => {

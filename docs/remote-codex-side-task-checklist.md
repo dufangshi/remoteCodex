@@ -87,7 +87,7 @@ without exposing product identity tokens to sandbox workers.
 - [ ] Add auth-provider-specific integration tests or smoke tests.
 - [x] Add token issuer and audience checks for production mode.
 - [x] Add clock-skew tolerance for provider JWT validation.
-- [ ] Add clear `401` and `403` error response shapes.
+- [x] Add clear `401` and `403` error response shapes.
 
 ### User Model
 
@@ -105,7 +105,7 @@ without exposing product identity tokens to sandbox workers.
 - [ ] Add user deletion or deactivation policy.
 - [ ] Add user data export policy.
 - [ ] Add user email verification state if the provider does not own it.
-- [ ] Add account bootstrap idempotency tests.
+- [x] Add account bootstrap idempotency tests.
 
 ### Frontend Auth Surface
 

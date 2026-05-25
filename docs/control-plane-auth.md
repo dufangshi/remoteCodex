@@ -66,3 +66,24 @@ authProvider + authSubject
 The browser product session is used only with the control plane. It must not be
 forwarded to sandbox workers. Worker traffic uses separate short-lived route
 tokens and router-injected worker tokens.
+
+## Error Shape
+
+Authentication and authorization failures use the standard control-plane error
+shape:
+
+```json
+{
+  "code": "unauthorized",
+  "message": "Authentication is required."
+}
+```
+
+Admin-only routes return:
+
+```json
+{
+  "code": "forbidden",
+  "message": "Administrator access is required."
+}
+```

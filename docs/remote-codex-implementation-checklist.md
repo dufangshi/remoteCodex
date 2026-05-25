@@ -69,6 +69,7 @@ plane. Browser identity must stay outside sandbox service credentials.
 - [x] Add issuer and audience checks for production verifier.
 - [x] Add clock-skew tolerance for production verifier.
 - [x] Add tests for local dev auth success paths.
+- [x] Add clear `401` and `403` auth error response shapes.
 - [x] Add user account status field.
 - [x] Add user billing identity field.
 - [x] Add user display name field if missing.
@@ -80,6 +81,7 @@ plane. Browser identity must stay outside sandbox service credentials.
 - [x] Add admin-only user status update endpoint.
 - [x] Add admin-only user quota profile update endpoint.
 - [x] Add audit events for admin user updates.
+- [x] Add account bootstrap idempotency tests.
 
 ### Frontend
 
