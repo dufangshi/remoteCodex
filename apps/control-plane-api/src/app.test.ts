@@ -884,6 +884,120 @@ describe('control plane api', () => {
     expect(archivedSession.json().session.status).toBe('archived');
   });
 
+  it('paginates project, workspace, and session lists', async () => {
+    const app = buildControlPlaneApp({ env: testEnv('product-list-pagination') });
+    apps.push(app);
+
+    const auth = { authorization: 'Bearer dev:pagination-user' };
+    await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: auth,
+      payload: {
+        email: 'pagination@example.com',
+      },
+    });
+
+    const projects = [];
+    for (const index of [1, 2, 3]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/projects',
+        headers: auth,
+        payload: {
+          name: `Project ${index}`,
+          slug: `project-${index}`,
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      projects.push(response.json().project);
+    }
+
+    const projectPage = await app.inject({
+      method: 'GET',
+      url: '/api/projects?limit=2&offset=1',
+      headers: auth,
+    });
+    expect(projectPage.statusCode).toBe(200);
+    expect(projectPage.json().projects).toHaveLength(2);
+    expect(projectPage.json().page).toEqual({
+      limit: 2,
+      offset: 1,
+      total: 3,
+      hasMore: false,
+    });
+
+    const workspaces = [];
+    for (const index of [1, 2, 3]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/projects/${projects[0].id}/workspaces`,
+        headers: auth,
+        payload: {
+          name: `Workspace ${index}`,
+          slug: `workspace-${index}`,
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      workspaces.push(response.json().workspace);
+    }
+
+    const workspacePage = await app.inject({
+      method: 'GET',
+      url: `/api/projects/${projects[0].id}/workspaces?limit=1&offset=1`,
+      headers: auth,
+    });
+    expect(workspacePage.statusCode).toBe(200);
+    expect(workspacePage.json().workspaces).toHaveLength(1);
+    expect(workspacePage.json().page).toEqual({
+      limit: 1,
+      offset: 1,
+      total: 3,
+      hasMore: true,
+    });
+
+    const globalWorkspacePage = await app.inject({
+      method: 'GET',
+      url: `/api/workspaces?projectId=${projects[0].id}&limit=2&offset=2`,
+      headers: auth,
+    });
+    expect(globalWorkspacePage.statusCode).toBe(200);
+    expect(globalWorkspacePage.json().workspaces).toHaveLength(1);
+    expect(globalWorkspacePage.json().page).toEqual({
+      limit: 2,
+      offset: 2,
+      total: 3,
+      hasMore: false,
+    });
+
+    for (const index of [1, 2, 3]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/workspaces/${workspaces[0].id}/sessions`,
+        headers: auth,
+        payload: {
+          provider: 'codex',
+          title: `Session ${index}`,
+        },
+      });
+      expect(response.statusCode).toBe(200);
+    }
+
+    const sessionPage = await app.inject({
+      method: 'GET',
+      url: `/api/workspaces/${workspaces[0].id}/sessions?limit=2&offset=0`,
+      headers: auth,
+    });
+    expect(sessionPage.statusCode).toBe(200);
+    expect(sessionPage.json().sessions).toHaveLength(2);
+    expect(sessionPage.json().page).toEqual({
+      limit: 2,
+      offset: 0,
+      total: 3,
+      hasMore: true,
+    });
+  });
+
   it('prevents cross-user access to projects, workspaces, sessions, and route token resources', async () => {
     const app = buildControlPlaneApp({ env: testEnv('ownership') });
     apps.push(app);

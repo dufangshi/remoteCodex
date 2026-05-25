@@ -170,9 +170,9 @@ Verification:
 - [x] Enforce ownership checks on workspace APIs.
 - [x] Enforce ownership checks on session APIs.
 - [x] Add cross-user denial tests.
-- [ ] Add pagination for project lists.
-- [ ] Add pagination for workspace lists.
-- [ ] Add pagination for session lists.
+- [x] Add pagination for project lists.
+- [x] Add pagination for workspace lists.
+- [x] Add pagination for session lists.
 - [ ] Add search/filter support for product lists.
 - [x] Add project list UI.
 - [x] Add project creation UI.
@@ -807,9 +807,9 @@ runtime state.
 - [x] Add `PATCH /api/sessions/:sessionId`.
 - [x] Add ownership checks for all project, workspace, and session endpoints.
 - [x] Add cross-user access denial tests.
-- [ ] Add pagination for project lists.
-- [ ] Add pagination for workspace lists.
-- [ ] Add pagination for session lists.
+- [x] Add pagination for project lists.
+- [x] Add pagination for workspace lists.
+- [x] Add pagination for session lists.
 - [ ] Add search or filtering for product UI lists.
 
 ### Frontend Product Flow

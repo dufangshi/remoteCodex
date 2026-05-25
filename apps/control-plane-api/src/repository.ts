@@ -44,6 +44,21 @@ export interface SandboxDefaults {
   s3PrefixBase: string;
 }
 
+export interface PaginationInput {
+  limit: number;
+  offset: number;
+}
+
+export interface PaginatedResult<T> {
+  items: T[];
+  page: {
+    limit: number;
+    offset: number;
+    total: number;
+    hasMore: boolean;
+  };
+}
+
 export class ControlPlaneRepository {
   constructor(private readonly db: DatabaseClient) {}
 
@@ -178,13 +193,21 @@ export class ControlPlaneRepository {
     return record;
   }
 
-  listProjects(userId: string) {
-    return this.db
+  listProjects(userId: string, pagination?: PaginationInput): PaginatedResult<typeof controlProjects.$inferSelect> {
+    const total = this.db
+      .select({ count: sql<number>`count(*)` })
+      .from(controlProjects)
+      .where(eq(controlProjects.userId, userId))
+      .get()?.count ?? 0;
+    const query = this.db
       .select()
       .from(controlProjects)
       .where(eq(controlProjects.userId, userId))
-      .orderBy(desc(controlProjects.createdAt))
-      .all();
+      .orderBy(desc(controlProjects.createdAt));
+    const items = pagination
+      ? query.limit(pagination.limit).offset(pagination.offset).all()
+      : query.all();
+    return paginated(items, pagination, total);
   }
 
   getProjectById(id: string) {
@@ -334,17 +357,28 @@ export class ControlPlaneRepository {
     return record;
   }
 
-  listWorkspaces(userId: string, input: { projectId?: string | undefined } = {}) {
+  listWorkspaces(userId: string, input: {
+    projectId?: string | undefined;
+    pagination?: PaginationInput | undefined;
+  } = {}): PaginatedResult<typeof controlWorkspaces.$inferSelect> {
     const filters = [
       eq(controlWorkspaces.userId, userId),
       input.projectId ? eq(controlWorkspaces.projectId, input.projectId) : null,
     ].filter((filter): filter is NonNullable<typeof filter> => Boolean(filter));
-    return this.db
+    const total = this.db
+      .select({ count: sql<number>`count(*)` })
+      .from(controlWorkspaces)
+      .where(and(...filters))
+      .get()?.count ?? 0;
+    const query = this.db
       .select()
       .from(controlWorkspaces)
       .where(and(...filters))
-      .orderBy(desc(controlWorkspaces.createdAt))
-      .all();
+      .orderBy(desc(controlWorkspaces.createdAt));
+    const items = input.pagination
+      ? query.limit(input.pagination.limit).offset(input.pagination.offset).all()
+      : query.all();
+    return paginated(items, input.pagination, total);
   }
 
   getWorkspaceById(id: string) {
@@ -405,13 +439,24 @@ export class ControlPlaneRepository {
     return record;
   }
 
-  listSessionsForWorkspace(workspaceId: string) {
-    return this.db
+  listSessionsForWorkspace(
+    workspaceId: string,
+    pagination?: PaginationInput,
+  ): PaginatedResult<typeof controlSessions.$inferSelect> {
+    const total = this.db
+      .select({ count: sql<number>`count(*)` })
+      .from(controlSessions)
+      .where(eq(controlSessions.workspaceId, workspaceId))
+      .get()?.count ?? 0;
+    const query = this.db
       .select()
       .from(controlSessions)
       .where(eq(controlSessions.workspaceId, workspaceId))
-      .orderBy(desc(controlSessions.createdAt))
-      .all();
+      .orderBy(desc(controlSessions.createdAt));
+    const items = pagination
+      ? query.limit(pagination.limit).offset(pagination.offset).all()
+      : query.all();
+    return paginated(items, pagination, total);
   }
 
   getSessionById(id: string) {
@@ -709,4 +754,18 @@ export class ControlPlaneRepository {
       })
       .run();
   }
+}
+
+function paginated<T>(items: T[], pagination: PaginationInput | undefined, total: number): PaginatedResult<T> {
+  const limit = pagination?.limit ?? total;
+  const offset = pagination?.offset ?? 0;
+  return {
+    items,
+    page: {
+      limit,
+      offset,
+      total,
+      hasMore: offset + items.length < total,
+    },
+  };
 }

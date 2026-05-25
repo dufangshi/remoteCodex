@@ -127,6 +127,11 @@ const routeTokenSchema = z.object({
   scopes: z.array(z.string().min(1)).default(['worker:read', 'worker:write']),
 });
 
+const paginationQuerySchema = z.object({
+  limit: z.coerce.number().int().positive().max(100).default(50),
+  offset: z.coerce.number().int().nonnegative().default(0),
+});
+
 const importUsageSchema = z.object({
   events: z.array(
     z.object({
@@ -813,7 +818,9 @@ export function buildControlPlaneApp(
 
   app.get('/api/projects', async (request) => {
     const user = requireUser(app, request);
-    return { projects: repository.listProjects(user.id) };
+    const pagination = paginationQuerySchema.parse(request.query);
+    const result = repository.listProjects(user.id, pagination);
+    return { projects: result.items, page: result.page };
   });
 
   app.post('/api/projects', async (request) => {
@@ -864,11 +871,16 @@ export function buildControlPlaneApp(
   app.get('/api/projects/:projectId/workspaces', async (request) => {
     const user = requireUser(app, request);
     const params = z.object({ projectId: z.string().uuid() }).parse(request.params);
+    const pagination = paginationQuerySchema.parse(request.query);
     const project = repository.getProjectById(params.projectId);
     if (!project || project.userId !== user.id) {
       throw new HttpError(404, 'not_found', 'Project not found.');
     }
-    return { workspaces: repository.listWorkspaces(user.id, { projectId: project.id }) };
+    const result = repository.listWorkspaces(user.id, {
+      projectId: project.id,
+      pagination,
+    });
+    return { workspaces: result.items, page: result.page };
   });
 
   app.post('/api/projects/:projectId/workspaces', async (request) => {
@@ -900,6 +912,7 @@ export function buildControlPlaneApp(
       .object({
         projectId: z.string().uuid().optional(),
       })
+      .merge(paginationQuerySchema)
       .parse(request.query);
     if (query.projectId) {
       const project = repository.getProjectById(query.projectId);
@@ -907,7 +920,14 @@ export function buildControlPlaneApp(
         throw new HttpError(404, 'not_found', 'Project not found.');
       }
     }
-    return { workspaces: repository.listWorkspaces(user.id, query) };
+    const result = repository.listWorkspaces(user.id, {
+      projectId: query.projectId,
+      pagination: {
+        limit: query.limit,
+        offset: query.offset,
+      },
+    });
+    return { workspaces: result.items, page: result.page };
   });
 
   app.post('/api/workspaces', async (request) => {
@@ -954,11 +974,13 @@ export function buildControlPlaneApp(
   app.get('/api/workspaces/:workspaceId/sessions', async (request) => {
     const user = requireUser(app, request);
     const params = z.object({ workspaceId: z.string().uuid() }).parse(request.params);
+    const pagination = paginationQuerySchema.parse(request.query);
     const workspace = repository.getWorkspaceById(params.workspaceId);
     if (!workspace || workspace.userId !== user.id) {
       throw new HttpError(404, 'not_found', 'Workspace not found.');
     }
-    return { sessions: repository.listSessionsForWorkspace(workspace.id) };
+    const result = repository.listSessionsForWorkspace(workspace.id, pagination);
+    return { sessions: result.items, page: result.page };
   });
 
   app.post('/api/workspaces/:workspaceId/sessions', async (request) => {

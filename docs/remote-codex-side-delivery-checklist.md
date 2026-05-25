@@ -210,9 +210,9 @@ execution state inside the sandbox.
 - [x] Define workspace archive/delete semantics.
 - [x] Define session archive/delete semantics.
 - [x] Document forward-only migration policy.
-- [ ] Add pagination for project lists.
-- [ ] Add pagination for workspace lists.
-- [ ] Add pagination for session lists.
+- [x] Add pagination for project lists.
+- [x] Add pagination for workspace lists.
+- [x] Add pagination for session lists.
 - [ ] Add search/filter support for product lists.
 
 ### Control Plane API

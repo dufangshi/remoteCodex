@@ -242,16 +242,16 @@ sandbox-local execution state.
 
 ### Product Metadata Tasks
 
-- [ ] Add pagination for project lists.
+- [x] Add pagination for project lists.
   - Acceptance: project list endpoint accepts bounded pagination parameters and
     returns stable pagination metadata.
   - Verification: API tests cover default limit, custom limit, and ownership.
 
-- [ ] Add pagination for workspace lists.
+- [x] Add pagination for workspace lists.
   - Acceptance: workspace list endpoint paginates within a project context.
   - Verification: API tests cover pagination and cross-user denial.
 
-- [ ] Add pagination for session lists.
+- [x] Add pagination for session lists.
   - Acceptance: session list endpoint paginates within a workspace context.
   - Verification: API tests cover pagination and archived-session handling.
 
@@ -312,9 +312,13 @@ sandbox-local execution state.
 
 ### Evidence
 
-- Files:
-- Verification:
-- Residual risk:
+- Files: `apps/control-plane-api/src/app.ts`,
+  `apps/control-plane-api/src/repository.ts`,
+  `apps/control-plane-api/src/app.test.ts`
+- Verification: `pnpm --filter @remote-codex/control-plane-api typecheck`;
+  `pnpm --filter @remote-codex/control-plane-api test`
+- Residual risk: search/filter, worker checkpoint sync, and frontend project
+  detail/loading/open-session tasks remain unchecked.
 
 ## Phase 3: Sandbox Lifecycle And AWS Runtime
 

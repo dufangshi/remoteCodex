@@ -180,9 +180,9 @@ live sandbox-local execution state.
 - [x] Define archive/delete semantics for workspaces.
 - [x] Define archive/delete semantics for sessions.
 - [x] Document forward-only migration policy.
-- [ ] Add pagination for project lists.
-- [ ] Add pagination for workspace lists.
-- [ ] Add pagination for session lists.
+- [x] Add pagination for project lists.
+- [x] Add pagination for workspace lists.
+- [x] Add pagination for session lists.
 - [ ] Add search and filter support for product lists.
 
 ### API Checklist
