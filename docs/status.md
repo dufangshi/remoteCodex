@@ -92,6 +92,25 @@ pnpm --filter @remote-codex/config typecheck
 pnpm --filter @remote-codex/db typecheck
 ```
 
+## Migration Policy
+
+Control-plane migrations are forward-only in this branch. Do not edit a
+published migration after it has been pushed. Add a new numbered migration for
+schema fixes, additive fields, indexes, backfills, or compatibility changes.
+
+Rollback is handled operationally by restoring the database from backups or by
+applying a new forward migration that reverts the undesired schema/data change.
+Every migration that affects product-control-plane tables should preserve
+existing user, project, workspace, session, sandbox, usage, and audit records
+unless a later checklist item explicitly defines a deletion policy.
+
+Before marking a schema checklist item complete, verify at least:
+
+```bash
+pnpm --filter @remote-codex/db typecheck
+pnpm --filter @remote-codex/control-plane-api test
+```
+
 Worker image verification target:
 
 ```bash

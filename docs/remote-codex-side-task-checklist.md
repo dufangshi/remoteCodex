@@ -191,10 +191,10 @@ runtime state.
 - [x] Link workspaces to projects.
 - [x] Link sessions to workspaces.
 - [x] Track worker session id separately from control-plane session id.
-- [ ] Add archive/delete semantics for projects.
+- [x] Add archive/delete semantics for projects.
 - [x] Add archive/delete semantics for workspaces.
 - [x] Add archive/delete semantics for sessions.
-- [ ] Add migration rollback notes or forward-only migration notes.
+- [x] Add migration rollback notes or forward-only migration notes.
 
 ### Control-Plane API
 
