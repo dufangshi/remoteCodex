@@ -12,9 +12,13 @@ Recommended reading order:
 5. [Control Plane Auth](./control-plane-auth.md)
 6. [Control Plane Session To Worker Contract](./control-plane-session-worker-contract.md)
 7. [Local Control Plane, Router, And Worker Smoke](./local-control-plane-worker-smoke.md)
-8. [Remote Codex Side Implementation Plan](./remote-codex-side-implementation-plan.md)
-9. [Remote Codex Side Task Checklist](./remote-codex-side-task-checklist.md)
-10. [Remote Codex Implementation Checklist](./remote-codex-implementation-checklist.md)
+8. [Remote Codex Side Delivery Checklist](./remote-codex-side-delivery-checklist.md)
+9. [Remote Codex Side Implementation Plan](./remote-codex-side-implementation-plan.md)
+10. [Remote Codex Side Task Checklist](./remote-codex-side-task-checklist.md)
+11. [Remote Codex Implementation Checklist](./remote-codex-implementation-checklist.md)
+
+Use the delivery checklist as the active execution board. The implementation
+plan and task checklist keep the broader inventory and historical phase detail.
 
 The control plane owns users, projects, sandbox lifecycle, routing, secrets,
 policy, and durable indexes. The worker runs inside each sandbox and owns the
