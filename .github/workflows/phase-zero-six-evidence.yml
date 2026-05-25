@@ -1,0 +1,82 @@
+name: Phase 0-6 Evidence Tooling
+
+on:
+  pull_request:
+    paths:
+      - package.json
+      - pnpm-lock.yaml
+      - scripts/*phase-zero-six*
+      - scripts/staging-phase-one-smoke.ts
+      - scripts/collect-aws-staging-preflight-evidence.ts
+      - docs/remote-codex-side-detailed-checklist.md
+      - docs/staging-release-readiness.md
+      - docs/status.md
+      - .github/workflows/phase-zero-six-evidence.yml
+  push:
+    branches:
+      - main
+      - sandbox-worker-control-plane
+    paths:
+      - package.json
+      - pnpm-lock.yaml
+      - scripts/*phase-zero-six*
+      - scripts/staging-phase-one-smoke.ts
+      - scripts/collect-aws-staging-preflight-evidence.ts
+      - docs/remote-codex-side-detailed-checklist.md
+      - docs/staging-release-readiness.md
+      - docs/status.md
+      - .github/workflows/phase-zero-six-evidence.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase-zero-six-evidence-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify Phase 0-6 evidence tooling
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.11.1
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck evidence scripts
+        run: |
+          pnpm exec tsc \
+            --noEmit \
+            --target ES2022 \
+            --module NodeNext \
+            --moduleResolution NodeNext \
+            --types node,vitest \
+            scripts/collect-aws-staging-preflight-evidence.ts \
+            scripts/staging-phase-one-smoke.ts \
+            scripts/run-phase-zero-six-staging-evidence.ts \
+            scripts/verify-aws-staging-preflight-evidence.ts \
+            scripts/verify-staging-phase-one-evidence.ts \
+            scripts/verify-phase-zero-six-evidence.ts \
+            scripts/verify-phase-zero-six-artifacts-safe.ts \
+            scripts/phase-zero-six-evidence.test.ts
+
+      - name: Test evidence tooling
+        run: pnpm test:phase-zero-six-evidence
+
+      - name: Audit current checklist state
+        run: pnpm verify:phase-zero-six-evidence

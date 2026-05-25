@@ -82,6 +82,10 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 - Phase 0-6 evidence tooling has CLI-level tests via
   `pnpm test:phase-zero-six-evidence`, covering guarded checklist application
   and obvious artifact secret leakage detection.
+- Phase 0-6 evidence tooling CI workflow exists at
+  `.github/workflows/phase-zero-six-evidence.yml`; it typechecks the evidence
+  scripts, runs `pnpm test:phase-zero-six-evidence`, and audits the current
+  checklist state on matching branch pushes and pull requests.
 - AWS staging preflight evidence verifier exists as
   `pnpm verify:aws-staging-preflight-evidence -- <evidence-json>` with template
   `docs/aws-staging-preflight-evidence-template.json`; it audits S3.04 and

@@ -1387,6 +1387,7 @@ pnpm --filter @remote-codex/supervisor-web typecheck
 pnpm --filter @remote-codex/supervisor-web test
 pnpm --filter @remote-codex/config typecheck
 pnpm --filter @remote-codex/db typecheck
+pnpm test:phase-zero-six-evidence
 pnpm smoke:local-worker-checkpoint
 pnpm smoke:production-auth
 pnpm smoke:provider-gateway -- <codex|claude|opencode>
