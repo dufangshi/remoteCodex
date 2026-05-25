@@ -135,7 +135,9 @@ Run these checks before marking any staging checkbox complete:
 
 The first staging deploy is not release-ready while any of these are true:
 
-- Production-style auth provider smoke has not run.
+- Production-style JWT-compatible auth smoke passes locally with
+  `pnpm smoke:production-auth`; live vendor/auth-service token issuance remains
+  a staging environment check when that service is selected.
 - Worker image has not been built from a clean checkout.
 - A real EKS Fargate sandbox cannot reach `/readyz`.
 - Browser-to-router-to-worker traffic has not been exercised.

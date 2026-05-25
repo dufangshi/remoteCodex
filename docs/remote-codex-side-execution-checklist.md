@@ -153,11 +153,11 @@ credential.
 
 ### Backend Tasks
 
-- [ ] Add production auth-provider integration smoke.
-  - Acceptance: the selected auth provider can issue a token accepted by the
-    control plane in staging-like config.
-  - Verification: integration smoke or documented staging smoke covers success,
-    expired token, wrong issuer, and wrong audience.
+- [x] Add production auth-provider integration smoke.
+  - Acceptance: the phase-one JWT-compatible auth provider shape can issue a
+    token accepted by the control plane in staging-like config.
+  - Verification: `pnpm smoke:production-auth` covers success, expired token,
+    wrong issuer, and wrong audience.
 
 - [x] Enforce disabled-user behavior for route-token issuance.
   - Acceptance: disabled users receive a stable `403` response and no route
@@ -238,12 +238,13 @@ credential.
   `docs/status.md`
 - Verification: `pnpm --filter @remote-codex/control-plane-api typecheck`;
   `pnpm --filter @remote-codex/control-plane-api test`;
+  `pnpm smoke:production-auth`;
   `pnpm --filter @remote-codex/supervisor-web typecheck`;
   `pnpm --filter @remote-codex/supervisor-web test`;
   `pnpm --filter @remote-codex/shared typecheck`; `git diff --check`
-- Residual risk: production auth-provider integration smoke and staging worker
-  JWT proof remain unchecked. User data export and deletion/anonymization APIs
-  are explicitly deferred and are not implemented.
+- Residual risk: live vendor auth deployment smoke and staging worker JWT proof
+  remain unchecked. User data export and deletion/anonymization APIs are
+  explicitly deferred and are not implemented.
 
 ## Phase 2: Projects, Workspaces, Sessions, And Worker Session Contract
 
@@ -1534,7 +1535,7 @@ corresponding implementation and verification land.
 
 - [x] 1. Finish frontend login route, authenticated shell guard, auth loading,
   expired-session, and disabled-account states.
-- [ ] 2. Add production auth-provider smoke test.
+- [x] 2. Add production auth-provider smoke test.
 - [x] 3. Enforce disabled-user behavior across route tokens, sandbox lifecycle,
   and usage import.
 - [x] 4. Add project detail UI, list loading states, and open-session flow.

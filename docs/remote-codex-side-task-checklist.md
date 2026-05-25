@@ -729,7 +729,7 @@ without exposing product identity tokens to sandbox workers.
 - [x] Choose the production phase-one auth provider.
 - [x] Document required auth provider environment variables.
 - [x] Document how auth subjects map to Remote Codex users.
-- [ ] Add auth-provider-specific integration tests or smoke tests.
+- [x] Add JWT-compatible auth-provider integration smoke test.
 - [x] Add token issuer and audience checks for production mode.
 - [x] Add clock-skew tolerance for provider JWT validation.
 - [x] Add clear `401` and `403` error response shapes.
@@ -1455,7 +1455,7 @@ The first shippable product phase is complete only when all of these are true:
 
 ## Suggested Execution Order
 
-- [ ] 1. Finish production auth decision and frontend auth shell.
+- [x] 1. Finish production auth decision and frontend auth shell.
 - [ ] 2. Finish project, workspace, and session frontend flows.
 - [ ] 3. Finish local sandbox development docs and smoke scripts.
 - [x] 4. Pin worker image provider runtime versions.

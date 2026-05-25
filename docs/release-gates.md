@@ -21,8 +21,8 @@ requires staging evidence.
 
 ### Auth And User Boundary
 
-- [ ] Production auth-provider smoke passes for valid, expired, wrong-issuer,
-  and wrong-audience tokens.
+- [x] Production-style JWT-compatible auth smoke passes for valid, expired,
+  wrong-issuer, and wrong-audience tokens.
 - [x] Disabled users cannot issue route tokens.
 - [x] Disabled users cannot start or restart sandboxes.
 - [ ] Product JWTs are stripped before router-to-worker traffic in staging.

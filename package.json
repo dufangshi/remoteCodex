@@ -44,6 +44,7 @@
     "dev:reset": "pnpm dev:stop && pnpm dev",
     "smoke:local-route-token": "tsx scripts/local-route-token-smoke.ts",
     "smoke:local-worker-checkpoint": "tsx scripts/local-worker-checkpoint-smoke.ts",
+    "smoke:production-auth": "tsx scripts/local-production-auth-smoke.ts",
     "service:start": "node scripts/service-manager.mjs start",
     "service:stop": "node scripts/service-manager.mjs stop",
     "service:status": "node scripts/service-manager.mjs status",

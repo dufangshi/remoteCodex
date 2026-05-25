@@ -118,10 +118,10 @@ milestone sections below remain the full backlog.
     session record changes.
   - Verify with documented command output or automated smoke.
 
-- [ ] Add selected production auth-provider smoke.
-  - Done when staging-like config validates a real provider-issued token and
+- [x] Add selected production auth-provider smoke.
+  - Done when staging-like config validates a JWT-compatible provider token and
     rejects expired, wrong-issuer, and wrong-audience tokens.
-  - Verify with an integration smoke or documented staging run.
+  - Verify with `pnpm smoke:production-auth`.
 
 - [ ] Run staging sandbox lifecycle smoke.
   - Done when start, stop, restart, readiness, and idempotency have been tested
@@ -230,8 +230,8 @@ worker credential.
 
 ### Auth Provider Integration
 
-- [ ] Add production auth-provider smoke procedure.
-  - Done when staging-like config can validate a real provider-issued token.
+- [x] Add production auth-provider smoke procedure.
+  - Done when staging-like config can validate a JWT-compatible provider token.
   - Verify success, expired token, wrong issuer, and wrong audience.
 
 - [ ] Add local or staging login-to-shell smoke.

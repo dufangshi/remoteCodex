@@ -101,6 +101,24 @@ The browser product session is used only with the control plane. It must not be
 forwarded to sandbox workers. Worker traffic uses separate short-lived route
 tokens and router-injected worker tokens.
 
+## Local Production-Style Smoke
+
+Use this smoke before staging auth-provider wiring changes:
+
+```bash
+pnpm smoke:production-auth
+```
+
+The smoke starts a temporary control-plane API in `CONTROL_PLANE_AUTH_MODE=jwt`
+with issuer and audience checks enabled. It verifies that a valid
+JWT-compatible product-session token is accepted, while expired,
+wrong-issuer, and wrong-audience tokens are rejected with `401`.
+
+This is the Remote Codex side production-style auth smoke for phase one. It
+does not prove a live Clerk, Auth0, Cognito, or custom auth deployment is
+issuing tokens correctly; that remains a staging deployment check when a vendor
+or auth service is selected for the environment.
+
 ## Error Shape
 
 Authentication and authorization failures use the standard control-plane error

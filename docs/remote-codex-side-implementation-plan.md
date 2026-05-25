@@ -122,7 +122,7 @@ worker credentials.
 - [x] Add admin user status update API.
 - [x] Add admin quota-profile update API.
 - [x] Add audit events for admin user updates.
-- [ ] Add integration smoke tests for the selected production auth provider.
+- [x] Add integration smoke tests for the selected production auth provider.
 - [x] Add explicit user deactivation behavior for route-token issuance,
   sandbox lifecycle, and usage import.
 - [x] Add user data export policy and API shape if required for launch.

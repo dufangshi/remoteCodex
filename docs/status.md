@@ -82,8 +82,10 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 - AWS sandbox adapter implementation.
 - Frontend auth shell covers the local login route, authenticated route guard,
   loading state, expired-session state, disabled-account state, and admin user
-  management for list/status/quota/non-admin denial. Production auth-provider
-  smoke coverage remains open.
+  management for list/status/quota/non-admin denial. Production-style
+  JWT-compatible auth smoke passes for valid, expired, wrong-issuer, and
+  wrong-audience tokens; live vendor/auth-service token issuance remains a
+  staging check when that service is selected.
 - Project detail and product metadata loading states are implemented in the
   control-plane panel; opening a session now gets an in-memory route token,
   opens a sandbox-router WebSocket, reconnects after token refresh, and shows
@@ -112,11 +114,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 
 ## Immediate Next Implementation Queue
 
-1. Add production auth-provider smoke coverage or staging smoke procedure for
-   valid, expired, wrong-issuer, and wrong-audience tokens.
-2. Add staging lifecycle smokes for start, stop, idempotent restart, and
+1. Add staging lifecycle smokes for start, stop, idempotent restart, and
    readiness.
-3. Run staging provider-runtime gateway smokes for Codex, Claude Code, and
+2. Run staging provider-runtime gateway smokes for Codex, Claude Code, and
    OpenCode.
 
 ## Verification Commands
