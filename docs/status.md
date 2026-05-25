@@ -168,6 +168,15 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   `phase-zero-six-staging-evidence-26409751861`. The artifact is diagnostic
   only because the `staging` Environment still lacks real Phase 0-6
   vars/secrets, so it must not be used to check S3/R5/G6 boxes.
+- GitHub currently exposes only the visible `Phase 0-6 Evidence Tooling`
+  workflow for manual dispatch from this branch; the standalone
+  `.github/workflows/phase-zero-six-staging-evidence.yml` file remains a
+  branch-local staging workflow definition but is not listed by
+  `gh workflow list --repo dufangshi/remoteCodex --all` until it is available
+  from the default branch. Operators should use the visible workflow commands
+  emitted by `pnpm phase-zero-six:github-env:report`, including the
+  `force_diagnostics=true` variants when they need artifact upload from a
+  partially configured environment.
 - GitHub Environment readiness for the manual staging evidence workflow can be
   checked with `pnpm phase-zero-six:github-env` or the human-readable
   `pnpm phase-zero-six:github-env:report`; the checker uses `gh` metadata APIs

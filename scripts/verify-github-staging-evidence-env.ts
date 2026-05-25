@@ -38,7 +38,9 @@ interface GithubReadinessReport {
   nextCommands: {
     openActionsWorkflow: string;
     runAwsOnly: string;
+    runAwsOnlyDiagnostics: string;
     runFull: string;
+    runFullDiagnostics: string;
   };
   secretSafety: {
     valuesPrinted: false;
@@ -139,8 +141,12 @@ function buildNextCommands(owner: string, repo: string) {
       `gh workflow view "Phase 0-6 Evidence Tooling" --repo ${owner}/${repo} --web`,
     runAwsOnly:
       `gh workflow run "Phase 0-6 Evidence Tooling" --repo ${owner}/${repo} --ref sandbox-worker-control-plane -f evidence_mode=aws-only -f force_diagnostics=false`,
+    runAwsOnlyDiagnostics:
+      `gh workflow run "Phase 0-6 Evidence Tooling" --repo ${owner}/${repo} --ref sandbox-worker-control-plane -f evidence_mode=aws-only -f force_diagnostics=true`,
     runFull:
       `gh workflow run "Phase 0-6 Evidence Tooling" --repo ${owner}/${repo} --ref sandbox-worker-control-plane -f evidence_mode=full -f force_diagnostics=false`,
+    runFullDiagnostics:
+      `gh workflow run "Phase 0-6 Evidence Tooling" --repo ${owner}/${repo} --ref sandbox-worker-control-plane -f evidence_mode=full -f force_diagnostics=true`,
   };
 }
 
