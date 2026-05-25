@@ -67,6 +67,10 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   `pnpm verify:staging-phase-one-evidence -- <smoke-json>`; it audits the
   remaining Phase 3, Phase 5, and Phase 6 staging checkboxes without mutating
   the checklist.
+- AWS staging preflight evidence verifier exists as
+  `pnpm verify:aws-staging-preflight-evidence -- <evidence-json>` with template
+  `docs/aws-staging-preflight-evidence-template.json`; it audits S3.04 and
+  S3.05 evidence before those boxes are checked.
 - Worker mode disables host/provider management APIs that should not be exposed
   in sandbox runtime.
 - Route-token signing supports key ids and previous-key verification.
@@ -155,13 +159,16 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 1. Run `pnpm smoke:staging-phase-one` with staging product/admin JWTs against
    the real staging control plane, router, and worker runtime, then attach the
    JSON output to release evidence.
-2. Run `pnpm verify:staging-phase-one-evidence -- <smoke-json>` on the
+2. Fill `docs/aws-staging-preflight-evidence-template.json` with real staging
+   AWS/EKS/RBAC evidence and run
+   `pnpm verify:aws-staging-preflight-evidence -- <evidence-json>`.
+3. Run `pnpm verify:staging-phase-one-evidence -- <smoke-json>` on the
    captured JSON before checking any staging boxes.
-3. Capture staging AWS/EKS proof for sandbox start, readiness, stop, and
+4. Capture staging AWS/EKS proof for sandbox start, readiness, stop, and
    idempotent lifecycle.
-4. Capture staging router proof for direct-worker denial and
+5. Capture staging router proof for direct-worker denial and
    browser-to-router-to-worker traffic.
-5. Run staging provider-runtime gateway smokes for Codex, Claude Code, and
+6. Run staging provider-runtime gateway smokes for Codex, Claude Code, and
    OpenCode, including gateway usage records and worker env/config root-key
    absence.
 

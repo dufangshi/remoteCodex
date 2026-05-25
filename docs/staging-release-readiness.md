@@ -94,6 +94,30 @@ The worker must not receive raw OpenAI, Anthropic, or other provider root keys.
 
 Run these checks before marking any staging checkbox complete:
 
+### AWS Staging Preflight Evidence
+
+Before running the lifecycle smoke, create an AWS staging preflight evidence
+file from:
+
+```text
+docs/aws-staging-preflight-evidence-template.json
+```
+
+Fill it with real staging account, EKS, VPC, image, log, service-account, IAM,
+and `kubectl auth can-i` results. Then run:
+
+```bash
+pnpm verify:aws-staging-preflight-evidence -- ./aws-staging-preflight.json
+```
+
+This verifier covers S3.04 and S3.05 only. It is read-only and reports whether
+the AWS config review and Kubernetes credential review are complete enough to
+check those boxes. It deliberately requires separate review evidence because
+the runtime smoke cannot prove account naming, VPC selection, log groups, or
+least-privilege RBAC by itself.
+
+### Phase-One Runtime Smoke
+
 The scripted entry point for the phase-one Remote Codex staging path is:
 
 ```bash

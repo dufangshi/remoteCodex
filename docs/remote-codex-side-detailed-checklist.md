@@ -395,12 +395,15 @@ and recover it.
   - Done when account, region, EKS cluster, namespace, Fargate profile, VPC,
     subnets, security groups, IAM roles, image registry, and log groups are
     named.
-  - Verify with staging config review and AWS access smoke.
+  - Verify with staging config review, AWS access smoke, and
+    `pnpm verify:aws-staging-preflight-evidence -- <evidence-json>`.
 
 - [ ] S3.05 Add least-privilege Kubernetes credentials.
   - Done when the control plane can create, inspect, and delete only the worker
     Pods and related resources it owns.
-  - Verify with config validation and staging lifecycle smoke.
+  - Verify with config validation, Kubernetes `can-i` evidence, staging
+    lifecycle smoke, and
+    `pnpm verify:aws-staging-preflight-evidence -- <evidence-json>`.
 
 - [ ] S3.06 Create a real worker Pod from the control plane.
   - Done when a staging API call starts one EKS Fargate Pod from an immutable
@@ -476,8 +479,11 @@ and recover it.
   `sandbox_ready`, optional `admin_sandbox_runtime_detail`, optional
   `idempotent_lifecycle`, and `stop_sandbox` evidence for these remaining
   staging boxes once real staging URLs and tokens are available. Run
+  `pnpm verify:aws-staging-preflight-evidence -- <evidence-json>` against
+  `docs/aws-staging-preflight-evidence-template.json`-shaped real staging
+  evidence before checking S3.04 or S3.05, and run
   `pnpm verify:staging-phase-one-evidence -- <smoke-json>` against captured
-  staging output before checking any of these boxes.
+  staging output before checking S3.06-S3.08.
 
 ## Phase 4: Worker Image And Runtime Guardrails
 
@@ -1313,6 +1319,7 @@ pnpm --filter @remote-codex/db typecheck
 pnpm smoke:local-worker-checkpoint
 pnpm smoke:production-auth
 pnpm smoke:staging-phase-one
+pnpm verify:aws-staging-preflight-evidence -- <evidence-json>
 pnpm verify:staging-phase-one-evidence -- <smoke-json>
 docker build -f Dockerfile.worker -t remote-codex-worker:verify .
 ```
