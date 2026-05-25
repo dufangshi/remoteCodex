@@ -59,6 +59,62 @@ Evidence:
 - Residual risk: <remaining unchecked edge>
 ```
 
+## How To Execute This Checklist
+
+Use the checklist as the day-to-day implementation board for Remote Codex side
+work.
+
+1. Pick the first unchecked item that belongs to the current phase or release
+   gate.
+2. Read the item's `Done when` and `Verify with` lines before writing code.
+3. Implement the smallest useful slice that can satisfy that single checkbox or
+   a tightly related group of checkboxes.
+4. Run the named verification command, smoke test, deployment check, or manual
+   evidence collection.
+5. Check the box only after the evidence exists on this branch or in the target
+   staging environment.
+6. Add or update the nearest evidence note when the proof is not obvious from
+   the code or tests.
+7. Update `docs/status.md` when the current focus, release risk, or next queue
+   changes materially.
+8. Commit the completed slice with the evidence summarized in the commit
+   message.
+
+For local implementation items, unit tests, typechecks, local smoke output, or
+docs review can be enough. For staging, AWS-live, provider-runtime,
+ElAgenteHarness-live, billing, or production-readiness items, local mocks are
+not enough; keep the box unchecked until the real target has passed.
+
+## Current Open Priority Queue
+
+The immediate priority is to finish the already implemented phase-one path with
+real staging evidence:
+
+- [ ] Prove AWS staging configuration and least-privilege Kubernetes/RBAC
+  credentials for S3.04 and S3.05.
+- [ ] Start, observe, stop, and idempotently restart a real EKS Fargate worker
+  Pod for S3.06 through S3.08.
+- [ ] Deploy the sandbox router in staging and prove browser traffic reaches
+  workers only through the router for R5.10 through R5.12.
+- [ ] Run Codex, Claude Code, and OpenCode from a real worker sandbox through
+  the LLM gateway for G6.11 through G6.13.
+
+After the phase-one staging proof is complete, continue with the next product
+capabilities in order:
+
+- [ ] Phase 7: ElAgenteHarness credentials, worker bootstrap, tool surface,
+  task/job visibility, and harness usage import.
+- [ ] Phase 8: approved MCP registry, provider MCP config rendering, path
+  containment, and tool-call auditing.
+- [ ] Phase 9: workspace persistence, safe file/diff endpoints, snapshots, and
+  chemistry artifacts.
+- [ ] Phase 10: unified usage ledger, quotas, billing summary, and admin usage
+  inspection.
+- [ ] Phase 11: Railway/AWS deployment wiring, secrets rotation, observability,
+  and CI smoke jobs.
+- [ ] Phase 12: end-to-end staging acceptance from login to sandbox, gateway,
+  harness, usage, quota, admin inspection, and secret-leakage review.
+
 ## Phase 0: Documentation And Release Baseline
 
 Goal: the branch is understandable, scoped, and safe to continue from.
