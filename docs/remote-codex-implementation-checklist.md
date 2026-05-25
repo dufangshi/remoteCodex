@@ -449,7 +449,7 @@ through ElAgenteHarness using scoped app keys.
 
 ### Control Plane Credentials
 
-- [ ] Add harness base URL config.
+- [x] Add harness base URL config.
 - [ ] Add harness admin credential config if needed.
 - [ ] Add harness credential table.
 - [ ] Store only key hash when raw key does not need to be recovered.
@@ -465,11 +465,11 @@ through ElAgenteHarness using scoped app keys.
 
 ### Worker Environment
 
-- [ ] Inject `ELAGENTE_HARNESS_BASE_URL`.
-- [ ] Inject `INACT_X_APP_KEY`.
+- [x] Inject `ELAGENTE_HARNESS_BASE_URL`.
+- [x] Inject `INACT_X_APP_KEY`.
 - [ ] Validate harness env in worker mode when chemistry tools are enabled.
 - [ ] Redact harness key from logs.
-- [ ] Add worker metadata that reports harness integration status without key.
+- [x] Add worker metadata that reports harness integration status without key.
 
 ### Worker Tool Bootstrap
 

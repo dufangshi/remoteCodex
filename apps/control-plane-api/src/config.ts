@@ -21,6 +21,8 @@ const envSchema = z.object({
   CONTROL_PLANE_INTERNAL_SERVICE_TOKEN: z.string().min(16).optional(),
   LLM_GATEWAY_BASE_URL: z.string().url().optional(),
   LLM_GATEWAY_TOKEN_SECRET_NAME: z.string().min(1).optional(),
+  ELAGENTE_HARNESS_BASE_URL: z.string().url().optional(),
+  ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: z.string().min(1).optional(),
   CONTROL_PLANE_ADMIN_IDENTITIES: z.string().optional(),
   CONTROL_PLANE_AUTH_MODE: z.enum(['dev', 'jwt']).optional(),
   CONTROL_PLANE_AUTH_JWT_SECRET: z.string().min(16).optional(),
@@ -47,6 +49,8 @@ export interface ControlPlaneConfig {
   internalServiceToken: string | null;
   llmGatewayBaseUrl: string | null;
   llmGatewayTokenSecretName: string | null;
+  harnessBaseUrl: string | null;
+  harnessAppKeySecretName: string | null;
   adminIdentities: Set<string>;
   authMode: 'dev' | 'jwt';
   authJwtSecret: string | null;
@@ -132,6 +136,8 @@ export function loadControlPlaneConfig(
     internalServiceToken: parsed.CONTROL_PLANE_INTERNAL_SERVICE_TOKEN ?? null,
     llmGatewayBaseUrl: parsed.LLM_GATEWAY_BASE_URL ?? null,
     llmGatewayTokenSecretName: parsed.LLM_GATEWAY_TOKEN_SECRET_NAME ?? null,
+    harnessBaseUrl: parsed.ELAGENTE_HARNESS_BASE_URL ?? null,
+    harnessAppKeySecretName: parsed.ELAGENTE_HARNESS_APP_KEY_SECRET_NAME ?? null,
     adminIdentities: new Set(
       (parsed.CONTROL_PLANE_ADMIN_IDENTITIES ?? '')
         .split(',')

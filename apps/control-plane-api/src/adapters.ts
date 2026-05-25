@@ -24,6 +24,10 @@ export interface SandboxStartInput {
     keyId: string;
     tokenSecretName?: string | null;
   } | undefined;
+  harness?: {
+    baseUrl: string;
+    appKeySecretName?: string | null;
+  } | undefined;
 }
 
 export interface SandboxEnvironment {
@@ -199,6 +203,16 @@ export class LocalWorkerProcessSandboxManager implements SandboxManager {
                 ? {
                     REMOTE_CODEX_LLM_GATEWAY_TOKEN:
                       this.input.workerEnv.REMOTE_CODEX_LLM_GATEWAY_TOKEN,
+                  }
+                : {}),
+            }
+          : {}),
+        ...(input.harness
+          ? {
+              ELAGENTE_HARNESS_BASE_URL: input.harness.baseUrl,
+              ...(this.input.workerEnv?.INACT_X_APP_KEY
+                ? {
+                    INACT_X_APP_KEY: this.input.workerEnv.INACT_X_APP_KEY,
                   }
                 : {}),
             }
@@ -454,6 +468,11 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
               REMOTE_CODEX_LLM_GATEWAY_KEY_ID: input.gateway.keyId,
             }
           : {}),
+        ...(input.harness
+          ? {
+              ELAGENTE_HARNESS_BASE_URL: input.harness.baseUrl,
+            }
+          : {}),
         WORKSPACE_ROOT: '/workspace',
         HOME: '/home/agent',
       },
@@ -467,6 +486,14 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
               REMOTE_CODEX_LLM_GATEWAY_TOKEN: {
                 secretName: input.gateway.tokenSecretName,
                 key: input.gateway.keyId,
+              },
+            }
+          : {}),
+        ...(input.harness?.appKeySecretName
+          ? {
+              INACT_X_APP_KEY: {
+                secretName: input.harness.appKeySecretName,
+                key: input.sandboxId,
               },
             }
           : {}),

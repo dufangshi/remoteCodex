@@ -81,6 +81,8 @@ describe('loadRuntimeConfig', () => {
       REMOTE_CODEX_WORKER_IDENTITY_SECRET: 'identity-secret',
       REMOTE_CODEX_LLM_GATEWAY_BASE_URL: 'https://llm-gateway.example.com',
       REMOTE_CODEX_LLM_GATEWAY_TOKEN: 'gw-token',
+      ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.com',
+      INACT_X_APP_KEY: 'harness-app-key',
     });
 
     expect(config.runtimeRole).toBe('worker');
@@ -95,6 +97,8 @@ describe('loadRuntimeConfig', () => {
     expect(config.workerIdentitySecret).toBe('identity-secret');
     expect(config.llmGatewayBaseUrl).toBe('https://llm-gateway.example.com');
     expect(config.llmGatewayToken).toBe('gw-token');
+    expect(config.harnessBaseUrl).toBe('https://harness.example.com');
+    expect(config.harnessEnabled).toBe(true);
     expect(config.workerRuntimeManifestPath).toBe('/opt/remote-codex/worker-runtime-manifest.json');
     expect(config.appName).toBe('Remote Codex Worker');
     expect(config.agentProviders.codex.home).toBe('/home/agent/.codex');

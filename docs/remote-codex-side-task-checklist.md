@@ -445,7 +445,7 @@ Verification:
 
 ### J. ElAgenteHarness Integration
 
-- [ ] Add harness base URL config.
+- [x] Add harness base URL config.
 - [ ] Add harness admin credential config if the harness requires one.
 - [ ] Add harness credential table.
 - [ ] Decide whether Remote Codex stores only key hashes or encrypted raw keys.
@@ -456,11 +456,11 @@ Verification:
 - [ ] Bind harness key to quota profile.
 - [ ] Add harness key rotation endpoint.
 - [ ] Add harness key revocation endpoint.
-- [ ] Inject `ELAGENTE_HARNESS_BASE_URL` into the worker.
-- [ ] Inject `INACT_X_APP_KEY` into the worker.
+- [x] Inject `ELAGENTE_HARNESS_BASE_URL` into the worker.
+- [x] Inject `INACT_X_APP_KEY` into the worker.
 - [ ] Validate harness env in worker mode when chemistry tools are enabled.
 - [ ] Redact harness key from logs.
-- [ ] Report harness integration status in worker metadata without exposing the
+- [x] Report harness integration status in worker metadata without exposing the
   raw key.
 - [ ] Decide whether the tool surface is MCP, shell wrappers, provider config,
   or a combination.
@@ -1143,7 +1143,7 @@ ElAgenteHarness using scoped, revocable `INACT_X_APP_KEY` credentials.
 
 ### Control-Plane Harness Credentials
 
-- [ ] Add harness base URL config.
+- [x] Add harness base URL config.
 - [ ] Add harness admin credential config if needed.
 - [ ] Add harness credential table.
 - [ ] Store only key hash when raw recovery is not needed.
@@ -1159,11 +1159,11 @@ ElAgenteHarness using scoped, revocable `INACT_X_APP_KEY` credentials.
 
 ### Worker Harness Bootstrap
 
-- [ ] Inject `ELAGENTE_HARNESS_BASE_URL`.
-- [ ] Inject `INACT_X_APP_KEY`.
+- [x] Inject `ELAGENTE_HARNESS_BASE_URL`.
+- [x] Inject `INACT_X_APP_KEY`.
 - [ ] Validate harness env in worker mode when chemistry tools are enabled.
 - [ ] Redact harness key from logs.
-- [ ] Add worker metadata that reports harness integration status without the
+- [x] Add worker metadata that reports harness integration status without the
   raw key.
 - [ ] Add ElAgenteHarness MCP config renderer if MCP is the chosen tool surface.
 - [ ] Add ElAgenteHarness shell/tool wrapper renderer if wrappers are used.

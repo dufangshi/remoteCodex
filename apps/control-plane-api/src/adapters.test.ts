@@ -174,6 +174,10 @@ describe('sandbox manager adapters', () => {
         keyId: 'gw-key-sbx-test',
         tokenSecretName: 'remote-codex-gateway-tokens',
       },
+      harness: {
+        baseUrl: 'https://harness.example.test',
+        appKeySecretName: 'remote-codex-harness-app-keys',
+      },
     });
     expect(env.env).toMatchObject({
       REMOTE_CODEX_RUNTIME_ROLE: 'worker',
@@ -184,6 +188,7 @@ describe('sandbox manager adapters', () => {
       SANDBOX_ROUTER_BASE_URL: 'https://sandbox-router.example.test',
       REMOTE_CODEX_LLM_GATEWAY_BASE_URL: 'https://llm-gateway.example.test',
       REMOTE_CODEX_LLM_GATEWAY_KEY_ID: 'gw-key-sbx-test',
+      ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
       WORKSPACE_ROOT: '/workspace',
       HOME: '/home/agent',
     });
@@ -196,10 +201,15 @@ describe('sandbox manager adapters', () => {
         secretName: 'remote-codex-gateway-tokens',
         key: 'gw-key-sbx-test',
       },
+      INACT_X_APP_KEY: {
+        secretName: 'remote-codex-harness-app-keys',
+        key: 'sbx_test',
+      },
     });
     expect(Object.keys(env.env)).not.toContain('OPENAI_API_KEY');
     expect(Object.keys(env.env)).not.toContain('ANTHROPIC_API_KEY');
     expect(Object.keys(env.env)).not.toContain('REMOTE_CODEX_LLM_GATEWAY_TOKEN');
+    expect(Object.keys(env.env)).not.toContain('INACT_X_APP_KEY');
   });
 
   it('applies an AWS worker Pod spec with deterministic names, env, and secrets', async () => {

@@ -519,7 +519,7 @@ import third, then quota enforcement and UI.
 
 ### ElAgenteHarness Checklist
 
-- [ ] Add harness base URL config.
+- [x] Add harness base URL config.
 - [ ] Add harness admin credential config if required.
 - [ ] Add harness credential table.
 - [ ] Decide whether Remote Codex stores only key hashes or encrypted raw keys.
@@ -530,11 +530,11 @@ import third, then quota enforcement and UI.
 - [ ] Bind harness key to quota profile.
 - [ ] Add harness key rotation endpoint.
 - [ ] Add harness key revocation endpoint.
-- [ ] Inject `ELAGENTE_HARNESS_BASE_URL` into the worker.
-- [ ] Inject `INACT_X_APP_KEY` into the worker.
+- [x] Inject `ELAGENTE_HARNESS_BASE_URL` into the worker.
+- [x] Inject `INACT_X_APP_KEY` into the worker.
 - [ ] Validate harness env in worker mode when chemistry tools are enabled.
 - [ ] Redact harness key from logs.
-- [ ] Report harness integration status in worker metadata without exposing the
+- [x] Report harness integration status in worker metadata without exposing the
   raw key.
 
 ### MCP And Tool Policy Checklist

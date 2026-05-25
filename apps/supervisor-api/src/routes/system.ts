@@ -118,6 +118,10 @@ export async function registerSystemRoutes(app: FastifyInstance) {
       workspaceRoot: app.services.config.workspaceRoot,
       managementRoutesEnabled: app.services.config.managementRoutesEnabled,
       agentRuntimeManagementEnabled: app.services.config.agentRuntimeManagementEnabled,
+      harness: {
+        enabled: app.services.config.harnessEnabled,
+        baseUrl: app.services.config.harnessBaseUrl,
+      },
       providers: app.services.agentRuntimes.all().map((runtime) => ({
         provider: runtime.provider,
         status: runtime.getStatus(),

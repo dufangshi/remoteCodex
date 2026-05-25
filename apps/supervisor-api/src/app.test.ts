@@ -626,6 +626,8 @@ describe('supervisor api', () => {
         REMOTE_CODEX_SANDBOX_ID: 'sbx_test',
         REMOTE_CODEX_USER_ID: 'user_test',
         REMOTE_CODEX_WORKER_RUNTIME_MANIFEST: manifestPath,
+        ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
+        INACT_X_APP_KEY: 'must-not-leak-harness-key',
       },
     });
     await app.ready();
@@ -656,6 +658,10 @@ describe('supervisor api', () => {
       userId: 'user_test',
       managementRoutesEnabled: false,
       agentRuntimeManagementEnabled: false,
+      harness: {
+        enabled: true,
+        baseUrl: 'https://harness.example.test',
+      },
       runtimeManifest: {
         imageVersion: 'staging-test',
         gitSha: 'abc123',
@@ -668,6 +674,7 @@ describe('supervisor api', () => {
       },
     });
     expect(JSON.stringify(metadata.json())).not.toContain('must-not-leak');
+    expect(JSON.stringify(metadata.json())).not.toContain('must-not-leak-harness-key');
   });
 
   it('requires the router token for worker API access when configured', async () => {

@@ -118,6 +118,8 @@ describe('control plane api', () => {
         ...testEnv('gateway-start'),
         LLM_GATEWAY_BASE_URL: 'https://llm-gateway.example.test',
         LLM_GATEWAY_TOKEN_SECRET_NAME: 'remote-codex-gateway-tokens',
+        ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
+        ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: 'remote-codex-harness-app-keys',
       },
       sandboxManager,
     });
@@ -147,6 +149,10 @@ describe('control plane api', () => {
         baseUrl: 'https://llm-gateway.example.test',
         keyId: `sub2api-key-${bootstrap.json().sandbox.id}`,
         tokenSecretName: 'remote-codex-gateway-tokens',
+      },
+      harness: {
+        baseUrl: 'https://harness.example.test',
+        appKeySecretName: 'remote-codex-harness-app-keys',
       },
     });
   });

@@ -274,6 +274,16 @@ function gatewayStartInput(
   };
 }
 
+function harnessStartInput(app: FastifyInstance): SandboxStartInput['harness'] {
+  if (!app.services.config.harnessBaseUrl) {
+    return undefined;
+  }
+  return {
+    baseUrl: app.services.config.harnessBaseUrl,
+    appKeySecretName: app.services.config.harnessAppKeySecretName,
+  };
+}
+
 export function buildControlPlaneApp(
   options: {
     env?: NodeJS.ProcessEnv;
@@ -511,6 +521,7 @@ export function buildControlPlaneApp(
       region: sandbox.region,
       s3Prefix: sandbox.s3Prefix,
       gateway: gatewayStartInput(app, sandbox),
+      harness: harnessStartInput(app),
     });
     return {
       sandbox: repository.updateSandboxState(sandbox.id, {
@@ -565,6 +576,7 @@ export function buildControlPlaneApp(
       region: sandbox.region,
       s3Prefix: sandbox.s3Prefix,
       gateway: gatewayStartInput(app, sandbox),
+      harness: harnessStartInput(app),
     });
     return {
       sandbox: repository.updateSandboxState(sandbox.id, result),
