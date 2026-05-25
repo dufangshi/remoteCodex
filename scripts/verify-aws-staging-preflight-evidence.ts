@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 
-interface CheckResult {
+export interface AwsPreflightCheckResult {
   item: string;
   title: string;
   readyToCheck: boolean;
@@ -9,14 +9,14 @@ interface CheckResult {
   matchedEvidence: string[];
 }
 
-interface CanIResult {
+export interface CanIResult {
   verb?: string;
   resource?: string;
   namespace?: string;
   allowed?: boolean;
 }
 
-interface AwsStagingPreflightEvidence {
+export interface AwsStagingPreflightEvidence {
   generatedAt?: string;
   reviewedBy?: string;
   reviewSource?: string;
@@ -69,7 +69,7 @@ async function readInput() {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-function parseEvidence(input: string): AwsStagingPreflightEvidence {
+export function parseAwsStagingPreflightEvidence(input: string): AwsStagingPreflightEvidence {
   const parsed = JSON.parse(input) as unknown;
   if (!isRecord(parsed)) {
     throw new Error('AWS staging preflight evidence must be a JSON object.');
@@ -85,21 +85,21 @@ function hasList(value: unknown) {
   return Array.isArray(value) && value.length > 0 && value.every(hasText);
 }
 
-function ready(input: Omit<CheckResult, 'readyToCheck'>): CheckResult {
+function ready(input: Omit<AwsPreflightCheckResult, 'readyToCheck'>): AwsPreflightCheckResult {
   return {
     ...input,
     readyToCheck: true,
   };
 }
 
-function notReady(input: Omit<CheckResult, 'readyToCheck'>): CheckResult {
+function notReady(input: Omit<AwsPreflightCheckResult, 'readyToCheck'>): AwsPreflightCheckResult {
   return {
     ...input,
     readyToCheck: false,
   };
 }
 
-function verifyS304(evidence: AwsStagingPreflightEvidence): CheckResult {
+function verifyS304(evidence: AwsStagingPreflightEvidence): AwsPreflightCheckResult {
   const aws = evidence.aws ?? {};
   const requiredEvidence = [
     'reviewedBy and generatedAt identify the staging config review',
@@ -174,7 +174,7 @@ function canIAllows(canI: CanIResult[] | undefined, verb: string, resource: stri
   ));
 }
 
-function verifyS305(evidence: AwsStagingPreflightEvidence): CheckResult {
+function verifyS305(evidence: AwsStagingPreflightEvidence): AwsPreflightCheckResult {
   const awsNamespace = evidence.aws?.namespace;
   const credentials = evidence.kubernetesCredentials ?? {};
   const namespace = credentials.namespace ?? awsNamespace ?? '';
@@ -262,10 +262,16 @@ function verifyS305(evidence: AwsStagingPreflightEvidence): CheckResult {
       });
 }
 
+export function evaluateAwsStagingPreflightEvidence(
+  evidence: AwsStagingPreflightEvidence,
+): AwsPreflightCheckResult[] {
+  return [verifyS304(evidence), verifyS305(evidence)];
+}
+
 async function main() {
   const input = await readInput();
-  const evidence = parseEvidence(input);
-  const results = [verifyS304(evidence), verifyS305(evidence)];
+  const evidence = parseAwsStagingPreflightEvidence(input);
+  const results = evaluateAwsStagingPreflightEvidence(evidence);
   const readyItems = results.filter((result) => result.readyToCheck).map((result) => result.item);
   const notReadyItems = results.filter((result) => !result.readyToCheck).map((result) => result.item);
 
@@ -280,10 +286,12 @@ async function main() {
   }, null, 2));
 }
 
-main().catch((error) => {
-  console.error(JSON.stringify({
-    ok: false,
-    error: error instanceof Error ? error.message : String(error),
-  }, null, 2));
-  process.exit(1);
-});
+if (process.argv[1]?.match(/verify-aws-staging-preflight-evidence\.(ts|js)$/)) {
+  main().catch((error) => {
+    console.error(JSON.stringify({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    }, null, 2));
+    process.exit(1);
+  });
+}

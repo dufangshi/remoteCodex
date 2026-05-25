@@ -213,6 +213,15 @@ stored JSON:
 pnpm verify:staging-phase-one-evidence -- ./staging-phase-one-smoke.json
 ```
 
+To audit all remaining Phase 0 through Phase 6 boxes in one read-only report,
+combine the AWS preflight evidence and the phase-one staging smoke:
+
+```bash
+pnpm verify:phase-zero-six-evidence -- \
+  --aws-preflight ./aws-staging-preflight.json \
+  --staging-smoke ./staging-phase-one-smoke.json
+```
+
 The verifier is intentionally read-only. It reports which remaining staging
 checkboxes have enough evidence to check and which proof fields are missing. It
 does not update checklist files automatically.

@@ -1,19 +1,19 @@
 import { readFile } from 'node:fs/promises';
 
-interface SmokeStep {
+export interface SmokeStep {
   name: string;
   ok: boolean;
   details?: Record<string, unknown>;
 }
 
-interface SmokeReport {
+export interface SmokeReport {
   ok?: boolean;
   generatedAt?: string;
   controlPlaneBaseUrl?: string;
   steps?: SmokeStep[];
 }
 
-interface ChecklistResult {
+export interface ChecklistResult {
   item: string;
   title: string;
   readyToCheck: boolean;
@@ -57,7 +57,7 @@ async function readInput() {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-function parseReport(input: string): SmokeReport {
+export function parseStagingPhaseOneReport(input: string): SmokeReport {
   const parsed = JSON.parse(input) as unknown;
   if (!isRecord(parsed)) {
     throw new Error('Evidence input must be a JSON object.');
@@ -186,7 +186,7 @@ function verifyProvider(
   });
 }
 
-function evaluate(report: SmokeReport): ChecklistResult[] {
+export function evaluateStagingPhaseOneEvidence(report: SmokeReport): ChecklistResult[] {
   const steps = stepMap(report);
   const start = steps.get('start_sandbox');
   const readyStep = steps.get('sandbox_ready');
@@ -420,8 +420,8 @@ function evaluate(report: SmokeReport): ChecklistResult[] {
 
 async function main() {
   const input = await readInput();
-  const report = parseReport(input);
-  const results = evaluate(report);
+  const report = parseStagingPhaseOneReport(input);
+  const results = evaluateStagingPhaseOneEvidence(report);
   const readyItems = results.filter((result) => result.readyToCheck).map((result) => result.item);
   const notReadyItems = results.filter((result) => !result.readyToCheck).map((result) => result.item);
 
@@ -439,10 +439,12 @@ async function main() {
   // failure so operators can use this as an audit step before boxes are ready.
 }
 
-main().catch((error) => {
-  console.error(JSON.stringify({
-    ok: false,
-    error: error instanceof Error ? error.message : String(error),
-  }, null, 2));
-  process.exit(1);
-});
+if (process.argv[1]?.match(/verify-staging-phase-one-evidence\.(ts|js)$/)) {
+  main().catch((error) => {
+    console.error(JSON.stringify({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    }, null, 2));
+    process.exit(1);
+  });
+}

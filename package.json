@@ -50,6 +50,7 @@
     "collect:aws-staging-preflight-evidence": "tsx scripts/collect-aws-staging-preflight-evidence.ts",
     "verify:aws-staging-preflight-evidence": "tsx scripts/verify-aws-staging-preflight-evidence.ts",
     "verify:staging-phase-one-evidence": "tsx scripts/verify-staging-phase-one-evidence.ts",
+    "verify:phase-zero-six-evidence": "tsx scripts/verify-phase-zero-six-evidence.ts",
     "service:start": "node scripts/service-manager.mjs start",
     "service:stop": "node scripts/service-manager.mjs stop",
     "service:status": "node scripts/service-manager.mjs status",
