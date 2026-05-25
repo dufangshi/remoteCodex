@@ -226,6 +226,84 @@ with a compact stable summary of checklist readiness, env readiness, artifact
 scan status, and artifact paths. This manifest is derived from the verifier
 outputs and is not a replacement for the raw evidence JSON.
 
+### GitHub Actions Manual Evidence Run
+
+The same evidence bundle can be collected from GitHub Actions with the manual
+workflow:
+
+```text
+.github/workflows/phase-zero-six-staging-evidence.yml
+```
+
+Run it with `workflow_dispatch` against the `staging` GitHub Environment. Use
+`evidence_mode=aws-only` for S3.04/S3.05 preflight evidence, or
+`evidence_mode=full` for AWS, runtime, router, direct-worker, and provider
+smokes. The workflow does not commit checklist changes. It uploads the evidence
+bundle as an artifact so an operator can review `summary.json`,
+`operator-report.txt`, `release-review.json`, and the verifier JSON files
+before applying any checkbox changes.
+
+Required GitHub Environment variables:
+
+- `AWS_STAGING_REVIEWED_BY`
+- `AWS_STAGING_REGION`
+- `AWS_STAGING_ACCOUNT_ID`
+- `AWS_STAGING_EKS_CLUSTER_NAME`
+- `AWS_STAGING_K8S_NAMESPACE`
+- `AWS_STAGING_FARGATE_PROFILE_NAME`
+- `AWS_STAGING_K8S_SERVICE_ACCOUNT`
+- `AWS_STAGING_K8S_ROLE_ARN`
+- `AWS_STAGING_WORKER_IMAGE_REPOSITORY`
+- `AWS_STAGING_WORKER_IMAGE_TAG`
+- `AWS_STAGING_LOG_GROUP_NAMES`
+- `AWS_STAGING_VPC_ID`
+- `AWS_STAGING_SUBNET_IDS`
+- `AWS_STAGING_SECURITY_GROUP_IDS`
+- `AWS_STAGING_CONFIG_REVIEWED=true`
+- `AWS_STAGING_CREDENTIAL_REVIEW_PASSED=true`
+- `STAGING_CONTROL_PLANE_BASE_URL`
+- `STAGING_SMOKE_EMAIL`
+- `STAGING_SANDBOX_READY_TIMEOUT_MS`
+- `STAGING_SANDBOX_STOP_TIMEOUT_MS`
+- `STAGING_IDEMPOTENT_LIFECYCLE_SMOKE=1`
+- `STAGING_STOP_SANDBOX_AFTER_SMOKE=1`
+- `STAGING_DIRECT_WORKER_BASE_URL`, or the private-worker proof variables
+  `STAGING_DIRECT_WORKER_PRIVATE_REVIEWED_BY`,
+  `STAGING_DIRECT_WORKER_NETWORK_MODE=private`,
+  `STAGING_DIRECT_WORKER_INGRESS_POLICY=router-only`, and
+  `STAGING_DIRECT_WORKER_PRIVATE_PROOF`
+- `STAGING_CODEX_GATEWAY_SMOKE_COMMAND_JSON`
+- `STAGING_CLAUDE_GATEWAY_SMOKE_COMMAND_JSON`
+- `STAGING_OPENCODE_GATEWAY_SMOKE_COMMAND_JSON`
+
+Required GitHub Environment secrets:
+
+- `STAGING_PRODUCT_JWT`
+- `STAGING_ADMIN_JWT`
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `AWS_SESSION_TOKEN`, when temporary AWS credentials are used
+- `STAGING_KUBECONFIG` or `STAGING_KUBECONFIG_B64`
+- `STAGING_CODEX_GATEWAY_SMOKE_COMMAND_ENV_JSON`, when the Codex smoke command
+  needs secret env
+- `STAGING_CLAUDE_GATEWAY_SMOKE_COMMAND_ENV_JSON`, when the Claude Code smoke
+  command needs secret env
+- `STAGING_OPENCODE_GATEWAY_SMOKE_COMMAND_ENV_JSON`, when the OpenCode smoke
+  command needs secret env
+
+After downloading and reviewing the artifact locally, apply only proven boxes:
+
+```bash
+pnpm collect:phase-zero-six-evidence -- \
+  --from-output-dir <downloaded-artifact-dir> \
+  --output-dir ./.temp/phase-zero-six-evidence/reviewed-apply \
+  --apply-ready
+```
+
+For an AWS-only artifact, include `--skip-staging-smoke` in the apply command.
+Commit the checklist update only after the verifier reports the relevant items
+under `readyToCheck` and the artifact secret scan passes.
+
 ### Phase-One Runtime Smoke
 
 The scripted entry point for the phase-one Remote Codex staging path is:

@@ -149,6 +149,12 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   checklist state on matching branch pushes and pull requests. GitHub Actions
   run `26400569738` passed on `sandbox-worker-control-plane` at commit
   `2f4e4dd44caf8f1d025b1bd3a18136a39d24ba93`.
+- Phase 0-6 manual staging evidence workflow exists at
+  `.github/workflows/phase-zero-six-staging-evidence.yml`; it runs from
+  `workflow_dispatch` against the `staging` GitHub Environment, supports full
+  or AWS-only evidence collection, and uploads the generated evidence bundle
+  without committing checklist changes. Operators must review the artifact and
+  run the guarded apply flow before checking any remaining S3/R5/G6 boxes.
 - AWS staging preflight evidence verifier exists as
   `pnpm verify:aws-staging-preflight-evidence -- <evidence-json>` with template
   `docs/aws-staging-preflight-evidence-template.json`; it audits S3.04 and

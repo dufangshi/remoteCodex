@@ -12,6 +12,7 @@ on:
       - docs/staging-release-readiness.md
       - docs/status.md
       - .github/workflows/phase-zero-six-evidence.yml
+      - .github/workflows/phase-zero-six-staging-evidence.yml
   push:
     branches:
       - main
@@ -26,6 +27,7 @@ on:
       - docs/staging-release-readiness.md
       - docs/status.md
       - .github/workflows/phase-zero-six-evidence.yml
+      - .github/workflows/phase-zero-six-staging-evidence.yml
 
 permissions:
   contents: read
