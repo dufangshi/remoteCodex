@@ -62,7 +62,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 - Phase-one staging smoke runner exists as `pnpm smoke:staging-phase-one`; it
   can produce JSON evidence for lifecycle, route-token, router, direct-worker,
   idempotent lifecycle, admin runtime detail, and optional provider gateway
-  staging checks once real staging URLs and tokens are available.
+  staging checks once real staging URLs and tokens are available. If the smoke
+  aborts mid-run, it now prints a JSON stderr report with partial steps so
+  failed staging runs remain diagnosable.
 - Staging smoke evidence verifier exists as
   `pnpm verify:staging-phase-one-evidence -- <smoke-json>`; it audits the
   remaining Phase 3, Phase 5, and Phase 6 staging checkboxes without mutating

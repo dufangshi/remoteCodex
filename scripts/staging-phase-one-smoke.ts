@@ -17,6 +17,8 @@ const requiredEnv = [
   'STAGING_PRODUCT_JWT',
 ] as const;
 
+let partialSteps: SmokeStep[] = [];
+
 function envValue(name: string) {
   const value = process.env[name]?.trim();
   return value ? value : null;
@@ -381,6 +383,7 @@ async function main() {
   const productJwt = requireEnv('STAGING_PRODUCT_JWT');
   const suffix = `${Date.now()}`;
   const steps: SmokeStep[] = [];
+  partialSteps = steps;
 
   const bootstrap = await requestJson({
     path: '/api/me/bootstrap',
@@ -626,6 +629,9 @@ main().catch((error) => {
   console.error(JSON.stringify({
     ok: false,
     error: error instanceof Error ? error.message : String(error),
+    generatedAt: new Date().toISOString(),
+    controlPlaneBaseUrl: envValue('STAGING_CONTROL_PLANE_BASE_URL'),
+    steps: partialSteps,
   }, null, 2));
   process.exit(1);
 });

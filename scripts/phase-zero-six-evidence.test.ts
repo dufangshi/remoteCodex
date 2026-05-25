@@ -223,6 +223,84 @@ async function withFakeStagingServers(
   }
 }
 
+async function withFailingRouteTokenServer(
+  handler: (input: { controlPlaneBaseUrl: string }) => Promise<void>,
+) {
+  const state = {
+    sandboxStarted: false,
+  };
+  const controlPlane = http.createServer((request, response) => {
+    const url = new URL(request.url ?? '/', 'http://127.0.0.1');
+    function json(body: unknown, status = 200) {
+      response.writeHead(status, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(body));
+    }
+    if (request.method === 'POST' && url.pathname === '/api/me/bootstrap') {
+      json({
+        user: { id: 'user-smoke' },
+        sandbox: { id: 'sandbox-smoke', state: 'stopped' },
+      });
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/api/sandbox/start') {
+      state.sandboxStarted = true;
+      json({
+        sandbox: {
+          id: 'sandbox-smoke',
+          state: 'running',
+          image: 'remote-codex-worker:staging',
+          resourceProfile: 'fargate-small',
+          workerServiceName: 'worker-svc',
+          k8sNamespace: 'remote-codex-sandboxes',
+          k8sPodName: 'worker-pod',
+          startupProgress: 'ready',
+        },
+      });
+      return;
+    }
+    if (request.method === 'GET' && url.pathname === '/api/sandbox/health') {
+      json({
+        sandbox: {
+          id: 'sandbox-smoke',
+          state: state.sandboxStarted ? 'running' : 'stopped',
+          lastSeenAt: '2026-05-25T12:00:00.000Z',
+          statusReason: 'ready',
+          workerServiceName: 'worker-svc',
+          k8sNamespace: 'remote-codex-sandboxes',
+          k8sPodName: 'worker-pod',
+          startupProgress: 'ready',
+        },
+      });
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/api/projects') {
+      json({ project: { id: 'project-smoke' } });
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/api/projects/project-smoke/workspaces') {
+      json({ workspace: { id: 'workspace-smoke' } });
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/api/workspaces/workspace-smoke/sessions') {
+      json({ session: { id: 'session-smoke' } });
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/api/sandboxes/sandbox-smoke/route-token') {
+      json({ error: 'router_unavailable' }, 500);
+      return;
+    }
+    response.writeHead(404, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ error: 'not_found', path: url.pathname }));
+  });
+  const controlPlaneBaseUrl = await listen(controlPlane);
+
+  try {
+    await handler({ controlPlaneBaseUrl });
+  } finally {
+    await closeServer(controlPlane);
+  }
+}
+
 function listen(server: http.Server) {
   return new Promise<string>((resolve) => {
     server.listen(0, '127.0.0.1', () => {
@@ -917,6 +995,34 @@ describe('phase zero-six evidence tooling', () => {
       });
       expect(result.stdout).not.toContain('forbidden without worker token');
       expect(result.stdout).not.toContain('secret-product-jwt-value');
+    });
+  });
+
+  it('prints partial staging smoke steps when the smoke aborts mid-run', async () => {
+    await withFailingRouteTokenServer(async ({ controlPlaneBaseUrl }) => {
+      const result = await runScriptWithEnv(
+        'scripts/staging-phase-one-smoke.ts',
+        [],
+        {
+          STAGING_CONTROL_PLANE_BASE_URL: controlPlaneBaseUrl,
+          STAGING_PRODUCT_JWT: 'secret-product-jwt-value',
+        },
+      );
+      const parsed = JSON.parse(result.stderr);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout).toBe('');
+      expect(parsed.ok).toBe(false);
+      expect(parsed.error).toContain('expected 200, got 500');
+      expect(parsed.controlPlaneBaseUrl).toBe(controlPlaneBaseUrl);
+      expect(parsed.steps.map((step: { name: string }) => step.name)).toEqual([
+        'bootstrap_user_and_sandbox',
+        'start_sandbox',
+        'sandbox_health',
+        'sandbox_ready',
+        'create_project_workspace_session',
+      ]);
+      expect(result.stderr).not.toContain('secret-product-jwt-value');
     });
   });
 

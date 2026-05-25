@@ -252,6 +252,10 @@ STAGING_PROVIDER_SMOKE_TIMEOUT_MS=180000
 
 The script prints JSON evidence with step names and ids. Store the output with
 the staging release record before checking the corresponding staging boxes.
+If the smoke aborts before the final report, it prints a JSON error object to
+stderr with the partial `steps` collected before the failure. Store that stderr
+JSON with the failed staging run; it is not checklist-completion evidence, but
+it usually shows exactly which lifecycle, router, or provider step failed.
 Before changing any staging checkbox, run the evidence verifier against that
 stored JSON:
 

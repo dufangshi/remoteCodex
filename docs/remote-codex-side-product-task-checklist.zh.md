@@ -9,6 +9,34 @@
 任务对应英文清单中的某个 staging/AWS/provider-runtime checkbox，也必须等
 真实环境证据存在后再去英文清单里勾选。
 
+## 如何使用这份清单
+
+这份文档是 Remote Codex 侧的日常任务看板。推荐执行方式是一次只拿一个
+checkbox，或者一个非常紧密的小组，完成后立刻验证、勾选、提交。
+
+每个 checkbox 的标准流程：
+
+1. 先读该项的 `Done when`，确认真正要交付的行为。
+2. 再读 `Verify with`，确认需要本地测试、CI、staging smoke，还是外部服务证据。
+3. 只改 Remote Codex 侧需要改的代码、配置、部署 wiring 或文档。
+4. 跑对应验证；如果是 AWS、Railway、gateway、ElAgenteHarness、provider
+   runtime 或 billing 相关任务，必须拿到真实环境证据。
+5. 验证通过后，把对应 `[ ]` 改成 `[x]`。
+6. 在 commit message、`docs/status.md` 或对应 release/staging 文档里记录证据。
+7. 提交这一小步，避免把未来任务一起批量勾掉。
+
+任务类型判断：
+
+- 本地代码任务：本仓库测试、typecheck、local smoke 通过后可以勾选。
+- CI 任务：workflow 已存在且至少有一次对应 CI run 通过后可以勾选。
+- Staging 任务：真实 staging 环境 smoke 通过后才能勾选。
+- AWS/runtime 任务：真实 EKS/Fargate、ECR、S3、CloudWatch 或 Kubernetes evidence
+  存在后才能勾选。
+- 外部集成任务：只在 Remote Codex 侧 contract、client、fixture、mock、env
+  wiring、UI 或 usage importer 完成时勾选；外部服务内部实现不在本仓库勾选。
+- 生产 readiness 任务：必须有生产或准生产部署、回滚、监控、secret rotation
+  或 release gate 证据，不能只靠本地测试。
+
 ## 勾选规则
 
 - 只有代码、测试、部署配置、smoke evidence 或明确的架构文档已经落到本
@@ -33,6 +61,34 @@ Evidence:
 - Verification: <commands, smoke output, deploy record, or docs review>
 - Residual risk: <remaining unchecked risk>
 ```
+
+## Remote Codex 侧交付边界
+
+本仓库需要完成：
+
+- Web 产品入口：login、project/workspace/session UI、billing/usage/admin UI。
+- Control Plane API：auth、users、projects、workspaces、sessions、sandbox
+  registry、route token、quota、usage、audit、admin API。
+- Sandbox lifecycle：每个用户一个 active sandbox，启动/停止/观察 AWS runtime。
+- Sandbox Router 集成：浏览器经 route token 进入 router，router 再转发到 worker。
+- Worker-mode supervisor：sandbox 内的 API、workspace、shell、file/diff、
+  artifact、provider runtime、MCP、checkpoint sync。
+- Worker image bootstrap：Codex、Claude Code、OpenCode、MCP、gateway config、
+  harness env/config 都在镜像或启动流程里准备好。
+- LLM Gateway 集成：创建 scoped key、渲染 provider config、导入 usage、做 quota。
+- ElAgenteHarness 集成：生成 scoped `INACT_X_APP_KEY`、注入 worker、暴露 workflow
+  和 task/job/artifact 能力、导入 usage。
+- Deployment/ops：Railway、AWS EKS Fargate、ECR、S3/object storage、secrets、
+  logs、metrics、alerts、CI smoke。
+
+本仓库不需要完成：
+
+- LLM gateway 内部模型路由和真实 provider root-key 管理。
+- ElAgenteHarness 的 workflow 执行内部逻辑。
+- Modal、AWS Batch、Slurm、ORCA 或其它重计算 worker 内部实现。
+- sandbox 外执行用户命令。
+- 直接把 provider root key、harness admin key 或 gateway admin key 暴露给 sandbox
+  内 agent。
 
 ## 当前目标架构
 
