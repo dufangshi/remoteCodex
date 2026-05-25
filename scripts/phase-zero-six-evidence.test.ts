@@ -841,19 +841,30 @@ describe('phase zero-six evidence tooling', () => {
 
   it('stops bundle collection after env readiness failure unless forced', async () => {
     const dir = await tempDir();
-    const result = await runScript('scripts/run-phase-zero-six-staging-evidence.ts', [
-      '--output-dir',
-      dir,
-    ]);
+    const result = await runScriptWithEnv(
+      'scripts/run-phase-zero-six-staging-evidence.ts',
+      [
+        '--output-dir',
+        dir,
+      ],
+      {
+        STAGING_PRODUCT_JWT: 'secret-product-jwt-value',
+      },
+    );
     const parsed = JSON.parse(result.stdout);
     const files = await readdir(dir);
+    const template = await readFile(path.join(dir, 'phase-zero-six.env.sh'), 'utf8');
 
     expect(result.exitCode).toBe(1);
     expect(parsed.ok).toBe(false);
     expect(parsed.stoppedAfterEnvReadiness).toBe(true);
     expect(parsed.artifacts.envReadiness).toBe(path.join(dir, 'env-readiness.json'));
+    expect(parsed.artifacts.envTemplate).toBe(path.join(dir, 'phase-zero-six.env.sh'));
     expect(parsed.artifacts.awsPreflight).toBeNull();
-    expect(files.sort()).toEqual(['env-readiness.json', 'summary.json']);
+    expect(files.sort()).toEqual(['env-readiness.json', 'phase-zero-six.env.sh', 'summary.json']);
+    expect(template).toContain('Phase 0-6 staging evidence environment template');
+    expect(template).not.toContain('secret-product-jwt-value');
+    expect(result.stdout).not.toContain('secret-product-jwt-value');
   });
 
   it('force mode continues bundle collection after env readiness failure', async () => {

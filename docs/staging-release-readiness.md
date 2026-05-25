@@ -335,6 +335,17 @@ inputs are missing, it stops before running AWS, Kubernetes, control-plane, or
 provider smoke commands. This avoids accidental partial live runs with the
 wrong staging inputs.
 
+When it stops at env readiness, it still writes a private placeholder shell
+template into the output directory:
+
+- `phase-zero-six.env.sh` for the full AWS/runtime/router/provider smoke.
+- `aws-preflight.env.sh` when `--skip-staging-smoke` is used.
+
+Fill that file in outside Git, `source` it, rerun
+`pnpm verify:phase-zero-six-env-ready`, and then rerun the bundle. The template
+contains placeholders and non-secret examples only; it is not completion
+evidence.
+
 For diagnostic collection only, operators can override that guard:
 
 ```bash
@@ -349,6 +360,7 @@ also report those boxes under `readyToCheck`.
 The bundle runner writes:
 
 - `env-readiness.json`
+- `phase-zero-six.env.sh` or `aws-preflight.env.sh`
 - `aws-staging-preflight.json`
 - `aws-staging-preflight-verification.json`
 - `staging-phase-one-smoke.json`

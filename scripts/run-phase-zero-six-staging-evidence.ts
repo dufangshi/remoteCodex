@@ -158,6 +158,10 @@ async function main() {
   await mkdir(outputDir, { recursive: true });
 
   const envReadinessPath = path.join(outputDir, 'env-readiness.json');
+  const envTemplatePath = path.join(
+    outputDir,
+    hasFlag('--skip-staging-smoke') ? 'aws-preflight.env.sh' : 'phase-zero-six.env.sh',
+  );
   const awsPath = path.join(outputDir, 'aws-staging-preflight.json');
   const stagingPath = path.join(outputDir, 'staging-phase-one-smoke.json');
   const awsVerificationPath = path.join(outputDir, 'aws-staging-preflight-verification.json');
@@ -177,6 +181,8 @@ async function main() {
       'tsx',
       'scripts/verify-phase-zero-six-env-ready.ts',
       ...(hasFlag('--skip-staging-smoke') ? ['--skip-staging-smoke'] : []),
+      '--write-env-template',
+      envTemplatePath,
     ],
     outputPath: envReadinessPath,
   }));
@@ -194,6 +200,7 @@ async function main() {
       reason: 'Environment readiness failed. Fill missing env names or rerun with --force for diagnostic collection.',
       artifacts: {
         envReadiness: envReadinessPath,
+        envTemplate: envTemplatePath,
         awsPreflight: null,
         stagingSmoke: null,
         awsVerification: null,
@@ -296,6 +303,7 @@ async function main() {
     applySkippedReason,
     artifacts: {
       envReadiness: envReadinessPath,
+      envTemplate: envTemplatePath,
       awsPreflight: awsPath,
       stagingSmoke: hasFlag('--skip-staging-smoke') ? null : stagingPath,
       awsVerification: awsVerificationPath,
