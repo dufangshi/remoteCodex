@@ -123,6 +123,12 @@ milestone sections below remain the full backlog.
     rejects expired, wrong-issuer, and wrong-audience tokens.
   - Verify with `pnpm smoke:production-auth`.
 
+- [x] Add phase-one staging smoke runner.
+  - Done when operators have a versioned command that exercises control plane,
+    sandbox lifecycle, route token, router-to-worker, direct-worker-denial, and
+    optional provider gateway checks against real staging URLs.
+  - Verify with script review and `pnpm --filter @remote-codex/control-plane-api typecheck`.
+
 - [ ] Run staging sandbox lifecycle smoke.
   - Done when start, stop, restart, readiness, and idempotency have been tested
     against a real sandbox runtime.

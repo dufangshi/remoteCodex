@@ -94,6 +94,28 @@ The worker must not receive raw OpenAI, Anthropic, or other provider root keys.
 
 Run these checks before marking any staging checkbox complete:
 
+The scripted entry point for the phase-one Remote Codex staging path is:
+
+```bash
+STAGING_CONTROL_PLANE_BASE_URL=https://<control-plane-staging> \
+STAGING_PRODUCT_JWT=<jwt-for-test-user> \
+STAGING_DIRECT_WORKER_BASE_URL=https://<worker-endpoint-if-public> \
+STAGING_STOP_SANDBOX_AFTER_SMOKE=1 \
+pnpm smoke:staging-phase-one
+```
+
+Optional provider runtime commands can be attached when the worker/gateway path
+is ready:
+
+```bash
+STAGING_CODEX_GATEWAY_SMOKE_COMMAND="<command run by the operator>" \
+STAGING_CLAUDE_GATEWAY_SMOKE_COMMAND="<command run by the operator>" \
+STAGING_OPENCODE_GATEWAY_SMOKE_COMMAND="<command run by the operator>"
+```
+
+The script prints JSON evidence with step names and ids. Store the output with
+the staging release record before checking the corresponding staging boxes.
+
 - Auth smoke:
   - valid staging user token reaches `GET /api/me`;
   - expired token is rejected;

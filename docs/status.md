@@ -59,6 +59,10 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 - Local worker checkpoint smoke verifies that the worker sync client reaches the
   control-plane internal checkpoint endpoint and updates durable session
   `workerSessionId`, `status`, and `lastActivityAt`.
+- Phase-one staging smoke runner exists as `pnpm smoke:staging-phase-one`; it
+  can produce JSON evidence for lifecycle, route-token, router, direct-worker,
+  and optional provider gateway staging checks once real staging URLs and tokens
+  are available.
 - Worker mode disables host/provider management APIs that should not be exposed
   in sandbox runtime.
 - Route-token signing supports key ids and previous-key verification.
@@ -114,9 +118,11 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 
 ## Immediate Next Implementation Queue
 
-1. Add staging lifecycle smokes for start, stop, idempotent restart, and
+1. Run `pnpm smoke:staging-phase-one` against the real staging control plane and
+   worker runtime, then attach the JSON output to release evidence.
+2. Add staging lifecycle smokes for start, stop, idempotent restart, and
    readiness.
-2. Run staging provider-runtime gateway smokes for Codex, Claude Code, and
+3. Run staging provider-runtime gateway smokes for Codex, Claude Code, and
    OpenCode.
 
 ## Verification Commands
