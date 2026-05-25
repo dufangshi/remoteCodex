@@ -146,7 +146,7 @@ const session = {
   sandboxId: 'sandbox-1',
   workspaceId: 'workspace-1',
   provider: 'codex',
-  workerSessionId: null,
+  workerSessionId: 'worker-session-1',
   title: 'Plan calculation',
   status: 'active',
   lastActivityAt: null,
@@ -254,6 +254,7 @@ describe('ControlPlanePage', () => {
     let projectCreated = false;
     let workspaceCreated = false;
     let sessionCreated = false;
+    let currentSession = session;
     let sandboxRunning = false;
     MockWorkerWebSocket.instances = [];
     vi.stubGlobal('WebSocket', MockWorkerWebSocket);
@@ -321,12 +322,23 @@ describe('ControlPlanePage', () => {
         }
 
         if (path === '/api/workspaces/workspace-1/sessions' && !init?.method) {
-          return jsonResponse({ sessions: sessionCreated ? [session] : [] });
+          return jsonResponse({ sessions: sessionCreated ? [currentSession] : [] });
         }
 
         if (path === '/api/workspaces/workspace-1/sessions' && init?.method === 'POST') {
           sessionCreated = true;
-          return jsonResponse({ session });
+          currentSession = { ...session, status: 'active' };
+          return jsonResponse({ session: currentSession });
+        }
+
+        if (path === '/api/sessions/session-1/close' && init?.method === 'POST') {
+          currentSession = { ...currentSession, status: 'idle' };
+          return jsonResponse({ session: currentSession });
+        }
+
+        if (path === '/api/sessions/session-1/resume' && init?.method === 'POST') {
+          currentSession = { ...currentSession, status: 'active' };
+          return jsonResponse({ session: currentSession });
         }
 
         if (path === '/api/sandboxes/sandbox-1/route-token' && init?.method === 'POST') {
@@ -435,12 +447,44 @@ describe('ControlPlanePage', () => {
       'Bearer dev:dev-user',
     );
 
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Session finalized and disconnected.')).toBeInTheDocument();
+    });
+    expect(MockWorkerWebSocket.instances[0]?.readyState).toBe(MockWorkerWebSocket.CLOSED);
+    expect(screen.getByText(/codex \/ idle/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Session resumed.')).toBeInTheDocument();
+    });
+    expect(screen.getByText(/codex \/ active/i)).toBeInTheDocument();
+
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
 
     await waitFor(() => {
       expect(screen.getByText('stopped')).toBeInTheDocument();
     });
     expect(MockWorkerWebSocket.instances[0]?.readyState).toBe(MockWorkerWebSocket.CLOSED);
+
+    const closeCall = vi.mocked(fetch).mock.calls.find(
+      ([input]) => String(input) === `${baseUrl}/api/sessions/session-1/close`,
+    );
+    const resumeCall = vi.mocked(fetch).mock.calls.find(
+      ([input]) => String(input) === `${baseUrl}/api/sessions/session-1/resume`,
+    );
+    expect(closeCall?.[1]?.method).toBe('POST');
+    expect(resumeCall?.[1]?.method).toBe('POST');
+    expect(new Headers(closeCall?.[1]?.headers).get('Authorization')).toBe(
+      'Bearer dev:dev-user',
+    );
+    expect(new Headers(closeCall?.[1]?.headers).has('x-remote-codex-worker-token')).toBe(false);
+    expect(new Headers(resumeCall?.[1]?.headers).get('Authorization')).toBe(
+      'Bearer dev:dev-user',
+    );
+    expect(new Headers(resumeCall?.[1]?.headers).has('x-remote-codex-worker-token')).toBe(false);
 
     fireEvent.click(screen.getByRole('button', { name: 'Restart' }));
 

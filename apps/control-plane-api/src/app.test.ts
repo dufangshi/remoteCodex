@@ -118,6 +118,8 @@ describe('control plane api', () => {
       expect.arrayContaining([
         'req.headers.authorization',
         'req.headers["x-remote-codex-service-token"]',
+        'SANDBOX_WORKER_AUTH_TOKEN',
+        'sandboxWorkerAuthToken',
         'LLM_GATEWAY_ADMIN_TOKEN',
         'llmGatewayAdminToken',
         'gatewayKey.keyCiphertext',
@@ -1081,6 +1083,120 @@ describe('control plane api', () => {
     });
     expect(archivedSession.statusCode).toBe(200);
     expect(archivedSession.json().session.status).toBe('archived');
+  });
+
+  it('closes and resumes control-plane sessions through the worker session API', async () => {
+    const workerRequests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      workerRequests.push({ url: String(url), init });
+      return Response.json({
+        thread: {
+          id: 'worker-session-1',
+          isLoaded: String(url).endsWith('/resume'),
+        },
+      });
+    }) as typeof fetch;
+
+    try {
+      const app = buildControlPlaneApp({
+        env: {
+          ...testEnv('session-lifecycle-worker'),
+          SANDBOX_WORKER_AUTH_TOKEN: 'internal-worker-session-token',
+        },
+      });
+      apps.push(app);
+
+      const auth = { authorization: 'Bearer dev:session-owner' };
+      await app.inject({
+        method: 'POST',
+        url: '/api/me/bootstrap',
+        headers: auth,
+        payload: {
+          email: 'session-owner@example.com',
+        },
+      });
+
+      const projectResponse = await app.inject({
+        method: 'POST',
+        url: '/api/projects',
+        headers: auth,
+        payload: {
+          name: 'Lifecycle Project',
+          slug: 'lifecycle-project',
+        },
+      });
+      const workspaceResponse = await app.inject({
+        method: 'POST',
+        url: `/api/projects/${projectResponse.json().project.id}/workspaces`,
+        headers: auth,
+        payload: {
+          name: 'Lifecycle Workspace',
+          slug: 'lifecycle-workspace',
+        },
+      });
+      const sessionResponse = await app.inject({
+        method: 'POST',
+        url: `/api/workspaces/${workspaceResponse.json().workspace.id}/sessions`,
+        headers: auth,
+        payload: {
+          provider: 'codex',
+          title: 'Lifecycle Session',
+        },
+      });
+      const session = sessionResponse.json().session;
+
+      await app.inject({
+        method: 'POST',
+        url: '/api/sandbox/start',
+        headers: auth,
+      });
+      await app.inject({
+        method: 'PATCH',
+        url: `/api/sessions/${session.id}`,
+        headers: auth,
+        payload: {
+          status: 'active',
+          workerSessionId: 'worker-session-1',
+        },
+      });
+
+      const close = await app.inject({
+        method: 'POST',
+        url: `/api/sessions/${session.id}/close`,
+        headers: auth,
+      });
+      expect(close.statusCode).toBe(200);
+      expect(close.json().session).toMatchObject({
+        id: session.id,
+        status: 'idle',
+        workerSessionId: 'worker-session-1',
+      });
+
+      const resume = await app.inject({
+        method: 'POST',
+        url: `/api/sessions/${session.id}/resume`,
+        headers: auth,
+      });
+      expect(resume.statusCode).toBe(200);
+      expect(resume.json().session).toMatchObject({
+        id: session.id,
+        status: 'active',
+        workerSessionId: 'worker-session-1',
+      });
+
+      expect(workerRequests.map((request) => request.url)).toEqual([
+        `http://sandbox-worker-${app.services.repository.getSandboxByUserId(close.json().session.userId)!.id}.remote-codex-sandboxes.svc.cluster.local:8787/api/threads/worker-session-1/disconnect`,
+        `http://sandbox-worker-${app.services.repository.getSandboxByUserId(close.json().session.userId)!.id}.remote-codex-sandboxes.svc.cluster.local:8787/api/threads/worker-session-1/resume`,
+      ]);
+      for (const request of workerRequests) {
+        const headers = new Headers(request.init?.headers);
+        expect(headers.get('x-remote-codex-worker-token')).toBe('internal-worker-session-token');
+        expect(headers.get('authorization')).toBeNull();
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it('paginates project, workspace, and session lists', async () => {

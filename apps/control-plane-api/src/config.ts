@@ -19,6 +19,7 @@ const envSchema = z.object({
   SANDBOX_DEFAULT_RESOURCE_PROFILE: z.enum(['small', 'standard', 'large']).optional(),
   SANDBOX_S3_PREFIX_BASE: z.string().min(1).optional(),
   SANDBOX_WORKER_INTERNAL_PORT: z.coerce.number().int().positive().optional(),
+  SANDBOX_WORKER_AUTH_TOKEN: z.string().min(1).optional(),
   CONTROL_PLANE_INTERNAL_SERVICE_TOKEN: z.string().min(16).optional(),
   LLM_GATEWAY_BASE_URL: z.string().url().optional(),
   LLM_GATEWAY_PROVIDER: z.string().trim().min(1).optional(),
@@ -52,6 +53,7 @@ export interface ControlPlaneConfig {
   sandboxDefaultResourceProfile: 'small' | 'standard' | 'large';
   sandboxS3PrefixBase: string;
   sandboxWorkerInternalPort: number;
+  sandboxWorkerAuthToken: string | null;
   internalServiceToken: string | null;
   llmGatewayBaseUrl: string | null;
   llmGatewayProvider: string;
@@ -153,6 +155,7 @@ export function loadControlPlaneConfig(
     sandboxS3PrefixBase:
       parsed.SANDBOX_S3_PREFIX_BASE ?? 's3://remote-codex-sandboxes/dev',
     sandboxWorkerInternalPort: parsed.SANDBOX_WORKER_INTERNAL_PORT ?? 8787,
+    sandboxWorkerAuthToken: parsed.SANDBOX_WORKER_AUTH_TOKEN ?? null,
     internalServiceToken: parsed.CONTROL_PLANE_INTERNAL_SERVICE_TOKEN ?? null,
     llmGatewayBaseUrl: parsed.LLM_GATEWAY_BASE_URL ?? null,
     llmGatewayProvider: parsed.LLM_GATEWAY_PROVIDER ?? 'sub2api',

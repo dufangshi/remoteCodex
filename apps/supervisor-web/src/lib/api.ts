@@ -442,6 +442,26 @@ export function createControlPlaneSession(
   );
 }
 
+export function closeControlPlaneSession(auth: ControlPlaneAuth, sessionId: string) {
+  return controlPlaneRequest<{ session: ControlPlaneSession }>(
+    auth,
+    `/api/sessions/${encodeURIComponent(sessionId)}/close`,
+    {
+      method: 'POST',
+    },
+  );
+}
+
+export function resumeControlPlaneSession(auth: ControlPlaneAuth, sessionId: string) {
+  return controlPlaneRequest<{ session: ControlPlaneSession }>(
+    auth,
+    `/api/sessions/${encodeURIComponent(sessionId)}/resume`,
+    {
+      method: 'POST',
+    },
+  );
+}
+
 export function startControlPlaneSandbox(auth: ControlPlaneAuth) {
   return controlPlaneRequest<{ sandbox: ControlPlaneSandbox }>(auth, '/api/sandbox/start', {
     method: 'POST',

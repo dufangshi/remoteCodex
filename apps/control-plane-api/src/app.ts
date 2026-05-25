@@ -58,6 +58,8 @@ export const CONTROL_PLANE_LOG_REDACTION_PATHS = [
   'req.headers.cookie',
   'req.headers["x-remote-codex-service-token"]',
   'res.headers["set-cookie"]',
+  'SANDBOX_WORKER_AUTH_TOKEN',
+  'sandboxWorkerAuthToken',
   'LLM_GATEWAY_ADMIN_TOKEN',
   'llmGatewayAdminToken',
   'gatewayKey.keyCiphertext',
@@ -315,6 +317,85 @@ function workerBaseUrlForSandbox(app: FastifyInstance, sandbox: {
     return `http://${sandbox.workerServiceName}.${sandbox.k8sNamespace}.svc.cluster.local:${app.services.config.sandboxWorkerInternalPort}`;
   }
   return `http://${sandbox.workerServiceName}:${app.services.config.sandboxWorkerInternalPort}`;
+}
+
+async function sendWorkerSessionLifecycleRequest(
+  app: FastifyInstance,
+  input: {
+    sandbox: {
+      id: string;
+      state: string;
+      k8sNamespace: string | null;
+      workerServiceName: string | null;
+    };
+    workerSessionId: string | null;
+    action: 'disconnect' | 'resume';
+  },
+) {
+  if (input.sandbox.state !== 'running') {
+    throw new HttpError(
+      409,
+      'sandbox_not_running',
+      'Sandbox must be running before changing worker session state.',
+    );
+  }
+  if (!input.workerSessionId) {
+    throw new HttpError(
+      409,
+      'worker_session_unavailable',
+      'Session does not have a worker session id yet.',
+    );
+  }
+  if (!app.services.config.sandboxWorkerAuthToken) {
+    throw new HttpError(
+      503,
+      'worker_session_unavailable',
+      'Worker session control is not configured.',
+    );
+  }
+
+  const workerBaseUrl = workerBaseUrlForSandbox(app, input.sandbox);
+  if (!workerBaseUrl) {
+    throw new HttpError(
+      409,
+      'worker_session_unavailable',
+      'Sandbox worker endpoint is unavailable.',
+    );
+  }
+
+  const response = await fetch(
+    `${workerBaseUrl.replace(/\/+$/, '')}/api/threads/${encodeURIComponent(input.workerSessionId)}/${input.action}`,
+    {
+      method: 'POST',
+      headers: {
+        'x-remote-codex-worker-token': app.services.config.sandboxWorkerAuthToken,
+      },
+    },
+  ).catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new HttpError(
+      503,
+      'worker_session_unavailable',
+      `Worker session request failed: ${message}`,
+    );
+  });
+
+  if (!response.ok) {
+    let message = `Worker session ${input.action} failed.`;
+    try {
+      const payload = (await response.json()) as { message?: unknown };
+      if (typeof payload.message === 'string') {
+        message = payload.message;
+      }
+    } catch {
+      // Keep the stable fallback message.
+    }
+    throw new HttpError(
+      response.status === 404 ? 409 : 502,
+      'worker_session_unavailable',
+      message,
+    );
+  }
 }
 
 function quotaExceededError(denial: QuotaDenial) {
@@ -1299,6 +1380,48 @@ export function buildControlPlaneApp(
     }
     return {
       session: repository.updateSession(session.id, updateSessionSchema.parse(request.body)),
+    };
+  });
+
+  app.post('/api/sessions/:sessionId/close', async (request) => {
+    const user = requireUser(app, request);
+    const params = z.object({ sessionId: z.string().uuid() }).parse(request.params);
+    const session = repository.getSessionById(params.sessionId);
+    if (!session || session.userId !== user.id) {
+      throw new HttpError(404, 'not_found', 'Session not found.');
+    }
+    const sandbox = repository.getSandboxById(session.sandboxId);
+    if (!sandbox || sandbox.userId !== user.id) {
+      throw new HttpError(404, 'not_found', 'Sandbox not found.');
+    }
+    await sendWorkerSessionLifecycleRequest(app, {
+      sandbox,
+      workerSessionId: session.workerSessionId,
+      action: 'disconnect',
+    });
+    return {
+      session: repository.updateSession(session.id, { status: 'idle' }),
+    };
+  });
+
+  app.post('/api/sessions/:sessionId/resume', async (request) => {
+    const user = requireUser(app, request);
+    const params = z.object({ sessionId: z.string().uuid() }).parse(request.params);
+    const session = repository.getSessionById(params.sessionId);
+    if (!session || session.userId !== user.id) {
+      throw new HttpError(404, 'not_found', 'Session not found.');
+    }
+    const sandbox = repository.getSandboxById(session.sandboxId);
+    if (!sandbox || sandbox.userId !== user.id) {
+      throw new HttpError(404, 'not_found', 'Sandbox not found.');
+    }
+    await sendWorkerSessionLifecycleRequest(app, {
+      sandbox,
+      workerSessionId: session.workerSessionId,
+      action: 'resume',
+    });
+    return {
+      session: repository.updateSession(session.id, { status: 'active' }),
     };
   });
 

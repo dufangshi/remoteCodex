@@ -316,12 +316,12 @@ runtime state.
     and last activity.
   - Verify with `pnpm smoke:local-worker-checkpoint`.
 
-- [ ] P2.15 Add session close/finalize flow.
+- [x] P2.15 Add session close/finalize flow.
   - Done when user close asks the worker to finalize state and updates durable
     session status.
   - Verify with API, worker, and frontend tests.
 
-- [ ] P2.16 Add session resume flow.
+- [x] P2.16 Add session resume flow.
   - Done when reopening an existing session restores worker context or clearly
     reports unavailable worker state.
   - Verify with local restart/resume smoke.
@@ -331,24 +331,35 @@ runtime state.
 - Files: `packages/db/src/schema.ts`, `docs/control-plane-session-worker-contract.md`,
   `apps/control-plane-api/src/app.ts`, `apps/control-plane-api/src/repository.ts`,
   `apps/control-plane-api/src/app.test.ts`,
+  `apps/supervisor-api/src/routes/threads.ts`,
+  `apps/supervisor-api/src/thread-session-lifecycle-coordinator.ts`,
+  `apps/supervisor-api/src/app.test.ts`,
+  `apps/supervisor-web/src/lib/api.ts`,
+  `apps/supervisor-web/src/lib/api.test.ts`,
+  `apps/supervisor-web/src/pages/ControlPlanePage.tsx`,
   `apps/supervisor-web/src/pages/ControlPlanePage.test.tsx`,
   `scripts/local-worker-checkpoint-smoke.ts`.
 - Verification:
   - `pnpm --filter @remote-codex/control-plane-api test -- --runInBand`
-    passed: 4 files, 62 tests, covering project/workspace/session CRUD,
-    ownership, pagination/filtering, route-token scope checks, and internal
-    checkpoint denial/success.
+    passed: 4 files, 63 tests, covering project/workspace/session CRUD,
+    ownership, pagination/filtering, route-token scope checks, internal
+    checkpoint denial/success, and control-plane close/resume calls to worker
+    session APIs without forwarding browser authorization.
   - `pnpm --filter @remote-codex/control-plane-api typecheck` passed.
   - `pnpm --filter @remote-codex/supervisor-web test -- ControlPlanePage`
     passed: 16 files, 250 tests, covering project/workspace/session UI,
-    route-token acquisition, WebSocket open, token refresh, and storage checks.
+    route-token acquisition, WebSocket open, token refresh, session close,
+    session resume, and storage checks.
   - `pnpm --filter @remote-codex/supervisor-web typecheck` passed.
   - `pnpm smoke:local-worker-checkpoint` passed and proved the worker checkpoint
     updated durable `workerSessionId`, `status`, and `lastActivityAt`.
   - `pnpm --filter @remote-codex/supervisor-api test -- worker-control-plane-sync`
     passed: 9 files, 160 tests.
-- Residual risk: user-facing session close/finalize and restart/resume behavior
-  remain unchecked until a dedicated local or staging smoke proves them.
+  - Existing supervisor-api tests cover `/api/threads/:id/disconnect` and
+    `/api/threads/:id/resume`, including disconnected-thread reload behavior.
+- Residual risk: Phase 2 is complete locally. Staging still needs the broader
+  phase-one route-token/router/worker smoke before production release, tracked
+  under Phase 5 and the staging release gates.
 
 ## Phase 3: Sandbox Lifecycle And AWS Runtime
 

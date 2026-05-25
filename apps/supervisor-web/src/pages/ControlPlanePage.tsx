@@ -3,6 +3,7 @@ import { FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 
 import type { AgentBackendIdDto } from '../../../../packages/shared/src/index';
 import {
   bootstrapControlPlaneUser,
+  closeControlPlaneSession,
   createControlPlaneProject,
   createControlPlaneRouteToken,
   createControlPlaneSession,
@@ -16,6 +17,7 @@ import {
   fetchControlPlaneSessions,
   fetchControlPlaneWorkspaces,
   restartControlPlaneSandbox,
+  resumeControlPlaneSession,
   startControlPlaneSandbox,
   stopControlPlaneSandbox,
   updateControlPlaneMe,
@@ -692,6 +694,42 @@ export function ControlPlanePage() {
     await handleRouteToken();
   }
 
+  async function handleCloseSession(session: ControlPlaneSession) {
+    if (!auth) {
+      return;
+    }
+    await run('Close session', async () => {
+      const result = await closeControlPlaneSession(auth, session.id);
+      setSessions((current) =>
+        current.map((item) => (item.id === result.session.id ? result.session : item)),
+      );
+      setSelectedSessionId(result.session.id);
+      setRouteToken(null);
+      setWorkerSocketUrl(null);
+      closeWorkerSocket();
+      clearRouteTokenRefreshTimer();
+      setWorkerConnectionState('idle');
+      setMessage('Session finalized and disconnected.');
+    });
+  }
+
+  async function handleResumeSession(session: ControlPlaneSession) {
+    if (!auth) {
+      return;
+    }
+    await run('Resume session', async () => {
+      const result = await resumeControlPlaneSession(auth, session.id);
+      setSessions((current) =>
+        current.map((item) => (item.id === result.session.id ? result.session : item)),
+      );
+      setSelectedSessionId(result.session.id);
+      if (sandbox?.state === 'running') {
+        await handleRouteToken();
+      }
+      setMessage('Session resumed.');
+    });
+  }
+
   return (
     <div className="mx-auto grid max-w-6xl gap-5 py-2 text-[var(--theme-fg)]">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[var(--theme-border)] pb-5">
@@ -1154,21 +1192,39 @@ export function ControlPlanePage() {
             <p className="text-sm text-[var(--theme-fg-muted)]">No sessions for this workspace.</p>
           ) : (
             sessions.map((session) => (
-              <button
+              <div
                 key={session.id}
-                type="button"
-                onClick={() => void handleOpenSession(session)}
-                className={`rounded-[0.85rem] border px-3 py-2 text-left text-sm transition ${
+                className={`grid gap-2 rounded-[0.85rem] border px-3 py-2 text-sm transition md:grid-cols-[1fr_auto] ${
                   selectedSessionId === session.id
                     ? 'border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)] text-[var(--theme-accent-strong)]'
                     : 'border-[var(--theme-border)] bg-[var(--theme-surface)] text-[var(--theme-fg)] hover:bg-[var(--theme-hover)]'
                 }`}
               >
-                <span className="font-medium">{session.title}</span>
-                <span className="ml-2 text-xs text-[var(--theme-fg-muted)]">
-                  {session.provider} / {session.status}
-                </span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => void handleOpenSession(session)}
+                  className="min-w-0 text-left"
+                >
+                  <span className="font-medium">{session.title}</span>
+                  <span className="ml-2 text-xs text-[var(--theme-fg-muted)]">
+                    {session.provider} / {session.status}
+                  </span>
+                </button>
+                <div className="flex flex-wrap gap-2 md:justify-end">
+                  <ActionButton
+                    onClick={() => void handleResumeSession(session)}
+                    disabled={!auth || !session.workerSessionId || sandbox?.state !== 'running'}
+                  >
+                    Resume
+                  </ActionButton>
+                  <ActionButton
+                    onClick={() => void handleCloseSession(session)}
+                    disabled={!auth || !session.workerSessionId || sandbox?.state !== 'running'}
+                  >
+                    Close
+                  </ActionButton>
+                </div>
+              </div>
             ))
           )}
         </div>

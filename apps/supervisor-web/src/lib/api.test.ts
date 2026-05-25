@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   applyProviderHostConfigArchive,
   bootstrapControlPlaneUser,
+  closeControlPlaneSession,
   createThreadShell,
   createProviderHostConfigArchive,
   createControlPlaneWorkspace,
@@ -16,6 +17,7 @@ import {
   buildAndRestartService,
   renameProviderHostConfigArchive,
   restartAgentBackend,
+  resumeControlPlaneSession,
   resumeThread,
   sendThreadPrompt,
   terminateShell,
@@ -164,6 +166,8 @@ describe('api request helper', () => {
       name: 'Molecule study',
       slug: 'molecule-study',
     });
+    await closeControlPlaneSession(auth, 'session-1');
+    await resumeControlPlaneSession(auth, 'session-1');
 
     const calls = vi.mocked(fetch).mock.calls;
     expect(calls[0]?.[0]).toBe('https://control.example.test/api/me/bootstrap');
@@ -185,5 +189,15 @@ describe('api request helper', () => {
     });
     expect(new Headers(calls[1]?.[1]?.headers).get('Authorization')).toBe('Bearer dev:user-1');
     expect(new Headers(calls[1]?.[1]?.headers).get('Content-Type')).toBe('application/json');
+
+    expect(calls[2]?.[0]).toBe('https://control.example.test/api/sessions/session-1/close');
+    expect(calls[2]?.[1]?.method).toBe('POST');
+    expect(new Headers(calls[2]?.[1]?.headers).get('Authorization')).toBe('Bearer dev:user-1');
+    expect(new Headers(calls[2]?.[1]?.headers).has('x-remote-codex-worker-token')).toBe(false);
+
+    expect(calls[3]?.[0]).toBe('https://control.example.test/api/sessions/session-1/resume');
+    expect(calls[3]?.[1]?.method).toBe('POST');
+    expect(new Headers(calls[3]?.[1]?.headers).get('Authorization')).toBe('Bearer dev:user-1');
+    expect(new Headers(calls[3]?.[1]?.headers).has('x-remote-codex-worker-token')).toBe(false);
   });
 });

@@ -99,9 +99,12 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   control-plane panel; opening a session now gets an in-memory route token,
   opens a sandbox-router WebSocket, reconnects after token refresh, and shows
   sandbox-offline UI when the router socket fails.
-- `docs/remote-codex-side-detailed-checklist.md` Phase 2 is complete through
-  worker checkpoint sync; user-facing session close/finalize and restart/resume
-  remain unchecked.
+- `docs/remote-codex-side-detailed-checklist.md` Phase 2 is complete locally:
+  worker checkpoint sync updates durable session state, product session close
+  calls the worker disconnect API and marks the durable session idle, and
+  product session resume calls the worker resume API and marks the durable
+  session active. Staging route-token/router/worker proof remains tracked under
+  Phase 5 and release gates.
 - Browser-to-worker route-token connection flow; route token issuance, refresh,
   browser WebSocket connection, and reconnect are in place, while staging router
   smoke checks remain open.
