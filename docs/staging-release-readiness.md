@@ -218,8 +218,8 @@ combine the AWS preflight evidence and the phase-one staging smoke:
 
 ```bash
 pnpm verify:phase-zero-six-evidence -- \
-  --aws-preflight ./aws-staging-preflight.json \
-  --staging-smoke ./staging-phase-one-smoke.json
+  --aws-preflight ./.temp/phase-zero-six-evidence/<run-id>/aws-staging-preflight.json \
+  --staging-smoke ./.temp/phase-zero-six-evidence/<run-id>/staging-phase-one-smoke.json
 ```
 
 After the aggregate report shows one or more remaining Phase 0 through Phase 6
@@ -228,8 +228,8 @@ items in one guarded step:
 
 ```bash
 pnpm verify:phase-zero-six-evidence -- \
-  --aws-preflight ./aws-staging-preflight.json \
-  --staging-smoke ./staging-phase-one-smoke.json \
+  --aws-preflight ./.temp/phase-zero-six-evidence/<run-id>/aws-staging-preflight.json \
+  --staging-smoke ./.temp/phase-zero-six-evidence/<run-id>/staging-phase-one-smoke.json \
   --apply-ready
 ```
 
@@ -252,7 +252,7 @@ runner to collect and verify the Phase 0 through Phase 6 evidence in one
 directory:
 
 ```bash
-pnpm collect:phase-zero-six-evidence -- --output-dir ./artifacts/phase-zero-six-evidence/<run-id>
+pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id>
 ```
 
 The bundle runner writes:
@@ -275,12 +275,18 @@ with the guarded checklist update:
 
 ```bash
 pnpm collect:phase-zero-six-evidence -- \
-  --output-dir ./artifacts/phase-zero-six-evidence/<run-id>-apply \
+  --output-dir ./.temp/phase-zero-six-evidence/<run-id>-apply \
   --apply-ready
 ```
 
 For AWS-only preflight work, such as checking only S3.04/S3.05 before the
 runtime smoke is available, pass `--skip-staging-smoke`.
+
+The recommended `.temp/phase-zero-six-evidence/` output location and legacy
+`artifacts/phase-zero-six-evidence/` location are ignored by Git. If an
+operator intentionally stores evidence elsewhere, run
+`pnpm verify:phase-zero-six-artifacts-safe -- --dir <artifact-dir>` and confirm
+the path is excluded from commits before saving raw staging JSON.
 
 The important step-to-checkbox mapping is:
 

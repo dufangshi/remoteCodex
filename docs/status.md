@@ -75,10 +75,11 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   only ready checkboxes and refuses to edit when no boxes are ready or any
   checked box is contradicted.
 - Phase 0-6 staging evidence bundle runner exists as
-  `pnpm collect:phase-zero-six-evidence -- --output-dir <artifact-dir>`; it
-  collects AWS preflight evidence, runs the phase-one staging smoke, runs all
-  evidence verifiers, scans generated JSON artifacts for obvious secret-like
-  leakage, and writes a summary JSON for the staging release record.
+  `pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id>`;
+  it collects AWS preflight evidence, runs the phase-one staging smoke, runs
+  all evidence verifiers, scans generated JSON artifacts for obvious
+  secret-like leakage, and writes a summary JSON for the staging release
+  record. The recommended `.temp` output path is ignored by Git.
 - Phase 0-6 evidence tooling has CLI-level tests via
   `pnpm test:phase-zero-six-evidence`, covering guarded checklist application
   and obvious artifact secret leakage detection.
@@ -214,7 +215,7 @@ gateway, ElAgenteHarness, or chemistry compute workers.
    same command with `--apply-ready`, then review and commit the checklist
    changes with the evidence artifacts referenced in the commit message.
 6. Prefer the bundle runner once staging env is complete:
-   `pnpm collect:phase-zero-six-evidence -- --output-dir <artifact-dir>`,
+   `pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id>`,
    adding `--apply-ready` only after the first read-only bundle has been
    reviewed.
 7. Capture staging AWS/EKS proof for sandbox start, readiness, stop, and
