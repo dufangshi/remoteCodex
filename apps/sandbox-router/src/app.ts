@@ -1,4 +1,6 @@
-import Fastify, { FastifyInstance, FastifyRequest } from 'fastify';
+import { Readable } from 'node:stream';
+
+import Fastify, { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z, ZodError } from 'zod';
 
 import type { RouteTokenPayload } from '../../../packages/shared/src/index';
@@ -299,6 +301,19 @@ function enforceRateLimit(request: FastifyRequest, payload: RouteTokenPayload) {
   );
 }
 
+function isEventStreamResponse(response: Response) {
+  return response.headers.get('content-type')?.toLowerCase().includes('text/event-stream') ?? false;
+}
+
+function copyResponseHeaders(response: Response, reply: FastifyReply) {
+  response.headers.forEach((value, name) => {
+    if (name.toLowerCase() === 'content-length') {
+      return;
+    }
+    reply.header(name, value);
+  });
+}
+
 async function proxyRequest(request: FastifyRequest) {
   const { payload, path } = verifyRouteTokenForRequest(request);
   try {
@@ -436,12 +451,10 @@ export function buildSandboxRouterApp(options: {
   app.all('/api/sandboxes/:sandboxId/*', async (request, reply) => {
     const response = await proxyRequest(request);
     reply.status(response.status);
-    response.headers.forEach((value, name) => {
-      if (name.toLowerCase() === 'content-length') {
-        return;
-      }
-      reply.header(name, value);
-    });
+    copyResponseHeaders(response, reply);
+    if (isEventStreamResponse(response) && response.body) {
+      return reply.send(Readable.fromWeb(response.body as unknown as Parameters<typeof Readable.fromWeb>[0]));
+    }
     return reply.send(Buffer.from(await response.arrayBuffer()));
   });
 

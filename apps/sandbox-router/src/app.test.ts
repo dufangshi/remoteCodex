@@ -245,6 +245,39 @@ describe('sandbox router', () => {
     expect(workerUrl.toString()).toBe('http://worker.svc.cluster.local:8787/api/worker/metadata');
   });
 
+  it('streams event-stream worker responses without buffering the whole body first', async () => {
+    vi.stubGlobal('fetch', fetchMock);
+    const arrayBuffer = vi.fn();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: first\n\n'));
+        controller.enqueue(new TextEncoder().encode('data: second\n\n'));
+        controller.close();
+      },
+    });
+    fetchMock.mockResolvedValue({
+      status: 200,
+      headers: new Headers({
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-cache',
+      }),
+      body: stream,
+      arrayBuffer,
+    });
+    const app = buildApp();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/sandboxes/sandbox_1/api/events?token=${encodeURIComponent(routeToken())}`,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain('text/event-stream');
+    expect(response.headers['content-length']).toBeUndefined();
+    expect(response.body).toBe('data: first\n\ndata: second\n\n');
+    expect(arrayBuffer).not.toHaveBeenCalled();
+  });
+
   it('rejects proxied request bodies that exceed the configured byte limit', async () => {
     vi.stubGlobal('fetch', fetchMock);
     const app = buildApp(undefined, {

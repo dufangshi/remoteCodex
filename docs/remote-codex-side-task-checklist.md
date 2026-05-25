@@ -363,7 +363,7 @@ Verification:
   service.
 - [x] Add router package if it lives in this repository.
 - [x] Implement HTTP proxy.
-- [ ] Implement SSE proxy.
+- [x] Implement SSE proxy.
 - [ ] Implement WebSocket proxy.
 - [x] Verify route tokens in the router.
 - [x] Resolve sandbox endpoint from control plane or registry.
@@ -1036,7 +1036,7 @@ token.
   repository.
 - [x] Add router package if it lives in this repository.
 - [x] Implement HTTP proxy.
-- [ ] Implement SSE proxy.
+- [x] Implement SSE proxy.
 - [ ] Implement WebSocket proxy.
 - [x] Verify route tokens.
 - [x] Resolve sandbox endpoint from the control plane or sandbox registry.
