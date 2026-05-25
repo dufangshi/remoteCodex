@@ -239,8 +239,8 @@ function nextSteps(input: {
     fillEnvTemplate: `Fill ${input.envTemplatePath} in a private operator shell; do not commit filled values.`,
     sourceEnvTemplate: `source ${input.envTemplatePath}`,
     verifyEnvReadiness: input.skippedStagingSmoke
-      ? 'pnpm verify:phase-zero-six-env-ready -- --skip-staging-smoke'
-      : 'pnpm verify:phase-zero-six-env-ready',
+      ? 'pnpm phase-zero-six:env:aws'
+      : 'pnpm phase-zero-six:env',
     rerunBundle: [
       'pnpm collect:phase-zero-six-evidence --',
       ...reuseArgs,

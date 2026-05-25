@@ -766,7 +766,7 @@ describe('phase zero-six evidence tooling', () => {
             'STAGING_IDEMPOTENT_LIFECYCLE_SMOKE=true',
             'STAGING_STOP_SANDBOX_AFTER_SMOKE=true',
           ]),
-          nextEvidenceCommand: 'pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id>',
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
         }),
         expect.objectContaining({
           item: 'G6.11',
@@ -776,7 +776,7 @@ describe('phase zero-six evidence tooling', () => {
       ]),
     );
     expect(parsed.nextCommands.collectEvidence).toBe(
-      'pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id>',
+      'pnpm phase-zero-six:collect',
     );
     expect(parsed.missingEnvExportTemplate).toEqual(
       expect.arrayContaining([
@@ -958,10 +958,10 @@ describe('phase zero-six evidence tooling', () => {
     expect(parsed.groups.map((group: { id: string }) => group.id)).toEqual(['aws-preflight']);
     expect(parsed.itemReadiness.map((entry: { item: string }) => entry.item)).toEqual(['S3.04', 'S3.05']);
     expect(parsed.nextCommands.collectEvidence).toBe(
-      'pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id> --skip-staging-smoke',
+      'pnpm phase-zero-six:collect:aws',
     );
     expect(parsed.nextCommands.writeEnvTemplate).toBe(
-      'pnpm verify:phase-zero-six-env-ready -- --skip-staging-smoke --write-env-template ./.temp/phase-zero-six-evidence/aws-preflight.env.sh',
+      'pnpm phase-zero-six:template:aws',
     );
   });
 
@@ -1015,10 +1015,10 @@ describe('phase zero-six evidence tooling', () => {
       ]),
     );
     expect(parsed.envReadiness.nextCommands.collectEvidence).toBe(
-      'pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id>',
+      'pnpm phase-zero-six:collect',
     );
     expect(parsed.nextSteps.fillEnvTemplate).toContain(path.join(dir, 'phase-zero-six.env.sh'));
-    expect(parsed.nextSteps.verifyEnvReadiness).toBe('pnpm verify:phase-zero-six-env-ready');
+    expect(parsed.nextSteps.verifyEnvReadiness).toBe('pnpm phase-zero-six:env');
     expect(parsed.nextSteps.rerunBundle).toContain(`--output-dir ${dir}`);
     expect(parsed.artifacts.envReadiness).toBe(path.join(dir, 'env-readiness.json'));
     expect(parsed.artifacts.envTemplate).toBe(path.join(dir, 'phase-zero-six.env.sh'));

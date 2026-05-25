@@ -446,8 +446,8 @@ function buildShellTemplate(input: {
 
   lines.push('# After filling values, run:');
   lines.push('# source <this-file>');
-  lines.push('# pnpm verify:phase-zero-six-env-ready');
-  lines.push('# pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id>');
+  lines.push(input.skippedStagingSmoke ? '# pnpm phase-zero-six:env:aws' : '# pnpm phase-zero-six:env');
+  lines.push(input.skippedStagingSmoke ? '# pnpm phase-zero-six:collect:aws' : '# pnpm phase-zero-six:collect');
   lines.push('');
 
   return `${lines.join('\n')}\n`;
@@ -455,9 +455,9 @@ function buildShellTemplate(input: {
 
 function groupEvidenceCommand(groupId: string, skipStagingSmoke: boolean) {
   if (groupId === 'aws-preflight' || skipStagingSmoke) {
-    return 'pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id> --skip-staging-smoke';
+    return 'pnpm phase-zero-six:collect:aws';
   }
-  return 'pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id>';
+  return 'pnpm phase-zero-six:collect';
 }
 
 function buildItemReadiness(input: {
@@ -484,16 +484,28 @@ function buildNextCommands(input: {
   envTemplatePath: string | null;
   skippedStagingSmoke: boolean;
 }) {
-  const readinessArgs = input.skippedStagingSmoke ? '--skip-staging-smoke ' : '';
-  const collectModeFlag = input.skippedStagingSmoke ? ' --skip-staging-smoke' : '';
   const templatePath = input.envTemplatePath ??
     `./.temp/phase-zero-six-evidence/${input.skippedStagingSmoke ? 'aws-preflight.env.sh' : 'phase-zero-six.env.sh'}`;
+  const defaultTemplatePath = input.skippedStagingSmoke
+    ? './.temp/phase-zero-six-evidence/aws-preflight.env.sh'
+    : './.temp/phase-zero-six-evidence/phase-zero-six.env.sh';
+  const writeEnvTemplate = input.envTemplatePath && input.envTemplatePath !== defaultTemplatePath
+    ? `pnpm verify:phase-zero-six-env-ready -- ${input.skippedStagingSmoke ? '--skip-staging-smoke ' : ''}--write-env-template ${templatePath}`
+    : input.skippedStagingSmoke
+      ? 'pnpm phase-zero-six:template:aws'
+      : 'pnpm phase-zero-six:template';
   return {
-    writeEnvTemplate: `pnpm verify:phase-zero-six-env-ready -- ${readinessArgs}--write-env-template ${templatePath}`,
+    writeEnvTemplate,
     sourceEnvTemplate: `source ${templatePath}`,
-    verifyEnvReadiness: `pnpm verify:phase-zero-six-env-ready${input.skippedStagingSmoke ? ' -- --skip-staging-smoke' : ''}`,
-    collectEvidence: `pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id>${collectModeFlag}`,
-    applyReviewedEvidence: `pnpm collect:phase-zero-six-evidence -- --from-output-dir ./.temp/phase-zero-six-evidence/<run-id> --output-dir ./.temp/phase-zero-six-evidence/<run-id>-apply --apply-ready${collectModeFlag}`,
+    verifyEnvReadiness: input.skippedStagingSmoke
+      ? 'pnpm phase-zero-six:env:aws'
+      : 'pnpm phase-zero-six:env',
+    collectEvidence: input.skippedStagingSmoke
+      ? 'pnpm phase-zero-six:collect:aws'
+      : 'pnpm phase-zero-six:collect',
+    applyReviewedEvidence: input.skippedStagingSmoke
+      ? 'pnpm phase-zero-six:apply:aws'
+      : 'pnpm phase-zero-six:apply',
   };
 }
 
