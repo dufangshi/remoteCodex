@@ -95,9 +95,9 @@ Task types:
 This queue is the recommended order for the next small commits. The detailed
 milestone sections below remain the full backlog.
 
-- [ ] Add worker Docker CI workflow.
+- [x] Add worker Docker CI workflow.
   - Done when CI builds `Dockerfile.worker` on branch or PR push.
-  - Verify with a passing CI run.
+  - Verify with workflow config review; passing CI run is tracked separately.
 
 - [ ] Add CI worker `/readyz` smoke.
   - Done when CI starts the built worker image and verifies readiness.

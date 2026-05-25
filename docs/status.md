@@ -89,8 +89,8 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   browser WebSocket connection, and reconnect are in place, while staging router
   smoke checks remain open.
 - Worker image runtime pinning, local Docker build, local `/readyz` smoke, and
-  local worker auth denial/success smoke are verified. CI image checks remain
-  open.
+  local worker auth denial/success smoke are verified. Worker image CI workflow
+  configuration exists; first passing CI run remains open.
 - Worker artifact register, metadata/list, download, and delete routes exist
   behind signed identity-envelope `artifact:read` and `artifact:write` scopes.
 - LLM gateway contract is fixed on a sub2api-compatible shape; provisioning,
@@ -108,7 +108,8 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 
 ## Immediate Next Implementation Queue
 
-1. Add CI worker image build plus CI `/readyz` and worker auth smokes.
+1. Confirm first passing CI run for worker image build, `/readyz`, and worker
+   auth smokes.
 2. Add production auth-provider smoke coverage or staging smoke procedure for
    valid, expired, wrong-issuer, and wrong-audience tokens.
 3. Add staging lifecycle smokes for start, stop, idempotent restart, and
