@@ -13,6 +13,8 @@ describe('control plane config', () => {
       CONTROL_PLANE_AUTH_JWT_ISSUER: 'https://issuer.example.test',
       CONTROL_PLANE_AUTH_JWT_AUDIENCE: 'remote-codex',
       CONTROL_PLANE_AUTH_JWT_CLOCK_SKEW_SECONDS: '45',
+      LLM_GATEWAY_BASE_URL: 'https://llm-gateway.example.test',
+      LLM_GATEWAY_TOKEN_SECRET_NAME: 'remote-codex-gateway-tokens',
     });
 
     expect(config.authMode).toBe('jwt');
@@ -21,5 +23,7 @@ describe('control plane config', () => {
     expect(config.authJwtIssuer).toBe('https://issuer.example.test');
     expect(config.authJwtAudience).toBe('remote-codex');
     expect(config.authJwtClockSkewSeconds).toBe(45);
+    expect(config.llmGatewayBaseUrl).toBe('https://llm-gateway.example.test');
+    expect(config.llmGatewayTokenSecretName).toBe('remote-codex-gateway-tokens');
   });
 });

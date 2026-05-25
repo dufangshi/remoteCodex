@@ -491,15 +491,15 @@ import third, then quota enforcement and UI.
 - [ ] Choose the phase-one gateway implementation and deployment shape.
 - [ ] Document gateway admin credential requirements.
 - [ ] Add gateway provider config table or config source.
-- [ ] Store gateway base URL.
-- [ ] Store gateway key id per user or sandbox.
+- [x] Store gateway base URL.
+- [x] Store gateway key id per user or sandbox.
 - [ ] Store encrypted gateway token only if raw recovery is required.
 - [ ] Add gateway client interface.
 - [ ] Implement gateway user creation.
 - [ ] Implement gateway key creation.
 - [ ] Implement gateway key revocation.
 - [ ] Implement gateway key rotation.
-- [ ] Attach gateway credential to sandbox provisioning.
+- [x] Attach gateway credential to sandbox provisioning.
 - [ ] Add admin endpoint to reconcile gateway keys.
 - [ ] Redact gateway tokens from logs.
 - [ ] Redact gateway tokens from API responses.

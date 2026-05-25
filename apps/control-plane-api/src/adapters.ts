@@ -19,6 +19,11 @@ export interface SandboxStartInput {
   image: string;
   region: string;
   s3Prefix: string;
+  gateway?: {
+    baseUrl: string;
+    keyId: string;
+    tokenSecretName?: string | null;
+  } | undefined;
 }
 
 export interface SandboxEnvironment {
@@ -186,6 +191,18 @@ export class LocalWorkerProcessSandboxManager implements SandboxManager {
         REMOTE_CODEX_USER_ID: input.userId,
         REMOTE_CODEX_WORKER_AUTH_TOKEN:
           this.input.workerEnv?.REMOTE_CODEX_WORKER_AUTH_TOKEN ?? 'local-worker-token',
+        ...(input.gateway
+          ? {
+              REMOTE_CODEX_LLM_GATEWAY_BASE_URL: input.gateway.baseUrl,
+              REMOTE_CODEX_LLM_GATEWAY_KEY_ID: input.gateway.keyId,
+              ...(this.input.workerEnv?.REMOTE_CODEX_LLM_GATEWAY_TOKEN
+                ? {
+                    REMOTE_CODEX_LLM_GATEWAY_TOKEN:
+                      this.input.workerEnv.REMOTE_CODEX_LLM_GATEWAY_TOKEN,
+                  }
+                : {}),
+            }
+          : {}),
         WORKSPACE_ROOT: this.input.workerEnv?.WORKSPACE_ROOT ?? '/workspace',
         HOME: this.input.workerEnv?.HOME ?? '/home/agent',
       },
@@ -431,6 +448,12 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
         REMOTE_CODEX_SANDBOX_REGION: input.region,
         REMOTE_CODEX_SANDBOX_S3_PREFIX: input.s3Prefix,
         SANDBOX_ROUTER_BASE_URL: this.config.routerBaseUrl,
+        ...(input.gateway
+          ? {
+              REMOTE_CODEX_LLM_GATEWAY_BASE_URL: input.gateway.baseUrl,
+              REMOTE_CODEX_LLM_GATEWAY_KEY_ID: input.gateway.keyId,
+            }
+          : {}),
         WORKSPACE_ROOT: '/workspace',
         HOME: '/home/agent',
       },
@@ -439,6 +462,14 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
           secretName: this.config.workerAuthTokenSecretName,
           key: 'token',
         },
+        ...(input.gateway?.tokenSecretName
+          ? {
+              REMOTE_CODEX_LLM_GATEWAY_TOKEN: {
+                secretName: input.gateway.tokenSecretName,
+                key: input.gateway.keyId,
+              },
+            }
+          : {}),
       },
     };
   }

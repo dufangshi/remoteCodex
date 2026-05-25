@@ -402,15 +402,15 @@ Verification:
 - [ ] Choose the phase-one gateway implementation and deployment shape.
 - [ ] Document gateway admin credential requirements.
 - [ ] Add gateway provider config table or config source.
-- [ ] Store gateway base URL.
-- [ ] Store gateway key id per user or sandbox.
+- [x] Store gateway base URL.
+- [x] Store gateway key id per user or sandbox.
 - [ ] Store encrypted gateway token only if raw recovery is required.
 - [ ] Add gateway client interface.
 - [ ] Implement gateway user creation.
 - [ ] Implement gateway key creation.
 - [ ] Implement gateway key revocation.
 - [ ] Implement gateway key rotation.
-- [ ] Attach gateway credential to sandbox provisioning.
+- [x] Attach gateway credential to sandbox provisioning.
 - [ ] Add admin endpoint to reconcile gateway keys.
 - [x] Render Codex config pointing to the gateway `/v1` endpoint.
 - [x] Prove Codex config never contains real provider root keys.
@@ -1082,8 +1082,8 @@ Real provider root keys stay outside the sandbox.
 ### Control-Plane Gateway Client
 
 - [ ] Add gateway provider config table or config source.
-- [ ] Store gateway base URL.
-- [ ] Store gateway key id per user or sandbox.
+- [x] Store gateway base URL.
+- [x] Store gateway key id per user or sandbox.
 - [ ] Store encrypted gateway token only if raw recovery is required.
 - [ ] Add gateway admin credential configuration.
 - [ ] Add gateway client interface.
@@ -1091,7 +1091,7 @@ Real provider root keys stay outside the sandbox.
 - [ ] Implement gateway key creation.
 - [ ] Implement gateway key revocation.
 - [ ] Implement gateway key rotation.
-- [ ] Attach gateway credential to sandbox provisioning.
+- [x] Attach gateway credential to sandbox provisioning.
 - [ ] Add admin endpoint to reconcile gateway keys.
 - [ ] Add tests with mocked gateway client.
 

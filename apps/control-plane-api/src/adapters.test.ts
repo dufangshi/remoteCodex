@@ -167,7 +167,14 @@ describe('sandbox manager adapters', () => {
   it('prepares AWS worker identity without exposing provider root keys', async () => {
     const manager = new AwsEksFargateSandboxManager(awsConfig());
 
-    const env = await manager.prepareSandboxEnvironment(sandboxInput);
+    const env = await manager.prepareSandboxEnvironment({
+      ...sandboxInput,
+      gateway: {
+        baseUrl: 'https://llm-gateway.example.test',
+        keyId: 'gw-key-sbx-test',
+        tokenSecretName: 'remote-codex-gateway-tokens',
+      },
+    });
     expect(env.env).toMatchObject({
       REMOTE_CODEX_RUNTIME_ROLE: 'worker',
       REMOTE_CODEX_SANDBOX_ID: 'sbx_test',
@@ -175,6 +182,8 @@ describe('sandbox manager adapters', () => {
       REMOTE_CODEX_SANDBOX_REGION: 'local',
       REMOTE_CODEX_SANDBOX_S3_PREFIX: 's3://example/test',
       SANDBOX_ROUTER_BASE_URL: 'https://sandbox-router.example.test',
+      REMOTE_CODEX_LLM_GATEWAY_BASE_URL: 'https://llm-gateway.example.test',
+      REMOTE_CODEX_LLM_GATEWAY_KEY_ID: 'gw-key-sbx-test',
       WORKSPACE_ROOT: '/workspace',
       HOME: '/home/agent',
     });
@@ -183,9 +192,14 @@ describe('sandbox manager adapters', () => {
         secretName: 'remote-codex-worker-token',
         key: 'token',
       },
+      REMOTE_CODEX_LLM_GATEWAY_TOKEN: {
+        secretName: 'remote-codex-gateway-tokens',
+        key: 'gw-key-sbx-test',
+      },
     });
     expect(Object.keys(env.env)).not.toContain('OPENAI_API_KEY');
     expect(Object.keys(env.env)).not.toContain('ANTHROPIC_API_KEY');
+    expect(Object.keys(env.env)).not.toContain('REMOTE_CODEX_LLM_GATEWAY_TOKEN');
   });
 
   it('applies an AWS worker Pod spec with deterministic names, env, and secrets', async () => {

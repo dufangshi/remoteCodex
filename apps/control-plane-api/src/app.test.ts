@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { createSignedToken } from '../../../packages/shared/src/index';
+import type { SandboxManager, SandboxProvisionResult, SandboxStartInput } from './adapters';
 import { buildControlPlaneApp } from './app';
 
 function testEnv(name: string) {
@@ -26,6 +27,51 @@ function decodeTokenHeader(token: string) {
   return JSON.parse(Buffer.from(`${normalized}${padding}`, 'base64').toString('utf8')) as {
     kid?: string;
   };
+}
+
+class RecordingSandboxManager implements SandboxManager {
+  readonly starts: SandboxStartInput[] = [];
+
+  async createSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
+    return this.startSandbox(input);
+  }
+
+  async startSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
+    this.starts.push(input);
+    return {
+      state: 'running',
+      routerBaseUrl: 'https://sandbox-gateway.test',
+      workerServiceName: `worker-${input.sandboxId}`,
+    };
+  }
+
+  async stopSandbox(): Promise<SandboxProvisionResult> {
+    return { state: 'stopped' };
+  }
+
+  async restartSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
+    return this.startSandbox(input);
+  }
+
+  async deleteSandbox(): Promise<SandboxProvisionResult> {
+    return { state: 'deleted' };
+  }
+
+  async getSandboxStatus(): Promise<SandboxProvisionResult> {
+    return { state: 'running' };
+  }
+
+  async getSandboxEndpoint() {
+    return { routerBaseUrl: 'https://sandbox-gateway.test' };
+  }
+
+  async prepareSandboxEnvironment(input: SandboxStartInput) {
+    return {
+      env: {
+        REMOTE_CODEX_SANDBOX_ID: input.sandboxId,
+      },
+    };
+  }
 }
 
 describe('control plane api', () => {
@@ -63,6 +109,46 @@ describe('control plane api', () => {
       lastFailureMessage: null,
     });
     expect(body.gatewayKey.externalKeyId).toBe(`sub2api-key-${body.sandbox.id}`);
+  });
+
+  it('attaches gateway credential metadata when starting a sandbox', async () => {
+    const sandboxManager = new RecordingSandboxManager();
+    const app = buildControlPlaneApp({
+      env: {
+        ...testEnv('gateway-start'),
+        LLM_GATEWAY_BASE_URL: 'https://llm-gateway.example.test',
+        LLM_GATEWAY_TOKEN_SECRET_NAME: 'remote-codex-gateway-tokens',
+      },
+      sandboxManager,
+    });
+    apps.push(app);
+
+    const auth = { authorization: 'Bearer dev:gateway-start-user' };
+    const bootstrap = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: auth,
+      payload: {
+        email: 'gateway-start@example.com',
+      },
+    });
+    expect(bootstrap.statusCode).toBe(200);
+
+    const started = await app.inject({
+      method: 'POST',
+      url: '/api/sandbox/start',
+      headers: auth,
+    });
+    expect(started.statusCode).toBe(200);
+    expect(sandboxManager.starts).toHaveLength(1);
+    expect(sandboxManager.starts[0]).toMatchObject({
+      sandboxId: bootstrap.json().sandbox.id,
+      gateway: {
+        baseUrl: 'https://llm-gateway.example.test',
+        keyId: `sub2api-key-${bootstrap.json().sandbox.id}`,
+        tokenSecretName: 'remote-codex-gateway-tokens',
+      },
+    });
   });
 
   it('keeps account bootstrap idempotent for the authenticated identity', async () => {

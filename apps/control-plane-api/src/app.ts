@@ -18,6 +18,7 @@ import {
   NoopSandboxManager,
   SandboxManagerError,
   SandboxManager,
+  type SandboxStartInput,
 } from './adapters';
 import {
   AuthVerifier,
@@ -258,6 +259,21 @@ async function ensureGateway(app: FastifyInstance, user: { id: string; email: st
   });
 }
 
+function gatewayStartInput(
+  app: FastifyInstance,
+  sandbox: { id: string },
+): SandboxStartInput['gateway'] {
+  const gatewayKey = app.services.repository.getGatewayKeyForSandbox(sandbox.id);
+  if (!gatewayKey || gatewayKey.status !== 'active' || !app.services.config.llmGatewayBaseUrl) {
+    return undefined;
+  }
+  return {
+    baseUrl: app.services.config.llmGatewayBaseUrl,
+    keyId: gatewayKey.externalKeyId,
+    tokenSecretName: app.services.config.llmGatewayTokenSecretName,
+  };
+}
+
 export function buildControlPlaneApp(
   options: {
     env?: NodeJS.ProcessEnv;
@@ -494,6 +510,7 @@ export function buildControlPlaneApp(
       image: sandbox.image,
       region: sandbox.region,
       s3Prefix: sandbox.s3Prefix,
+      gateway: gatewayStartInput(app, sandbox),
     });
     return {
       sandbox: repository.updateSandboxState(sandbox.id, {
@@ -547,6 +564,7 @@ export function buildControlPlaneApp(
       image: sandbox.image,
       region: sandbox.region,
       s3Prefix: sandbox.s3Prefix,
+      gateway: gatewayStartInput(app, sandbox),
     });
     return {
       sandbox: repository.updateSandboxState(sandbox.id, result),

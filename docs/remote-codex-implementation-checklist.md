@@ -389,8 +389,8 @@ real provider keys stay outside the sandbox.
 ### Control Plane
 
 - [ ] Add gateway provider config table or config source.
-- [ ] Store gateway base URL.
-- [ ] Store gateway key id per user or sandbox.
+- [x] Store gateway base URL.
+- [x] Store gateway key id per user or sandbox.
 - [ ] Store encrypted gateway token only if needed.
 - [ ] Add gateway admin credential config.
 - [ ] Add gateway client interface.
@@ -398,7 +398,7 @@ real provider keys stay outside the sandbox.
 - [ ] Implement gateway key creation.
 - [ ] Implement gateway key revocation.
 - [ ] Implement gateway key rotation.
-- [ ] Attach gateway credential to sandbox provisioning.
+- [x] Attach gateway credential to sandbox provisioning.
 - [ ] Add admin endpoint to reconcile gateway keys.
 - [ ] Add tests with mocked gateway client.
 
