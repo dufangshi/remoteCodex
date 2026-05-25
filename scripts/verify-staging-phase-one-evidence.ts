@@ -189,6 +189,7 @@ function evaluate(report: SmokeReport): ChecklistResult[] {
   const stop = steps.get('stop_sandbox');
   const idempotent = steps.get('idempotent_lifecycle');
   const issueRouteToken = steps.get('issue_route_token');
+  const routerHealth = steps.get('router_health');
   const browserProxy = steps.get('browser_to_router_to_worker');
   const directDenial = steps.get('direct_worker_denial');
 
@@ -308,8 +309,11 @@ function evaluate(report: SmokeReport): ChecklistResult[] {
 
   const routerReady =
     issueRouteToken?.ok === true &&
+    routerHealth?.ok === true &&
     browserProxy?.ok === true &&
     Boolean(stringDetail(issueRouteToken, 'routerBaseUrl')) &&
+    Boolean(stringDetail(routerHealth, 'routerBaseUrl')) &&
+    routerHealth.details?.role === 'sandbox-router' &&
     browserProxy.details?.role === 'worker' &&
     typeof browserProxy.details?.sandboxId === 'string' &&
     typeof browserProxy.details?.userId === 'string';
@@ -317,10 +321,11 @@ function evaluate(report: SmokeReport): ChecklistResult[] {
     ? ready({
       item: 'R5.10',
       title: 'Deploy sandbox-router in staging.',
-      reason: 'Staging evidence shows route-token issuance with routerBaseUrl and successful router-to-worker resolution.',
-      matchedSteps: ['issue_route_token', 'browser_to_router_to_worker'],
+      reason: 'Staging evidence shows router health, route-token issuance, and successful router-to-worker resolution.',
+      matchedSteps: ['issue_route_token', 'router_health', 'browser_to_router_to_worker'],
       requiredEvidence: [
         'issue_route_token.ok is true with routerBaseUrl',
+        'router_health.ok is true with role sandbox-router',
         'browser_to_router_to_worker.ok is true',
         'Worker metadata reports role, sandboxId, and userId',
       ],
@@ -328,10 +333,11 @@ function evaluate(report: SmokeReport): ChecklistResult[] {
     : notReady({
       item: 'R5.10',
       title: 'Deploy sandbox-router in staging.',
-      reason: 'Missing route-token routerBaseUrl or successful browser-to-router-to-worker evidence.',
-      matchedSteps: ['issue_route_token', 'browser_to_router_to_worker'].filter((name) => steps.has(name)),
+      reason: 'Missing router health, route-token routerBaseUrl, or successful browser-to-router-to-worker evidence.',
+      matchedSteps: ['issue_route_token', 'router_health', 'browser_to_router_to_worker'].filter((name) => steps.has(name)),
       requiredEvidence: [
         'issue_route_token.ok is true with routerBaseUrl',
+        'router_health.ok is true with role sandbox-router',
         'browser_to_router_to_worker.ok is true',
         'Worker metadata reports role, sandboxId, and userId',
       ],

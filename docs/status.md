@@ -86,6 +86,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 - Staging stop evidence now polls sandbox health until `stopped`, and direct
   worker denial accepts `401` or `403`, aligning smoke output with the
   checklist verifier for S3.07 and R5.11.
+- Staging router deployment evidence now includes an explicit `router_health`
+  step before browser-to-router-to-worker metadata resolution, strengthening
+  R5.10 proof.
 - Worker mode disables host/provider management APIs that should not be exposed
   in sandbox runtime.
 - Route-token signing supports key ids and previous-key verification.

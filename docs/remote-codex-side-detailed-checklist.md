@@ -628,7 +628,8 @@ router-injected worker identity.
 - [ ] R5.10 Deploy sandbox-router in staging.
   - Done when the staging browser can reach router health and the router can
     resolve a live sandbox endpoint.
-  - Verify with staging deployment smoke.
+  - Verify with staging smoke recording `router_health`, route-token issue,
+    and router-to-worker metadata resolution.
 
 - [ ] R5.11 Add direct-worker-denial proof.
   - Done when direct requests to a worker public endpoint fail without the

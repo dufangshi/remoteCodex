@@ -227,6 +227,8 @@ The important step-to-checkbox mapping is:
   `stopConverged: true`.
 - `idempotent_lifecycle` proves repeated start/restart calls keep one sandbox
   id for S3.08.
+- `router_health` proves the deployed staging router health endpoint is
+  reachable and reports `role: "sandbox-router"` for R5.10.
 - `browser_to_router_to_worker` proves R5.12.
 - `direct_worker_denial` proves R5.11 when `STAGING_DIRECT_WORKER_BASE_URL` is
   available and direct worker access returns `401` or `403`.

@@ -462,6 +462,21 @@ async function main() {
   });
 
   const routerBaseUrl = routeToken.json.routerBaseUrl as string;
+  const routerHealth = await requestJson({
+    baseUrl: routerBaseUrl,
+    path: '/healthz',
+    expectedStatus: 200,
+  });
+  steps.push({
+    name: 'router_health',
+    ok: routerHealth.json.ok === true && routerHealth.json.role === 'sandbox-router',
+    details: {
+      routerBaseUrl,
+      role: routerHealth.json.role,
+      status: routerHealth.status,
+    },
+  });
+
   const proxiedMetadata = await requestJson({
     baseUrl: routerBaseUrl,
     path: `/api/sandboxes/${sandbox.id}/api/worker/metadata?token=${encodeURIComponent(routeToken.json.token)}`,
