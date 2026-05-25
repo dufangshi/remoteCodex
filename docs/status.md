@@ -79,6 +79,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   collects AWS preflight evidence, runs the phase-one staging smoke, runs all
   evidence verifiers, scans generated JSON artifacts for obvious secret-like
   leakage, and writes a summary JSON for the staging release record.
+- Phase 0-6 evidence tooling has CLI-level tests via
+  `pnpm test:phase-zero-six-evidence`, covering guarded checklist application
+  and obvious artifact secret leakage detection.
 - AWS staging preflight evidence verifier exists as
   `pnpm verify:aws-staging-preflight-evidence -- <evidence-json>` with template
   `docs/aws-staging-preflight-evidence-template.json`; it audits S3.04 and

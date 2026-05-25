@@ -63,6 +63,7 @@
     "lint": "pnpm -r --if-present lint",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "NODE_ENV=test pnpm -r --if-present test",
+    "test:phase-zero-six-evidence": "vitest run scripts/phase-zero-six-evidence.test.ts",
     "test:e2e": "playwright test",
     "db:migrate": "pnpm --filter @remote-codex/db db:migrate",
     "impeccable": "impeccable",
