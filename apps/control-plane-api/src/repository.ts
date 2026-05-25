@@ -535,7 +535,8 @@ export class ControlPlaneRepository {
   }
 
   usageSummaryForUser(userId: string) {
-    return this.db
+    return (
+      this.db
       .select({
         requestCount: sql<number>`count(*)`,
         inputTokens: sql<number>`coalesce(sum(${controlUsageEvents.inputTokens}), 0)`,
@@ -545,7 +546,14 @@ export class ControlPlaneRepository {
       })
       .from(controlUsageEvents)
       .where(eq(controlUsageEvents.userId, userId))
-      .get();
+      .get() ?? {
+        requestCount: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedTokens: 0,
+        costUsd: 0,
+      }
+    );
   }
 
   listUsageEventsForUser(userId: string, limit = 100) {

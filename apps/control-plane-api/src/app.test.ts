@@ -1131,4 +1131,124 @@ describe('control plane api', () => {
     expect(suspendedToken.statusCode).toBe(401);
     expect(suspendedToken.json().code).toBe('unauthorized');
   });
+
+  it('refuses route tokens when the quota profile disables worker routing', async () => {
+    const app = buildControlPlaneApp({ env: testEnv('route-token-quota-disabled') });
+    apps.push(app);
+
+    const userAuth = { authorization: 'Bearer dev:quota-disabled-user' };
+    const adminAuth = { authorization: 'Bearer dev:admin' };
+    await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: adminAuth,
+      payload: { email: 'admin-quota-disabled@example.com' },
+    });
+    const bootstrap = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: userAuth,
+      payload: { email: 'quota-disabled@example.com' },
+    });
+    const user = bootstrap.json().user;
+    const sandbox = bootstrap.json().sandbox;
+    await app.inject({
+      method: 'POST',
+      url: '/api/sandbox/start',
+      headers: userAuth,
+    });
+
+    const quotaUpdate = await app.inject({
+      method: 'PATCH',
+      url: `/api/admin/users/${user.id}`,
+      headers: adminAuth,
+      payload: {
+        quotaProfile: 'disabled',
+      },
+    });
+    expect(quotaUpdate.statusCode).toBe(200);
+
+    const routeToken = await app.inject({
+      method: 'POST',
+      url: `/api/sandboxes/${sandbox.id}/route-token`,
+      headers: userAuth,
+      payload: {},
+    });
+    expect(routeToken.statusCode).toBe(402);
+    expect(routeToken.json()).toMatchObject({
+      code: 'quota_exceeded',
+      message: 'Quota exceeded.',
+      details: {
+        reason: 'route_tokens_disabled',
+        quotaProfile: 'disabled',
+        limit: 0,
+        used: 0,
+      },
+    });
+  });
+
+  it('refuses route tokens when LLM spend reaches the user quota', async () => {
+    const app = buildControlPlaneApp({ env: testEnv('route-token-quota-spend') });
+    apps.push(app);
+
+    const userAuth = { authorization: 'Bearer dev:quota-spend-user' };
+    const adminAuth = { authorization: 'Bearer dev:admin' };
+    await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: adminAuth,
+      payload: { email: 'admin-quota-spend@example.com' },
+    });
+    const bootstrap = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: userAuth,
+      payload: { email: 'quota-spend@example.com' },
+    });
+    const { user, sandbox, gatewayKey } = bootstrap.json();
+    await app.inject({
+      method: 'POST',
+      url: '/api/sandbox/start',
+      headers: userAuth,
+    });
+
+    const imported = await app.inject({
+      method: 'POST',
+      url: '/api/admin/usage/import',
+      headers: adminAuth,
+      payload: {
+        events: [
+          {
+            userId: user.id,
+            sandboxId: sandbox.id,
+            gatewayKeyId: gatewayKey.id,
+            provider: 'sub2api',
+            model: 'gpt-5.1-codex',
+            costUsd: 25,
+            externalRequestId: 'req_quota_spend',
+            occurredAt: '2026-05-23T00:00:00.000Z',
+          },
+        ],
+      },
+    });
+    expect(imported.statusCode).toBe(200);
+
+    const routeToken = await app.inject({
+      method: 'POST',
+      url: `/api/sandboxes/${sandbox.id}/route-token`,
+      headers: userAuth,
+      payload: {},
+    });
+    expect(routeToken.statusCode).toBe(402);
+    expect(routeToken.json()).toMatchObject({
+      code: 'quota_exceeded',
+      message: 'Quota exceeded.',
+      details: {
+        reason: 'llm_spend_quota_exceeded',
+        quotaProfile: 'developer',
+        limit: 25,
+        used: 25,
+      },
+    });
+  });
 });

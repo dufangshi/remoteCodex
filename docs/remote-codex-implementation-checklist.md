@@ -621,15 +621,15 @@ Goal: all paid resources are normalized into the control-plane ledger.
 
 - [ ] Add quota profile schema.
 - [ ] Add user quota assignment.
-- [ ] Add quota check service.
-- [ ] Add LLM spend quota.
+- [x] Add quota check service.
+- [x] Add LLM spend quota.
 - [ ] Add compute spend quota.
 - [ ] Add storage quota.
 - [ ] Add sandbox runtime quota.
-- [ ] Add quota preflight before route-token issuance.
+- [x] Add quota preflight before route-token issuance.
 - [ ] Add quota preflight before harness job creation when visible to control
   plane.
-- [ ] Add quota exceeded API response shape.
+- [x] Add quota exceeded API response shape.
 
 ### UI
 
@@ -644,7 +644,7 @@ Goal: all paid resources are normalized into the control-plane ledger.
 Verification:
 
 - [ ] Usage ledger tests pass.
-- [ ] Quota service tests pass.
+- [x] Quota service tests pass.
 - [ ] Usage UI typecheck passes.
 
 ## Phase 12: Frontend Product Surface

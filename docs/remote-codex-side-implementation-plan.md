@@ -433,8 +433,8 @@ control-plane-issued route tokens and router-injected worker identity.
 - [x] Reject route-token requests for archived sessions.
 - [x] Return `routerBaseUrl`, `wsBaseUrl`, and `expiresAt`.
 - [x] Audit route-token issuance.
-- [ ] Check user quota before issuing route tokens.
-- [ ] Return a stable quota-exceeded API error shape.
+- [x] Check user quota before issuing route tokens.
+- [x] Return a stable quota-exceeded API error shape.
 
 ### Router Checklist
 
@@ -576,15 +576,15 @@ import third, then quota enforcement and UI.
 - [ ] Store metadata JSON.
 - [ ] Add quota profile schema.
 - [ ] Add user quota assignment.
-- [ ] Add quota check service.
-- [ ] Add LLM spend quota.
+- [x] Add quota check service.
+- [x] Add LLM spend quota.
 - [ ] Add compute spend quota.
 - [ ] Add storage quota.
 - [ ] Add sandbox runtime quota.
-- [ ] Add quota preflight before route-token issuance.
+- [x] Add quota preflight before route-token issuance.
 - [ ] Add quota preflight before harness job creation when visible to Remote
   Codex.
-- [ ] Add quota exceeded API response shape.
+- [x] Add quota exceeded API response shape.
 - [ ] Add scheduled LLM gateway usage import job.
 - [ ] Add manual admin LLM usage import endpoint.
 - [ ] Deduplicate gateway usage events by gateway event id.
@@ -619,7 +619,7 @@ import third, then quota enforcement and UI.
 - [ ] MCP config rendering tests pass.
 - [ ] MCP startup audit tests pass.
 - [ ] Usage ledger tests pass.
-- [ ] Quota service tests pass.
+- [x] Quota service tests pass.
 - [ ] Usage UI tests pass.
 
 ## Later Phases: Persistence, Deployment, Operations, And CI
@@ -699,4 +699,3 @@ first provider/harness bootstrap path works.
 - [ ] Add staging smoke script for browser-to-router-to-worker traffic.
 - [ ] Add release checklist that blocks production when required smoke tests are
   unchecked.
-

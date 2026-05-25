@@ -26,6 +26,7 @@ import {
   requireAuthenticatedUser,
 } from './auth';
 import { ControlPlaneConfig, loadControlPlaneConfig } from './config';
+import { checkRouteTokenQuota, QuotaDenial } from './quota';
 import { ControlPlaneRepository } from './repository';
 
 class HttpError extends Error {
@@ -33,6 +34,7 @@ class HttpError extends Error {
     public readonly statusCode: number,
     public readonly code: string,
     message: string,
+    public readonly details?: unknown,
   ) {
     super(message);
   }
@@ -139,6 +141,7 @@ function toErrorPayload(error: unknown) {
       payload: {
         code: error.code,
         message: error.message,
+        ...(error.details === undefined ? {} : { details: error.details }),
       },
     };
   }
@@ -218,6 +221,15 @@ function workerBaseUrlForSandbox(app: FastifyInstance, sandbox: {
     return `http://${sandbox.workerServiceName}.${sandbox.k8sNamespace}.svc.cluster.local:${app.services.config.sandboxWorkerInternalPort}`;
   }
   return `http://${sandbox.workerServiceName}:${app.services.config.sandboxWorkerInternalPort}`;
+}
+
+function quotaExceededError(denial: QuotaDenial) {
+  return new HttpError(402, 'quota_exceeded', 'Quota exceeded.', {
+    reason: denial.reason,
+    quotaProfile: denial.quotaProfile,
+    limit: denial.limit,
+    used: denial.used,
+  });
 }
 
 async function ensureGateway(app: FastifyInstance, user: { id: string; email: string; displayName: string | null }, sandbox: { id: string }) {
@@ -764,6 +776,10 @@ export function buildControlPlaneApp(
     }
     if (sandbox.state !== 'running') {
       throw new HttpError(409, 'sandbox_not_running', 'Sandbox must be running before issuing a route token.');
+    }
+    const quota = checkRouteTokenQuota(user, repository.usageSummaryForUser(user.id));
+    if (!quota.allowed) {
+      throw quotaExceededError(quota.denial!);
     }
 
     const input = routeTokenSchema.parse(request.body ?? {});
