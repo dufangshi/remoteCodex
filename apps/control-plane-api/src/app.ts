@@ -627,7 +627,12 @@ export function buildControlPlaneApp(
     if (!workspace || workspace.userId !== user.id) {
       throw new HttpError(404, 'not_found', 'Workspace not found.');
     }
-    const input = z.object({ name: z.string().min(1).optional() }).parse(request.body);
+    const input = z
+      .object({
+        name: z.string().min(1).optional(),
+        status: z.enum(['active', 'archived', 'deleted']).optional(),
+      })
+      .parse(request.body);
     return {
       workspace: repository.updateWorkspace(workspace.id, input),
     };

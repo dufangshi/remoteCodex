@@ -116,6 +116,8 @@ live runtime state.
 - [x] Add migration for missing project fields.
 - [x] Add migration for missing workspace fields.
 - [x] Add migration for missing session fields.
+- [x] Add archive/delete semantics for workspaces.
+- [x] Add archive/delete semantics for sessions.
 - [x] Add `GET /api/projects`.
 - [x] Add `POST /api/projects`.
 - [x] Add `GET /api/projects/:projectId`.

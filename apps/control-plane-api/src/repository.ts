@@ -311,6 +311,7 @@ export class ControlPlaneRepository {
       sandboxId: input.sandboxId,
       name: input.name,
       slug: input.slug,
+      status: 'active',
       path: `/workspace/${input.slug}`,
       sourceType: input.sourceType,
       gitUrl: input.gitUrl ?? null,
@@ -344,15 +345,22 @@ export class ControlPlaneRepository {
     return this.db.select().from(controlWorkspaces).where(eq(controlWorkspaces.id, id)).get();
   }
 
-  updateWorkspace(id: string, input: { name?: string | undefined }) {
+  updateWorkspace(id: string, input: {
+    name?: string | undefined;
+    status?: string | undefined;
+  }) {
     const update: {
       name?: string;
+      status?: string;
       updatedAt: string;
     } = {
       updatedAt: new Date().toISOString(),
     };
     if (input.name !== undefined) {
       update.name = input.name;
+    }
+    if (input.status !== undefined) {
+      update.status = input.status;
     }
     this.db.update(controlWorkspaces).set(update).where(eq(controlWorkspaces.id, id)).run();
     const workspace = this.getWorkspaceById(id);

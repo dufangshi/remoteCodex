@@ -240,6 +240,7 @@ export const controlWorkspaces = sqliteTable(
     sandboxId: text('sandbox_id').notNull(),
     name: text('name').notNull(),
     slug: text('slug').notNull(),
+    status: text('status').notNull().default('active'),
     path: text('path').notNull(),
     sourceType: text('source_type').notNull(),
     gitUrl: text('git_url'),

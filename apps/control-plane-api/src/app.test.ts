@@ -378,10 +378,14 @@ describe('control plane api', () => {
       headers: auth,
       payload: {
         name: 'Renamed ORCA Workspace',
+        status: 'active',
       },
     });
     expect(patchedWorkspace.statusCode).toBe(200);
-    expect(patchedWorkspace.json().workspace.name).toBe('Renamed ORCA Workspace');
+    expect(patchedWorkspace.json().workspace).toMatchObject({
+      name: 'Renamed ORCA Workspace',
+      status: 'active',
+    });
 
     const sessionResponse = await app.inject({
       method: 'POST',
@@ -442,6 +446,28 @@ describe('control plane api', () => {
     });
     expect(archived.statusCode).toBe(200);
     expect(archived.json().project.status).toBe('archived');
+
+    const archivedWorkspace = await app.inject({
+      method: 'PATCH',
+      url: `/api/workspaces/${workspace.id}`,
+      headers: auth,
+      payload: {
+        status: 'archived',
+      },
+    });
+    expect(archivedWorkspace.statusCode).toBe(200);
+    expect(archivedWorkspace.json().workspace.status).toBe('archived');
+
+    const archivedSession = await app.inject({
+      method: 'PATCH',
+      url: `/api/sessions/${session.id}`,
+      headers: auth,
+      payload: {
+        status: 'archived',
+      },
+    });
+    expect(archivedSession.statusCode).toBe(200);
+    expect(archivedSession.json().session.status).toBe('archived');
   });
 
   it('prevents cross-user access to projects, workspaces, sessions, and route token resources', async () => {
