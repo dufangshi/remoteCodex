@@ -7,6 +7,7 @@ import {
   controlAuditLogs,
   controlGatewayKeys,
   controlGatewayUsers,
+  controlProjects,
   controlSandboxes,
   controlSessions,
   controlUsageEvents,
@@ -81,6 +82,8 @@ export class ControlPlaneRepository {
       displayName: input.displayName ?? null,
       status: 'active',
       plan: 'developer',
+      billingCustomerId: null,
+      quotaProfile: 'developer',
       createdAt: now,
       updatedAt: now,
       lastSeenAt: now,
@@ -92,8 +95,15 @@ export class ControlPlaneRepository {
     return record;
   }
 
-  listUsers() {
-    return this.db.select().from(controlUsers).orderBy(desc(controlUsers.createdAt)).all();
+  listUsers(input: { status?: string | undefined; plan?: string | undefined } = {}) {
+    const filters = [
+      input.status ? eq(controlUsers.status, input.status) : null,
+      input.plan ? eq(controlUsers.plan, input.plan) : null,
+    ].filter((filter): filter is NonNullable<typeof filter> => Boolean(filter));
+    const query = this.db.select().from(controlUsers);
+    return (filters.length ? query.where(and(...filters)) : query)
+      .orderBy(desc(controlUsers.createdAt))
+      .all();
   }
 
   getUserById(id: string) {
@@ -113,11 +123,19 @@ export class ControlPlaneRepository {
       .get();
   }
 
-  updateUser(id: string, input: { status?: string | undefined; plan?: string | undefined; displayName?: string | null | undefined }) {
+  updateUser(id: string, input: {
+    status?: string | undefined;
+    plan?: string | undefined;
+    displayName?: string | null | undefined;
+    billingCustomerId?: string | null | undefined;
+    quotaProfile?: string | undefined;
+  }) {
     const update: {
       status?: string;
       plan?: string;
       displayName?: string | null;
+      billingCustomerId?: string | null;
+      quotaProfile?: string;
       updatedAt: string;
     } = {
       updatedAt: new Date().toISOString(),
@@ -131,9 +149,68 @@ export class ControlPlaneRepository {
     if (input.displayName !== undefined) {
       update.displayName = input.displayName;
     }
+    if (input.billingCustomerId !== undefined) {
+      update.billingCustomerId = input.billingCustomerId;
+    }
+    if (input.quotaProfile !== undefined) {
+      update.quotaProfile = input.quotaProfile;
+    }
     this.db.update(controlUsers).set(update).where(eq(controlUsers.id, id)).run();
     this.audit(id, 'user.updated', 'user', id, input);
     return this.getUserById(id);
+  }
+
+  createProject(input: { userId: string; name: string; slug: string }) {
+    const now = new Date().toISOString();
+    const record = {
+      id: randomUUID(),
+      userId: input.userId,
+      name: input.name,
+      slug: input.slug,
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.db.insert(controlProjects).values(record).run();
+    this.audit(input.userId, 'project.created', 'project', record.id, {
+      slug: input.slug,
+    });
+    return record;
+  }
+
+  listProjects(userId: string) {
+    return this.db
+      .select()
+      .from(controlProjects)
+      .where(eq(controlProjects.userId, userId))
+      .orderBy(desc(controlProjects.createdAt))
+      .all();
+  }
+
+  getProjectById(id: string) {
+    return this.db.select().from(controlProjects).where(eq(controlProjects.id, id)).get();
+  }
+
+  updateProject(id: string, input: { name?: string | undefined; status?: string | undefined }) {
+    const update: {
+      name?: string;
+      status?: string;
+      updatedAt: string;
+    } = {
+      updatedAt: new Date().toISOString(),
+    };
+    if (input.name !== undefined) {
+      update.name = input.name;
+    }
+    if (input.status !== undefined) {
+      update.status = input.status;
+    }
+    this.db.update(controlProjects).set(update).where(eq(controlProjects.id, id)).run();
+    const project = this.getProjectById(id);
+    if (project) {
+      this.audit(project.userId, 'project.updated', 'project', id, input);
+    }
+    return project;
   }
 
   ensureSandboxForUser(userId: string, defaults: SandboxDefaults) {
@@ -163,6 +240,7 @@ export class ControlPlaneRepository {
       lastStartedAt: null,
       lastSeenAt: null,
       idleTimeoutAt: null,
+      statusReason: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -195,6 +273,7 @@ export class ControlPlaneRepository {
       workerServiceName?: string | null;
       k8sNamespace?: string | null;
       k8sPodName?: string | null;
+      statusReason?: string | null;
     },
   ) {
     const now = new Date().toISOString();
@@ -216,6 +295,7 @@ export class ControlPlaneRepository {
 
   createWorkspace(input: {
     userId: string;
+    projectId?: string | null | undefined;
     sandboxId: string;
     name: string;
     slug: string;
@@ -227,6 +307,7 @@ export class ControlPlaneRepository {
     const record = {
       id: randomUUID(),
       userId: input.userId,
+      projectId: input.projectId ?? null,
       sandboxId: input.sandboxId,
       name: input.name,
       slug: input.slug,
@@ -240,22 +321,45 @@ export class ControlPlaneRepository {
     this.db.insert(controlWorkspaces).values(record).run();
     this.audit(input.userId, 'workspace.created', 'workspace', record.id, {
       sandboxId: input.sandboxId,
+      projectId: input.projectId ?? null,
       slug: input.slug,
     });
     return record;
   }
 
-  listWorkspaces(userId: string) {
+  listWorkspaces(userId: string, input: { projectId?: string | undefined } = {}) {
+    const filters = [
+      eq(controlWorkspaces.userId, userId),
+      input.projectId ? eq(controlWorkspaces.projectId, input.projectId) : null,
+    ].filter((filter): filter is NonNullable<typeof filter> => Boolean(filter));
     return this.db
       .select()
       .from(controlWorkspaces)
-      .where(eq(controlWorkspaces.userId, userId))
+      .where(and(...filters))
       .orderBy(desc(controlWorkspaces.createdAt))
       .all();
   }
 
   getWorkspaceById(id: string) {
     return this.db.select().from(controlWorkspaces).where(eq(controlWorkspaces.id, id)).get();
+  }
+
+  updateWorkspace(id: string, input: { name?: string | undefined }) {
+    const update: {
+      name?: string;
+      updatedAt: string;
+    } = {
+      updatedAt: new Date().toISOString(),
+    };
+    if (input.name !== undefined) {
+      update.name = input.name;
+    }
+    this.db.update(controlWorkspaces).set(update).where(eq(controlWorkspaces.id, id)).run();
+    const workspace = this.getWorkspaceById(id);
+    if (workspace) {
+      this.audit(workspace.userId, 'workspace.updated', 'workspace', id, input);
+    }
+    return workspace;
   }
 
   createSession(input: {
@@ -298,6 +402,48 @@ export class ControlPlaneRepository {
 
   getSessionById(id: string) {
     return this.db.select().from(controlSessions).where(eq(controlSessions.id, id)).get();
+  }
+
+  listSandboxes() {
+    return this.db
+      .select()
+      .from(controlSandboxes)
+      .orderBy(desc(controlSandboxes.updatedAt))
+      .all();
+  }
+
+  updateSession(id: string, input: {
+    title?: string | undefined;
+    status?: string | undefined;
+    workerSessionId?: string | null | undefined;
+  }) {
+    const now = new Date().toISOString();
+    const update: {
+      title?: string;
+      status?: string;
+      workerSessionId?: string | null;
+      lastActivityAt?: string;
+      updatedAt: string;
+    } = {
+      updatedAt: now,
+    };
+    if (input.title !== undefined) {
+      update.title = input.title;
+    }
+    if (input.status !== undefined) {
+      update.status = input.status;
+      update.lastActivityAt = now;
+    }
+    if (input.workerSessionId !== undefined) {
+      update.workerSessionId = input.workerSessionId;
+      update.lastActivityAt = now;
+    }
+    this.db.update(controlSessions).set(update).where(eq(controlSessions.id, id)).run();
+    const session = this.getSessionById(id);
+    if (session) {
+      this.audit(session.userId, 'session.updated', 'session', id, input);
+    }
+    return session;
   }
 
   upsertGatewayUser(input: { userId: string; provider: string; externalUserId: string }) {

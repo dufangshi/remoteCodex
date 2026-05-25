@@ -12,9 +12,15 @@ import {
   LlmGatewayAdmin,
   NoopLlmGatewayAdmin,
   NoopSandboxManager,
+  SandboxManagerError,
   SandboxManager,
 } from './adapters';
-import { identityFromRequest, requireAuthenticatedUser } from './auth';
+import {
+  AuthVerifier,
+  createAuthVerifier,
+  identityFromRequest,
+  requireAuthenticatedUser,
+} from './auth';
 import { ControlPlaneConfig, loadControlPlaneConfig } from './config';
 import { ControlPlaneRepository } from './repository';
 import { createSignedToken, verifySignedToken } from './tokens';
@@ -35,6 +41,7 @@ export interface ControlPlaneServices {
   repository: ControlPlaneRepository;
   sandboxManager: SandboxManager;
   llmGatewayAdmin: LlmGatewayAdmin;
+  authVerifier: AuthVerifier;
 }
 
 declare module 'fastify' {
@@ -52,9 +59,25 @@ const updateUserSchema = z.object({
   status: z.enum(['active', 'suspended', 'deleted']).optional(),
   plan: z.string().min(1).optional(),
   displayName: z.string().min(1).nullable().optional(),
+  billingCustomerId: z.string().min(1).nullable().optional(),
+  quotaProfile: z.string().min(1).optional(),
+});
+
+const createProjectSchema = z.object({
+  name: z.string().min(1),
+  slug: z
+    .string()
+    .min(1)
+    .regex(/^[a-z0-9][a-z0-9-]*$/),
+});
+
+const updateProjectSchema = z.object({
+  name: z.string().min(1).optional(),
+  status: z.enum(['active', 'archived']).optional(),
 });
 
 const createWorkspaceSchema = z.object({
+  projectId: z.string().uuid().nullable().optional(),
   name: z.string().min(1),
   slug: z
     .string()
@@ -68,6 +91,12 @@ const createWorkspaceSchema = z.object({
 const createSessionSchema = z.object({
   provider: z.enum(['codex', 'claude', 'opencode']),
   title: z.string().min(1).default('New session'),
+});
+
+const updateSessionSchema = z.object({
+  title: z.string().min(1).optional(),
+  status: z.enum(['created', 'active', 'idle', 'archived', 'deleted']).optional(),
+  workerSessionId: z.string().min(1).nullable().optional(),
 });
 
 const routeTokenSchema = z.object({
@@ -118,6 +147,16 @@ function toErrorPayload(error: unknown) {
     };
   }
 
+  if (error instanceof SandboxManagerError) {
+    return {
+      statusCode: error.code === 'quota' ? 402 : error.code === 'config' ? 400 : 503,
+      payload: {
+        code: `sandbox_${error.code}`,
+        message: error.message,
+      },
+    };
+  }
+
   return {
     statusCode: 500,
     payload: {
@@ -128,7 +167,11 @@ function toErrorPayload(error: unknown) {
 }
 
 function requireUser(app: FastifyInstance, request: FastifyRequest) {
-  const user = requireAuthenticatedUser(request, app.services.repository);
+  const user = requireAuthenticatedUser(
+    request,
+    app.services.repository,
+    app.services.authVerifier,
+  );
   if (!user || user.status !== 'active') {
     throw new HttpError(401, 'unauthorized', 'Authentication is required.');
   }
@@ -184,6 +227,11 @@ export function buildControlPlaneApp(
   runMigrations(config.databaseUrl);
   const database = createDatabase(config.databaseUrl);
   const repository = new ControlPlaneRepository(database.db);
+  const authVerifier = createAuthVerifier({
+    mode: config.authMode,
+    jwtSecret: config.authJwtSecret,
+    jwtProvider: config.authJwtProvider,
+  });
 
   const app = Fastify({
     logger:
@@ -201,6 +249,7 @@ export function buildControlPlaneApp(
     repository,
     sandboxManager: options.sandboxManager ?? new NoopSandboxManager(config.routerBaseUrl),
     llmGatewayAdmin: options.llmGatewayAdmin ?? new NoopLlmGatewayAdmin(),
+    authVerifier,
   });
 
   app.setErrorHandler((error, _request, reply) => {
@@ -217,7 +266,7 @@ export function buildControlPlaneApp(
   }));
 
   app.post('/api/auth/register', async (request) => {
-    const identity = identityFromRequest(request);
+    const identity = app.services.authVerifier.identityFromRequest(request);
     if (!identity) {
       throw new HttpError(401, 'unauthorized', 'Authentication is required.');
     }
@@ -238,7 +287,7 @@ export function buildControlPlaneApp(
   });
 
   app.post('/api/me/bootstrap', async (request) => {
-    const identity = identityFromRequest(request);
+    const identity = app.services.authVerifier.identityFromRequest(request);
     if (!identity) {
       throw new HttpError(401, 'unauthorized', 'Authentication is required.');
     }
@@ -308,8 +357,14 @@ export function buildControlPlaneApp(
 
   app.get('/api/admin/users', async (request) => {
     requireAdmin(app, request);
+    const query = z
+      .object({
+        status: z.enum(['active', 'suspended', 'deleted']).optional(),
+        plan: z.string().min(1).optional(),
+      })
+      .parse(request.query);
     return {
-      users: repository.listUsers(),
+      users: repository.listUsers(query),
     };
   });
 
@@ -331,6 +386,32 @@ export function buildControlPlaneApp(
     return { events };
   });
 
+  app.get('/api/admin/sandboxes', async (request) => {
+    requireAdmin(app, request);
+    return {
+      sandboxes: repository.listSandboxes(),
+    };
+  });
+
+  app.post('/api/admin/sandboxes/:sandboxId/force-stop', async (request) => {
+    requireAdmin(app, request);
+    const params = z.object({ sandboxId: z.string().uuid() }).parse(request.params);
+    const sandbox = repository.getSandboxById(params.sandboxId);
+    if (!sandbox) {
+      throw new HttpError(404, 'not_found', 'Sandbox not found.');
+    }
+    const result = await app.services.sandboxManager.stopSandbox({
+      sandboxId: sandbox.id,
+      userId: sandbox.userId,
+    });
+    return {
+      sandbox: repository.updateSandboxState(sandbox.id, {
+        ...result,
+        statusReason: result.statusReason ?? 'force-stopped by administrator',
+      }),
+    };
+  });
+
   app.get('/api/sandbox', async (request) => {
     const user = requireUser(app, request);
     const sandbox = repository.ensureSandboxForUser(user.id, {
@@ -339,6 +420,27 @@ export function buildControlPlaneApp(
       s3PrefixBase: config.sandboxS3PrefixBase,
     });
     return { sandbox };
+  });
+
+  app.get('/api/sandbox/health', async (request) => {
+    const user = requireUser(app, request);
+    const sandbox = repository.getSandboxByUserId(user.id);
+    if (!sandbox) {
+      throw new HttpError(404, 'not_found', 'Sandbox not found.');
+    }
+    const status = await app.services.sandboxManager.getSandboxStatus({
+      sandboxId: sandbox.id,
+      userId: user.id,
+    });
+    const endpoint = await app.services.sandboxManager.getSandboxEndpoint({
+      sandboxId: sandbox.id,
+      userId: user.id,
+    });
+    return {
+      sandbox,
+      status,
+      endpoint,
+    };
   });
 
   app.post('/api/sandbox/start', async (request) => {
@@ -375,9 +477,121 @@ export function buildControlPlaneApp(
     };
   });
 
+  app.post('/api/sandbox/restart', async (request) => {
+    const user = requireUser(app, request);
+    const sandbox = repository.getSandboxByUserId(user.id);
+    if (!sandbox) {
+      throw new HttpError(404, 'not_found', 'Sandbox not found.');
+    }
+    const result = await app.services.sandboxManager.restartSandbox({
+      sandboxId: sandbox.id,
+      userId: user.id,
+      image: sandbox.image,
+      region: sandbox.region,
+      s3Prefix: sandbox.s3Prefix,
+    });
+    return {
+      sandbox: repository.updateSandboxState(sandbox.id, result),
+    };
+  });
+
+  app.get('/api/projects', async (request) => {
+    const user = requireUser(app, request);
+    return { projects: repository.listProjects(user.id) };
+  });
+
+  app.post('/api/projects', async (request) => {
+    const user = requireUser(app, request);
+    const input = createProjectSchema.parse(request.body);
+    return {
+      project: repository.createProject({
+        userId: user.id,
+        ...input,
+      }),
+    };
+  });
+
+  app.get('/api/projects/:projectId', async (request) => {
+    const user = requireUser(app, request);
+    const params = z.object({ projectId: z.string().uuid() }).parse(request.params);
+    const project = repository.getProjectById(params.projectId);
+    if (!project || project.userId !== user.id) {
+      throw new HttpError(404, 'not_found', 'Project not found.');
+    }
+    return { project };
+  });
+
+  app.patch('/api/projects/:projectId', async (request) => {
+    const user = requireUser(app, request);
+    const params = z.object({ projectId: z.string().uuid() }).parse(request.params);
+    const project = repository.getProjectById(params.projectId);
+    if (!project || project.userId !== user.id) {
+      throw new HttpError(404, 'not_found', 'Project not found.');
+    }
+    return {
+      project: repository.updateProject(project.id, updateProjectSchema.parse(request.body)),
+    };
+  });
+
+  app.delete('/api/projects/:projectId', async (request) => {
+    const user = requireUser(app, request);
+    const params = z.object({ projectId: z.string().uuid() }).parse(request.params);
+    const project = repository.getProjectById(params.projectId);
+    if (!project || project.userId !== user.id) {
+      throw new HttpError(404, 'not_found', 'Project not found.');
+    }
+    return {
+      project: repository.updateProject(project.id, { status: 'archived' }),
+    };
+  });
+
+  app.get('/api/projects/:projectId/workspaces', async (request) => {
+    const user = requireUser(app, request);
+    const params = z.object({ projectId: z.string().uuid() }).parse(request.params);
+    const project = repository.getProjectById(params.projectId);
+    if (!project || project.userId !== user.id) {
+      throw new HttpError(404, 'not_found', 'Project not found.');
+    }
+    return { workspaces: repository.listWorkspaces(user.id, { projectId: project.id }) };
+  });
+
+  app.post('/api/projects/:projectId/workspaces', async (request) => {
+    const user = requireUser(app, request);
+    const params = z.object({ projectId: z.string().uuid() }).parse(request.params);
+    const project = repository.getProjectById(params.projectId);
+    if (!project || project.userId !== user.id) {
+      throw new HttpError(404, 'not_found', 'Project not found.');
+    }
+    const sandbox = repository.ensureSandboxForUser(user.id, {
+      image: config.sandboxDefaultImage,
+      region: config.sandboxDefaultRegion,
+      s3PrefixBase: config.sandboxS3PrefixBase,
+    });
+    const input = createWorkspaceSchema.omit({ projectId: true }).parse(request.body);
+    return {
+      workspace: repository.createWorkspace({
+        userId: user.id,
+        sandboxId: sandbox.id,
+        projectId: project.id,
+        ...input,
+      }),
+    };
+  });
+
   app.get('/api/workspaces', async (request) => {
     const user = requireUser(app, request);
-    return { workspaces: repository.listWorkspaces(user.id) };
+    const query = z
+      .object({
+        projectId: z.string().uuid().optional(),
+      })
+      .parse(request.query);
+    if (query.projectId) {
+      const project = repository.getProjectById(query.projectId);
+      if (!project || project.userId !== user.id) {
+        throw new HttpError(404, 'not_found', 'Project not found.');
+      }
+    }
+    return { workspaces: repository.listWorkspaces(user.id, query) };
   });
 
   app.post('/api/workspaces', async (request) => {
@@ -388,12 +602,31 @@ export function buildControlPlaneApp(
       s3PrefixBase: config.sandboxS3PrefixBase,
     });
     const input = createWorkspaceSchema.parse(request.body);
+    if (input.projectId) {
+      const project = repository.getProjectById(input.projectId);
+      if (!project || project.userId !== user.id) {
+        throw new HttpError(404, 'not_found', 'Project not found.');
+      }
+    }
     return {
       workspace: repository.createWorkspace({
         userId: user.id,
         sandboxId: sandbox.id,
         ...input,
       }),
+    };
+  });
+
+  app.patch('/api/workspaces/:workspaceId', async (request) => {
+    const user = requireUser(app, request);
+    const params = z.object({ workspaceId: z.string().uuid() }).parse(request.params);
+    const workspace = repository.getWorkspaceById(params.workspaceId);
+    if (!workspace || workspace.userId !== user.id) {
+      throw new HttpError(404, 'not_found', 'Workspace not found.');
+    }
+    const input = z.object({ name: z.string().min(1).optional() }).parse(request.body);
+    return {
+      workspace: repository.updateWorkspace(workspace.id, input),
     };
   });
 
@@ -423,6 +656,18 @@ export function buildControlPlaneApp(
         provider: input.provider,
         title: input.title,
       }),
+    };
+  });
+
+  app.patch('/api/sessions/:sessionId', async (request) => {
+    const user = requireUser(app, request);
+    const params = z.object({ sessionId: z.string().uuid() }).parse(request.params);
+    const session = repository.getSessionById(params.sessionId);
+    if (!session || session.userId !== user.id) {
+      throw new HttpError(404, 'not_found', 'Session not found.');
+    }
+    return {
+      session: repository.updateSession(session.id, updateSessionSchema.parse(request.body)),
     };
   });
 
@@ -487,7 +732,11 @@ export function buildControlPlaneApp(
 
   app.get('/api/route-token/verify', async (request) => {
     const token = z.object({ token: z.string().min(1) }).parse(request.query).token;
-    return { payload: verifySignedToken(token, config.jwtSecret) };
+    try {
+      return { payload: verifySignedToken(token, config.jwtSecret) };
+    } catch {
+      throw new HttpError(401, 'invalid_route_token', 'Route token is invalid or expired.');
+    }
   });
 
   return app;

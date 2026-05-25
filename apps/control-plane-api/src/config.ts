@@ -16,6 +16,9 @@ const envSchema = z.object({
   SANDBOX_DEFAULT_REGION: z.string().min(1).optional(),
   SANDBOX_S3_PREFIX_BASE: z.string().min(1).optional(),
   CONTROL_PLANE_ADMIN_IDENTITIES: z.string().optional(),
+  CONTROL_PLANE_AUTH_MODE: z.enum(['dev', 'jwt']).optional(),
+  CONTROL_PLANE_AUTH_JWT_SECRET: z.string().min(16).optional(),
+  CONTROL_PLANE_AUTH_JWT_PROVIDER: z.string().min(1).optional(),
 });
 
 export interface ControlPlaneConfig {
@@ -32,6 +35,9 @@ export interface ControlPlaneConfig {
   sandboxDefaultRegion: string;
   sandboxS3PrefixBase: string;
   adminIdentities: Set<string>;
+  authMode: 'dev' | 'jwt';
+  authJwtSecret: string | null;
+  authJwtProvider: string;
 }
 
 export function loadControlPlaneConfig(
@@ -71,5 +77,8 @@ export function loadControlPlaneConfig(
         .map((identity) => identity.trim())
         .filter(Boolean),
     ),
+    authMode: parsed.CONTROL_PLANE_AUTH_MODE ?? 'dev',
+    authJwtSecret: parsed.CONTROL_PLANE_AUTH_JWT_SECRET ?? null,
+    authJwtProvider: parsed.CONTROL_PLANE_AUTH_JWT_PROVIDER ?? 'jwt',
   };
 }

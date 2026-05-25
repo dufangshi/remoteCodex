@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { buildControlPlaneApp } from './app';
+import { createSignedToken } from './tokens';
 
 function testEnv(name: string) {
   return {
@@ -157,6 +158,293 @@ describe('control plane api', () => {
       session_id: session.id,
       scopes: ['worker:read', 'worker:write', 'session:prompt'],
     });
+
+    const expiredToken = createSignedToken(
+      {
+        sub: user.id,
+        sandbox_id: sandbox.id,
+        scopes: ['worker:read'],
+        iat: 1,
+        exp: 2,
+        jti: 'expired',
+      },
+      'test-control-plane-secret-key',
+    );
+    const expiredVerify = await app.inject({
+      method: 'GET',
+      url: `/api/route-token/verify?token=${encodeURIComponent(expiredToken)}`,
+    });
+    expect(expiredVerify.statusCode).toBe(401);
+
+    const tamperedVerify = await app.inject({
+      method: 'GET',
+      url: `/api/route-token/verify?token=${encodeURIComponent(`${route.token}x`)}`,
+    });
+    expect(tamperedVerify.statusCode).toBe(401);
+  });
+
+  it('manages projects, project workspaces, session metadata, restart, and health', async () => {
+    const app = buildControlPlaneApp({ env: testEnv('projects') });
+    apps.push(app);
+
+    const auth = { authorization: 'Bearer dev:project-user' };
+    await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: auth,
+      payload: {
+        email: 'project@example.com',
+        displayName: 'Project User',
+      },
+    });
+
+    const projectResponse = await app.inject({
+      method: 'POST',
+      url: '/api/projects',
+      headers: auth,
+      payload: {
+        name: 'Chemistry Project',
+        slug: 'chemistry-project',
+      },
+    });
+    expect(projectResponse.statusCode).toBe(200);
+    const project = projectResponse.json().project;
+    expect(project.status).toBe('active');
+
+    const projectList = await app.inject({
+      method: 'GET',
+      url: '/api/projects',
+      headers: auth,
+    });
+    expect(projectList.json().projects).toHaveLength(1);
+
+    const patchedProject = await app.inject({
+      method: 'PATCH',
+      url: `/api/projects/${project.id}`,
+      headers: auth,
+      payload: {
+        name: 'Renamed Chemistry Project',
+      },
+    });
+    expect(patchedProject.statusCode).toBe(200);
+    expect(patchedProject.json().project.name).toBe('Renamed Chemistry Project');
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${project.id}/workspaces`,
+      headers: auth,
+      payload: {
+        name: 'ORCA Workspace',
+        slug: 'orca-workspace',
+      },
+    });
+    expect(workspaceResponse.statusCode).toBe(200);
+    const workspace = workspaceResponse.json().workspace;
+    expect(workspace.projectId).toBe(project.id);
+
+    const projectWorkspaces = await app.inject({
+      method: 'GET',
+      url: `/api/projects/${project.id}/workspaces`,
+      headers: auth,
+    });
+    expect(projectWorkspaces.json().workspaces).toHaveLength(1);
+
+    const patchedWorkspace = await app.inject({
+      method: 'PATCH',
+      url: `/api/workspaces/${workspace.id}`,
+      headers: auth,
+      payload: {
+        name: 'Renamed ORCA Workspace',
+      },
+    });
+    expect(patchedWorkspace.statusCode).toBe(200);
+    expect(patchedWorkspace.json().workspace.name).toBe('Renamed ORCA Workspace');
+
+    const sessionResponse = await app.inject({
+      method: 'POST',
+      url: `/api/workspaces/${workspace.id}/sessions`,
+      headers: auth,
+      payload: {
+        provider: 'claude',
+        title: 'Optimize molecule',
+      },
+    });
+    expect(sessionResponse.statusCode).toBe(200);
+    const session = sessionResponse.json().session;
+
+    const patchedSession = await app.inject({
+      method: 'PATCH',
+      url: `/api/sessions/${session.id}`,
+      headers: auth,
+      payload: {
+        title: 'Optimize molecule with ORCA',
+        status: 'active',
+        workerSessionId: 'worker-session-1',
+      },
+    });
+    expect(patchedSession.statusCode).toBe(200);
+    expect(patchedSession.json().session).toMatchObject({
+      title: 'Optimize molecule with ORCA',
+      status: 'active',
+      workerSessionId: 'worker-session-1',
+    });
+
+    const start = await app.inject({
+      method: 'POST',
+      url: '/api/sandbox/start',
+      headers: auth,
+    });
+    expect(start.statusCode).toBe(200);
+
+    const health = await app.inject({
+      method: 'GET',
+      url: '/api/sandbox/health',
+      headers: auth,
+    });
+    expect(health.statusCode).toBe(200);
+    expect(health.json().status.state).toBe('running');
+
+    const restart = await app.inject({
+      method: 'POST',
+      url: '/api/sandbox/restart',
+      headers: auth,
+    });
+    expect(restart.statusCode).toBe(200);
+    expect(restart.json().sandbox.state).toBe('running');
+
+    const archived = await app.inject({
+      method: 'DELETE',
+      url: `/api/projects/${project.id}`,
+      headers: auth,
+    });
+    expect(archived.statusCode).toBe(200);
+    expect(archived.json().project.status).toBe('archived');
+  });
+
+  it('prevents cross-user access to projects, workspaces, sessions, and route token resources', async () => {
+    const app = buildControlPlaneApp({ env: testEnv('ownership') });
+    apps.push(app);
+
+    const ownerAuth = { authorization: 'Bearer dev:owner' };
+    const otherAuth = { authorization: 'Bearer dev:other' };
+    await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: ownerAuth,
+      payload: { email: 'owner@example.com' },
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: otherAuth,
+      payload: { email: 'other@example.com' },
+    });
+
+    const project = (await app.inject({
+      method: 'POST',
+      url: '/api/projects',
+      headers: ownerAuth,
+      payload: { name: 'Private Project', slug: 'private-project' },
+    })).json().project;
+    const workspace = (await app.inject({
+      method: 'POST',
+      url: `/api/projects/${project.id}/workspaces`,
+      headers: ownerAuth,
+      payload: { name: 'Private Workspace', slug: 'private-workspace' },
+    })).json().workspace;
+    const session = (await app.inject({
+      method: 'POST',
+      url: `/api/workspaces/${workspace.id}/sessions`,
+      headers: ownerAuth,
+      payload: { provider: 'codex', title: 'Private Session' },
+    })).json().session;
+
+    const projectRead = await app.inject({
+      method: 'GET',
+      url: `/api/projects/${project.id}`,
+      headers: otherAuth,
+    });
+    expect(projectRead.statusCode).toBe(404);
+
+    const workspacePatch = await app.inject({
+      method: 'PATCH',
+      url: `/api/workspaces/${workspace.id}`,
+      headers: otherAuth,
+      payload: { name: 'stolen' },
+    });
+    expect(workspacePatch.statusCode).toBe(404);
+
+    const sessionPatch = await app.inject({
+      method: 'PATCH',
+      url: `/api/sessions/${session.id}`,
+      headers: otherAuth,
+      payload: { title: 'stolen' },
+    });
+    expect(sessionPatch.statusCode).toBe(404);
+
+    const otherSandbox = (await app.inject({
+      method: 'POST',
+      url: '/api/sandbox/start',
+      headers: otherAuth,
+    })).json().sandbox;
+    const badRouteToken = await app.inject({
+      method: 'POST',
+      url: `/api/sandboxes/${otherSandbox.id}/route-token`,
+      headers: otherAuth,
+      payload: {
+        workspaceId: workspace.id,
+        sessionId: session.id,
+      },
+    });
+    expect(badRouteToken.statusCode).toBe(404);
+  });
+
+  it('supports jwt auth mode and rejects invalid production tokens', async () => {
+    const env = {
+      ...testEnv('jwt-auth'),
+      CONTROL_PLANE_AUTH_MODE: 'jwt',
+      CONTROL_PLANE_AUTH_JWT_SECRET: 'production-auth-test-secret',
+      CONTROL_PLANE_AUTH_JWT_PROVIDER: 'test-jwt',
+      CONTROL_PLANE_ADMIN_IDENTITIES: 'test-jwt:admin',
+    };
+    const app = buildControlPlaneApp({ env });
+    apps.push(app);
+
+    const token = createSignedToken(
+      {
+        sub: 'jwt-user',
+        exp: Math.floor(Date.now() / 1000) + 300,
+      },
+      'production-auth-test-secret',
+    );
+
+    const invalid = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: {
+        authorization: 'Bearer invalid-token',
+      },
+      payload: {
+        email: 'jwt@example.com',
+      },
+    });
+    expect(invalid.statusCode).toBe(401);
+
+    const bootstrap = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+      payload: {
+        email: 'jwt@example.com',
+      },
+    });
+    expect(bootstrap.statusCode).toBe(200);
+    expect(bootstrap.json().user).toMatchObject({
+      authProvider: 'test-jwt',
+      authSubject: 'jwt-user',
+    });
   });
 
   it('exposes user management for control-plane administration', async () => {
@@ -196,10 +484,75 @@ describe('control plane api', () => {
       payload: {
         plan: 'pro',
         status: 'active',
+        billingCustomerId: 'cus_test',
+        quotaProfile: 'pro',
       },
     });
     expect(update.statusCode).toBe(200);
     expect(update.json().user.plan).toBe('pro');
+    expect(update.json().user.billingCustomerId).toBe('cus_test');
+    expect(update.json().user.quotaProfile).toBe('pro');
+
+    const filtered = await app.inject({
+      method: 'GET',
+      url: '/api/admin/users?plan=pro&status=active',
+      headers: {
+        authorization: 'Bearer dev:admin',
+      },
+    });
+    expect(filtered.statusCode).toBe(200);
+    expect(filtered.json().users).toHaveLength(1);
+  });
+
+  it('exposes sandbox management for control-plane administration', async () => {
+    const app = buildControlPlaneApp({ env: testEnv('admin-sandboxes') });
+    apps.push(app);
+
+    const userAuth = { authorization: 'Bearer dev:sandbox-owner' };
+    const bootstrap = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: userAuth,
+      payload: {
+        email: 'sandbox-owner@example.com',
+      },
+    });
+    const sandboxId = bootstrap.json().sandbox.id;
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: {
+        authorization: 'Bearer dev:admin',
+      },
+      payload: {
+        email: 'admin@example.com',
+      },
+    });
+
+    const list = await app.inject({
+      method: 'GET',
+      url: '/api/admin/sandboxes',
+      headers: {
+        authorization: 'Bearer dev:admin',
+      },
+    });
+    expect(list.statusCode).toBe(200);
+    expect(list.json().sandboxes.some((sandbox: { id: string }) => sandbox.id === sandboxId)).toBe(true);
+
+    const forceStop = await app.inject({
+      method: 'POST',
+      url: `/api/admin/sandboxes/${sandboxId}/force-stop`,
+      headers: {
+        authorization: 'Bearer dev:admin',
+      },
+    });
+    expect(forceStop.statusCode).toBe(200);
+    expect(forceStop.json().sandbox).toMatchObject({
+      id: sandboxId,
+      state: 'stopped',
+      statusReason: 'force-stopped by administrator',
+    });
   });
 
   it('forbids non-admin users from control-plane administration', async () => {

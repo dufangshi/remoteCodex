@@ -4,29 +4,67 @@ export interface SandboxProvisionResult {
   workerServiceName?: string | null;
   k8sNamespace?: string | null;
   k8sPodName?: string | null;
+  statusReason?: string | null;
+}
+
+export interface SandboxStartInput {
+  sandboxId: string;
+  userId: string;
+  image: string;
+  region: string;
+  s3Prefix: string;
+}
+
+export interface SandboxEnvironment {
+  env: Record<string, string>;
+}
+
+export type SandboxManagerErrorCode = 'quota' | 'capacity' | 'config' | 'provider';
+
+export class SandboxManagerError extends Error {
+  constructor(
+    public readonly code: SandboxManagerErrorCode,
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
 export interface SandboxManager {
-  startSandbox(input: {
-    sandboxId: string;
-    userId: string;
-    image: string;
-    region: string;
-    s3Prefix: string;
-  }): Promise<SandboxProvisionResult>;
+  createSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult>;
+  startSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult>;
   stopSandbox(input: { sandboxId: string; userId: string }): Promise<SandboxProvisionResult>;
+  restartSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult>;
+  deleteSandbox(input: { sandboxId: string; userId: string }): Promise<SandboxProvisionResult>;
+  getSandboxStatus(input: { sandboxId: string; userId: string }): Promise<SandboxProvisionResult>;
+  getSandboxEndpoint(input: { sandboxId: string; userId: string }): Promise<{ routerBaseUrl: string | null }>;
+  prepareSandboxEnvironment(input: SandboxStartInput): Promise<SandboxEnvironment>;
 }
 
 export class NoopSandboxManager implements SandboxManager {
   constructor(private readonly routerBaseUrl: string) {}
 
-  async startSandbox(input: {
-    sandboxId: string;
-    userId: string;
-    image: string;
-    region: string;
-    s3Prefix: string;
-  }): Promise<SandboxProvisionResult> {
+  async createSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
+    return this.runningResult(input);
+  }
+
+  async startSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
+    return this.runningResult(input);
+  }
+
+  async restartSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
+    return this.runningResult(input);
+  }
+
+  async stopSandbox(): Promise<SandboxProvisionResult> {
+    return { state: 'stopped' };
+  }
+
+  async deleteSandbox(): Promise<SandboxProvisionResult> {
+    return { state: 'deleted' };
+  }
+
+  async getSandboxStatus(input: { sandboxId: string }): Promise<SandboxProvisionResult> {
     return {
       state: 'running',
       routerBaseUrl: this.routerBaseUrl,
@@ -36,8 +74,29 @@ export class NoopSandboxManager implements SandboxManager {
     };
   }
 
-  async stopSandbox(): Promise<SandboxProvisionResult> {
-    return { state: 'stopped' };
+  async getSandboxEndpoint(): Promise<{ routerBaseUrl: string | null }> {
+    return { routerBaseUrl: this.routerBaseUrl };
+  }
+
+  async prepareSandboxEnvironment(input: SandboxStartInput): Promise<SandboxEnvironment> {
+    return {
+      env: {
+        REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+        REMOTE_CODEX_SANDBOX_ID: input.sandboxId,
+        REMOTE_CODEX_USER_ID: input.userId,
+        WORKSPACE_ROOT: '/workspace',
+      },
+    };
+  }
+
+  private runningResult(input: { sandboxId: string }): SandboxProvisionResult {
+    return {
+      state: 'running',
+      routerBaseUrl: this.routerBaseUrl,
+      workerServiceName: `sandbox-worker-${input.sandboxId}`,
+      k8sNamespace: 'remote-codex-sandboxes',
+      k8sPodName: `sandbox-${input.sandboxId}`,
+    };
   }
 }
 

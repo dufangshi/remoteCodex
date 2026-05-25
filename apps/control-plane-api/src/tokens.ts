@@ -29,7 +29,15 @@ export interface RouteTokenPayload {
   jti: string;
 }
 
-export function createSignedToken(payload: RouteTokenPayload, secret: string): string {
+export interface SignedTokenPayload {
+  sub: string;
+  iat?: number;
+  exp: number;
+  jti?: string;
+  [key: string]: unknown;
+}
+
+export function createSignedToken(payload: SignedTokenPayload, secret: string): string {
   const header = { alg: 'HS256', typ: 'JWT' };
   const encodedHeader = base64UrlEncode(JSON.stringify(header));
   const encodedPayload = base64UrlEncode(JSON.stringify(payload));
@@ -37,7 +45,11 @@ export function createSignedToken(payload: RouteTokenPayload, secret: string): s
   return `${signingInput}.${sign(signingInput, secret)}`;
 }
 
-export function verifySignedToken(token: string, secret: string, nowSeconds = Math.floor(Date.now() / 1000)) {
+export function verifySignedToken<TPayload extends { sub: string; exp: number } = RouteTokenPayload>(
+  token: string,
+  secret: string,
+  nowSeconds = Math.floor(Date.now() / 1000),
+) {
   const parts = token.split('.');
   if (parts.length !== 3 || !parts[0] || !parts[1] || !parts[2]) {
     throw new Error('Invalid token shape.');
@@ -54,7 +66,7 @@ export function verifySignedToken(token: string, secret: string, nowSeconds = Ma
     throw new Error('Invalid token signature.');
   }
 
-  const payload = JSON.parse(base64UrlDecode(parts[1]).toString('utf8')) as RouteTokenPayload;
+  const payload = JSON.parse(base64UrlDecode(parts[1]).toString('utf8')) as TPayload;
   if (payload.exp <= nowSeconds) {
     throw new Error('Token expired.');
   }

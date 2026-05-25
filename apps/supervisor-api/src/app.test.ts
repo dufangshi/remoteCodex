@@ -643,6 +643,15 @@ describe('supervisor api', () => {
       },
     });
     expect(authorized.statusCode).toBe(200);
+
+    const bearerAuthorized = await app.inject({
+      method: 'GET',
+      url: '/api/worker/metadata',
+      headers: {
+        authorization: 'Bearer router-secret',
+      },
+    });
+    expect(bearerAuthorized.statusCode).toBe(200);
   });
 
   it('writes gateway-backed provider config during worker startup', async () => {

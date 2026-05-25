@@ -187,6 +187,8 @@ export const controlUsers = sqliteTable(
     displayName: text('display_name'),
     status: text('status').notNull().default('active'),
     plan: text('plan').notNull().default('developer'),
+    billingCustomerId: text('billing_customer_id'),
+    quotaProfile: text('quota_profile').notNull().default('developer'),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
     lastSeenAt: text('last_seen_at'),
@@ -198,6 +200,16 @@ export const controlUsers = sqliteTable(
     ),
   }),
 );
+
+export const controlProjects = sqliteTable('control_projects', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  name: text('name').notNull(),
+  slug: text('slug').notNull(),
+  status: text('status').notNull().default('active'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
 
 export const controlSandboxes = sqliteTable('control_sandboxes', {
   id: text('id').primaryKey(),
@@ -214,6 +226,7 @@ export const controlSandboxes = sqliteTable('control_sandboxes', {
   lastStartedAt: text('last_started_at'),
   lastSeenAt: text('last_seen_at'),
   idleTimeoutAt: text('idle_timeout_at'),
+  statusReason: text('status_reason'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });
@@ -223,6 +236,7 @@ export const controlWorkspaces = sqliteTable(
   {
     id: text('id').primaryKey(),
     userId: text('user_id').notNull(),
+    projectId: text('project_id'),
     sandboxId: text('sandbox_id').notNull(),
     name: text('name').notNull(),
     slug: text('slug').notNull(),
