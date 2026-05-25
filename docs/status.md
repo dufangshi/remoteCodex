@@ -84,6 +84,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   provider selection config, worker provider config rendering, and manual usage
   import exist, while scheduled import, metrics, and frontend degraded/usage UI
   remain open.
+- Gateway token storage is documented as metadata plus optional encrypted
+  ciphertext only; raw provider keys and raw gateway tokens are not returned by
+  Remote Codex APIs.
 - ElAgenteHarness credential provisioning and worker bootstrap.
 
 ## Immediate Next Implementation Queue

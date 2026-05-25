@@ -486,7 +486,7 @@ real provider root keys stay outside the sandbox.
 - [x] Add gateway provider config table or config source.
 - [x] Store gateway base URL.
 - [x] Store gateway key id per user or sandbox.
-- [ ] Store encrypted gateway token only if raw recovery is required.
+- [x] Store encrypted gateway token only if raw recovery is required.
 - [x] Add gateway admin credential config.
 - [x] Add gateway client interface.
 - [x] Implement gateway user creation.

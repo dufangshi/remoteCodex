@@ -583,7 +583,7 @@ Evidence:
     environments or gateways are expected.
   - Verification: config tests cover missing and valid gateway provider config.
 
-- [ ] Store encrypted gateway token only if raw recovery is required.
+- [x] Store encrypted gateway token only if raw recovery is required.
   - Acceptance: docs and schema clarify whether raw gateway tokens are stored,
     encrypted, or write-only after provisioning.
   - Verification: tests prove raw tokens are redacted from API responses and

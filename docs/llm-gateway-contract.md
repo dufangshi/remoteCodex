@@ -125,6 +125,31 @@ contract and should be tracked separately in Remote Codex records. The value is
 stored with `control_gateway_users`, `control_gateway_keys`, and usage import
 events, and it is part of usage dedupe with `externalRequestId`.
 
+## Gateway Token Storage Decision
+
+Remote Codex does not store raw provider root keys.
+
+For phase one, Remote Codex stores gateway key metadata and may store encrypted
+gateway token material only when the gateway returns `keyCiphertext`.
+`keyCiphertext` is treated as encrypted-at-source recovery material, not as a
+plain API key:
+
+- It may be stored in `control_gateway_keys.key_ciphertext`.
+- It must be encrypted before it reaches Remote Codex.
+- It must never be returned in Remote Codex API responses.
+- API responses expose only `hasEncryptedKey`.
+- It must be redacted from logs and audit payloads.
+- If the gateway can inject or manage worker token material without returning
+  recoverable ciphertext, `keyCiphertext` should be `null`.
+
+Raw recovery is not required for the default path. The preferred production
+path is `LLM_GATEWAY_TOKEN_SECRET_NAME`, where the sandbox manager injects the
+scoped gateway token from the deployment secret store into the worker Pod.
+
+If a future gateway requires Remote Codex to recover raw gateway tokens, add a
+separate encryption key management decision, rotation procedure, and response
+redaction tests before enabling that behavior.
+
 ## Admin API Endpoints
 
 Remote Codex currently calls these gateway admin endpoints through
