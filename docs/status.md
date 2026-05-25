@@ -84,7 +84,8 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   staging release record. When env readiness fails, it now still writes a
   placeholder-only `phase-zero-six.env.sh` or `aws-preflight.env.sh` into the
   output directory so operators can fill missing staging inputs without
-  scraping JSON, and it scans those early-stop artifacts before returning. Its
+  scraping JSON, scans those early-stop artifacts before returning, and puts
+  readiness groups plus next-step commands directly in `summary.json`. Its
   bundle-level `--apply-ready` path now runs
   read-only Phase 0-6 verification first, scans generated artifacts second, and
   only then runs a separate checklist apply command; if the artifact scan

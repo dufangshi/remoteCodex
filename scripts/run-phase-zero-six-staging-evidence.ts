@@ -148,6 +148,64 @@ function commandSummary(result: CommandResult) {
   };
 }
 
+function envReadinessSummary(result: CommandResult | undefined) {
+  const parsed = result ? parseJsonOutput(result) as {
+    readyGroups?: unknown;
+    notReadyGroups?: unknown;
+    groups?: unknown;
+  } | null : null;
+  const groups = Array.isArray(parsed?.groups) ? parsed.groups : [];
+  return {
+    readyGroups: Array.isArray(parsed?.readyGroups) ? parsed.readyGroups : [],
+    notReadyGroups: Array.isArray(parsed?.notReadyGroups) ? parsed.notReadyGroups : [],
+    groups: groups.map((group) => {
+      const entry = group as {
+        id?: unknown;
+        items?: unknown;
+        ready?: unknown;
+        missingEnv?: unknown;
+        missingRecommendedEnv?: unknown;
+      };
+      return {
+        id: typeof entry.id === 'string' ? entry.id : null,
+        items: Array.isArray(entry.items) ? entry.items : [],
+        ready: entry.ready === true,
+        missingEnv: Array.isArray(entry.missingEnv) ? entry.missingEnv : [],
+        missingRecommendedEnv: Array.isArray(entry.missingRecommendedEnv)
+          ? entry.missingRecommendedEnv
+          : [],
+      };
+    }),
+  };
+}
+
+function nextSteps(input: {
+  outputDir: string;
+  envTemplatePath: string;
+  skippedStagingSmoke: boolean;
+  applyReady: boolean;
+}) {
+  return {
+    fillEnvTemplate: `Fill ${input.envTemplatePath} in a private operator shell; do not commit filled values.`,
+    sourceEnvTemplate: `source ${input.envTemplatePath}`,
+    verifyEnvReadiness: input.skippedStagingSmoke
+      ? 'pnpm verify:phase-zero-six-env-ready -- --skip-staging-smoke'
+      : 'pnpm verify:phase-zero-six-env-ready',
+    rerunBundle: [
+      'pnpm collect:phase-zero-six-evidence --',
+      `--output-dir ${input.outputDir}`,
+      ...(input.skippedStagingSmoke ? ['--skip-staging-smoke'] : []),
+      ...(input.applyReady ? ['--apply-ready'] : []),
+    ].join(' '),
+    applyChecklistAfterReview: [
+      'pnpm collect:phase-zero-six-evidence --',
+      `--output-dir ${input.outputDir}-apply`,
+      ...(input.skippedStagingSmoke ? ['--skip-staging-smoke'] : []),
+      '--apply-ready',
+    ].join(' '),
+  };
+}
+
 async function main() {
   const outputDir =
     argValue('--output-dir') ??
@@ -199,6 +257,13 @@ async function main() {
       skippedStagingSmoke: hasFlag('--skip-staging-smoke'),
       stoppedAfterEnvReadiness: true,
       reason: 'Environment readiness failed. Fill missing env names or rerun with --force for diagnostic collection.',
+      envReadiness: envReadinessSummary(commands[0]),
+      nextSteps: nextSteps({
+        outputDir,
+        envTemplatePath,
+        skippedStagingSmoke: hasFlag('--skip-staging-smoke'),
+        applyReady,
+      }),
       artifacts: {
         envReadiness: envReadinessPath,
         envTemplate: envTemplatePath,
@@ -318,6 +383,13 @@ async function main() {
     stoppedAfterEnvReadiness: false,
     phaseZeroSixComplete,
     applySkippedReason,
+    envReadiness: envReadinessSummary(commands[0]),
+    nextSteps: nextSteps({
+      outputDir,
+      envTemplatePath,
+      skippedStagingSmoke: hasFlag('--skip-staging-smoke'),
+      applyReady,
+    }),
     artifacts: {
       envReadiness: envReadinessPath,
       envTemplate: envTemplatePath,

@@ -933,6 +933,22 @@ describe('phase zero-six evidence tooling', () => {
     expect(parsed.ok).toBe(false);
     expect(parsed.stoppedAfterEnvReadiness).toBe(true);
     expect(parsed.artifactScanPassed).toBe(true);
+    expect(parsed.envReadiness.notReadyGroups).toEqual([
+      'aws-preflight',
+      'runtime-smoke',
+      'direct-worker-denial',
+      'codex-provider-smoke',
+      'claude-provider-smoke',
+      'opencode-provider-smoke',
+    ]);
+    expect(parsed.envReadiness.groups[0]).toEqual(expect.objectContaining({
+      id: 'aws-preflight',
+      items: ['S3.04', 'S3.05'],
+      ready: false,
+    }));
+    expect(parsed.nextSteps.fillEnvTemplate).toContain(path.join(dir, 'phase-zero-six.env.sh'));
+    expect(parsed.nextSteps.verifyEnvReadiness).toBe('pnpm verify:phase-zero-six-env-ready');
+    expect(parsed.nextSteps.rerunBundle).toContain(`--output-dir ${dir}`);
     expect(parsed.artifacts.envReadiness).toBe(path.join(dir, 'env-readiness.json'));
     expect(parsed.artifacts.envTemplate).toBe(path.join(dir, 'phase-zero-six.env.sh'));
     expect(parsed.artifacts.artifactSecretScan).toBe(path.join(dir, 'artifact-secret-scan.json'));

@@ -347,6 +347,10 @@ contains placeholders and non-secret examples only; it is not completion
 evidence. Even in this early-stop path, the bundle writes
 `artifact-secret-scan.json` and scans the generated readiness JSON, summary,
 and shell template before returning.
+The resulting `summary.json` includes `envReadiness.readyGroups`,
+`envReadiness.notReadyGroups`, a per-group missing-env summary, and `nextSteps`
+commands so the operator can continue without manually opening
+`env-readiness.json`.
 
 For diagnostic collection only, operators can override that guard:
 
