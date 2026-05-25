@@ -183,7 +183,7 @@ live sandbox-local execution state.
 - [x] Add pagination for project lists.
 - [x] Add pagination for workspace lists.
 - [x] Add pagination for session lists.
-- [ ] Add search and filter support for product lists.
+- [x] Add search and filter support for product lists.
 
 ### API Checklist
 

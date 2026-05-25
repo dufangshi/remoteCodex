@@ -255,7 +255,7 @@ sandbox-local execution state.
   - Acceptance: session list endpoint paginates within a workspace context.
   - Verification: API tests cover pagination and archived-session handling.
 
-- [ ] Add search/filter support for product lists.
+- [x] Add search/filter support for product lists.
   - Acceptance: product list APIs support the filters needed by the frontend
     without leaking cross-user data.
   - Verification: API tests cover search, status filters, and ownership.
@@ -317,7 +317,7 @@ sandbox-local execution state.
   `apps/control-plane-api/src/app.test.ts`
 - Verification: `pnpm --filter @remote-codex/control-plane-api typecheck`;
   `pnpm --filter @remote-codex/control-plane-api test`
-- Residual risk: search/filter, worker checkpoint sync, and frontend project
+- Residual risk: worker checkpoint sync and frontend project
   detail/loading/open-session tasks remain unchecked.
 
 ## Phase 3: Sandbox Lifecycle And AWS Runtime

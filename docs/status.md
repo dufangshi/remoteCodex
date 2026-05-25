@@ -43,7 +43,7 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 - Control-plane schema and APIs cover users, projects, workspaces, sessions,
   sandboxes, route tokens, and admin user/sandbox operations.
 - Project, workspace, and session list APIs support bounded `limit`/`offset`
-  pagination with response metadata.
+  pagination with response metadata plus search/status filters.
 - Inactive account behavior is implemented for route-token issuance, sandbox
   start/restart, and usage import.
 - User data export and deletion/anonymization APIs are explicitly deferred in
@@ -76,8 +76,7 @@ gateway, ElAgenteHarness, or chemistry compute workers.
    expired, unauthorized, and disabled-account states.
 2. Add production auth-provider smoke coverage or staging smoke procedure for
    valid, expired, wrong-issuer, and wrong-audience tokens.
-3. Add project search/filter support and frontend project detail/loading/open
-   session flows.
+3. Add frontend project detail/loading/open-session flows.
 4. Add worker checkpoint caller plus wrong-user and wrong-sandbox denial tests.
 5. Add AWS namespace/label strategy, Pod cleanup policy, idle timeout, and
    sandbox reaper.

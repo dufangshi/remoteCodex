@@ -927,6 +927,25 @@ describe('control plane api', () => {
       hasMore: false,
     });
 
+    const archivedProject = await app.inject({
+      method: 'DELETE',
+      url: `/api/projects/${projects[1].id}`,
+      headers: auth,
+    });
+    expect(archivedProject.statusCode).toBe(200);
+
+    const filteredProjects = await app.inject({
+      method: 'GET',
+      url: '/api/projects?search=Project%202&status=archived',
+      headers: auth,
+    });
+    expect(filteredProjects.statusCode).toBe(200);
+    expect(filteredProjects.json().projects).toHaveLength(1);
+    expect(filteredProjects.json().projects[0]).toMatchObject({
+      id: projects[1].id,
+      status: 'archived',
+    });
+
     const workspaces = [];
     for (const index of [1, 2, 3]) {
       const response = await app.inject({
@@ -970,17 +989,41 @@ describe('control plane api', () => {
       hasMore: false,
     });
 
+    const archivedWorkspace = await app.inject({
+      method: 'PATCH',
+      url: `/api/workspaces/${workspaces[1].id}`,
+      headers: auth,
+      payload: {
+        status: 'archived',
+      },
+    });
+    expect(archivedWorkspace.statusCode).toBe(200);
+
+    const filteredWorkspaces = await app.inject({
+      method: 'GET',
+      url: `/api/projects/${projects[0].id}/workspaces?search=Workspace%202&status=archived`,
+      headers: auth,
+    });
+    expect(filteredWorkspaces.statusCode).toBe(200);
+    expect(filteredWorkspaces.json().workspaces).toHaveLength(1);
+    expect(filteredWorkspaces.json().workspaces[0]).toMatchObject({
+      id: workspaces[1].id,
+      status: 'archived',
+    });
+
+    const sessions = [];
     for (const index of [1, 2, 3]) {
       const response = await app.inject({
         method: 'POST',
         url: `/api/workspaces/${workspaces[0].id}/sessions`,
         headers: auth,
         payload: {
-          provider: 'codex',
+          provider: index === 2 ? 'claude' : 'codex',
           title: `Session ${index}`,
         },
       });
       expect(response.statusCode).toBe(200);
+      sessions.push(response.json().session);
     }
 
     const sessionPage = await app.inject({
@@ -995,6 +1038,29 @@ describe('control plane api', () => {
       offset: 0,
       total: 3,
       hasMore: true,
+    });
+
+    const activeSession = await app.inject({
+      method: 'PATCH',
+      url: `/api/sessions/${sessions[1].id}`,
+      headers: auth,
+      payload: {
+        status: 'active',
+      },
+    });
+    expect(activeSession.statusCode).toBe(200);
+
+    const filteredSessions = await app.inject({
+      method: 'GET',
+      url: `/api/workspaces/${workspaces[0].id}/sessions?search=Session%202&status=active&provider=claude`,
+      headers: auth,
+    });
+    expect(filteredSessions.statusCode).toBe(200);
+    expect(filteredSessions.json().sessions).toHaveLength(1);
+    expect(filteredSessions.json().sessions[0]).toMatchObject({
+      id: sessions[1].id,
+      provider: 'claude',
+      status: 'active',
     });
   });
 

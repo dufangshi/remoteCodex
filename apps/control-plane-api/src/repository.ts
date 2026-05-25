@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, like, sql } from 'drizzle-orm';
 
 import { DatabaseClient } from '../../../packages/db/src/index';
 import {
@@ -193,21 +193,30 @@ export class ControlPlaneRepository {
     return record;
   }
 
-  listProjects(userId: string, pagination?: PaginationInput): PaginatedResult<typeof controlProjects.$inferSelect> {
+  listProjects(userId: string, input: {
+    pagination?: PaginationInput | undefined;
+    search?: string | undefined;
+    status?: string | undefined;
+  } = {}): PaginatedResult<typeof controlProjects.$inferSelect> {
+    const filters = [
+      eq(controlProjects.userId, userId),
+      input.status ? eq(controlProjects.status, input.status) : null,
+      input.search ? like(controlProjects.name, `%${escapeLike(input.search)}%`) : null,
+    ].filter((filter): filter is NonNullable<typeof filter> => Boolean(filter));
     const total = this.db
       .select({ count: sql<number>`count(*)` })
       .from(controlProjects)
-      .where(eq(controlProjects.userId, userId))
+      .where(and(...filters))
       .get()?.count ?? 0;
     const query = this.db
       .select()
       .from(controlProjects)
-      .where(eq(controlProjects.userId, userId))
+      .where(and(...filters))
       .orderBy(desc(controlProjects.createdAt));
-    const items = pagination
-      ? query.limit(pagination.limit).offset(pagination.offset).all()
+    const items = input.pagination
+      ? query.limit(input.pagination.limit).offset(input.pagination.offset).all()
       : query.all();
-    return paginated(items, pagination, total);
+    return paginated(items, input.pagination, total);
   }
 
   getProjectById(id: string) {
@@ -360,10 +369,14 @@ export class ControlPlaneRepository {
   listWorkspaces(userId: string, input: {
     projectId?: string | undefined;
     pagination?: PaginationInput | undefined;
+    search?: string | undefined;
+    status?: string | undefined;
   } = {}): PaginatedResult<typeof controlWorkspaces.$inferSelect> {
     const filters = [
       eq(controlWorkspaces.userId, userId),
       input.projectId ? eq(controlWorkspaces.projectId, input.projectId) : null,
+      input.status ? eq(controlWorkspaces.status, input.status) : null,
+      input.search ? like(controlWorkspaces.name, `%${escapeLike(input.search)}%`) : null,
     ].filter((filter): filter is NonNullable<typeof filter> => Boolean(filter));
     const total = this.db
       .select({ count: sql<number>`count(*)` })
@@ -441,22 +454,33 @@ export class ControlPlaneRepository {
 
   listSessionsForWorkspace(
     workspaceId: string,
-    pagination?: PaginationInput,
+    input: {
+      pagination?: PaginationInput | undefined;
+      search?: string | undefined;
+      status?: string | undefined;
+      provider?: string | undefined;
+    } = {},
   ): PaginatedResult<typeof controlSessions.$inferSelect> {
+    const filters = [
+      eq(controlSessions.workspaceId, workspaceId),
+      input.status ? eq(controlSessions.status, input.status) : null,
+      input.provider ? eq(controlSessions.provider, input.provider) : null,
+      input.search ? like(controlSessions.title, `%${escapeLike(input.search)}%`) : null,
+    ].filter((filter): filter is NonNullable<typeof filter> => Boolean(filter));
     const total = this.db
       .select({ count: sql<number>`count(*)` })
       .from(controlSessions)
-      .where(eq(controlSessions.workspaceId, workspaceId))
+      .where(and(...filters))
       .get()?.count ?? 0;
     const query = this.db
       .select()
       .from(controlSessions)
-      .where(eq(controlSessions.workspaceId, workspaceId))
+      .where(and(...filters))
       .orderBy(desc(controlSessions.createdAt));
-    const items = pagination
-      ? query.limit(pagination.limit).offset(pagination.offset).all()
+    const items = input.pagination
+      ? query.limit(input.pagination.limit).offset(input.pagination.offset).all()
       : query.all();
-    return paginated(items, pagination, total);
+    return paginated(items, input.pagination, total);
   }
 
   getSessionById(id: string) {
@@ -768,4 +792,8 @@ function paginated<T>(items: T[], pagination: PaginationInput | undefined, total
       hasMore: offset + items.length < total,
     },
   };
+}
+
+function escapeLike(value: string) {
+  return value.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_');
 }

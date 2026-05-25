@@ -173,7 +173,7 @@ Verification:
 - [x] Add pagination for project lists.
 - [x] Add pagination for workspace lists.
 - [x] Add pagination for session lists.
-- [ ] Add search/filter support for product lists.
+- [x] Add search/filter support for product lists.
 - [x] Add project list UI.
 - [x] Add project creation UI.
 - [ ] Add project detail UI.
@@ -810,7 +810,7 @@ runtime state.
 - [x] Add pagination for project lists.
 - [x] Add pagination for workspace lists.
 - [x] Add pagination for session lists.
-- [ ] Add search or filtering for product UI lists.
+- [x] Add search or filtering for product UI lists.
 
 ### Frontend Product Flow
 

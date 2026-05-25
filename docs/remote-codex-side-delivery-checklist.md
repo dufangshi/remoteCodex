@@ -213,7 +213,7 @@ execution state inside the sandbox.
 - [x] Add pagination for project lists.
 - [x] Add pagination for workspace lists.
 - [x] Add pagination for session lists.
-- [ ] Add search/filter support for product lists.
+- [x] Add search/filter support for product lists.
 
 ### Control Plane API
 

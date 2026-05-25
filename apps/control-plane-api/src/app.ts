@@ -132,6 +132,11 @@ const paginationQuerySchema = z.object({
   offset: z.coerce.number().int().nonnegative().default(0),
 });
 
+const productListQuerySchema = paginationQuerySchema.extend({
+  search: z.string().trim().min(1).max(200).optional(),
+  status: z.string().trim().min(1).max(50).optional(),
+});
+
 const importUsageSchema = z.object({
   events: z.array(
     z.object({
@@ -818,8 +823,19 @@ export function buildControlPlaneApp(
 
   app.get('/api/projects', async (request) => {
     const user = requireUser(app, request);
-    const pagination = paginationQuerySchema.parse(request.query);
-    const result = repository.listProjects(user.id, pagination);
+    const query = productListQuerySchema
+      .extend({
+        status: z.enum(['active', 'archived']).optional(),
+      })
+      .parse(request.query);
+    const result = repository.listProjects(user.id, {
+      pagination: {
+        limit: query.limit,
+        offset: query.offset,
+      },
+      search: query.search,
+      status: query.status,
+    });
     return { projects: result.items, page: result.page };
   });
 
@@ -871,14 +887,23 @@ export function buildControlPlaneApp(
   app.get('/api/projects/:projectId/workspaces', async (request) => {
     const user = requireUser(app, request);
     const params = z.object({ projectId: z.string().uuid() }).parse(request.params);
-    const pagination = paginationQuerySchema.parse(request.query);
+    const query = productListQuerySchema
+      .extend({
+        status: z.enum(['active', 'archived', 'deleted']).optional(),
+      })
+      .parse(request.query);
     const project = repository.getProjectById(params.projectId);
     if (!project || project.userId !== user.id) {
       throw new HttpError(404, 'not_found', 'Project not found.');
     }
     const result = repository.listWorkspaces(user.id, {
       projectId: project.id,
-      pagination,
+      pagination: {
+        limit: query.limit,
+        offset: query.offset,
+      },
+      search: query.search,
+      status: query.status,
     });
     return { workspaces: result.items, page: result.page };
   });
@@ -912,7 +937,11 @@ export function buildControlPlaneApp(
       .object({
         projectId: z.string().uuid().optional(),
       })
-      .merge(paginationQuerySchema)
+      .merge(
+        productListQuerySchema.extend({
+          status: z.enum(['active', 'archived', 'deleted']).optional(),
+        }),
+      )
       .parse(request.query);
     if (query.projectId) {
       const project = repository.getProjectById(query.projectId);
@@ -926,6 +955,8 @@ export function buildControlPlaneApp(
         limit: query.limit,
         offset: query.offset,
       },
+      search: query.search,
+      status: query.status,
     });
     return { workspaces: result.items, page: result.page };
   });
@@ -974,12 +1005,25 @@ export function buildControlPlaneApp(
   app.get('/api/workspaces/:workspaceId/sessions', async (request) => {
     const user = requireUser(app, request);
     const params = z.object({ workspaceId: z.string().uuid() }).parse(request.params);
-    const pagination = paginationQuerySchema.parse(request.query);
+    const query = productListQuerySchema
+      .extend({
+        status: z.enum(['created', 'active', 'idle', 'archived', 'deleted']).optional(),
+        provider: z.string().trim().min(1).max(50).optional(),
+      })
+      .parse(request.query);
     const workspace = repository.getWorkspaceById(params.workspaceId);
     if (!workspace || workspace.userId !== user.id) {
       throw new HttpError(404, 'not_found', 'Workspace not found.');
     }
-    const result = repository.listSessionsForWorkspace(workspace.id, pagination);
+    const result = repository.listSessionsForWorkspace(workspace.id, {
+      pagination: {
+        limit: query.limit,
+        offset: query.offset,
+      },
+      search: query.search,
+      status: query.status,
+      provider: query.provider,
+    });
     return { sessions: result.items, page: result.page };
   });
 
