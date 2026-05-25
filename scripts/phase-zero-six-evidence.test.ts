@@ -1082,6 +1082,28 @@ describe('phase zero-six evidence tooling', () => {
     expect(template).not.toContain('secret-aws-value');
   });
 
+  it('rejects unfilled GitHub staging Environment template placeholders', async () => {
+    const dir = await tempDir();
+    const templatePath = path.join(dir, 'github-staging.env.sh');
+    await runScript(
+      'scripts/configure-github-staging-evidence-env.ts',
+      ['--write-template', templatePath, '--direct-worker-mode', 'private'],
+    );
+
+    const result = await runScript(
+      'scripts/configure-github-staging-evidence-env.ts',
+      ['--values-file', templatePath, '--direct-worker-mode', 'private', '--dry-run'],
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.missingVariables).toContain('AWS_STAGING_REVIEWED_BY');
+    expect(parsed.missingSecrets).toContain('STAGING_PRODUCT_JWT');
+    expect(result.stdout).not.toContain('<aws-staging-reviewed-by>');
+    expect(result.stdout).not.toContain('<staging-product-jwt>');
+  });
+
   it('dry-runs GitHub staging Environment configuration without printing secret values', async () => {
     const dir = await tempDir();
     const envPath = path.join(dir, 'github-staging.env.sh');
@@ -1113,6 +1135,30 @@ describe('phase zero-six evidence tooling', () => {
     expect(result.stdout).not.toContain(secretProductJwt);
     expect(result.stdout).not.toContain(secretAwsKey);
     expect(result.stdout).not.toContain('secret-kubeconfig-b64-value');
+  });
+
+  it('ignores optional GitHub staging Environment placeholder secrets', async () => {
+    const dir = await tempDir();
+    const envPath = path.join(dir, 'github-staging.env.sh');
+    const lines = [
+      ...requiredVariables.map((name) => `export ${name}='value-for-${name}'`),
+      ...directWorkerPrivateVariables.map((name) => `export ${name}='value-for-${name}'`),
+      ...requiredSecrets.map((name) => `export ${name}='value-for-${name}'`),
+      `export ${kubeconfigSecretAlternatives[1]}='secret-kubeconfig-b64-value'`,
+      "export AWS_SESSION_TOKEN='<aws-session-token>'",
+    ];
+    await writeFile(envPath, `${lines.join('\n')}\n`);
+
+    const result = await runScript(
+      'scripts/configure-github-staging-evidence-env.ts',
+      ['--values-file', envPath, '--direct-worker-mode', 'private', '--dry-run'],
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.secrets.optionalNames).not.toContain('AWS_SESSION_TOKEN');
+    expect(result.stdout).not.toContain('<aws-session-token>');
   });
 
   it('reports missing GitHub staging Environment values by name only', async () => {

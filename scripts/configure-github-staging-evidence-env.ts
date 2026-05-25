@@ -108,11 +108,21 @@ function allRequiredSecretNames(values: Map<string, string>) {
 }
 
 function presentOptionalSecretNames(values: Map<string, string>) {
-  return optionalSecrets.filter((name) => values.has(name));
+  return optionalSecrets.filter((name) => hasFilledValue(values, name));
+}
+
+function isPlaceholderValue(value: string) {
+  const trimmed = value.trim();
+  return trimmed.startsWith('<') && trimmed.endsWith('>');
+}
+
+function hasFilledValue(values: Map<string, string>, name: string) {
+  const value = values.get(name);
+  return value !== undefined && value !== '' && !isPlaceholderValue(value);
 }
 
 function missingNames(names: readonly string[], values: Map<string, string>) {
-  return names.filter((name) => !values.has(name) || values.get(name) === '');
+  return names.filter((name) => !hasFilledValue(values, name));
 }
 
 function templateValue(name: string) {
