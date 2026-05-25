@@ -7,6 +7,7 @@ import {
   createControlPlaneRouteToken,
   createControlPlaneSession,
   createControlPlaneWorkspace,
+  fetchControlPlaneAdminUsers,
   fetchControlPlaneMe,
   fetchControlPlaneAdminSandboxDetail,
   fetchControlPlaneProjects,
@@ -18,8 +19,10 @@ import {
   startControlPlaneSandbox,
   stopControlPlaneSandbox,
   updateControlPlaneMe,
+  updateControlPlaneAdminUser,
   ApiError,
   type ControlPlaneAuth,
+  type ControlPlaneAdminUserUpdate,
   type ControlPlaneSandboxDetail,
   type ControlPlaneProject,
   type ControlPlaneRouteToken,
@@ -197,6 +200,8 @@ function ActionButton({
   );
 }
 
+const USER_STATUSES = ['active', 'suspended', 'deleted'] as const;
+
 export function ControlPlanePage() {
   const [storedAuth, setStoredAuth] = useState<StoredControlPlaneAuth>(() => readStoredAuth());
   const [auth, setAuth] = useState<ControlPlaneAuth | null>(null);
@@ -205,6 +210,7 @@ export function ControlPlanePage() {
   const [adminSandboxDetail, setAdminSandboxDetail] = useState<ControlPlaneSandboxDetail | null>(null);
   const [usage, setUsage] = useState<ControlPlaneUsageSummary | null>(null);
   const [usageEvents, setUsageEvents] = useState<ControlPlaneUsageEvent[]>([]);
+  const [adminUsers, setAdminUsers] = useState<ControlPlaneUser[]>([]);
   const [projects, setProjects] = useState<ControlPlaneProject[]>([]);
   const [workspaces, setWorkspaces] = useState<ControlPlaneWorkspace[]>([]);
   const [sessions, setSessions] = useState<ControlPlaneSession[]>([]);
@@ -223,16 +229,19 @@ export function ControlPlanePage() {
   const [quotaExceeded, setQuotaExceeded] = useState<string | null>(null);
   const [disabledAccount, setDisabledAccount] = useState<string | null>(null);
   const [expiredSession, setExpiredSession] = useState<string | null>(null);
+  const [adminUsersForbidden, setAdminUsersForbidden] = useState<string | null>(null);
   const [metadataLoading, setMetadataLoading] = useState<{
     projects: boolean;
     workspaces: boolean;
     sessions: boolean;
     usageEvents: boolean;
+    adminUsers: boolean;
   }>({
     projects: false,
     workspaces: false,
     sessions: false,
     usageEvents: false,
+    adminUsers: false,
   });
   const [workerConnectionState, setWorkerConnectionState] = useState<'idle' | 'ready' | 'reconnecting'>('idle');
   const routeTokenRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -257,6 +266,7 @@ export function ControlPlanePage() {
     setQuotaExceeded(null);
     setDisabledAccount(null);
     setExpiredSession(null);
+    setAdminUsersForbidden(null);
     try {
       return await action();
     } catch (caught) {
@@ -283,6 +293,9 @@ export function ControlPlanePage() {
         (caught.statusCode === 401 || caught.payload.code === 'unauthorized')
       ) {
         setExpiredSession(caught.message);
+      }
+      if (caught instanceof ApiError && caught.payload.code === 'forbidden') {
+        setAdminUsersForbidden(caught.message);
       }
       setError(caught instanceof Error ? caught.message : `${label} failed.`);
       return null;
@@ -424,6 +437,8 @@ export function ControlPlanePage() {
     setAdminSandboxDetail(null);
     setUsage(null);
     setUsageEvents([]);
+    setAdminUsers([]);
+    setAdminUsersForbidden(null);
     setProjects([]);
     setWorkspaces([]);
     setSessions([]);
@@ -534,6 +549,44 @@ export function ControlPlanePage() {
     });
   }
 
+  async function handleLoadAdminUsers() {
+    if (!auth) {
+      return;
+    }
+    setAdminUsersForbidden(null);
+    setMetadataLoading((current) => ({ ...current, adminUsers: true }));
+    const result = await run('Load admin users', async () => fetchControlPlaneAdminUsers(auth));
+    if (result) {
+      setAdminUsers(result.users);
+      setMessage('Admin users loaded.');
+    }
+    setMetadataLoading((current) => ({ ...current, adminUsers: false }));
+  }
+
+  async function handleAdminUserUpdate(
+    targetUser: ControlPlaneUser,
+    input: ControlPlaneAdminUserUpdate,
+  ) {
+    if (!auth) {
+      return;
+    }
+    setAdminUsersForbidden(null);
+    const result = await run('Update admin user', async () =>
+      updateControlPlaneAdminUser(auth, targetUser.id, input),
+    );
+    if (result) {
+      setAdminUsers((current) =>
+        current.map((adminUser) =>
+          adminUser.id === result.user.id ? result.user : adminUser,
+        ),
+      );
+      if (user?.id === result.user.id) {
+        setUser(result.user);
+      }
+      setMessage(`Updated ${result.user.email}.`);
+    }
+  }
+
   async function handleRouteToken() {
     if (!auth || !sandbox) {
       return null;
@@ -634,6 +687,11 @@ export function ControlPlanePage() {
       {expiredSession ? (
         <div className="rounded-[0.9rem] border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-4 py-3 text-sm text-[var(--status-warning-fg)]">
           Session expired: {expiredSession}
+        </div>
+      ) : null}
+      {adminUsersForbidden ? (
+        <div className="rounded-[0.9rem] border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-4 py-3 text-sm text-[var(--status-warning-fg)]">
+          Admin access denied: {adminUsersForbidden}
         </div>
       ) : null}
       {workerConnectionState === 'reconnecting' ? (
@@ -741,6 +799,73 @@ export function ControlPlanePage() {
                   ${Number(event.costUsd).toFixed(2)}
                 </p>
                 <p className="text-xs">{event.occurredAt}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
+
+      <Section
+        title="Admin users"
+        action={
+          <ActionButton
+            onClick={() => void handleLoadAdminUsers()}
+            disabled={!canUseControlPlane || metadataLoading.adminUsers}
+          >
+            Load users
+          </ActionButton>
+        }
+      >
+        {metadataLoading.adminUsers ? (
+          <p className="text-sm text-[var(--theme-fg-muted)]">Loading admin users...</p>
+        ) : adminUsers.length === 0 ? (
+          <p className="text-sm text-[var(--theme-fg-muted)]">No admin users loaded.</p>
+        ) : (
+          <div className="grid gap-3">
+            {adminUsers.map((adminUser) => (
+              <div
+                key={adminUser.id}
+                className="grid gap-3 rounded-[0.85rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] p-3 text-sm text-[var(--theme-fg-muted)] lg:grid-cols-[1.2fr_0.8fr_0.9fr_auto]"
+              >
+                <div>
+                  <p className="font-medium text-[var(--theme-fg)]">{adminUser.email}</p>
+                  <p className="text-xs">{adminUser.displayName ?? 'No display name'}</p>
+                </div>
+                <label className="grid gap-1.5 text-xs font-medium">
+                  <span>Status</span>
+                  <select
+                    value={adminUser.status}
+                    onChange={(event) => {
+                      const status = event.currentTarget.value as (typeof USER_STATUSES)[number];
+                      void handleAdminUserUpdate(adminUser, { status });
+                    }}
+                    className="h-10 rounded-[0.7rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 text-sm text-[var(--theme-fg)] outline-none"
+                  >
+                    {USER_STATUSES.map((status) => (
+                      <option key={status} value={status}>
+                        {status}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-1.5 text-xs font-medium">
+                  <span>Quota profile</span>
+                  <input
+                    aria-label={`Quota profile for ${adminUser.email}`}
+                    defaultValue={adminUser.quotaProfile ?? 'default'}
+                    onBlur={(event) => {
+                      const quotaProfile = event.currentTarget.value.trim();
+                      if (quotaProfile && quotaProfile !== adminUser.quotaProfile) {
+                        void handleAdminUserUpdate(adminUser, { quotaProfile });
+                      }
+                    }}
+                    className="h-10 rounded-[0.7rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 text-sm text-[var(--theme-fg)] outline-none"
+                  />
+                </label>
+                <div className="grid content-center gap-1 text-xs">
+                  <p><span className="text-[var(--theme-fg)]">Plan:</span> {adminUser.plan}</p>
+                  <p><span className="text-[var(--theme-fg)]">Last seen:</span> {adminUser.lastSeenAt ?? 'never'}</p>
+                </div>
               </div>
             ))}
           </div>

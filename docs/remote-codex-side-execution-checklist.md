@@ -212,7 +212,7 @@ credential.
     sandbox sessions.
   - Verification: frontend test covers disabled response handling.
 
-- [ ] Add admin user management UI.
+- [x] Add admin user management UI.
   - Acceptance: admins can view users, update status, and update quota profile.
   - Verification: frontend tests cover list, status update, quota update, and
     non-admin denial UI.
@@ -230,6 +230,7 @@ credential.
   `apps/control-plane-api/src/app.test.ts`,
   `apps/supervisor-web/src/app.tsx`,
   `apps/supervisor-web/src/app.test.tsx`,
+  `apps/supervisor-web/src/lib/api.ts`,
   `apps/supervisor-web/src/pages/ControlPlaneLoginPage.tsx`,
   `apps/supervisor-web/src/pages/ControlPlanePage.tsx`,
   `apps/supervisor-web/src/pages/ControlPlanePage.test.tsx`,
@@ -240,10 +241,9 @@ credential.
   `pnpm --filter @remote-codex/supervisor-web typecheck`;
   `pnpm --filter @remote-codex/supervisor-web test`;
   `pnpm --filter @remote-codex/shared typecheck`; `git diff --check`
-- Residual risk: production auth-provider integration smoke, admin user
-  management UI, and staging worker JWT proof remain unchecked. User data
-  export and deletion/anonymization APIs are explicitly deferred and are not
-  implemented.
+- Residual risk: production auth-provider integration smoke and staging worker
+  JWT proof remain unchecked. User data export and deletion/anonymization APIs
+  are explicitly deferred and are not implemented.
 
 ## Phase 2: Projects, Workspaces, Sessions, And Worker Session Contract
 

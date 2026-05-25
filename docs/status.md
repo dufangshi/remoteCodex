@@ -74,8 +74,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   staging verification has not run yet.
 - AWS sandbox adapter implementation.
 - Frontend auth shell covers the local login route, authenticated route guard,
-  loading state, expired-session state, and disabled-account state. Production
-  auth-provider smoke coverage and admin user management remain open.
+  loading state, expired-session state, disabled-account state, and admin user
+  management for list/status/quota/non-admin denial. Production auth-provider
+  smoke coverage remains open.
 - Project detail and product metadata loading states are implemented in the
   control-plane panel; the real worker connection step after route-token issue
   remains open.
@@ -99,13 +100,11 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 
 1. Add production auth-provider smoke coverage or staging smoke procedure for
    valid, expired, wrong-issuer, and wrong-audience tokens.
-2. Add admin user management UI for list, status update, quota update, and
-   non-admin denial states.
-3. Add real open-session worker connection flow after route-token issue.
-4. Add staging lifecycle smokes for start, stop, idempotent restart, and
+2. Add real open-session worker connection flow after route-token issue.
+3. Add staging lifecycle smokes for start, stop, idempotent restart, and
    readiness.
-5. Build and smoke-test the worker Docker image, then add CI image checks.
-6. Run staging provider-runtime gateway smokes for Codex, Claude Code, and
+4. Build and smoke-test the worker Docker image, then add CI image checks.
+5. Run staging provider-runtime gateway smokes for Codex, Claude Code, and
    OpenCode.
 
 ## Verification Commands

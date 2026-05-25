@@ -180,6 +180,13 @@ export interface ControlPlaneUser {
   lastSeenAt: string | null;
 }
 
+export interface ControlPlaneAdminUserUpdate {
+  status?: 'active' | 'suspended' | 'deleted';
+  plan?: string;
+  billingCustomerId?: string | null;
+  quotaProfile?: string;
+}
+
 export interface ControlPlaneSandbox {
   id: string;
   userId: string;
@@ -471,6 +478,27 @@ export function fetchControlPlaneAdminSandboxDetail(
     auth,
     `/api/admin/sandboxes/${encodeURIComponent(sandboxId)}`,
     { cache: 'no-store' },
+  );
+}
+
+export function fetchControlPlaneAdminUsers(auth: ControlPlaneAuth) {
+  return controlPlaneRequest<{ users: ControlPlaneUser[] }>(auth, '/api/admin/users', {
+    cache: 'no-store',
+  });
+}
+
+export function updateControlPlaneAdminUser(
+  auth: ControlPlaneAuth,
+  userId: string,
+  input: ControlPlaneAdminUserUpdate,
+) {
+  return controlPlaneRequest<{ user: ControlPlaneUser }>(
+    auth,
+    `/api/admin/users/${encodeURIComponent(userId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    },
   );
 }
 

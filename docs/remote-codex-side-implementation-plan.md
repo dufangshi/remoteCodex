@@ -139,7 +139,7 @@ worker credentials.
 - [x] Add expired-session state.
 - [x] Add disabled-account state.
 - [x] Add account/profile page.
-- [ ] Add admin user management UI.
+- [x] Add admin user management UI.
 
 ### Verification
 

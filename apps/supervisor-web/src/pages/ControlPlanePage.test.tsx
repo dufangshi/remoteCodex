@@ -157,6 +157,17 @@ const usageEvent = {
   importedAt: '2026-05-25T00:03:00.000Z',
 };
 
+const adminUser = {
+  ...user,
+  id: 'user-admin-target',
+  authSubject: 'admin-target',
+  email: 'admin-target@example.com',
+  displayName: 'Admin Target',
+  status: 'active',
+  plan: 'developer',
+  quotaProfile: 'default',
+};
+
 const adminSandboxDetail = {
   sandbox: {
     ...runningSandbox,
@@ -612,6 +623,144 @@ describe('ControlPlanePage', () => {
 
     await waitFor(() => {
       expect(screen.getByText('No LLM usage events yet.')).toBeInTheDocument();
+    });
+  });
+
+  it('loads admin users and updates user status and quota profile', async () => {
+    let currentAdminUser = adminUser;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
+
+      if (path === '/api/me/bootstrap' && init?.method === 'POST') {
+        return jsonResponse({ user, sandbox: stoppedSandbox, gatewayKey: null });
+      }
+
+      if (path === '/api/me' && !init?.method) {
+        return jsonResponse({ user, sandbox: stoppedSandbox, usage });
+      }
+
+      if (path === '/api/projects' && !init?.method) {
+        return jsonResponse({ projects: [] });
+      }
+
+      if (path === '/api/workspaces' && !init?.method) {
+        return jsonResponse({ workspaces: [] });
+      }
+
+      if (path === '/api/admin/users' && !init?.method) {
+        return jsonResponse({ users: [currentAdminUser] });
+      }
+
+      if (path === '/api/admin/users/user-admin-target' && init?.method === 'PATCH') {
+        currentAdminUser = {
+          ...currentAdminUser,
+          ...JSON.parse(String(init.body)),
+        };
+        return jsonResponse({ user: currentAdminUser });
+      }
+
+      const usageEvents = usageEventsResponse(path);
+      if (usageEvents) {
+        return usageEvents;
+      }
+
+      return jsonResponse({
+        code: 'not_found',
+        message: `Unhandled request: ${path}`,
+      }, 404);
+    });
+
+    render(<ControlPlanePage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
+    await waitFor(() => {
+      expect(screen.getByText('dev@example.com')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load users' }));
+    await waitFor(() => {
+      expect(screen.getByText('admin-target@example.com')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByDisplayValue('active'), {
+      target: { value: 'suspended' },
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Updated admin-target@example.com.')).toBeInTheDocument();
+    });
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+      `${baseUrl}/api/admin/users/user-admin-target`,
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'suspended' }),
+      }),
+    );
+
+    const quotaInput = screen.getByLabelText('Quota profile for admin-target@example.com');
+    fireEvent.change(quotaInput, { target: { value: 'pro' } });
+    fireEvent.blur(quotaInput);
+    await waitFor(() => {
+      const quotaUpdateCall = vi.mocked(fetch).mock.calls.find(
+        ([input, init]) =>
+          String(input) === `${baseUrl}/api/admin/users/user-admin-target` &&
+          String(init?.body) === JSON.stringify({ quotaProfile: 'pro' }),
+      );
+      expect(quotaUpdateCall).toBeDefined();
+    });
+  });
+
+  it('shows non-admin denial UI when admin users cannot be loaded', async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
+
+      if (path === '/api/me/bootstrap' && init?.method === 'POST') {
+        return jsonResponse({ user, sandbox: stoppedSandbox, gatewayKey: null });
+      }
+
+      if (path === '/api/me' && !init?.method) {
+        return jsonResponse({ user, sandbox: stoppedSandbox, usage });
+      }
+
+      if (path === '/api/projects' && !init?.method) {
+        return jsonResponse({ projects: [] });
+      }
+
+      if (path === '/api/workspaces' && !init?.method) {
+        return jsonResponse({ workspaces: [] });
+      }
+
+      if (path === '/api/admin/users' && !init?.method) {
+        return jsonResponse({
+          code: 'forbidden',
+          message: 'Administrator access is required.',
+        }, 403);
+      }
+
+      const usageEvents = usageEventsResponse(path);
+      if (usageEvents) {
+        return usageEvents;
+      }
+
+      return jsonResponse({
+        code: 'not_found',
+        message: `Unhandled request: ${path}`,
+      }, 404);
+    });
+
+    render(<ControlPlanePage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
+    await waitFor(() => {
+      expect(screen.getByText('dev@example.com')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load users' }));
+    await waitFor(() => {
+      expect(
+        screen.getByText('Admin access denied: Administrator access is required.'),
+      ).toBeInTheDocument();
     });
   });
 

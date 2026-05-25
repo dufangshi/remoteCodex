@@ -138,7 +138,7 @@ Verification:
 - [x] Add expired-session state.
 - [x] Add disabled-account state.
 - [x] Add account/profile page.
-- [ ] Add admin user management UI.
+- [x] Add admin user management UI.
 - [x] Prove product user JWTs are never forwarded to worker APIs.
 
 Verification:
@@ -762,7 +762,7 @@ without exposing product identity tokens to sandbox workers.
 - [x] Add expired-session state.
 - [x] Add unauthorized or disabled-account state.
 - [x] Add account/profile page.
-- [ ] Add admin-only user table or user management route.
+- [x] Add admin-only user table or user management route.
 - [ ] Ensure product user JWT is never passed to worker APIs.
 
 ### Verification
