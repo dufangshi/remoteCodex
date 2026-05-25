@@ -71,6 +71,11 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   `pnpm verify:aws-staging-preflight-evidence -- <evidence-json>` with template
   `docs/aws-staging-preflight-evidence-template.json`; it audits S3.04 and
   S3.05 evidence before those boxes are checked.
+- AWS staging preflight evidence collector exists as
+  `scripts/collect-aws-staging-preflight-evidence.ts`; it can gather a first
+  evidence draft from `aws` CLI, `kubectl auth can-i`, and deployment env
+  values before the verifier is run. Use `pnpm exec tsx ... > file` when
+  redirecting clean JSON to a file.
 - Worker mode disables host/provider management APIs that should not be exposed
   in sandbox runtime.
 - Route-token signing supports key ids and previous-key verification.
@@ -159,8 +164,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 1. Run `pnpm smoke:staging-phase-one` with staging product/admin JWTs against
    the real staging control plane, router, and worker runtime, then attach the
    JSON output to release evidence.
-2. Fill `docs/aws-staging-preflight-evidence-template.json` with real staging
-   AWS/EKS/RBAC evidence and run
+2. Generate or fill AWS/EKS/RBAC preflight evidence with
+   `pnpm exec tsx scripts/collect-aws-staging-preflight-evidence.ts > <evidence-json>`,
+   review it for real staging values, and run
    `pnpm verify:aws-staging-preflight-evidence -- <evidence-json>`.
 3. Run `pnpm verify:staging-phase-one-evidence -- <smoke-json>` on the
    captured JSON before checking any staging boxes.

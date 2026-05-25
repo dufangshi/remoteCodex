@@ -97,14 +97,34 @@ Run these checks before marking any staging checkbox complete:
 ### AWS Staging Preflight Evidence
 
 Before running the lifecycle smoke, create an AWS staging preflight evidence
-file from:
+file. The template is:
 
 ```text
 docs/aws-staging-preflight-evidence-template.json
 ```
 
-Fill it with real staging account, EKS, VPC, image, log, service-account, IAM,
-and `kubectl auth can-i` results. Then run:
+Prefer collecting the first draft from the staging operator environment:
+
+```bash
+AWS_STAGING_REVIEWED_BY=<operator-email> \
+AWS_STAGING_EKS_CLUSTER_NAME=<cluster> \
+AWS_STAGING_FARGATE_PROFILE_NAME=<profile> \
+AWS_STAGING_CONFIG_REVIEWED=true \
+AWS_STAGING_CREDENTIAL_REVIEW_PASSED=true \
+pnpm exec tsx scripts/collect-aws-staging-preflight-evidence.ts > ./aws-staging-preflight.json
+```
+
+The collector uses `aws sts get-caller-identity`,
+`aws eks describe-cluster`, `aws eks describe-fargate-profile`, and
+`kubectl auth can-i` when those CLIs are available. It also accepts the same
+deployment env names used by the control plane, including
+`SANDBOX_EKS_CLUSTER_NAME`, `SANDBOX_K8S_NAMESPACE`,
+`SANDBOX_K8S_SERVICE_ACCOUNT`, `SANDBOX_WORKER_IMAGE_REPOSITORY`,
+`SANDBOX_WORKER_IMAGE_TAG`, `SANDBOX_SUBNET_IDS`, and
+`SANDBOX_SECURITY_GROUP_IDS`.
+
+Review and edit the generated JSON to remove placeholders and add any values
+that are not discoverable from the CLIs, such as log group names. Then run:
 
 ```bash
 pnpm verify:aws-staging-preflight-evidence -- ./aws-staging-preflight.json

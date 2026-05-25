@@ -479,6 +479,9 @@ and recover it.
   `sandbox_ready`, optional `admin_sandbox_runtime_detail`, optional
   `idempotent_lifecycle`, and `stop_sandbox` evidence for these remaining
   staging boxes once real staging URLs and tokens are available. Run
+  `pnpm exec tsx scripts/collect-aws-staging-preflight-evidence.ts > <evidence-json>`
+  from the staging operator environment to draft S3.04/S3.05 evidence, review
+  the JSON for real account/RBAC values, then run
   `pnpm verify:aws-staging-preflight-evidence -- <evidence-json>` against
   `docs/aws-staging-preflight-evidence-template.json`-shaped real staging
   evidence before checking S3.04 or S3.05, and run
@@ -1319,6 +1322,7 @@ pnpm --filter @remote-codex/db typecheck
 pnpm smoke:local-worker-checkpoint
 pnpm smoke:production-auth
 pnpm smoke:staging-phase-one
+pnpm exec tsx scripts/collect-aws-staging-preflight-evidence.ts > <evidence-json>
 pnpm verify:aws-staging-preflight-evidence -- <evidence-json>
 pnpm verify:staging-phase-one-evidence -- <smoke-json>
 docker build -f Dockerfile.worker -t remote-codex-worker:verify .
