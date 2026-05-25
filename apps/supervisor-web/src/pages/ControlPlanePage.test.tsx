@@ -347,7 +347,7 @@ describe('ControlPlanePage', () => {
     });
   });
 
-  it('refreshes in-memory route tokens before expiry', async () => {
+  it('refreshes in-memory route tokens before expiry and shows reconnecting state', async () => {
     let routeTokenCount = 0;
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -375,13 +375,19 @@ describe('ControlPlanePage', () => {
 
       if (path === '/api/sandboxes/sandbox-1/route-token' && init?.method === 'POST') {
         routeTokenCount += 1;
-        return jsonResponse({
+        const response = jsonResponse({
           sandboxId: 'sandbox-1',
           routerBaseUrl: 'https://router.example.test',
           wsBaseUrl: 'wss://router.example.test',
           token: `route-token-${routeTokenCount}`,
           expiresAt: new Date(Date.now() + 65_000).toISOString(),
         });
+        if (routeTokenCount === 2) {
+          return new Promise<Response>((resolve) => {
+            setTimeout(() => resolve(response), 1000);
+          });
+        }
+        return response;
       }
 
       return jsonResponse({
@@ -407,11 +413,15 @@ describe('ControlPlanePage', () => {
     await waitFor(() => {
       expect(routeTokenCount).toBe(2);
     }, { timeout: 6500 });
-    expect(screen.getByText('Route token is available in memory.')).toBeInTheDocument();
+    expect(screen.getByText('Reconnecting worker route.')).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByText('Route token is available in memory.')).toBeInTheDocument();
+    });
     expect(window.localStorage.getItem('remote-codex-control-plane-auth')).not.toContain(
       'route-token-2',
     );
-  }, 8000);
+  }, 9000);
 
   it('stores only local dev auth settings and keeps route tokens in memory', async () => {
     render(<ControlPlanePage />);

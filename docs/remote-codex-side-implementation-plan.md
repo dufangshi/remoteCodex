@@ -464,7 +464,7 @@ control-plane-issued route tokens and router-injected worker identity.
 - [x] Refresh route token before expiry.
 - [ ] Reconnect worker WebSocket after token refresh.
 - [x] Show route authorization failure state.
-- [ ] Show reconnecting state during route refresh or WebSocket reconnect.
+- [x] Show reconnecting state during route refresh or WebSocket reconnect.
 - [ ] Show sandbox offline state when the router reports worker unavailable.
 
 ### Verification

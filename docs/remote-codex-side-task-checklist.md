@@ -387,7 +387,7 @@ Verification:
 - [x] Refresh route token before expiry.
 - [ ] Reconnect WebSocket after token refresh.
 - [x] Show route authorization failure state.
-- [ ] Show reconnecting state.
+- [x] Show reconnecting state.
 
 Verification:
 
@@ -1063,7 +1063,7 @@ token.
 - [ ] Reconnect WebSocket after token refresh.
 - [ ] Show sandbox offline state.
 - [x] Show route authorization failure state.
-- [ ] Show reconnecting state.
+- [x] Show reconnecting state.
 - [ ] Avoid persisting route tokens in local storage.
 
 ### Verification
