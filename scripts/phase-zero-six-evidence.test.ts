@@ -956,6 +956,9 @@ describe('phase zero-six evidence tooling', () => {
     expect(parsed.nextCommands.collectEvidence).toBe(
       'pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id> --skip-staging-smoke',
     );
+    expect(parsed.nextCommands.writeEnvTemplate).toBe(
+      'pnpm verify:phase-zero-six-env-ready -- --skip-staging-smoke --write-env-template ./.temp/phase-zero-six-evidence/aws-preflight.env.sh',
+    );
   });
 
   it('stops bundle collection after env readiness failure unless forced', async () => {
@@ -991,6 +994,23 @@ describe('phase zero-six evidence tooling', () => {
       items: ['S3.04', 'S3.05'],
       ready: false,
     }));
+    expect(parsed.envReadiness.itemReadiness).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          item: 'S3.04',
+          groupId: 'aws-preflight',
+          envReady: false,
+        }),
+        expect.objectContaining({
+          item: 'G6.13',
+          groupId: 'opencode-provider-smoke',
+          envReady: false,
+        }),
+      ]),
+    );
+    expect(parsed.envReadiness.nextCommands.collectEvidence).toBe(
+      'pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id>',
+    );
     expect(parsed.nextSteps.fillEnvTemplate).toContain(path.join(dir, 'phase-zero-six.env.sh'));
     expect(parsed.nextSteps.verifyEnvReadiness).toBe('pnpm verify:phase-zero-six-env-ready');
     expect(parsed.nextSteps.rerunBundle).toContain(`--output-dir ${dir}`);
@@ -1228,6 +1248,7 @@ describe('phase zero-six evidence tooling', () => {
     ]);
     expect(parsed.results).toEqual([]);
     expect(parsed.envReadiness.notReadyGroups).toEqual(['aws-preflight']);
+    expect(parsed.envReadiness.itemReadiness).toEqual([]);
     expect(parsed.nextSteps.rerunBundle).toContain(`--from-output-dir ${evidenceDir}`);
   });
 

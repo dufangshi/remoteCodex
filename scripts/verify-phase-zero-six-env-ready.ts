@@ -484,15 +484,16 @@ function buildNextCommands(input: {
   envTemplatePath: string | null;
   skippedStagingSmoke: boolean;
 }) {
-  const modeFlag = input.skippedStagingSmoke ? ' --skip-staging-smoke' : '';
+  const readinessArgs = input.skippedStagingSmoke ? '--skip-staging-smoke ' : '';
+  const collectModeFlag = input.skippedStagingSmoke ? ' --skip-staging-smoke' : '';
   const templatePath = input.envTemplatePath ??
     `./.temp/phase-zero-six-evidence/${input.skippedStagingSmoke ? 'aws-preflight.env.sh' : 'phase-zero-six.env.sh'}`;
   return {
-    writeEnvTemplate: `pnpm verify:phase-zero-six-env-ready${modeFlag} -- --write-env-template ${templatePath}`,
+    writeEnvTemplate: `pnpm verify:phase-zero-six-env-ready -- ${readinessArgs}--write-env-template ${templatePath}`,
     sourceEnvTemplate: `source ${templatePath}`,
-    verifyEnvReadiness: `pnpm verify:phase-zero-six-env-ready${modeFlag}`,
-    collectEvidence: `pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id>${modeFlag}`,
-    applyReviewedEvidence: `pnpm collect:phase-zero-six-evidence -- --from-output-dir ./.temp/phase-zero-six-evidence/<run-id> --output-dir ./.temp/phase-zero-six-evidence/<run-id>-apply --apply-ready${modeFlag}`,
+    verifyEnvReadiness: `pnpm verify:phase-zero-six-env-ready${input.skippedStagingSmoke ? ' -- --skip-staging-smoke' : ''}`,
+    collectEvidence: `pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id>${collectModeFlag}`,
+    applyReviewedEvidence: `pnpm collect:phase-zero-six-evidence -- --from-output-dir ./.temp/phase-zero-six-evidence/<run-id> --output-dir ./.temp/phase-zero-six-evidence/<run-id>-apply --apply-ready${collectModeFlag}`,
   };
 }
 

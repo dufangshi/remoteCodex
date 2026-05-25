@@ -180,6 +180,8 @@ function envReadinessSummaryFromParsed(parsed: {
   readyGroups?: unknown;
   notReadyGroups?: unknown;
   groups?: unknown;
+  itemReadiness?: unknown;
+  nextCommands?: unknown;
 } | null) {
   const groups = Array.isArray(parsed?.groups) ? parsed.groups : [];
   return {
@@ -203,6 +205,10 @@ function envReadinessSummaryFromParsed(parsed: {
           : [],
       };
     }),
+    itemReadiness: Array.isArray(parsed?.itemReadiness) ? parsed.itemReadiness : [],
+    nextCommands: parsed?.nextCommands && typeof parsed.nextCommands === 'object'
+      ? parsed.nextCommands
+      : null,
   };
 }
 
@@ -213,6 +219,8 @@ async function readEnvReadinessSummary(filePath: string) {
       readyGroups?: unknown;
       notReadyGroups?: unknown;
       groups?: unknown;
+      itemReadiness?: unknown;
+      nextCommands?: unknown;
     });
   } catch {
     return envReadinessSummaryFromParsed(null);

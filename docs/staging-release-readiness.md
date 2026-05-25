@@ -198,6 +198,9 @@ it explains why a specific checkbox still cannot be checked without opening
 the larger group summary. `nextCommands` gives the matching copyable command
 sequence for writing a private env template, sourcing it, verifying readiness,
 collecting evidence, and applying reviewed evidence.
+When the bundle stops at env readiness, the same `itemReadiness` and
+`nextCommands` fields are copied into `summary.envReadiness`, so the operator
+can continue from `summary.json` without opening `env-readiness.json`.
 
 ### Phase-One Runtime Smoke
 
