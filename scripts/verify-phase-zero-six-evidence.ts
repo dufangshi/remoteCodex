@@ -37,6 +37,41 @@ interface BlockingGroup {
 }
 
 const phaseZeroSixPrefixes = ['D0', 'A1', 'P2', 'S3', 'W4', 'R5', 'G6'];
+const blockingGroupDefinitions = [
+  {
+    id: 'aws-preflight',
+    items: ['S3.04', 'S3.05'],
+    nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
+  },
+  {
+    id: 'runtime-smoke',
+    items: ['S3.06', 'S3.07', 'S3.08'],
+    nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+  },
+  {
+    id: 'router-smoke',
+    items: ['R5.10', 'R5.11', 'R5.12'],
+    nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+  },
+  {
+    id: 'provider-smoke',
+    items: ['G6.11', 'G6.12', 'G6.13'],
+    nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+  },
+];
+
+function evidenceGroupForItem(item: string) {
+  const group = blockingGroupDefinitions.find((definition) => definition.items.includes(item));
+  return group
+    ? {
+        groupId: group.id,
+        nextEvidenceCommand: group.nextEvidenceCommand,
+      }
+    : {
+        groupId: null,
+        nextEvidenceCommand: null,
+      };
+}
 
 function argValue(name: string) {
   const index = process.argv.indexOf(name);
@@ -161,30 +196,8 @@ function buildBlockingGroups(input: {
 }): BlockingGroup[] {
   const readyIds = new Set(input.readyToCheck.map((entry) => entry.checklist.item));
   const missingIds = new Set(input.stillMissing.map((entry) => entry.checklist.item));
-  const groups = [
-    {
-      id: 'aws-preflight',
-      items: ['S3.04', 'S3.05'],
-      nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
-    },
-    {
-      id: 'runtime-smoke',
-      items: ['S3.06', 'S3.07', 'S3.08'],
-      nextEvidenceCommand: 'pnpm phase-zero-six:collect',
-    },
-    {
-      id: 'router-smoke',
-      items: ['R5.10', 'R5.11', 'R5.12'],
-      nextEvidenceCommand: 'pnpm phase-zero-six:collect',
-    },
-    {
-      id: 'provider-smoke',
-      items: ['G6.11', 'G6.12', 'G6.13'],
-      nextEvidenceCommand: 'pnpm phase-zero-six:collect',
-    },
-  ];
 
-  return groups
+  return blockingGroupDefinitions
     .map((group) => ({
       ...group,
       readyItems: group.items.filter((item) => readyIds.has(item)),
@@ -285,6 +298,7 @@ async function main() {
       item: entry.checklist.item,
       title: entry.checklist.title,
       line: entry.checklist.line,
+      ...evidenceGroupForItem(entry.checklist.item),
       source: entry.evidence?.source,
       reason: entry.evidence?.reason,
     })),
@@ -292,6 +306,7 @@ async function main() {
       item: entry.checklist.item,
       title: entry.checklist.title,
       line: entry.checklist.line,
+      ...evidenceGroupForItem(entry.checklist.item),
       reason: entry.evidence?.reason ?? 'No matching evidence result was provided.',
       requiredEvidence: entry.evidence?.requiredEvidence ?? [
         'Provide AWS preflight evidence with --aws-preflight, staging smoke evidence with --staging-smoke, or complete the local checklist item with its documented verification.',
@@ -302,6 +317,7 @@ async function main() {
       item: entry.checklist.item,
       title: entry.checklist.title,
       line: entry.checklist.line,
+      ...evidenceGroupForItem(entry.checklist.item),
       source: entry.evidence?.source,
       reason: entry.evidence?.reason,
     })),

@@ -584,6 +584,30 @@ describe('phase zero-six evidence tooling', () => {
 
     expect(result.exitCode).toBe(0);
     expect(parsed.ok).toBe(false);
+    expect(parsed.stillMissing).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          item: 'S3.04',
+          groupId: 'aws-preflight',
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
+        }),
+        expect.objectContaining({
+          item: 'S3.07',
+          groupId: 'runtime-smoke',
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+        expect.objectContaining({
+          item: 'R5.11',
+          groupId: 'router-smoke',
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+        expect.objectContaining({
+          item: 'G6.13',
+          groupId: 'provider-smoke',
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+      ]),
+    );
     expect(parsed.blockingGroups).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -631,6 +655,18 @@ describe('phase zero-six evidence tooling', () => {
     expect(result.exitCode).toBe(0);
     expect(parsed.apply.applied).toBe(true);
     expect(parsed.apply.appliedItems).toEqual(['S3.04', 'S3.05']);
+    expect(parsed.readyToCheck).toEqual([
+      expect.objectContaining({
+        item: 'S3.04',
+        groupId: 'aws-preflight',
+        nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
+      }),
+      expect.objectContaining({
+        item: 'S3.05',
+        groupId: 'aws-preflight',
+        nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
+      }),
+    ]);
     expect(checklist).toContain('- [x] S3.04 Finalize AWS staging configuration.');
     expect(checklist).toContain('- [x] S3.05 Add least-privilege Kubernetes credentials.');
     expect(checklist).toContain('- [ ] S3.06 Create a real worker Pod from the control plane.');
