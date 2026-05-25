@@ -72,6 +72,87 @@ The worker is not a global backend. It should not own user registration, billing
 organization membership, project ownership, or sandbox creation. It only serves
 requests for the sandbox where it runs.
 
+## Phase-One AWS Runtime Decision
+
+Use EKS Fargate for phase one sandbox workers.
+
+Reasons:
+
+- Kubernetes gives a durable abstraction for one user to one Pod, labels,
+  namespaces, service discovery, network policy, and future multi-container
+  sidecars.
+- Fargate keeps the first deployment away from node-pool management while still
+  giving per-Pod isolation and resource sizing.
+- The control plane can start with a small AWS adapter that creates, stops, and
+  watches Pods, then grow into richer scheduling without changing the worker
+  contract.
+- EKS keeps the router and worker routing model close to the eventual
+  production shape. ECS Fargate remains a fallback if Kubernetes operational
+  overhead becomes too high.
+
+The first implementation should use:
+
+- One active sandbox equals one EKS Fargate Pod.
+- One Pod contains one worker container.
+- One user owns one sandbox in phase one.
+- One sandbox can contain many workspaces and sessions.
+- Pods run in private subnets.
+- The sandbox router is the only public worker entry point.
+
+## Worker Image
+
+Use ECR for the worker image repository:
+
+```text
+<aws-account-id>.dkr.ecr.<region>.amazonaws.com/remote-codex-worker
+```
+
+Use immutable tags that encode source and release identity:
+
+```text
+remote-codex-worker:<git-sha>
+remote-codex-worker:<release-version>
+remote-codex-worker:staging-<git-sha>
+```
+
+`latest` should not be used for sandbox creation. The control plane should store
+the exact image tag on the sandbox record and pass it to the AWS adapter.
+
+## Resource Profiles
+
+Phase one should start with named profiles rather than arbitrary user-supplied
+CPU and memory:
+
+| Profile | vCPU | Memory | Ephemeral storage | Intended use |
+| --- | ---: | ---: | ---: | --- |
+| `small` | 0.5 | 1 GB | 20 GB | Light chat, file edits, metadata inspection. |
+| `standard` | 1 | 2 GB | 40 GB | Default agent coding and chemistry workflow prep. |
+| `large` | 2 | 4 GB | 80 GB | Heavier local package installs and artifact prep. |
+
+Heavy chemistry compute should go through ElAgenteHarness and the job pool, not
+through the interactive sandbox profile by default.
+
+## AWS Network Requirements
+
+Minimum phase-one AWS requirements:
+
+- VPC with private subnets for Fargate worker Pods.
+- Public entry point only for the sandbox router, for example an ALB or API
+  gateway in front of the router service.
+- Security group that allows browser-facing traffic to the router and
+  router-to-worker traffic on the worker API port.
+- No direct public inbound path to worker Pods.
+- NAT or controlled egress for package installs, provider gateway calls,
+  ElAgenteHarness calls, and approved remote MCP endpoints.
+- ECR pull permissions for the worker Pod execution role.
+- CloudWatch logs for worker stdout/stderr.
+- Secrets injection from AWS Secrets Manager, Kubernetes secrets, or an
+  equivalent secret source controlled by the sandbox manager.
+
+The AWS adapter should treat missing subnets, security groups, image repository,
+execution role, or route-token signing configuration as configuration errors,
+not provider capacity errors.
+
 ## Component Responsibilities
 
 ### Control Plane

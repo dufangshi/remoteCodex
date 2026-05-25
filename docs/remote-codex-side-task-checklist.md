@@ -81,9 +81,9 @@ without exposing product identity tokens to sandbox workers.
 - [x] Add JWT verifier support for production-style auth.
 - [x] Add tests for local-dev auth success paths.
 - [x] Add tests for production verifier failure paths.
-- [ ] Choose the production phase-one auth provider.
-- [ ] Document required auth provider environment variables.
-- [ ] Document how auth subjects map to Remote Codex users.
+- [x] Choose the production phase-one auth provider.
+- [x] Document required auth provider environment variables.
+- [x] Document how auth subjects map to Remote Codex users.
 - [ ] Add auth-provider-specific integration tests or smoke tests.
 - [x] Add token issuer and audience checks for production mode.
 - [x] Add clock-skew tolerance for provider JWT validation.
@@ -231,12 +231,12 @@ start, stop, observe, and eventually snapshot it.
 
 ### AWS Adapter
 
-- [ ] Choose phase-one runtime: EKS Fargate or ECS Fargate.
-- [ ] Document why that runtime was chosen.
-- [ ] Define the worker image repository.
-- [ ] Define the worker image tag format.
-- [ ] Define CPU, memory, and ephemeral storage profiles.
-- [ ] Define VPC, subnet, security group, and egress requirements.
+- [x] Choose phase-one runtime: EKS Fargate or ECS Fargate.
+- [x] Document why that runtime was chosen.
+- [x] Define the worker image repository.
+- [x] Define the worker image tag format.
+- [x] Define CPU, memory, and ephemeral storage profiles.
+- [x] Define VPC, subnet, security group, and egress requirements.
 - [ ] Implement AWS adapter configuration loading.
 - [ ] Implement Pod/task creation.
 - [ ] Implement Pod/task stop.

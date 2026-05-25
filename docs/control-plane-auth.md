@@ -16,6 +16,21 @@ maps its `sub` claim to a product user identity. A later Clerk, Auth0, Cognito,
 or custom auth provider can replace the verifier without changing the
 repository or route ownership checks.
 
+The phase-one production provider choice is a JWT-compatible product auth
+issuer operated outside sandbox workers. In the first deployment this can be a
+managed auth product, for example Clerk, Auth0, Cognito, or a custom Railway API
+that issues signed product-session JWTs. Remote Codex should only depend on the
+verified JWT claims, not on a provider SDK in route handlers.
+
+For the current repository implementation, production mode means:
+
+- The frontend obtains a product-session JWT from the chosen auth service.
+- The browser sends that JWT only to the control-plane API.
+- The control plane validates signature, issuer, audience, time claims, and
+  subject.
+- The control plane maps the verified subject into `control_users`.
+- Worker traffic uses route tokens and worker tokens instead of the product JWT.
+
 ## Environment
 
 ```text
@@ -28,6 +43,31 @@ CONTROL_PLANE_AUTH_JWT_CLOCK_SKEW_SECONDS=60
 ```
 
 `CONTROL_PLANE_AUTH_MODE=dev` is the default for local development and tests.
+
+## Subject Mapping
+
+The product user identity is keyed by:
+
+```text
+authProvider + authSubject
+```
+
+For JWT mode:
+
+- `authProvider` is `CONTROL_PLANE_AUTH_JWT_PROVIDER`.
+- `authSubject` is the JWT `sub` claim.
+- `email` and `displayName` still come from the bootstrap/register payload for
+  now, because provider-specific claim mapping is intentionally not coupled to
+  the control-plane route code.
+
+Recommended phase-one values:
+
+```text
+CONTROL_PLANE_AUTH_MODE=jwt
+CONTROL_PLANE_AUTH_JWT_PROVIDER=clerk
+CONTROL_PLANE_AUTH_JWT_ISSUER=<clerk-or-auth-service-issuer>
+CONTROL_PLANE_AUTH_JWT_AUDIENCE=remote-codex-control-plane
+```
 
 ## Local Development Auth
 
@@ -56,12 +96,6 @@ The generic `jwt` verifier checks:
 - `aud` when `CONTROL_PLANE_AUTH_JWT_AUDIENCE` is set.
 
 ## Product User Records
-
-External identities are mapped to local `control_users` records by:
-
-```text
-authProvider + authSubject
-```
 
 The browser product session is used only with the control plane. It must not be
 forwarded to sandbox workers. Worker traffic uses separate short-lived route

@@ -60,7 +60,7 @@ plane. Browser identity must stay outside sandbox service credentials.
 
 ### Control Plane Backend
 
-- [ ] Choose production auth provider for phase one.
+- [x] Choose production auth provider for phase one.
 - [x] Document the chosen auth provider and local-dev auth behavior.
 - [x] Add production auth verifier interface.
 - [x] Implement production auth verifier.
@@ -184,11 +184,11 @@ user.
 
 ### AWS Adapter
 
-- [ ] Choose phase-one runtime: EKS Fargate or ECS Fargate.
-- [ ] Document why that runtime is chosen.
-- [ ] Define sandbox image repository and tag format.
-- [ ] Define CPU/memory/storage resource profiles.
-- [ ] Define VPC/subnet/security group requirements.
+- [x] Choose phase-one runtime: EKS Fargate or ECS Fargate.
+- [x] Document why that runtime is chosen.
+- [x] Define sandbox image repository and tag format.
+- [x] Define CPU/memory/storage resource profiles.
+- [x] Define VPC/subnet/security group requirements.
 - [ ] Implement AWS adapter configuration loading.
 - [ ] Implement sandbox Pod/task creation.
 - [ ] Implement sandbox Pod/task stop.
