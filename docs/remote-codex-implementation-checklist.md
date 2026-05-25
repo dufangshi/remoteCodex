@@ -332,7 +332,7 @@ Goal: browser traffic reaches workers only through a route-token checked proxy.
 
 - [x] Fetch route token before connecting to a worker.
 - [x] Store route token only in memory.
-- [ ] Refresh route token before expiry.
+- [x] Refresh route token before expiry.
 - [ ] Reconnect WebSocket after token refresh.
 - [ ] Show sandbox offline state.
 - [x] Show route authorization failure state.

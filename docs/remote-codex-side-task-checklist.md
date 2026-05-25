@@ -379,7 +379,7 @@ Verification:
 - [x] Add router audit logs.
 - [x] Fetch route token before opening a worker session from the frontend.
 - [x] Store route token only in memory.
-- [ ] Refresh route token before expiry.
+- [x] Refresh route token before expiry.
 - [ ] Reconnect WebSocket after token refresh.
 - [x] Show route authorization failure state.
 - [ ] Show reconnecting state.
@@ -1054,7 +1054,7 @@ token.
 
 - [x] Fetch a route token before opening a worker session.
 - [x] Store route token only in memory.
-- [ ] Refresh route token before expiry.
+- [x] Refresh route token before expiry.
 - [ ] Reconnect WebSocket after token refresh.
 - [ ] Show sandbox offline state.
 - [x] Show route authorization failure state.

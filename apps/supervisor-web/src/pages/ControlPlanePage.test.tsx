@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ControlPlaneSandbox } from '../lib/api';
 import { ControlPlanePage } from './ControlPlanePage';
@@ -130,6 +130,10 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 describe('ControlPlanePage', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   beforeEach(() => {
     let projectCreated = false;
     let workspaceCreated = false;
@@ -342,6 +346,72 @@ describe('ControlPlanePage', () => {
       ).toBeInTheDocument();
     });
   });
+
+  it('refreshes in-memory route tokens before expiry', async () => {
+    let routeTokenCount = 0;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
+
+      if (path === '/api/me/bootstrap' && init?.method === 'POST') {
+        return jsonResponse({ user, sandbox: runningSandbox, gatewayKey: null });
+      }
+
+      if (path === '/api/me' && !init?.method) {
+        return jsonResponse({ user, sandbox: runningSandbox, usage });
+      }
+
+      if (path === '/api/projects' && !init?.method) {
+        return jsonResponse({ projects: [project] });
+      }
+
+      if (path === '/api/workspaces?projectId=project-1' && !init?.method) {
+        return jsonResponse({ workspaces: [workspace] });
+      }
+
+      if (path === '/api/workspaces/workspace-1/sessions' && !init?.method) {
+        return jsonResponse({ sessions: [session] });
+      }
+
+      if (path === '/api/sandboxes/sandbox-1/route-token' && init?.method === 'POST') {
+        routeTokenCount += 1;
+        return jsonResponse({
+          sandboxId: 'sandbox-1',
+          routerBaseUrl: 'https://router.example.test',
+          wsBaseUrl: 'wss://router.example.test',
+          token: `route-token-${routeTokenCount}`,
+          expiresAt: new Date(Date.now() + 65_000).toISOString(),
+        });
+      }
+
+      return jsonResponse({
+        code: 'not_found',
+        message: `Unhandled request: ${path}`,
+      }, 404);
+    });
+
+    render(<ControlPlanePage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Plan calculation/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Plan calculation/i }));
+
+    await waitFor(() => {
+      expect(routeTokenCount).toBe(1);
+    });
+
+    await waitFor(() => {
+      expect(routeTokenCount).toBe(2);
+    }, { timeout: 6500 });
+    expect(screen.getByText('Route token is available in memory.')).toBeInTheDocument();
+    expect(window.localStorage.getItem('remote-codex-control-plane-auth')).not.toContain(
+      'route-token-2',
+    );
+  }, 8000);
 
   it('stores only local dev auth settings and keeps route tokens in memory', async () => {
     render(<ControlPlanePage />);

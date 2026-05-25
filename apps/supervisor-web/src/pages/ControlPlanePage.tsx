@@ -1,4 +1,4 @@
-import { FormEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
+import { FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { AgentBackendIdDto } from '../../../../packages/shared/src/index';
 import {
@@ -27,6 +27,8 @@ import {
 } from '../lib/api';
 
 const AUTH_STORAGE_KEY = 'remote-codex-control-plane-auth';
+const ROUTE_TOKEN_REFRESH_SKEW_MS = 60_000;
+const ROUTE_TOKEN_MIN_REFRESH_MS = 5_000;
 
 interface StoredControlPlaneAuth {
   baseUrl: string;
@@ -210,6 +212,8 @@ export function ControlPlanePage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [workerConnectionState, setWorkerConnectionState] = useState<'idle' | 'ready' | 'reconnecting'>('idle');
+  const routeTokenRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const canUseControlPlane = Boolean(auth && user);
 
@@ -290,6 +294,40 @@ export function ControlPlanePage() {
     });
   }, [auth, selectedProjectId]);
 
+  useEffect(
+    () => () => {
+      if (routeTokenRefreshTimerRef.current) {
+        clearTimeout(routeTokenRefreshTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  function clearRouteTokenRefreshTimer() {
+    if (routeTokenRefreshTimerRef.current) {
+      clearTimeout(routeTokenRefreshTimerRef.current);
+      routeTokenRefreshTimerRef.current = null;
+    }
+  }
+
+  function scheduleRouteTokenRefresh(token: ControlPlaneRouteToken | null) {
+    clearRouteTokenRefreshTimer();
+    if (!token) {
+      return;
+    }
+    const expiresAtMs = Date.parse(token.expiresAt);
+    if (!Number.isFinite(expiresAtMs)) {
+      return;
+    }
+    const delayMs = Math.max(
+      ROUTE_TOKEN_MIN_REFRESH_MS,
+      expiresAtMs - Date.now() - ROUTE_TOKEN_REFRESH_SKEW_MS,
+    );
+    routeTokenRefreshTimerRef.current = setTimeout(() => {
+      void refreshRouteTokenBeforeExpiry();
+    }, delayMs);
+  }
+
   async function handleBootstrap(event: FormEvent) {
     event.preventDefault();
     const nextAuth = {
@@ -319,6 +357,8 @@ export function ControlPlanePage() {
     setWorkspaces([]);
     setSessions([]);
     setRouteToken(null);
+    clearRouteTokenRefreshTimer();
+    setWorkerConnectionState('idle');
     setMessage('Signed out locally.');
   }
 
@@ -397,9 +437,13 @@ export function ControlPlanePage() {
       } else if (action === 'stop') {
         setSandbox((await stopControlPlaneSandbox(auth)).sandbox);
         setRouteToken(null);
+        clearRouteTokenRefreshTimer();
+        setWorkerConnectionState('idle');
       } else if (action === 'restart') {
         setSandbox((await restartControlPlaneSandbox(auth)).sandbox);
         setRouteToken(null);
+        clearRouteTokenRefreshTimer();
+        setWorkerConnectionState('idle');
       } else {
         const health = await fetchControlPlaneSandboxHealth(auth);
         setSandbox(health.sandbox);
@@ -428,9 +472,20 @@ export function ControlPlanePage() {
       }
       const token = await createControlPlaneRouteToken(auth, sandbox.id, routeTokenInput);
       setRouteToken(token);
+      scheduleRouteTokenRefresh(token);
+      setWorkerConnectionState('ready');
       setMessage('Route token is available in memory.');
       return token;
     });
+  }
+
+  async function refreshRouteTokenBeforeExpiry() {
+    if (!auth || !sandbox || sandbox.state !== 'running' || !selectedSessionId) {
+      return;
+    }
+    setWorkerConnectionState('reconnecting');
+    const token = await handleRouteToken();
+    setWorkerConnectionState(token ? 'ready' : 'idle');
   }
 
   async function handleOpenSession(session: ControlPlaneSession) {
@@ -473,6 +528,11 @@ export function ControlPlanePage() {
       {message ? (
         <div className="rounded-[0.9rem] border border-[var(--status-success-border)] bg-[var(--status-success-bg)] px-4 py-3 text-sm text-[var(--status-success-fg)]">
           {message}
+        </div>
+      ) : null}
+      {workerConnectionState === 'reconnecting' ? (
+        <div className="rounded-[0.9rem] border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-4 py-3 text-sm text-[var(--status-warning-fg)]">
+          Reconnecting worker route.
         </div>
       ) : null}
       {sandboxNotice ? (
