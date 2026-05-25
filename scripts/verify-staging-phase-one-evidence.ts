@@ -22,6 +22,14 @@ export interface ChecklistResult {
   requiredEvidence: string[];
 }
 
+interface BlockingGroup {
+  id: string;
+  items: string[];
+  notReadyItems: string[];
+  readyItems: string[];
+  nextEvidenceCommand: string;
+}
+
 const providerSteps = {
   'G6.11': {
     title: 'Run staging Codex gateway smoke.',
@@ -430,12 +438,52 @@ export function evaluateStagingPhaseOneEvidence(report: SmokeReport): ChecklistR
   return results;
 }
 
+function buildBlockingGroups(results: ChecklistResult[]): BlockingGroup[] {
+  const groups = [
+    {
+      id: 'aws-preflight',
+      items: ['S3.04', 'S3.05'],
+      nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
+    },
+    {
+      id: 'runtime-smoke',
+      items: ['S3.06', 'S3.07', 'S3.08'],
+      nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+    },
+    {
+      id: 'router-smoke',
+      items: ['R5.10', 'R5.11', 'R5.12'],
+      nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+    },
+    {
+      id: 'provider-smoke',
+      items: ['G6.11', 'G6.12', 'G6.13'],
+      nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+    },
+  ];
+  return groups
+    .map((group) => {
+      const groupResults = results.filter((result) => group.items.includes(result.item));
+      return {
+        ...group,
+        notReadyItems: groupResults
+          .filter((result) => !result.readyToCheck)
+          .map((result) => result.item),
+        readyItems: groupResults
+          .filter((result) => result.readyToCheck)
+          .map((result) => result.item),
+      };
+    })
+    .filter((group) => group.notReadyItems.length > 0);
+}
+
 async function main() {
   const input = await readInput();
   const report = parseStagingPhaseOneReport(input);
   const results = evaluateStagingPhaseOneEvidence(report);
   const readyItems = results.filter((result) => result.readyToCheck).map((result) => result.item);
   const notReadyItems = results.filter((result) => !result.readyToCheck).map((result) => result.item);
+  const blockingGroups = buildBlockingGroups(results);
 
   console.log(JSON.stringify({
     ok: notReadyItems.length === 0,
@@ -444,6 +492,7 @@ async function main() {
     controlPlaneBaseUrl: report.controlPlaneBaseUrl ?? null,
     readyItems,
     notReadyItems,
+    blockingGroups,
     results,
   }, null, 2));
 
