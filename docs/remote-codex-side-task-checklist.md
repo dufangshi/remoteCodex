@@ -337,7 +337,7 @@ Verification:
 - [x] Add `file:write` checks to file write, move, delete, and upload routes.
 - [x] Add `provider:turn:create` checks to provider turn creation routes.
 - [x] Add `provider:turn:interrupt` checks to provider interrupt routes.
-- [ ] Add artifact read/write scopes to artifact routes once the artifact model
+- [x] Add artifact read/write scopes to artifact routes once the artifact model
   is finalized.
 - [x] Deny scope-protected routes when the envelope is missing.
 - [x] Deny scope-protected routes when the envelope is expired.
@@ -997,7 +997,7 @@ required identity, filesystem, or token settings are missing.
 - [x] Add scope checks for file write.
 - [x] Add scope checks for provider turn creation.
 - [x] Add scope checks for provider interrupt.
-- [ ] Add scope checks for artifact read/write.
+- [x] Add scope checks for artifact read/write.
 - [x] Add denial tests for every checked scope-protected route.
 
 ### Verification

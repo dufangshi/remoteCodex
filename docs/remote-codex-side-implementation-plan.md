@@ -392,7 +392,7 @@ Goal: the sandbox worker image is reproducible, non-root, scoped to
 - [x] Add `file:write` checks to file write, move, delete, and upload routes.
 - [x] Add `provider:turn:create` checks to provider turn creation routes.
 - [x] Add `provider:turn:interrupt` checks to provider interrupt routes.
-- [ ] Add artifact read/write scopes after the artifact model is finalized.
+- [x] Add artifact read/write scopes after the artifact model is finalized.
 - [x] Deny scope-protected routes when the envelope is missing.
 - [x] Deny scope-protected routes when the envelope is expired.
 - [x] Deny scope-protected routes when the envelope sandbox is wrong.

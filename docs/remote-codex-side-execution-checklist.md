@@ -453,7 +453,7 @@ identity, filesystem, provider, MCP, gateway, or harness settings are unsafe.
 
 ### Worker Authorization Tasks
 
-- [ ] Add artifact read/write scope checks.
+- [x] Add artifact read/write scope checks.
   - Acceptance: artifact download, upload, metadata, and delete routes require
     the appropriate identity-envelope scopes.
   - Verification: worker tests cover missing, wrong, and valid scopes.
@@ -471,14 +471,18 @@ identity, filesystem, provider, MCP, gateway, or harness settings are unsafe.
 
 - Files: `Dockerfile.worker`, `apps/supervisor-api/src/worker-index.ts`,
   `apps/supervisor-api/src/worker-environment.ts`,
-  `apps/supervisor-api/src/app.ts`
+  `apps/supervisor-api/src/app.ts`,
+  `apps/supervisor-api/src/routes/workspaces.ts`,
+  `apps/supervisor-api/src/app.test.ts`
 - Verification: `docker build -f Dockerfile.worker -t remote-codex-worker:verify .`;
   `docker run -d --name remote-codex-worker-verify-smoke -p 127.0.0.1:18787:8787 ... remote-codex-worker:verify`;
   `curl -fsS http://127.0.0.1:18787/readyz`;
   `curl -sS -o /tmp/remote-codex-worker-denied.json -w '%{http_code}' http://127.0.0.1:18787/api/worker/metadata`;
-  `curl -sS -H 'x-remote-codex-worker-token: router-secret' http://127.0.0.1:18787/api/worker/metadata`
+  `curl -sS -H 'x-remote-codex-worker-token: router-secret' http://127.0.0.1:18787/api/worker/metadata`;
+  `pnpm --filter @remote-codex/supervisor-api typecheck`;
+  `pnpm --filter @remote-codex/supervisor-api test -- --runInBand`
 - Residual risk: CI worker image build and CI worker `/readyz` smoke remain
-  unchecked; artifact read/write scope checks are still open.
+  unchecked.
 
 ## Phase 5: Sandbox Router And Route Tokens
 

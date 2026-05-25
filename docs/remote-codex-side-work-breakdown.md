@@ -356,7 +356,7 @@ router-injected identity.
     workspace, or session.
   - Verify with worker tests.
 
-- [ ] Add artifact read/write scope checks.
+- [x] Add artifact read/write scope checks.
   - Done when artifact download, upload, metadata, and delete routes require
     appropriate identity-envelope scopes.
   - Verify with missing, wrong, and valid scope tests.

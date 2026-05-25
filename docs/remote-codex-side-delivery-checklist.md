@@ -386,7 +386,7 @@ required identity, filesystem, gateway, or harness settings are unsafe.
 - [x] Add `file:write` checks.
 - [x] Add `provider:turn:create` checks.
 - [x] Add `provider:turn:interrupt` checks.
-- [ ] Add artifact read/write scope checks.
+- [x] Add artifact read/write scope checks.
 
 ### Verification
 

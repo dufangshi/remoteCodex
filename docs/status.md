@@ -87,6 +87,8 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 - Worker image runtime pinning, local Docker build, local `/readyz` smoke, and
   local worker auth denial/success smoke are verified. CI image checks remain
   open.
+- Worker artifact register, metadata/list, download, and delete routes exist
+  behind signed identity-envelope `artifact:read` and `artifact:write` scopes.
 - LLM gateway contract is fixed on a sub2api-compatible shape; provisioning,
   provider selection config, worker provider config rendering, manual usage
   import, gateway usage-export adapter, frontend degraded state, LLM usage

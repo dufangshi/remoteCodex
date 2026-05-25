@@ -1082,6 +1082,163 @@ describe('supervisor api', () => {
     });
   });
 
+  it('enforces artifact read and write scopes for worker artifact routes', async () => {
+    await app.close();
+    app = buildTestApp(fakeCodexManager, {
+      env: {
+        REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+        REMOTE_CODEX_SANDBOX_ID: 'sbx_test',
+        REMOTE_CODEX_USER_ID: 'user_test',
+        REMOTE_CODEX_WORKER_AUTH_TOKEN: 'router-secret',
+        REMOTE_CODEX_WORKER_IDENTITY_SECRET: workerIdentitySecret,
+      },
+    });
+    await app.ready();
+
+    const baseHeaders = {
+      'x-remote-codex-worker-token': 'router-secret',
+    };
+    const artifactReadHeaders = {
+      ...baseHeaders,
+      ...makeWorkerIdentityHeaders({
+        scopes: ['artifact:read'],
+      }),
+    };
+    const artifactWriteHeaders = {
+      ...baseHeaders,
+      ...makeWorkerIdentityHeaders({
+        scopes: ['artifact:write'],
+      }),
+    };
+    const wrongScopeHeaders = {
+      ...baseHeaders,
+      ...makeWorkerIdentityHeaders({
+        scopes: ['file:write'],
+      }),
+    };
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      headers: baseHeaders,
+      payload: {
+        absPath: path.join(tempDir, 'artifact-workspace'),
+      },
+    });
+    expect(workspaceResponse.statusCode).toBe(200);
+    const workspaceId = workspaceResponse.json().id;
+
+    const missingEnvelope = await app.inject({
+      method: 'POST',
+      url: `/api/workspaces/${workspaceId}/artifacts`,
+      headers: baseHeaders,
+      payload: {
+        id: 'result.log',
+        name: 'result.log',
+        mediaType: 'text/plain',
+        contentBase64: Buffer.from('artifact content').toString('base64'),
+      },
+    });
+    expect(missingEnvelope.statusCode).toBe(403);
+
+    const wrongWriteScope = await app.inject({
+      method: 'POST',
+      url: `/api/workspaces/${workspaceId}/artifacts`,
+      headers: wrongScopeHeaders,
+      payload: {
+        id: 'result.log',
+        name: 'result.log',
+        mediaType: 'text/plain',
+        contentBase64: Buffer.from('artifact content').toString('base64'),
+      },
+    });
+    expect(wrongWriteScope.statusCode).toBe(403);
+
+    const createArtifact = await app.inject({
+      method: 'POST',
+      url: `/api/workspaces/${workspaceId}/artifacts`,
+      headers: artifactWriteHeaders,
+      payload: {
+        id: 'result.log',
+        name: '../unsafe/result.log',
+        mediaType: 'text/plain',
+        contentBase64: Buffer.from('artifact content').toString('base64'),
+        metadata: {
+          source: 'worker-test',
+        },
+      },
+    });
+    expect(createArtifact.statusCode).toBe(200);
+    expect(createArtifact.json().artifact).toMatchObject({
+      id: 'result.log',
+      name: 'result.log',
+      mediaType: 'text/plain',
+      size: 'artifact content'.length,
+      metadata: {
+        source: 'worker-test',
+      },
+    });
+
+    const wrongReadScope = await app.inject({
+      method: 'GET',
+      url: `/api/workspaces/${workspaceId}/artifacts`,
+      headers: artifactWriteHeaders,
+    });
+    expect(wrongReadScope.statusCode).toBe(403);
+
+    const listArtifacts = await app.inject({
+      method: 'GET',
+      url: `/api/workspaces/${workspaceId}/artifacts`,
+      headers: artifactReadHeaders,
+    });
+    expect(listArtifacts.statusCode).toBe(200);
+    expect(listArtifacts.json().artifacts).toHaveLength(1);
+
+    const metadata = await app.inject({
+      method: 'GET',
+      url: `/api/workspaces/${workspaceId}/artifacts/result.log`,
+      headers: artifactReadHeaders,
+    });
+    expect(metadata.statusCode).toBe(200);
+    expect(metadata.json().artifact.id).toBe('result.log');
+
+    const download = await app.inject({
+      method: 'GET',
+      url: `/api/workspaces/${workspaceId}/artifacts/result.log/download`,
+      headers: artifactReadHeaders,
+    });
+    expect(download.statusCode).toBe(200);
+    expect(download.headers['content-type']).toContain('text/plain');
+    expect(download.body).toBe('artifact content');
+
+    const deleteDenied = await app.inject({
+      method: 'DELETE',
+      url: `/api/workspaces/${workspaceId}/artifacts/result.log`,
+      headers: artifactReadHeaders,
+    });
+    expect(deleteDenied.statusCode).toBe(403);
+
+    const deleteArtifact = await app.inject({
+      method: 'DELETE',
+      url: `/api/workspaces/${workspaceId}/artifacts/result.log`,
+      headers: artifactWriteHeaders,
+    });
+    expect(deleteArtifact.statusCode).toBe(200);
+    expect(deleteArtifact.json()).toMatchObject({
+      deleted: true,
+      artifact: {
+        id: 'result.log',
+      },
+    });
+
+    const missingAfterDelete = await app.inject({
+      method: 'GET',
+      url: `/api/workspaces/${workspaceId}/artifacts/result.log`,
+      headers: artifactReadHeaders,
+    });
+    expect(missingAfterDelete.statusCode).toBe(404);
+  });
+
   it('writes gateway-backed provider config during worker startup', async () => {
     await app.close();
     const claudeHome = path.join(tempDir, 'claude-home');
