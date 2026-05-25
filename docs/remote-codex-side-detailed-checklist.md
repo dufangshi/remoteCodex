@@ -471,7 +471,11 @@ and recover it.
 - Residual risk: S3.04-S3.08 remain unchecked because no real staging AWS/EKS
   environment has been exercised. Capacity preflight is implemented as
   documented quota/subnet review plus deterministic runtime failure mapping;
-  it still needs staging AWS access smoke before production.
+  it still needs staging AWS access smoke before production. The
+  `pnpm smoke:staging-phase-one` runner now emits `start_sandbox`,
+  `sandbox_ready`, optional `admin_sandbox_runtime_detail`, optional
+  `idempotent_lifecycle`, and `stop_sandbox` evidence for these remaining
+  staging boxes once real staging URLs and tokens are available.
 
 ## Phase 4: Worker Image And Runtime Guardrails
 
@@ -669,7 +673,8 @@ router-injected worker identity.
 - Residual risk: R5.10-R5.12 remain unchecked because sandbox-router has not
   been deployed and smoked against real staging workers. Direct worker denial
   and browser-to-router-to-worker staging evidence still need
-  `pnpm smoke:staging-phase-one` output.
+  `pnpm smoke:staging-phase-one` output. The runner now emits
+  `browser_to_router_to_worker` and optional `direct_worker_denial` evidence.
 
 ## Phase 6: LLM Gateway And Provider Runtime Bootstrap
 
@@ -811,7 +816,10 @@ the sandbox, while real provider root keys stay outside the sandbox.
     usage detail, and quota exceeded states.
 - Residual risk: G6.11-G6.13 remain unchecked because Codex, Claude Code, and
   OpenCode have not yet made real staging model requests through the deployed
-  gateway from real worker sandboxes.
+  gateway from real worker sandboxes. The staging runner can attach
+  `codex_gateway_smoke`, `claude_gateway_smoke`, and `opencode_gateway_smoke`
+  command output; check these boxes only when that output also includes gateway
+  usage records and root-key absence checks.
 
 ## Phase 7: ElAgenteHarness Integration
 

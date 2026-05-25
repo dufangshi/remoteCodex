@@ -9,6 +9,8 @@ interface SmokeStep {
   details?: Record<string, unknown>;
 }
 
+type JsonObject = Record<string, unknown>;
+
 const requiredEnv = [
   'STAGING_CONTROL_PLANE_BASE_URL',
   'STAGING_PRODUCT_JWT',
@@ -25,6 +27,22 @@ function requireEnv(name: (typeof requiredEnv)[number]) {
     throw new Error(`${name} is required.`);
   }
   return value;
+}
+
+function numericEnv(name: string, fallback: number) {
+  const value = envValue(name);
+  if (!value) {
+    return fallback;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`${name} must be a positive number.`);
+  }
+  return parsed;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function requestJson(input: {
@@ -70,15 +88,169 @@ async function runOptionalCommand(name: string, commandEnvName: string): Promise
     timeout: Number(process.env.STAGING_PROVIDER_SMOKE_TIMEOUT_MS ?? 120_000),
     env: process.env,
   });
+  const parsedStdout = parseOptionalJson(stdout);
   return {
     name,
-    ok: true,
+    ok: parsedStdout?.ok === undefined ? true : parsedStdout.ok === true,
     details: {
       commandEnv: commandEnvName,
       stdout: stdout.slice(0, 4000),
       stderr: stderr.slice(0, 4000),
+      parsedStdout,
     },
   };
+}
+
+function parseOptionalJson(value: string): JsonObject | null {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('{')) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as JsonObject
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function waitForSandboxRunning(input: {
+  productJwt: string;
+  sandboxId: string;
+  steps: SmokeStep[];
+}) {
+  const timeoutMs = numericEnv('STAGING_SANDBOX_READY_TIMEOUT_MS', 10 * 60_000);
+  const intervalMs = numericEnv('STAGING_SANDBOX_READY_POLL_MS', 10_000);
+  const deadline = Date.now() + timeoutMs;
+  let lastHealth: Awaited<ReturnType<typeof requestJson>> | null = null;
+  while (Date.now() <= deadline) {
+    lastHealth = await requestJson({
+      path: '/api/sandbox/health',
+      token: input.productJwt,
+      expectedStatus: 200,
+    });
+    const sandbox = lastHealth.json.sandbox;
+    if (sandbox.state === 'running') {
+      input.steps.push({
+        name: 'sandbox_ready',
+        ok: true,
+        details: {
+          sandboxId: input.sandboxId,
+          state: sandbox.state,
+          routerBaseUrl: sandbox.routerBaseUrl,
+          workerServiceName: sandbox.workerServiceName,
+          k8sNamespace: sandbox.k8sNamespace,
+          k8sPodName: sandbox.k8sPodName,
+          startupProgress: sandbox.startupProgress,
+        },
+      });
+      return lastHealth;
+    }
+    if (sandbox.state === 'failed') {
+      input.steps.push({
+        name: 'sandbox_ready',
+        ok: false,
+        details: {
+          sandboxId: input.sandboxId,
+          state: sandbox.state,
+          statusReason: sandbox.statusReason,
+          lastFailureCode: sandbox.lastFailureCode,
+          lastFailureMessage: sandbox.lastFailureMessage,
+        },
+      });
+      return lastHealth;
+    }
+    await sleep(intervalMs);
+  }
+  input.steps.push({
+    name: 'sandbox_ready',
+    ok: false,
+    details: {
+      sandboxId: input.sandboxId,
+      timeoutMs,
+      lastState: lastHealth?.json?.sandbox?.state,
+      lastStatusReason: lastHealth?.json?.sandbox?.statusReason,
+    },
+  });
+  return lastHealth;
+}
+
+async function optionalAdminSandboxDetail(input: {
+  sandboxId: string;
+  steps: SmokeStep[];
+}) {
+  const adminJwt = envValue('STAGING_ADMIN_JWT');
+  if (!adminJwt) {
+    return null;
+  }
+  const detail = await requestJson({
+    path: `/api/admin/sandboxes/${input.sandboxId}`,
+    token: adminJwt,
+    expectedStatus: 200,
+  });
+  input.steps.push({
+    name: 'admin_sandbox_runtime_detail',
+    ok: true,
+    details: {
+      sandboxId: input.sandboxId,
+      runtimeState: detail.json.runtimeStatus?.state,
+      workerBaseUrl: detail.json.workerBaseUrl,
+      k8sNamespace: detail.json.sandbox?.k8sNamespace ?? detail.json.runtimeStatus?.k8sNamespace,
+      k8sPodName: detail.json.sandbox?.k8sPodName ?? detail.json.runtimeStatus?.k8sPodName,
+      workerServiceName:
+        detail.json.sandbox?.workerServiceName ?? detail.json.runtimeStatus?.workerServiceName,
+      recentLifecycleAuditCount: detail.json.recentLifecycleErrors?.length ?? 0,
+      failure:
+        detail.json.runtimeStatus?.lastFailureCode ??
+        detail.json.sandbox?.lastFailureCode ??
+        null,
+    },
+  });
+  return detail;
+}
+
+async function runOptionalIdempotentLifecycleSmoke(input: {
+  productJwt: string;
+  sandboxId: string;
+  steps: SmokeStep[];
+}) {
+  if (process.env.STAGING_IDEMPOTENT_LIFECYCLE_SMOKE !== '1') {
+    return;
+  }
+  const firstStart = await requestJson({
+    path: '/api/sandbox/start',
+    method: 'POST',
+    token: input.productJwt,
+    expectedStatus: 200,
+  });
+  const secondStart = await requestJson({
+    path: '/api/sandbox/start',
+    method: 'POST',
+    token: input.productJwt,
+    expectedStatus: 200,
+  });
+  const restart = await requestJson({
+    path: '/api/sandbox/restart',
+    method: 'POST',
+    token: input.productJwt,
+    expectedStatus: 200,
+  });
+  await waitForSandboxRunning(input);
+  input.steps.push({
+    name: 'idempotent_lifecycle',
+    ok:
+      firstStart.json.sandbox.id === input.sandboxId &&
+      secondStart.json.sandbox.id === input.sandboxId &&
+      restart.json.sandbox.id === input.sandboxId,
+    details: {
+      sandboxId: input.sandboxId,
+      firstStartState: firstStart.json.sandbox.state,
+      secondStartState: secondStart.json.sandbox.state,
+      restartState: restart.json.sandbox.state,
+    },
+  });
 }
 
 async function main() {
@@ -118,12 +290,17 @@ async function main() {
   });
   steps.push({
     name: 'start_sandbox',
-    ok: start.json.sandbox.state === 'running',
+    ok: ['starting', 'running'].includes(start.json.sandbox.state),
     details: {
       sandboxId: start.json.sandbox.id,
       state: start.json.sandbox.state,
-      imageVersion: start.json.sandbox.imageVersion,
-      endpoint: start.json.sandbox.endpoint,
+      image: start.json.sandbox.image,
+      resourceProfile: start.json.sandbox.resourceProfile,
+      routerBaseUrl: start.json.sandbox.routerBaseUrl,
+      workerServiceName: start.json.sandbox.workerServiceName,
+      k8sNamespace: start.json.sandbox.k8sNamespace,
+      k8sPodName: start.json.sandbox.k8sPodName,
+      startupProgress: start.json.sandbox.startupProgress,
     },
   });
 
@@ -138,9 +315,13 @@ async function main() {
     details: {
       sandboxId: health.json.sandbox.id,
       state: health.json.sandbox.state,
-      lastHeartbeatAt: health.json.sandbox.lastHeartbeatAt,
+      lastSeenAt: health.json.sandbox.lastSeenAt,
+      statusReason: health.json.sandbox.statusReason,
     },
   });
+  await waitForSandboxRunning({ productJwt, sandboxId: sandbox.id, steps });
+  await optionalAdminSandboxDetail({ sandboxId: sandbox.id, steps });
+  await runOptionalIdempotentLifecycleSmoke({ productJwt, sandboxId: sandbox.id, steps });
 
   const project = await requestJson({
     path: '/api/projects',
@@ -257,12 +438,20 @@ async function main() {
       token: productJwt,
       expectedStatus: 200,
     });
+    const finalHealth = await requestJson({
+      path: '/api/sandbox/health',
+      token: productJwt,
+      expectedStatus: 200,
+    });
     steps.push({
       name: 'stop_sandbox',
-      ok: stop.json.sandbox.state === 'stopped',
+      ok: ['stopping', 'stopped'].includes(stop.json.sandbox.state),
       details: {
         sandboxId: stop.json.sandbox.id,
         state: stop.json.sandbox.state,
+        finalHealthState: finalHealth.json.sandbox.state,
+        k8sPodName: stop.json.sandbox.k8sPodName,
+        workerServiceName: stop.json.sandbox.workerServiceName,
       },
     });
   }

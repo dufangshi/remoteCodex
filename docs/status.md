@@ -61,8 +61,8 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   `workerSessionId`, `status`, and `lastActivityAt`.
 - Phase-one staging smoke runner exists as `pnpm smoke:staging-phase-one`; it
   can produce JSON evidence for lifecycle, route-token, router, direct-worker,
-  and optional provider gateway staging checks once real staging URLs and tokens
-  are available.
+  idempotent lifecycle, admin runtime detail, and optional provider gateway
+  staging checks once real staging URLs and tokens are available.
 - Worker mode disables host/provider management APIs that should not be exposed
   in sandbox runtime.
 - Route-token signing supports key ids and previous-key verification.
@@ -148,14 +148,16 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 
 ## Immediate Next Implementation Queue
 
-1. Run `pnpm smoke:staging-phase-one` against the real staging control plane and
-   worker runtime, then attach the JSON output to release evidence.
-2. Capture staging proof that browser product JWTs are stripped before worker
-   requests.
-3. Add staging lifecycle smokes for start, stop, idempotent restart, and
-   readiness.
+1. Run `pnpm smoke:staging-phase-one` with staging product/admin JWTs against
+   the real staging control plane, router, and worker runtime, then attach the
+   JSON output to release evidence.
+2. Capture staging AWS/EKS proof for sandbox start, readiness, stop, and
+   idempotent lifecycle.
+3. Capture staging router proof for direct-worker denial and
+   browser-to-router-to-worker traffic.
 4. Run staging provider-runtime gateway smokes for Codex, Claude Code, and
-   OpenCode.
+   OpenCode, including gateway usage records and worker env/config root-key
+   absence.
 
 ## Verification Commands
 

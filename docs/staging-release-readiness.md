@@ -99,7 +99,9 @@ The scripted entry point for the phase-one Remote Codex staging path is:
 ```bash
 STAGING_CONTROL_PLANE_BASE_URL=https://<control-plane-staging> \
 STAGING_PRODUCT_JWT=<jwt-for-test-user> \
+STAGING_ADMIN_JWT=<jwt-for-admin-user> \
 STAGING_DIRECT_WORKER_BASE_URL=https://<worker-endpoint-if-public> \
+STAGING_IDEMPOTENT_LIFECYCLE_SMOKE=1 \
 STAGING_STOP_SANDBOX_AFTER_SMOKE=1 \
 pnpm smoke:staging-phase-one
 ```
@@ -113,8 +115,32 @@ STAGING_CLAUDE_GATEWAY_SMOKE_COMMAND="<command run by the operator>" \
 STAGING_OPENCODE_GATEWAY_SMOKE_COMMAND="<command run by the operator>"
 ```
 
+Useful timing overrides for slower EKS/Fargate starts:
+
+```bash
+STAGING_SANDBOX_READY_TIMEOUT_MS=900000 \
+STAGING_SANDBOX_READY_POLL_MS=15000 \
+STAGING_PROVIDER_SMOKE_TIMEOUT_MS=180000
+```
+
 The script prints JSON evidence with step names and ids. Store the output with
 the staging release record before checking the corresponding staging boxes.
+The important step-to-checkbox mapping is:
+
+- `start_sandbox`, `sandbox_ready`, and `admin_sandbox_runtime_detail` prove
+  real worker Pod creation, runtime identity, image, namespace, Pod name,
+  worker service name, and readiness for S3.06.
+- `stop_sandbox` proves user stop convergence for S3.07 when final registry
+  and Pod state are recorded.
+- `idempotent_lifecycle` proves repeated start/restart calls keep one sandbox
+  id for S3.08.
+- `browser_to_router_to_worker` proves R5.12.
+- `direct_worker_denial` proves R5.11 when `STAGING_DIRECT_WORKER_BASE_URL` is
+  available.
+- `codex_gateway_smoke`, `claude_gateway_smoke`, and
+  `opencode_gateway_smoke` prove G6.11-G6.13 only when the command output also
+  records a successful gateway usage event and confirms no provider root key is
+  present in worker env/config.
 
 - Auth smoke:
   - valid staging user token reaches `GET /api/me`;
