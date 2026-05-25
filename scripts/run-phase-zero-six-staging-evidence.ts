@@ -135,6 +135,19 @@ function commandRequiredForBundleSuccess(result: CommandResult) {
   return !successfulCommandNamesForPartialEvidence().has(result.name);
 }
 
+function commandSummary(result: CommandResult) {
+  const parsed = parseJsonOutput(result) as { ok?: unknown } | null;
+  return {
+    name: result.name,
+    exitCode: result.exitCode,
+    ok: commandOkForBundle(result),
+    rawOk: commandOk(result),
+    outputPath: result.outputPath,
+    parsedOk: parsed?.ok ?? null,
+    stderr: result.stderr.slice(0, 4000),
+  };
+}
+
 async function main() {
   const outputDir =
     argValue('--output-dir') ??
@@ -190,14 +203,7 @@ async function main() {
         artifactSecretScan: null,
         summary: summaryPath,
       },
-      results: commands.map((result) => ({
-        name: result.name,
-        exitCode: result.exitCode,
-        ok: commandOk(result),
-        outputPath: result.outputPath,
-        parsedOk: (parseJsonOutput(result) as { ok?: unknown } | null)?.ok ?? null,
-        stderr: result.stderr.slice(0, 4000),
-      })),
+      results: commands.map(commandSummary),
     };
     await writeFile(summaryPath, JSON.stringify(summary, null, 2));
     console.log(JSON.stringify(summary, null, 2));
@@ -299,14 +305,7 @@ async function main() {
       artifactSecretScan: artifactSafetyPath,
       summary: summaryPath,
     },
-    results: commands.map((result) => ({
-      name: result.name,
-      exitCode: result.exitCode,
-      ok: commandOk(result),
-      outputPath: result.outputPath,
-      parsedOk: (parseJsonOutput(result) as { ok?: unknown } | null)?.ok ?? null,
-      stderr: result.stderr.slice(0, 4000),
-    })),
+    results: commands.map(commandSummary),
   };
 
   await writeFile(summaryPath, JSON.stringify(summary, null, 2));

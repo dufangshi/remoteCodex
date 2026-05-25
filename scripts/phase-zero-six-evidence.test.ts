@@ -818,6 +818,20 @@ describe('phase zero-six evidence tooling', () => {
     expect(parsed.ok).toBe(true);
     expect(parsed.phaseZeroSixComplete).toBe(false);
     expect(parsed.applySkippedReason).toBeNull();
+    expect(
+      parsed.results.find((entry: { name: string }) => entry.name === 'verify_phase_zero_six_evidence'),
+    ).toMatchObject({
+      ok: true,
+      rawOk: false,
+      parsedOk: false,
+    });
+    expect(
+      parsed.results.find((entry: { name: string }) => entry.name === 'verify_phase_zero_six_evidence_apply'),
+    ).toMatchObject({
+      ok: true,
+      rawOk: false,
+      parsedOk: false,
+    });
     expect(parsed.artifacts.phaseZeroSixApply).toBe(path.join(dir, 'phase-zero-six-apply.json'));
     expect(files).toContain('phase-zero-six-apply.json');
     expect(checklist).toContain('- [x] S3.04 Finalize AWS staging configuration.');

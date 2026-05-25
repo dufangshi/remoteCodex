@@ -346,6 +346,13 @@ mean every Phase 0 through Phase 6 checklist item is complete. Use
 such as AWS-only S3.04/S3.05 preflight with `--skip-staging-smoke`, can produce
 `ok: true` and `phaseZeroSixComplete: false`.
 
+Each `summary.results[]` entry includes both `ok` and `rawOk`. `ok` is the
+bundle-level interpretation for that command. `rawOk` is the command's own
+checklist-completion result. For partial evidence, `verify_phase_zero_six_*`
+commands can have `ok: true` and `rawOk: false`, meaning the command ran and
+applied the ready boxes successfully, while the full Phase 0 through Phase 6
+checklist still has missing staging evidence.
+
 Checklist apply inside the bundle is intentionally ordered after read-only
 verification and artifact scanning. Even when `--apply-ready` is present, the
 bundle first writes `phase-zero-six-verification.json`, then scans the artifact
