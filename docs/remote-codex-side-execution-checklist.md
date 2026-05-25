@@ -314,7 +314,7 @@ sandbox-local execution state.
     states.
   - Verification: frontend tests cover each pending state.
 
-- [ ] Add open-session flow that obtains a route token and connects through the
+- [x] Add open-session flow that obtains a route token and connects through the
   router.
   - Acceptance: clicking a session opens the worker through the router using an
     in-memory route token.
@@ -327,15 +327,19 @@ sandbox-local execution state.
   `apps/control-plane-api/src/app.test.ts`,
   `apps/supervisor-api/src/worker-control-plane-sync.ts`,
   `apps/supervisor-api/src/worker-control-plane-sync.test.ts`,
-  `apps/supervisor-api/src/routes/system.ts`, `packages/config/src/index.ts`
+  `apps/supervisor-api/src/routes/system.ts`,
+  `apps/supervisor-web/src/pages/ControlPlanePage.tsx`,
+  `apps/supervisor-web/src/pages/ControlPlanePage.test.tsx`,
+  `packages/config/src/index.ts`
 - Verification: `pnpm --filter @remote-codex/control-plane-api typecheck`;
   `pnpm --filter @remote-codex/control-plane-api test`;
   `pnpm --filter @remote-codex/supervisor-api typecheck`;
   `pnpm --filter @remote-codex/supervisor-api test`;
+  `pnpm --filter @remote-codex/supervisor-web typecheck`;
+  `pnpm --filter @remote-codex/supervisor-web test -- ControlPlanePage`;
   `pnpm --filter @remote-codex/config typecheck`;
   `pnpm --filter @remote-codex/config test`
-- Residual risk: the open-session router/worker connection task remains
-  unchecked; no staging worker-to-control-plane smoke has run.
+- Residual risk: no staging worker-to-control-plane smoke has run.
 
 ## Phase 3: Sandbox Lifecycle And AWS Runtime
 
@@ -505,12 +509,12 @@ router-injected internal worker identity.
 
 ### Frontend Tasks
 
-- [ ] Reconnect WebSocket after token refresh.
+- [x] Reconnect WebSocket after token refresh.
   - Acceptance: long-running sessions refresh route tokens and reconnect
     without requiring full app reload.
   - Verification: frontend or e2e test simulates expiring token and reconnect.
 
-- [ ] Show sandbox offline state from router failures.
+- [x] Show sandbox offline state from router failures.
   - Acceptance: router `sandbox_offline` or upstream errors produce a clear UI
     state.
   - Verification: frontend tests cover offline and reconnect states.
@@ -1514,7 +1518,7 @@ corresponding implementation and verification land.
 - [ ] 2. Add production auth-provider smoke test.
 - [x] 3. Enforce disabled-user behavior across route tokens, sandbox lifecycle,
   and usage import.
-- [ ] 4. Add project detail UI, list loading states, and open-session flow.
+- [x] 4. Add project detail UI, list loading states, and open-session flow.
 - [x] 5. Add worker checkpoint caller, wrong-user/wrong-sandbox denial, retry,
   and session finalize behavior.
 - [x] 6. Add AWS namespace/label strategy, Pod cleanup policy, idle timeout, and

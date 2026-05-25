@@ -247,7 +247,7 @@ execution state inside the sandbox.
 - [x] Add empty states for project/workspace/session lists.
 - [x] Add create/update error states.
 - [x] Add loading states for every list.
-- [ ] Add open-session flow that obtains a route token and connects through the
+- [x] Add open-session flow that obtains a route token and connects through the
   router.
 
 ### Verification
@@ -454,8 +454,8 @@ router-injected internal worker token.
 - [x] Refresh route token before expiry.
 - [x] Show route authorization failure state.
 - [x] Show reconnecting state.
-- [ ] Reconnect WebSocket after token refresh.
-- [ ] Show sandbox offline state from router failures.
+- [x] Reconnect WebSocket after token refresh.
+- [x] Show sandbox offline state from router failures.
 - [x] Add tests proving route tokens are not persisted in local storage.
 
 ### Verification
@@ -869,7 +869,7 @@ The first usable product phase is complete only when all of these are checked:
 ## Recommended Execution Order
 
 - [ ] 1. Finish frontend auth shell and provider auth smoke.
-- [ ] 2. Finish project detail and open-session flow.
+- [x] 2. Finish project detail and open-session flow.
 - [x] 3. Add worker session checkpoint caller and wrong-user/wrong-sandbox tests.
 - [x] 4. Validate harness env when chemistry tools are enabled.
 - [x] 5. Add gateway client interface and mocked gateway admin tests.

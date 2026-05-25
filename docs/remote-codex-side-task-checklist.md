@@ -387,7 +387,7 @@ Verification:
 - [x] Fetch route token before opening a worker session from the frontend.
 - [x] Store route token only in memory.
 - [x] Refresh route token before expiry.
-- [ ] Reconnect WebSocket after token refresh.
+- [x] Reconnect WebSocket after token refresh.
 - [x] Show route authorization failure state.
 - [x] Show reconnecting state.
 
@@ -1071,8 +1071,8 @@ token.
 - [x] Fetch a route token before opening a worker session.
 - [x] Store route token only in memory.
 - [x] Refresh route token before expiry.
-- [ ] Reconnect WebSocket after token refresh.
-- [ ] Show sandbox offline state.
+- [x] Reconnect WebSocket after token refresh.
+- [x] Show sandbox offline state.
 - [x] Show route authorization failure state.
 - [x] Show reconnecting state.
 - [x] Avoid persisting route tokens in local storage.

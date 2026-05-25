@@ -217,7 +217,7 @@ live sandbox-local execution state.
 - [x] Add empty states for project, workspace, and session lists.
 - [x] Add loading states for all product metadata lists.
 - [x] Add create/update error states.
-- [ ] Add open-session flow that obtains a route token and connects through the
+- [x] Add open-session flow that obtains a route token and connects through the
   router.
 
 ### Verification
@@ -469,10 +469,10 @@ control-plane-issued route tokens and router-injected worker identity.
 - [x] Store route token only in memory.
 - [x] Refresh route token before expiry.
 - [x] Avoid persisting route tokens in local storage.
-- [ ] Reconnect worker WebSocket after token refresh.
+- [x] Reconnect worker WebSocket after token refresh.
 - [x] Show route authorization failure state.
 - [x] Show reconnecting state during route refresh or WebSocket reconnect.
-- [ ] Show sandbox offline state when the router reports worker unavailable.
+- [x] Show sandbox offline state when the router reports worker unavailable.
 
 ### Verification
 

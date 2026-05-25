@@ -78,10 +78,12 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   management for list/status/quota/non-admin denial. Production auth-provider
   smoke coverage remains open.
 - Project detail and product metadata loading states are implemented in the
-  control-plane panel; the real worker connection step after route-token issue
-  remains open.
-- Browser-to-worker route-token connection flow; route token issuance and
-  refresh are in place, while staging router smoke checks remain open.
+  control-plane panel; opening a session now gets an in-memory route token,
+  opens a sandbox-router WebSocket, reconnects after token refresh, and shows
+  sandbox-offline UI when the router socket fails.
+- Browser-to-worker route-token connection flow; route token issuance, refresh,
+  browser WebSocket connection, and reconnect are in place, while staging router
+  smoke checks remain open.
 - Worker image runtime pinning and smoke verification.
 - LLM gateway contract is fixed on a sub2api-compatible shape; provisioning,
   provider selection config, worker provider config rendering, manual usage
@@ -100,11 +102,10 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 
 1. Add production auth-provider smoke coverage or staging smoke procedure for
    valid, expired, wrong-issuer, and wrong-audience tokens.
-2. Add real open-session worker connection flow after route-token issue.
-3. Add staging lifecycle smokes for start, stop, idempotent restart, and
+2. Add staging lifecycle smokes for start, stop, idempotent restart, and
    readiness.
-4. Build and smoke-test the worker Docker image, then add CI image checks.
-5. Run staging provider-runtime gateway smokes for Codex, Claude Code, and
+3. Build and smoke-test the worker Docker image, then add CI image checks.
+4. Run staging provider-runtime gateway smokes for Codex, Claude Code, and
    OpenCode.
 
 ## Verification Commands

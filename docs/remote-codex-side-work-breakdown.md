@@ -166,13 +166,13 @@ worker session through the router.
 
 ### Session Opening
 
-- [ ] Add open-session action in the project/workspace/session UI.
+- [x] Add open-session action in the project/workspace/session UI.
   - Done when selecting a session requests a route token scoped to user,
     sandbox, project, workspace, and session.
   - Verify with frontend tests that include the selected project/workspace/
     session ids.
 
-- [ ] Connect the browser to the sandbox router after route-token issue.
+- [x] Connect the browser to the sandbox router after route-token issue.
   - Done when the UI opens a live worker connection without exposing the worker
     endpoint or internal worker token.
   - Verify with local e2e or integration smoke.
@@ -182,12 +182,12 @@ worker session through the router.
     IndexedDB, URL query params, or logs.
   - Verify with frontend tests and code review around token handling.
 
-- [ ] Add worker connection lifecycle UI.
+- [x] Add worker connection lifecycle UI.
   - Done when the UI distinguishes connecting, connected, reconnecting,
     offline, expired token, and unauthorized states.
   - Verify with frontend tests for each state.
 
-- [ ] Add WebSocket/SSE reconnect after token refresh.
+- [x] Add WebSocket/SSE reconnect after token refresh.
   - Done when long-running sessions refresh route tokens and reconnect without a
     full app reload.
   - Verify with frontend or e2e test that simulates token expiry.

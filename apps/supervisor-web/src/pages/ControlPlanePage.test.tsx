@@ -6,6 +6,37 @@ import { ControlPlanePage } from './ControlPlanePage';
 
 const baseUrl = 'http://127.0.0.1:8790';
 
+class MockWorkerWebSocket extends EventTarget {
+  static instances: MockWorkerWebSocket[] = [];
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSING = 2;
+  static CLOSED = 3;
+
+  readonly url: string;
+  readyState = MockWorkerWebSocket.CONNECTING;
+
+  constructor(url: string) {
+    super();
+    this.url = url;
+    MockWorkerWebSocket.instances.push(this);
+  }
+
+  open() {
+    this.readyState = MockWorkerWebSocket.OPEN;
+    this.dispatchEvent(new Event('open'));
+  }
+
+  fail() {
+    this.dispatchEvent(new Event('error'));
+  }
+
+  close(_code?: number, reason = '') {
+    this.readyState = MockWorkerWebSocket.CLOSED;
+    this.dispatchEvent(new CloseEvent('close', { reason }));
+  }
+}
+
 function storageSnapshot(storage: Storage) {
   return Array.from({ length: storage.length }, (_, index) => {
     const key = storage.key(index);
@@ -224,6 +255,8 @@ describe('ControlPlanePage', () => {
     let workspaceCreated = false;
     let sessionCreated = false;
     let sandboxRunning = false;
+    MockWorkerWebSocket.instances = [];
+    vi.stubGlobal('WebSocket', MockWorkerWebSocket);
     window.localStorage.clear();
     vi.stubGlobal(
       'fetch',
@@ -373,6 +406,17 @@ describe('ControlPlanePage', () => {
     await waitFor(() => {
       expect(screen.getByText('wss://router.example.test')).toBeInTheDocument();
     });
+    await waitFor(() => {
+      expect(MockWorkerWebSocket.instances).toHaveLength(1);
+    });
+    expect(MockWorkerWebSocket.instances[0]?.url).toBe(
+      'wss://router.example.test/api/sandboxes/sandbox-1/ws?token=route-token',
+    );
+    expect(screen.getByText('Connecting worker route.')).toBeInTheDocument();
+    MockWorkerWebSocket.instances[0]?.open();
+    await waitFor(() => {
+      expect(screen.getByText('ready')).toBeInTheDocument();
+    });
 
     expect(JSON.stringify(storageSnapshot(window.localStorage))).not.toContain('route-token');
     expect(JSON.stringify(storageSnapshot(window.sessionStorage))).not.toContain('route-token');
@@ -396,6 +440,7 @@ describe('ControlPlanePage', () => {
     await waitFor(() => {
       expect(screen.getByText('stopped')).toBeInTheDocument();
     });
+    expect(MockWorkerWebSocket.instances[0]?.readyState).toBe(MockWorkerWebSocket.CLOSED);
 
     fireEvent.click(screen.getByRole('button', { name: 'Restart' }));
 
@@ -461,6 +506,70 @@ describe('ControlPlanePage', () => {
       expect(
         screen.getByText('Sandbox must be running before issuing a route token.'),
       ).toBeInTheDocument();
+    });
+  });
+
+  it('shows sandbox offline state when the router websocket fails', async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
+
+      if (path === '/api/me/bootstrap' && init?.method === 'POST') {
+        return jsonResponse({ user, sandbox: runningSandbox, gatewayKey: null });
+      }
+
+      if (path === '/api/me' && !init?.method) {
+        return jsonResponse({ user, sandbox: runningSandbox, usage });
+      }
+
+      if (path === '/api/projects' && !init?.method) {
+        return jsonResponse({ projects: [project] });
+      }
+
+      if (path === '/api/workspaces?projectId=project-1' && !init?.method) {
+        return jsonResponse({ workspaces: [workspace] });
+      }
+
+      if (path === '/api/workspaces/workspace-1/sessions' && !init?.method) {
+        return jsonResponse({ sessions: [session] });
+      }
+
+      if (path === '/api/sandboxes/sandbox-1/route-token' && init?.method === 'POST') {
+        return jsonResponse({
+          sandboxId: 'sandbox-1',
+          routerBaseUrl: 'https://router.example.test',
+          wsBaseUrl: 'wss://router.example.test',
+          token: 'route-token-offline',
+          expiresAt: '2026-05-25T00:05:00.000Z',
+        });
+      }
+
+      const usageEvents = usageEventsResponse(path);
+      if (usageEvents) {
+        return usageEvents;
+      }
+
+      return jsonResponse({
+        code: 'not_found',
+        message: `Unhandled request: ${path}`,
+      }, 404);
+    });
+
+    render(<ControlPlanePage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Plan calculation/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Plan calculation/i }));
+    await waitFor(() => {
+      expect(MockWorkerWebSocket.instances).toHaveLength(1);
+    });
+
+    MockWorkerWebSocket.instances[0]?.fail();
+    await waitFor(() => {
+      expect(screen.getByText('Sandbox offline: Worker route connection failed.')).toBeInTheDocument();
     });
   });
 
@@ -531,15 +640,27 @@ describe('ControlPlanePage', () => {
     await waitFor(() => {
       expect(routeTokenCount).toBe(1);
     });
+    expect(MockWorkerWebSocket.instances[0]?.url).toContain('token=route-token-1');
+    MockWorkerWebSocket.instances[0]?.open();
+    await waitFor(() => {
+      expect(screen.getByText('ready')).toBeInTheDocument();
+    });
 
     await waitFor(() => {
       expect(routeTokenCount).toBe(2);
     }, { timeout: 6500 });
     expect(screen.getByText('Reconnecting worker route.')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(MockWorkerWebSocket.instances).toHaveLength(2);
+    });
+    expect(MockWorkerWebSocket.instances[0]?.readyState).toBe(MockWorkerWebSocket.CLOSED);
+    expect(MockWorkerWebSocket.instances[1]?.url).toContain('token=route-token-2');
+    MockWorkerWebSocket.instances[1]?.open();
 
     await waitFor(() => {
       expect(screen.getByText('Route token is available in memory.')).toBeInTheDocument();
     });
+    expect(screen.getByText('ready')).toBeInTheDocument();
     expect(JSON.stringify(storageSnapshot(window.localStorage))).not.toContain('route-token-2');
     expect(JSON.stringify(storageSnapshot(window.sessionStorage))).not.toContain('route-token-2');
   }, 9000);

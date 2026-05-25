@@ -218,6 +218,7 @@ export function ControlPlanePage() {
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState('');
   const [selectedSessionId, setSelectedSessionId] = useState('');
   const [routeToken, setRouteToken] = useState<ControlPlaneRouteToken | null>(null);
+  const [workerSocketUrl, setWorkerSocketUrl] = useState<string | null>(null);
   const [projectName, setProjectName] = useState('Computational chemistry');
   const [workspaceName, setWorkspaceName] = useState('Molecule study');
   const [sessionTitle, setSessionTitle] = useState('Plan calculation');
@@ -229,6 +230,7 @@ export function ControlPlanePage() {
   const [quotaExceeded, setQuotaExceeded] = useState<string | null>(null);
   const [disabledAccount, setDisabledAccount] = useState<string | null>(null);
   const [expiredSession, setExpiredSession] = useState<string | null>(null);
+  const [sandboxOffline, setSandboxOffline] = useState<string | null>(null);
   const [adminUsersForbidden, setAdminUsersForbidden] = useState<string | null>(null);
   const [metadataLoading, setMetadataLoading] = useState<{
     projects: boolean;
@@ -243,8 +245,9 @@ export function ControlPlanePage() {
     usageEvents: false,
     adminUsers: false,
   });
-  const [workerConnectionState, setWorkerConnectionState] = useState<'idle' | 'ready' | 'reconnecting'>('idle');
+  const [workerConnectionState, setWorkerConnectionState] = useState<'idle' | 'connecting' | 'ready' | 'reconnecting'>('idle');
   const routeTokenRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const workerSocketRef = useRef<WebSocket | null>(null);
 
   const canUseControlPlane = Boolean(auth && user);
 
@@ -266,6 +269,7 @@ export function ControlPlanePage() {
     setQuotaExceeded(null);
     setDisabledAccount(null);
     setExpiredSession(null);
+    setSandboxOffline(null);
     setAdminUsersForbidden(null);
     try {
       return await action();
@@ -381,15 +385,58 @@ export function ControlPlanePage() {
       if (routeTokenRefreshTimerRef.current) {
         clearTimeout(routeTokenRefreshTimerRef.current);
       }
+      closeWorkerSocket();
     },
     [],
   );
+
+  function closeWorkerSocket() {
+    const socket = workerSocketRef.current;
+    workerSocketRef.current = null;
+    if (socket && socket.readyState !== WebSocket.CLOSED) {
+      socket.close();
+    }
+  }
 
   function clearRouteTokenRefreshTimer() {
     if (routeTokenRefreshTimerRef.current) {
       clearTimeout(routeTokenRefreshTimerRef.current);
       routeTokenRefreshTimerRef.current = null;
     }
+  }
+
+  function workerWebSocketUrlForToken(token: ControlPlaneRouteToken) {
+    const base = token.wsBaseUrl.replace(/\/+$/, '');
+    return `${base}/api/sandboxes/${encodeURIComponent(token.sandboxId)}/ws?token=${encodeURIComponent(token.token)}`;
+  }
+
+  function connectWorkerSocket(token: ControlPlaneRouteToken, state: 'connecting' | 'reconnecting' = 'connecting') {
+    closeWorkerSocket();
+    const socketUrl = workerWebSocketUrlForToken(token);
+    setWorkerSocketUrl(socketUrl);
+    setSandboxOffline(null);
+    setWorkerConnectionState(state);
+    const socket = new WebSocket(socketUrl);
+    workerSocketRef.current = socket;
+    socket.addEventListener('open', () => {
+      if (workerSocketRef.current === socket) {
+        setWorkerConnectionState('ready');
+      }
+    });
+    socket.addEventListener('error', () => {
+      if (workerSocketRef.current === socket) {
+        setSandboxOffline('Worker route connection failed.');
+        setWorkerConnectionState('idle');
+      }
+    });
+    socket.addEventListener('close', (event) => {
+      if (workerSocketRef.current === socket) {
+        setSandboxOffline(
+          event.reason || 'Worker route closed before the session could stay connected.',
+        );
+        setWorkerConnectionState('idle');
+      }
+    });
   }
 
   function scheduleRouteTokenRefresh(token: ControlPlaneRouteToken | null) {
@@ -523,11 +570,15 @@ export function ControlPlanePage() {
       } else if (action === 'stop') {
         setSandbox((await stopControlPlaneSandbox(auth)).sandbox);
         setRouteToken(null);
+        setWorkerSocketUrl(null);
+        closeWorkerSocket();
         clearRouteTokenRefreshTimer();
         setWorkerConnectionState('idle');
       } else if (action === 'restart') {
         setSandbox((await restartControlPlaneSandbox(auth)).sandbox);
         setRouteToken(null);
+        setWorkerSocketUrl(null);
+        closeWorkerSocket();
         clearRouteTokenRefreshTimer();
         setWorkerConnectionState('idle');
       } else {
@@ -587,7 +638,7 @@ export function ControlPlanePage() {
     }
   }
 
-  async function handleRouteToken() {
+  async function handleRouteToken(connectionState: 'connecting' | 'reconnecting' = 'connecting') {
     if (!auth || !sandbox) {
       return null;
     }
@@ -612,7 +663,7 @@ export function ControlPlanePage() {
       const token = await createControlPlaneRouteToken(auth, sandbox.id, routeTokenInput);
       setRouteToken(token);
       scheduleRouteTokenRefresh(token);
-      setWorkerConnectionState('ready');
+      connectWorkerSocket(token, connectionState);
       setMessage('Route token is available in memory.');
       return token;
     });
@@ -623,14 +674,18 @@ export function ControlPlanePage() {
       return;
     }
     setWorkerConnectionState('reconnecting');
-    const token = await handleRouteToken();
-    setWorkerConnectionState(token ? 'ready' : 'idle');
+    const token = await handleRouteToken('reconnecting');
+    if (!token) {
+      setWorkerConnectionState('idle');
+    }
   }
 
   async function handleOpenSession(session: ControlPlaneSession) {
     setSelectedSessionId(session.id);
     if (!sandbox || sandbox.state !== 'running') {
       setRouteToken(null);
+      setWorkerSocketUrl(null);
+      closeWorkerSocket();
       setError('Sandbox must be running before opening a worker session.');
       return;
     }
@@ -697,6 +752,16 @@ export function ControlPlanePage() {
       {workerConnectionState === 'reconnecting' ? (
         <div className="rounded-[0.9rem] border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-4 py-3 text-sm text-[var(--status-warning-fg)]">
           Reconnecting worker route.
+        </div>
+      ) : null}
+      {workerConnectionState === 'connecting' ? (
+        <div className="rounded-[0.9rem] border border-[var(--status-neutral-border)] bg-[var(--status-neutral-bg)] px-4 py-3 text-sm text-[var(--status-neutral-fg)]">
+          Connecting worker route.
+        </div>
+      ) : null}
+      {sandboxOffline ? (
+        <div className="rounded-[0.9rem] border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-4 py-3 text-sm text-[var(--status-danger-fg)]">
+          Sandbox offline: {sandboxOffline}
         </div>
       ) : null}
       {sandboxNotice ? (
@@ -1111,6 +1176,8 @@ export function ControlPlanePage() {
           <div className="mt-4 rounded-[0.9rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] p-3 text-xs text-[var(--theme-fg-muted)]">
             <p><span className="text-[var(--theme-fg)]">Router:</span> {routeToken.routerBaseUrl}</p>
             <p><span className="text-[var(--theme-fg)]">WebSocket:</span> {routeToken.wsBaseUrl}</p>
+            <p><span className="text-[var(--theme-fg)]">Connection:</span> {workerConnectionState}</p>
+            <p><span className="text-[var(--theme-fg)]">Worker socket:</span> {workerSocketUrl ?? 'not connected'}</p>
             <p><span className="text-[var(--theme-fg)]">Expires:</span> {routeToken.expiresAt}</p>
           </div>
         ) : null}
