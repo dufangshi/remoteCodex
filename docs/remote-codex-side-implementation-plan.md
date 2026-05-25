@@ -228,7 +228,7 @@ live sandbox-local execution state.
 - [x] Session sync tests cover wrong-user and wrong-sandbox denial.
 - [ ] E2E smoke test creates a project, workspace, session, and opens the
   session through the router.
-- [ ] Local smoke test proves a worker checkpoint reaches the control plane.
+- [x] Local smoke test proves a worker checkpoint reaches the control plane.
 
 ## Phase 3: Sandbox Lifecycle And AWS Runtime
 

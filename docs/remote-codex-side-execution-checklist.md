@@ -335,6 +335,7 @@ sandbox-local execution state.
   `pnpm --filter @remote-codex/control-plane-api test`;
   `pnpm --filter @remote-codex/supervisor-api typecheck`;
   `pnpm --filter @remote-codex/supervisor-api test`;
+  `pnpm smoke:local-worker-checkpoint`;
   `pnpm --filter @remote-codex/supervisor-web typecheck`;
   `pnpm --filter @remote-codex/supervisor-web test -- ControlPlanePage`;
   `pnpm --filter @remote-codex/config typecheck`;

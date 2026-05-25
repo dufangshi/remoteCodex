@@ -210,7 +210,7 @@ Verification:
 
 - [x] Worker metadata tests cover safe metadata shape.
 - [x] Session sync tests cover wrong-user and wrong-sandbox denial.
-- [ ] Local smoke test verifies worker checkpoint reaches the control plane.
+- [x] Local smoke test verifies worker checkpoint reaches the control plane.
 
 ### E. Sandbox Lifecycle And AWS Adapter
 

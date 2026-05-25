@@ -113,7 +113,7 @@ milestone sections below remain the full backlog.
     token.
   - Verify with CI logs showing successful metadata response.
 
-- [ ] Add local worker checkpoint-to-control-plane smoke.
+- [x] Add local worker checkpoint-to-control-plane smoke.
   - Done when a worker-mode supervisor sends a checkpoint and the control-plane
     session record changes.
   - Verify with documented command output or automated smoke.
@@ -278,10 +278,10 @@ worker session through the router.
 
 ### Session Synchronization
 
-- [ ] Add local smoke proving worker checkpoint reaches the control plane.
+- [x] Add local smoke proving worker checkpoint reaches the control plane.
   - Done when a worker-mode supervisor sends a checkpoint to the control plane
     and the durable session record changes.
-  - Verify with documented command output or e2e smoke.
+  - Verify with `pnpm smoke:local-worker-checkpoint`.
 
 - [ ] Add user-facing session close/finalize flow.
   - Done when closing a session asks the worker to finalize state and updates

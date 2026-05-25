@@ -256,7 +256,7 @@ execution state inside the sandbox.
 - [x] Frontend project/workspace/session navigation tests pass.
 - [x] Worker metadata tests cover safe metadata shape.
 - [x] Session sync tests cover wrong-user and wrong-sandbox denial.
-- [ ] Local smoke proves a worker checkpoint reaches the control plane.
+- [x] Local smoke proves a worker checkpoint reaches the control plane.
 - [ ] E2E smoke creates project, workspace, session, and opens the session.
 
 ## Phase 3: Sandbox Lifecycle And AWS Runtime

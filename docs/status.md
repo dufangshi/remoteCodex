@@ -56,6 +56,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 - Project, workspace, session, and sandbox ownership tests exist.
 - Worker mode validates required sandbox identity and internal worker token
   settings.
+- Local worker checkpoint smoke verifies that the worker sync client reaches the
+  control-plane internal checkpoint endpoint and updates durable session
+  `workerSessionId`, `status`, and `lastActivityAt`.
 - Worker mode disables host/provider management APIs that should not be exposed
   in sandbox runtime.
 - Route-token signing supports key ids and previous-key verification.

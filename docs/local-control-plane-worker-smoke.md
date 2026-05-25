@@ -7,7 +7,7 @@ The smoke does not require AWS, Docker, Railway, or a real LLM gateway. It uses
 in-process Fastify apps to exercise the same route-token, router proxy, and
 worker-auth code paths used by the deployed services.
 
-## Command
+## Route-Token Command
 
 ```bash
 pnpm smoke:local-route-token
@@ -15,9 +15,17 @@ pnpm smoke:local-route-token
 
 The command runs `scripts/local-route-token-smoke.ts`.
 
+## Worker Checkpoint Command
+
+```bash
+pnpm smoke:local-worker-checkpoint
+```
+
+The command runs `scripts/local-worker-checkpoint-smoke.ts`.
+
 ## What It Starts
 
-The script creates a temporary local environment and starts:
+The route-token script creates a temporary local environment and starts:
 
 - A worker-mode `supervisor-api` instance.
 - A `sandbox-router` instance.
@@ -27,9 +35,13 @@ All three services listen on ephemeral localhost ports and are closed when the
 script exits. Temporary SQLite databases, provider homes, and workspace
 directories are removed at the end of the run.
 
-## What It Verifies
+The worker checkpoint script starts a temporary `control-plane-api` instance on
+an ephemeral localhost port and uses the worker sync client against the real
+internal checkpoint endpoint.
 
-The smoke verifies this path:
+## What The Route-Token Smoke Verifies
+
+The route-token smoke verifies this path:
 
 1. The control plane bootstraps a local dev user.
 2. The control plane creates the user's phase-one sandbox record.
@@ -54,6 +66,37 @@ Expected output:
 }
 ```
 
+## What The Worker Checkpoint Smoke Verifies
+
+The worker checkpoint smoke verifies this path:
+
+1. The control plane bootstraps a local dev user and phase-one sandbox record.
+2. The control plane creates a workspace.
+3. The control plane creates a session.
+4. The worker sync client sends a checkpoint through
+   `/api/internal/sessions/:sessionId/checkpoint` using the internal service
+   token.
+5. The control plane validates the worker user id and sandbox id.
+6. The durable session record is updated with `workerSessionId`, `status`, and
+   `lastActivityAt`.
+7. The user-facing session list returns the updated durable session fields.
+
+Expected output:
+
+```json
+{
+  "ok": true,
+  "userId": "<control-plane-user-id>",
+  "sandboxId": "<control-plane-sandbox-id>",
+  "workspaceId": "<control-plane-workspace-id>",
+  "sessionId": "<control-plane-session-id>",
+  "checkpointWorkerSessionId": "worker-session-local-smoke",
+  "refreshedWorkerSessionId": "worker-session-local-smoke",
+  "refreshedStatus": "active",
+  "refreshedLastActivityAt": "<iso timestamp>"
+}
+```
+
 ## What It Does Not Verify
 
 This smoke is intentionally local and narrow. It does not verify:
@@ -67,6 +110,7 @@ This smoke is intentionally local and narrow. It does not verify:
 - LLM gateway credential provisioning.
 - ElAgenteHarness key injection.
 - Workspace snapshot persistence.
+- Staging worker-to-control-plane networking.
 
 Those checks remain separate checklist items.
 
@@ -82,4 +126,3 @@ Those checks remain separate checklist items.
 - If worker metadata returns `403`, confirm
   `SANDBOX_ROUTER_WORKER_IDENTITY_SECRET` matches
   `REMOTE_CODEX_WORKER_IDENTITY_SECRET`.
-
