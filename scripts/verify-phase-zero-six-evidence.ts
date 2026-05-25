@@ -206,6 +206,35 @@ function buildBlockingGroups(input: {
     .filter((group) => group.notReadyItems.length > 0);
 }
 
+function buildNextCommands(blockingGroups: BlockingGroup[]) {
+  const hasOnlyAwsPreflight =
+    blockingGroups.length > 0 &&
+    blockingGroups.every((group) => group.id === 'aws-preflight');
+  const hasAwsPreflight = blockingGroups.some((group) => group.id === 'aws-preflight');
+  const hasFullStagingGroups = blockingGroups.some((group) => group.id !== 'aws-preflight');
+
+  return {
+    auditChecklist: 'pnpm phase-zero-six:audit',
+    writeEnvTemplate: hasOnlyAwsPreflight
+      ? 'pnpm phase-zero-six:template:aws'
+      : 'pnpm phase-zero-six:template',
+    sourceEnvTemplate: hasOnlyAwsPreflight
+      ? 'source ./.temp/phase-zero-six-evidence/aws-preflight.env.sh'
+      : 'source ./.temp/phase-zero-six-evidence/phase-zero-six.env.sh',
+    verifyEnvReadiness: hasOnlyAwsPreflight
+      ? 'pnpm phase-zero-six:env:aws'
+      : 'pnpm phase-zero-six:env',
+    collectEvidence: hasOnlyAwsPreflight
+      ? 'pnpm phase-zero-six:collect:aws'
+      : 'pnpm phase-zero-six:collect',
+    applyReviewedEvidence: hasOnlyAwsPreflight
+      ? 'pnpm phase-zero-six:apply:aws'
+      : 'pnpm phase-zero-six:apply',
+    collectAwsOnly: hasAwsPreflight ? 'pnpm phase-zero-six:collect:aws' : null,
+    collectFullStaging: hasFullStagingGroups ? 'pnpm phase-zero-six:collect' : null,
+  };
+}
+
 async function main() {
   const checklistPath = argValue('--checklist') ?? 'docs/remote-codex-side-detailed-checklist.md';
   const awsPath = argValue('--aws-preflight');
@@ -233,6 +262,7 @@ async function main() {
     readyToCheck,
     stillMissing,
   });
+  const nextCommands = buildNextCommands(blockingGroups);
   const originalCountsByPrefix = countsByPrefix(checklist);
   const canApply =
     applyReady &&
@@ -313,6 +343,7 @@ async function main() {
       ],
     })),
     blockingGroups,
+    nextCommands,
     checkedButContradicted: checkedButContradicted.map((entry) => ({
       item: entry.checklist.item,
       title: entry.checklist.title,

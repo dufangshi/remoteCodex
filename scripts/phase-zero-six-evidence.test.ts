@@ -608,6 +608,16 @@ describe('phase zero-six evidence tooling', () => {
         }),
       ]),
     );
+    expect(parsed.nextCommands).toEqual({
+      auditChecklist: 'pnpm phase-zero-six:audit',
+      writeEnvTemplate: 'pnpm phase-zero-six:template',
+      sourceEnvTemplate: 'source ./.temp/phase-zero-six-evidence/phase-zero-six.env.sh',
+      verifyEnvReadiness: 'pnpm phase-zero-six:env',
+      collectEvidence: 'pnpm phase-zero-six:collect',
+      applyReviewedEvidence: 'pnpm phase-zero-six:apply',
+      collectAwsOnly: 'pnpm phase-zero-six:collect:aws',
+      collectFullStaging: 'pnpm phase-zero-six:collect',
+    });
     expect(parsed.blockingGroups).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -667,6 +677,16 @@ describe('phase zero-six evidence tooling', () => {
         nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
       }),
     ]);
+    expect(parsed.nextCommands).toEqual({
+      auditChecklist: 'pnpm phase-zero-six:audit',
+      writeEnvTemplate: 'pnpm phase-zero-six:template',
+      sourceEnvTemplate: 'source ./.temp/phase-zero-six-evidence/phase-zero-six.env.sh',
+      verifyEnvReadiness: 'pnpm phase-zero-six:env',
+      collectEvidence: 'pnpm phase-zero-six:collect',
+      applyReviewedEvidence: 'pnpm phase-zero-six:apply',
+      collectAwsOnly: null,
+      collectFullStaging: 'pnpm phase-zero-six:collect',
+    });
     expect(checklist).toContain('- [x] S3.04 Finalize AWS staging configuration.');
     expect(checklist).toContain('- [x] S3.05 Add least-privilege Kubernetes credentials.');
     expect(checklist).toContain('- [ ] S3.06 Create a real worker Pod from the control plane.');
