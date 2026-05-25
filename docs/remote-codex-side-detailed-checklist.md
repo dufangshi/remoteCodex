@@ -65,23 +65,23 @@ Goal: the branch is understandable, scoped, and safe to continue from.
 
 ### Architecture Docs
 
-- [ ] D0.01 Confirm `docs/README.md` points to the current product architecture.
+- [x] D0.01 Confirm `docs/README.md` points to the current product architecture.
   - Done when the docs index names the control plane, sandbox worker, router,
     LLM gateway, ElAgenteHarness, and release checklists.
   - Verify with docs review and `git diff --check`.
 
-- [ ] D0.02 Keep the Agente product architecture document current.
+- [x] D0.02 Keep the Agente product architecture document current.
   - Done when the architecture doc matches the current decision: Railway
     frontend/API, AWS sandbox runtime, gateway-scoped model keys, and
     ElAgenteHarness integration.
   - Verify with docs review against this checklist.
 
-- [ ] D0.03 Keep the control-plane to sandbox-worker contract current.
+- [x] D0.03 Keep the control-plane to sandbox-worker contract current.
   - Done when lifecycle, route-token, worker-token, identity-envelope, and
     checkpoint responsibilities are documented.
   - Verify with docs review and links to the relevant API tests.
 
-- [ ] D0.04 Keep architecture decisions current.
+- [x] D0.04 Keep architecture decisions current.
   - Done when decisions for EKS Fargate, one Pod per active sandbox, one
     container per sandbox, route-token proxying, and gateway-owned provider
     roots are recorded.
@@ -89,25 +89,39 @@ Goal: the branch is understandable, scoped, and safe to continue from.
 
 ### Release Baseline
 
-- [ ] D0.05 Maintain staging release-readiness notes.
+- [x] D0.05 Maintain staging release-readiness notes.
   - Done when staging services, env vars, smoke commands, blocked gates, and
     rollback steps are listed.
   - Verify with `docs/staging-release-readiness.md`.
 
-- [ ] D0.06 Maintain production release gates.
+- [x] D0.06 Maintain production release gates.
   - Done when auth, sandbox lifecycle, router, gateway, harness, worker image,
     usage import, quota, observability, and rollback gates are explicit.
   - Verify with `docs/release-gates.md`.
 
-- [ ] D0.07 Keep current branch status updated after major slices.
+- [x] D0.07 Keep current branch status updated after major slices.
   - Done when `docs/status.md` names completed work, current focus, and
     residual risks.
   - Verify in the same commit as the larger implementation slice.
 
-- [ ] D0.08 Keep one authoritative day-to-day checklist.
+- [x] D0.08 Keep one authoritative day-to-day checklist.
   - Done when this document is linked from the docs index and future completed
     tasks are reflected here.
   - Verify with docs review.
+
+### Phase 0 Evidence
+
+- Files: `docs/README.md`, `docs/agente-product-architecture.md`,
+  `docs/control-plane-sandbox-worker.md`, `docs/architecture-decisions.md`,
+  `docs/staging-release-readiness.md`, `docs/release-gates.md`,
+  `docs/status.md`, `docs/remote-codex-side-detailed-checklist.md`.
+- Verification: docs review confirmed the current product shape, route-token
+  worker contract, EKS Fargate runtime decision, gateway-owned provider-root
+  boundary, staging smoke requirements, production gates, and active checklist
+  ownership are documented; `git diff --check` passes.
+- Residual risk: this phase does not claim live staging verification. Staging,
+  AWS-live, and provider-runtime smoke items stay unchecked in later phases
+  until those environments are exercised.
 
 ## Phase 1: Product Auth, Users, And Admin Boundary
 

@@ -77,8 +77,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 
 ## In Progress
 
-- Phase 0 documentation and release baseline is complete for this branch; live
-  staging verification has not run yet.
+- Phase 0 documentation and release baseline is complete in
+  `docs/remote-codex-side-detailed-checklist.md`; live staging verification has
+  not run yet.
 - `docs/remote-codex-side-detailed-checklist.md` is the active one-item-at-a-time
   implementation checklist. Use it for task selection and checkbox updates.
   Keep `docs/remote-codex-side-work-breakdown.md` aligned for the near-term
