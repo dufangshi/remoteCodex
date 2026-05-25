@@ -267,7 +267,7 @@ worker session through the router.
     endpoint or internal worker token.
   - Verify with local e2e or integration smoke.
 
-- [ ] Keep route tokens in memory only.
+- [x] Keep route tokens in memory only.
   - Done when route tokens are never written to localStorage, sessionStorage,
     IndexedDB, URL query params, or logs.
   - Verify with frontend tests and code review around token handling.

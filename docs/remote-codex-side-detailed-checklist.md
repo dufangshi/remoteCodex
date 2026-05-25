@@ -244,74 +244,74 @@ runtime state.
 
 ### Data Model And API
 
-- [ ] P2.01 Finalize project schema and ownership.
+- [x] P2.01 Finalize project schema and ownership.
   - Done when projects store owner, name, status, timestamps, and archive/delete
     semantics.
   - Verify with migration and ownership tests.
 
-- [ ] P2.02 Finalize workspace schema and ownership.
+- [x] P2.02 Finalize workspace schema and ownership.
   - Done when workspaces are linked to projects and have status, source,
     timestamps, and archive/delete semantics.
   - Verify with migration and ownership tests.
 
-- [ ] P2.03 Finalize session schema and ownership.
+- [x] P2.03 Finalize session schema and ownership.
   - Done when sessions link to workspaces and track control-plane session id,
     worker session id, status, last activity, and archive semantics.
   - Verify with migration and ownership tests.
 
-- [ ] P2.04 Add project CRUD APIs.
+- [x] P2.04 Add project CRUD APIs.
   - Done when list, create, detail, update, and archive/delete paths exist.
   - Verify with API tests including cross-user denial.
 
-- [ ] P2.05 Add workspace APIs.
+- [x] P2.05 Add workspace APIs.
   - Done when workspaces can be listed, created, updated, and archived under
     the correct project.
   - Verify with API tests including wrong-project and wrong-user denial.
 
-- [ ] P2.06 Add session APIs.
+- [x] P2.06 Add session APIs.
   - Done when sessions can be listed, created, updated, archived, and opened
     only by the owner.
   - Verify with API tests including wrong-workspace and wrong-user denial.
 
-- [ ] P2.07 Add bounded pagination and filters.
+- [x] P2.07 Add bounded pagination and filters.
   - Done when project, workspace, and session lists have safe limits, offsets
     or cursors, and search/status filters where needed.
   - Verify with API tests for defaults, max limits, and filters.
 
 ### Frontend Product Flow
 
-- [ ] P2.08 Add project list and creation UI.
+- [x] P2.08 Add project list and creation UI.
   - Done when users can view, create, and recover from errors in the project
     list.
   - Verify with frontend tests.
 
-- [ ] P2.09 Add project detail and workspace UI.
+- [x] P2.09 Add project detail and workspace UI.
   - Done when users can open a project, see workspaces, create a workspace, and
     inspect loading/error/empty states.
   - Verify with frontend tests.
 
-- [ ] P2.10 Add session list and creation UI.
+- [x] P2.10 Add session list and creation UI.
   - Done when users can list and create sessions inside a workspace.
   - Verify with frontend tests.
 
-- [ ] P2.11 Add session open action.
+- [x] P2.11 Add session open action.
   - Done when opening a session requests a route token scoped to user, sandbox,
     project, workspace, and session.
   - Verify with frontend tests and a local smoke.
 
-- [ ] P2.12 Keep route tokens in memory only.
+- [x] P2.12 Keep route tokens in memory only.
   - Done when route tokens are never written to localStorage, sessionStorage,
     IndexedDB, URLs, logs, or persisted app state.
   - Verify with code review and frontend tests.
 
 ### Worker Session Sync
 
-- [ ] P2.13 Define worker session metadata contract.
+- [x] P2.13 Define worker session metadata contract.
   - Done when worker metadata needed by the control-plane session registry is
     documented and tested.
   - Verify with worker metadata tests.
 
-- [ ] P2.14 Add worker-to-control-plane checkpoint sync.
+- [x] P2.14 Add worker-to-control-plane checkpoint sync.
   - Done when worker mode can update durable session status, worker session id,
     and last activity.
   - Verify with `pnpm smoke:local-worker-checkpoint`.
@@ -325,6 +325,30 @@ runtime state.
   - Done when reopening an existing session restores worker context or clearly
     reports unavailable worker state.
   - Verify with local restart/resume smoke.
+
+### Phase 2 Evidence
+
+- Files: `packages/db/src/schema.ts`, `docs/control-plane-session-worker-contract.md`,
+  `apps/control-plane-api/src/app.ts`, `apps/control-plane-api/src/repository.ts`,
+  `apps/control-plane-api/src/app.test.ts`,
+  `apps/supervisor-web/src/pages/ControlPlanePage.test.tsx`,
+  `scripts/local-worker-checkpoint-smoke.ts`.
+- Verification:
+  - `pnpm --filter @remote-codex/control-plane-api test -- --runInBand`
+    passed: 4 files, 62 tests, covering project/workspace/session CRUD,
+    ownership, pagination/filtering, route-token scope checks, and internal
+    checkpoint denial/success.
+  - `pnpm --filter @remote-codex/control-plane-api typecheck` passed.
+  - `pnpm --filter @remote-codex/supervisor-web test -- ControlPlanePage`
+    passed: 16 files, 250 tests, covering project/workspace/session UI,
+    route-token acquisition, WebSocket open, token refresh, and storage checks.
+  - `pnpm --filter @remote-codex/supervisor-web typecheck` passed.
+  - `pnpm smoke:local-worker-checkpoint` passed and proved the worker checkpoint
+    updated durable `workerSessionId`, `status`, and `lastActivityAt`.
+  - `pnpm --filter @remote-codex/supervisor-api test -- worker-control-plane-sync`
+    passed: 9 files, 160 tests.
+- Residual risk: user-facing session close/finalize and restart/resume behavior
+  remain unchecked until a dedicated local or staging smoke proves them.
 
 ## Phase 3: Sandbox Lifecycle And AWS Runtime
 
