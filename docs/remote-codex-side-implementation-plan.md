@@ -75,14 +75,14 @@ Goal: make the branch understandable and safe to build on.
 - [x] Add the Remote Codex side checklist.
 - [x] Add this implementation plan.
 - [ ] Add first staging release notes and link them back to the checklist.
-- [ ] Add a short onboarding note for local development of the control plane,
+- [x] Add a short onboarding note for local development of the control plane,
   router, and worker together.
 
 ### Verification
 
 - [x] `docs/README.md` links to the architecture and checklist docs.
 - [x] `docs/status.md` describes current branch status and known gaps.
-- [ ] A fresh contributor can follow the docs to run control-plane API,
+- [x] A fresh contributor can follow the docs to run control-plane API,
   supervisor-web, sandbox-router, and a local worker-mode supervisor API.
 
 ## Phase 1: Product Auth, Users, And Admin Boundary
@@ -306,7 +306,7 @@ user.
 - [x] Add failure reason UI.
 - [ ] Add admin sandbox detail UI.
 - [ ] Add local smoke script that starts control plane plus local worker.
-- [ ] Add local route-token smoke test against the worker-process adapter.
+- [x] Add local route-token smoke test against the worker-process adapter.
 
 ### Verification
 
@@ -454,7 +454,7 @@ control-plane-issued route tokens and router-injected worker identity.
 - [x] Add structured proxy errors.
 - [x] Add router health endpoint.
 - [x] Add router audit logs.
-- [ ] Add local browser-to-router-to-worker smoke script.
+- [x] Add local browser-to-router-to-worker smoke script.
 - [ ] Add staging direct-worker-denial check.
 
 ### Frontend Checklist
@@ -472,7 +472,7 @@ control-plane-issued route tokens and router-injected worker identity.
 - [x] Control-plane route-token tests pass.
 - [x] Router unit tests pass.
 - [x] Sandbox-router typecheck passes.
-- [ ] Local browser-to-router-to-worker smoke test passes.
+- [x] Local browser-to-router-to-worker smoke test passes.
 - [ ] Staging browser-to-router-to-worker smoke test passes.
 - [ ] Staging proves the worker is unreachable without router-injected token.
 

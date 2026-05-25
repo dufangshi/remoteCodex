@@ -94,12 +94,15 @@ Each task should be checked only when all three statements are true:
 - [x] Add this Remote Codex side task checklist.
 - [x] Add the Remote Codex side implementation plan with phase-by-phase
   execution checklists.
+- [x] Add local onboarding and smoke documentation for the control plane,
+  sandbox router, and worker.
 - [ ] Add a short release-readiness document before the first staging deploy.
 
 Verification:
 
 - [x] `docs/README.md` links to the architecture docs and checklist docs.
 - [x] `docs/status.md` names completed work and remaining risks.
+- [x] `docs/local-control-plane-worker-smoke.md` documents the local smoke path.
 - [ ] First staging release notes link back to this checklist.
 
 ### B. Product Auth, Users, And Admin Boundary
@@ -260,7 +263,7 @@ Verification:
 - [ ] Add sandbox idle-timeout policy.
 - [ ] Add admin sandbox view.
 - [ ] Add local smoke script that starts control plane plus local worker.
-- [ ] Add local route-token smoke test against the worker process.
+- [x] Add local route-token smoke test against the worker process.
 - [ ] Run staging start-one-sandbox smoke test.
 - [ ] Run staging stop-one-sandbox smoke test.
 
@@ -390,7 +393,7 @@ Verification:
 
 - [x] Control-plane route-token tests pass.
 - [x] Router unit tests pass.
-- [ ] Local browser-to-router-to-worker smoke test passes.
+- [x] Local browser-to-router-to-worker smoke test passes.
 - [ ] Staging browser-to-router-to-worker smoke test passes.
 - [ ] Worker is unreachable without router-injected token in staging.
 
@@ -867,7 +870,7 @@ start, stop, observe, and eventually snapshot it.
 - [x] Add local adapter tests.
 - [x] Document local sandbox development environment variables.
 - [ ] Add a local smoke script that starts control plane plus local worker.
-- [ ] Add local route-token smoke test against the worker process.
+- [x] Add local route-token smoke test against the worker process.
 
 ### AWS Adapter
 
@@ -1067,7 +1070,7 @@ token.
 
 - [x] Control-plane route-token tests pass.
 - [x] Router unit tests pass.
-- [ ] Browser to router to worker local smoke test passes.
+- [x] Browser to router to worker local smoke test passes.
 - [ ] Browser to router to worker staging smoke test passes.
 - [ ] Worker is unreachable without router-injected token in staging.
 

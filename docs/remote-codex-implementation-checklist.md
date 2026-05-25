@@ -341,7 +341,7 @@ Goal: browser traffic reaches workers only through a route-token checked proxy.
 
 - [x] Router unit tests pass.
 - [x] Control-plane route-token tests pass.
-- [ ] Browser to router to worker smoke test passes.
+- [x] Browser to router to worker smoke test passes.
 - [ ] Worker is not reachable without router token in staging.
 
 ## Phase 6: Worker Authorization And Policy
