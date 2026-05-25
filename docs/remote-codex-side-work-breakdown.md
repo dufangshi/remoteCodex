@@ -99,16 +99,16 @@ milestone sections below remain the full backlog.
   - Done when CI builds `Dockerfile.worker` on branch or PR push.
   - Verify with workflow config review; passing CI run is tracked separately.
 
-- [ ] Add CI worker `/readyz` smoke.
+- [x] Add CI worker `/readyz` smoke.
   - Done when CI starts the built worker image and verifies readiness.
   - Verify with CI logs showing `/readyz` success.
 
-- [ ] Add CI worker auth denial smoke.
+- [x] Add CI worker auth denial smoke.
   - Done when CI proves non-health worker routes reject requests without the
     internal worker token.
   - Verify with CI logs showing the expected `401` or `403`.
 
-- [ ] Add CI worker auth success smoke.
+- [x] Add CI worker auth success smoke.
   - Done when CI proves worker metadata is reachable with the internal worker
     token.
   - Verify with CI logs showing successful metadata response.
@@ -365,11 +365,11 @@ configuration is unsafe.
     and returns healthy readiness.
   - Verify with local container smoke output.
 
-- [ ] Add CI worker image build.
+- [x] Add CI worker image build.
   - Done when CI builds the worker image on PR or branch push.
   - Verify with passing CI job.
 
-- [ ] Add CI worker readiness smoke.
+- [x] Add CI worker readiness smoke.
   - Done when CI starts the image and verifies `/readyz`.
   - Verify with passing CI logs.
 

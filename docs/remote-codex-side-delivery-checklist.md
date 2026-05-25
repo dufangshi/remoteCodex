@@ -347,8 +347,8 @@ required identity, filesystem, gateway, or harness settings are unsafe.
 - [x] Add safe worker runtime metadata endpoint.
 - [x] Build the worker image locally from a clean checkout.
 - [x] Run the worker container locally and verify `/readyz`.
-- [ ] Add CI worker image build.
-- [ ] Add CI worker `/readyz` smoke.
+- [x] Add CI worker image build.
+- [x] Add CI worker `/readyz` smoke.
 
 ### Worker Startup Validation
 
@@ -396,6 +396,9 @@ required identity, filesystem, gateway, or harness settings are unsafe.
 - [x] `docker build -f Dockerfile.worker -t remote-codex-worker:verify .`
 - [x] Local worker container smoke verifies `/readyz`.
 - [x] Local worker container smoke verifies non-health auth denial/success.
+- [x] GitHub Actions `Worker Image` run `26395932692` verifies worker Docker
+  build, `/readyz`, auth denial, and auth success:
+  `https://github.com/dufangshi/remoteCodex/actions/runs/26395932692`
 
 ## Phase 5: Sandbox Router And Route Tokens
 
@@ -826,10 +829,10 @@ guesswork.
 - [ ] Add CI job for supervisor-web tests.
 - [ ] Add CI job for config typecheck.
 - [ ] Add CI job for config tests.
-- [ ] Add CI job for worker Docker build.
-- [ ] Add CI smoke test for worker `/readyz`.
-- [ ] Add CI smoke test for worker auth denial.
-- [ ] Add CI smoke test for worker auth success.
+- [x] Add CI job for worker Docker build.
+- [x] Add CI smoke test for worker `/readyz`.
+- [x] Add CI smoke test for worker auth denial.
+- [x] Add CI smoke test for worker auth success.
 - [ ] Add CI test for route-token verification.
 - [ ] Add CI test for gateway config rendering.
 - [ ] Add CI test for harness env/config rendering.
@@ -863,7 +866,7 @@ The first usable product phase is complete only when all of these are checked:
 - [ ] The control plane imports or receives harness and compute usage.
 - [ ] The user can see a usage summary.
 - [ ] Basic quota enforcement exists.
-- [ ] The worker image can be built in CI.
+- [x] The worker image can be built in CI.
 - [ ] Staging can run browser-to-worker-to-gateway-to-harness smoke tests.
 
 ## Recommended Execution Order

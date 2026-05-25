@@ -427,11 +427,11 @@ identity, filesystem, provider, MCP, gateway, or harness settings are unsafe.
     env and returns healthy readiness.
   - Verification: local container smoke captures `/readyz`.
 
-- [ ] Add CI worker image build.
+- [x] Add CI worker image build.
   - Acceptance: CI builds the worker image on PR or branch push.
   - Verification: CI config exists and build job passes.
 
-- [ ] Add CI worker `/readyz` smoke.
+- [x] Add CI worker `/readyz` smoke.
   - Acceptance: CI starts the image and verifies readiness.
   - Verification: CI smoke logs show `/readyz` success.
 
@@ -469,7 +469,8 @@ identity, filesystem, provider, MCP, gateway, or harness settings are unsafe.
 
 ### Evidence
 
-- Files: `Dockerfile.worker`, `apps/supervisor-api/src/worker-index.ts`,
+- Files: `Dockerfile.worker`, `.github/workflows/worker-image.yml`,
+  `apps/supervisor-api/src/worker-index.ts`,
   `apps/supervisor-api/src/worker-environment.ts`,
   `apps/supervisor-api/src/app.ts`,
   `apps/supervisor-api/src/routes/workspaces.ts`,
@@ -480,9 +481,12 @@ identity, filesystem, provider, MCP, gateway, or harness settings are unsafe.
   `curl -sS -o /tmp/remote-codex-worker-denied.json -w '%{http_code}' http://127.0.0.1:18787/api/worker/metadata`;
   `curl -sS -H 'x-remote-codex-worker-token: router-secret' http://127.0.0.1:18787/api/worker/metadata`;
   `pnpm --filter @remote-codex/supervisor-api typecheck`;
-  `pnpm --filter @remote-codex/supervisor-api test -- --runInBand`
-- Residual risk: CI worker image build and CI worker `/readyz` smoke remain
-  unchecked.
+  `pnpm --filter @remote-codex/supervisor-api test -- --runInBand`;
+  GitHub Actions `Worker Image` run `26395932692` passed on
+  `sandbox-worker-control-plane`:
+  `https://github.com/dufangshi/remoteCodex/actions/runs/26395932692`
+- Residual risk: staging worker image deploy and real EKS Fargate worker
+  startup remain unchecked.
 
 ## Phase 5: Sandbox Router And Route Tokens
 
@@ -1468,10 +1472,10 @@ manual guesswork.
 - [ ] Add CI job for supervisor-web tests.
 - [ ] Add CI job for config typecheck.
 - [ ] Add CI job for config tests.
-- [ ] Add CI job for worker Docker build.
-- [ ] Add CI smoke test for worker `/readyz`.
-- [ ] Add CI smoke test for worker auth denial.
-- [ ] Add CI smoke test for worker auth success.
+- [x] Add CI job for worker Docker build.
+- [x] Add CI smoke test for worker `/readyz`.
+- [x] Add CI smoke test for worker auth denial.
+- [x] Add CI smoke test for worker auth success.
 - [ ] Add CI test for route-token verification.
 - [ ] Add CI test for gateway config rendering.
 - [ ] Add CI test for harness env/config rendering.
@@ -1510,14 +1514,17 @@ checked.
 - [ ] The control plane imports or receives harness and compute usage.
 - [ ] The user can see a usage summary.
 - [ ] Basic quota enforcement exists.
-- [ ] The worker image can be built in CI.
+- [x] The worker image can be built in CI.
 - [ ] Staging can run browser-to-worker-to-gateway-to-harness smoke tests.
 
 ### Evidence
 
-- Files:
-- Verification:
-- Residual risk:
+- Files: `.github/workflows/worker-image.yml`, `Dockerfile.worker`
+- Verification: GitHub Actions `Worker Image` run `26395932692` passed on
+  `sandbox-worker-control-plane`:
+  `https://github.com/dufangshi/remoteCodex/actions/runs/26395932692`
+- Residual risk: phase-one remains incomplete until staging signup, sandbox
+  lifecycle, router, provider gateway, harness, usage, and quota smokes pass.
 
 ## Recommended Implementation Order
 
@@ -1534,8 +1541,8 @@ corresponding implementation and verification land.
   and session finalize behavior.
 - [x] 6. Add AWS namespace/label strategy, Pod cleanup policy, idle timeout, and
   sandbox reaper.
-- [ ] 7. Build the worker image locally, run `/readyz`, and add worker Docker CI.
-- [ ] 8. Add worker MCP config validation and artifact read/write scopes.
+- [x] 7. Build the worker image locally, run `/readyz`, and add worker Docker CI.
+- [x] 8. Add worker MCP config validation and artifact read/write scopes.
 - [ ] 9. Add route-token session scopes, WebSocket reconnect after token
   refresh, and direct-worker-denial staging smoke.
 - [x] 10. Choose and document the phase-one LLM gateway deployment shape.

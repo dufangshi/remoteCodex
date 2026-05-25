@@ -646,10 +646,10 @@ Verification:
 - [ ] Add CI job for supervisor-web tests.
 - [ ] Add CI job for config typecheck.
 - [ ] Add CI job for config tests.
-- [ ] Add CI job for worker Docker build.
-- [ ] Add CI smoke test for worker `/readyz`.
-- [ ] Add CI smoke test for worker auth denial.
-- [ ] Add CI smoke test for worker auth success.
+- [x] Add CI job for worker Docker build.
+- [x] Add CI smoke test for worker `/readyz`.
+- [x] Add CI smoke test for worker auth denial.
+- [x] Add CI smoke test for worker auth success.
 - [ ] Add CI test for route-token verification.
 - [ ] Add CI test for gateway config rendering.
 - [ ] Add CI test for harness env/config rendering.
@@ -1009,6 +1009,9 @@ required identity, filesystem, or token settings are missing.
 - [x] Run the worker container locally and verify `/readyz`.
 - [x] Verify the worker rejects non-health requests without token.
 - [x] Verify the worker accepts non-health requests with the internal token.
+- [x] GitHub Actions `Worker Image` run `26395932692` verifies worker Docker
+  build, `/readyz`, auth denial, and auth success:
+  `https://github.com/dufangshi/remoteCodex/actions/runs/26395932692`
 
 ## Phase 5: Sandbox Router And Route Tokens
 
@@ -1411,10 +1414,10 @@ production traffic.
 - [ ] Add CI job for supervisor-web tests.
 - [ ] Add CI job for config typecheck.
 - [ ] Add CI job for config tests.
-- [ ] Add CI job for worker Docker build.
-- [ ] Add CI smoke test for worker `/readyz`.
-- [ ] Add CI smoke test for worker auth denial.
-- [ ] Add CI smoke test for worker auth success.
+- [x] Add CI job for worker Docker build.
+- [x] Add CI smoke test for worker `/readyz`.
+- [x] Add CI smoke test for worker auth denial.
+- [x] Add CI smoke test for worker auth success.
 - [ ] Add CI test for route-token verification.
 - [ ] Add CI test for gateway config rendering.
 - [ ] Add CI test for harness env/config rendering.
@@ -1447,7 +1450,7 @@ The first shippable product phase is complete only when all of these are true:
 - [ ] The control plane imports or receives harness and compute usage.
 - [ ] The user can see a usage summary.
 - [ ] Basic quota enforcement exists.
-- [ ] The worker image can be built in CI.
+- [x] The worker image can be built in CI.
 - [ ] Staging can run browser to worker to gateway to harness smoke tests.
 
 ## Suggested Execution Order
@@ -1455,7 +1458,7 @@ The first shippable product phase is complete only when all of these are true:
 - [ ] 1. Finish production auth decision and frontend auth shell.
 - [ ] 2. Finish project, workspace, and session frontend flows.
 - [ ] 3. Finish local sandbox development docs and smoke scripts.
-- [ ] 4. Pin worker image provider runtime versions.
+- [x] 4. Pin worker image provider runtime versions.
 - [ ] 5. Implement route-token router or decide it belongs in a separate repo.
 - [ ] 6. Implement AWS sandbox adapter.
 - [ ] 7. Add gateway key provisioning and provider config rendering.
