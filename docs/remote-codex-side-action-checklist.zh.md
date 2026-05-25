@@ -42,6 +42,78 @@ Evidence:
 - Residual risk: <remaining unchecked risk>
 ```
 
+## 任务粒度和勾选规则
+
+这份文档是 Remote Codex 侧的主执行任务板。原则上一个 checkbox 对应一次可以
+独立 review、独立验证、独立提交的产品切片。切片可以很小，但必须闭环：有代码、
+配置、测试、文档或真实环境 evidence，而不是只代表意向。
+
+每次勾选前先确认：
+
+- 这个任务确实属于 Remote Codex 仓库，而不是 LLM gateway、ElAgenteHarness、
+  Modal/AWS Batch/HPC worker 或其它外部系统内部实现。
+- `完成标准` 已满足；如果发现标准不够具体，先更新标准再实现。
+- `验证方式` 已执行；真实 AWS、Railway、gateway、provider runtime、
+  ElAgenteHarness、billing 或 production readiness 项不能用本地 mock 代替。
+- secret 没有出现在 logs、API response、browser state、smoke artifact、diff 或
+  docs 中。
+- 如果 release 状态、staging 状态或当前 focus 发生变化，同步更新
+  `docs/status.md`、`docs/staging-release-readiness.md` 或相关 release 文档。
+
+建议每个实现切片都在 commit/PR 描述中保留这个格式：
+
+```text
+Task:
+- <checkbox id and text>
+
+Remote Codex changes:
+- <files, APIs, UI routes, worker behavior, config, or docs changed>
+
+Evidence:
+- <unit tests, typecheck, local smoke, staging smoke, deploy log, or manual review>
+
+Still unchecked:
+- <AWS/staging/provider/billing/secret risk that remains open>
+```
+
+不要提前勾选未来任务。如果一个实现自然证明多个 checkbox，可以一次勾多个，但
+commit/PR 里需要分别写清每个 checkbox 的 evidence。
+
+## 任务总览
+
+| Phase | 主题 | Remote Codex 侧交付物 | 勾选所需证据 |
+| --- | --- | --- | --- |
+| A | 文档、边界和状态管理 | 当前架构、owner boundary、status、release gate、阅读入口 | docs review、`git diff --check` |
+| B | Auth、Users 和 Admin | 登录/注册、JWT 校验、user bootstrap、account status、admin API/UI | API/frontend tests、staging login smoke |
+| C | Projects、Workspaces 和 Sessions | durable metadata、session route token、worker checkpoint、close/resume | API/frontend/worker tests、local worker smoke |
+| D | Sandbox Lifecycle 和 AWS Runtime | SandboxManager、local adapter、EKS adapter、lifecycle、idle/admin stop | adapter tests、真实 AWS/EKS staging smoke |
+| E | Worker Image 和 Runtime Guardrails | 预构建 worker image、非 root runtime、启动校验、redaction、CI image smoke | image build、container smoke、worker tests |
+| F | Sandbox Router 和 Worker Authorization | route token、router proxy、worker token、identity envelope、direct denial | router/worker tests、真实 staging router smoke |
+| G | LLM Gateway 和 Provider Bootstrap | gateway contract/client、scoped key、Codex/Claude/OpenCode config、usage import | contract tests、真实 provider runtime smoke |
+| H | ElAgenteHarness Integration | harness admin client、`INACT_X_APP_KEY`、tool surface、task/job/artifact UI | contract/worker/frontend tests、staging harness smoke |
+| I | MCP 和 Tool Policy | approved MCP registry、stdio/remote policy、env/path containment、audit/UI | policy/rendering/worker/frontend tests |
+| J | Workspace Persistence、Files、Diffs 和 Artifacts | snapshot、safe file/diff API、artifact storage/display、credential exclusion | DB/API/worker/frontend tests、storage smoke |
+| K | Billing、Quota 和 Unified Usage | usage ledger、source mappers、idempotent import、quota、billing/admin UI | mapper/API/job/frontend tests、usage import smoke |
+| L | Deployment、Operations 和 CI | Railway/AWS/ECR/S3/secrets/logging/metrics/alerts/CI | deploy logs、CI run、ops review |
+| M | End-To-End Acceptance | 一个真实用户完整路径：login、sandbox、provider、harness、usage、admin | staging browser/API/provider/harness smokes |
+
+## 单任务执行模板
+
+开始任意 checkbox 前，可以复制下面的临时执行模板到 issue、PR 或本地 notes。
+任务完成后只把主 checkbox 改成 `[x]`；模板本身不需要提交到文档里。
+
+```markdown
+- [ ] Scope: 明确本任务会改哪些 package、API、UI、worker behavior、config 或 docs。
+- [ ] Contract: 如果涉及 gateway/harness/AWS/router/provider，先确认输入、输出、错误和 secret 边界。
+- [ ] Implement: 完成最小可用切片，不带无关 refactor。
+- [ ] Tests: 增加或更新 unit/API/frontend/worker/policy tests。
+- [ ] Smoke: 跑本任务指定 smoke；真实环境任务保留 staging/deploy evidence。
+- [ ] Secret review: 确认 raw key/token/JWT 不进入日志、响应、artifact、browser state 或 docs。
+- [ ] Docs/status: 如影响架构、release gate 或当前状态，同步文档。
+- [ ] Checklist: 更新本文件对应 checkbox。
+- [ ] Commit: 提交实现、测试和 checklist/evidence 引用。
+```
+
 ## 当前目标架构
 
 ```text
