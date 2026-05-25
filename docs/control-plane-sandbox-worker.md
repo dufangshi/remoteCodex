@@ -340,6 +340,115 @@ Use it to validate control-plane API flows, route-token issuance, worker
 startup, and UI behavior. Use the worker image or an AWS adapter for isolation
 testing.
 
+## Sandbox Lifecycle State Machine
+
+The control plane stores one sandbox row per product user in phase one. The
+stored row is the durable product record; the sandbox manager adapter is the
+runtime reconciler for local worker processes, EKS Fargate Pods, or a future
+runtime.
+
+Canonical control-plane states:
+
+| State | Meaning | Browser behavior |
+| --- | --- | --- |
+| `stopped` | No worker should be serving traffic for the sandbox. | Show start action. |
+| `starting` | Runtime creation has been requested but the worker is not ready. | Show startup progress and disable duplicate starts. |
+| `running` | Worker endpoint is routable and ready for route-token traffic. | Allow session open and worker connection. |
+| `degraded` | Worker exists but health/readiness checks are failing or incomplete. | Show degraded banner and allow retry/restart. |
+| `stopping` | Runtime deletion or graceful shutdown has been requested. | Disable new sessions and show stopping state. |
+| `failed` | The last lifecycle transition failed and needs retry or admin action. | Show failure reason and retry/restart action. |
+| `deleted` | Sandbox record or runtime is intentionally retired. | Hide from normal user flows except audit/history. |
+| `unknown` | Adapter cannot determine runtime state. | Treat as offline and require refresh/reconcile. |
+
+Allowed lifecycle transitions:
+
+```text
+stopped  -> starting -> running
+starting -> running
+starting -> failed
+running  -> degraded
+degraded -> running
+running  -> stopping -> stopped
+degraded -> stopping -> stopped
+failed   -> starting
+failed   -> deleted
+stopped  -> deleted
+unknown  -> starting
+unknown  -> stopping
+unknown  -> failed
+```
+
+The local adapter currently moves directly to `running` or `stopped` because it
+starts a local child process synchronously. The AWS adapter may return
+`starting`, `stopping`, `failed`, or `unknown` while Kubernetes reconciles the
+Pod and Service.
+
+State fields:
+
+- `state` is the user-visible lifecycle state.
+- `statusReason` is a short operator-facing reason for the latest transition or
+  failure.
+- `k8sNamespace`, `k8sPodName`, and `workerServiceName` identify the runtime
+  target when the AWS adapter is used.
+- `routerBaseUrl` identifies the public router entry point, not a direct worker
+  URL.
+- `lastStartedAt` is set when the control plane stores `running`.
+- `lastSeenAt` is for future worker heartbeat updates.
+- `idleTimeoutAt` is for future idle shutdown policy.
+
+The control plane should persist every lifecycle transition and audit it as
+`sandbox.<state>`. Adapter failures should use structured
+`SandboxManagerError` codes:
+
+- `quota`: user or plan cannot start the sandbox.
+- `capacity`: runtime has no available capacity.
+- `config`: local or deployment configuration is invalid.
+- `provider`: AWS, Kubernetes, or another provider failed unexpectedly.
+
+## Sandbox Lifecycle Idempotency
+
+All sandbox lifecycle APIs must be safe to retry. Browser retries, Railway
+request retries, Kubernetes reconciliation, and admin retries should not create
+duplicate sandboxes or leak worker Pods.
+
+Idempotency rules:
+
+- `GET /api/sandbox` must create at most one sandbox row for a user. Repeated
+  calls return the same sandbox id.
+- `POST /api/sandbox/start` must be idempotent for a sandbox that is already
+  `starting` or `running`. The adapter should return the existing target Pod or
+  service metadata instead of creating a second runtime.
+- `POST /api/sandbox/stop` must be idempotent for `stopping`, `stopped`, and
+  missing-runtime cases. Deleting a missing Pod should still converge the
+  control-plane row toward `stopped`.
+- `POST /api/sandbox/restart` is a composed stop-then-start operation. It must
+  reuse the same sandbox id and should replace the runtime target only after the
+  old runtime has been stopped or marked failed.
+- Admin force-stop uses the same stop path as user stop, but records an
+  operator-facing `statusReason` and audit event.
+- Future `deleteSandbox` behavior must be idempotent for `deleted` and
+  missing-runtime cases. Deletion must not remove audit history.
+
+AWS adapter idempotency requirements:
+
+- Pod names must be deterministic from the sandbox id, for example
+  `remote-codex-worker-<sandbox-id>`.
+- Kubernetes labels must include sandbox id, user id, runtime role, image tag,
+  and resource profile so reconciliation can find existing resources.
+- `startSandbox` should create or patch the desired Pod/Service and then return
+  `starting` until readiness is observed.
+- `stopSandbox` should delete the deterministic Pod/Service if present and then
+  return `stopping` or `stopped` depending on observed deletion state.
+- `getSandboxStatus` should map Kubernetes `Pending`, `Running`, readiness
+  failures, image pull failures, unschedulable capacity, and deleted Pods into
+  the canonical control-plane states.
+- Endpoint discovery must return the router base URL plus worker service
+  identity. It must not expose direct Pod IPs to browsers.
+
+Route-token issuance depends on lifecycle state. The control plane should issue
+route tokens only when the stored sandbox state is `running`, the account is
+active, and quota checks pass.
+
 Worker metadata is exposed for the router/control plane:
 
 ```text

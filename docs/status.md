@@ -1,0 +1,110 @@
+# Remote Codex Branch Status
+
+This file is the current-state handoff for the
+`sandbox-worker-control-plane` branch. Update it before larger phase handoffs or
+when the next implementation focus changes materially.
+
+## Current Scope
+
+Remote Codex is being shaped into the Agente product control plane plus sandbox
+worker runtime:
+
+- Railway-facing product frontend and control-plane API.
+- Product users, projects, workspaces, sessions, sandbox registry, usage, quota,
+  and audit records.
+- Per-user sandbox lifecycle orchestration.
+- Worker-mode supervisor API inside each sandbox.
+- Worker bootstrap for Codex, Claude Code, OpenCode, MCP, the LLM gateway, and
+  ElAgenteHarness.
+
+Remote Codex integrates with, but does not own, the internals of the LLM
+gateway, ElAgenteHarness, or chemistry compute workers.
+
+## Current Mode Definitions
+
+- Local development: dev bearer auth, local control-plane API, local database,
+  local worker-process sandbox adapter, and mocked or manually configured
+  gateway/harness dependencies.
+- Staging: production-style JWT auth, real deployed control plane, real sandbox
+  runtime, staging gateway credentials, staging harness credentials, and staging
+  AWS/database/object-storage resources.
+- Production: production auth, production database and object storage,
+  least-privilege AWS permissions, secure secrets, route-token key rotation,
+  credential rotation, usage import, quota enforcement, and operational alerts.
+
+## Implemented Baseline
+
+- Architecture docs and task checklists exist under `docs/`.
+- Control-plane auth supports local dev bearer auth and production-style JWT
+  verification with issuer, audience, expiry, not-before, issued-at, and clock
+  skew checks.
+- Control-plane schema and APIs cover users, projects, workspaces, sessions,
+  sandboxes, route tokens, and admin user/sandbox operations.
+- Project, workspace, session, and sandbox ownership tests exist.
+- Worker mode validates required sandbox identity and internal worker token
+  settings.
+- Worker mode disables host/provider management APIs that should not be exposed
+  in sandbox runtime.
+- Route-token signing supports key ids and previous-key verification.
+- Local worker-process sandbox adapter exists for development.
+- Phase-one AWS runtime decision is EKS Fargate with one Pod per active user
+  sandbox.
+
+## In Progress
+
+- AWS sandbox adapter implementation.
+- Frontend auth shell, login states, and admin user management.
+- Browser-to-worker route-token connection flow.
+- Worker image runtime pinning and smoke verification.
+- LLM gateway provisioning, worker provider config rendering, and usage import.
+- ElAgenteHarness credential provisioning and worker bootstrap.
+
+## Immediate Next Implementation Queue
+
+1. Finish and verify AWS adapter configuration loading.
+2. Implement AWS Pod creation, stop, status polling, endpoint discovery, and
+   worker environment/secret injection behind mocked Kubernetes clients.
+3. Implement AWS Pod creation, stop, status polling, endpoint discovery, and
+   worker environment/secret injection against the documented lifecycle rules.
+4. Finish frontend auth shell: login route, authenticated app guard, loading,
+   expired, unauthorized, and disabled-account states.
+5. Add the route-token browser connection flow and router implementation or
+   separate-router contract.
+6. Pin provider runtime versions in the worker image and add Docker smoke tests.
+7. Implement gateway key provisioning and generated provider config regression
+   tests.
+8. Implement ElAgenteHarness key provisioning and worker environment/bootstrap
+   tests.
+
+## Verification Commands
+
+Use the focused command for the area changed, then add broader checks before a
+handoff.
+
+```bash
+pnpm --filter @remote-codex/control-plane-api typecheck
+pnpm --filter @remote-codex/control-plane-api test
+pnpm --filter @remote-codex/supervisor-web typecheck
+pnpm --filter @remote-codex/supervisor-web test
+pnpm --filter @remote-codex/supervisor-api typecheck
+pnpm --filter @remote-codex/supervisor-api test
+pnpm --filter @remote-codex/config typecheck
+pnpm --filter @remote-codex/db typecheck
+```
+
+Worker image verification target:
+
+```bash
+docker build -f Dockerfile.worker -t remote-codex-worker:verify .
+```
+
+Staging smoke targets:
+
+- User login to authenticated shell.
+- Project creation to workspace creation to session creation.
+- Control plane starts one sandbox.
+- Browser connects through router to worker.
+- Worker rejects direct non-health requests without internal token.
+- Worker runs Codex, Claude Code, and OpenCode through the LLM gateway.
+- Worker calls ElAgenteHarness with the injected `INACT_X_APP_KEY`.
+- Usage import shows LLM and harness usage for the correct product user.

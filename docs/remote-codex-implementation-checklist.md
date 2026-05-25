@@ -189,7 +189,7 @@ user.
 - [x] Define sandbox image repository and tag format.
 - [x] Define CPU/memory/storage resource profiles.
 - [x] Define VPC/subnet/security group requirements.
-- [ ] Implement AWS adapter configuration loading.
+- [x] Implement AWS adapter configuration loading.
 - [ ] Implement sandbox Pod/task creation.
 - [ ] Implement sandbox Pod/task stop.
 - [ ] Implement sandbox status polling.

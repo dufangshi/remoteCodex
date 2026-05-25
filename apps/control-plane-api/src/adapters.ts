@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { z } from 'zod';
 
 export interface SandboxProvisionResult {
   state: string;
@@ -185,6 +186,154 @@ export class LocalWorkerProcessSandboxManager implements SandboxManager {
       routerBaseUrl: this.input.routerBaseUrl,
       workerServiceName: `local-worker-${sandboxId}`,
     };
+  }
+}
+
+const awsSandboxAdapterEnvSchema = z.object({
+  AWS_REGION: z.string().min(1).optional(),
+  SANDBOX_AWS_REGION: z.string().min(1).optional(),
+  SANDBOX_EKS_CLUSTER_NAME: z.string().min(1),
+  SANDBOX_K8S_NAMESPACE: z.string().min(1).default('remote-codex-sandboxes'),
+  SANDBOX_K8S_SERVICE_ACCOUNT: z.string().min(1),
+  SANDBOX_WORKER_IMAGE_REPOSITORY: z.string().min(1),
+  SANDBOX_WORKER_IMAGE_TAG: z.string().min(1),
+  SANDBOX_ROUTER_BASE_URL: z.string().url(),
+  SANDBOX_WORKER_AUTH_TOKEN_SECRET_NAME: z.string().min(1),
+  SANDBOX_SUBNET_IDS: z.string().min(1),
+  SANDBOX_SECURITY_GROUP_IDS: z.string().min(1),
+  SANDBOX_RESOURCE_PROFILE: z.enum(['small', 'standard', 'large']).default('standard'),
+});
+
+export interface AwsSandboxAdapterConfig {
+  region: string;
+  clusterName: string;
+  namespace: string;
+  serviceAccountName: string;
+  imageRepository: string;
+  imageTag: string;
+  routerBaseUrl: string;
+  workerAuthTokenSecretName: string;
+  subnetIds: string[];
+  securityGroupIds: string[];
+  resourceProfile: 'small' | 'standard' | 'large';
+}
+
+function commaList(value: string) {
+  return value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+export function loadAwsSandboxAdapterConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): AwsSandboxAdapterConfig {
+  const parsed = awsSandboxAdapterEnvSchema.parse(env);
+  const subnetIds = commaList(parsed.SANDBOX_SUBNET_IDS);
+  const securityGroupIds = commaList(parsed.SANDBOX_SECURITY_GROUP_IDS);
+  if (subnetIds.length === 0) {
+    throw new SandboxManagerError('config', 'SANDBOX_SUBNET_IDS must include at least one subnet id.');
+  }
+  if (securityGroupIds.length === 0) {
+    throw new SandboxManagerError(
+      'config',
+      'SANDBOX_SECURITY_GROUP_IDS must include at least one security group id.',
+    );
+  }
+
+  return {
+    region: parsed.SANDBOX_AWS_REGION ?? parsed.AWS_REGION ?? 'us-east-1',
+    clusterName: parsed.SANDBOX_EKS_CLUSTER_NAME,
+    namespace: parsed.SANDBOX_K8S_NAMESPACE,
+    serviceAccountName: parsed.SANDBOX_K8S_SERVICE_ACCOUNT,
+    imageRepository: parsed.SANDBOX_WORKER_IMAGE_REPOSITORY,
+    imageTag: parsed.SANDBOX_WORKER_IMAGE_TAG,
+    routerBaseUrl: parsed.SANDBOX_ROUTER_BASE_URL,
+    workerAuthTokenSecretName: parsed.SANDBOX_WORKER_AUTH_TOKEN_SECRET_NAME,
+    subnetIds,
+    securityGroupIds,
+    resourceProfile: parsed.SANDBOX_RESOURCE_PROFILE,
+  };
+}
+
+export class AwsEksFargateSandboxManager implements SandboxManager {
+  constructor(readonly config: AwsSandboxAdapterConfig) {}
+
+  async createSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
+    return this.startSandbox(input);
+  }
+
+  async startSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
+    return {
+      state: 'starting',
+      routerBaseUrl: this.config.routerBaseUrl,
+      workerServiceName: this.workerServiceName(input.sandboxId),
+      k8sNamespace: this.config.namespace,
+      k8sPodName: this.podName(input.sandboxId),
+      statusReason: 'AWS EKS Fargate adapter is configured; Pod creation is not implemented yet.',
+    };
+  }
+
+  async stopSandbox(input: { sandboxId: string }): Promise<SandboxProvisionResult> {
+    return {
+      state: 'stopping',
+      routerBaseUrl: this.config.routerBaseUrl,
+      workerServiceName: this.workerServiceName(input.sandboxId),
+      k8sNamespace: this.config.namespace,
+      k8sPodName: this.podName(input.sandboxId),
+      statusReason: 'AWS EKS Fargate adapter is configured; Pod stop is not implemented yet.',
+    };
+  }
+
+  async restartSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
+    await this.stopSandbox(input);
+    return this.startSandbox(input);
+  }
+
+  async deleteSandbox(input: { sandboxId: string }): Promise<SandboxProvisionResult> {
+    await this.stopSandbox(input);
+    return {
+      state: 'deleting',
+      routerBaseUrl: this.config.routerBaseUrl,
+      workerServiceName: this.workerServiceName(input.sandboxId),
+      k8sNamespace: this.config.namespace,
+      k8sPodName: this.podName(input.sandboxId),
+    };
+  }
+
+  async getSandboxStatus(input: { sandboxId: string }): Promise<SandboxProvisionResult> {
+    return {
+      state: 'unknown',
+      routerBaseUrl: this.config.routerBaseUrl,
+      workerServiceName: this.workerServiceName(input.sandboxId),
+      k8sNamespace: this.config.namespace,
+      k8sPodName: this.podName(input.sandboxId),
+      statusReason: 'AWS EKS Fargate status polling is not implemented yet.',
+    };
+  }
+
+  async getSandboxEndpoint(): Promise<{ routerBaseUrl: string | null }> {
+    return { routerBaseUrl: this.config.routerBaseUrl };
+  }
+
+  async prepareSandboxEnvironment(input: SandboxStartInput): Promise<SandboxEnvironment> {
+    return {
+      env: {
+        REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+        REMOTE_CODEX_SANDBOX_ID: input.sandboxId,
+        REMOTE_CODEX_USER_ID: input.userId,
+        WORKSPACE_ROOT: '/workspace',
+        HOME: '/home/agent',
+      },
+    };
+  }
+
+  private podName(sandboxId: string) {
+    return `remote-codex-worker-${sandboxId}`;
+  }
+
+  private workerServiceName(sandboxId: string) {
+    return `remote-codex-worker-${sandboxId}`;
   }
 }
 

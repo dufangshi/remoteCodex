@@ -36,6 +36,53 @@ leave it unchecked.
 - Do not check tasks that are implemented only in an external service.
 - If a task moves out of this repository, mark the Remote Codex item as the
   integration contract only and add the external service link in the note.
+- A task is not complete when it is only documented. Documentation-only work can
+  check documentation tasks, but implementation tasks need code and verification.
+- When checking a task, update the nearest `Verification` section or add a short
+  note with the command, smoke test, migration, or deployment check that proves
+  it.
+- If a task is intentionally deferred, keep it unchecked and add a short reason
+  near the item or in `docs/status.md`.
+
+## Phase Gate Rules
+
+Use these gates to keep the branch shippable while the implementation grows.
+
+- Phase 0 is the documentation and repository baseline. It is complete when new
+  contributors can read the docs index, understand the product boundaries, and
+  see the current branch status without external context.
+- Phase 1 is complete when product auth works in local and production-style
+  modes, frontend auth states are covered, and product identity never crosses
+  into worker APIs.
+- Phase 2 is complete when users can create projects, workspaces, and sessions
+  from the UI, and the control plane owns durable metadata with ownership tests.
+- Phase 3 is complete when local development and AWS sandbox lifecycle paths can
+  start, stop, observe, and recover one sandbox per user.
+- Phase 4 is complete when the worker image is reproducible, non-root, pinned,
+  and rejects unsafe startup or unauthorized worker API access.
+- Phase 5 is complete when browser traffic reaches workers only through
+  route-token proxying, and direct worker access is not viable in staging.
+- Phase 6 is complete when Codex, Claude Code, and OpenCode bootstrap against
+  the LLM gateway without exposing real provider root keys to the sandbox.
+
+## Work Item Completion Template
+
+When finishing a checklist item, use this evidence pattern in the commit or PR
+description:
+
+- Task: the exact checklist item that changed from `[ ]` to `[x]`.
+- Files: the code, migration, docs, or tests that implement it.
+- Verification: the exact command or smoke test that passed.
+- Residual risk: any known limitation that stays unchecked elsewhere.
+
+Example:
+
+```text
+Task: Phase 3 / AWS Adapter / Implement worker environment injection
+Files: apps/control-plane-api/src/adapters.ts, apps/control-plane-api/src/adapters.test.ts
+Verification: pnpm --filter @remote-codex/control-plane-api test
+Residual risk: live EKS start/stop smoke test remains unchecked
+```
 
 ## Phase 0: Repository Baseline And Architecture
 
@@ -56,11 +103,11 @@ scope clear to future contributors.
 
 ### Repository Hygiene
 
-- [ ] Add a top-level architecture decision log for major deployment decisions.
-- [ ] Add a `docs/status.md` or equivalent current-state summary before each
+- [x] Add a top-level architecture decision log for major deployment decisions.
+- [x] Add a `docs/status.md` or equivalent current-state summary before each
   larger phase handoff.
-- [ ] Keep obsolete docs removed from this branch.
-- [ ] Ensure docs describe the difference between local-dev mode, staging mode,
+- [x] Keep obsolete docs removed from this branch.
+- [x] Ensure docs describe the difference between local-dev mode, staging mode,
   and production mode.
 
 ### Verification
@@ -217,8 +264,8 @@ start, stop, observe, and eventually snapshot it.
 - [x] Add `getSandboxEndpoint`.
 - [x] Add `prepareSandboxEnvironment`.
 - [x] Add structured errors for quota, capacity, config, and provider failures.
-- [ ] Add a sandbox lifecycle state machine document.
-- [ ] Add idempotency rules for start, stop, restart, and delete.
+- [x] Add a sandbox lifecycle state machine document.
+- [x] Add idempotency rules for start, stop, restart, and delete.
 
 ### Local Development Adapter
 
@@ -237,7 +284,7 @@ start, stop, observe, and eventually snapshot it.
 - [x] Define the worker image tag format.
 - [x] Define CPU, memory, and ephemeral storage profiles.
 - [x] Define VPC, subnet, security group, and egress requirements.
-- [ ] Implement AWS adapter configuration loading.
+- [x] Implement AWS adapter configuration loading.
 - [ ] Implement Pod/task creation.
 - [ ] Implement Pod/task stop.
 - [ ] Implement Pod/task status polling.
