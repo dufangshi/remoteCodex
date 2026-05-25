@@ -426,6 +426,24 @@ pnpm collect:phase-zero-six-evidence -- \
   --apply-ready
 ```
 
+If the live evidence has already been collected and reviewed, do not rerun the
+live AWS, Kubernetes, control-plane, router, or provider smoke commands just to
+apply checklist boxes. Reuse the reviewed artifact directory instead:
+
+```bash
+pnpm collect:phase-zero-six-evidence -- \
+  --from-output-dir ./.temp/phase-zero-six-evidence/<run-id> \
+  --output-dir ./.temp/phase-zero-six-evidence/<run-id>-apply \
+  --apply-ready
+```
+
+`--from-output-dir` reads the existing evidence files, reruns the verifiers and
+artifact secret scan, and then applies ready checklist boxes if allowed. It
+does not collect fresh AWS preflight evidence or rerun the staging smoke.
+If the source directory only contains an early env-readiness failure, the
+summary reports `missingEvidenceFiles` instead of calling downstream verifiers
+with missing paths.
+
 For AWS-only preflight work, such as checking only S3.04/S3.05 before the
 runtime smoke is available, pass `--skip-staging-smoke`. In that mode the
 bundle also passes `--skip-staging-smoke` to the env readiness verifier, so only

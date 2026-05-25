@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 interface CommandResult {
@@ -154,6 +154,14 @@ function envReadinessSummary(result: CommandResult | undefined) {
     notReadyGroups?: unknown;
     groups?: unknown;
   } | null : null;
+  return envReadinessSummaryFromParsed(parsed);
+}
+
+function envReadinessSummaryFromParsed(parsed: {
+  readyGroups?: unknown;
+  notReadyGroups?: unknown;
+  groups?: unknown;
+} | null) {
   const groups = Array.isArray(parsed?.groups) ? parsed.groups : [];
   return {
     readyGroups: Array.isArray(parsed?.readyGroups) ? parsed.readyGroups : [],
@@ -179,12 +187,27 @@ function envReadinessSummary(result: CommandResult | undefined) {
   };
 }
 
+async function readEnvReadinessSummary(filePath: string) {
+  try {
+    const raw = await readFile(filePath, 'utf8');
+    return envReadinessSummaryFromParsed(JSON.parse(raw) as {
+      readyGroups?: unknown;
+      notReadyGroups?: unknown;
+      groups?: unknown;
+    });
+  } catch {
+    return envReadinessSummaryFromParsed(null);
+  }
+}
+
 function nextSteps(input: {
   outputDir: string;
+  fromOutputDir: string | null;
   envTemplatePath: string;
   skippedStagingSmoke: boolean;
   applyReady: boolean;
 }) {
+  const reuseArgs = input.fromOutputDir ? [`--from-output-dir ${input.fromOutputDir}`] : [];
   return {
     fillEnvTemplate: `Fill ${input.envTemplatePath} in a private operator shell; do not commit filled values.`,
     sourceEnvTemplate: `source ${input.envTemplatePath}`,
@@ -193,12 +216,14 @@ function nextSteps(input: {
       : 'pnpm verify:phase-zero-six-env-ready',
     rerunBundle: [
       'pnpm collect:phase-zero-six-evidence --',
+      ...reuseArgs,
       `--output-dir ${input.outputDir}`,
       ...(input.skippedStagingSmoke ? ['--skip-staging-smoke'] : []),
       ...(input.applyReady ? ['--apply-ready'] : []),
     ].join(' '),
     applyChecklistAfterReview: [
       'pnpm collect:phase-zero-six-evidence --',
+      ...reuseArgs,
       `--output-dir ${input.outputDir}-apply`,
       ...(input.skippedStagingSmoke ? ['--skip-staging-smoke'] : []),
       '--apply-ready',
@@ -206,22 +231,45 @@ function nextSteps(input: {
   };
 }
 
+async function missingRequiredEvidenceFiles(input: {
+  awsPath: string;
+  stagingPath: string;
+  skipStagingSmoke: boolean;
+}) {
+  const required = [
+    input.awsPath,
+    ...(input.skipStagingSmoke ? [] : [input.stagingPath]),
+  ];
+  const missing: string[] = [];
+  for (const filePath of required) {
+    try {
+      await access(filePath);
+    } catch {
+      missing.push(filePath);
+    }
+  }
+  return missing;
+}
+
 async function main() {
   const outputDir =
     argValue('--output-dir') ??
     path.join('artifacts', 'phase-zero-six-evidence', timestampForPath());
+  const fromOutputDir = argValue('--from-output-dir');
   const applyReady = hasFlag('--apply-ready');
   const force = hasFlag('--force');
   const checklistPath = argValue('--checklist');
+  const reuseExistingArtifacts = Boolean(fromOutputDir);
   await mkdir(outputDir, { recursive: true });
 
-  const envReadinessPath = path.join(outputDir, 'env-readiness.json');
+  const evidenceDir = fromOutputDir ?? outputDir;
+  const envReadinessPath = path.join(evidenceDir, 'env-readiness.json');
   const envTemplatePath = path.join(
-    outputDir,
+    evidenceDir,
     hasFlag('--skip-staging-smoke') ? 'aws-preflight.env.sh' : 'phase-zero-six.env.sh',
   );
-  const awsPath = path.join(outputDir, 'aws-staging-preflight.json');
-  const stagingPath = path.join(outputDir, 'staging-phase-one-smoke.json');
+  const awsPath = path.join(evidenceDir, 'aws-staging-preflight.json');
+  const stagingPath = path.join(evidenceDir, 'staging-phase-one-smoke.json');
   const awsVerificationPath = path.join(outputDir, 'aws-staging-preflight-verification.json');
   const stagingVerificationPath = path.join(outputDir, 'staging-phase-one-verification.json');
   const phaseVerificationPath = path.join(outputDir, 'phase-zero-six-verification.json');
@@ -231,26 +279,80 @@ async function main() {
 
   const commands: CommandResult[] = [];
 
-  commands.push(await runCommand({
-    name: 'verify_phase_zero_six_env_ready',
-    command: [
-      'pnpm',
-      'exec',
-      'tsx',
-      'scripts/verify-phase-zero-six-env-ready.ts',
-      ...(hasFlag('--skip-staging-smoke') ? ['--skip-staging-smoke'] : []),
-      '--write-env-template',
-      envTemplatePath,
-    ],
-    outputPath: envReadinessPath,
-  }));
+  if (reuseExistingArtifacts) {
+    const missingEvidenceFiles = await missingRequiredEvidenceFiles({
+      awsPath,
+      stagingPath,
+      skipStagingSmoke: hasFlag('--skip-staging-smoke'),
+    });
+    if (missingEvidenceFiles.length > 0) {
+      const summary = {
+        ok: false,
+        generatedAt: new Date().toISOString(),
+        outputDir,
+        fromOutputDir,
+        reuseExistingArtifacts,
+        applyReady,
+        force,
+        checklistPath,
+        skippedStagingSmoke: hasFlag('--skip-staging-smoke'),
+        stoppedAfterEnvReadiness: false,
+        phaseZeroSixComplete: false,
+        reason: 'Reviewed artifact reuse requested, but required evidence files are missing.',
+        missingEvidenceFiles,
+        envReadiness: await readEnvReadinessSummary(envReadinessPath),
+        nextSteps: nextSteps({
+          outputDir,
+          fromOutputDir,
+          envTemplatePath,
+          skippedStagingSmoke: hasFlag('--skip-staging-smoke'),
+          applyReady,
+        }),
+        artifacts: {
+          envReadiness: envReadinessPath,
+          envTemplate: envTemplatePath,
+          awsPreflight: awsPath,
+          stagingSmoke: hasFlag('--skip-staging-smoke') ? null : stagingPath,
+          awsVerification: null,
+          stagingVerification: null,
+          phaseZeroSixVerification: null,
+          phaseZeroSixApply: null,
+          artifactSecretScan: null,
+          summary: summaryPath,
+        },
+        results: [],
+      };
+      await writeFile(summaryPath, JSON.stringify(summary, null, 2));
+      console.log(JSON.stringify(summary, null, 2));
+      process.exitCode = 1;
+      return;
+    }
+  }
 
-  if (!commandOk(commands[0]) && !force) {
+  if (!reuseExistingArtifacts) {
+    commands.push(await runCommand({
+      name: 'verify_phase_zero_six_env_ready',
+      command: [
+        'pnpm',
+        'exec',
+        'tsx',
+        'scripts/verify-phase-zero-six-env-ready.ts',
+        ...(hasFlag('--skip-staging-smoke') ? ['--skip-staging-smoke'] : []),
+        '--write-env-template',
+        envTemplatePath,
+      ],
+      outputPath: envReadinessPath,
+    }));
+  }
+
+  if (!reuseExistingArtifacts && !commandOk(commands[0] as CommandResult) && !force) {
     const preScanSummaryPath = summaryPath;
     const summary = {
       ok: false,
       generatedAt: new Date().toISOString(),
       outputDir,
+      fromOutputDir,
+      reuseExistingArtifacts,
       applyReady,
       force,
       checklistPath,
@@ -260,6 +362,7 @@ async function main() {
       envReadiness: envReadinessSummary(commands[0]),
       nextSteps: nextSteps({
         outputDir,
+        fromOutputDir,
         envTemplatePath,
         skippedStagingSmoke: hasFlag('--skip-staging-smoke'),
         applyReady,
@@ -300,11 +403,13 @@ async function main() {
     return;
   }
 
-  commands.push(await runCommand({
-    name: 'collect_aws_staging_preflight_evidence',
-    command: ['pnpm', 'exec', 'tsx', 'scripts/collect-aws-staging-preflight-evidence.ts'],
-    outputPath: awsPath,
-  }));
+  if (!reuseExistingArtifacts) {
+    commands.push(await runCommand({
+      name: 'collect_aws_staging_preflight_evidence',
+      command: ['pnpm', 'exec', 'tsx', 'scripts/collect-aws-staging-preflight-evidence.ts'],
+      outputPath: awsPath,
+    }));
+  }
   commands.push(await runCommand({
     name: 'verify_aws_staging_preflight_evidence',
     command: ['pnpm', 'exec', 'tsx', 'scripts/verify-aws-staging-preflight-evidence.ts', awsPath],
@@ -312,11 +417,13 @@ async function main() {
   }));
 
   if (!hasFlag('--skip-staging-smoke')) {
-    commands.push(await runCommand({
-      name: 'run_staging_phase_one_smoke',
-      command: ['pnpm', 'exec', 'tsx', 'scripts/staging-phase-one-smoke.ts'],
-      outputPath: stagingPath,
-    }));
+    if (!reuseExistingArtifacts) {
+      commands.push(await runCommand({
+        name: 'run_staging_phase_one_smoke',
+        command: ['pnpm', 'exec', 'tsx', 'scripts/staging-phase-one-smoke.ts'],
+        outputPath: stagingPath,
+      }));
+    }
     commands.push(await runCommand({
       name: 'verify_staging_phase_one_evidence',
       command: ['pnpm', 'exec', 'tsx', 'scripts/verify-staging-phase-one-evidence.ts', stagingPath],
@@ -341,7 +448,7 @@ async function main() {
   }));
   commands.push(await runCommand({
     name: 'verify_phase_zero_six_artifacts_safe',
-    command: ['pnpm', 'exec', 'tsx', 'scripts/verify-phase-zero-six-artifacts-safe.ts', '--dir', outputDir],
+    command: ['pnpm', 'exec', 'tsx', 'scripts/verify-phase-zero-six-artifacts-safe.ts', '--dir', evidenceDir],
     outputPath: artifactSafetyPath,
   }));
 
@@ -372,10 +479,15 @@ async function main() {
     .filter(commandRequiredForBundleSuccess)
     .every(commandOkForBundle);
   const phaseZeroSixComplete = phaseVerificationComplete(phaseApplyResult ?? phaseVerification);
+  const readinessSummary = reuseExistingArtifacts
+    ? await readEnvReadinessSummary(envReadinessPath)
+    : envReadinessSummary(commands[0]);
   const summary = {
     ok: requiredCommandsOk && applyCompletedOrNotRequested,
     generatedAt: new Date().toISOString(),
     outputDir,
+    fromOutputDir,
+    reuseExistingArtifacts,
     applyReady,
     force,
     checklistPath,
@@ -383,9 +495,10 @@ async function main() {
     stoppedAfterEnvReadiness: false,
     phaseZeroSixComplete,
     applySkippedReason,
-    envReadiness: envReadinessSummary(commands[0]),
+    envReadiness: readinessSummary,
     nextSteps: nextSteps({
       outputDir,
+      fromOutputDir,
       envTemplatePath,
       skippedStagingSmoke: hasFlag('--skip-staging-smoke'),
       applyReady,

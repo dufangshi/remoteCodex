@@ -89,7 +89,10 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   bundle-level `--apply-ready` path now runs
   read-only Phase 0-6 verification first, scans generated artifacts second, and
   only then runs a separate checklist apply command; if the artifact scan
-  fails, no checklist file is edited. Bundle `summary.ok` reports collection
+  fails, no checklist file is edited. The bundle also supports
+  `--from-output-dir <dir>` to reuse already reviewed evidence artifacts for
+  verification/apply without rerunning live AWS, Kubernetes, control-plane,
+  router, or provider smoke commands. Bundle `summary.ok` reports collection
   and apply-flow success, while `summary.phaseZeroSixComplete` separately
   reports whether all Phase 0-6 boxes are complete, so AWS-only partial
   evidence can succeed without claiming full release readiness. Summary result

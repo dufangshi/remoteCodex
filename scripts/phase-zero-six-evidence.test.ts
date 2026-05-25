@@ -1056,6 +1056,109 @@ describe('phase zero-six evidence tooling', () => {
     expect(checklist).toContain('- [ ] S3.06 Create a real worker Pod from the control plane.');
   });
 
+  it('applies reviewed artifacts without rerunning live collection or smoke commands', async () => {
+    const evidenceDir = await tempDir();
+    const applyDir = await tempDir();
+    const checklistPath = path.join(applyDir, 'checklist.md');
+    await writeFile(checklistPath, minimalChecklist());
+    await writeFile(
+      path.join(evidenceDir, 'env-readiness.json'),
+      JSON.stringify({
+        ok: true,
+        readyGroups: ['aws-preflight'],
+        notReadyGroups: [],
+        groups: [{
+          id: 'aws-preflight',
+          items: ['S3.04', 'S3.05'],
+          ready: true,
+          missingEnv: [],
+          missingRecommendedEnv: [],
+        }],
+      }),
+    );
+    await writeFile(
+      path.join(evidenceDir, 'aws-staging-preflight.json'),
+      JSON.stringify(completeAwsEvidence(), null, 2),
+    );
+
+    const result = await runScript(
+      'scripts/run-phase-zero-six-staging-evidence.ts',
+      [
+        '--from-output-dir',
+        evidenceDir,
+        '--output-dir',
+        applyDir,
+        '--skip-staging-smoke',
+        '--apply-ready',
+        '--checklist',
+        checklistPath,
+      ],
+    );
+    const parsed = JSON.parse(result.stdout);
+    const checklist = await readFile(checklistPath, 'utf8');
+    const commandNames = parsed.results.map((entry: { name: string }) => entry.name);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.reuseExistingArtifacts).toBe(true);
+    expect(parsed.fromOutputDir).toBe(evidenceDir);
+    expect(commandNames).not.toContain('verify_phase_zero_six_env_ready');
+    expect(commandNames).not.toContain('collect_aws_staging_preflight_evidence');
+    expect(commandNames).not.toContain('run_staging_phase_one_smoke');
+    expect(commandNames).toEqual([
+      'verify_aws_staging_preflight_evidence',
+      'verify_phase_zero_six_evidence',
+      'verify_phase_zero_six_artifacts_safe',
+      'verify_phase_zero_six_evidence_apply',
+    ]);
+    expect(parsed.envReadiness.readyGroups).toEqual(['aws-preflight']);
+    expect(parsed.artifacts.awsPreflight).toBe(path.join(evidenceDir, 'aws-staging-preflight.json'));
+    expect(parsed.artifacts.artifactSecretScan).toBe(path.join(applyDir, 'artifact-secret-scan.json'));
+    expect(checklist).toContain('- [x] S3.04 Finalize AWS staging configuration.');
+    expect(checklist).toContain('- [x] S3.05 Add least-privilege Kubernetes credentials.');
+  });
+
+  it('reports missing reviewed artifact files before running reuse verifiers', async () => {
+    const evidenceDir = await tempDir();
+    const applyDir = await tempDir();
+    await writeFile(
+      path.join(evidenceDir, 'env-readiness.json'),
+      JSON.stringify({
+        ok: false,
+        readyGroups: [],
+        notReadyGroups: ['aws-preflight'],
+        groups: [{
+          id: 'aws-preflight',
+          items: ['S3.04', 'S3.05'],
+          ready: false,
+          missingEnv: ['AWS_STAGING_REVIEWED_BY'],
+          missingRecommendedEnv: [],
+        }],
+      }),
+    );
+
+    const result = await runScript(
+      'scripts/run-phase-zero-six-staging-evidence.ts',
+      [
+        '--from-output-dir',
+        evidenceDir,
+        '--output-dir',
+        applyDir,
+        '--apply-ready',
+      ],
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.reason).toBe('Reviewed artifact reuse requested, but required evidence files are missing.');
+    expect(parsed.missingEvidenceFiles).toEqual([
+      path.join(evidenceDir, 'aws-staging-preflight.json'),
+      path.join(evidenceDir, 'staging-phase-one-smoke.json'),
+    ]);
+    expect(parsed.results).toEqual([]);
+    expect(parsed.envReadiness.notReadyGroups).toEqual(['aws-preflight']);
+    expect(parsed.nextSteps.rerunBundle).toContain(`--from-output-dir ${evidenceDir}`);
+  });
+
   it('does not apply checklist changes when bundle artifact scan fails', async () => {
     const dir = await tempDir();
     const checklistPath = path.join(dir, 'checklist.md');
