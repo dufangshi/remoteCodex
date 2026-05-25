@@ -229,7 +229,14 @@ outputs and is not a replacement for the raw evidence JSON.
 ### GitHub Actions Manual Evidence Run
 
 The same evidence bundle can be collected from GitHub Actions with the manual
-workflow:
+entry point in the already-visible evidence workflow:
+
+```text
+.github/workflows/phase-zero-six-evidence.yml
+```
+
+The standalone workflow below mirrors the same staging collection job and is
+kept for default-branch availability once this branch is merged:
 
 ```text
 .github/workflows/phase-zero-six-staging-evidence.yml
@@ -253,6 +260,16 @@ pnpm phase-zero-six:github-env:report
 
 This checker uses GitHub metadata APIs through `gh`. It prints variable and
 secret names only; GitHub does not return secret values.
+
+Trigger the visible workflow from the current branch with:
+
+```bash
+gh workflow run "Phase 0-6 Evidence Tooling" \
+  --repo dufangshi/remoteCodex \
+  --ref sandbox-worker-control-plane \
+  -f evidence_mode=full \
+  -f force_diagnostics=false
+```
 
 Required GitHub Environment variables:
 

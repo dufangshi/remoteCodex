@@ -186,11 +186,11 @@ function directWorkerProofReadiness(presentVariables: string[]) {
 function buildNextCommands(owner: string, repo: string) {
   return {
     openActionsWorkflow:
-      `gh workflow view "Phase 0-6 Staging Evidence" --repo ${owner}/${repo} --web`,
+      `gh workflow view "Phase 0-6 Evidence Tooling" --repo ${owner}/${repo} --web`,
     runAwsOnly:
-      `gh workflow run "Phase 0-6 Staging Evidence" --repo ${owner}/${repo} --ref sandbox-worker-control-plane -f evidence_mode=aws-only -f force_diagnostics=false`,
+      `gh workflow run "Phase 0-6 Evidence Tooling" --repo ${owner}/${repo} --ref sandbox-worker-control-plane -f evidence_mode=aws-only -f force_diagnostics=false`,
     runFull:
-      `gh workflow run "Phase 0-6 Staging Evidence" --repo ${owner}/${repo} --ref sandbox-worker-control-plane -f evidence_mode=full -f force_diagnostics=false`,
+      `gh workflow run "Phase 0-6 Evidence Tooling" --repo ${owner}/${repo} --ref sandbox-worker-control-plane -f evidence_mode=full -f force_diagnostics=false`,
   };
 }
 
