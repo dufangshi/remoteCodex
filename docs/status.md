@@ -69,15 +69,19 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   `pnpm verify:staging-phase-one-evidence -- <smoke-json>`; it audits the
   remaining Phase 3, Phase 5, and Phase 6 staging checkboxes without mutating
   the checklist.
-- Phase 0-6 aggregate evidence verifier exists as
-  `pnpm verify:phase-zero-six-evidence -- --aws-preflight <evidence-json> --staging-smoke <smoke-json>`;
+- Phase 0-6 aggregate evidence verifier exists as `pnpm phase-zero-six:audit`
+  for the current checklist state, or as
+  `pnpm verify:phase-zero-six-evidence -- --aws-preflight <evidence-json> --staging-smoke <smoke-json>`
+  when reviewing collected AWS and staging smoke artifacts;
   it reads the active checklist and combines AWS preflight plus staging smoke
   verifier output into one read-only report of boxes that are ready to check
   and boxes still missing evidence. Its explicit `--apply-ready` mode updates
   only ready checkboxes and refuses to edit when no boxes are ready or any
   checked box is contradicted.
-- Phase 0-6 staging evidence bundle runner exists as
-  `pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id>`;
+- Phase 0-6 staging evidence bundle runner exists as `pnpm phase-zero-six:collect`
+  for the standard `.temp/phase-zero-six-evidence/latest` path, with
+  `pnpm collect:phase-zero-six-evidence -- --output-dir <dir>` still available
+  for custom artifact directories;
   it checks non-secret env readiness, collects AWS preflight evidence, runs the
   phase-one staging smoke, runs all evidence verifiers, scans generated JSON
   artifacts for obvious secret-like leakage, and writes a summary JSON for the
@@ -265,28 +269,27 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 
 ## Immediate Next Implementation Queue
 
-1. Run `pnpm smoke:staging-phase-one` with staging product/admin JWTs against
-   the real staging control plane, router, and worker runtime, then attach the
-   JSON output to release evidence.
-2. Generate or fill AWS/EKS/RBAC preflight evidence with
-   `pnpm exec tsx scripts/collect-aws-staging-preflight-evidence.ts > <evidence-json>`,
-   review it for real staging values, and run
-   `pnpm verify:aws-staging-preflight-evidence -- <evidence-json>`.
-3. Run `pnpm verify:staging-phase-one-evidence -- <smoke-json>` on the
-   captured JSON before checking any staging boxes.
-4. Run
-   `pnpm verify:phase-zero-six-evidence -- --aws-preflight <evidence-json> --staging-smoke <smoke-json>`
-   to produce one read-only Phase 0-6 checklist audit before editing boxes.
-5. If the aggregate audit reports proven items under `readyToCheck`, run the
-   same command with `--apply-ready`, then review and commit the checklist
-   changes with the evidence artifacts referenced in the commit message.
-6. Prefer the bundle runner once staging env is complete:
-   `pnpm collect:phase-zero-six-evidence -- --output-dir ./.temp/phase-zero-six-evidence/<run-id>`,
-   adding `--apply-ready` only after the first read-only bundle has been
-   reviewed.
-7. If the bundle fails before live evidence collection, run
-   `pnpm verify:phase-zero-six-env-ready` and use `itemReadiness` plus
-   `nextCommands` to fill the missing env names before retrying.
+1. Run `pnpm phase-zero-six:template`, fill
+   `.temp/phase-zero-six-evidence/phase-zero-six.env.sh` in a private operator
+   shell, then `source` it. Do not commit the filled env file.
+2. Run `pnpm phase-zero-six:env`. Use `itemReadiness` and `nextCommands` to
+   fill missing AWS, staging runtime, direct-worker, and provider smoke inputs.
+3. Run `pnpm phase-zero-six:collect` once env readiness is complete. This
+   collects AWS preflight, staging lifecycle/router smoke, provider gateway
+   smoke, verifier output, artifact scans, `operator-report.txt`,
+   `release-review.json`, and `summary.json`.
+4. Review `.temp/phase-zero-six-evidence/latest/summary.json`,
+   `operator-report.txt`, `release-review.json`, and raw evidence JSON for
+   accidental secret exposure and expected live staging targets.
+5. Run `pnpm phase-zero-six:audit` for the current checklist state, and inspect
+   the bundle's `checklistReadiness.readyToCheck` before editing boxes.
+6. If the bundle reports proven items under `readyToCheck`, run
+   `pnpm phase-zero-six:apply`, then review and commit the checklist changes
+   with the evidence artifacts referenced in the commit message.
+7. For AWS-only S3.04/S3.05 work before runtime smoke exists, use
+   `pnpm phase-zero-six:template:aws`, `pnpm phase-zero-six:env:aws`,
+   `pnpm phase-zero-six:collect:aws`, and after review
+   `pnpm phase-zero-six:apply:aws`.
 8. Capture staging AWS/EKS proof for sandbox start, readiness, stop, and
    idempotent lifecycle.
 9. Capture staging router proof for direct-worker denial and
