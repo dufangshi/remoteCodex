@@ -69,6 +69,8 @@
     "phase-zero-six:audit:report": "pnpm verify:phase-zero-six-evidence -- --format text",
     "phase-zero-six:github-env": "pnpm verify:github-staging-evidence-env",
     "phase-zero-six:github-env:report": "pnpm verify:github-staging-evidence-env -- --format text --no-fail",
+    "phase-zero-six:github-env:template": "tsx scripts/configure-github-staging-evidence-env.ts --write-template ./.temp/phase-zero-six-evidence/github-staging.env.sh",
+    "phase-zero-six:github-env:configure": "tsx scripts/configure-github-staging-evidence-env.ts",
     "service:start": "node scripts/service-manager.mjs start",
     "service:stop": "node scripts/service-manager.mjs stop",
     "service:status": "node scripts/service-manager.mjs status",

@@ -167,6 +167,14 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   checked with `pnpm phase-zero-six:github-env` or the human-readable
   `pnpm phase-zero-six:github-env:report`; the checker uses `gh` metadata APIs
   and prints only variable and secret names, never values.
+- GitHub Environment configuration for the manual staging evidence workflow now
+  has an operator path: `pnpm phase-zero-six:github-env:template` writes a
+  private `.temp` template, and `pnpm phase-zero-six:github-env:configure -- \
+  --values-file <path> --direct-worker-mode private --dry-run` validates the
+  filled names before `gh variable set --env staging` and
+  `gh secret set --env staging` are used. The configure tool shares required
+  var/secret names with the readiness checker and prints names only, never
+  values.
 - The GitHub `staging` Environment now exists and allows the
   `sandbox-worker-control-plane` branch. It still has no required Phase 0-6
   evidence variables or secrets configured, so the manual staging evidence

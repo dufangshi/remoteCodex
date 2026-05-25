@@ -1,65 +1,15 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import {
+  directWorkerPrivateVariables,
+  directWorkerPublicVariables,
+  kubeconfigSecretAlternatives,
+  optionalSecrets,
+  requiredSecrets,
+  requiredVariables,
+} from './phase-zero-six-github-env-contract.js';
 
 const execFileAsync = promisify(execFile);
-
-const requiredVariables = [
-  'AWS_STAGING_REVIEWED_BY',
-  'AWS_STAGING_REGION',
-  'AWS_STAGING_ACCOUNT_ID',
-  'AWS_STAGING_EKS_CLUSTER_NAME',
-  'AWS_STAGING_K8S_NAMESPACE',
-  'AWS_STAGING_FARGATE_PROFILE_NAME',
-  'AWS_STAGING_K8S_SERVICE_ACCOUNT',
-  'AWS_STAGING_K8S_ROLE_ARN',
-  'AWS_STAGING_WORKER_IMAGE_REPOSITORY',
-  'AWS_STAGING_WORKER_IMAGE_TAG',
-  'AWS_STAGING_LOG_GROUP_NAMES',
-  'AWS_STAGING_VPC_ID',
-  'AWS_STAGING_SUBNET_IDS',
-  'AWS_STAGING_SECURITY_GROUP_IDS',
-  'AWS_STAGING_CONFIG_REVIEWED',
-  'AWS_STAGING_CREDENTIAL_REVIEW_PASSED',
-  'STAGING_CONTROL_PLANE_BASE_URL',
-  'STAGING_SMOKE_EMAIL',
-  'STAGING_SANDBOX_READY_TIMEOUT_MS',
-  'STAGING_SANDBOX_STOP_TIMEOUT_MS',
-  'STAGING_IDEMPOTENT_LIFECYCLE_SMOKE',
-  'STAGING_STOP_SANDBOX_AFTER_SMOKE',
-  'STAGING_CODEX_GATEWAY_SMOKE_COMMAND_JSON',
-  'STAGING_CLAUDE_GATEWAY_SMOKE_COMMAND_JSON',
-  'STAGING_OPENCODE_GATEWAY_SMOKE_COMMAND_JSON',
-];
-
-const directWorkerPublicVariables = [
-  'STAGING_DIRECT_WORKER_BASE_URL',
-];
-
-const directWorkerPrivateVariables = [
-  'STAGING_DIRECT_WORKER_PRIVATE_REVIEWED_BY',
-  'STAGING_DIRECT_WORKER_NETWORK_MODE',
-  'STAGING_DIRECT_WORKER_INGRESS_POLICY',
-  'STAGING_DIRECT_WORKER_PRIVATE_PROOF',
-];
-
-const requiredSecrets = [
-  'STAGING_PRODUCT_JWT',
-  'STAGING_ADMIN_JWT',
-  'AWS_ACCESS_KEY_ID',
-  'AWS_SECRET_ACCESS_KEY',
-];
-
-const optionalSecrets = [
-  'AWS_SESSION_TOKEN',
-  'STAGING_CODEX_GATEWAY_SMOKE_COMMAND_ENV_JSON',
-  'STAGING_CLAUDE_GATEWAY_SMOKE_COMMAND_ENV_JSON',
-  'STAGING_OPENCODE_GATEWAY_SMOKE_COMMAND_ENV_JSON',
-];
-
-const kubeconfigSecretAlternatives = [
-  'STAGING_KUBECONFIG',
-  'STAGING_KUBECONFIG_B64',
-];
 
 interface GithubReadinessReport {
   ok: boolean;
@@ -160,12 +110,12 @@ async function listEnvironmentSecrets(owner: string, repo: string, environment: 
     .sort();
 }
 
-function missingFrom(required: string[], present: string[]) {
+function missingFrom(required: readonly string[], present: readonly string[]) {
   const presentSet = new Set(present);
   return required.filter((name) => !presentSet.has(name));
 }
 
-function intersection(names: string[], present: string[]) {
+function intersection(names: readonly string[], present: readonly string[]) {
   const presentSet = new Set(present);
   return names.filter((name) => presentSet.has(name));
 }
@@ -211,7 +161,7 @@ async function buildReport(): Promise<GithubReadinessReport> {
   const missingRequiredSecrets = missingFrom(requiredSecrets, secrets);
   const missingKubeconfigAlternative = intersection(kubeconfigSecretAlternatives, secrets).length > 0
     ? []
-    : kubeconfigSecretAlternatives;
+    : [...kubeconfigSecretAlternatives];
 
   return {
     ok:

@@ -6,6 +6,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
+import {
+  directWorkerPrivateVariables,
+  kubeconfigSecretAlternatives,
+  requiredSecrets,
+  requiredVariables,
+} from './phase-zero-six-github-env-contract.js';
 import { redactSecretText } from './secret-redaction.js';
 
 const execFileAsync = promisify(execFile);
@@ -1048,6 +1054,91 @@ describe('phase zero-six evidence tooling', () => {
     expect(template).not.toContain('secret-admin-jwt-value');
     expect(result.stdout).not.toContain('secret-product-jwt-value');
     expect(result.stdout).not.toContain('secret-admin-jwt-value');
+  });
+
+  it('writes a GitHub staging Environment template without leaking current secret values', async () => {
+    const dir = await tempDir();
+    const templatePath = path.join(dir, 'github-staging.env.sh');
+    const result = await runScriptWithEnv(
+      'scripts/configure-github-staging-evidence-env.ts',
+      ['--write-template', templatePath, '--direct-worker-mode', 'private'],
+      {
+        STAGING_PRODUCT_JWT: 'secret-product-jwt-value',
+        AWS_SECRET_ACCESS_KEY: 'secret-aws-value',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+    const template = await readFile(templatePath, 'utf8');
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.action).toBe('write-template');
+    expect(template).toContain('Phase 0-6 GitHub staging Environment configuration template');
+    expect(template).toContain('export AWS_STAGING_REVIEWED_BY=');
+    expect(template).toContain('export STAGING_DIRECT_WORKER_PRIVATE_PROOF=');
+    expect(template).toContain(`# export ${kubeconfigSecretAlternatives[0]}=`);
+    expect(template).toContain(`export ${kubeconfigSecretAlternatives[1]}=`);
+    expect(template).not.toContain('secret-product-jwt-value');
+    expect(template).not.toContain('secret-aws-value');
+  });
+
+  it('dry-runs GitHub staging Environment configuration without printing secret values', async () => {
+    const dir = await tempDir();
+    const envPath = path.join(dir, 'github-staging.env.sh');
+    const secretProductJwt = 'secret-product-jwt-value';
+    const secretAwsKey = 'secret-aws-value';
+    const lines = [
+      ...requiredVariables.map((name) => `export ${name}='value-for-${name}'`),
+      ...directWorkerPrivateVariables.map((name) => `export ${name}='value-for-${name}'`),
+      ...requiredSecrets.map((name) => `export ${name}='value-for-${name}'`),
+      `export ${kubeconfigSecretAlternatives[1]}='secret-kubeconfig-b64-value'`,
+      `export STAGING_PRODUCT_JWT='${secretProductJwt}'`,
+      `export AWS_SECRET_ACCESS_KEY='${secretAwsKey}'`,
+    ];
+    await writeFile(envPath, `${lines.join('\n')}\n`);
+
+    const result = await runScript(
+      'scripts/configure-github-staging-evidence-env.ts',
+      ['--values-file', envPath, '--direct-worker-mode', 'private', '--dry-run'],
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.dryRun).toBe(true);
+    expect(parsed.variables.names).toContain('AWS_STAGING_REVIEWED_BY');
+    expect(parsed.variables.names).toContain('STAGING_DIRECT_WORKER_PRIVATE_PROOF');
+    expect(parsed.secrets.requiredNames).toContain('STAGING_PRODUCT_JWT');
+    expect(parsed.secrets.requiredNames).toContain(kubeconfigSecretAlternatives[1]);
+    expect(result.stdout).not.toContain(secretProductJwt);
+    expect(result.stdout).not.toContain(secretAwsKey);
+    expect(result.stdout).not.toContain('secret-kubeconfig-b64-value');
+  });
+
+  it('reports missing GitHub staging Environment values by name only', async () => {
+    const dir = await tempDir();
+    const envPath = path.join(dir, 'github-staging-incomplete.env.sh');
+    await writeFile(
+      envPath,
+      [
+        "export STAGING_PRODUCT_JWT='secret-product-jwt-value'",
+        "export AWS_SECRET_ACCESS_KEY='secret-aws-value'",
+      ].join('\n'),
+    );
+
+    const result = await runScript(
+      'scripts/configure-github-staging-evidence-env.ts',
+      ['--values-file', envPath, '--direct-worker-mode', 'private', '--dry-run'],
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.missingVariables).toContain('AWS_STAGING_REVIEWED_BY');
+    expect(parsed.missingSecrets).toContain('STAGING_ADMIN_JWT');
+    expect(parsed.missingSecrets).toContain(kubeconfigSecretAlternatives[0]);
+    expect(result.stdout).not.toContain('secret-product-jwt-value');
+    expect(result.stdout).not.toContain('secret-aws-value');
   });
 
   it('marks all phase zero-six env groups ready when required env names are set', async () => {

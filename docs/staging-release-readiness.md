@@ -261,6 +261,32 @@ pnpm phase-zero-six:github-env:report
 This checker uses GitHub metadata APIs through `gh`. It prints variable and
 secret names only; GitHub does not return secret values.
 
+To configure the Environment from a private operator shell, generate a local
+template, fill it with real staging values, dry-run it, then apply it:
+
+```bash
+pnpm phase-zero-six:github-env:template
+
+# Fill ./.temp/phase-zero-six-evidence/github-staging.env.sh privately.
+# Do not commit the filled file.
+
+pnpm phase-zero-six:github-env:configure -- \
+  --values-file ./.temp/phase-zero-six-evidence/github-staging.env.sh \
+  --direct-worker-mode private \
+  --dry-run
+
+pnpm phase-zero-six:github-env:configure -- \
+  --values-file ./.temp/phase-zero-six-evidence/github-staging.env.sh \
+  --direct-worker-mode private
+```
+
+Use `--direct-worker-mode public` only when the staging worker has a public URL
+that should return 401/403 without router-injected worker credentials. The
+default `private` mode proves direct-worker denial through reviewed private
+network policy variables instead. The configure command prints variable and
+secret names only. It writes secrets through `gh secret set --env staging` and
+does not echo values.
+
 Trigger the visible workflow from the current branch with:
 
 ```bash
