@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { access, constants, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 interface EnvRequirement {
@@ -32,6 +32,7 @@ interface EnvReadinessReport {
   generatedAt: string;
   skippedStagingSmoke: boolean;
   envTemplatePath: string | null;
+  hostToolReadiness: HostToolReadiness;
   readyGroups: string[];
   notReadyGroups: string[];
   groups: ReturnType<typeof evaluateGroup>[];
@@ -52,6 +53,26 @@ interface EnvReadinessReport {
     valuesPrinted: boolean;
     note: string;
   };
+}
+
+interface HostToolRequirement {
+  name: string;
+  command: string;
+  requiredForGroups: string[];
+  reason: string;
+}
+
+interface HostToolReadiness {
+  ok: boolean;
+  requirements: Array<{
+    name: string;
+    command: string;
+    requiredForGroups: string[];
+    reason: string;
+    found: boolean;
+    path: string | null;
+  }>;
+  missing: string[];
 }
 
 function envValue(name: string) {
@@ -110,6 +131,35 @@ function presentNames(requirements: EnvRequirement[]) {
 
 function hasFlag(name: string) {
   return process.argv.includes(name);
+}
+
+function pathEntries() {
+  return (process.env.PATH ?? '')
+    .split(path.delimiter)
+    .filter(Boolean);
+}
+
+async function findExecutable(command: string) {
+  if (command.includes('/') || command.includes('\\')) {
+    try {
+      await access(command, constants.X_OK);
+      return command;
+    } catch {
+      return null;
+    }
+  }
+
+  for (const entry of pathEntries()) {
+    const candidate = path.join(entry, command);
+    try {
+      await access(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      // Keep scanning PATH.
+    }
+  }
+
+  return null;
 }
 
 function argValue(name: string) {
@@ -408,6 +458,51 @@ const groups: EnvGroup[] = [
   },
 ];
 
+const hostToolRequirements: HostToolRequirement[] = [
+  {
+    name: 'AWS CLI',
+    command: 'aws',
+    requiredForGroups: ['aws-preflight'],
+    reason: 'Collects AWS account, EKS cluster, Fargate profile, VPC, subnet, security group, ECR, and CloudWatch evidence.',
+  },
+  {
+    name: 'kubectl',
+    command: 'kubectl',
+    requiredForGroups: ['aws-preflight'],
+    reason: 'Collects Kubernetes namespace, service account, RBAC, Pod lifecycle, and kubectl auth can-i evidence.',
+  },
+];
+
+async function evaluateHostTools(input: {
+  skippedStagingSmoke: boolean;
+}): Promise<HostToolReadiness> {
+  const selected = hostToolRequirements.filter((requirement) => {
+    if (input.skippedStagingSmoke) {
+      return requirement.requiredForGroups.includes('aws-preflight');
+    }
+    return true;
+  });
+
+  const requirements = await Promise.all(selected.map(async (requirement) => {
+    const foundPath = await findExecutable(requirement.command);
+    return {
+      ...requirement,
+      found: Boolean(foundPath),
+      path: foundPath,
+    };
+  }));
+
+  const missing = requirements
+    .filter((requirement) => !requirement.found)
+    .map((requirement) => requirement.command);
+
+  return {
+    ok: missing.length === 0,
+    requirements,
+    missing,
+  };
+}
+
 function evaluateGroup(group: EnvGroup) {
   const missingRequired = group.required.filter((requirement) => !requirementSatisfied(requirement));
   const missingRecommended = (group.recommended ?? [])
@@ -563,6 +658,18 @@ function renderTextReport(report: EnvReadinessReport) {
   }
 
   lines.push('');
+  lines.push('## Host Tools');
+  lines.push(`- Ready: ${String(report.hostToolReadiness.ok)}`);
+  if (report.hostToolReadiness.missing.length > 0) {
+    lines.push(`- Missing commands: ${report.hostToolReadiness.missing.join(', ')}`);
+  }
+  for (const requirement of report.hostToolReadiness.requirements) {
+    lines.push(`- ${requirement.command}: ${requirement.found ? 'found' : 'missing'}`);
+    lines.push(`  Required for: ${requirement.requiredForGroups.join(', ')}`);
+    lines.push(`  Reason: ${requirement.reason}`);
+  }
+
+  lines.push('');
   lines.push('## Groups');
   for (const group of report.groups) {
     lines.push(`- ${group.id}: ${group.ready ? 'ready' : 'not ready'}`);
@@ -601,6 +708,9 @@ async function main() {
     ? groups.filter((group) => group.id === 'aws-preflight')
     : groups;
   const evaluatedGroups = selectedGroups.map(evaluateGroup);
+  const hostToolReadiness = await evaluateHostTools({
+    skippedStagingSmoke: skipStagingSmoke,
+  });
   const readyGroups = evaluatedGroups
     .filter((group) => group.ready)
     .map((group) => group.id);
@@ -626,6 +736,7 @@ async function main() {
     generatedAt,
     skippedStagingSmoke: skipStagingSmoke,
     envTemplatePath,
+    hostToolReadiness,
     readyGroups,
     notReadyGroups,
     groups: evaluatedGroups,

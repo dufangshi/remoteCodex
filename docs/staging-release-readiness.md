@@ -153,6 +153,11 @@ The `:report` commands are operator aids. They are read-only and do not fail
 only because required live staging env is still missing; use the JSON commands
 without `:report` for strict readiness gates.
 
+The same readiness report also includes a host-tool preflight for commands
+needed by live evidence collection, currently `aws` and `kubectl` for the AWS
+preflight group. Host-tool readiness only proves the operator machine can run
+the collector; it is not checklist evidence by itself.
+
 To generate a private shell template for the missing staging inputs, use:
 
 ```bash

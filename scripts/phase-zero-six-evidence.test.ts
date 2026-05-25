@@ -933,6 +933,21 @@ describe('phase zero-six evidence tooling', () => {
     expect(result.exitCode).toBe(1);
     expect(parsed.ok).toBe(false);
     expect(parsed.secretSafety.valuesPrinted).toBe(false);
+    expect(parsed.hostToolReadiness).toEqual(
+      expect.objectContaining({
+        ok: expect.any(Boolean),
+        requirements: expect.arrayContaining([
+          expect.objectContaining({
+            command: 'aws',
+            requiredForGroups: expect.arrayContaining(['aws-preflight']),
+          }),
+          expect.objectContaining({
+            command: 'kubectl',
+            requiredForGroups: expect.arrayContaining(['aws-preflight']),
+          }),
+        ]),
+      }),
+    );
     expect(result.stdout).toContain('STAGING_PRODUCT_JWT');
     expect(result.stdout).toContain('STAGING_ADMIN_JWT');
     expect(parsed.itemReadiness).toEqual(
@@ -984,6 +999,9 @@ describe('phase zero-six evidence tooling', () => {
     expect(result.stdout).toContain('Mode: full staging');
     expect(result.stdout).toContain('## Next Commands');
     expect(result.stdout).toContain('collectEvidence: pnpm phase-zero-six:collect');
+    expect(result.stdout).toContain('## Host Tools');
+    expect(result.stdout).toContain('aws:');
+    expect(result.stdout).toContain('kubectl:');
     expect(result.stdout).toContain('## Groups');
     expect(result.stdout).toContain('runtime-smoke: not ready');
     expect(result.stdout).toContain('STAGING_IDEMPOTENT_LIFECYCLE_SMOKE=true');

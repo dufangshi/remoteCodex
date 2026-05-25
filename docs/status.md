@@ -126,7 +126,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   boxes blocked by each missing evidence group. The bundle summary preserves
   these fields under `summary.envReadiness` on early env failure, and the
   bundle writes a non-authoritative `operator-report.txt` plus
-  `release-review.json` for quick staging handoff and release review. It is not
+  `release-review.json` for quick staging handoff and release review. It now
+  also reports host-tool readiness for the live evidence collector, including
+  `aws` and `kubectl` for the AWS preflight group. It is not
   checklist-completion evidence by itself.
 - Phase 0-6 operator convenience scripts now wrap the evidence flow:
   `pnpm phase-zero-six:env`, `pnpm phase-zero-six:template`,
