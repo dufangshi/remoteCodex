@@ -1,7 +1,10 @@
 import { FastifyRequest } from 'fastify';
 
+import {
+  SignedTokenPayload,
+  verifySignedToken,
+} from '../../../packages/shared/src/index';
 import { ControlPlaneRepository } from './repository';
-import { SignedTokenPayload, verifySignedToken } from './tokens';
 
 export interface AuthIdentity {
   authProvider: string;

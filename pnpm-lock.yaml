@@ -143,6 +143,31 @@ importers:
         specifier: ^3.1.1
         version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.6.1)(jsdom@29.0.0)(lightningcss@1.32.0)(tsx@4.21.0)
 
+  apps/sandbox-router:
+    dependencies:
+      '@remote-codex/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      fastify:
+        specifier: ^5.2.1
+        version: 5.8.4
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      tsup:
+        specifier: ^8.4.0
+        version: 8.5.1(jiti@2.6.1)(postcss@8.5.9)(tsx@4.21.0)(typescript@5.9.3)
+      tsx:
+        specifier: ^4.19.3
+        version: 4.21.0
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.1.1
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.6.1)(jsdom@29.0.0)(lightningcss@1.32.0)(tsx@4.21.0)
+
   apps/supervisor-api:
     dependencies:
       '@fastify/multipart':

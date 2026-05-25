@@ -359,23 +359,23 @@ Verification:
 - [x] Reject route-token requests for archived sessions.
 - [x] Return `routerBaseUrl`, `wsBaseUrl`, and `expiresAt`.
 - [x] Audit route-token issuance.
-- [ ] Decide whether the router package lives in this repository or another
+- [x] Decide whether the router package lives in this repository or another
   service.
-- [ ] Add router package if it lives in this repository.
-- [ ] Implement HTTP proxy.
+- [x] Add router package if it lives in this repository.
+- [x] Implement HTTP proxy.
 - [ ] Implement SSE proxy.
 - [ ] Implement WebSocket proxy.
-- [ ] Verify route tokens in the router.
+- [x] Verify route tokens in the router.
 - [ ] Resolve sandbox endpoint from control plane or registry.
-- [ ] Inject internal worker token.
-- [ ] Strip browser-supplied internal worker headers.
-- [ ] Strip browser-supplied identity envelope headers.
-- [ ] Inject signed identity envelope when worker scope checks are enabled.
+- [x] Inject internal worker token.
+- [x] Strip browser-supplied internal worker headers.
+- [x] Strip browser-supplied identity envelope headers.
+- [x] Inject signed identity envelope when worker scope checks are enabled.
 - [ ] Add request size limits.
 - [ ] Add idle timeouts.
 - [ ] Add rate limits.
-- [ ] Add structured proxy errors.
-- [ ] Add router health endpoint.
+- [x] Add structured proxy errors.
+- [x] Add router health endpoint.
 - [ ] Add router audit logs.
 - [ ] Fetch route token before opening a worker session from the frontend.
 - [x] Store route token only in memory.
@@ -387,7 +387,7 @@ Verification:
 Verification:
 
 - [x] Control-plane route-token tests pass.
-- [ ] Router unit tests pass.
+- [x] Router unit tests pass.
 - [ ] Local browser-to-router-to-worker smoke test passes.
 - [ ] Staging browser-to-router-to-worker smoke test passes.
 - [ ] Worker is unreachable without router-injected token in staging.
@@ -1032,22 +1032,22 @@ token.
 
 ### Router Implementation
 
-- [ ] Decide whether the router package lives in this repository or a separate
+- [x] Decide whether the router package lives in this repository or a separate
   repository.
-- [ ] Add router package if it lives in this repository.
-- [ ] Implement HTTP proxy.
+- [x] Add router package if it lives in this repository.
+- [x] Implement HTTP proxy.
 - [ ] Implement SSE proxy.
 - [ ] Implement WebSocket proxy.
-- [ ] Verify route tokens.
+- [x] Verify route tokens.
 - [ ] Resolve sandbox endpoint from the control plane or sandbox registry.
-- [ ] Inject `X-Remote-Codex-Worker-Token`.
-- [ ] Strip browser-supplied internal worker headers.
-- [ ] Strip browser-supplied identity envelope headers.
+- [x] Inject `X-Remote-Codex-Worker-Token`.
+- [x] Strip browser-supplied internal worker headers.
+- [x] Strip browser-supplied identity envelope headers.
 - [ ] Add request size limits.
 - [ ] Add idle timeouts.
 - [ ] Add rate limits.
-- [ ] Add structured proxy errors.
-- [ ] Add router health endpoint.
+- [x] Add structured proxy errors.
+- [x] Add router health endpoint.
 - [ ] Add router audit logs.
 
 ### Frontend Worker Connection
@@ -1064,7 +1064,7 @@ token.
 ### Verification
 
 - [x] Control-plane route-token tests pass.
-- [ ] Router unit tests pass.
+- [x] Router unit tests pass.
 - [ ] Browser to router to worker local smoke test passes.
 - [ ] Browser to router to worker staging smoke test passes.
 - [ ] Worker is unreachable without router-injected token in staging.

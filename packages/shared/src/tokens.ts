@@ -18,14 +18,12 @@ function sign(input: string, secret: string): string {
   return base64UrlEncode(createHmac('sha256', secret).update(input).digest());
 }
 
-export interface RouteTokenPayload {
-  sub: string;
+export interface RouteTokenPayload extends SignedTokenPayload {
   sandbox_id: string;
   workspace_id?: string;
   session_id?: string;
   scopes: string[];
   iat: number;
-  exp: number;
   jti: string;
 }
 
@@ -70,7 +68,9 @@ function decodeHeader(token: string) {
   };
 }
 
-export function verifySignedToken<TPayload extends { sub: string; exp: number } = RouteTokenPayload>(
+export function verifySignedToken<
+  TPayload extends { sub: string; exp: number } = RouteTokenPayload,
+>(
   token: string,
   secret: string,
   nowSeconds = Math.floor(Date.now() / 1000),

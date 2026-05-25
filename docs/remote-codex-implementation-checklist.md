@@ -314,19 +314,19 @@ Goal: browser traffic reaches workers only through a route-token checked proxy.
 
 ### Router
 
-- [ ] Decide router location in this repo or separate service.
-- [ ] Add router package if kept in this repo.
-- [ ] Implement HTTP proxy.
+- [x] Decide router location in this repo or separate service.
+- [x] Add router package if kept in this repo.
+- [x] Implement HTTP proxy.
 - [ ] Implement WebSocket proxy.
-- [ ] Implement route token verification.
+- [x] Implement route token verification.
 - [ ] Resolve sandbox endpoint from control plane or registry.
-- [ ] Inject `X-Remote-Codex-Worker-Token`.
-- [ ] Strip browser-supplied internal worker headers.
+- [x] Inject `X-Remote-Codex-Worker-Token`.
+- [x] Strip browser-supplied internal worker headers.
 - [ ] Add request size limits.
 - [ ] Add idle timeout.
 - [ ] Add basic rate limit.
-- [ ] Add structured proxy errors.
-- [ ] Add router health endpoint.
+- [x] Add structured proxy errors.
+- [x] Add router health endpoint.
 
 ### Frontend
 
@@ -339,7 +339,7 @@ Goal: browser traffic reaches workers only through a route-token checked proxy.
 
 ### Verification
 
-- [ ] Router unit tests pass.
+- [x] Router unit tests pass.
 - [x] Control-plane route-token tests pass.
 - [ ] Browser to router to worker smoke test passes.
 - [ ] Worker is not reachable without router token in staging.

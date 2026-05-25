@@ -9,6 +9,10 @@ import {
   runMigrations,
 } from '../../../packages/db/src/index';
 import {
+  createSignedToken,
+  verifySignedTokenWithKeys,
+} from '../../../packages/shared/src/index';
+import {
   LlmGatewayAdmin,
   NoopLlmGatewayAdmin,
   NoopSandboxManager,
@@ -23,7 +27,6 @@ import {
 } from './auth';
 import { ControlPlaneConfig, loadControlPlaneConfig } from './config';
 import { ControlPlaneRepository } from './repository';
-import { createSignedToken, verifySignedTokenWithKeys } from './tokens';
 
 class HttpError extends Error {
   constructor(
