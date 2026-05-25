@@ -1924,6 +1924,26 @@ describe('phase zero-six evidence tooling', () => {
     });
   });
 
+  it('treats placeholder staging smoke env values as missing without echoing them', async () => {
+    const result = await runScriptWithEnv(
+      'scripts/staging-phase-one-smoke.ts',
+      [],
+      {
+        STAGING_CONTROL_PLANE_BASE_URL: '<staging-control-plane-base-url>',
+        STAGING_PRODUCT_JWT: '<staging-product-jwt>',
+      },
+    );
+    const parsed = JSON.parse(result.stderr);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe('');
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error).toBe('STAGING_CONTROL_PLANE_BASE_URL is required.');
+    expect(parsed.controlPlaneBaseUrl).toBeNull();
+    expect(result.stderr).not.toContain('<staging-control-plane-base-url>');
+    expect(result.stderr).not.toContain('<staging-product-jwt>');
+  });
+
   it('prints partial staging smoke steps when the smoke aborts mid-run', async () => {
     await withFailingRouteTokenServer(async ({ controlPlaneBaseUrl }) => {
       const result = await runScriptWithEnv(
@@ -1989,6 +2009,31 @@ describe('phase zero-six evidence tooling', () => {
     expect(parsed.details.commandStderr).toContain('[REDACTED_OPENAI_KEY]');
     expect(result.stdout).not.toContain('eyJaaaaaaaaaaaaaaaa');
     expect(result.stdout).not.toContain('sk-testsecretvalue1234567890');
+  });
+
+  it('ignores placeholder provider gateway smoke env values as unconfigured', async () => {
+    const result = await runScriptWithEnv(
+      'scripts/provider-gateway-smoke.ts',
+      ['codex'],
+      {
+        PROVIDER_GATEWAY_SMOKE_CONFIG_PATH: '<provider-config-path>',
+        PROVIDER_GATEWAY_SMOKE_COMMAND_JSON: '<provider-smoke-command-json>',
+        PROVIDER_GATEWAY_SMOKE_USAGE_RECORDED: '<provider-usage-recorded>',
+        REMOTE_CODEX_LLM_GATEWAY_BASE_URL: '<gateway-base-url>',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.details.commandRan).toBe(false);
+    expect(parsed.gatewayUsageRecorded).toBe(false);
+    expect(parsed.workerConfigUsesGateway).toBe(false);
+    expect(parsed.details.gatewayBaseUrlConfigured).toBe(false);
+    expect(parsed.details.providerConfigPath).not.toBe('<provider-config-path>');
+    expect(result.stdout).not.toContain('<provider-config-path>');
+    expect(result.stdout).not.toContain('<provider-smoke-command-json>');
+    expect(result.stdout).not.toContain('<gateway-base-url>');
   });
 
   it('keeps redacted provider command output when provider gateway smoke command fails', async () => {
@@ -2072,5 +2117,52 @@ describe('phase zero-six evidence tooling', () => {
       expect(result.stdout).not.toContain('sk-testsecretvalue1234567890');
       expect(result.stdout).not.toContain('secret-product-jwt-value');
     });
+  });
+
+  it('ignores placeholder AWS preflight values instead of recording them as evidence', async () => {
+    const result = await runScriptWithEnv(
+      'scripts/collect-aws-staging-preflight-evidence.ts',
+      [],
+      {
+        AWS_STAGING_PREFLIGHT_SKIP_COMMANDS: '1',
+        AWS_STAGING_REVIEWED_BY: '<reviewed-by>',
+        AWS_STAGING_ACCOUNT_ID: '<account-id>',
+        AWS_STAGING_REGION: '<region>',
+        AWS_STAGING_EKS_CLUSTER_NAME: '<cluster-name>',
+        AWS_STAGING_K8S_NAMESPACE: '<namespace>',
+        AWS_STAGING_FARGATE_PROFILE_NAME: '<fargate-profile>',
+        AWS_STAGING_K8S_SERVICE_ACCOUNT: '<service-account>',
+        AWS_STAGING_WORKER_IMAGE_REPOSITORY: '<worker-image-repository>',
+        AWS_STAGING_WORKER_IMAGE_TAG: 'sha-<git-sha>',
+        AWS_STAGING_LOG_GROUP_NAMES: '<log-group-name>',
+        AWS_STAGING_CONFIG_REVIEWED: '<aws-staging-config-reviewed>',
+        AWS_STAGING_CREDENTIAL_REVIEW_PASSED: '<aws-staging-credential-review-passed>',
+        AWS_STAGING_K8S_AUTH_MODE: '<k8s-auth-mode>',
+        AWS_STAGING_K8S_ROLE_ARN: '<role-arn>',
+        AWS_STAGING_VPC_ID: '<vpc-id>',
+        AWS_STAGING_SUBNET_IDS: '<subnet-ids>',
+        AWS_STAGING_SECURITY_GROUP_IDS: '<security-group-ids>',
+        AWS_STAGING_ENVIRONMENT: '<environment>',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.reviewedBy).toBe('');
+    expect(parsed.aws.accountId).toBe('');
+    expect(parsed.aws.region).toBe('us-east-1');
+    expect(parsed.aws.eksClusterName).toBe('');
+    expect(parsed.aws.namespace).toBe('remote-codex-sandboxes');
+    expect(parsed.aws.fargateProfileName).toBe('');
+    expect(parsed.aws.workerImageRepository).toBe('');
+    expect(parsed.aws.workerImageTag).toBe('');
+    expect(parsed.aws.configReviewed).toBe(false);
+    expect(parsed.kubernetesCredentials.authMode).toBe('');
+    expect(parsed.kubernetesCredentials.roleArn).toBe('');
+    expect(parsed.kubernetesCredentials.ownedResourceSelector['remote-codex.dev/environment'])
+      .toBe('staging');
+    expect(parsed.kubernetesCredentials.credentialReviewPassed).toBe(false);
+    expect(result.stdout).not.toContain('<reviewed-by>');
+    expect(result.stdout).not.toContain('sha-<git-sha>');
   });
 });

@@ -17,7 +17,7 @@ interface CommandError {
 
 function envValue(name: string) {
   const value = process.env[name]?.trim();
-  return value ? value : null;
+  return value && !/<[^>]+>/.test(value) ? value : null;
 }
 
 function envBoolean(name: string) {
