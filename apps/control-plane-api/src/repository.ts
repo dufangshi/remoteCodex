@@ -594,6 +594,19 @@ export class ControlPlaneRepository {
       .get();
   }
 
+  getGatewayKeyByExternalId(input: { provider: string; externalKeyId: string }) {
+    return this.db
+      .select()
+      .from(controlGatewayKeys)
+      .where(
+        and(
+          eq(controlGatewayKeys.provider, input.provider),
+          eq(controlGatewayKeys.externalKeyId, input.externalKeyId),
+        ),
+      )
+      .get();
+  }
+
   getGatewayUserForUser(input: { userId: string; provider: string }) {
     return this.db
       .select()
@@ -640,6 +653,21 @@ export class ControlPlaneRepository {
   }
 
   recordUsageEvent(input: UsageEventInput) {
+    if (input.externalRequestId) {
+      const existing = this.db
+        .select()
+        .from(controlUsageEvents)
+        .where(
+          and(
+            eq(controlUsageEvents.provider, input.provider),
+            eq(controlUsageEvents.externalRequestId, input.externalRequestId),
+          ),
+        )
+        .get();
+      if (existing) {
+        return existing;
+      }
+    }
     const record = {
       id: randomUUID(),
       userId: input.userId,

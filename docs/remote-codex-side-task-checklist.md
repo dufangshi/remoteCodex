@@ -421,16 +421,16 @@ Verification:
 - [x] Add startup check that gateway env is present when providers are enabled.
 - [x] Redact gateway tokens from logs.
 - [x] Redact gateway tokens from API responses.
-- [ ] Define normalized LLM usage event schema.
+- [x] Define normalized LLM usage event schema.
 - [ ] Add usage import adapter for the chosen gateway.
 - [ ] Add scheduled usage import job.
-- [ ] Add manual admin usage import endpoint.
-- [ ] Deduplicate usage events by gateway event id.
-- [ ] Map gateway key id to user id.
-- [ ] Map gateway key id to sandbox id when available.
-- [ ] Store model, prompt tokens, completion tokens, cached tokens, and cost.
-- [ ] Add user usage summary endpoint.
-- [ ] Add user usage events endpoint.
+- [x] Add manual admin usage import endpoint.
+- [x] Deduplicate usage events by gateway event id.
+- [x] Map gateway key id to user id.
+- [x] Map gateway key id to sandbox id when available.
+- [x] Store model, prompt tokens, completion tokens, cached tokens, and cost.
+- [x] Add user usage summary endpoint.
+- [x] Add user usage events endpoint.
 - [ ] Add LLM usage summary UI.
 - [ ] Add LLM usage detail UI.
 - [ ] Add gateway unavailable UI.
@@ -440,7 +440,7 @@ Verification:
 
 - [x] Gateway client tests pass with mocked gateway API.
 - [x] Worker provider bootstrap tests pass for Codex, Claude Code, and OpenCode.
-- [ ] Usage import tests pass.
+- [x] Usage import tests pass.
 - [ ] Frontend usage UI tests pass.
 
 ### J. ElAgenteHarness Integration
@@ -1111,16 +1111,16 @@ Real provider root keys stay outside the sandbox.
 
 ### Usage Import
 
-- [ ] Define normalized LLM usage event schema.
+- [x] Define normalized LLM usage event schema.
 - [ ] Add usage import adapter for the chosen gateway.
 - [ ] Add scheduled usage import job.
-- [ ] Add manual admin usage import endpoint.
-- [ ] Deduplicate usage events by gateway event id.
-- [ ] Map gateway key id to user id.
-- [ ] Map gateway key id to sandbox id when available.
-- [ ] Store model, prompt tokens, completion tokens, cached tokens, and cost.
-- [ ] Add user usage summary endpoint.
-- [ ] Add user usage events endpoint.
+- [x] Add manual admin usage import endpoint.
+- [x] Deduplicate usage events by gateway event id.
+- [x] Map gateway key id to user id.
+- [x] Map gateway key id to sandbox id when available.
+- [x] Store model, prompt tokens, completion tokens, cached tokens, and cost.
+- [x] Add user usage summary endpoint.
+- [x] Add user usage events endpoint.
 
 ### Frontend
 
@@ -1133,7 +1133,7 @@ Real provider root keys stay outside the sandbox.
 
 - [ ] Control-plane gateway tests pass.
 - [ ] Worker gateway bootstrap tests pass.
-- [ ] Usage import tests pass.
+- [x] Usage import tests pass.
 - [ ] Frontend usage UI tests pass.
 
 ## Phase 7: ElAgenteHarness Integration

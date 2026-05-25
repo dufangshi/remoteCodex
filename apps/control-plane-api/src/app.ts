@@ -29,7 +29,7 @@ import {
 } from './auth';
 import { ControlPlaneConfig, loadControlPlaneConfig } from './config';
 import { checkRouteTokenQuota, QuotaDenial } from './quota';
-import { ControlPlaneRepository } from './repository';
+import { ControlPlaneRepository, type UsageEventInput } from './repository';
 
 class HttpError extends Error {
   constructor(
@@ -130,11 +130,12 @@ const routeTokenSchema = z.object({
 const importUsageSchema = z.object({
   events: z.array(
     z.object({
-      userId: z.string().uuid(),
-      sandboxId: z.string().uuid(),
+      userId: z.string().uuid().optional(),
+      sandboxId: z.string().uuid().optional(),
       workspaceId: z.string().uuid().nullable().optional(),
       sessionId: z.string().uuid().nullable().optional(),
       gatewayKeyId: z.string().uuid().nullable().optional(),
+      gatewayExternalKeyId: z.string().min(1).optional(),
       provider: z.string().min(1),
       model: z.string().min(1),
       inputTokens: z.number().int().nonnegative().optional(),
@@ -146,6 +147,8 @@ const importUsageSchema = z.object({
     }),
   ),
 });
+
+type UsageImportEvent = z.infer<typeof importUsageSchema>['events'][number];
 
 const adminSandboxReasonSchema = z.object({
   reason: z.string().min(1).max(500).optional(),
@@ -283,6 +286,33 @@ function quotaExceededError(denial: QuotaDenial) {
     limit: denial.limit,
     used: denial.used,
   });
+}
+
+function normalizeUsageImportEvent(
+  repository: ControlPlaneRepository,
+  event: UsageImportEvent,
+): UsageEventInput {
+  const gatewayKey = event.gatewayExternalKeyId
+    ? repository.getGatewayKeyByExternalId({
+        provider: event.provider,
+        externalKeyId: event.gatewayExternalKeyId,
+      })
+    : null;
+  const userId = event.userId ?? gatewayKey?.userId;
+  const sandboxId = event.sandboxId ?? gatewayKey?.sandboxId;
+  if (!userId || !sandboxId) {
+    throw new HttpError(
+      400,
+      'usage_identity_unresolved',
+      'Usage import event must include user/sandbox ids or a known gateway key id.',
+    );
+  }
+  return {
+    ...event,
+    userId,
+    sandboxId,
+    gatewayKeyId: event.gatewayKeyId ?? gatewayKey?.id ?? null,
+  };
 }
 
 async function ensureGateway(app: FastifyInstance, user: { id: string; email: string; displayName: string | null }, sandbox: { id: string }) {
@@ -517,7 +547,9 @@ export function buildControlPlaneApp(
   app.post('/api/admin/usage/import', async (request) => {
     requireAdmin(app, request);
     const input = importUsageSchema.parse(request.body);
-    const events = input.events.map((event) => repository.recordUsageEvent(event));
+    const events = input.events.map((event) =>
+      repository.recordUsageEvent(normalizeUsageImportEvent(repository, event)),
+    );
     return { events };
   });
 

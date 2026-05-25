@@ -1374,6 +1374,131 @@ describe('control plane api', () => {
     expect(events.json().events).toHaveLength(1);
   });
 
+  it('imports gateway usage by external key and deduplicates external requests', async () => {
+    const app = buildControlPlaneApp({ env: testEnv('gateway-usage-import') });
+    apps.push(app);
+
+    const auth = { authorization: 'Bearer dev:gateway-usage-user' };
+    const bootstrap = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: auth,
+      payload: {
+        email: 'gateway-usage@example.com',
+      },
+    });
+    expect(bootstrap.statusCode).toBe(200);
+    const { sandbox, gatewayKey } = bootstrap.json();
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: {
+        authorization: 'Bearer dev:admin',
+      },
+      payload: {
+        email: 'admin@example.com',
+      },
+    });
+
+    const imported = await app.inject({
+      method: 'POST',
+      url: '/api/admin/usage/import',
+      headers: {
+        authorization: 'Bearer dev:admin',
+      },
+      payload: {
+        events: [
+          {
+            gatewayExternalKeyId: gatewayKey.externalKeyId,
+            provider: 'sub2api',
+            model: 'gpt-5.1-codex',
+            inputTokens: 200,
+            outputTokens: 50,
+            cachedTokens: 25,
+            costUsd: 0.42,
+            externalRequestId: 'gateway_req_1',
+            occurredAt: '2026-05-23T01:00:00.000Z',
+          },
+          {
+            gatewayExternalKeyId: gatewayKey.externalKeyId,
+            provider: 'sub2api',
+            model: 'gpt-5.1-codex',
+            inputTokens: 999,
+            outputTokens: 999,
+            costUsd: 9.99,
+            externalRequestId: 'gateway_req_1',
+            occurredAt: '2026-05-23T01:01:00.000Z',
+          },
+        ],
+      },
+    });
+    expect(imported.statusCode).toBe(200);
+    expect(imported.json().events).toHaveLength(2);
+    expect(imported.json().events[0]).toMatchObject({
+      sandboxId: sandbox.id,
+      gatewayKeyId: gatewayKey.id,
+      inputTokens: 200,
+      outputTokens: 50,
+      cachedTokens: 25,
+      costUsd: 0.42,
+      externalRequestId: 'gateway_req_1',
+    });
+    expect(imported.json().events[1].id).toBe(imported.json().events[0].id);
+
+    const summary = await app.inject({
+      method: 'GET',
+      url: '/api/usage/summary',
+      headers: auth,
+    });
+    expect(summary.statusCode).toBe(200);
+    expect(summary.json().usage).toMatchObject({
+      requestCount: 1,
+      inputTokens: 200,
+      outputTokens: 50,
+      cachedTokens: 25,
+      costUsd: 0.42,
+    });
+  });
+
+  it('rejects gateway usage import when identity cannot be resolved', async () => {
+    const app = buildControlPlaneApp({ env: testEnv('gateway-usage-unresolved') });
+    apps.push(app);
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: {
+        authorization: 'Bearer dev:admin',
+      },
+      payload: {
+        email: 'admin@example.com',
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/admin/usage/import',
+      headers: {
+        authorization: 'Bearer dev:admin',
+      },
+      payload: {
+        events: [
+          {
+            gatewayExternalKeyId: 'missing-gateway-key',
+            provider: 'sub2api',
+            model: 'gpt-5.1-codex',
+            externalRequestId: 'gateway_req_missing',
+          },
+        ],
+      },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      code: 'usage_identity_unresolved',
+    });
+  });
+
   it('refuses route tokens for non-running sandboxes', async () => {
     const app = buildControlPlaneApp({ env: testEnv('stopped') });
     apps.push(app);

@@ -588,8 +588,8 @@ import third, then quota enforcement and UI.
 - [ ] Add scheduled LLM gateway usage import job.
 - [ ] Add manual admin LLM usage import endpoint.
 - [ ] Deduplicate gateway usage events by gateway event id.
-- [ ] Map gateway key id to user id.
-- [ ] Map gateway key id to sandbox id when available.
+- [x] Map gateway key id to user id.
+- [x] Map gateway key id to sandbox id when available.
 - [ ] Add harness webhook receiver or polling importer.
 - [ ] Map harness usage to user, sandbox, project, workspace, and session when
   available.

@@ -512,16 +512,16 @@ real provider root keys stay outside the sandbox.
 
 ### Usage Import
 
-- [ ] Define normalized LLM usage event schema.
+- [x] Define normalized LLM usage event schema.
 - [ ] Add usage import adapter for the chosen gateway.
 - [ ] Add scheduled usage import job.
-- [ ] Add manual admin usage import endpoint.
-- [ ] Deduplicate usage events by gateway event id.
-- [ ] Map gateway key id to user id.
-- [ ] Map gateway key id to sandbox id when available.
-- [ ] Store model, prompt tokens, completion tokens, cached tokens, and cost.
-- [ ] Add user usage summary endpoint.
-- [ ] Add user usage events endpoint.
+- [x] Add manual admin usage import endpoint.
+- [x] Deduplicate usage events by gateway event id.
+- [x] Map gateway key id to user id.
+- [x] Map gateway key id to sandbox id when available.
+- [x] Store model, prompt tokens, completion tokens, cached tokens, and cost.
+- [x] Add user usage summary endpoint.
+- [x] Add user usage events endpoint.
 
 ### Frontend
 
@@ -534,7 +534,7 @@ real provider root keys stay outside the sandbox.
 
 - [x] Gateway client tests pass with mocked gateway API.
 - [x] Worker provider bootstrap tests pass for Codex, Claude Code, and OpenCode.
-- [ ] Usage import tests pass.
+- [x] Usage import tests pass.
 - [ ] Frontend usage UI tests pass.
 - [ ] Staging gateway smoke validates no provider root key enters the sandbox.
 
