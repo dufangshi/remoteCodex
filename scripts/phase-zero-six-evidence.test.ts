@@ -557,6 +557,60 @@ describe('phase zero-six evidence tooling', () => {
     expect(checklist).toContain('- [ ] S3.04 Finalize AWS staging configuration.');
   });
 
+  it('summarizes aggregate phase zero-six gaps by blocking group', async () => {
+    const dir = await tempDir();
+    const checklistPath = path.join(dir, 'checklist.md');
+    const awsPath = path.join(dir, 'aws.json');
+    const stagingPath = path.join(dir, 'staging.json');
+    const awsEvidence = completeAwsEvidence();
+    const stagingEvidence = completeStagingSmokeEvidence();
+    awsEvidence.aws.configReviewed = false;
+    stagingEvidence.steps = stagingEvidence.steps.filter((step) =>
+      !['stop_sandbox', 'direct_worker_denial', 'opencode_gateway_smoke'].includes(step.name),
+    );
+    await writeFile(checklistPath, minimalChecklist());
+    await writeFile(awsPath, JSON.stringify(awsEvidence, null, 2));
+    await writeFile(stagingPath, JSON.stringify(stagingEvidence, null, 2));
+
+    const result = await runScript('scripts/verify-phase-zero-six-evidence.ts', [
+      '--checklist',
+      checklistPath,
+      '--aws-preflight',
+      awsPath,
+      '--staging-smoke',
+      stagingPath,
+    ]);
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.blockingGroups).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'aws-preflight',
+          readyItems: ['S3.05'],
+          notReadyItems: ['S3.04'],
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
+        }),
+        expect.objectContaining({
+          id: 'runtime-smoke',
+          notReadyItems: ['S3.07'],
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+        expect.objectContaining({
+          id: 'router-smoke',
+          notReadyItems: ['R5.11'],
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+        expect.objectContaining({
+          id: 'provider-smoke',
+          notReadyItems: ['G6.13'],
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+      ]),
+    );
+  });
+
   it('applies only ready checklist boxes from AWS preflight evidence', async () => {
     const dir = await tempDir();
     const checklistPath = path.join(dir, 'checklist.md');

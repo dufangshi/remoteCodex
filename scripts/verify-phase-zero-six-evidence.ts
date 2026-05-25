@@ -28,6 +28,14 @@ interface EvidenceResult {
   source: string;
 }
 
+interface BlockingGroup {
+  id: string;
+  items: string[];
+  readyItems: string[];
+  notReadyItems: string[];
+  nextEvidenceCommand: string;
+}
+
 const phaseZeroSixPrefixes = ['D0', 'A1', 'P2', 'S3', 'W4', 'R5', 'G6'];
 
 function argValue(name: string) {
@@ -147,6 +155,44 @@ function countsByPrefix(checklist: ChecklistItem[]) {
   }));
 }
 
+function buildBlockingGroups(input: {
+  readyToCheck: Array<{ checklist: ChecklistItem }>;
+  stillMissing: Array<{ checklist: ChecklistItem }>;
+}): BlockingGroup[] {
+  const readyIds = new Set(input.readyToCheck.map((entry) => entry.checklist.item));
+  const missingIds = new Set(input.stillMissing.map((entry) => entry.checklist.item));
+  const groups = [
+    {
+      id: 'aws-preflight',
+      items: ['S3.04', 'S3.05'],
+      nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
+    },
+    {
+      id: 'runtime-smoke',
+      items: ['S3.06', 'S3.07', 'S3.08'],
+      nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+    },
+    {
+      id: 'router-smoke',
+      items: ['R5.10', 'R5.11', 'R5.12'],
+      nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+    },
+    {
+      id: 'provider-smoke',
+      items: ['G6.11', 'G6.12', 'G6.13'],
+      nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+    },
+  ];
+
+  return groups
+    .map((group) => ({
+      ...group,
+      readyItems: group.items.filter((item) => readyIds.has(item)),
+      notReadyItems: group.items.filter((item) => missingIds.has(item)),
+    }))
+    .filter((group) => group.notReadyItems.length > 0);
+}
+
 async function main() {
   const checklistPath = argValue('--checklist') ?? 'docs/remote-codex-side-detailed-checklist.md';
   const awsPath = argValue('--aws-preflight');
@@ -170,6 +216,10 @@ async function main() {
     .filter((item) => item.checked)
     .map((item) => ({ checklist: item, evidence: evidence.get(item.item) }))
     .filter((entry) => entry.evidence && entry.evidence.readyToCheck === false);
+  const blockingGroups = buildBlockingGroups({
+    readyToCheck,
+    stillMissing,
+  });
   const originalCountsByPrefix = countsByPrefix(checklist);
   const canApply =
     applyReady &&
@@ -247,6 +297,7 @@ async function main() {
         'Provide AWS preflight evidence with --aws-preflight, staging smoke evidence with --staging-smoke, or complete the local checklist item with its documented verification.',
       ],
     })),
+    blockingGroups,
     checkedButContradicted: checkedButContradicted.map((entry) => ({
       item: entry.checklist.item,
       title: entry.checklist.title,
