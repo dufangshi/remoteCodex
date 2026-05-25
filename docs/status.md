@@ -35,6 +35,8 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 ## Implemented Baseline
 
 - Architecture docs and task checklists exist under `docs/`.
+- Staging release-readiness notes and production release gates exist under
+  `docs/`.
 - Control-plane auth supports local dev bearer auth and production-style JWT
   verification with issuer, audience, expiry, not-before, issued-at, and clock
   skew checks.
@@ -52,6 +54,8 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 
 ## In Progress
 
+- Phase 0 documentation and release baseline is complete for this branch; live
+  staging verification has not run yet.
 - AWS sandbox adapter implementation.
 - Frontend auth shell, login states, and admin user management.
 - Browser-to-worker route-token connection flow.
@@ -61,20 +65,19 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 
 ## Immediate Next Implementation Queue
 
-1. Finish and verify AWS adapter configuration loading.
-2. Implement AWS Pod creation, stop, status polling, endpoint discovery, and
-   worker environment/secret injection behind mocked Kubernetes clients.
-3. Implement AWS Pod creation, stop, status polling, endpoint discovery, and
-   worker environment/secret injection against the documented lifecycle rules.
-4. Finish frontend auth shell: login route, authenticated app guard, loading,
+1. Finish frontend auth shell: login route, authenticated app guard, loading,
    expired, unauthorized, and disabled-account states.
-5. Add the route-token browser connection flow and router implementation or
-   separate-router contract.
-6. Pin provider runtime versions in the worker image and add Docker smoke tests.
-7. Implement gateway key provisioning and generated provider config regression
-   tests.
-8. Implement ElAgenteHarness key provisioning and worker environment/bootstrap
-   tests.
+2. Add production auth-provider smoke coverage or staging smoke procedure for
+   valid, expired, wrong-issuer, and wrong-audience tokens.
+3. Enforce disabled-user behavior across route-token issuance, sandbox
+   start/restart, and usage import.
+4. Add project detail, list loading states, and open-session flow.
+5. Add worker checkpoint caller plus wrong-user and wrong-sandbox denial tests.
+6. Add AWS namespace/label strategy, Pod cleanup policy, idle timeout, and
+   sandbox reaper.
+7. Build and smoke-test the worker Docker image, then add CI image checks.
+8. Finish gateway usage adapter, scheduled import, metrics, and frontend usage
+   UI.
 
 ## Verification Commands
 

@@ -74,7 +74,7 @@ Goal: make the branch understandable and safe to build on.
 - [x] Document the control-plane session to worker contract.
 - [x] Add the Remote Codex side checklist.
 - [x] Add this implementation plan.
-- [ ] Add first staging release notes and link them back to the checklist.
+- [x] Add first staging release notes and link them back to the checklist.
 - [x] Add a short onboarding note for local development of the control plane,
   router, and worker together.
 
@@ -697,5 +697,5 @@ first provider/harness bootstrap path works.
   worker.
 - [ ] Add staging smoke script for one sandbox lifecycle.
 - [ ] Add staging smoke script for browser-to-router-to-worker traffic.
-- [ ] Add release checklist that blocks production when required smoke tests are
+- [x] Add release checklist that blocks production when required smoke tests are
   unchecked.

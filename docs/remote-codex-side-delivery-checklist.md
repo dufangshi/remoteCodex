@@ -121,14 +121,14 @@ understand.
   handling, and local development.
 - [x] Document local control-plane, router, and worker smoke flow.
 - [x] Add implementation checklists.
-- [ ] Add first staging release-readiness notes.
+- [x] Add first staging release-readiness notes.
 
 ### Verification
 
 - [x] `docs/README.md` points to the active architecture docs.
 - [x] `docs/status.md` describes implemented work and open risks.
 - [x] Local smoke documentation exists.
-- [ ] Staging release notes link back to this checklist.
+- [x] Staging release notes link back to this checklist.
 
 ## Phase 1: Product Auth, Users, And Admin Boundary
 

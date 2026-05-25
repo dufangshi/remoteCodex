@@ -96,14 +96,14 @@ Each task should be checked only when all three statements are true:
   execution checklists.
 - [x] Add local onboarding and smoke documentation for the control plane,
   sandbox router, and worker.
-- [ ] Add a short release-readiness document before the first staging deploy.
+- [x] Add a short release-readiness document before the first staging deploy.
 
 Verification:
 
 - [x] `docs/README.md` links to the architecture docs and checklist docs.
 - [x] `docs/status.md` names completed work and remaining risks.
 - [x] `docs/local-control-plane-worker-smoke.md` documents the local smoke path.
-- [ ] First staging release notes link back to this checklist.
+- [x] First staging release notes link back to this checklist.
 
 ### B. Product Auth, Users, And Admin Boundary
 

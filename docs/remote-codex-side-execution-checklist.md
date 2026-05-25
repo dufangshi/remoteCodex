@@ -121,28 +121,30 @@ Goal: keep the branch understandable and releaseable as product shape changes.
 
 ### Tasks
 
-- [ ] Add first staging release-readiness notes.
+- [x] Add first staging release-readiness notes.
   - Acceptance: create a staging readiness document that names the exact
     services, env vars, smoke checks, rollback steps, and blocked gates for the
     first staging deploy.
   - Verification: docs link back to this checklist and to `docs/status.md`.
 
-- [ ] Add a release checklist that blocks production when required smoke checks
+- [x] Add a release checklist that blocks production when required smoke checks
   are unchecked.
   - Acceptance: release checklist includes auth, sandbox lifecycle, router,
     gateway, harness, worker image, usage import, and rollback gates.
   - Verification: checklist is linked from `docs/README.md`.
 
-- [ ] Update `docs/status.md` after each major implementation slice.
+- [x] Update `docs/status.md` after each major implementation slice.
   - Acceptance: status names completed work, current focus, and remaining
     risks.
   - Verification: status file commit accompanies larger phase handoffs.
 
 ### Evidence
 
-- Files:
-- Verification:
-- Residual risk:
+- Files: `docs/staging-release-readiness.md`, `docs/release-gates.md`,
+  `docs/status.md`, `docs/README.md`
+- Verification: `git diff --check`
+- Residual risk: staging has not been deployed or smoked; staging and
+  production gates remain unchecked until real environment verification exists.
 
 ## Phase 1: Product Auth, Users, And Admin Boundary
 
