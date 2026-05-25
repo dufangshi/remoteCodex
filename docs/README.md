@@ -22,11 +22,13 @@ Recommended reading order:
 15. [Remote Codex Side Work Breakdown And Checklist](./remote-codex-side-work-breakdown.md)
 
 Use the Chinese product task checklist as the primary step-by-step task board
-for new Remote Codex side work. Each checkbox is intended to be small enough to
-implement, verify, check off, and commit as a standalone slice. It covers the
-current product direction from Phase 0-6 staging evidence through
-ElAgenteHarness, MCP/tool policy, persistence, billing, deployment, and
-end-to-end acceptance.
+for new Remote Codex side work. It is the current daily execution checklist:
+pick one unchecked item, satisfy its `Done when` and `Verify with`, then check
+off that item and commit the evidence. Each checkbox should be small enough to
+implement, verify, check off, and commit as a standalone slice. If a future item
+is still too broad, split it there before implementing. It covers the current
+product direction from Phase 0-6 staging evidence through ElAgenteHarness,
+MCP/tool policy, persistence, billing, deployment, and end-to-end acceptance.
 
 Use the detailed checklist as the authoritative Phase 0-6 evidence board
 because the Phase 0-6 verification scripts read it directly. The work breakdown

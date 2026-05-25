@@ -219,11 +219,13 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   not run yet.
 - `docs/remote-codex-side-product-task-checklist.zh.md` is the active
   Remote Codex side product task board for one-item-at-a-time implementation.
-  `docs/remote-codex-side-detailed-checklist.md` remains the authoritative
-  Phase 0-6 evidence checklist because the evidence scripts read it directly.
-  Keep `docs/remote-codex-side-work-breakdown.md` aligned for the near-term
-  queue, and keep `docs/remote-codex-side-execution-checklist.md` synchronized
-  when a completed item changes phase evidence or release risk.
+  Treat it as the daily execution checklist: choose one unchecked item, satisfy
+  its `Done when` and `Verify with`, check only that proven item, and commit the
+  evidence. `docs/remote-codex-side-detailed-checklist.md` remains the
+  authoritative Phase 0-6 evidence checklist because the evidence scripts read
+  it directly. Keep `docs/remote-codex-side-work-breakdown.md` aligned for the
+  near-term queue, and keep `docs/remote-codex-side-execution-checklist.md`
+  synchronized when a completed item changes phase evidence or release risk.
 - AWS sandbox adapter implementation exists with local manager and mocked
   EKS/Fargate adapter tests; real staging AWS/EKS lifecycle verification has not
   run yet.

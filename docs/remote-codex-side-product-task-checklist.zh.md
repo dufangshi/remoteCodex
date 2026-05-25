@@ -9,10 +9,12 @@
 任务对应英文清单中的某个 staging/AWS/provider-runtime checkbox，也必须等
 真实环境证据存在后再去英文清单里勾选。
 
-本文件是 Remote Codex 侧后续产品化工作的中文主任务板。每个任务都应该能被
-单独领取、实现、验证、勾选和提交。外部系统的内部任务不在这里打勾；这里
-只打勾 Remote Codex 仓库内已经落地的 API、UI、worker、router、配置、部署
-wiring、contract、client、smoke 或文档。
+本文件是 Remote Codex 侧后续产品化工作的中文主任务板，也是当前推荐使用的
+日常执行 checklist。每个任务都应该能被单独领取、实现、验证、勾选和提交。
+如果某个任务实际推进时发现仍然过大，先把它拆成更小的子 checkbox，再开始
+实现。外部系统的内部任务不在这里打勾；这里只打勾 Remote Codex 仓库内已经
+落地的 API、UI、worker、router、配置、部署 wiring、contract、client、smoke
+或文档。
 
 ## 文档定位
 
@@ -21,6 +23,11 @@ wiring、contract、client、smoke 或文档。
 - Remote Codex 侧到底要做哪些工程任务。
 - 每个任务完成到什么程度才可以勾选。
 - 做完后用什么测试、smoke、部署记录或人工 evidence 证明它已经完成。
+
+它的使用方式很直接：从“当前优先级”开始，选择一个未完成 checkbox，完成
+对应 `Done when` 和 `Verify with`，再把该 checkbox 从 `[ ]` 改成 `[x]`。
+不要只因为设计已讨论、外部系统已计划、或者 mock 数据能跑通就勾选真实环境
+任务。
 
 它不是外部系统的总项目管理文档。LLM gateway、ElAgenteHarness、Modal/AWS
 Batch/HPC worker、ORCA worker 等外部系统可以有自己的任务板；本文件只跟踪
@@ -74,6 +81,49 @@ Remote Codex 仓库中需要实现或集成的部分。
   - 包含：一个真实用户从登录到 sandbox、provider、harness、usage、quota、
     admin inspection 和 secret leakage review 的完整路径。
   - 对应任务：P12.01-P12.16。
+
+## Checklist 粒度标准
+
+一个合格的 checkbox 应该满足下面这些条件。如果后续新增任务，也按这个标准
+写：
+
+- 可以由一个人或一次小 PR 独立完成。
+- 有明确的 Remote Codex 侧代码、配置、部署 wiring、测试、smoke 或文档产物。
+- 有清楚的 `Done when`，说明用户、control plane、worker、router、gateway、
+  harness、billing 或 ops 行为完成到什么程度。
+- 有清楚的 `Verify with`，说明要跑哪个 test、typecheck、local smoke、
+  staging smoke、deploy log、artifact scan 或人工 review。
+- 不把外部系统内部实现混进 Remote Codex 任务；外部系统只通过 contract、
+  client、mock/fixture、env wiring、UI、importer 或 staging smoke 体现。
+- 涉及 secret、key、token、JWT、provider config、worker env 的任务必须包含
+  redaction 或 secret review。
+
+勾选一个任务前，至少确认：
+
+- 代码或文档已经在当前 branch 落地。
+- 指定验证已经执行，并且结果可以在命令输出、CI run、staging artifact、
+  deploy log、`docs/status.md` 或 commit message 中追溯。
+- 如果任务依赖 AWS、Railway、LLM gateway、ElAgenteHarness、provider runtime、
+  billing 或 production readiness，证据来自真实目标环境，而不是本地 mock。
+- 没有把 raw provider key、gateway token、harness admin token、
+  `INACT_X_APP_KEY`、product JWT、worker internal token 写入仓库、日志、
+  smoke artifact、browser storage、API response 或 route token。
+
+推荐每完成一个 checkbox 就单独提交一次。提交信息或 PR 描述至少包含：
+
+```text
+Task:
+- <checkbox id and text>
+
+Remote Codex changes:
+- <main files, APIs, UI routes, worker behavior, config, or docs changed>
+
+Evidence:
+- <commands, tests, staging smoke, deploy log, artifact, or docs review>
+
+Still unchecked:
+- <remaining AWS/staging/provider/billing/secret risks>
+```
 
 ## Remote Codex 侧模块拆分
 
