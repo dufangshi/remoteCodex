@@ -4,6 +4,7 @@ interface EnvRequirement {
   names: string[];
   mode?: 'all' | 'any';
   kind?: 'present' | 'truthy';
+  example?: string;
 }
 
 interface EnvGroup {
@@ -42,6 +43,25 @@ function requirementLabel(requirement: EnvRequirement) {
   return `${requirement.names.join(separator)}${suffix}`;
 }
 
+function canonicalEnvName(requirement: EnvRequirement) {
+  return requirement.names[0] ?? requirement.id;
+}
+
+function placeholderValue(requirement: EnvRequirement) {
+  if (requirement.kind === 'truthy') {
+    return 'true';
+  }
+  return requirement.example ?? `<${requirement.id}>`;
+}
+
+function shellQuote(value: string) {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function exportLine(requirement: EnvRequirement) {
+  return `export ${canonicalEnvName(requirement)}=${shellQuote(placeholderValue(requirement))}`;
+}
+
 function presentNames(requirements: EnvRequirement[]) {
   return requirements.flatMap((requirement) =>
     requirement.names.filter((name) => (
@@ -60,41 +80,49 @@ const groups: EnvGroup[] = [
         id: 'reviewer',
         description: 'Operator identity for AWS staging config review.',
         names: ['AWS_STAGING_REVIEWED_BY'],
+        example: 'operator@example.com',
       },
       {
         id: 'cluster',
         description: 'Staging EKS cluster name.',
         names: ['AWS_STAGING_EKS_CLUSTER_NAME', 'SANDBOX_EKS_CLUSTER_NAME'],
+        example: 'remote-codex-staging',
       },
       {
         id: 'namespace',
         description: 'Sandbox Kubernetes namespace.',
         names: ['AWS_STAGING_K8S_NAMESPACE', 'SANDBOX_K8S_NAMESPACE'],
+        example: 'remote-codex-sandboxes',
       },
       {
         id: 'fargate-profile',
         description: 'EKS Fargate profile name.',
         names: ['AWS_STAGING_FARGATE_PROFILE_NAME'],
+        example: 'sandbox-workers',
       },
       {
         id: 'service-account',
         description: 'Kubernetes service account used by sandbox manager.',
         names: ['AWS_STAGING_K8S_SERVICE_ACCOUNT', 'SANDBOX_K8S_SERVICE_ACCOUNT'],
+        example: 'remote-codex-sandbox-manager',
       },
       {
         id: 'worker-image-repository',
         description: 'Worker image repository expected in staging.',
         names: ['AWS_STAGING_WORKER_IMAGE_REPOSITORY', 'SANDBOX_WORKER_IMAGE_REPOSITORY'],
+        example: '<account-id>.dkr.ecr.<region>.amazonaws.com/remote-codex-worker',
       },
       {
         id: 'worker-image-tag',
         description: 'Immutable worker image tag expected in staging.',
         names: ['AWS_STAGING_WORKER_IMAGE_TAG', 'SANDBOX_WORKER_IMAGE_TAG'],
+        example: 'sha-<git-sha>',
       },
       {
         id: 'log-groups',
         description: 'CloudWatch log groups used for staging evidence.',
         names: ['AWS_STAGING_LOG_GROUP_NAMES'],
+        example: '/aws/eks/remote-codex-staging,/aws/eks/remote-codex-worker',
       },
       {
         id: 'config-reviewed',
@@ -114,31 +142,37 @@ const groups: EnvGroup[] = [
         id: 'region',
         description: 'AWS region; collector falls back to SANDBOX_AWS_REGION, AWS_REGION, then us-east-1.',
         names: ['AWS_STAGING_REGION', 'SANDBOX_AWS_REGION', 'AWS_REGION'],
+        example: 'us-east-1',
       },
       {
         id: 'account',
         description: 'AWS account id; collector can also discover it via aws sts.',
         names: ['AWS_STAGING_ACCOUNT_ID'],
+        example: '123456789012',
       },
       {
         id: 'vpc',
         description: 'VPC id; collector can also discover it from the EKS cluster.',
         names: ['AWS_STAGING_VPC_ID'],
+        example: 'vpc-xxxxxxxx',
       },
       {
         id: 'subnets',
         description: 'Subnet ids; collector can also discover them from the EKS cluster.',
         names: ['AWS_STAGING_SUBNET_IDS', 'SANDBOX_SUBNET_IDS'],
+        example: 'subnet-aaa,subnet-bbb',
       },
       {
         id: 'security-groups',
         description: 'Security group ids; collector can also discover them from the EKS cluster.',
         names: ['AWS_STAGING_SECURITY_GROUP_IDS', 'SANDBOX_SECURITY_GROUP_IDS'],
+        example: 'sg-xxxxxxxx',
       },
       {
         id: 'k8s-role',
         description: 'IAM role ARN used by the Kubernetes credential path.',
         names: ['AWS_STAGING_K8S_ROLE_ARN', 'AWS_ROLE_ARN'],
+        example: 'arn:aws:iam::<account-id>:role/remote-codex-sandbox-manager',
       },
     ],
     warnings: [
@@ -154,16 +188,19 @@ const groups: EnvGroup[] = [
         id: 'control-plane-url',
         description: 'Staging control-plane API base URL.',
         names: ['STAGING_CONTROL_PLANE_BASE_URL'],
+        example: 'https://remote-codex-control-plane-staging.example.com',
       },
       {
         id: 'product-token',
         description: 'Product JWT for the staging smoke user.',
         names: ['STAGING_PRODUCT_JWT'],
+        example: '<staging-product-jwt>',
       },
       {
         id: 'admin-token',
         description: 'Admin JWT needed for runtime Pod identity proof.',
         names: ['STAGING_ADMIN_JWT'],
+        example: '<staging-admin-jwt>',
       },
       {
         id: 'idempotent-smoke',
@@ -183,16 +220,19 @@ const groups: EnvGroup[] = [
         id: 'smoke-email',
         description: 'Stable email for the staging smoke user.',
         names: ['STAGING_SMOKE_EMAIL'],
+        example: 'phase-one-smoke@example.com',
       },
       {
         id: 'ready-timeout',
         description: 'Sandbox readiness timeout for slower EKS Fargate starts.',
         names: ['STAGING_SANDBOX_READY_TIMEOUT_MS'],
+        example: '900000',
       },
       {
         id: 'stop-timeout',
         description: 'Sandbox stop timeout for slower EKS Fargate termination.',
         names: ['STAGING_SANDBOX_STOP_TIMEOUT_MS'],
+        example: '900000',
       },
     ],
   },
@@ -205,6 +245,7 @@ const groups: EnvGroup[] = [
         id: 'direct-worker-url',
         description: 'Worker base URL used only to prove direct access is denied.',
         names: ['STAGING_DIRECT_WORKER_BASE_URL'],
+        example: 'https://<direct-worker-endpoint>',
       },
     ],
     warnings: [
@@ -220,6 +261,7 @@ const groups: EnvGroup[] = [
         id: 'codex-command',
         description: 'Codex provider smoke command.',
         names: ['STAGING_CODEX_GATEWAY_SMOKE_COMMAND_JSON', 'STAGING_CODEX_GATEWAY_SMOKE_COMMAND'],
+        example: '["pnpm","exec","tsx","scripts/provider-gateway-smoke.ts","codex"]',
       },
     ],
     recommended: [
@@ -227,6 +269,7 @@ const groups: EnvGroup[] = [
         id: 'codex-env',
         description: 'Provider-specific env overrides for the Codex smoke helper.',
         names: ['STAGING_CODEX_GATEWAY_SMOKE_COMMAND_ENV_JSON'],
+        example: '{"PROVIDER_GATEWAY_SMOKE_COMMAND_JSON":"[\\"codex\\",\\"exec\\",\\"--\\",\\"echo\\",\\"gateway smoke\\"]","PROVIDER_GATEWAY_SMOKE_USAGE_RECORDED":"1"}',
       },
     ],
   },
@@ -239,6 +282,7 @@ const groups: EnvGroup[] = [
         id: 'claude-command',
         description: 'Claude Code provider smoke command.',
         names: ['STAGING_CLAUDE_GATEWAY_SMOKE_COMMAND_JSON', 'STAGING_CLAUDE_GATEWAY_SMOKE_COMMAND'],
+        example: '["pnpm","exec","tsx","scripts/provider-gateway-smoke.ts","claude"]',
       },
     ],
     recommended: [
@@ -246,6 +290,7 @@ const groups: EnvGroup[] = [
         id: 'claude-env',
         description: 'Provider-specific env overrides for the Claude Code smoke helper.',
         names: ['STAGING_CLAUDE_GATEWAY_SMOKE_COMMAND_ENV_JSON'],
+        example: '{"PROVIDER_GATEWAY_SMOKE_COMMAND_JSON":"[\\"claude\\",\\"-p\\",\\"gateway smoke\\"]","PROVIDER_GATEWAY_SMOKE_USAGE_RECORDED":"1"}',
       },
     ],
   },
@@ -258,6 +303,7 @@ const groups: EnvGroup[] = [
         id: 'opencode-command',
         description: 'OpenCode provider smoke command.',
         names: ['STAGING_OPENCODE_GATEWAY_SMOKE_COMMAND_JSON', 'STAGING_OPENCODE_GATEWAY_SMOKE_COMMAND'],
+        example: '["pnpm","exec","tsx","scripts/provider-gateway-smoke.ts","opencode"]',
       },
     ],
     recommended: [
@@ -265,6 +311,7 @@ const groups: EnvGroup[] = [
         id: 'opencode-env',
         description: 'Provider-specific env overrides for the OpenCode smoke helper.',
         names: ['STAGING_OPENCODE_GATEWAY_SMOKE_COMMAND_ENV_JSON'],
+        example: '{"PROVIDER_GATEWAY_SMOKE_COMMAND_JSON":"[\\"opencode\\",\\"run\\",\\"gateway smoke\\"]","PROVIDER_GATEWAY_SMOKE_USAGE_RECORDED":"1"}',
       },
     ],
   },
@@ -280,6 +327,8 @@ function evaluateGroup(group: EnvGroup) {
     ...presentNames(group.required),
     ...presentNames(group.recommended ?? []),
   ])).sort();
+  const missingRequiredTemplate = missingRequired.map(exportLine);
+  const missingRecommendedTemplate = missingRecommended.map(exportLine);
 
   return {
     id: group.id,
@@ -290,6 +339,8 @@ function evaluateGroup(group: EnvGroup) {
     missingEnv: missingRequired.map(requirementLabel),
     recommendedEnv,
     missingRecommendedEnv: missingRecommended.map(requirementLabel),
+    missingRequiredExportTemplate: missingRequiredTemplate,
+    missingRecommendedExportTemplate: missingRecommendedTemplate,
     presentEnvNamesOnly,
     warnings: group.warnings ?? [],
   };
@@ -310,6 +361,12 @@ function main() {
     readyGroups,
     notReadyGroups,
     groups: evaluatedGroups,
+    missingEnvExportTemplate: evaluatedGroups.flatMap((group) =>
+      group.missingRequiredExportTemplate.map((line) => `# ${group.id}\n${line}`),
+    ),
+    missingRecommendedEnvExportTemplate: evaluatedGroups.flatMap((group) =>
+      group.missingRecommendedExportTemplate.map((line) => `# ${group.id}\n${line}`),
+    ),
     secretSafety: {
       valuesPrinted: false,
       note: 'This report prints environment variable names only; it never prints JWTs, API keys, tokens, or command JSON values.',

@@ -157,6 +157,14 @@ It is an operator convenience check only; it does not prove AWS access, staging
 lifecycle, router behavior, or provider runtime success, and it must not be
 used to check any checklist box by itself.
 
+The JSON includes `missingEnvExportTemplate` and
+`missingRecommendedEnvExportTemplate` arrays. These contain shell `export`
+lines with placeholders or non-secret examples only, grouped by evidence area.
+Operators can copy those lines into a private staging shell, replace
+placeholders with real values, and rerun the readiness check. Do not commit a
+filled env file or paste real JWTs, gateway tokens, provider command env JSON,
+or AWS credentials into release docs.
+
 ### Phase-One Runtime Smoke
 
 The scripted entry point for the phase-one Remote Codex staging path is:

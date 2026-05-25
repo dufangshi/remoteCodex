@@ -201,6 +201,12 @@ describe('phase zero-six evidence tooling', () => {
     expect(parsed.secretSafety.valuesPrinted).toBe(false);
     expect(result.stdout).toContain('STAGING_PRODUCT_JWT');
     expect(result.stdout).toContain('STAGING_ADMIN_JWT');
+    expect(parsed.missingEnvExportTemplate).toEqual(
+      expect.arrayContaining([
+        "# runtime-smoke\nexport STAGING_IDEMPOTENT_LIFECYCLE_SMOKE='true'",
+        "# runtime-smoke\nexport STAGING_STOP_SANDBOX_AFTER_SMOKE='true'",
+      ]),
+    );
     expect(result.stdout).not.toContain('secret-product-jwt-value');
     expect(result.stdout).not.toContain('secret-admin-jwt-value');
   });
@@ -236,6 +242,7 @@ describe('phase zero-six evidence tooling', () => {
     expect(result.exitCode).toBe(0);
     expect(parsed.ok).toBe(true);
     expect(parsed.notReadyGroups).toEqual([]);
+    expect(parsed.missingEnvExportTemplate).toEqual([]);
     expect(parsed.readyGroups).toEqual([
       'aws-preflight',
       'runtime-smoke',
