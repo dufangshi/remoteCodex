@@ -159,6 +159,30 @@ STAGING_CLAUDE_GATEWAY_SMOKE_COMMAND="<command run by the operator>" \
 STAGING_OPENCODE_GATEWAY_SMOKE_COMMAND="<command run by the operator>"
 ```
 
+The recommended command target is the provider gateway helper inside the
+worker. Run it directly in the worker shell, or wrap it with `kubectl exec` if
+the operator launches it from outside the Pod:
+
+```bash
+PROVIDER_GATEWAY_SMOKE_COMMAND_JSON='["codex","exec","--","echo","gateway smoke"]' \
+PROVIDER_GATEWAY_SMOKE_USAGE_RECORDED=1 \
+pnpm exec tsx scripts/provider-gateway-smoke.ts codex
+```
+
+For the phase-one staging runner, point each optional command at the helper:
+
+```bash
+STAGING_CODEX_GATEWAY_SMOKE_COMMAND="pnpm exec tsx scripts/provider-gateway-smoke.ts codex" \
+STAGING_CLAUDE_GATEWAY_SMOKE_COMMAND="pnpm exec tsx scripts/provider-gateway-smoke.ts claude" \
+STAGING_OPENCODE_GATEWAY_SMOKE_COMMAND="pnpm exec tsx scripts/provider-gateway-smoke.ts opencode"
+```
+
+`PROVIDER_GATEWAY_SMOKE_COMMAND_JSON` must be a JSON string array containing
+the real provider CLI command to run inside the worker. The helper verifies the
+provider command result, gateway usage evidence, generated provider config, and
+absence of raw root-key env/config names before printing the JSON consumed by
+the staging verifier.
+
 Useful timing overrides for slower EKS/Fargate starts:
 
 ```bash

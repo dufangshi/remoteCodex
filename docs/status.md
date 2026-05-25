@@ -76,6 +76,10 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   evidence draft from `aws` CLI, `kubectl auth can-i`, and deployment env
   values before the verifier is run. Use `pnpm exec tsx ... > file` when
   redirecting clean JSON to a file.
+- Provider gateway smoke helper exists as
+  `scripts/provider-gateway-smoke.ts`; it wraps a real provider CLI command,
+  checks generated provider config, checks raw root-key absence, and emits the
+  JSON fields required by the G6.11-G6.13 staging verifier.
 - Worker mode disables host/provider management APIs that should not be exposed
   in sandbox runtime.
 - Route-token signing supports key ids and previous-key verification.
@@ -176,7 +180,8 @@ gateway, ElAgenteHarness, or chemistry compute workers.
    browser-to-router-to-worker traffic.
 6. Run staging provider-runtime gateway smokes for Codex, Claude Code, and
    OpenCode, including gateway usage records and worker env/config root-key
-   absence.
+   absence. Use `pnpm exec tsx scripts/provider-gateway-smoke.ts <provider>`
+   inside the worker to produce the required evidence JSON.
 
 ## Verification Commands
 

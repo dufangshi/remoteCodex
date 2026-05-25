@@ -834,7 +834,10 @@ the sandbox, while real provider root keys stay outside the sandbox.
   command output; check these boxes only when that output also includes gateway
   usage records and root-key absence checks. The verifier expects each provider
   smoke command to emit parsed JSON with `provider`, `gatewayUsageRecorded`,
-  `rootKeysAbsent`, and `workerConfigUsesGateway`.
+  `rootKeysAbsent`, and `workerConfigUsesGateway`. Use
+  `pnpm exec tsx scripts/provider-gateway-smoke.ts <provider>` inside the
+  worker, with `PROVIDER_GATEWAY_SMOKE_COMMAND_JSON` pointing at the real
+  provider CLI invocation, to produce this JSON.
 
 ## Phase 7: ElAgenteHarness Integration
 
@@ -1321,6 +1324,7 @@ pnpm --filter @remote-codex/config typecheck
 pnpm --filter @remote-codex/db typecheck
 pnpm smoke:local-worker-checkpoint
 pnpm smoke:production-auth
+pnpm smoke:provider-gateway -- <codex|claude|opencode>
 pnpm smoke:staging-phase-one
 pnpm exec tsx scripts/collect-aws-staging-preflight-evidence.ts > <evidence-json>
 pnpm verify:aws-staging-preflight-evidence -- <evidence-json>
