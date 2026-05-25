@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { ControlPlaneSandbox } from '../lib/api';
 import { ControlPlanePage } from './ControlPlanePage';
 
 const baseUrl = 'http://127.0.0.1:8790';
@@ -20,7 +21,7 @@ const user = {
   lastSeenAt: '2026-05-25T00:00:00.000Z',
 };
 
-const stoppedSandbox = {
+const stoppedSandbox: ControlPlaneSandbox = {
   id: 'sandbox-1',
   userId: 'user-1',
   state: 'stopped',
@@ -41,13 +42,36 @@ const stoppedSandbox = {
   updatedAt: '2026-05-25T00:00:00.000Z',
 };
 
-const runningSandbox = {
+const runningSandbox: ControlPlaneSandbox = {
   ...stoppedSandbox,
   state: 'running',
   routerBaseUrl: 'https://router.example.test',
   workerServiceName: 'worker-user-1',
   lastStartedAt: '2026-05-25T00:01:00.000Z',
   lastSeenAt: '2026-05-25T00:01:30.000Z',
+};
+
+const startingSandbox: ControlPlaneSandbox = {
+  ...stoppedSandbox,
+  state: 'starting',
+  statusReason: 'Worker Pod has been applied and is waiting for readiness.',
+  startupProgress: 25,
+};
+
+const degradedSandbox: ControlPlaneSandbox = {
+  ...runningSandbox,
+  state: 'degraded',
+  statusReason: 'Worker Pod is running but not ready.',
+  startupProgress: 75,
+};
+
+const failedSandbox: ControlPlaneSandbox = {
+  ...stoppedSandbox,
+  state: 'failed',
+  statusReason: 'Cannot pull worker image.',
+  startupProgress: 25,
+  lastFailureCode: 'image_pull',
+  lastFailureMessage: 'Cannot pull worker image.',
 };
 
 const project = {
@@ -331,5 +355,75 @@ describe('ControlPlanePage', () => {
     await waitFor(() => {
       expect(screen.getByText('Project slug is already in use.')).toBeInTheDocument();
     });
+  });
+
+  it('shows sandbox startup, degraded, and failure states', async () => {
+    let currentSandbox: ControlPlaneSandbox = startingSandbox;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
+
+      if (path === '/api/me/bootstrap' && init?.method === 'POST') {
+        return jsonResponse({ user, sandbox: currentSandbox, gatewayKey: null });
+      }
+
+      if (path === '/api/me' && !init?.method) {
+        return jsonResponse({ user, sandbox: currentSandbox, usage });
+      }
+
+      if (path === '/api/projects' && !init?.method) {
+        return jsonResponse({ projects: [] });
+      }
+
+      if (path === '/api/workspaces' && !init?.method) {
+        return jsonResponse({ workspaces: [] });
+      }
+
+      if (path === '/api/sandbox/health' && !init?.method) {
+        currentSandbox = degradedSandbox;
+        return jsonResponse({
+          sandbox: currentSandbox,
+          status: {
+            state: 'degraded',
+          },
+          endpoint: {
+            routerBaseUrl: 'https://router.example.test',
+          },
+        });
+      }
+
+      if (path === '/api/sandbox/restart' && init?.method === 'POST') {
+        currentSandbox = failedSandbox;
+        return jsonResponse({ sandbox: currentSandbox });
+      }
+
+      return jsonResponse({
+        code: 'not_found',
+        message: `Unhandled request: ${path}`,
+      }, 404);
+    });
+
+    render(<ControlPlanePage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Startup progress')).toBeInTheDocument();
+    });
+    expect(screen.getByText('25%')).toBeInTheDocument();
+    expect(screen.getByText('Worker Pod has been applied and is waiting for readiness.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Health' }));
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Worker Pod is running but not ready.').length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Restart' }));
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Cannot pull worker image.').length).toBeGreaterThan(0);
+    });
+    expect(screen.getByText('image_pull')).toBeInTheDocument();
   });
 });

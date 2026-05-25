@@ -81,11 +81,46 @@ function statusTone(state: string) {
   switch (state) {
     case 'running':
       return 'border-[var(--status-success-border)] bg-[var(--status-success-bg)] text-[var(--status-success-fg)]';
+    case 'failed':
+    case 'degraded':
+    case 'unknown':
+      return 'border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)]';
     case 'stopped':
       return 'border-[var(--status-neutral-border)] bg-[var(--status-neutral-bg)] text-[var(--status-neutral-fg)]';
     default:
       return 'border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] text-[var(--status-warning-fg)]';
   }
+}
+
+function sandboxBanner(sandbox: ControlPlaneSandbox | null) {
+  if (!sandbox) {
+    return null;
+  }
+  if (sandbox.state === 'degraded') {
+    return {
+      tone: 'warning',
+      text: sandbox.statusReason ?? 'Sandbox is reachable but not fully ready.',
+    };
+  }
+  if (sandbox.state === 'failed') {
+    return {
+      tone: 'danger',
+      text: sandbox.lastFailureMessage ?? sandbox.statusReason ?? 'Sandbox startup failed.',
+    };
+  }
+  if (sandbox.state === 'unknown') {
+    return {
+      tone: 'warning',
+      text: sandbox.statusReason ?? 'Sandbox state is unknown.',
+    };
+  }
+  if (!['running', 'starting', 'stopping'].includes(sandbox.state)) {
+    return {
+      tone: 'neutral',
+      text: 'Sandbox is offline.',
+    };
+  }
+  return null;
 }
 
 function Section({
@@ -186,6 +221,7 @@ export function ControlPlanePage() {
     () => workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ?? null,
     [selectedWorkspaceId, workspaces],
   );
+  const sandboxNotice = sandboxBanner(sandbox);
 
   async function run<T>(label: string, action: () => Promise<T>) {
     setBusy(label);
@@ -428,6 +464,19 @@ export function ControlPlanePage() {
           {message}
         </div>
       ) : null}
+      {sandboxNotice ? (
+        <div
+          className={`rounded-[0.9rem] border px-4 py-3 text-sm ${
+            sandboxNotice.tone === 'danger'
+              ? 'border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)]'
+              : sandboxNotice.tone === 'warning'
+                ? 'border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] text-[var(--status-warning-fg)]'
+                : 'border-[var(--status-neutral-border)] bg-[var(--status-neutral-bg)] text-[var(--status-neutral-fg)]'
+          }`}
+        >
+          {sandboxNotice.text}
+        </div>
+      ) : null}
 
       <Section
         title="Account"
@@ -505,11 +554,33 @@ export function ControlPlanePage() {
         }
       >
         {sandbox ? (
-          <div className="grid gap-3 text-sm text-[var(--theme-fg-muted)] md:grid-cols-2">
-            <p><span className="text-[var(--theme-fg)]">Sandbox id:</span> {sandbox.id}</p>
-            <p><span className="text-[var(--theme-fg)]">Image:</span> {sandbox.image}</p>
-            <p><span className="text-[var(--theme-fg)]">Router:</span> {sandbox.routerBaseUrl ?? 'not assigned'}</p>
-            <p><span className="text-[var(--theme-fg)]">S3 prefix:</span> {sandbox.s3Prefix}</p>
+          <div className="grid gap-4">
+            <div className="grid gap-3 text-sm text-[var(--theme-fg-muted)] md:grid-cols-2">
+              <p><span className="text-[var(--theme-fg)]">Sandbox id:</span> {sandbox.id}</p>
+              <p><span className="text-[var(--theme-fg)]">Image:</span> {sandbox.image}</p>
+              <p><span className="text-[var(--theme-fg)]">Router:</span> {sandbox.routerBaseUrl ?? 'not assigned'}</p>
+              <p><span className="text-[var(--theme-fg)]">S3 prefix:</span> {sandbox.s3Prefix}</p>
+              {sandbox.statusReason ? (
+                <p><span className="text-[var(--theme-fg)]">Status:</span> {sandbox.statusReason}</p>
+              ) : null}
+              {sandbox.lastFailureCode ? (
+                <p><span className="text-[var(--theme-fg)]">Failure:</span> {sandbox.lastFailureCode}</p>
+              ) : null}
+            </div>
+            {typeof sandbox.startupProgress === 'number' && sandbox.startupProgress > 0 && sandbox.startupProgress < 100 ? (
+              <div className="grid gap-2">
+                <div className="flex items-center justify-between text-xs text-[var(--theme-fg-muted)]">
+                  <span>Startup progress</span>
+                  <span>{sandbox.startupProgress}%</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-[var(--theme-muted)]">
+                  <div
+                    className="h-full rounded-full bg-[var(--theme-accent-solid)]"
+                    style={{ width: `${sandbox.startupProgress}%` }}
+                  />
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : (
           <p className="text-sm text-[var(--theme-fg-muted)]">Login to bootstrap the user sandbox.</p>

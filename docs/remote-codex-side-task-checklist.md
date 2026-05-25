@@ -321,9 +321,9 @@ start, stop, observe, and eventually snapshot it.
 - [x] Add start sandbox action.
 - [x] Add stop sandbox action.
 - [x] Add restart sandbox action.
-- [ ] Add degraded/offline banner.
-- [ ] Add startup progress state.
-- [ ] Add failure reason display.
+- [x] Add degraded/offline banner.
+- [x] Add startup progress state.
+- [x] Add failure reason display.
 - [ ] Add admin sandbox view.
 
 ### Verification
