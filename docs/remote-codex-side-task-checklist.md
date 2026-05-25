@@ -65,6 +65,597 @@ Use these gates to keep the branch shippable while the implementation grows.
 - Phase 6 is complete when Codex, Claude Code, and OpenCode bootstrap against
   the LLM gateway without exposing real provider root keys to the sandbox.
 
+## Detailed Remote Codex Execution Board
+
+Use this board as the practical one-item-at-a-time task list for this
+repository. The phase sections below remain the full inventory; this section is
+the execution-oriented view that should be updated as commits land.
+
+Each task should be checked only when all three statements are true:
+
+- The code or document change is merged on this branch.
+- The related tests, typechecks, smoke checks, or manual deployment checks have
+  passed.
+- The completion evidence is recorded in the commit message, PR, or nearby
+  verification note.
+
+### A. Repository And Architecture Baseline
+
+- [x] Create and push the `sandbox-worker-control-plane` branch.
+- [x] Remove obsolete docs that do not match the sandbox-worker product shape.
+- [x] Add the docs index in `docs/README.md`.
+- [x] Document the full Agente product architecture.
+- [x] Document the control-plane to sandbox-worker architecture.
+- [x] Document product auth and control-plane identity boundaries.
+- [x] Document the session-to-worker contract.
+- [x] Document current branch status and known gaps.
+- [x] Document architecture decisions for AWS runtime, sandbox shape, and local
+  development mode.
+- [x] Add this Remote Codex side task checklist.
+- [ ] Add a short release-readiness document before the first staging deploy.
+
+Verification:
+
+- [x] `docs/README.md` links to the architecture docs and checklist docs.
+- [x] `docs/status.md` names completed work and remaining risks.
+- [ ] First staging release notes link back to this checklist.
+
+### B. Product Auth, Users, And Admin Boundary
+
+- [x] Define the control-plane auth verifier interface.
+- [x] Keep `dev:<subject>` bearer auth for local development.
+- [x] Implement production-style JWT verifier support.
+- [x] Validate JWT issuer.
+- [x] Validate JWT audience.
+- [x] Add clock-skew tolerance.
+- [x] Standardize `401` and `403` error responses.
+- [x] Bootstrap a product user record idempotently from authenticated identity.
+- [x] Store user status.
+- [x] Store display name.
+- [x] Store billing customer id.
+- [x] Store quota profile.
+- [x] Add `GET /api/me`.
+- [x] Add `PATCH /api/me`.
+- [x] Add admin user listing.
+- [x] Add admin user status update.
+- [x] Add admin quota-profile update.
+- [x] Add audit events for admin user updates.
+- [ ] Add provider-specific auth integration or smoke tests.
+- [ ] Add explicit user deactivation policy.
+- [ ] Add user data export policy.
+- [ ] Add email verification state only if the chosen auth provider does not
+  own it.
+- [ ] Add frontend login route.
+- [x] Add frontend registration/signup entry.
+- [x] Add frontend logout action.
+- [ ] Add authenticated app-shell guard.
+- [ ] Add auth-loading state.
+- [ ] Add expired-session state.
+- [ ] Add disabled-account state.
+- [x] Add account/profile page.
+- [ ] Add admin user management UI.
+- [ ] Prove product user JWTs are never forwarded to worker APIs.
+
+Verification:
+
+- [x] Control-plane auth unit tests pass.
+- [x] Control-plane typecheck passes.
+- [x] Supervisor-web typecheck passes.
+- [ ] Frontend auth tests cover login, logout, loading, expired session, and
+  disabled account.
+- [ ] Local or staging e2e smoke test covers login to authenticated shell.
+
+### C. Product Data Model: Projects, Workspaces, Sessions
+
+- [x] Create durable project records.
+- [x] Create durable workspace records.
+- [x] Create durable session records.
+- [x] Link workspaces to projects.
+- [x] Link sessions to workspaces.
+- [x] Track worker session id separately from control-plane session id.
+- [x] Enforce one-user-to-one-sandbox invariant for phase one.
+- [x] Define project archive/delete semantics.
+- [x] Define workspace archive/delete semantics.
+- [x] Define session archive/delete semantics.
+- [x] Document forward-only migration policy.
+- [x] Add project CRUD API.
+- [x] Add workspace creation and update API.
+- [x] Add session creation and update API.
+- [x] Enforce ownership checks on project APIs.
+- [x] Enforce ownership checks on workspace APIs.
+- [x] Enforce ownership checks on session APIs.
+- [x] Add cross-user denial tests.
+- [ ] Add pagination for project lists.
+- [ ] Add pagination for workspace lists.
+- [ ] Add pagination for session lists.
+- [ ] Add search/filter support for product lists.
+- [x] Add project list UI.
+- [x] Add project creation UI.
+- [ ] Add project detail UI.
+- [x] Add workspace list UI inside project context.
+- [x] Add workspace creation UI.
+- [x] Add session list UI inside workspace context.
+- [x] Add session creation UI.
+- [ ] Add session open flow that acquires a route token.
+- [x] Add empty states for project/workspace/session lists.
+- [ ] Add loading states for every project/workspace/session list.
+- [x] Add create/update error states.
+
+Verification:
+
+- [x] Control-plane CRUD and ownership tests pass.
+- [x] Frontend project/workspace/session navigation tests pass.
+- [ ] E2E smoke test covers create project, create workspace, create session,
+  and open session.
+
+### D. Session-To-Worker Contract
+
+- [x] Define how a control-plane session maps to a worker thread/session.
+- [x] Define worker metadata fields required by the session registry.
+- [x] Add worker metadata endpoint fields.
+- [x] Add explicit session checkpoint endpoint.
+- [ ] Add worker-to-control-plane heartbeat or checkpoint call.
+- [ ] Add session close/finalize sync behavior.
+- [ ] Reject worker session sync for the wrong user.
+- [ ] Reject worker session sync for the wrong sandbox.
+- [ ] Add retry/backoff policy for session checkpoint submission.
+- [ ] Add audit events for session sync failures.
+
+Verification:
+
+- [x] Worker metadata tests cover safe metadata shape.
+- [ ] Session sync tests cover wrong-user and wrong-sandbox denial.
+- [ ] Local smoke test verifies worker checkpoint reaches the control plane.
+
+### E. Sandbox Lifecycle And AWS Adapter
+
+- [x] Define `SandboxManager`.
+- [x] Add `createSandbox`.
+- [x] Add `startSandbox`.
+- [x] Add `stopSandbox`.
+- [x] Add `restartSandbox`.
+- [x] Add `deleteSandbox`.
+- [x] Add status polling.
+- [x] Add endpoint discovery.
+- [x] Add environment preparation.
+- [x] Add structured errors for quota, capacity, config, and provider failures.
+- [x] Implement local no-op adapter for tests.
+- [x] Implement local worker-process adapter for development.
+- [x] Document local sandbox environment variables.
+- [x] Choose EKS Fargate for phase-one sandbox workers.
+- [x] Document the EKS Fargate decision and ECS fallback.
+- [x] Define worker image repository and immutable tag format.
+- [x] Define CPU, memory, and ephemeral storage profiles.
+- [x] Define VPC, subnet, security group, and egress requirements.
+- [x] Implement AWS adapter configuration loading.
+- [x] Implement Pod creation.
+- [x] Implement Pod stop.
+- [x] Implement Pod status polling.
+- [x] Implement worker endpoint discovery.
+- [x] Implement worker environment injection.
+- [x] Implement worker secret injection.
+- [x] Handle AWS capacity errors.
+- [x] Handle image pull errors.
+- [x] Handle worker readiness timeout.
+- [x] Add sandbox start API.
+- [x] Add sandbox stop API.
+- [x] Add sandbox restart API.
+- [x] Add sandbox health API.
+- [x] Add admin sandbox list API.
+- [x] Add admin force-stop API.
+- [x] Track sandbox heartbeat timestamp.
+- [x] Track image version.
+- [x] Track resource profile.
+- [x] Track endpoint.
+- [x] Track status reason.
+- [x] Track startup progress.
+- [x] Track last failure code and message.
+- [x] Add sandbox status indicator UI.
+- [x] Add start/stop/restart actions in the UI.
+- [x] Add degraded/offline UI.
+- [x] Add startup progress UI.
+- [x] Add failure reason UI.
+- [ ] Add sandbox idle-timeout policy.
+- [ ] Add admin sandbox view.
+- [ ] Add local smoke script that starts control plane plus local worker.
+- [ ] Add local route-token smoke test against the worker process.
+- [ ] Run staging start-one-sandbox smoke test.
+- [ ] Run staging stop-one-sandbox smoke test.
+
+Verification:
+
+- [x] Unit tests cover lifecycle transitions.
+- [x] AWS adapter tests pass with mocked AWS clients.
+- [x] Local worker-process adapter can start a worker.
+- [ ] Staging can create, start, observe, and stop one EKS Fargate sandbox.
+
+### F. Worker Image, Runtime, And Startup Guardrails
+
+- [x] Keep `Dockerfile.worker` as the canonical image.
+- [x] Pin Node base image version.
+- [x] Pin `@openai/codex`.
+- [x] Pin `@anthropic-ai/claude-code`.
+- [x] Pin `@anthropic-ai/claude-agent-sdk`.
+- [x] Pin `opencode-ai`.
+- [x] Pin `@opencode-ai/sdk`.
+- [x] Add image labels for git SHA and image version.
+- [x] Run the image as non-root `agent`.
+- [x] Use `/workspace` as workspace root.
+- [x] Put provider homes under `/home/agent`.
+- [x] Listen on `0.0.0.0`.
+- [x] Add build-time provider runtime manifest.
+- [x] Add safe worker runtime metadata endpoint.
+- [x] Validate worker-mode required environment.
+- [x] Validate `REMOTE_CODEX_SANDBOX_ID`.
+- [x] Validate `REMOTE_CODEX_USER_ID`.
+- [x] Validate `REMOTE_CODEX_WORKER_AUTH_TOKEN`.
+- [x] Validate `WORKSPACE_ROOT=/workspace` in production worker mode.
+- [x] Validate `HOME=/home/agent` in production worker mode.
+- [x] Fail fast on missing provider home directories.
+- [x] Fail fast on unwritable workspace.
+- [x] Redact service tokens from startup logs.
+- [x] Add startup metadata logs without secrets.
+- [ ] Validate gateway environment when provider runtimes are enabled.
+- [ ] Validate ElAgenteHarness environment when chemistry tools are enabled.
+- [ ] Validate MCP config path and permissions.
+- [ ] Build the worker image locally from a clean checkout.
+- [ ] Run the worker container locally and verify `/readyz`.
+
+Verification:
+
+- [x] Supervisor API typecheck passes.
+- [x] Config typecheck passes.
+- [ ] `docker build -f Dockerfile.worker -t remote-codex-worker:verify .`
+- [ ] Local worker container smoke test passes.
+
+### G. Worker API Authorization And Scope Policy
+
+- [x] Keep `/healthz` public.
+- [x] Keep `/readyz` public.
+- [x] Require worker token for non-health APIs in worker mode.
+- [x] Accept `Authorization: Bearer <token>`.
+- [x] Accept `X-Remote-Codex-Worker-Token`.
+- [x] Disable provider host config read in worker mode.
+- [x] Disable provider host config write in worker mode.
+- [x] Disable build restart in worker mode.
+- [x] Disable runtime install/update in worker mode.
+- [x] Strip or ignore browser-supplied user identity headers.
+- [ ] Define signed identity envelope headers.
+- [ ] Sign identity envelope in the router or local test client.
+- [ ] Verify identity envelope signature in the worker.
+- [ ] Verify identity envelope expiry.
+- [ ] Verify identity envelope sandbox id matches `REMOTE_CODEX_SANDBOX_ID`.
+- [ ] Verify identity envelope scopes.
+- [ ] Add `shell:write` checks to shell write, terminate, and update routes.
+- [ ] Add `file:write` checks to file write, move, delete, and upload routes.
+- [ ] Add `provider:turn:create` checks to provider turn creation routes.
+- [ ] Add `provider:turn:interrupt` checks to provider interrupt routes.
+- [ ] Add artifact read/write scopes to artifact routes once the artifact model
+  is finalized.
+- [ ] Deny scope-protected routes when the envelope is missing.
+- [ ] Deny scope-protected routes when the envelope is expired.
+- [ ] Deny scope-protected routes when the envelope sandbox is wrong.
+- [ ] Deny scope-protected routes when required scope is missing.
+
+Verification:
+
+- [x] Worker token auth tests pass.
+- [x] Disabled management-route tests pass.
+- [ ] Scope-denial tests cover every checked scope-protected route.
+- [ ] `pnpm --filter @remote-codex/supervisor-api test`
+
+### H. Sandbox Router And Route Tokens
+
+- [x] Define route token payload schema.
+- [x] Include user id, sandbox id, scopes, expiry, and nonce/token id.
+- [x] Sign route tokens with a control-plane secret.
+- [x] Add route-token key id.
+- [x] Document route-token signing key rotation.
+- [x] Add route-token tests for expiry, tampering, and wrong sandbox.
+- [x] Add `POST /api/sandboxes/:sandboxId/route-token`.
+- [x] Check sandbox ownership before issuing a route token.
+- [x] Check sandbox running state before issuing a route token.
+- [x] Check account status before issuing a route token.
+- [x] Reject route-token requests for archived sessions.
+- [x] Return `routerBaseUrl`, `wsBaseUrl`, and `expiresAt`.
+- [x] Audit route-token issuance.
+- [ ] Decide whether the router package lives in this repository or another
+  service.
+- [ ] Add router package if it lives in this repository.
+- [ ] Implement HTTP proxy.
+- [ ] Implement SSE proxy.
+- [ ] Implement WebSocket proxy.
+- [ ] Verify route tokens in the router.
+- [ ] Resolve sandbox endpoint from control plane or registry.
+- [ ] Inject internal worker token.
+- [ ] Strip browser-supplied internal worker headers.
+- [ ] Strip browser-supplied identity envelope headers.
+- [ ] Inject signed identity envelope when worker scope checks are enabled.
+- [ ] Add request size limits.
+- [ ] Add idle timeouts.
+- [ ] Add rate limits.
+- [ ] Add structured proxy errors.
+- [ ] Add router health endpoint.
+- [ ] Add router audit logs.
+- [ ] Fetch route token before opening a worker session from the frontend.
+- [x] Store route token only in memory.
+- [ ] Refresh route token before expiry.
+- [ ] Reconnect WebSocket after token refresh.
+- [ ] Show route authorization failure state.
+- [ ] Show reconnecting state.
+
+Verification:
+
+- [x] Control-plane route-token tests pass.
+- [ ] Router unit tests pass.
+- [ ] Local browser-to-router-to-worker smoke test passes.
+- [ ] Staging browser-to-router-to-worker smoke test passes.
+- [ ] Worker is unreachable without router-injected token in staging.
+
+### I. LLM Gateway Integration
+
+- [ ] Choose the phase-one gateway implementation and deployment shape.
+- [ ] Document gateway admin credential requirements.
+- [ ] Add gateway provider config table or config source.
+- [ ] Store gateway base URL.
+- [ ] Store gateway key id per user or sandbox.
+- [ ] Store encrypted gateway token only if raw recovery is required.
+- [ ] Add gateway client interface.
+- [ ] Implement gateway user creation.
+- [ ] Implement gateway key creation.
+- [ ] Implement gateway key revocation.
+- [ ] Implement gateway key rotation.
+- [ ] Attach gateway credential to sandbox provisioning.
+- [ ] Add admin endpoint to reconcile gateway keys.
+- [ ] Render Codex config pointing to the gateway `/v1` endpoint.
+- [ ] Prove Codex config never contains real provider root keys.
+- [ ] Render Claude Code config pointing to the gateway.
+- [ ] Prove Claude Code config never contains real provider root keys.
+- [ ] Render OpenCode config pointing to the gateway.
+- [ ] Prove OpenCode config never contains real provider root keys.
+- [ ] Add startup check that gateway env is present when providers are enabled.
+- [ ] Redact gateway tokens from logs.
+- [ ] Redact gateway tokens from API responses.
+- [ ] Define normalized LLM usage event schema.
+- [ ] Add usage import adapter for the chosen gateway.
+- [ ] Add scheduled usage import job.
+- [ ] Add manual admin usage import endpoint.
+- [ ] Deduplicate usage events by gateway event id.
+- [ ] Map gateway key id to user id.
+- [ ] Map gateway key id to sandbox id when available.
+- [ ] Store model, prompt tokens, completion tokens, cached tokens, and cost.
+- [ ] Add user usage summary endpoint.
+- [ ] Add user usage events endpoint.
+- [ ] Add LLM usage summary UI.
+- [ ] Add LLM usage detail UI.
+- [ ] Add gateway unavailable UI.
+- [ ] Add quota exceeded UI for LLM usage.
+
+Verification:
+
+- [ ] Gateway client tests pass with mocked gateway API.
+- [ ] Worker provider bootstrap tests pass for Codex, Claude Code, and OpenCode.
+- [ ] Usage import tests pass.
+- [ ] Frontend usage UI tests pass.
+
+### J. ElAgenteHarness Integration
+
+- [ ] Add harness base URL config.
+- [ ] Add harness admin credential config if the harness requires one.
+- [ ] Add harness credential table.
+- [ ] Decide whether Remote Codex stores only key hashes or encrypted raw keys.
+- [ ] Generate `INACT_X_APP_KEY` during user or sandbox provisioning.
+- [ ] Bind harness key to user id.
+- [ ] Bind harness key to sandbox id.
+- [ ] Bind harness key to scopes.
+- [ ] Bind harness key to quota profile.
+- [ ] Add harness key rotation endpoint.
+- [ ] Add harness key revocation endpoint.
+- [ ] Inject `ELAGENTE_HARNESS_BASE_URL` into the worker.
+- [ ] Inject `INACT_X_APP_KEY` into the worker.
+- [ ] Validate harness env in worker mode when chemistry tools are enabled.
+- [ ] Redact harness key from logs.
+- [ ] Report harness integration status in worker metadata without exposing the
+  raw key.
+- [ ] Decide whether the tool surface is MCP, shell wrappers, provider config,
+  or a combination.
+- [ ] Render ElAgenteHarness MCP config if MCP is used.
+- [ ] Render ElAgenteHarness shell/tool wrappers if wrappers are used.
+- [ ] Integrate harness tools into Codex config.
+- [ ] Integrate harness tools into Claude Code config.
+- [ ] Integrate harness tools into OpenCode config.
+- [ ] Add workflow catalog endpoint or proxy integration.
+- [ ] Add task list endpoint or proxy integration.
+- [ ] Add task detail endpoint or proxy integration.
+- [ ] Add artifact metadata endpoint or proxy integration.
+- [ ] Add workflow catalog UI.
+- [ ] Add task status UI.
+- [ ] Add job status UI.
+- [ ] Add chemistry artifact display hooks.
+- [ ] Define normalized harness usage event schema.
+- [ ] Add harness webhook receiver or polling importer.
+- [ ] Map harness usage to user, sandbox, project, workspace, and session when
+  available.
+- [ ] Store workflow id, job id, usage units, estimated cost, and actual cost.
+
+Verification:
+
+- [ ] Harness credential tests pass.
+- [ ] Harness bootstrap tests pass.
+- [ ] Harness tool config tests pass.
+- [ ] Harness usage import tests pass.
+- [ ] Frontend workflow/task UI tests pass.
+
+### K. MCP And Tool Policy
+
+- [ ] Define approved MCP server registry.
+- [ ] Define stdio MCP launch policy.
+- [ ] Define remote MCP allowlist policy.
+- [ ] Render Codex MCP config under the sandbox provider home.
+- [ ] Render Claude MCP config under the sandbox provider home.
+- [ ] Render OpenCode MCP config under the sandbox provider home.
+- [ ] Ensure stdio MCP servers run with cwd inside `/workspace`.
+- [ ] Ensure stdio MCP servers inherit only approved env vars.
+- [ ] Block host-local filesystem MCP servers by default.
+- [ ] Block host-local Docker MCP servers by default.
+- [ ] Block host-local database MCP servers by default.
+- [ ] Add MCP startup audit events.
+- [ ] Add MCP tool-call audit events.
+- [ ] Add MCP failure timeline items where useful.
+- [ ] Add ElAgenteHarness tools to the approved MCP/tool registry.
+- [ ] Add UI for MCP status and failures.
+
+Verification:
+
+- [ ] MCP config rendering tests pass.
+- [ ] MCP startup audit tests pass.
+- [ ] Worker typecheck passes.
+
+### L. Workspace Persistence, Diffs, And Artifacts
+
+- [ ] Choose phase-one persistence backend.
+- [ ] Document EFS tradeoffs.
+- [ ] Document S3 snapshot tradeoffs.
+- [ ] Document temporary workspace limitations if chosen for MVP.
+- [ ] Define maximum workspace size.
+- [ ] Define maximum artifact size.
+- [ ] Add snapshot metadata table.
+- [ ] Restore snapshot before worker readiness.
+- [ ] Save snapshot before sandbox stop.
+- [ ] Add manual snapshot endpoint.
+- [ ] Add snapshot status endpoint.
+- [ ] Add snapshot failure handling.
+- [ ] Add snapshot retry policy.
+- [ ] Add snapshot retention policy.
+- [ ] Initialize baseline in `/workspace`.
+- [ ] Preserve git metadata when source is a git repository.
+- [ ] Create synthetic baseline commit when source is not a git repository.
+- [ ] Add worker changed-files endpoint.
+- [ ] Add worker text-diff endpoint.
+- [ ] Add worker binary-diff metadata endpoint.
+- [ ] Add patch size limit.
+- [ ] Add file size limit.
+- [ ] Add symlink policy.
+- [ ] Add executable-bit policy.
+- [ ] Add delete policy.
+- [ ] Add generated credential exclusion policy.
+- [ ] Add diff review UI.
+- [ ] Add apply accepted changes path.
+- [ ] Define artifact ownership model.
+- [ ] Define object storage path format.
+- [ ] Add artifact upload from worker or harness.
+- [ ] Add artifact download/view URL endpoint.
+- [ ] Add artifact retention policy.
+- [ ] Add chemistry artifact type mapping.
+
+Verification:
+
+- [ ] Snapshot restore smoke test passes.
+- [ ] Snapshot save smoke test passes.
+- [ ] Diff endpoint tests pass.
+- [ ] Diff review UI tests pass.
+
+### M. Billing, Quotas, And Usage Ledger
+
+- [ ] Finalize usage ledger schema.
+- [ ] Add source enum for `llm`.
+- [ ] Add source enum for `harness`.
+- [ ] Add source enum for `compute`.
+- [ ] Add source enum for `storage`.
+- [ ] Add source enum for `sandbox_runtime`.
+- [ ] Add dedupe key.
+- [ ] Store user id.
+- [ ] Store sandbox id.
+- [ ] Store project id when available.
+- [ ] Store workspace id when available.
+- [ ] Store session id when available.
+- [ ] Store units.
+- [ ] Store cost amount.
+- [ ] Store currency.
+- [ ] Store metadata JSON.
+- [ ] Add quota profile schema.
+- [ ] Add user quota assignment.
+- [ ] Add quota check service.
+- [ ] Add LLM spend quota.
+- [ ] Add compute spend quota.
+- [ ] Add storage quota.
+- [ ] Add sandbox runtime quota.
+- [ ] Add quota preflight before route-token issuance.
+- [ ] Add quota preflight before harness job creation when visible to Remote
+  Codex.
+- [ ] Add quota exceeded API response shape.
+- [ ] Add usage dashboard.
+- [ ] Add LLM usage breakdown.
+- [ ] Add workflow usage breakdown.
+- [ ] Add compute usage breakdown.
+- [ ] Add quota remaining display.
+- [ ] Add quota exceeded banner.
+- [ ] Add admin usage reconciliation page or export endpoint.
+
+Verification:
+
+- [ ] Usage ledger tests pass.
+- [ ] Quota service tests pass.
+- [ ] Usage UI tests pass.
+
+### N. Deployment, Operations, And CI
+
+- [ ] Add Railway service definition for frontend.
+- [ ] Add Railway service definition for control-plane API.
+- [ ] Add Railway Postgres configuration.
+- [ ] Add required frontend env documentation.
+- [ ] Add required control-plane env documentation.
+- [ ] Add migration command for deploy.
+- [ ] Add frontend health check.
+- [ ] Add control-plane health check.
+- [ ] Add AWS account and environment naming convention.
+- [ ] Add ECR repository for worker image.
+- [ ] Add sandbox router deployment plan.
+- [ ] Add sandbox worker runtime plan.
+- [ ] Add VPC networking plan.
+- [ ] Add egress policy.
+- [ ] Add secrets injection plan.
+- [ ] Add logs and metrics plan.
+- [ ] Store route-token signing secret securely.
+- [ ] Store worker internal token material securely.
+- [ ] Store gateway admin credentials securely.
+- [ ] Store harness admin credentials securely.
+- [ ] Store AWS credentials securely.
+- [ ] Define secret rotation procedure.
+- [ ] Define emergency revoke procedure.
+- [ ] Add control-plane structured logs.
+- [ ] Add router structured logs.
+- [ ] Add worker structured logs.
+- [ ] Add usage import logs.
+- [ ] Add sandbox lifecycle metrics.
+- [ ] Add route-token issuance metrics.
+- [ ] Add worker connection metrics.
+- [ ] Add error dashboards.
+- [ ] Add CI job for control-plane typecheck.
+- [ ] Add CI job for control-plane tests.
+- [ ] Add CI job for supervisor-api typecheck.
+- [ ] Add CI job for supervisor-api tests.
+- [ ] Add CI job for supervisor-web typecheck.
+- [ ] Add CI job for supervisor-web tests.
+- [ ] Add CI job for config typecheck.
+- [ ] Add CI job for config tests.
+- [ ] Add CI job for worker Docker build.
+- [ ] Add CI smoke test for worker `/readyz`.
+- [ ] Add CI smoke test for worker auth denial.
+- [ ] Add CI smoke test for worker auth success.
+- [ ] Add CI test for route-token verification.
+- [ ] Add CI test for gateway config rendering.
+- [ ] Add CI test for harness env/config rendering.
+- [ ] Add CI e2e smoke test for login to session open.
+- [ ] Add CI e2e smoke test for browser to router to worker connection.
+
+Verification:
+
+- [ ] Staging deploy succeeds.
+- [ ] Staging browser-to-worker smoke test succeeds.
+- [ ] Staging gateway usage import smoke test succeeds.
+- [ ] Staging harness key injection smoke test succeeds.
+
 ## Work Item Completion Template
 
 When finishing a checklist item, use this evidence pattern in the commit or PR
