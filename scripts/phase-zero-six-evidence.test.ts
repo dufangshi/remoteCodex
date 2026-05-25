@@ -1117,12 +1117,15 @@ describe('phase zero-six evidence tooling', () => {
     expect(commandNames).toEqual([
       'verify_aws_staging_preflight_evidence',
       'verify_phase_zero_six_evidence',
-      'verify_phase_zero_six_artifacts_safe',
+      'verify_phase_zero_six_input_artifacts_safe',
+      'verify_phase_zero_six_output_artifacts_safe',
       'verify_phase_zero_six_evidence_apply',
     ]);
     expect(parsed.envReadiness.readyGroups).toEqual(['aws-preflight']);
     expect(parsed.artifacts.awsPreflight).toBe(path.join(evidenceDir, 'aws-staging-preflight.json'));
-    expect(parsed.artifacts.artifactSecretScan).toBe(path.join(applyDir, 'artifact-secret-scan.json'));
+    expect(parsed.artifacts.artifactSecretScan).toBeNull();
+    expect(parsed.artifacts.inputArtifactSecretScan).toBe(path.join(applyDir, 'artifact-secret-scan-input.json'));
+    expect(parsed.artifacts.outputArtifactSecretScan).toBe(path.join(applyDir, 'artifact-secret-scan-output.json'));
     expect(checklist).toContain('- [x] S3.04 Finalize AWS staging configuration.');
     expect(checklist).toContain('- [x] S3.05 Add least-privilege Kubernetes credentials.');
   });

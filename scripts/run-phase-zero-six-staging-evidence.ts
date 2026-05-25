@@ -294,6 +294,8 @@ async function main() {
   const phaseVerificationPath = path.join(outputDir, 'phase-zero-six-verification.json');
   const phaseApplyPath = path.join(outputDir, 'phase-zero-six-apply.json');
   const artifactSafetyPath = path.join(outputDir, 'artifact-secret-scan.json');
+  const inputArtifactSafetyPath = path.join(outputDir, 'artifact-secret-scan-input.json');
+  const outputArtifactSafetyPath = path.join(outputDir, 'artifact-secret-scan-output.json');
   const summaryPath = path.join(outputDir, 'summary.json');
 
   const commands: CommandResult[] = [];
@@ -465,15 +467,33 @@ async function main() {
     command: phaseCommand,
     outputPath: phaseVerificationPath,
   }));
-  commands.push(await runCommand({
-    name: 'verify_phase_zero_six_artifacts_safe',
-    command: ['pnpm', 'exec', 'tsx', 'scripts/verify-phase-zero-six-artifacts-safe.ts', '--dir', evidenceDir],
-    outputPath: artifactSafetyPath,
-  }));
+  if (reuseExistingArtifacts) {
+    commands.push(await runCommand({
+      name: 'verify_phase_zero_six_input_artifacts_safe',
+      command: ['pnpm', 'exec', 'tsx', 'scripts/verify-phase-zero-six-artifacts-safe.ts', '--dir', evidenceDir],
+      outputPath: inputArtifactSafetyPath,
+    }));
+    commands.push(await runCommand({
+      name: 'verify_phase_zero_six_output_artifacts_safe',
+      command: ['pnpm', 'exec', 'tsx', 'scripts/verify-phase-zero-six-artifacts-safe.ts', '--dir', outputDir],
+      outputPath: outputArtifactSafetyPath,
+    }));
+  } else {
+    commands.push(await runCommand({
+      name: 'verify_phase_zero_six_artifacts_safe',
+      command: ['pnpm', 'exec', 'tsx', 'scripts/verify-phase-zero-six-artifacts-safe.ts', '--dir', outputDir],
+      outputPath: artifactSafetyPath,
+    }));
+  }
 
   let phaseApplyResult: CommandResult | null = null;
   let applySkippedReason: string | null = null;
-  const artifactScanPassed = commandOk(commands[commands.length - 1] as CommandResult);
+  const artifactScanResults = reuseExistingArtifacts
+    ? commands.filter((result) =>
+      result.name === 'verify_phase_zero_six_input_artifacts_safe' ||
+      result.name === 'verify_phase_zero_six_output_artifacts_safe')
+    : commands.filter((result) => result.name === 'verify_phase_zero_six_artifacts_safe');
+  const artifactScanPassed = artifactScanResults.length > 0 && artifactScanResults.every(commandOk);
   const phaseVerification = commands.find((result) => result.name === 'verify_phase_zero_six_evidence');
   if (applyReady) {
     if (!artifactScanPassed) {
@@ -532,7 +552,9 @@ async function main() {
       stagingVerification: hasFlag('--skip-staging-smoke') ? null : stagingVerificationPath,
       phaseZeroSixVerification: phaseVerificationPath,
       phaseZeroSixApply: phaseApplyResult ? phaseApplyPath : null,
-      artifactSecretScan: artifactSafetyPath,
+      artifactSecretScan: reuseExistingArtifacts ? null : artifactSafetyPath,
+      inputArtifactSecretScan: reuseExistingArtifacts ? inputArtifactSafetyPath : null,
+      outputArtifactSecretScan: reuseExistingArtifacts ? outputArtifactSafetyPath : null,
       summary: summaryPath,
     },
     results: commands.map(commandSummary),

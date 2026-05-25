@@ -92,7 +92,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   fails, no checklist file is edited. The bundle also supports
   `--from-output-dir <dir>` to reuse already reviewed evidence artifacts for
   verification/apply without rerunning live AWS, Kubernetes, control-plane,
-  router, or provider smoke commands. Bundle `summary.ok` reports collection
+  router, or provider smoke commands; reuse mode scans both the input evidence
+  directory and the newly generated verifier/apply output directory before
+  applying checklist changes. Bundle `summary.ok` reports collection
   and apply-flow success, while `summary.phaseZeroSixComplete` separately
   reports whether all Phase 0-6 boxes are complete, so AWS-only partial
   evidence can succeed without claiming full release readiness. Summary result

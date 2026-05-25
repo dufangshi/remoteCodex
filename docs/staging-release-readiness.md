@@ -442,9 +442,10 @@ pnpm collect:phase-zero-six-evidence -- \
   --apply-ready
 ```
 
-`--from-output-dir` reads the existing evidence files, reruns the verifiers and
-artifact secret scan, and then applies ready checklist boxes if allowed. It
-does not collect fresh AWS preflight evidence or rerun the staging smoke.
+`--from-output-dir` reads the existing evidence files, reruns the verifiers,
+scans both the input evidence directory and the newly generated verifier/apply
+artifact directory, and then applies ready checklist boxes if allowed. It does
+not collect fresh AWS preflight evidence or rerun the staging smoke.
 If the source directory only contains an early env-readiness failure, the
 summary reports `missingEvidenceFiles` instead of calling downstream verifiers
 with missing paths.
