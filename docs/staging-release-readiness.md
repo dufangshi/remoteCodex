@@ -149,6 +149,10 @@ For a human-readable report of the same readiness state, use:
 pnpm phase-zero-six:env:report
 ```
 
+The `:report` commands are operator aids. They are read-only and do not fail
+only because required live staging env is still missing; use the JSON commands
+without `:report` for strict readiness gates.
+
 To generate a private shell template for the missing staging inputs, use:
 
 ```bash
@@ -342,7 +346,8 @@ The read-only audit emits:
 
 Use `phase-zero-six:audit` for machine-readable JSON and
 `phase-zero-six:audit:report` for the same state as a human-readable text
-report.
+report. Add `--fail-on-incomplete` to the underlying verifier only for CI-style
+checks that should fail while Phase 0 through Phase 6 evidence is incomplete.
 
 After the aggregate report shows one or more remaining Phase 0 through Phase 6
 items under `readyToCheck`, the same tool can update those proven checklist

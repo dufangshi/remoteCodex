@@ -670,6 +670,24 @@ describe('phase zero-six evidence tooling', () => {
     expect(result.stdout).toContain('Do not check live AWS/staging/provider boxes');
   });
 
+  it('can fail aggregate phase zero-six audit for CI checks', async () => {
+    const dir = await tempDir();
+    const checklistPath = path.join(dir, 'checklist.md');
+    await writeFile(checklistPath, minimalChecklist());
+
+    const result = await runScript('scripts/verify-phase-zero-six-evidence.ts', [
+      '--checklist',
+      checklistPath,
+      '--format',
+      'text',
+      '--fail-on-incomplete',
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('# Remote Codex Phase 0-6 Audit');
+    expect(result.stdout).toContain('Complete: false');
+  });
+
   it('applies only ready checklist boxes from AWS preflight evidence', async () => {
     const dir = await tempDir();
     const checklistPath = path.join(dir, 'checklist.md');
@@ -952,7 +970,7 @@ describe('phase zero-six evidence tooling', () => {
   it('renders env readiness as a text report without printing secret values', async () => {
     const result = await runScriptWithEnv(
       'scripts/verify-phase-zero-six-env-ready.ts',
-      ['--format', 'text'],
+      ['--format', 'text', '--no-fail'],
       {
         STAGING_CONTROL_PLANE_BASE_URL: 'https://control-plane.example.test',
         STAGING_PRODUCT_JWT: 'secret-product-jwt-value',
@@ -960,7 +978,7 @@ describe('phase zero-six evidence tooling', () => {
       },
     );
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain('# Remote Codex Phase 0-6 Env Readiness');
     expect(result.stdout).toContain('Ready: false');
     expect(result.stdout).toContain('Mode: full staging');
@@ -974,6 +992,17 @@ describe('phase zero-six evidence tooling', () => {
     expect(result.stdout).toContain('This report prints environment variable names only');
     expect(result.stdout).not.toContain('secret-product-jwt-value');
     expect(result.stdout).not.toContain('secret-admin-jwt-value');
+  });
+
+  it('can fail env readiness text report for CI checks', async () => {
+    const result = await runScript('scripts/verify-phase-zero-six-env-ready.ts', [
+      '--format',
+      'text',
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('# Remote Codex Phase 0-6 Env Readiness');
+    expect(result.stdout).toContain('Ready: false');
   });
 
   it('writes a placeholder env template without leaking current secret values', async () => {

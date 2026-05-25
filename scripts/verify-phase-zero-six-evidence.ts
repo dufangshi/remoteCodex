@@ -456,6 +456,10 @@ async function main() {
   };
 
   console.log(format === 'text' ? renderTextReport(report) : JSON.stringify(report, null, 2));
+
+  if (!report.ok && hasFlag('--fail-on-incomplete')) {
+    process.exitCode = 1;
+  }
 }
 
 main().catch((error) => {

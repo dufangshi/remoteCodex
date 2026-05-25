@@ -651,7 +651,7 @@ async function main() {
 
   console.log(format === 'text' ? renderTextReport(report) : JSON.stringify(report, null, 2));
 
-  if (notReadyGroups.length > 0) {
+  if (notReadyGroups.length > 0 && !hasFlag('--no-fail')) {
     process.exitCode = 1;
   }
 }
