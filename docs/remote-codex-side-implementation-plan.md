@@ -592,7 +592,7 @@ import third, then quota enforcement and UI.
 - [ ] Add quota preflight before harness job creation when visible to Remote
   Codex.
 - [x] Add quota exceeded API response shape.
-- [ ] Add scheduled LLM gateway usage import job.
+- [x] Add scheduled LLM gateway usage import job.
 - [x] Add manual admin LLM usage import endpoint.
 - [x] Deduplicate gateway usage events by gateway event id.
 - [x] Map gateway key id to user id.
@@ -688,7 +688,7 @@ first provider/harness bootstrap path works.
 - [ ] Add sandbox lifecycle metrics.
 - [ ] Add route-token issuance metrics.
 - [ ] Add router request metrics.
-- [ ] Add gateway usage import metrics.
+- [x] Add gateway usage import metrics.
 - [ ] Add harness usage import metrics.
 - [ ] Add quota denial metrics.
 

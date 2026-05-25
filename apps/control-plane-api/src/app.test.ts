@@ -2240,6 +2240,120 @@ describe('control plane api', () => {
     });
   });
 
+  it('runs the scheduled usage import job with stored cursor and metrics', async () => {
+    const exportCalls: Array<{ cursor?: string | null; limit?: number }> = [];
+    let externalKeyId = '';
+    const app = buildControlPlaneApp({
+      env: testEnvWithInternalService('scheduled-gateway-usage-import'),
+      llmGatewayAdmin: {
+        async ensureUser(input) {
+          return { externalUserId: `sub2api-user-${input.userId}` };
+        },
+        async ensureSandboxKey(input) {
+          externalKeyId = `sub2api-key-${input.sandboxId}`;
+          return {
+            externalKeyId,
+            keyCiphertext: null,
+          };
+        },
+        async rotateSandboxKey(input) {
+          return {
+            externalKeyId: `sub2api-key-${input.sandboxId}-rotated`,
+            keyCiphertext: null,
+          };
+        },
+        async revokeSandboxKey() {},
+        async reconcileSandboxKey(input) {
+          return {
+            externalKeyId: `sub2api-key-${input.sandboxId}`,
+            keyCiphertext: null,
+          };
+        },
+        async exportUsage(input = {}) {
+          exportCalls.push(input);
+          return {
+            events: [
+              {
+                eventId: `scheduled_req_${exportCalls.length}`,
+                externalKeyId,
+                model: 'gpt-5.1-codex',
+                inputTokens: 10,
+                outputTokens: 5,
+                cachedTokens: 1,
+                costUsd: 0.05,
+                currency: 'USD',
+                occurredAt: `2026-05-24T0${exportCalls.length}:00:00.000Z`,
+              },
+            ],
+            nextCursor: `cursor-${exportCalls.length}`,
+          };
+        },
+      },
+    });
+    apps.push(app);
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: { authorization: 'Bearer dev:scheduled-usage-user' },
+      payload: { email: 'scheduled-usage@example.com' },
+    });
+
+    const forbidden = await app.inject({
+      method: 'POST',
+      url: '/api/internal/jobs/usage-import',
+      headers: {
+        'x-remote-codex-service-token': 'wrong-token',
+      },
+      payload: { limit: 50 },
+    });
+    expect(forbidden.statusCode).toBe(403);
+
+    const firstRun = await app.inject({
+      method: 'POST',
+      url: '/api/internal/jobs/usage-import',
+      headers: {
+        'x-remote-codex-service-token': 'test-internal-service-token',
+      },
+      payload: { limit: 50 },
+    });
+    expect(firstRun.statusCode).toBe(200);
+    expect(firstRun.json().import).toMatchObject({
+      source: 'gateway',
+      sourceCount: 1,
+      importedCount: 1,
+      duplicateCount: 0,
+      failureCount: 0,
+      nextCursor: 'cursor-1',
+    });
+
+    const secondRun = await app.inject({
+      method: 'POST',
+      url: '/api/internal/jobs/usage-import',
+      headers: {
+        'x-remote-codex-service-token': 'test-internal-service-token',
+      },
+      payload: { limit: 25 },
+    });
+    expect(secondRun.statusCode).toBe(200);
+    expect(exportCalls).toEqual([
+      { cursor: null, limit: 50 },
+      { cursor: 'cursor-1', limit: 25 },
+    ]);
+    expect(secondRun.json().state).toMatchObject({
+      provider: 'sub2api',
+      source: 'gateway',
+      cursor: 'cursor-2',
+      lastSourceCount: 1,
+      lastImportedCount: 1,
+      lastDuplicateCount: 0,
+      lastFailureCount: 0,
+    });
+    expect(
+      app.services.repository.listAuditLogs({ action: 'usage.import_completed' }),
+    ).toHaveLength(2);
+  });
+
   it('rejects gateway usage import when identity cannot be resolved', async () => {
     const app = buildControlPlaneApp({ env: testEnv('gateway-usage-unresolved') });
     apps.push(app);

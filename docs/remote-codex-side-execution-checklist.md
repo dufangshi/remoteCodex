@@ -595,13 +595,13 @@ Evidence:
   - Verification: gateway client tests and control-plane tests cover import,
     identity mapping, dedupe, and gateway-export response parsing.
 
-- [ ] Add scheduled usage import job.
+- [x] Add scheduled usage import job.
   - Acceptance: import runs on a schedule with a stored watermark and bounded
     batch size.
   - Verification: job tests cover initial import, incremental import, retry,
     and idempotency.
 
-- [ ] Add usage import logs and metrics.
+- [x] Add usage import logs and metrics.
   - Acceptance: import records source count, imported count, duplicate count,
     failure count, and last successful watermark without secrets.
   - Verification: tests or smoke logs prove structured records are emitted.
@@ -1404,7 +1404,7 @@ manual guesswork.
     harness state without secrets.
   - Verification: worker tests or smoke logs cover redaction.
 
-- [ ] Add usage import logs.
+- [x] Add usage import logs.
   - Acceptance: import logs counts, watermarks, and failures.
   - Verification: importer tests or smoke logs cover records.
 
@@ -1421,7 +1421,7 @@ manual guesswork.
   - Acceptance: metrics track HTTP/SSE/WebSocket connections and failures.
   - Verification: router metrics tests or staging dashboard.
 
-- [ ] Add gateway usage import metrics.
+- [x] Add gateway usage import metrics.
   - Acceptance: metrics track source/imported/duplicate/failed events.
   - Verification: importer tests or staging dashboard.
 

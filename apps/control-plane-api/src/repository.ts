@@ -11,6 +11,7 @@ import {
   controlSandboxes,
   controlSessions,
   controlUsageEvents,
+  controlUsageImportState,
   controlUsers,
   controlWorkspaces,
 } from '../../../packages/db/src/schema';
@@ -36,6 +37,17 @@ export interface UsageEventInput {
   costUsd?: number | undefined;
   externalRequestId?: string | null | undefined;
   occurredAt?: string | undefined;
+}
+
+export interface UsageImportMetricsInput {
+  provider: string;
+  source: string;
+  cursor?: string | null | undefined;
+  sourceCount: number;
+  importedCount: number;
+  duplicateCount: number;
+  failureCount: number;
+  failureMessage?: string | null | undefined;
 }
 
 export interface SandboxDefaults {
@@ -841,6 +853,75 @@ export class ControlPlaneRepository {
       .orderBy(desc(controlUsageEvents.occurredAt))
       .limit(limit)
       .all();
+  }
+
+  getUsageImportState(input: { provider: string; source: string }) {
+    return this.db
+      .select()
+      .from(controlUsageImportState)
+      .where(
+        and(
+          eq(controlUsageImportState.provider, input.provider),
+          eq(controlUsageImportState.source, input.source),
+        ),
+      )
+      .get();
+  }
+
+  markUsageImportStarted(input: { provider: string; source: string }) {
+    const now = new Date().toISOString();
+    const existing = this.getUsageImportState(input);
+    if (existing) {
+      this.db
+        .update(controlUsageImportState)
+        .set({
+          lastStartedAt: now,
+          updatedAt: now,
+        })
+        .where(eq(controlUsageImportState.id, existing.id))
+        .run();
+      return this.getUsageImportState(input)!;
+    }
+    const record = {
+      id: randomUUID(),
+      provider: input.provider,
+      source: input.source,
+      cursor: null,
+      lastStartedAt: now,
+      lastSucceededAt: null,
+      lastFailedAt: null,
+      lastFailureMessage: null,
+      lastSourceCount: 0,
+      lastImportedCount: 0,
+      lastDuplicateCount: 0,
+      lastFailureCount: 0,
+      updatedAt: now,
+    };
+    this.db.insert(controlUsageImportState).values(record).run();
+    return record;
+  }
+
+  recordUsageImportMetrics(input: UsageImportMetricsInput) {
+    const now = new Date().toISOString();
+    const existing =
+      this.getUsageImportState({ provider: input.provider, source: input.source }) ??
+      this.markUsageImportStarted({ provider: input.provider, source: input.source });
+    this.db
+      .update(controlUsageImportState)
+      .set({
+        cursor: input.cursor ?? existing.cursor,
+        lastSucceededAt: input.failureCount > 0 ? existing.lastSucceededAt : now,
+        lastFailedAt: input.failureCount > 0 ? now : existing.lastFailedAt,
+        lastFailureMessage: input.failureMessage ?? null,
+        lastSourceCount: input.sourceCount,
+        lastImportedCount: input.importedCount,
+        lastDuplicateCount: input.duplicateCount,
+        lastFailureCount: input.failureCount,
+        updatedAt: now,
+      })
+      .where(eq(controlUsageImportState.id, existing.id))
+      .run();
+    return this.getUsageImportState({ provider: input.provider, source: input.source })!;
   }
 
   recordUsageEvent(input: UsageEventInput) {

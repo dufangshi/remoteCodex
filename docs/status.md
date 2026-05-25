@@ -83,8 +83,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 - LLM gateway contract is fixed on a sub2api-compatible shape; provisioning,
   provider selection config, worker provider config rendering, manual usage
   import, gateway usage-export adapter, frontend degraded state, LLM usage
-  summary, LLM usage detail UI, and quota-exceeded UI exist, while scheduled
-  import, metrics, and staging provider-runtime smokes remain open.
+  summary, LLM usage detail UI, quota-exceeded UI, scheduled usage-import job,
+  and usage import metrics exist, while staging provider-runtime smokes remain
+  open.
 - Gateway token storage is documented as metadata plus optional encrypted
   ciphertext only; raw provider keys and raw gateway tokens are not returned by
   Remote Codex APIs.
@@ -102,8 +103,8 @@ gateway, ElAgenteHarness, or chemistry compute workers.
 4. Add staging lifecycle smokes for start, stop, idempotent restart, and
    readiness.
 5. Build and smoke-test the worker Docker image, then add CI image checks.
-6. Finish gateway scheduled import, metrics, and staging provider-runtime
-   gateway smokes.
+6. Run staging provider-runtime gateway smokes for Codex, Claude Code, and
+   OpenCode.
 
 ## Verification Commands
 

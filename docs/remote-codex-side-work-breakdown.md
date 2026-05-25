@@ -447,13 +447,13 @@ the sandbox, and Remote Codex can bill usage by product user.
   - Verify with tests for import, identity mapping, dedupe, pagination, and
     malformed gateway responses.
 
-- [ ] Add scheduled usage import job.
+- [x] Add scheduled usage import job.
   - Done when import runs on a schedule with stored watermark and bounded batch
     size.
   - Verify with job tests for initial import, incremental import, retry, and
     idempotency.
 
-- [ ] Add usage import logs and metrics.
+- [x] Add usage import logs and metrics.
   - Done when import records source count, imported count, duplicate count,
     failure count, and last successful watermark without secrets.
   - Verify with tests or smoke logs.

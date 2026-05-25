@@ -356,8 +356,9 @@ Pagination/watermark requirements for the gateway export:
   window.
 
 Remote Codex implements a gateway usage-export adapter through the admin usage
-import path. The scheduled puller is not implemented yet. Until then, imports
-use the admin-only Remote Codex endpoint and a staging script or operator task.
+import path and an internal service-token job endpoint for scheduled imports.
+Deployment still needs to wire Railway/AWS cron or another scheduler to call the
+internal job endpoint in staging and production.
 
 ## Degraded Behavior
 

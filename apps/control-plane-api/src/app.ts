@@ -386,6 +386,81 @@ function gatewayUsageExportEventToImportEvent(
   };
 }
 
+async function importGatewayUsageBatch(app: FastifyInstance, input: {
+  cursor?: string | null;
+  limit?: number;
+  useStoredCursor?: boolean;
+}) {
+  const repository = app.services.repository;
+  const provider = app.services.config.llmGatewayProvider;
+  const source = 'gateway';
+  const state = input.useStoredCursor
+    ? repository.getUsageImportState({ provider, source })
+    : null;
+  repository.markUsageImportStarted({ provider, source });
+  try {
+    const gatewayExport = await app.services.llmGatewayAdmin.exportUsage({
+      cursor: input.cursor ?? state?.cursor ?? null,
+      limit: input.limit ?? 100,
+    });
+    const inputEvents = gatewayExport.events.map((event) =>
+      gatewayUsageExportEventToImportEvent(provider, event),
+    );
+    const events = inputEvents.map((event) =>
+      repository.recordUsageEvent(normalizeUsageImportEvent(repository, event)),
+    );
+    const metrics = {
+      source,
+      sourceCount: inputEvents.length,
+      importedCount: events.length,
+      duplicateCount: Math.max(0, inputEvents.length - new Set(events.map((event) => event.id)).size),
+      failureCount: 0,
+      nextCursor: gatewayExport.nextCursor ?? null,
+    };
+    const importState = repository.recordUsageImportMetrics({
+      provider,
+      source,
+      cursor: metrics.nextCursor,
+      sourceCount: metrics.sourceCount,
+      importedCount: metrics.importedCount,
+      duplicateCount: metrics.duplicateCount,
+      failureCount: metrics.failureCount,
+    });
+    repository.audit(null, 'usage.import_completed', 'usage_import', importState.id, {
+      provider,
+      source,
+      sourceCount: metrics.sourceCount,
+      importedCount: metrics.importedCount,
+      duplicateCount: metrics.duplicateCount,
+      failureCount: metrics.failureCount,
+      nextCursor: metrics.nextCursor,
+    });
+    return {
+      events,
+      import: metrics,
+      state: importState,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Usage import failed.';
+    const importState = repository.recordUsageImportMetrics({
+      provider,
+      source,
+      sourceCount: 0,
+      importedCount: 0,
+      duplicateCount: 0,
+      failureCount: 1,
+      failureMessage: message,
+    });
+    repository.audit(null, 'usage.import_failed', 'usage_import', importState.id, {
+      provider,
+      source,
+      failureCount: 1,
+      message,
+    });
+    throw error;
+  }
+}
+
 async function ensureGateway(app: FastifyInstance, user: { id: string; email: string; displayName: string | null }, sandbox: { id: string }) {
   const gatewayUser = await app.services.llmGatewayAdmin.ensureUser({
     userId: user.id,
@@ -628,15 +703,13 @@ export function buildControlPlaneApp(
   app.post('/api/admin/usage/import', async (request) => {
     requireAdmin(app, request);
     const input = importUsageSchema.parse(request.body);
-    const gatewayExport = input.events
-      ? null
-      : await app.services.llmGatewayAdmin.exportUsage({
-          cursor: input.cursor ?? null,
-          limit: input.limit ?? 100,
-        });
-    const inputEvents = input.events ?? gatewayExport?.events.map((event) =>
-      gatewayUsageExportEventToImportEvent(config.llmGatewayProvider, event),
-    ) ?? [];
+    if (!input.events) {
+      return importGatewayUsageBatch(app, {
+        cursor: input.cursor ?? null,
+        limit: input.limit ?? 100,
+      });
+    }
+    const inputEvents = input.events;
     const events = inputEvents.map((event) =>
       repository.recordUsageEvent(normalizeUsageImportEvent(repository, event)),
     );
@@ -648,7 +721,7 @@ export function buildControlPlaneApp(
         importedCount: events.length,
         duplicateCount: Math.max(0, inputEvents.length - new Set(events.map((event) => event.id)).size),
         failureCount: 0,
-        nextCursor: gatewayExport?.nextCursor ?? null,
+        nextCursor: null,
       },
     };
   });
@@ -717,6 +790,19 @@ export function buildControlPlaneApp(
     return {
       reaper: await app.services.sandboxReaper.runOnce(),
     };
+  });
+
+  app.post('/api/internal/jobs/usage-import', async (request) => {
+    requireInternalService(app, request);
+    const input = z
+      .object({
+        limit: z.number().int().positive().max(500).optional(),
+      })
+      .parse(request.body ?? {});
+    return importGatewayUsageBatch(app, {
+      limit: input.limit ?? 100,
+      useStoredCursor: true,
+    });
   });
 
   app.get('/api/admin/sandboxes', async (request) => {

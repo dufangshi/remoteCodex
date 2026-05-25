@@ -339,6 +339,25 @@ export const controlUsageEvents = sqliteTable('control_usage_events', {
   importedAt: text('imported_at').notNull(),
 });
 
+export const controlUsageImportState = sqliteTable('control_usage_import_state', {
+  id: text('id').primaryKey(),
+  provider: text('provider').notNull(),
+  source: text('source').notNull(),
+  cursor: text('cursor'),
+  lastStartedAt: text('last_started_at'),
+  lastSucceededAt: text('last_succeeded_at'),
+  lastFailedAt: text('last_failed_at'),
+  lastFailureMessage: text('last_failure_message'),
+  lastSourceCount: integer('last_source_count').notNull().default(0),
+  lastImportedCount: integer('last_imported_count').notNull().default(0),
+  lastDuplicateCount: integer('last_duplicate_count').notNull().default(0),
+  lastFailureCount: integer('last_failure_count').notNull().default(0),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => ({
+  providerSourceIdx: uniqueIndex('control_usage_import_state_provider_source_idx')
+    .on(table.provider, table.source),
+}));
+
 export const controlAuditLogs = sqliteTable('control_audit_logs', {
   id: text('id').primaryKey(),
   userId: text('user_id'),

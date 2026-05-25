@@ -425,7 +425,7 @@ Verification:
 - [x] Redact gateway tokens from API responses.
 - [x] Define normalized LLM usage event schema.
 - [x] Add usage import adapter for the chosen gateway.
-- [ ] Add scheduled usage import job.
+- [x] Add scheduled usage import job.
 - [x] Add manual admin usage import endpoint.
 - [x] Deduplicate usage events by gateway event id.
 - [x] Map gateway key id to user id.
@@ -633,7 +633,7 @@ Verification:
 - [ ] Add control-plane structured logs.
 - [ ] Add router structured logs.
 - [ ] Add worker structured logs.
-- [ ] Add usage import logs.
+- [x] Add usage import logs.
 - [ ] Add sandbox lifecycle metrics.
 - [ ] Add route-token issuance metrics.
 - [ ] Add worker connection metrics.
@@ -1124,7 +1124,7 @@ Real provider root keys stay outside the sandbox.
 
 - [x] Define normalized LLM usage event schema.
 - [x] Add usage import adapter for the chosen gateway.
-- [ ] Add scheduled usage import job.
+- [x] Add scheduled usage import job.
 - [x] Add manual admin usage import endpoint.
 - [x] Deduplicate usage events by gateway event id.
 - [x] Map gateway key id to user id.
@@ -1395,7 +1395,7 @@ production traffic.
 - [ ] Add control-plane structured logs.
 - [ ] Add router structured logs.
 - [ ] Add worker structured logs.
-- [ ] Add usage import logs.
+- [x] Add usage import logs.
 - [ ] Add sandbox lifecycle metrics.
 - [ ] Add route-token issuance metrics.
 - [ ] Add worker connection metrics.
