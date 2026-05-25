@@ -155,6 +155,84 @@ describe('control plane api', () => {
     }
   });
 
+  it('rotates and revokes gateway keys from admin sandbox APIs', async () => {
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      const urlText = String(url);
+      if (urlText.endsWith('/api/admin/users/ensure')) {
+        return Response.json({ externalUserId: 'gw-user-admin' });
+      }
+      if (urlText.endsWith('/keys/ensure')) {
+        return Response.json({ externalKeyId: 'gw-key-original' });
+      }
+      if (urlText.endsWith('/rotate')) {
+        return Response.json({
+          externalKeyId: 'gw-key-rotated',
+          keyCiphertext: 'encrypted-rotated-token',
+        });
+      }
+      return Response.json({ ok: true });
+    }) as typeof fetch;
+
+    try {
+      const app = buildControlPlaneApp({
+        env: {
+          ...testEnv('gateway-admin-rotate-revoke'),
+          LLM_GATEWAY_ADMIN_BASE_URL: 'https://gateway-admin.example.test',
+          LLM_GATEWAY_ADMIN_TOKEN: 'gateway-admin-token',
+        },
+      });
+      apps.push(app);
+
+      const bootstrap = await app.inject({
+        method: 'POST',
+        url: '/api/me/bootstrap',
+        headers: { authorization: 'Bearer dev:admin' },
+        payload: {
+          email: 'admin-gateway@example.com',
+        },
+      });
+      expect(bootstrap.statusCode).toBe(200);
+      const sandboxId = bootstrap.json().sandbox.id;
+
+      const rotate = await app.inject({
+        method: 'POST',
+        url: `/api/admin/sandboxes/${sandboxId}/gateway-key/rotate`,
+        headers: { authorization: 'Bearer dev:admin' },
+      });
+      expect(rotate.statusCode).toBe(200);
+      expect(rotate.json().gatewayKey).toMatchObject({
+        externalKeyId: 'gw-key-rotated',
+        keyCiphertext: 'encrypted-rotated-token',
+        status: 'active',
+        revokedAt: null,
+      });
+      expect(rotate.json().gatewayKey.rotatedAt).toEqual(expect.any(String));
+
+      const revoke = await app.inject({
+        method: 'POST',
+        url: `/api/admin/sandboxes/${sandboxId}/gateway-key/revoke`,
+        headers: { authorization: 'Bearer dev:admin' },
+      });
+      expect(revoke.statusCode).toBe(200);
+      expect(revoke.json().gatewayKey).toMatchObject({
+        externalKeyId: 'gw-key-rotated',
+        status: 'revoked',
+      });
+      expect(revoke.json().gatewayKey.revokedAt).toEqual(expect.any(String));
+      expect(requests.map((request) => request.url)).toContain(
+        'https://gateway-admin.example.test/api/admin/users/gw-user-admin/keys/gw-key-original/rotate',
+      );
+      expect(requests.map((request) => request.url)).toContain(
+        'https://gateway-admin.example.test/api/admin/users/gw-user-admin/keys/gw-key-rotated/revoke',
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('attaches gateway credential metadata when starting a sandbox', async () => {
     const sandboxManager = new RecordingSandboxManager();
     const app = buildControlPlaneApp({

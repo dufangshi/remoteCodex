@@ -136,6 +136,29 @@ const adminSandboxReasonSchema = z.object({
   reason: z.string().min(1).max(500).optional(),
 });
 
+function requireGatewayKeyContext(app: FastifyInstance, sandboxId: string) {
+  const sandbox = app.services.repository.getSandboxById(sandboxId);
+  if (!sandbox) {
+    throw new HttpError(404, 'not_found', 'Sandbox not found.');
+  }
+  const gatewayKey = app.services.repository.getGatewayKeyForSandbox(sandbox.id);
+  if (!gatewayKey) {
+    throw new HttpError(404, 'not_found', 'Gateway key not found.');
+  }
+  const gatewayUser = app.services.repository.getGatewayUserForUser({
+    userId: sandbox.userId,
+    provider: gatewayKey.provider,
+  });
+  if (!gatewayUser) {
+    throw new HttpError(409, 'gateway_user_missing', 'Gateway user is missing.');
+  }
+  return {
+    sandbox,
+    gatewayKey,
+    gatewayUser,
+  };
+}
+
 function toErrorPayload(error: unknown) {
   if (error instanceof HttpError) {
     return {
@@ -536,6 +559,44 @@ export function buildControlPlaneApp(
       sandbox: repository.updateSandboxState(sandbox.id, {
         ...result,
         statusReason: input.reason ?? result.statusReason ?? 'restarted by administrator',
+      }),
+    };
+  });
+
+  app.post('/api/admin/sandboxes/:sandboxId/gateway-key/rotate', async (request) => {
+    requireAdmin(app, request);
+    const params = z.object({ sandboxId: z.string().uuid() }).parse(request.params);
+    const { sandbox, gatewayKey, gatewayUser } = requireGatewayKeyContext(app, params.sandboxId);
+    const rotated = await app.services.llmGatewayAdmin.rotateSandboxKey({
+      userId: sandbox.userId,
+      sandboxId: sandbox.id,
+      externalUserId: gatewayUser.externalUserId,
+      externalKeyId: gatewayKey.externalKeyId,
+    });
+    return {
+      gatewayKey: repository.updateGatewayKeyRotation({
+        sandboxId: sandbox.id,
+        provider: gatewayKey.provider,
+        externalKeyId: rotated.externalKeyId,
+        keyCiphertext: rotated.keyCiphertext ?? null,
+      }),
+    };
+  });
+
+  app.post('/api/admin/sandboxes/:sandboxId/gateway-key/revoke', async (request) => {
+    requireAdmin(app, request);
+    const params = z.object({ sandboxId: z.string().uuid() }).parse(request.params);
+    const { sandbox, gatewayKey, gatewayUser } = requireGatewayKeyContext(app, params.sandboxId);
+    await app.services.llmGatewayAdmin.revokeSandboxKey({
+      userId: sandbox.userId,
+      sandboxId: sandbox.id,
+      externalUserId: gatewayUser.externalUserId,
+      externalKeyId: gatewayKey.externalKeyId,
+    });
+    return {
+      gatewayKey: repository.revokeGatewayKey({
+        sandboxId: sandbox.id,
+        provider: gatewayKey.provider,
       }),
     };
   });

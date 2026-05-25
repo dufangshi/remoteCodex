@@ -497,8 +497,8 @@ import third, then quota enforcement and UI.
 - [x] Add gateway client interface.
 - [x] Implement gateway user creation.
 - [x] Implement gateway key creation.
-- [ ] Implement gateway key revocation.
-- [ ] Implement gateway key rotation.
+- [x] Implement gateway key revocation.
+- [x] Implement gateway key rotation.
 - [x] Attach gateway credential to sandbox provisioning.
 - [ ] Add admin endpoint to reconcile gateway keys.
 - [ ] Redact gateway tokens from logs.

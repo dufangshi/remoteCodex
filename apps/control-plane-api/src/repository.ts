@@ -526,11 +526,84 @@ export class ControlPlaneRepository {
     return record;
   }
 
+  updateGatewayKeyRotation(input: {
+    sandboxId: string;
+    provider: string;
+    externalKeyId: string;
+    keyCiphertext?: string | null;
+  }) {
+    const now = new Date().toISOString();
+    this.db
+      .update(controlGatewayKeys)
+      .set({
+        externalKeyId: input.externalKeyId,
+        keyCiphertext: input.keyCiphertext ?? null,
+        status: 'active',
+        rotatedAt: now,
+        revokedAt: null,
+      })
+      .where(
+        and(
+          eq(controlGatewayKeys.sandboxId, input.sandboxId),
+          eq(controlGatewayKeys.provider, input.provider),
+        ),
+      )
+      .run();
+    const key = this.getGatewayKeyForSandbox(input.sandboxId);
+    if (key) {
+      this.audit(key.userId, 'gateway_key.rotated', 'gateway_key', key.id, {
+        provider: input.provider,
+        externalKeyId: input.externalKeyId,
+      });
+    }
+    return key;
+  }
+
+  revokeGatewayKey(input: { sandboxId: string; provider: string }) {
+    const existing = this.getGatewayKeyForSandbox(input.sandboxId);
+    if (!existing) {
+      return null;
+    }
+    const now = new Date().toISOString();
+    this.db
+      .update(controlGatewayKeys)
+      .set({
+        status: 'revoked',
+        revokedAt: now,
+      })
+      .where(eq(controlGatewayKeys.id, existing.id))
+      .run();
+    this.db
+      .update(controlSandboxes)
+      .set({ gatewayKeyId: null, updatedAt: now })
+      .where(eq(controlSandboxes.id, input.sandboxId))
+      .run();
+    const key = this.getGatewayKeyForSandbox(input.sandboxId);
+    this.audit(existing.userId, 'gateway_key.revoked', 'gateway_key', existing.id, {
+      provider: input.provider,
+      externalKeyId: existing.externalKeyId,
+    });
+    return key;
+  }
+
   getGatewayKeyForSandbox(sandboxId: string) {
     return this.db
       .select()
       .from(controlGatewayKeys)
       .where(eq(controlGatewayKeys.sandboxId, sandboxId))
+      .get();
+  }
+
+  getGatewayUserForUser(input: { userId: string; provider: string }) {
+    return this.db
+      .select()
+      .from(controlGatewayUsers)
+      .where(
+        and(
+          eq(controlGatewayUsers.userId, input.userId),
+          eq(controlGatewayUsers.provider, input.provider),
+        ),
+      )
       .get();
   }
 

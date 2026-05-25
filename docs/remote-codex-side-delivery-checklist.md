@@ -489,8 +489,8 @@ real provider root keys stay outside the sandbox.
 - [x] Add gateway client interface.
 - [x] Implement gateway user creation.
 - [x] Implement gateway key creation.
-- [ ] Implement gateway key revocation.
-- [ ] Implement gateway key rotation.
+- [x] Implement gateway key revocation.
+- [x] Implement gateway key rotation.
 - [x] Attach gateway credential to sandbox provisioning.
 - [ ] Add admin endpoint to reconcile gateway keys.
 - [x] Add mocked gateway client tests.

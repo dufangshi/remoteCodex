@@ -680,6 +680,18 @@ export interface LlmGatewayAdmin {
     sandboxId: string;
     externalUserId: string;
   }): Promise<GatewayKeyResult>;
+  rotateSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId: string;
+  }): Promise<GatewayKeyResult>;
+  revokeSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId: string;
+  }): Promise<void>;
 }
 
 type GatewayFetch = typeof fetch;
@@ -799,6 +811,62 @@ export class HttpLlmGatewayAdmin implements LlmGatewayAdmin {
           : null,
     };
   }
+
+  async rotateSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId: string;
+  }): Promise<GatewayKeyResult> {
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/api/admin/users/${encodeURIComponent(input.externalUserId)}/keys/${encodeURIComponent(input.externalKeyId)}/rotate`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${this.adminToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: input.userId,
+          sandboxId: input.sandboxId,
+        }),
+      },
+    );
+    const payload = await parseGatewayResponse<unknown>(response);
+    return {
+      externalKeyId: externalIdFromPayload(payload, 'external key id'),
+      keyCiphertext:
+        payload &&
+        typeof payload === 'object' &&
+        'keyCiphertext' in payload &&
+        typeof payload.keyCiphertext === 'string'
+          ? payload.keyCiphertext
+          : null,
+    };
+  }
+
+  async revokeSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId: string;
+  }): Promise<void> {
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/api/admin/users/${encodeURIComponent(input.externalUserId)}/keys/${encodeURIComponent(input.externalKeyId)}/revoke`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${this.adminToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: input.userId,
+          sandboxId: input.sandboxId,
+        }),
+      },
+    );
+    await parseGatewayResponse<unknown>(response);
+  }
 }
 
 export class NoopLlmGatewayAdmin implements LlmGatewayAdmin {
@@ -814,4 +882,13 @@ export class NoopLlmGatewayAdmin implements LlmGatewayAdmin {
       keyCiphertext: null,
     };
   }
+
+  async rotateSandboxKey(input: { sandboxId: string }): Promise<GatewayKeyResult> {
+    return {
+      externalKeyId: `sub2api-key-${input.sandboxId}-rotated`,
+      keyCiphertext: null,
+    };
+  }
+
+  async revokeSandboxKey(): Promise<void> {}
 }

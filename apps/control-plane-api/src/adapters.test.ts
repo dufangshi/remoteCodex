@@ -484,6 +484,84 @@ describe('HTTP LLM gateway admin', () => {
     });
   });
 
+  it('rotates a gateway sandbox key through the admin API', async () => {
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      return Response.json({
+        externalKeyId: 'gw-key-rotated',
+        keyCiphertext: 'encrypted-rotated-token',
+      });
+    };
+    const admin = new HttpLlmGatewayAdmin({
+      baseUrl: 'https://gateway-admin.example.test',
+      adminToken: 'admin-token',
+      fetchImpl,
+    });
+
+    await expect(
+      admin.rotateSandboxKey({
+        userId: 'user-123',
+        sandboxId: 'sbx-123',
+        externalUserId: 'gw-user-123',
+        externalKeyId: 'gw-key-123',
+      }),
+    ).resolves.toEqual({
+      externalKeyId: 'gw-key-rotated',
+      keyCiphertext: 'encrypted-rotated-token',
+    });
+    expect(requests[0]).toMatchObject({
+      url: 'https://gateway-admin.example.test/api/admin/users/gw-user-123/keys/gw-key-123/rotate',
+      init: {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer admin-token',
+          'content-type': 'application/json',
+        },
+      },
+    });
+    expect(JSON.parse(String(requests[0]!.init!.body))).toEqual({
+      userId: 'user-123',
+      sandboxId: 'sbx-123',
+    });
+  });
+
+  it('revokes a gateway sandbox key through the admin API', async () => {
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      return Response.json({ ok: true });
+    };
+    const admin = new HttpLlmGatewayAdmin({
+      baseUrl: 'https://gateway-admin.example.test',
+      adminToken: 'admin-token',
+      fetchImpl,
+    });
+
+    await expect(
+      admin.revokeSandboxKey({
+        userId: 'user-123',
+        sandboxId: 'sbx-123',
+        externalUserId: 'gw-user-123',
+        externalKeyId: 'gw-key-123',
+      }),
+    ).resolves.toBeUndefined();
+    expect(requests[0]).toMatchObject({
+      url: 'https://gateway-admin.example.test/api/admin/users/gw-user-123/keys/gw-key-123/revoke',
+      init: {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer admin-token',
+          'content-type': 'application/json',
+        },
+      },
+    });
+    expect(JSON.parse(String(requests[0]!.init!.body))).toEqual({
+      userId: 'user-123',
+      sandboxId: 'sbx-123',
+    });
+  });
+
   it('maps gateway admin errors to provider sandbox manager errors', async () => {
     const fetchImpl = async () =>
       Response.json({ message: 'gateway unavailable' }, { status: 503 });
