@@ -14,6 +14,10 @@ Related systems have their own implementation plans:
 Remote Codex must integrate with those systems through stable contracts, but it
 should not absorb their internal responsibilities.
 
+For a narrower checklist that tracks only the tasks this repository must
+implement, see
+[`docs/remote-codex-side-task-checklist.md`](./remote-codex-side-task-checklist.md).
+
 ## Progress Legend
 
 - `[ ]` Not started.
