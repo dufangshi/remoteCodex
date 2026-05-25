@@ -108,8 +108,9 @@ gateway, ElAgenteHarness, or chemistry compute workers.
   itself.
 - Phase 0-6 evidence tooling has CLI-level tests via
   `pnpm test:phase-zero-six-evidence`, covering guarded checklist application
-  and obvious artifact secret leakage detection, including bundle-level refusal
-  to apply checklist changes after an artifact scan failure.
+  and obvious artifact secret leakage detection in JSON and shell/env evidence
+  artifacts, including bundle-level refusal to apply checklist changes after an
+  artifact scan failure.
 - Phase 0-6 evidence tooling CI workflow exists at
   `.github/workflows/phase-zero-six-evidence.yml`; it typechecks the evidence
   scripts, runs `pnpm test:phase-zero-six-evidence`, and audits the current

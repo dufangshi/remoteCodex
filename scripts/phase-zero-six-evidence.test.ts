@@ -656,6 +656,80 @@ describe('phase zero-six evidence tooling', () => {
     expect(parsed.findings.map((finding: { kind: string }) => finding.kind)).toContain('jwt_value');
   });
 
+  it('scans shell env artifacts for obvious secrets while allowing placeholders', async () => {
+    const safeDir = await tempDir();
+    await writeFile(
+      path.join(safeDir, 'phase-zero-six.env.sh'),
+      [
+        "export STAGING_PRODUCT_JWT='<staging-product-jwt>'",
+        "export AWS_STAGING_REVIEWED_BY='operator@example.com'",
+        '',
+      ].join('\n'),
+    );
+    const safeResult = await runScript('scripts/verify-phase-zero-six-artifacts-safe.ts', [
+      '--dir',
+      safeDir,
+    ]);
+    const safeParsed = JSON.parse(safeResult.stdout);
+
+    expect(safeResult.exitCode).toBe(0);
+    expect(safeParsed.ok).toBe(true);
+    expect(safeParsed.scannedFiles).toContain(path.join(safeDir, 'phase-zero-six.env.sh'));
+
+    const leakingDir = await tempDir();
+    await writeFile(
+      path.join(leakingDir, 'phase-zero-six.env.sh'),
+      "export STAGING_PRODUCT_JWT='Bearer eyJaaaaaaaaaaaaaaaa.eyJbbbbbbbbbbbbbbbb.cccccccccccccccccc'\n",
+    );
+    const leakingResult = await runScript('scripts/verify-phase-zero-six-artifacts-safe.ts', [
+      '--dir',
+      leakingDir,
+    ]);
+    const leakingParsed = JSON.parse(leakingResult.stdout);
+
+    expect(leakingResult.exitCode).toBe(1);
+    expect(leakingParsed.ok).toBe(false);
+    expect(leakingParsed.findings.map((finding: { kind: string }) => finding.kind)).toContain('bearer_token');
+    expect(leakingParsed.findings.map((finding: { kind: string }) => finding.kind)).toContain('jwt_value');
+  });
+
+  it('allows phase evidence artifact paths while still flagging long secret-like values', async () => {
+    const safeDir = await tempDir();
+    await writeFile(
+      path.join(safeDir, 'summary.json'),
+      JSON.stringify({
+        artifacts: {
+          envReadiness: '.temp/phase-zero-six-evidence/latest-local-template-check/env-readiness.json',
+          envTemplate: '.temp/phase-zero-six-evidence/latest-local-template-check/phase-zero-six.env.sh',
+        },
+      }),
+    );
+    const safeResult = await runScript('scripts/verify-phase-zero-six-artifacts-safe.ts', [
+      '--dir',
+      safeDir,
+    ]);
+    const safeParsed = JSON.parse(safeResult.stdout);
+
+    expect(safeResult.exitCode).toBe(0);
+    expect(safeParsed.ok).toBe(true);
+
+    const leakingDir = await tempDir();
+    await writeFile(
+      path.join(leakingDir, 'summary.json'),
+      JSON.stringify({
+        value: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      }),
+    );
+    const leakingResult = await runScript('scripts/verify-phase-zero-six-artifacts-safe.ts', [
+      '--dir',
+      leakingDir,
+    ]);
+    const leakingParsed = JSON.parse(leakingResult.stdout);
+
+    expect(leakingResult.exitCode).toBe(1);
+    expect(leakingParsed.findings.map((finding: { kind: string }) => finding.kind)).toContain('long_secret_like_value');
+  });
+
   it('reports env readiness without printing secret values', async () => {
     const result = await runScriptWithEnv(
       'scripts/verify-phase-zero-six-env-ready.ts',

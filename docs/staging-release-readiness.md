@@ -373,6 +373,11 @@ The bundle runner writes:
 The bundle runner also scans generated JSON artifacts for obvious secret-like
 values and sensitive fields before marking the bundle successful. This is a
 guardrail, not a replacement for operator review.
+It also scans generated shell/env/text artifacts such as
+`phase-zero-six.env.sh` and `aws-preflight.env.sh` for obvious bearer tokens,
+JWTs, provider keys, AWS access keys, GitHub tokens, and long secret-like
+values. Placeholder values are allowed; filled real secrets should not be kept
+in evidence artifact directories.
 Provider command `stdout`, `stderr`, and command errors are redacted before
 they are written to evidence JSON, and then scanned again by the artifact
 secret scanner. The provider gateway helper preserves redacted stdout and

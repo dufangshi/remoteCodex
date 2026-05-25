@@ -54,17 +54,59 @@ function preview(value: string) {
   return value.length > 32 ? `${value.slice(0, 12)}...${value.slice(-8)}` : value;
 }
 
+function isLikelyArtifactPath(value: string) {
+  return (
+    /^\.?\/?(?:\.temp|temp)\/phase-zero-six-evidence\//.test(value) ||
+    /^\.?\/?artifacts\/phase-zero-six-evidence\//.test(value) ||
+    /^[A-Za-z]:[\\/].*[\\/]phase-zero-six-evidence[\\/]/.test(value)
+  );
+}
+
 async function listJsonFiles(root: string): Promise<string[]> {
   const entries = await readdir(root);
   const files: string[] = [];
   for (const entry of entries) {
     const filePath = path.join(root, entry);
     const entryStat = await stat(filePath);
-    if (entryStat.isFile() && entry.endsWith('.json')) {
+    if (entryStat.isFile() && isScannableArtifact(filePath)) {
       files.push(filePath);
     }
   }
   return files.sort();
+}
+
+function isScannableArtifact(filePath: string) {
+  const basename = path.basename(filePath);
+  return (
+    basename.endsWith('.json') ||
+    basename.endsWith('.env') ||
+    basename.endsWith('.env.sh') ||
+    basename.endsWith('.sh') ||
+    basename.endsWith('.txt') ||
+    basename.endsWith('.log')
+  );
+}
+
+function scanText(input: {
+  file: string;
+  value: string;
+  path: string;
+  findings: Finding[];
+}) {
+  for (const [kind, pattern] of secretValuePatterns) {
+    const match = input.value.match(pattern);
+    if (match?.[0]) {
+      if (kind === 'long_secret_like_value' && isLikelyArtifactPath(match[0])) {
+        continue;
+      }
+      input.findings.push({
+        file: input.file,
+        kind,
+        path: input.path,
+        preview: preview(match[0]),
+      });
+    }
+  }
 }
 
 function scanJsonValue(input: {
@@ -111,17 +153,12 @@ function scanJsonValue(input: {
     return;
   }
 
-  for (const [kind, pattern] of secretValuePatterns) {
-    const match = input.value.match(pattern);
-    if (match?.[0]) {
-      input.findings.push({
-        file: input.file,
-        kind,
-        path: input.path,
-        preview: preview(match[0]),
-      });
-    }
-  }
+  scanText({
+    file: input.file,
+    value: input.value,
+    path: input.path,
+    findings: input.findings,
+  });
 }
 
 async function main() {
@@ -134,6 +171,16 @@ async function main() {
 
   for (const file of files) {
     const raw = await readFile(file, 'utf8');
+    if (!file.endsWith('.json')) {
+      scanText({
+        file,
+        value: raw,
+        path: '',
+        findings,
+      });
+      continue;
+    }
+
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
