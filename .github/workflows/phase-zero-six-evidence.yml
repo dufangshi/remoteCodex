@@ -192,7 +192,7 @@ jobs:
       - name: Collect evidence bundle
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
           args=(--output-dir ./.temp/phase-zero-six-evidence/gha)
           if [[ "${{ inputs.evidence_mode }}" == "aws-only" ]]; then
             args+=(--skip-staging-smoke)
@@ -201,6 +201,12 @@ jobs:
             args+=(--force)
           fi
           pnpm collect:phase-zero-six-evidence -- "${args[@]}"
+          exit_code=$?
+          if [[ "$exit_code" -ne 0 && "${{ inputs.force_diagnostics }}" == "true" ]]; then
+            echo "::warning::Evidence collection exited with ${exit_code}; force_diagnostics=true so uploaded artifacts are the expected output."
+            exit 0
+          fi
+          exit "$exit_code"
 
       - name: Upload evidence artifacts
         if: always()

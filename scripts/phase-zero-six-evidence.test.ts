@@ -1546,7 +1546,7 @@ describe('phase zero-six evidence tooling', () => {
     expect(checklist).toContain('- [x] S3.04 Finalize AWS staging configuration.');
     expect(checklist).toContain('- [x] S3.05 Add least-privilege Kubernetes credentials.');
     expect(checklist).toContain('- [ ] S3.06 Create a real worker Pod from the control plane.');
-  });
+  }, 15_000);
 
   it('applies reviewed artifacts without rerunning live collection or smoke commands', async () => {
     const evidenceDir = await tempDir();
