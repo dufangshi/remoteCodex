@@ -1,0 +1,35 @@
+aws_region     = "us-east-1"
+aws_account_id = "123456789012"
+environment    = "staging"
+
+eks_cluster_name    = "remote-codex-staging"
+fargate_profile_name = "remote-codex-staging-workers"
+vpc_id              = "vpc-00000000000000000"
+private_subnet_ids  = ["subnet-00000000000000000", "subnet-11111111111111111"]
+worker_security_group_ids = ["sg-00000000000000000"]
+
+kubernetes_namespace = "remote-codex-staging"
+sandbox_manager_role_arn = "arn:aws:iam::123456789012:role/remote-codex-staging-sandbox-manager"
+
+worker_image_tag = "replace-with-git-sha"
+worker_auth_token = "replace-with-worker-internal-token"
+
+sandbox_router_base_url = "https://router-staging.example.com"
+control_plane_base_url  = "https://control-plane-staging.example.com"
+
+route_token_signing_key_id = "staging-001"
+route_token_signing_secret = "replace-with-route-token-signing-secret"
+router_worker_auth_token = "replace-with-worker-internal-token"
+router_worker_identity_secret = "replace-with-router-worker-identity-secret"
+control_plane_service_token = "replace-with-control-plane-service-token"
+
+# Set this after a router image exists. Leave null to skip router Deployment/Service.
+router_image = null
+
+aws_staging_reviewed_by = "operator@example.com"
+aws_staging_config_reviewed = false
+aws_staging_credential_review_passed = false
+
+tags = {
+  Owner = "remote-codex"
+}
