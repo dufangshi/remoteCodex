@@ -19,6 +19,9 @@ import {
   NoopSandboxManager,
   SandboxManagerError,
   SandboxManager,
+  AwsEksFargateSandboxManager,
+  KubectlAwsSandboxKubernetesClient,
+  loadAwsSandboxAdapterConfig,
   type SandboxStartInput,
 } from './adapters';
 import {
@@ -594,6 +597,29 @@ function harnessStartInput(app: FastifyInstance): SandboxStartInput['harness'] {
   };
 }
 
+function hasAwsSandboxConfig(env: NodeJS.ProcessEnv) {
+  return Boolean(
+    env.SANDBOX_EKS_CLUSTER_NAME &&
+      env.SANDBOX_K8S_SERVICE_ACCOUNT &&
+      env.SANDBOX_WORKER_IMAGE_REPOSITORY &&
+      env.SANDBOX_WORKER_IMAGE_TAG &&
+      env.SANDBOX_ROUTER_BASE_URL &&
+      env.SANDBOX_WORKER_AUTH_TOKEN_SECRET_NAME &&
+      env.SANDBOX_SUBNET_IDS &&
+      env.SANDBOX_SECURITY_GROUP_IDS,
+  );
+}
+
+function defaultSandboxManager(env: NodeJS.ProcessEnv, routerBaseUrl: string): SandboxManager {
+  if (!hasAwsSandboxConfig(env)) {
+    return new NoopSandboxManager(routerBaseUrl);
+  }
+  return new AwsEksFargateSandboxManager(
+    loadAwsSandboxAdapterConfig(env),
+    new KubectlAwsSandboxKubernetesClient(),
+  );
+}
+
 export function buildControlPlaneApp(
   options: {
     env?: NodeJS.ProcessEnv;
@@ -628,7 +654,8 @@ export function buildControlPlaneApp(
     disableRequestLogging: config.disableRequestLogging,
   });
 
-  const sandboxManager = options.sandboxManager ?? new NoopSandboxManager(config.routerBaseUrl);
+  const runtimeEnv = options.env ?? process.env;
+  const sandboxManager = options.sandboxManager ?? defaultSandboxManager(runtimeEnv, config.routerBaseUrl);
   const services: ControlPlaneServices = {
     config,
     database,
@@ -1092,8 +1119,9 @@ export function buildControlPlaneApp(
       sandboxId: sandbox.id,
       userId: user.id,
     });
+    const updatedSandbox = repository.updateSandboxState(sandbox.id, status);
     return {
-      sandbox,
+      sandbox: updatedSandbox,
       status,
       endpoint,
     };

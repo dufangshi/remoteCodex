@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { z } from 'zod';
+
+const execFileAsync = promisify(execFile);
 
 export interface SandboxProvisionResult {
   state: string;
@@ -365,6 +369,332 @@ export interface AwsSandboxKubernetesClient {
   }): Promise<AwsWorkerRuntimeResource[]>;
 }
 
+function shellJson(value: unknown) {
+  return JSON.stringify(value);
+}
+
+function labelsToSelector(selector: Record<string, string>) {
+  return Object.entries(selector)
+    .map(([key, value]) => `${key}=${value}`)
+    .join(',');
+}
+
+function workerPodManifest(spec: AwsWorkerPodSpec) {
+  return {
+    apiVersion: 'v1',
+    kind: 'Pod',
+    metadata: {
+      name: spec.podName,
+      namespace: spec.namespace,
+      labels: spec.labels,
+      annotations: {
+        'remote-codex.dev/subnet-ids': spec.subnetIds.join(','),
+        'remote-codex.dev/security-group-ids': spec.securityGroupIds.join(','),
+      },
+    },
+    spec: {
+      serviceAccountName: spec.serviceAccountName,
+      restartPolicy: 'Never',
+      containers: [
+        {
+          name: 'worker',
+          image: spec.image,
+          imagePullPolicy: 'IfNotPresent',
+          ports: [
+            {
+              name: 'http',
+              containerPort: 8787,
+            },
+          ],
+          env: [
+            ...Object.entries(spec.env).map(([name, value]) => ({ name, value })),
+            ...Object.entries(spec.secretEnv).map(([name, ref]) => ({
+              name,
+              valueFrom: {
+                secretKeyRef: {
+                  name: ref.secretName,
+                  key: ref.key,
+                },
+              },
+            })),
+          ],
+          resources: {
+            requests: {
+              cpu: spec.resources.cpu,
+              memory: spec.resources.memory,
+              'ephemeral-storage': spec.resources.ephemeralStorage,
+            },
+            limits: {
+              cpu: spec.resources.cpu,
+              memory: spec.resources.memory,
+              'ephemeral-storage': spec.resources.ephemeralStorage,
+            },
+          },
+          readinessProbe: {
+            httpGet: {
+              path: '/readyz',
+              port: 'http',
+            },
+            initialDelaySeconds: 5,
+            periodSeconds: 10,
+            failureThreshold: 18,
+          },
+          livenessProbe: {
+            httpGet: {
+              path: '/readyz',
+              port: 'http',
+            },
+            initialDelaySeconds: 20,
+            periodSeconds: 30,
+          },
+        },
+      ],
+    },
+  };
+}
+
+function workerServiceManifest(spec: AwsWorkerPodSpec) {
+  return {
+    apiVersion: 'v1',
+    kind: 'Service',
+    metadata: {
+      name: spec.serviceName,
+      namespace: spec.namespace,
+      labels: spec.labels,
+    },
+    spec: {
+      type: 'ClusterIP',
+      selector: {
+        'remote-codex.dev/sandbox-id': spec.labels['remote-codex.dev/sandbox-id'],
+        'remote-codex.dev/runtime-role': 'worker',
+      },
+      ports: [
+        {
+          name: 'http',
+          port: 8787,
+          targetPort: 'http',
+        },
+      ],
+    },
+  };
+}
+
+function podReadyFromStatus(pod: any) {
+  const conditions = Array.isArray(pod?.status?.conditions) ? pod.status.conditions : [];
+  return conditions.some(
+    (condition: any) => condition?.type === 'Ready' && condition?.status === 'True',
+  );
+}
+
+function podReasonFromStatus(pod: any) {
+  const containerStatuses = Array.isArray(pod?.status?.containerStatuses)
+    ? pod.status.containerStatuses
+    : [];
+  const waiting = containerStatuses
+    .map((status: any) => status?.state?.waiting)
+    .find((state: any) => state?.reason || state?.message);
+  if (waiting) {
+    return {
+      reason: waiting.reason ?? null,
+      message: waiting.message ?? null,
+    };
+  }
+
+  const conditions = Array.isArray(pod?.status?.conditions) ? pod.status.conditions : [];
+  const notReady = conditions
+    .filter((condition: any) => condition?.status !== 'True')
+    .find((condition: any) => condition?.reason || condition?.message);
+  return {
+    reason: notReady?.reason ?? pod?.status?.reason ?? null,
+    message: notReady?.message ?? pod?.status?.message ?? null,
+  };
+}
+
+export class KubectlAwsSandboxKubernetesClient implements AwsSandboxKubernetesClient {
+  constructor(
+    private readonly input: {
+      kubectlPath?: string;
+      timeoutMs?: number;
+    } = {},
+  ) {}
+
+  async applyWorkerPod(spec: AwsWorkerPodSpec): Promise<void> {
+    await this.kubectl([
+      'apply',
+      '-f',
+      '-',
+    ], `${shellJson(workerServiceManifest(spec))}\n---\n${shellJson(workerPodManifest(spec))}\n`);
+  }
+
+  async deleteWorkerPod(input: {
+    namespace: string;
+    podName: string;
+    serviceName: string;
+  }): Promise<{ deleted: boolean }> {
+    const podExists = await this.exists(['get', 'pod', input.podName, '-n', input.namespace]);
+    const serviceExists = await this.exists(['get', 'service', input.serviceName, '-n', input.namespace]);
+    await this.kubectl([
+      'delete',
+      'pod',
+      input.podName,
+      '-n',
+      input.namespace,
+      '--ignore-not-found=true',
+    ]);
+    await this.kubectl([
+      'delete',
+      'service',
+      input.serviceName,
+      '-n',
+      input.namespace,
+      '--ignore-not-found=true',
+    ]);
+    return { deleted: podExists || serviceExists };
+  }
+
+  async getWorkerPod(input: {
+    namespace: string;
+    podName: string;
+  }): Promise<AwsWorkerPodStatus | null> {
+    const result = await this.kubectl([
+      'get',
+      'pod',
+      input.podName,
+      '-n',
+      input.namespace,
+      '-o',
+      'json',
+    ], undefined, { allowNotFound: true });
+    if (result.notFound) {
+      return null;
+    }
+    const pod = JSON.parse(result.stdout);
+    const reason = podReasonFromStatus(pod);
+    return {
+      phase: pod?.status?.phase ?? 'Unknown',
+      ready: podReadyFromStatus(pod),
+      reason: reason.reason,
+      message: reason.message,
+    };
+  }
+
+  async getWorkerEndpoint(input: {
+    namespace: string;
+    serviceName: string;
+  }): Promise<AwsWorkerEndpoint> {
+    return {
+      workerServiceName: input.serviceName,
+    };
+  }
+
+  async listWorkerPods(input: {
+    namespace: string;
+    selector: Record<string, string>;
+  }): Promise<AwsWorkerRuntimeResource[]> {
+    const result = await this.kubectl([
+      'get',
+      'pods',
+      '-n',
+      input.namespace,
+      '-l',
+      labelsToSelector(input.selector),
+      '-o',
+      'json',
+    ]);
+    const payload = JSON.parse(result.stdout);
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    return items.map((pod: any) => ({
+      sandboxId:
+        pod?.metadata?.labels?.['remote-codex.dev/sandbox-id'] ??
+        pod?.metadata?.labels?.['remote-codex/sandbox-id'] ??
+        pod?.metadata?.name,
+      userId:
+        pod?.metadata?.labels?.['remote-codex.dev/user-id'] ??
+        pod?.metadata?.labels?.['remote-codex/user-id'] ??
+        null,
+      podName: pod?.metadata?.name,
+      serviceName: pod?.metadata?.name,
+      state: pod?.status?.phase ?? 'Unknown',
+      labels: pod?.metadata?.labels ?? {},
+    }));
+  }
+
+  private async exists(args: string[]) {
+    const result = await this.kubectl(args, undefined, { allowNotFound: true });
+    return !result.notFound;
+  }
+
+  private async kubectl(
+    args: string[],
+    stdin?: string,
+    options: { allowNotFound?: boolean } = {},
+  ): Promise<{ stdout: string; notFound: boolean }> {
+    try {
+      if (stdin !== undefined) {
+        const result = await this.spawnKubectl(args, stdin);
+        return { stdout: result.stdout, notFound: false };
+      }
+      const result = await execFileAsync(this.input.kubectlPath ?? 'kubectl', args, {
+        timeout: this.input.timeoutMs ?? 60_000,
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      return { stdout: result.stdout, notFound: false };
+    } catch (error) {
+      const failure = error as {
+        stdout?: string;
+        stderr?: string;
+        message?: string;
+      };
+      const stderr = failure.stderr ?? '';
+      if (options.allowNotFound && /not found/i.test(stderr)) {
+        return { stdout: failure.stdout ?? '', notFound: true };
+      }
+      if (options.allowNotFound && /not found/i.test(failure.message ?? '')) {
+        return { stdout: failure.stdout ?? '', notFound: true };
+      }
+      throw new SandboxManagerError(
+        'provider',
+        `kubectl ${args.join(' ')} failed: ${stderr || failure.message || String(error)}`,
+      );
+    }
+  }
+
+  private spawnKubectl(args: string[], stdin: string): Promise<{ stdout: string }> {
+    return new Promise((resolve, reject) => {
+      const child = spawn(this.input.kubectlPath ?? 'kubectl', args, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      let stdout = '';
+      let stderr = '';
+      const timeout = setTimeout(() => {
+        child.kill('SIGTERM');
+        reject(new Error(`kubectl ${args.join(' ')} timed out.`));
+      }, this.input.timeoutMs ?? 60_000);
+      child.stdout.setEncoding('utf8');
+      child.stderr.setEncoding('utf8');
+      child.stdout.on('data', (chunk) => {
+        stdout += chunk;
+      });
+      child.stderr.on('data', (chunk) => {
+        stderr += chunk;
+      });
+      child.on('error', (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
+      child.on('close', (code) => {
+        clearTimeout(timeout);
+        if (code === 0) {
+          resolve({ stdout });
+          return;
+        }
+        reject(new Error(stderr || `kubectl ${args.join(' ')} exited with code ${code}.`));
+      });
+      child.stdin.end(stdin);
+    });
+  }
+}
+
 function commaList(value: string) {
   return value
     .split(',')
@@ -609,7 +939,9 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
               REMOTE_CODEX_LLM_GATEWAY_BASE_URL: input.gateway.baseUrl,
               REMOTE_CODEX_LLM_GATEWAY_KEY_ID: input.gateway.keyId,
             }
-          : {}),
+          : {
+              REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: '',
+            }),
         ...(input.harness
           ? {
               ELAGENTE_HARNESS_BASE_URL: input.harness.baseUrl,

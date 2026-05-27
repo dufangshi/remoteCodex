@@ -215,6 +215,12 @@ resource "kubernetes_role_v1" "sandbox_manager" {
 
   rule {
     api_groups = [""]
+    resources  = ["pods/log"]
+    verbs      = ["get"]
+  }
+
+  rule {
+    api_groups = [""]
     resources  = ["services"]
     verbs      = ["create", "get", "list", "delete"]
   }
