@@ -4,6 +4,298 @@ This file is the current-state handoff for the
 `sandbox-worker-control-plane` branch. Update it before larger phase handoffs or
 when the next implementation focus changes materially.
 
+## 2026-05-27 Railway/EKS Deployment Handoff
+
+This branch has been deployed to Railway project `TaskMarket`, environment
+`production`, with AWS/EKS sandbox runtime in account `918876873590`,
+region `ca-central-1`.
+
+### Current Git State
+
+- Branch: `sandbox-worker-control-plane`.
+- Latest pushed commit: `cebf2f7 Allow frontend CORS for control plane`.
+- Recent deployment commits:
+  - `cebf2f7 Allow frontend CORS for control plane`.
+  - `e88ad3e Deploy Railway supervisor frontend`.
+  - `80631bd Deploy Railway control plane to EKS workers`.
+
+### Active CORS Fix Pending Deploy
+
+The browser frontend currently needs the `cebf2f7` control-plane CORS fix to be
+deployed. Before this deploy, clicking `Login / register` in the Railway
+frontend fails in the browser with:
+
+```text
+Access to fetch at
+https://remote-codex-control-plane-production.up.railway.app/api/me/bootstrap
+from origin
+https://remote-codex-frontend-production.up.railway.app
+has been blocked by CORS policy:
+No 'Access-Control-Allow-Origin' header is present
+```
+
+`cebf2f7` fixes this in:
+
+- `apps/control-plane-api/src/app.ts`
+- `apps/control-plane-api/src/config.ts`
+- `apps/control-plane-api/src/app.test.ts`
+
+The control plane now handles OPTIONS preflight requests and allowlists browser
+origins. The production frontend is allowed by default:
+
+```text
+https://remote-codex-frontend-production.up.railway.app
+```
+
+Additional browser origins can be appended with:
+
+```text
+CONTROL_PLANE_CORS_ALLOWED_ORIGINS=<comma-separated origins>
+```
+
+The expected CORS response includes:
+
+```text
+Access-Control-Allow-Origin: <allowed origin>
+Access-Control-Allow-Methods: GET,POST,PATCH,DELETE,OPTIONS
+Access-Control-Allow-Headers: authorization,content-type,x-remote-codex-service-token
+Access-Control-Max-Age: 600
+Vary: Origin
+```
+
+Local verification for the CORS fix passed:
+
+```bash
+pnpm --filter @remote-codex/control-plane-api typecheck
+pnpm --filter @remote-codex/control-plane-api test
+git diff --check
+```
+
+The control-plane test suite passed with 65 tests.
+
+### Immediate Next Step
+
+Railway CLI auth expired while trying to deploy the CORS fix. Re-authenticate:
+
+```bash
+railway login --browserless
+```
+
+Open:
+
+```text
+https://railway.com/activate
+```
+
+Enter the new code printed by the CLI, then deploy the current branch to the
+control-plane service:
+
+```bash
+railway up \
+  --service remote-codex-control-plane \
+  --environment production \
+  --message allow-frontend-cors-cebf2f7 \
+  --detach
+```
+
+Wait for success:
+
+```bash
+railway service status \
+  --service remote-codex-control-plane \
+  --environment production \
+  --json
+```
+
+Then verify preflight:
+
+```bash
+curl -i -X OPTIONS \
+  https://remote-codex-control-plane-production.up.railway.app/api/me/bootstrap \
+  -H 'Origin: https://remote-codex-frontend-production.up.railway.app' \
+  -H 'Access-Control-Request-Method: POST' \
+  -H 'Access-Control-Request-Headers: authorization,content-type'
+```
+
+Expected result:
+
+```text
+HTTP/2 204
+access-control-allow-origin: https://remote-codex-frontend-production.up.railway.app
+access-control-allow-methods: GET,POST,PATCH,DELETE,OPTIONS
+access-control-allow-headers: authorization,content-type,x-remote-codex-service-token
+```
+
+After this deploy, refresh:
+
+```text
+https://remote-codex-frontend-production.up.railway.app/control-plane/login
+```
+
+and click `Login / register` again.
+
+### Railway Services
+
+Project/environment:
+
+```text
+Project: TaskMarket
+Environment: production
+```
+
+Frontend:
+
+```text
+Service: remote-codex-frontend
+URL: https://remote-codex-frontend-production.up.railway.app
+Latest verified deployment before CORS fix: f84dea39-5c6f-4423-b61d-2c49af20d7b6
+Status before CORS fix: SUCCESS
+/healthz: ok
+```
+
+Control plane:
+
+```text
+Service: remote-codex-control-plane
+URL: https://remote-codex-control-plane-production.up.railway.app
+Latest verified deployment before CORS fix: 32b13417-4bc4-4dd8-acb7-cdb5163ce750
+Status before CORS fix: SUCCESS
+/healthz: {"ok":true,"service":"control-plane-api"}
+```
+
+The control-plane deployment above does not include `cebf2f7`; redeploy is
+required before browser login works from the frontend origin.
+
+### AWS/EKS Runtime
+
+AWS account/region:
+
+```text
+Account: 918876873590
+Region: ca-central-1
+```
+
+EKS:
+
+```text
+Cluster: inact-harness-agents
+Namespace: remote-codex-staging
+Fargate profile: remote-codex-staging-workers
+```
+
+Router:
+
+```text
+URL: http://k8s-remoteco-remoteco-7dd92e25ca-b41c163a458fb214.elb.ca-central-1.amazonaws.com
+/healthz: {"ok":true,"role":"sandbox-router"}
+```
+
+Observed EKS Auto Mode nodes:
+
+```text
+i-0112b1453eb49e03f
+Type: c6g.large
+Name tag: null
+Node pool: system
+Private IP: 10.0.131.110
+Running: kube-system metrics-server pods
+
+i-002ad155c9d04d932
+Type: c6a.large
+Name tag: null
+Node pool: general-purpose
+Private IP: 10.0.144.184
+Running: remote-codex-sandbox-router
+```
+
+Do not manually terminate those EC2 instances. They are EKS Auto Mode managed
+capacity. The Remote Codex worker Pods are temporary and run through the
+`remote-codex-staging-workers` Fargate profile, not as persistent EC2 nodes.
+
+### Last Full Runtime Smoke
+
+The final API-level smoke before the CORS browser issue passed:
+
+```text
+ok: true
+generatedAt: 2026-05-27T06:07:45.651Z
+```
+
+Passed steps:
+
+```text
+bootstrap_user_and_sandbox
+start_sandbox
+sandbox_health
+sandbox_ready
+create_project_workspace_session
+issue_route_token
+router_health
+browser_to_router_to_worker
+direct_worker_private_denial
+stop_sandbox
+```
+
+Cleanup check returned:
+
+```text
+No resources found in remote-codex-staging namespace.
+```
+
+The smoke command shape was:
+
+```bash
+STAGING_CONTROL_PLANE_BASE_URL=https://remote-codex-control-plane-production.up.railway.app \
+STAGING_PRODUCT_JWT=dev:smoke-user-3 \
+STAGING_IDEMPOTENT_LIFECYCLE_SMOKE=0 \
+STAGING_STOP_SANDBOX_AFTER_SMOKE=1 \
+STAGING_SANDBOX_READY_TIMEOUT_MS=900000 \
+STAGING_SANDBOX_READY_POLL_MS=10000 \
+STAGING_SANDBOX_STOP_TIMEOUT_MS=900000 \
+STAGING_DIRECT_WORKER_PRIVATE_REVIEWED_BY=yinalwyn123@gmail.com \
+STAGING_DIRECT_WORKER_NETWORK_MODE=private \
+STAGING_DIRECT_WORKER_INGRESS_POLICY=router-only \
+STAGING_DIRECT_WORKER_PRIVATE_PROOF='worker Service is ClusterIP in remote-codex-staging and only router LoadBalancer is public' \
+pnpm smoke:staging-phase-one
+```
+
+### Product Limitations
+
+This is an internal/dev-mode deployment, not the final user-facing product.
+
+- Control-plane auth is still dev bearer auth:
+
+  ```text
+  CONTROL_PLANE_AUTH_MODE=dev
+  Authorization: Bearer dev:<subject>
+  ```
+
+- Real TaskMarket auth is not wired yet.
+- Real LLM/provider execution is not wired yet. Workers are allowed to start
+  without a gateway by setting:
+
+  ```text
+  REMOTE_CODEX_ENABLED_AGENT_PROVIDERS=""
+  ```
+
+- The current deployment proves frontend/control-plane/router/worker lifecycle,
+  route-token issuance, router-to-worker access, direct-worker denial, and
+  cleanup. It does not yet provide a complete end-user coding-agent workflow.
+
+### Sensitive Local Files
+
+Do not print or commit these files:
+
+```text
+.temp/railway-control-plane.env
+.temp/remote-codex-control-plane-staging-access-key.json
+.temp/aws-terraform.env
+infra/terraform/staging/terraform.tfvars
+infra/terraform/staging/terraform.tfstate
+```
+
+They are ignored by Git.
+
 ## Current Scope
 
 Remote Codex is being shaped into the Agente product control plane plus sandbox
