@@ -37,6 +37,8 @@ import {
 } from '../lib/api';
 
 export const CONTROL_PLANE_AUTH_STORAGE_KEY = 'remote-codex-control-plane-auth';
+const DEFAULT_CONTROL_PLANE_BASE_URL =
+  import.meta.env.VITE_CONTROL_PLANE_BASE_URL || 'http://127.0.0.1:8790';
 const ROUTE_TOKEN_REFRESH_SKEW_MS = 60_000;
 const ROUTE_TOKEN_MIN_REFRESH_MS = 5_000;
 
@@ -59,7 +61,7 @@ function slugFromName(value: string) {
 function readStoredAuth(): StoredControlPlaneAuth {
   if (typeof window === 'undefined') {
     return {
-      baseUrl: 'http://127.0.0.1:8790',
+      baseUrl: DEFAULT_CONTROL_PLANE_BASE_URL,
       subject: 'dev-user',
       email: 'dev@example.com',
       displayName: 'Developer',
@@ -71,7 +73,7 @@ function readStoredAuth(): StoredControlPlaneAuth {
     try {
       const parsed = JSON.parse(raw) as Partial<StoredControlPlaneAuth>;
       return {
-        baseUrl: parsed.baseUrl || 'http://127.0.0.1:8790',
+        baseUrl: parsed.baseUrl || DEFAULT_CONTROL_PLANE_BASE_URL,
         subject: parsed.subject || 'dev-user',
         email: parsed.email || 'dev@example.com',
         displayName: parsed.displayName || 'Developer',
@@ -82,7 +84,7 @@ function readStoredAuth(): StoredControlPlaneAuth {
   }
 
   return {
-    baseUrl: 'http://127.0.0.1:8790',
+    baseUrl: DEFAULT_CONTROL_PLANE_BASE_URL,
     subject: 'dev-user',
     email: 'dev@example.com',
     displayName: 'Developer',

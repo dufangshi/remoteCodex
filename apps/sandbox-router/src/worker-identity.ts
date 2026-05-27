@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto';
 
-import type { RouteTokenPayload } from '../../../packages/shared/src/index';
+import type { RouteTokenPayload } from '../../../packages/shared/src/tokens';
 
 export const WORKER_IDENTITY_HEADERS = {
   user: 'x-remote-codex-user',

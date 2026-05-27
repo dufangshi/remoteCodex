@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import WebSocket, { WebSocketServer } from 'ws';
 
-import { createSignedToken, RouteTokenPayload } from '../../../packages/shared/src/index';
+import { createSignedToken, RouteTokenPayload } from '../../../packages/shared/src/tokens';
 import {
   buildSandboxRouterApp,
   SandboxEndpointResolver,

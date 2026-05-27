@@ -5,8 +5,8 @@ import Fastify, { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import WebSocket from 'ws';
 import { z, ZodError } from 'zod';
 
-import type { RouteTokenPayload } from '../../../packages/shared/src/index';
-import { verifySignedTokenWithKeys } from '../../../packages/shared/src/index';
+import type { RouteTokenPayload } from '../../../packages/shared/src/tokens';
+import { verifySignedTokenWithKeys } from '../../../packages/shared/src/tokens';
 import { loadSandboxRouterConfig, SandboxRouterConfig } from './config';
 import {
   WORKER_IDENTITY_HEADERS,

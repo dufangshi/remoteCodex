@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import type { SigningKey } from '../../../packages/shared/src/index';
+import type { SigningKey } from '../../../packages/shared/src/tokens';
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).optional(),

@@ -3,7 +3,7 @@ import { FastifyRequest } from 'fastify';
 import {
   SignedTokenPayload,
   verifySignedToken,
-} from '../../../packages/shared/src/index';
+} from '../../../packages/shared/src/tokens';
 import { ControlPlaneRepository } from './repository';
 
 export interface AuthIdentity {

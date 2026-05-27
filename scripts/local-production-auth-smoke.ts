@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { buildControlPlaneApp } from '../apps/control-plane-api/src/app';
-import { createSignedToken } from '../packages/shared/src/index';
+import { createSignedToken } from '../packages/shared/src/tokens';
 
 const authSecret = 'local-production-auth-smoke-secret';
 const issuer = 'https://auth.local-smoke.example.test';

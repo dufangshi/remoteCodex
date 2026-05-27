@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createSignedToken } from '../../../packages/shared/src/index';
+import { createSignedToken } from '../../../packages/shared/src/tokens';
 import type {
   SandboxManager,
   SandboxProvisionResult,

@@ -11,7 +11,7 @@ import {
 import {
   createSignedToken,
   verifySignedTokenWithKeys,
-} from '../../../packages/shared/src/index';
+} from '../../../packages/shared/src/tokens';
 import {
   HttpLlmGatewayAdmin,
   LlmGatewayAdmin,

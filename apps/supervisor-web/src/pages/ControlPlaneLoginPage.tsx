@@ -3,6 +3,9 @@ import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 
 import { CONTROL_PLANE_AUTH_STORAGE_KEY } from './ControlPlanePage';
 
+const DEFAULT_CONTROL_PLANE_BASE_URL =
+  import.meta.env.VITE_CONTROL_PLANE_BASE_URL || 'http://127.0.0.1:8790';
+
 interface StoredControlPlaneAuth {
   baseUrl: string;
   subject: string;
@@ -71,7 +74,7 @@ export function ControlPlaneLoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const existing = readStoredAuth();
-  const [baseUrl, setBaseUrl] = useState(existing?.baseUrl ?? 'http://127.0.0.1:8790');
+  const [baseUrl, setBaseUrl] = useState(existing?.baseUrl ?? DEFAULT_CONTROL_PLANE_BASE_URL);
   const [subject, setSubject] = useState(existing?.subject ?? 'dev-user');
   const [email, setEmail] = useState(existing?.email ?? 'dev@example.com');
   const [displayName, setDisplayName] = useState(existing?.displayName ?? 'Developer');
