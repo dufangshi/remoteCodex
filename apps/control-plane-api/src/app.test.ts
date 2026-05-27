@@ -129,6 +129,73 @@ describe('control plane api', () => {
     );
   });
 
+  it('allows configured browser origins to call the API', async () => {
+    const app = buildControlPlaneApp({
+      env: {
+        ...testEnv('cors'),
+        CONTROL_PLANE_CORS_ALLOWED_ORIGINS: 'https://frontend.example.test',
+      },
+    });
+    apps.push(app);
+
+    const preflight = await app.inject({
+      method: 'OPTIONS',
+      url: '/api/me/bootstrap',
+      headers: {
+        origin: 'https://frontend.example.test',
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'authorization,content-type',
+      },
+    });
+
+    expect(preflight.statusCode).toBe(204);
+    expect(preflight.headers['access-control-allow-origin']).toBe(
+      'https://frontend.example.test',
+    );
+    expect(preflight.headers['access-control-allow-methods']).toContain('POST');
+    expect(preflight.headers['access-control-allow-headers']).toContain('authorization');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: {
+        origin: 'https://frontend.example.test',
+        authorization: 'Bearer dev:user-cors',
+      },
+      payload: {
+        email: 'cors@example.com',
+        displayName: 'Cors User',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['access-control-allow-origin']).toBe(
+      'https://frontend.example.test',
+    );
+  });
+
+  it('does not allow unconfigured browser origins', async () => {
+    const app = buildControlPlaneApp({
+      env: {
+        ...testEnv('cors-denied'),
+        CONTROL_PLANE_CORS_ALLOWED_ORIGINS: 'https://frontend.example.test',
+      },
+    });
+    apps.push(app);
+
+    const response = await app.inject({
+      method: 'OPTIONS',
+      url: '/api/me/bootstrap',
+      headers: {
+        origin: 'https://evil.example.test',
+        'access-control-request-method': 'POST',
+      },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(response.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
   it('bootstraps a user, sandbox, and gateway key', async () => {
     const app = buildControlPlaneApp({ env: testEnv('bootstrap') });
     apps.push(app);

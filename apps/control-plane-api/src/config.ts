@@ -36,7 +36,12 @@ const envSchema = z.object({
   CONTROL_PLANE_AUTH_JWT_ISSUER: z.string().min(1).optional(),
   CONTROL_PLANE_AUTH_JWT_AUDIENCE: z.string().min(1).optional(),
   CONTROL_PLANE_AUTH_JWT_CLOCK_SKEW_SECONDS: z.coerce.number().int().nonnegative().optional(),
+  CONTROL_PLANE_CORS_ALLOWED_ORIGINS: z.string().optional(),
 });
+
+const DEFAULT_CORS_ALLOWED_ORIGINS = [
+  'https://remote-codex-frontend-production.up.railway.app',
+];
 
 export interface ControlPlaneConfig {
   nodeEnv: 'development' | 'test' | 'production';
@@ -71,6 +76,7 @@ export interface ControlPlaneConfig {
   authJwtAudience: string | null;
   authJwtClockSkewSeconds: number;
   routeTokenSigningKeys: Array<{ id: string; secret: string }>;
+  corsAllowedOrigins: Set<string>;
 }
 
 function parsePreviousSigningKeys(value: string | undefined) {
@@ -178,5 +184,12 @@ export function loadControlPlaneConfig(
     authJwtAudience: parsed.CONTROL_PLANE_AUTH_JWT_AUDIENCE ?? null,
     authJwtClockSkewSeconds: parsed.CONTROL_PLANE_AUTH_JWT_CLOCK_SKEW_SECONDS ?? 60,
     routeTokenSigningKeys,
+    corsAllowedOrigins: new Set([
+      ...DEFAULT_CORS_ALLOWED_ORIGINS,
+      ...(parsed.CONTROL_PLANE_CORS_ALLOWED_ORIGINS ?? '')
+        .split(',')
+        .map((origin) => origin.trim())
+        .filter(Boolean),
+    ]),
   };
 }

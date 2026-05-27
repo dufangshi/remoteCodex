@@ -620,6 +620,33 @@ function defaultSandboxManager(env: NodeJS.ProcessEnv, routerBaseUrl: string): S
   );
 }
 
+function originAllowed(config: ControlPlaneConfig, origin: string) {
+  return config.corsAllowedOrigins.has(origin) || config.corsAllowedOrigins.has('*');
+}
+
+function registerCorsHooks(app: FastifyInstance, config: ControlPlaneConfig) {
+  app.addHook('onRequest', (request, reply, done) => {
+    const origin = request.headers.origin;
+    if (typeof origin === 'string' && originAllowed(config, origin)) {
+      reply.header('Access-Control-Allow-Origin', origin);
+      reply.header('Vary', 'Origin');
+      reply.header('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+      reply.header(
+        'Access-Control-Allow-Headers',
+        'authorization,content-type,x-remote-codex-service-token',
+      );
+      reply.header('Access-Control-Max-Age', '600');
+    }
+
+    if (request.method === 'OPTIONS') {
+      reply.status(204).send();
+      return;
+    }
+
+    done();
+  });
+}
+
 export function buildControlPlaneApp(
   options: {
     env?: NodeJS.ProcessEnv;
@@ -653,6 +680,8 @@ export function buildControlPlaneApp(
           },
     disableRequestLogging: config.disableRequestLogging,
   });
+
+  registerCorsHooks(app, config);
 
   const runtimeEnv = options.env ?? process.env;
   const sandboxManager = options.sandboxManager ?? defaultSandboxManager(runtimeEnv, config.routerBaseUrl);
