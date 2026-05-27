@@ -693,6 +693,21 @@ describe('control plane api', () => {
     expect(workspace.projectId).toBe(project.id);
     expect(workspace.path).toBe('/workspace/workspace-a');
 
+    const duplicateWorkspaceResponse = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${project.id}/workspaces`,
+      headers: auth,
+      payload: {
+        name: 'Workspace A Again',
+        slug: 'workspace-a',
+      },
+    });
+    expect(duplicateWorkspaceResponse.statusCode).toBe(409);
+    expect(duplicateWorkspaceResponse.json()).toMatchObject({
+      code: 'workspace_slug_conflict',
+      message: 'A workspace with this slug already exists for this sandbox.',
+    });
+
     const sessionResponse = await app.inject({
       method: 'POST',
       url: `/api/workspaces/${workspace.id}/sessions`,

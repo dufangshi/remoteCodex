@@ -263,6 +263,21 @@ function toErrorPayload(error: unknown) {
     };
   }
 
+  if (
+    isSqliteUniqueConstraint(
+      error,
+      'control_workspaces.sandbox_id, control_workspaces.slug',
+    )
+  ) {
+    return {
+      statusCode: 409,
+      payload: {
+        code: 'workspace_slug_conflict',
+        message: 'A workspace with this slug already exists for this sandbox.',
+      },
+    };
+  }
+
   return {
     statusCode: 500,
     payload: {
@@ -270,6 +285,18 @@ function toErrorPayload(error: unknown) {
       message: 'Unexpected control plane error.',
     },
   };
+}
+
+function isSqliteUniqueConstraint(error: unknown, constraint: string) {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+  const candidate = error as { code?: unknown; message?: unknown };
+  return (
+    candidate.code === 'SQLITE_CONSTRAINT_UNIQUE' &&
+    typeof candidate.message === 'string' &&
+    candidate.message.includes(`UNIQUE constraint failed: ${constraint}`)
+  );
 }
 
 function requireUser(app: FastifyInstance, request: FastifyRequest) {
