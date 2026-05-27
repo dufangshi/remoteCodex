@@ -42,9 +42,9 @@ locals {
   )
 
   worker_labels = {
-    "app.kubernetes.io/name"       = "remote-codex-worker"
-    "app.kubernetes.io/part-of"    = "remote-codex"
-    "app.kubernetes.io/component"  = "sandbox-worker"
+    "app.kubernetes.io/name"        = "remote-codex-worker"
+    "app.kubernetes.io/part-of"     = "remote-codex"
+    "app.kubernetes.io/component"   = "sandbox-worker"
     "remote-codex.dev/runtime-role" = "worker"
     "remote-codex.dev/environment"  = var.environment
   }
@@ -79,22 +79,22 @@ locals {
   }
 
   aws_staging_evidence_env = {
-    AWS_STAGING_REVIEWED_BY                 = var.aws_staging_reviewed_by
-    AWS_STAGING_REGION                      = var.aws_region
-    AWS_STAGING_ACCOUNT_ID                  = var.aws_account_id
-    AWS_STAGING_EKS_CLUSTER_NAME            = var.eks_cluster_name
-    AWS_STAGING_K8S_NAMESPACE               = kubernetes_namespace_v1.remote_codex.metadata[0].name
-    AWS_STAGING_FARGATE_PROFILE_NAME        = var.fargate_profile_name
-    AWS_STAGING_K8S_SERVICE_ACCOUNT         = kubernetes_service_account_v1.sandbox_manager.metadata[0].name
-    AWS_STAGING_K8S_ROLE_ARN                = var.sandbox_manager_role_arn
-    AWS_STAGING_WORKER_IMAGE_REPOSITORY     = local.worker_image_repository_url
-    AWS_STAGING_WORKER_IMAGE_TAG            = var.worker_image_tag
-    AWS_STAGING_LOG_GROUP_NAMES             = join(",", [aws_cloudwatch_log_group.worker.name, aws_cloudwatch_log_group.router.name])
-    AWS_STAGING_VPC_ID                      = var.vpc_id
-    AWS_STAGING_SUBNET_IDS                  = join(",", var.private_subnet_ids)
-    AWS_STAGING_SECURITY_GROUP_IDS          = join(",", var.worker_security_group_ids)
-    AWS_STAGING_CONFIG_REVIEWED             = tostring(var.aws_staging_config_reviewed)
-    AWS_STAGING_CREDENTIAL_REVIEW_PASSED    = tostring(var.aws_staging_credential_review_passed)
+    AWS_STAGING_REVIEWED_BY              = var.aws_staging_reviewed_by
+    AWS_STAGING_REGION                   = var.aws_region
+    AWS_STAGING_ACCOUNT_ID               = var.aws_account_id
+    AWS_STAGING_EKS_CLUSTER_NAME         = var.eks_cluster_name
+    AWS_STAGING_K8S_NAMESPACE            = kubernetes_namespace_v1.remote_codex.metadata[0].name
+    AWS_STAGING_FARGATE_PROFILE_NAME     = var.fargate_profile_name
+    AWS_STAGING_K8S_SERVICE_ACCOUNT      = kubernetes_service_account_v1.sandbox_manager.metadata[0].name
+    AWS_STAGING_K8S_ROLE_ARN             = var.sandbox_manager_role_arn
+    AWS_STAGING_WORKER_IMAGE_REPOSITORY  = local.worker_image_repository_url
+    AWS_STAGING_WORKER_IMAGE_TAG         = var.worker_image_tag
+    AWS_STAGING_LOG_GROUP_NAMES          = join(",", [aws_cloudwatch_log_group.worker.name, aws_cloudwatch_log_group.router.name])
+    AWS_STAGING_VPC_ID                   = var.vpc_id
+    AWS_STAGING_SUBNET_IDS               = join(",", var.private_subnet_ids)
+    AWS_STAGING_SECURITY_GROUP_IDS       = join(",", var.worker_security_group_ids)
+    AWS_STAGING_CONFIG_REVIEWED          = tostring(var.aws_staging_config_reviewed)
+    AWS_STAGING_CREDENTIAL_REVIEW_PASSED = tostring(var.aws_staging_credential_review_passed)
   }
 }
 
@@ -162,7 +162,7 @@ resource "kubernetes_namespace_v1" "remote_codex" {
     name = var.kubernetes_namespace
 
     labels = {
-      "app.kubernetes.io/part-of" = "remote-codex"
+      "app.kubernetes.io/part-of"    = "remote-codex"
       "remote-codex.dev/environment" = var.environment
     }
   }
@@ -390,9 +390,9 @@ resource "kubernetes_secret_v1" "router_runtime" {
   }
 
   data = {
-    route-token-signing-secret = var.route_token_signing_secret
-    worker-auth-token          = var.router_worker_auth_token
-    worker-identity-secret     = var.router_worker_identity_secret
+    route-token-signing-secret  = var.route_token_signing_secret
+    worker-auth-token           = var.router_worker_auth_token
+    worker-identity-secret      = var.router_worker_identity_secret
     control-plane-service-token = var.control_plane_service_token
   }
 

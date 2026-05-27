@@ -46,12 +46,12 @@ output "aws_staging_evidence_env" {
 output "github_staging_environment_vars" {
   description = "Non-secret GitHub Environment variables for the manual staging evidence workflow."
   value = merge(local.aws_staging_evidence_env, {
-    STAGING_CONTROL_PLANE_BASE_URL        = var.control_plane_base_url
-    STAGING_SANDBOX_READY_TIMEOUT_MS      = "900000"
-    STAGING_SANDBOX_STOP_TIMEOUT_MS       = "900000"
-    STAGING_IDEMPOTENT_LIFECYCLE_SMOKE    = "1"
-    STAGING_STOP_SANDBOX_AFTER_SMOKE      = "1"
-    STAGING_DIRECT_WORKER_NETWORK_MODE    = "private"
-    STAGING_DIRECT_WORKER_INGRESS_POLICY  = "router-only"
+    STAGING_CONTROL_PLANE_BASE_URL       = var.control_plane_base_url
+    STAGING_SANDBOX_READY_TIMEOUT_MS     = "900000"
+    STAGING_SANDBOX_STOP_TIMEOUT_MS      = "900000"
+    STAGING_IDEMPOTENT_LIFECYCLE_SMOKE   = "1"
+    STAGING_STOP_SANDBOX_AFTER_SMOKE     = "1"
+    STAGING_DIRECT_WORKER_NETWORK_MODE   = "private"
+    STAGING_DIRECT_WORKER_INGRESS_POLICY = "router-only"
   })
 }
