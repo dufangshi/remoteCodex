@@ -157,6 +157,14 @@ resource "aws_cloudwatch_log_group" "router" {
   tags = local.common_tags
 }
 
+resource "aws_ec2_tag" "public_load_balancer_subnets" {
+  for_each = toset(var.public_load_balancer_subnet_ids)
+
+  resource_id = each.value
+  key         = "kubernetes.io/role/elb"
+  value       = "1"
+}
+
 resource "kubernetes_namespace_v1" "remote_codex" {
   metadata {
     name = var.kubernetes_namespace
@@ -359,7 +367,7 @@ resource "kubernetes_deployment_v1" "sandbox_router" {
 
           readiness_probe {
             http_get {
-              path = "/readyz"
+              path = "/healthz"
               port = "http"
             }
             initial_delay_seconds = 5
@@ -411,7 +419,8 @@ resource "kubernetes_service_v1" "sandbox_router" {
   }
 
   spec {
-    type = var.router_service_type
+    type                = var.router_service_type
+    load_balancer_class = var.router_load_balancer_class
 
     selector = local.router_labels
 

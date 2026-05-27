@@ -34,6 +34,12 @@ variable "private_subnet_ids" {
   type        = list(string)
 }
 
+variable "public_load_balancer_subnet_ids" {
+  description = "Public subnet ids tagged for internet-facing EKS Auto Mode load balancers."
+  type        = list(string)
+  default     = []
+}
+
 variable "worker_security_group_ids" {
   description = "Security group ids used by worker Pods or the worker-facing network path."
   type        = list(string)
@@ -173,10 +179,18 @@ variable "router_service_type" {
   default     = "LoadBalancer"
 }
 
+variable "router_load_balancer_class" {
+  description = "Load balancer class for the sandbox-router Service when using EKS Auto Mode."
+  type        = string
+  default     = "eks.amazonaws.com/nlb"
+}
+
 variable "router_service_annotations" {
   description = "Annotations for the sandbox-router Service."
   type        = map(string)
-  default     = {}
+  default = {
+    "service.beta.kubernetes.io/aws-load-balancer-scheme" = "internet-facing"
+  }
 }
 
 variable "router_log_level" {

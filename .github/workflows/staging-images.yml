@@ -1,0 +1,126 @@
+name: Staging Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Immutable image tag to publish. Defaults to the commit SHA.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: staging-images-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  AWS_REGION: ca-central-1
+  AWS_ACCOUNT_ID: "918876873590"
+  WORKER_ECR_REPOSITORY: remote-codex-worker-staging
+  ROUTER_ECR_REPOSITORY: remote-codex-sandbox-router-staging
+
+jobs:
+  build-and-push:
+    name: Build and push staging images
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set image tag
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.inputs.image_tag }}"
+          if [[ -z "${tag}" ]]; then
+            tag="${GITHUB_SHA}"
+          fi
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_STAGING_GITHUB_ACTIONS_ROLE_ARN }}
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build worker image
+        run: |
+          docker build \
+            -f Dockerfile.worker \
+            -t "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${WORKER_ECR_REPOSITORY}:${{ steps.image.outputs.tag }}" \
+            --build-arg REMOTE_CODEX_IMAGE_VERSION="${{ steps.image.outputs.tag }}" \
+            --build-arg REMOTE_CODEX_GIT_SHA="${GITHUB_SHA}" \
+            .
+
+      - name: Smoke worker image
+        run: |
+          docker run -d \
+            --name remote-codex-worker-staging-smoke \
+            -p 127.0.0.1:18787:8787 \
+            -e REMOTE_CODEX_SANDBOX_ID=sbx_verify \
+            -e REMOTE_CODEX_USER_ID=user_verify \
+            -e REMOTE_CODEX_WORKER_AUTH_TOKEN=router-secret \
+            -e REMOTE_CODEX_ENABLED_AGENT_PROVIDERS= \
+            "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${WORKER_ECR_REPOSITORY}:${{ steps.image.outputs.tag }}"
+          for attempt in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:18787/readyz; then
+              exit 0
+            fi
+            docker ps -a --filter name=remote-codex-worker-staging-smoke
+            sleep 2
+          done
+          docker logs remote-codex-worker-staging-smoke
+          exit 1
+
+      - name: Stop worker smoke container
+        if: always()
+        run: docker rm -f remote-codex-worker-staging-smoke || true
+
+      - name: Build sandbox router image
+        run: |
+          docker build \
+            -f Dockerfile.sandbox-router \
+            -t "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ROUTER_ECR_REPOSITORY}:${{ steps.image.outputs.tag }}" \
+            --build-arg REMOTE_CODEX_IMAGE_VERSION="${{ steps.image.outputs.tag }}" \
+            --build-arg REMOTE_CODEX_GIT_SHA="${GITHUB_SHA}" \
+            .
+
+      - name: Smoke sandbox router image
+        run: |
+          docker run -d \
+            --name remote-codex-router-staging-smoke \
+            -p 127.0.0.1:18791:8791 \
+            "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ROUTER_ECR_REPOSITORY}:${{ steps.image.outputs.tag }}"
+          for attempt in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:18791/healthz; then
+              exit 0
+            fi
+            docker ps -a --filter name=remote-codex-router-staging-smoke
+            sleep 2
+          done
+          docker logs remote-codex-router-staging-smoke
+          exit 1
+
+      - name: Stop router smoke container
+        if: always()
+        run: docker rm -f remote-codex-router-staging-smoke || true
+
+      - name: Push worker image
+        run: |
+          docker push "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${WORKER_ECR_REPOSITORY}:${{ steps.image.outputs.tag }}"
+
+      - name: Push sandbox router image
+        run: |
+          docker push "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ROUTER_ECR_REPOSITORY}:${{ steps.image.outputs.tag }}"

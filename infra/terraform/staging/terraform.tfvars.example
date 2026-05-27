@@ -6,6 +6,7 @@ eks_cluster_name    = "remote-codex-staging"
 fargate_profile_name = "remote-codex-staging-workers"
 vpc_id              = "vpc-00000000000000000"
 private_subnet_ids  = ["subnet-00000000000000000", "subnet-11111111111111111"]
+public_load_balancer_subnet_ids = ["subnet-22222222222222222", "subnet-33333333333333333"]
 worker_security_group_ids = ["sg-00000000000000000"]
 
 kubernetes_namespace = "remote-codex-staging"

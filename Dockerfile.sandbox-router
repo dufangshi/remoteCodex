@@ -1,0 +1,33 @@
+FROM node:22-bookworm-slim AS base
+
+ARG REMOTE_CODEX_IMAGE_VERSION=development
+ARG REMOTE_CODEX_GIT_SHA=unknown
+
+LABEL org.opencontainers.image.title="remote-codex-sandbox-router" \
+      org.opencontainers.image.version="${REMOTE_CODEX_IMAGE_VERSION}" \
+      org.opencontainers.image.revision="${REMOTE_CODEX_GIT_SHA}" \
+      org.opencontainers.image.description="Remote Codex sandbox router"
+
+ENV NODE_ENV=production \
+    HOST=0.0.0.0 \
+    PORT=8791 \
+    REMOTE_CODEX_PACKAGE_ROOT=/opt/remote-codex
+
+RUN corepack enable
+
+WORKDIR /opt/remote-codex
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY apps/sandbox-router ./apps/sandbox-router
+COPY packages/shared ./packages/shared
+
+RUN pnpm install --frozen-lockfile \
+  && pnpm --filter @remote-codex/sandbox-router build \
+  && pnpm store prune
+
+EXPOSE 8791
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:8791/healthz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+CMD ["node", "/opt/remote-codex/apps/sandbox-router/dist/index.js"]
