@@ -812,6 +812,155 @@ describe('control plane api', () => {
     expect(tamperedVerify.statusCode).toBe(401);
   });
 
+  it('materializes workspaces, starts worker sessions, and forwards prompts when sandbox is running', async () => {
+    const workerRequests: Array<{
+      url: string;
+      method: string;
+      body: unknown;
+      workerToken: string | null;
+    }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      const textBody = typeof init?.body === 'string' ? init.body : null;
+      const body = textBody ? JSON.parse(textBody) : null;
+      const headers = new Headers(init?.headers);
+      workerRequests.push({
+        url: String(url),
+        method: init?.method ?? 'GET',
+        body,
+        workerToken: headers.get('x-remote-codex-worker-token'),
+      });
+      if (String(url).endsWith('/api/workspaces')) {
+        return Response.json({
+          id: 'worker-workspace-1',
+          absPath: body.absPath,
+          label: body.label,
+        });
+      }
+      if (String(url).endsWith('/api/threads/start')) {
+        return Response.json({
+          id: 'worker-thread-1',
+          provider: body.provider,
+          providerSessionId: 'codex-session-1',
+        });
+      }
+      if (String(url).endsWith('/api/threads/worker-thread-1/prompt')) {
+        return Response.json({
+          turn: {
+            id: 'turn-1',
+            status: 'completed',
+          },
+        });
+      }
+      return Response.json({ message: 'unexpected worker request' }, { status: 404 });
+    }) as typeof fetch;
+
+    try {
+      const app = buildControlPlaneApp({
+        env: {
+          ...testEnv('worker-session-binding'),
+          SANDBOX_WORKER_AUTH_TOKEN: 'internal-worker-token',
+          SANDBOX_WORKER_DEFAULT_CODEX_MODEL: 'gpt-5.1-codex',
+        },
+      });
+      apps.push(app);
+
+      const auth = { authorization: 'Bearer dev:worker-session-user' };
+      await app.inject({
+        method: 'POST',
+        url: '/api/me/bootstrap',
+        headers: auth,
+        payload: {
+          email: 'worker-session@example.com',
+        },
+      });
+      await app.inject({
+        method: 'POST',
+        url: '/api/sandbox/start',
+        headers: auth,
+      });
+      const projectResponse = await app.inject({
+        method: 'POST',
+        url: '/api/projects',
+        headers: auth,
+        payload: {
+          name: 'Worker Project',
+          slug: 'worker-project',
+        },
+      });
+      const workspaceResponse = await app.inject({
+        method: 'POST',
+        url: `/api/projects/${projectResponse.json().project.id}/workspaces`,
+        headers: auth,
+        payload: {
+          name: 'Worker Workspace',
+          slug: 'worker-workspace',
+        },
+      });
+      expect(workspaceResponse.statusCode).toBe(200);
+
+      const sessionResponse = await app.inject({
+        method: 'POST',
+        url: `/api/workspaces/${workspaceResponse.json().workspace.id}/sessions`,
+        headers: auth,
+        payload: {
+          provider: 'codex',
+          title: 'Worker Session',
+        },
+      });
+      expect(sessionResponse.statusCode).toBe(200);
+      expect(sessionResponse.json().session).toMatchObject({
+        status: 'active',
+        workerSessionId: 'worker-thread-1',
+      });
+
+      const promptResponse = await app.inject({
+        method: 'POST',
+        url: `/api/sessions/${sessionResponse.json().session.id}/prompt`,
+        headers: auth,
+        payload: {
+          prompt: 'Reply with ok.',
+        },
+      });
+      expect(promptResponse.statusCode).toBe(200);
+      expect(promptResponse.json().turn).toMatchObject({
+        turn: {
+          id: 'turn-1',
+          status: 'completed',
+        },
+      });
+
+      expect(workerRequests.map((request) => request.url)).toEqual([
+        `http://sandbox-worker-${app.services.repository.getSandboxByUserId(sessionResponse.json().session.userId)!.id}.remote-codex-sandboxes.svc.cluster.local:8787/api/workspaces`,
+        `http://sandbox-worker-${app.services.repository.getSandboxByUserId(sessionResponse.json().session.userId)!.id}.remote-codex-sandboxes.svc.cluster.local:8787/api/workspaces`,
+        `http://sandbox-worker-${app.services.repository.getSandboxByUserId(sessionResponse.json().session.userId)!.id}.remote-codex-sandboxes.svc.cluster.local:8787/api/threads/start`,
+        `http://sandbox-worker-${app.services.repository.getSandboxByUserId(sessionResponse.json().session.userId)!.id}.remote-codex-sandboxes.svc.cluster.local:8787/api/threads/worker-thread-1/prompt`,
+      ]);
+      expect(workerRequests.map((request) => request.workerToken)).toEqual([
+        'internal-worker-token',
+        'internal-worker-token',
+        'internal-worker-token',
+        'internal-worker-token',
+      ]);
+      expect(workerRequests[0]!.body).toMatchObject({
+        absPath: '/workspace/worker-workspace',
+        label: 'Worker Workspace',
+      });
+      expect(workerRequests[2]!.body).toMatchObject({
+        workspaceId: 'worker-workspace-1',
+        provider: 'codex',
+        title: 'Worker Session',
+        model: 'gpt-5.1-codex',
+        approvalMode: 'yolo',
+      });
+      expect(workerRequests[3]!.body).toMatchObject({
+        prompt: 'Reply with ok.',
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('refuses route tokens when project, workspace, and session scopes do not match', async () => {
     const app = buildControlPlaneApp({ env: testEnv('route-token-scope-mismatch') });
     apps.push(app);
@@ -1304,6 +1453,7 @@ describe('control plane api', () => {
       });
 
       expect(workerRequests.map((request) => request.url)).toEqual([
+        `http://sandbox-worker-${app.services.repository.getSandboxByUserId(close.json().session.userId)!.id}.remote-codex-sandboxes.svc.cluster.local:8787/api/workspaces`,
         `http://sandbox-worker-${app.services.repository.getSandboxByUserId(close.json().session.userId)!.id}.remote-codex-sandboxes.svc.cluster.local:8787/api/threads/worker-session-1/disconnect`,
         `http://sandbox-worker-${app.services.repository.getSandboxByUserId(close.json().session.userId)!.id}.remote-codex-sandboxes.svc.cluster.local:8787/api/threads/worker-session-1/resume`,
       ]);

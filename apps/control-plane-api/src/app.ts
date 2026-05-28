@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 
 import Fastify, { FastifyInstance, FastifyRequest } from 'fastify';
 import { z, ZodError } from 'zod';
@@ -120,6 +120,7 @@ const createWorkspaceSchema = z.object({
 const createSessionSchema = z.object({
   provider: z.enum(['codex', 'claude', 'opencode']),
   title: z.string().min(1).default('New session'),
+  model: z.string().min(1).optional(),
 });
 
 const updateSessionSchema = z.object({
@@ -135,12 +136,32 @@ const checkpointSessionSchema = z.object({
   status: z.enum(['created', 'active', 'idle', 'archived', 'deleted']).optional(),
 });
 
+const sendSessionPromptSchema = z.object({
+  prompt: z.string().min(1),
+  model: z.string().min(1).optional(),
+});
+
 const routeTokenSchema = z.object({
   projectId: z.string().uuid().optional(),
   workspaceId: z.string().uuid().optional(),
   sessionId: z.string().uuid().optional(),
   scopes: z.array(z.string().min(1)).default(['worker:read', 'worker:write']),
 });
+
+const workerThreadSchema = z.object({
+  id: z.string().min(1),
+  providerSessionId: z.string().min(1).nullable().optional(),
+  provider: z.string().min(1).optional(),
+});
+
+const WORKER_IDENTITY_HEADERS = {
+  user: 'x-remote-codex-user',
+  project: 'x-remote-codex-project',
+  sandbox: 'x-remote-codex-sandbox',
+  scopes: 'x-remote-codex-scopes',
+  expiresAt: 'x-remote-codex-expires-at',
+  signature: 'x-remote-codex-signature',
+} as const;
 
 const paginationQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(100).default(50),
@@ -347,6 +368,342 @@ function workerBaseUrlForSandbox(app: FastifyInstance, sandbox: {
     return `http://${sandbox.workerServiceName}.${sandbox.k8sNamespace}.svc.cluster.local:${app.services.config.sandboxWorkerInternalPort}`;
   }
   return `http://${sandbox.workerServiceName}:${app.services.config.sandboxWorkerInternalPort}`;
+}
+
+function workerIdentityHeaders(input: {
+  userId: string;
+  projectId?: string | null | undefined;
+  sandboxId: string;
+  scopes: string[];
+  secret: string | null;
+}) {
+  if (!input.secret) {
+    return {};
+  }
+  const envelope = {
+    userId: input.userId,
+    projectId: input.projectId ?? null,
+    sandboxId: input.sandboxId,
+    scopes: [...input.scopes].sort(),
+    expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+  };
+  const signature = createHmac('sha256', input.secret)
+    .update(JSON.stringify(envelope))
+    .digest('base64url');
+  return {
+    [WORKER_IDENTITY_HEADERS.user]: envelope.userId,
+    ...(envelope.projectId ? { [WORKER_IDENTITY_HEADERS.project]: envelope.projectId } : {}),
+    [WORKER_IDENTITY_HEADERS.sandbox]: envelope.sandboxId,
+    [WORKER_IDENTITY_HEADERS.scopes]: envelope.scopes.join(','),
+    [WORKER_IDENTITY_HEADERS.expiresAt]: envelope.expiresAt,
+    [WORKER_IDENTITY_HEADERS.signature]: signature,
+  };
+}
+
+function canControlRunningWorker(app: FastifyInstance, sandbox: {
+  state: string;
+  k8sNamespace: string | null;
+  workerServiceName: string | null;
+}) {
+  return (
+    sandbox.state === 'running' &&
+    Boolean(app.services.config.sandboxWorkerAuthToken) &&
+    Boolean(workerBaseUrlForSandbox(app, sandbox))
+  );
+}
+
+function requireRunningWorkerEndpoint(
+  app: FastifyInstance,
+  input: {
+    sandbox: {
+      id?: string;
+      state: string;
+      k8sNamespace: string | null;
+      workerServiceName: string | null;
+    };
+    unavailableCode: string;
+    unavailableMessage: string;
+  },
+) {
+  if (input.sandbox.state !== 'running') {
+    throw new HttpError(
+      409,
+      'sandbox_not_running',
+      'Sandbox must be running before worker operations can run.',
+    );
+  }
+  if (!app.services.config.sandboxWorkerAuthToken) {
+    throw new HttpError(
+      503,
+      input.unavailableCode,
+      'Worker control is not configured.',
+    );
+  }
+  const workerBaseUrl = workerBaseUrlForSandbox(app, input.sandbox);
+  if (!workerBaseUrl) {
+    throw new HttpError(
+      409,
+      input.unavailableCode,
+      input.unavailableMessage,
+    );
+  }
+  return workerBaseUrl.replace(/\/+$/, '');
+}
+
+async function sendWorkerJsonRequest(
+  app: FastifyInstance,
+  input: {
+    workerBaseUrl: string;
+    path: string;
+    method?: string;
+    body?: unknown;
+    workerIdentity?: {
+      userId: string;
+      projectId?: string | null | undefined;
+      sandboxId: string;
+      scopes: string[];
+    };
+    failureCode: string;
+    fallbackMessage: string;
+  },
+) {
+  const init: RequestInit = {
+    method: input.method ?? 'POST',
+    headers: {
+      ...(input.body === undefined ? {} : { 'content-type': 'application/json' }),
+      'x-remote-codex-worker-token': app.services.config.sandboxWorkerAuthToken!,
+      ...(input.workerIdentity
+        ? workerIdentityHeaders({
+            ...input.workerIdentity,
+            secret: app.services.config.sandboxWorkerIdentitySecret,
+          })
+        : {}),
+    },
+    ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
+  };
+  const response = await fetch(`${input.workerBaseUrl}${input.path}`, init).catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new HttpError(503, input.failureCode, `${input.fallbackMessage}: ${message}`);
+  });
+
+  const text = await response.text();
+  let payload: unknown = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = null;
+    }
+  }
+
+  if (!response.ok) {
+    const message =
+      payload &&
+      typeof payload === 'object' &&
+      'message' in payload &&
+      typeof payload.message === 'string'
+        ? payload.message
+        : text || input.fallbackMessage;
+    throw new HttpError(
+      response.status === 404 || response.status === 409 ? 409 : 502,
+      input.failureCode,
+      message,
+    );
+  }
+
+  return payload;
+}
+
+async function materializeWorkerWorkspace(
+  app: FastifyInstance,
+  input: {
+    sandbox: {
+      id: string;
+      state: string;
+      k8sNamespace: string | null;
+      workerServiceName: string | null;
+    };
+    workspace: {
+      path: string;
+      name: string;
+      sourceType: string;
+      gitUrl: string | null;
+    };
+  },
+) {
+  const workerBaseUrl = requireRunningWorkerEndpoint(app, {
+    sandbox: input.sandbox,
+    unavailableCode: 'worker_workspace_unavailable',
+    unavailableMessage: 'Sandbox worker endpoint is unavailable.',
+  });
+  const body =
+    input.workspace.sourceType === 'git' && input.workspace.gitUrl
+      ? {
+          gitUrl: input.workspace.gitUrl,
+          label: input.workspace.name,
+        }
+      : {
+          absPath: input.workspace.path,
+          label: input.workspace.name,
+        };
+
+  try {
+    return await sendWorkerJsonRequest(app, {
+      workerBaseUrl,
+      path: '/api/workspaces',
+      body,
+      failureCode: 'worker_workspace_unavailable',
+      fallbackMessage: 'Worker workspace materialization failed',
+    });
+  } catch (error) {
+    if (error instanceof HttpError && error.statusCode === 409) {
+      const encodedPath = encodeURIComponent(input.workspace.path);
+      const payload = await sendWorkerJsonRequest(app, {
+        workerBaseUrl,
+        path: `/api/workspaces?path=${encodedPath}`,
+        method: 'GET',
+        failureCode: 'worker_workspace_unavailable',
+        fallbackMessage: 'Worker workspace lookup failed',
+      });
+      if (Array.isArray(payload)) {
+        const existing = payload.find(
+          (workspace) =>
+            workspace &&
+            typeof workspace === 'object' &&
+            'absPath' in workspace &&
+            workspace.absPath === input.workspace.path,
+        );
+        if (existing) {
+          return existing;
+        }
+      }
+    }
+    throw error;
+  }
+}
+
+async function materializeSandboxWorkspaces(
+  app: FastifyInstance,
+  input: {
+    userId: string;
+    sandbox: {
+      id: string;
+      state: string;
+      k8sNamespace: string | null;
+      workerServiceName: string | null;
+    };
+  },
+) {
+  const result = app.services.repository.listWorkspaces(input.userId, {
+    status: 'active',
+  });
+  const workspaces = result.items.filter((workspace) => workspace.sandboxId === input.sandbox.id);
+  for (const workspace of workspaces) {
+    await materializeWorkerWorkspace(app, {
+      sandbox: input.sandbox,
+      workspace,
+    });
+  }
+}
+
+async function createWorkerThreadSession(
+  app: FastifyInstance,
+  input: {
+    sandbox: {
+      id: string;
+      state: string;
+      k8sNamespace: string | null;
+      workerServiceName: string | null;
+    };
+    workspace: {
+      path: string;
+      name: string;
+      sourceType: string;
+      gitUrl: string | null;
+    };
+    provider: 'codex' | 'claude' | 'opencode';
+    title: string;
+    model?: string | undefined;
+  },
+) {
+  const workerBaseUrl = requireRunningWorkerEndpoint(app, {
+    sandbox: input.sandbox,
+    unavailableCode: 'worker_session_unavailable',
+    unavailableMessage: 'Sandbox worker endpoint is unavailable.',
+  });
+  const workerWorkspace = await materializeWorkerWorkspace(app, {
+    sandbox: input.sandbox,
+    workspace: input.workspace,
+  });
+  const workspaceId =
+    workerWorkspace &&
+    typeof workerWorkspace === 'object' &&
+    'id' in workerWorkspace &&
+    typeof workerWorkspace.id === 'string'
+      ? workerWorkspace.id
+      : null;
+  if (!workspaceId) {
+    throw new HttpError(
+      502,
+      'worker_workspace_unavailable',
+      'Worker workspace materialization did not return a workspace id.',
+    );
+  }
+
+  const workerThread = await sendWorkerJsonRequest(app, {
+    workerBaseUrl,
+    path: '/api/threads/start',
+    body: {
+      workspaceId,
+      provider: input.provider,
+      title: input.title,
+      model: input.model ?? app.services.config.sandboxWorkerDefaultCodexModel,
+      approvalMode: 'yolo',
+    },
+    failureCode: 'worker_session_unavailable',
+    fallbackMessage: 'Worker session creation failed',
+  });
+
+  return workerThreadSchema.parse(workerThread);
+}
+
+async function sendWorkerThreadPrompt(
+  app: FastifyInstance,
+  input: {
+    sandbox: {
+      id: string;
+      state: string;
+      k8sNamespace: string | null;
+      workerServiceName: string | null;
+    };
+    userId: string;
+    projectId?: string | null | undefined;
+    workerSessionId: string;
+    prompt: string;
+    model?: string | undefined;
+  },
+) {
+  const workerBaseUrl = requireRunningWorkerEndpoint(app, {
+    sandbox: input.sandbox,
+    unavailableCode: 'worker_session_unavailable',
+    unavailableMessage: 'Sandbox worker endpoint is unavailable.',
+  });
+  return sendWorkerJsonRequest(app, {
+    workerBaseUrl,
+    path: `/api/threads/${encodeURIComponent(input.workerSessionId)}/prompt`,
+    body: {
+      prompt: input.prompt,
+      ...(input.model ? { model: input.model } : {}),
+    },
+    workerIdentity: {
+      userId: input.userId,
+      projectId: input.projectId,
+      sandboxId: input.sandbox.id,
+      scopes: ['provider:turn:create'],
+    },
+    failureCode: 'worker_turn_unavailable',
+    fallbackMessage: 'Worker prompt failed',
+  });
 }
 
 async function sendWorkerSessionLifecycleRequest(
@@ -1055,17 +1412,24 @@ export function buildControlPlaneApp(
       gateway: gatewayStartInput(app, runtimeSandbox),
       harness: harnessStartInput(app),
     });
+    const updatedSandbox = repository.updateSandboxState(runtimeSandbox.id, {
+      ...result,
+      statusReason: input.reason ?? result.statusReason ?? 'restarted by administrator',
+      auditMetadata: {
+        operatorUserId: admin.id,
+        operatorIdentity: identityKey(admin.authProvider, admin.authSubject),
+        reason: input.reason ?? null,
+        adminAction: 'restart',
+      },
+    });
+    if (updatedSandbox && canControlRunningWorker(app, updatedSandbox)) {
+      await materializeSandboxWorkspaces(app, {
+        userId: updatedSandbox.userId,
+        sandbox: updatedSandbox,
+      });
+    }
     return {
-      sandbox: repository.updateSandboxState(runtimeSandbox.id, {
-        ...result,
-        statusReason: input.reason ?? result.statusReason ?? 'restarted by administrator',
-        auditMetadata: {
-          operatorUserId: admin.id,
-          operatorIdentity: identityKey(admin.authProvider, admin.authSubject),
-          reason: input.reason ?? null,
-          adminAction: 'restart',
-        },
-      }),
+      sandbox: updatedSandbox,
     };
   });
 
@@ -1212,8 +1576,15 @@ export function buildControlPlaneApp(
       gateway: gatewayStartInput(app, runtimeSandbox),
       harness: harnessStartInput(app),
     });
+    const updatedSandbox = repository.updateSandboxState(runtimeSandbox.id, result);
+    if (updatedSandbox && canControlRunningWorker(app, updatedSandbox)) {
+      await materializeSandboxWorkspaces(app, {
+        userId: user.id,
+        sandbox: updatedSandbox,
+      });
+    }
     return {
-      sandbox: repository.updateSandboxState(runtimeSandbox.id, result),
+      sandbox: updatedSandbox,
     };
   });
 
@@ -1253,8 +1624,15 @@ export function buildControlPlaneApp(
       gateway: gatewayStartInput(app, runtimeSandbox),
       harness: harnessStartInput(app),
     });
+    const updatedSandbox = repository.updateSandboxState(runtimeSandbox.id, result);
+    if (updatedSandbox && canControlRunningWorker(app, updatedSandbox)) {
+      await materializeSandboxWorkspaces(app, {
+        userId: user.id,
+        sandbox: updatedSandbox,
+      });
+    }
     return {
-      sandbox: repository.updateSandboxState(runtimeSandbox.id, result),
+      sandbox: updatedSandbox,
     };
   });
 
@@ -1359,13 +1737,21 @@ export function buildControlPlaneApp(
       s3PrefixBase: config.sandboxS3PrefixBase,
     });
     const input = createWorkspaceSchema.omit({ projectId: true }).parse(request.body);
+    const workspace = repository.createWorkspace({
+      userId: user.id,
+      sandboxId: sandbox.id,
+      projectId: project.id,
+      ...input,
+    });
+    const runningSandbox = repository.getSandboxById(sandbox.id);
+    if (runningSandbox && canControlRunningWorker(app, runningSandbox)) {
+      await materializeWorkerWorkspace(app, {
+        sandbox: runningSandbox,
+        workspace,
+      });
+    }
     return {
-      workspace: repository.createWorkspace({
-        userId: user.id,
-        sandboxId: sandbox.id,
-        projectId: project.id,
-        ...input,
-      }),
+      workspace,
     };
   });
 
@@ -1414,12 +1800,20 @@ export function buildControlPlaneApp(
         throw new HttpError(404, 'not_found', 'Project not found.');
       }
     }
+    const workspace = repository.createWorkspace({
+      userId: user.id,
+      sandboxId: sandbox.id,
+      ...input,
+    });
+    const runningSandbox = repository.getSandboxById(sandbox.id);
+    if (runningSandbox && canControlRunningWorker(app, runningSandbox)) {
+      await materializeWorkerWorkspace(app, {
+        sandbox: runningSandbox,
+        workspace,
+      });
+    }
     return {
-      workspace: repository.createWorkspace({
-        userId: user.id,
-        sandboxId: sandbox.id,
-        ...input,
-      }),
+      workspace,
     };
   });
 
@@ -1474,14 +1868,35 @@ export function buildControlPlaneApp(
       throw new HttpError(404, 'not_found', 'Workspace not found.');
     }
     const input = createSessionSchema.parse(request.body);
+    const sandbox = repository.getSandboxById(workspace.sandboxId);
+    if (!sandbox || sandbox.userId !== user.id) {
+      throw new HttpError(404, 'not_found', 'Sandbox not found.');
+    }
+    const workerThread =
+      canControlRunningWorker(app, sandbox)
+        ? await createWorkerThreadSession(app, {
+            sandbox,
+            workspace,
+            provider: input.provider,
+            title: input.title,
+            ...(input.model ? { model: input.model } : {}),
+          })
+        : null;
+    const session = repository.createSession({
+      userId: user.id,
+      sandboxId: workspace.sandboxId,
+      workspaceId: workspace.id,
+      provider: input.provider,
+      title: input.title,
+    });
+    const updatedSession = workerThread
+      ? repository.updateSession(session.id, {
+          status: 'active',
+          workerSessionId: workerThread.id,
+        })
+      : session;
     return {
-      session: repository.createSession({
-        userId: user.id,
-        sandboxId: workspace.sandboxId,
-        workspaceId: workspace.id,
-        provider: input.provider,
-        title: input.title,
-      }),
+      session: updatedSession,
     };
   });
 
@@ -1536,6 +1951,43 @@ export function buildControlPlaneApp(
     });
     return {
       session: repository.updateSession(session.id, { status: 'active' }),
+    };
+  });
+
+  app.post('/api/sessions/:sessionId/prompt', async (request) => {
+    const user = requireUser(app, request);
+    const params = z.object({ sessionId: z.string().uuid() }).parse(request.params);
+    const input = sendSessionPromptSchema.parse(request.body);
+    const session = repository.getSessionById(params.sessionId);
+    if (!session || session.userId !== user.id) {
+      throw new HttpError(404, 'not_found', 'Session not found.');
+    }
+    const sandbox = repository.getSandboxById(session.sandboxId);
+    if (!sandbox || sandbox.userId !== user.id) {
+      throw new HttpError(404, 'not_found', 'Sandbox not found.');
+    }
+    if (!session.workerSessionId) {
+      throw new HttpError(
+        409,
+        'worker_session_unavailable',
+        'Session does not have a worker session id yet.',
+      );
+    }
+    const workspace = repository.getWorkspaceById(session.workspaceId);
+    if (!workspace || workspace.userId !== user.id) {
+      throw new HttpError(404, 'not_found', 'Workspace not found.');
+    }
+    const turn = await sendWorkerThreadPrompt(app, {
+      sandbox,
+      userId: user.id,
+      projectId: workspace.projectId,
+      workerSessionId: session.workerSessionId,
+      prompt: input.prompt,
+      ...(input.model ? { model: input.model } : {}),
+    });
+    return {
+      session: repository.updateSession(session.id, { status: 'active' }),
+      turn,
     };
   });
 

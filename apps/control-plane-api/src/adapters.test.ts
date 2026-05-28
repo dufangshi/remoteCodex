@@ -251,6 +251,10 @@ describe('sandbox manager adapters', () => {
         secretName: 'remote-codex-worker-token',
         key: 'token',
       },
+      REMOTE_CODEX_WORKER_IDENTITY_SECRET: {
+        secretName: 'remote-codex-worker-token',
+        key: 'identity-secret',
+      },
       REMOTE_CODEX_LLM_GATEWAY_TOKEN: {
         secretName: 'remote-codex-gateway-tokens',
         key: 'gw-key-sbx-test',

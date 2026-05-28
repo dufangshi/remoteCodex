@@ -20,7 +20,9 @@ const envSchema = z.object({
   SANDBOX_S3_PREFIX_BASE: z.string().min(1).optional(),
   SANDBOX_WORKER_INTERNAL_PORT: z.coerce.number().int().positive().optional(),
   SANDBOX_WORKER_ENABLED_AGENT_PROVIDERS: z.string().optional(),
+  SANDBOX_WORKER_DEFAULT_CODEX_MODEL: z.string().trim().min(1).optional(),
   SANDBOX_WORKER_AUTH_TOKEN: z.string().min(1).optional(),
+  SANDBOX_WORKER_IDENTITY_SECRET: z.string().min(1).optional(),
   CONTROL_PLANE_INTERNAL_SERVICE_TOKEN: z.string().min(16).optional(),
   LLM_GATEWAY_BASE_URL: z.string().url().optional(),
   LLM_GATEWAY_PROVIDER: z.string().trim().min(1).optional(),
@@ -61,7 +63,9 @@ export interface ControlPlaneConfig {
   sandboxS3PrefixBase: string;
   sandboxWorkerInternalPort: number;
   sandboxWorkerEnabledAgentProviders: string;
+  sandboxWorkerDefaultCodexModel: string;
   sandboxWorkerAuthToken: string | null;
+  sandboxWorkerIdentitySecret: string | null;
   internalServiceToken: string | null;
   llmGatewayBaseUrl: string | null;
   llmGatewayProvider: string;
@@ -167,7 +171,10 @@ export function loadControlPlaneConfig(
     sandboxWorkerInternalPort: parsed.SANDBOX_WORKER_INTERNAL_PORT ?? 8787,
     sandboxWorkerEnabledAgentProviders:
       parsed.SANDBOX_WORKER_ENABLED_AGENT_PROVIDERS ?? 'codex',
+    sandboxWorkerDefaultCodexModel:
+      parsed.SANDBOX_WORKER_DEFAULT_CODEX_MODEL ?? 'gpt-5.1-codex',
     sandboxWorkerAuthToken: parsed.SANDBOX_WORKER_AUTH_TOKEN ?? null,
+    sandboxWorkerIdentitySecret: parsed.SANDBOX_WORKER_IDENTITY_SECRET ?? null,
     internalServiceToken: parsed.CONTROL_PLANE_INTERNAL_SERVICE_TOKEN ?? null,
     llmGatewayBaseUrl: parsed.LLM_GATEWAY_BASE_URL ?? null,
     llmGatewayProvider: parsed.LLM_GATEWAY_PROVIDER ?? 'sub2api',

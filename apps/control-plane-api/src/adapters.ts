@@ -970,6 +970,10 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
           secretName: this.config.workerAuthTokenSecretName,
           key: 'token',
         },
+        REMOTE_CODEX_WORKER_IDENTITY_SECRET: {
+          secretName: this.config.workerAuthTokenSecretName,
+          key: 'identity-secret',
+        },
         ...(input.gateway?.tokenSecretName
           ? {
               REMOTE_CODEX_LLM_GATEWAY_TOKEN: {

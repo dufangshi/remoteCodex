@@ -18,6 +18,8 @@ const requiredEnv = [
 ] as const;
 
 let partialSteps: SmokeStep[] = [];
+const DEFAULT_CODEX_E2E_PROMPT =
+  'Reply with exactly: remote-codex-codex-e2e-ok';
 
 function envValue(name: string) {
   const value = process.env[name]?.trim();
@@ -474,16 +476,22 @@ async function main() {
     body: {
       provider: 'codex',
       title: `Smoke Session ${suffix}`,
+      ...(envValue('STAGING_CODEX_E2E_MODEL')
+        ? { model: envValue('STAGING_CODEX_E2E_MODEL') }
+        : {}),
     },
     expectedStatus: 200,
   });
+  const workerSessionId = session.json.session.workerSessionId ?? null;
   steps.push({
     name: 'create_project_workspace_session',
-    ok: true,
+    ok: Boolean(workerSessionId),
     details: {
       projectId: project.json.project.id,
       workspaceId: workspace.json.workspace.id,
       sessionId: session.json.session.id,
+      workerSessionId,
+      sessionStatus: session.json.session.status,
     },
   });
 
@@ -567,6 +575,33 @@ async function main() {
       sandboxId: sandbox.id,
       providers: runtimeProviders,
       runtimes: workerReady.json.runtimes,
+    },
+  });
+
+  const codexPrompt = envValue('STAGING_CODEX_E2E_PROMPT') ?? DEFAULT_CODEX_E2E_PROMPT;
+  const codexTurn = await requestJson({
+    path: `/api/sessions/${session.json.session.id}/prompt`,
+    method: 'POST',
+    token: productJwt,
+    body: {
+      prompt: codexPrompt,
+      ...(envValue('STAGING_CODEX_E2E_MODEL')
+        ? { model: envValue('STAGING_CODEX_E2E_MODEL') }
+        : {}),
+    },
+    expectedStatus: 200,
+  });
+  steps.push({
+    name: 'codex_worker_prompt_e2e',
+    ok: Boolean(codexTurn.json.turn),
+    details: {
+      sessionId: session.json.session.id,
+      workerSessionId,
+      turnKeys: codexTurn.json.turn && typeof codexTurn.json.turn === 'object'
+        ? Object.keys(codexTurn.json.turn)
+        : [],
+      sessionStatus: codexTurn.json.session?.status,
+      promptLength: codexPrompt.length,
     },
   });
 

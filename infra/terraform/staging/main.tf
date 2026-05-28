@@ -73,6 +73,7 @@ locals {
     SANDBOX_WORKER_IMAGE_TAG               = var.worker_image_tag
     SANDBOX_ROUTER_BASE_URL                = var.sandbox_router_base_url
     SANDBOX_WORKER_AUTH_TOKEN_SECRET_NAME  = var.worker_auth_token_secret_name
+    SANDBOX_WORKER_IDENTITY_SECRET         = var.router_worker_identity_secret
     SANDBOX_WORKER_ENABLED_AGENT_PROVIDERS = var.worker_enabled_agent_providers
     LLM_GATEWAY_TOKEN_SECRET_NAME          = var.llm_gateway_token_secret_name
     LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY    = var.llm_gateway_static_token_secret_key
@@ -265,7 +266,8 @@ resource "kubernetes_secret_v1" "worker_auth_token" {
   }
 
   data = {
-    token = var.worker_auth_token
+    token           = var.worker_auth_token
+    identity-secret = var.router_worker_identity_secret
   }
 
   type = "Opaque"

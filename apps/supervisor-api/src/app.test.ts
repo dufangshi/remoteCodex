@@ -1577,6 +1577,65 @@ describe('supervisor api', () => {
     expect(listResponse.json()).toHaveLength(1);
   });
 
+  it('supports worker-mode workspace, thread, and prompt calls from the control plane', async () => {
+    await app.close();
+    app = buildTestApp(fakeCodexManager, {
+      env: {
+        REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+        REMOTE_CODEX_WORKER_AUTH_TOKEN: 'worker-control-token',
+        REMOTE_CODEX_SANDBOX_ID: '00000000-0000-4000-8000-000000000001',
+        REMOTE_CODEX_USER_ID: '00000000-0000-4000-8000-000000000002',
+      },
+    });
+    await app.ready();
+
+    const headers = {
+      'x-remote-codex-worker-token': 'worker-control-token',
+    };
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      headers,
+      payload: {
+        absPath: path.join(tempDir, 'worker-control-workspace'),
+        label: 'Worker Control Workspace',
+      },
+    });
+    expect(workspaceResponse.statusCode).toBe(200);
+
+    const threadResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      headers,
+      payload: {
+        workspaceId: workspaceResponse.json().id,
+        provider: 'codex',
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Worker Control Thread',
+      },
+    });
+    expect(threadResponse.statusCode).toBe(200);
+    expect(threadResponse.json()).toMatchObject({
+      provider: 'codex',
+      title: 'Worker Control Thread',
+      model: 'gpt-5',
+    });
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${threadResponse.json().id}/prompt`,
+      headers,
+      payload: {
+        prompt: 'Reply with ok.',
+      },
+    });
+    expect(promptResponse.statusCode).toBe(200);
+    expect(promptResponse.json()).toMatchObject({
+      provider: 'codex',
+    });
+  });
+
   it('returns and saves workspace settings', async () => {
     const initialResponse = await app.inject({
       method: 'GET',
