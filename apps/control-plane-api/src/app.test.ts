@@ -828,23 +828,25 @@ describe('control plane api', () => {
         url: String(url),
         method: init?.method ?? 'GET',
         body,
-        workerToken: headers.get('x-remote-codex-worker-token'),
+        workerToken:
+          headers.get('x-remote-codex-worker-token') ??
+          headers.get('authorization'),
       });
-      if (String(url).endsWith('/api/workspaces')) {
+      if (String(url).includes('/api/workspaces')) {
         return Response.json({
           id: 'worker-workspace-1',
           absPath: body.absPath,
           label: body.label,
         });
       }
-      if (String(url).endsWith('/api/threads/start')) {
+      if (String(url).includes('/api/threads/start')) {
         return Response.json({
           id: 'worker-thread-1',
           provider: body.provider,
           providerSessionId: 'codex-session-1',
         });
       }
-      if (String(url).endsWith('/api/threads/worker-thread-1/prompt')) {
+      if (String(url).includes('/api/threads/worker-thread-1/prompt')) {
         return Response.json({
           turn: {
             id: 'turn-1',
@@ -931,16 +933,16 @@ describe('control plane api', () => {
       });
 
       expect(workerRequests.map((request) => request.url)).toEqual([
-        `http://sandbox-worker-${app.services.repository.getSandboxByUserId(sessionResponse.json().session.userId)!.id}.remote-codex-sandboxes.svc.cluster.local:8787/api/workspaces`,
-        `http://sandbox-worker-${app.services.repository.getSandboxByUserId(sessionResponse.json().session.userId)!.id}.remote-codex-sandboxes.svc.cluster.local:8787/api/workspaces`,
-        `http://sandbox-worker-${app.services.repository.getSandboxByUserId(sessionResponse.json().session.userId)!.id}.remote-codex-sandboxes.svc.cluster.local:8787/api/threads/start`,
-        `http://sandbox-worker-${app.services.repository.getSandboxByUserId(sessionResponse.json().session.userId)!.id}.remote-codex-sandboxes.svc.cluster.local:8787/api/threads/worker-thread-1/prompt`,
+        `https://sandbox-gateway.test/api/sandboxes/${app.services.repository.getSandboxByUserId(sessionResponse.json().session.userId)!.id}/api/workspaces`,
+        `https://sandbox-gateway.test/api/sandboxes/${app.services.repository.getSandboxByUserId(sessionResponse.json().session.userId)!.id}/api/workspaces`,
+        `https://sandbox-gateway.test/api/sandboxes/${app.services.repository.getSandboxByUserId(sessionResponse.json().session.userId)!.id}/api/threads/start`,
+        `https://sandbox-gateway.test/api/sandboxes/${app.services.repository.getSandboxByUserId(sessionResponse.json().session.userId)!.id}/api/threads/worker-thread-1/prompt`,
       ]);
-      expect(workerRequests.map((request) => request.workerToken)).toEqual([
-        'internal-worker-token',
-        'internal-worker-token',
-        'internal-worker-token',
-        'internal-worker-token',
+      expect(workerRequests.map((request) => request.workerToken?.startsWith('Bearer '))).toEqual([
+        true,
+        true,
+        true,
+        true,
       ]);
       expect(workerRequests[0]!.body).toMatchObject({
         absPath: '/workspace/worker-workspace',
@@ -1453,14 +1455,14 @@ describe('control plane api', () => {
       });
 
       expect(workerRequests.map((request) => request.url)).toEqual([
-        `http://sandbox-worker-${app.services.repository.getSandboxByUserId(close.json().session.userId)!.id}.remote-codex-sandboxes.svc.cluster.local:8787/api/workspaces`,
-        `http://sandbox-worker-${app.services.repository.getSandboxByUserId(close.json().session.userId)!.id}.remote-codex-sandboxes.svc.cluster.local:8787/api/threads/worker-session-1/disconnect`,
-        `http://sandbox-worker-${app.services.repository.getSandboxByUserId(close.json().session.userId)!.id}.remote-codex-sandboxes.svc.cluster.local:8787/api/threads/worker-session-1/resume`,
+        `https://sandbox-gateway.test/api/sandboxes/${app.services.repository.getSandboxByUserId(close.json().session.userId)!.id}/api/workspaces`,
+        `https://sandbox-gateway.test/api/sandboxes/${app.services.repository.getSandboxByUserId(close.json().session.userId)!.id}/api/threads/worker-session-1/disconnect`,
+        `https://sandbox-gateway.test/api/sandboxes/${app.services.repository.getSandboxByUserId(close.json().session.userId)!.id}/api/threads/worker-session-1/resume`,
       ]);
       for (const request of workerRequests) {
         const headers = new Headers(request.init?.headers);
-        expect(headers.get('x-remote-codex-worker-token')).toBe('internal-worker-session-token');
-        expect(headers.get('authorization')).toBeNull();
+        expect(headers.get('x-remote-codex-worker-token')).toBeNull();
+        expect(headers.get('authorization')?.startsWith('Bearer ')).toBe(true);
       }
     } finally {
       globalThis.fetch = originalFetch;

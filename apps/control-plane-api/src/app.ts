@@ -408,7 +408,7 @@ function canControlRunningWorker(app: FastifyInstance, sandbox: {
   return (
     sandbox.state === 'running' &&
     Boolean(app.services.config.sandboxWorkerAuthToken) &&
-    Boolean(workerBaseUrlForSandbox(app, sandbox))
+    Boolean(app.services.config.routerBaseUrl || workerBaseUrlForSandbox(app, sandbox))
   );
 }
 
@@ -450,10 +450,85 @@ function requireRunningWorkerEndpoint(
   return workerBaseUrl.replace(/\/+$/, '');
 }
 
+function createBackendRouteToken(
+  app: FastifyInstance,
+  input: {
+    userId: string;
+    sandboxId: string;
+    projectId?: string | null | undefined;
+    workspaceId?: string | null | undefined;
+    sessionId?: string | null | undefined;
+    scopes: string[];
+  },
+) {
+  const now = Math.floor(Date.now() / 1000);
+  const signingKey = app.services.config.routeTokenSigningKeys[0]!;
+  return createSignedToken(
+    {
+      sub: input.userId,
+      sandbox_id: input.sandboxId,
+      ...(input.projectId ? { project_id: input.projectId } : {}),
+      ...(input.workspaceId ? { workspace_id: input.workspaceId } : {}),
+      ...(input.sessionId ? { session_id: input.sessionId } : {}),
+      scopes: input.scopes,
+      iat: now,
+      exp: now + app.services.config.routeTokenTtlSeconds,
+      jti: randomUUID(),
+    },
+    signingKey.secret,
+    { kid: signingKey.id },
+  );
+}
+
+function workerProxyBaseUrl(
+  app: FastifyInstance,
+  input: {
+    sandbox: {
+      id: string;
+      state: string;
+      k8sNamespace: string | null;
+      workerServiceName: string | null;
+    };
+    userId: string;
+    projectId?: string | null | undefined;
+    workspaceId?: string | null | undefined;
+    sessionId?: string | null | undefined;
+    scopes: string[];
+  },
+) {
+  if (app.services.config.routerBaseUrl) {
+    const base = app.services.config.routerBaseUrl.endsWith('/')
+      ? app.services.config.routerBaseUrl.slice(0, -1)
+      : app.services.config.routerBaseUrl;
+    const routeToken = createBackendRouteToken(app, {
+      userId: input.userId,
+      sandboxId: input.sandbox.id,
+      projectId: input.projectId,
+      workspaceId: input.workspaceId,
+      sessionId: input.sessionId,
+      scopes: input.scopes,
+    });
+    return {
+      workerBaseUrl: `${base}/api/sandboxes/${encodeURIComponent(input.sandbox.id)}`,
+      routeToken,
+    };
+  }
+  const workerBaseUrl = requireRunningWorkerEndpoint(app, {
+    sandbox: input.sandbox,
+    unavailableCode: 'worker_session_unavailable',
+    unavailableMessage: 'Sandbox worker endpoint is unavailable.',
+  });
+  return {
+    workerBaseUrl,
+    routeToken: null,
+  };
+}
+
 async function sendWorkerJsonRequest(
   app: FastifyInstance,
   input: {
     workerBaseUrl: string;
+    routeToken?: string | null | undefined;
     path: string;
     method?: string;
     body?: unknown;
@@ -471,7 +546,9 @@ async function sendWorkerJsonRequest(
     method: input.method ?? 'POST',
     headers: {
       ...(input.body === undefined ? {} : { 'content-type': 'application/json' }),
-      'x-remote-codex-worker-token': app.services.config.sandboxWorkerAuthToken!,
+      ...(input.routeToken
+        ? { authorization: `Bearer ${input.routeToken}` }
+        : { 'x-remote-codex-worker-token': app.services.config.sandboxWorkerAuthToken! }),
       ...(input.workerIdentity
         ? workerIdentityHeaders({
             ...input.workerIdentity,
@@ -524,6 +601,9 @@ async function materializeWorkerWorkspace(
       workerServiceName: string | null;
     };
     workspace: {
+      id: string;
+      userId: string;
+      projectId: string | null;
       path: string;
       name: string;
       sourceType: string;
@@ -531,10 +611,12 @@ async function materializeWorkerWorkspace(
     };
   },
 ) {
-  const workerBaseUrl = requireRunningWorkerEndpoint(app, {
+  const { workerBaseUrl, routeToken } = workerProxyBaseUrl(app, {
     sandbox: input.sandbox,
-    unavailableCode: 'worker_workspace_unavailable',
-    unavailableMessage: 'Sandbox worker endpoint is unavailable.',
+    userId: input.workspace.userId,
+    projectId: input.workspace.projectId,
+    workspaceId: input.workspace.id,
+    scopes: ['worker:read', 'worker:write', 'file:write'],
   });
   const body =
     input.workspace.sourceType === 'git' && input.workspace.gitUrl
@@ -550,6 +632,7 @@ async function materializeWorkerWorkspace(
   try {
     return await sendWorkerJsonRequest(app, {
       workerBaseUrl,
+      routeToken,
       path: '/api/workspaces',
       body,
       failureCode: 'worker_workspace_unavailable',
@@ -560,6 +643,7 @@ async function materializeWorkerWorkspace(
       const encodedPath = encodeURIComponent(input.workspace.path);
       const payload = await sendWorkerJsonRequest(app, {
         workerBaseUrl,
+        routeToken,
         path: `/api/workspaces?path=${encodedPath}`,
         method: 'GET',
         failureCode: 'worker_workspace_unavailable',
@@ -616,6 +700,9 @@ async function createWorkerThreadSession(
       workerServiceName: string | null;
     };
     workspace: {
+      id: string;
+      userId: string;
+      projectId: string | null;
       path: string;
       name: string;
       sourceType: string;
@@ -626,10 +713,12 @@ async function createWorkerThreadSession(
     model?: string | undefined;
   },
 ) {
-  const workerBaseUrl = requireRunningWorkerEndpoint(app, {
+  const { workerBaseUrl, routeToken } = workerProxyBaseUrl(app, {
     sandbox: input.sandbox,
-    unavailableCode: 'worker_session_unavailable',
-    unavailableMessage: 'Sandbox worker endpoint is unavailable.',
+    userId: input.workspace.userId,
+    projectId: input.workspace.projectId,
+    workspaceId: input.workspace.id,
+    scopes: ['worker:read', 'worker:write', 'file:write'],
   });
   const workerWorkspace = await materializeWorkerWorkspace(app, {
     sandbox: input.sandbox,
@@ -652,6 +741,7 @@ async function createWorkerThreadSession(
 
   const workerThread = await sendWorkerJsonRequest(app, {
     workerBaseUrl,
+    routeToken,
     path: '/api/threads/start',
     body: {
       workspaceId,
@@ -678,18 +768,22 @@ async function sendWorkerThreadPrompt(
     };
     userId: string;
     projectId?: string | null | undefined;
+    sessionId?: string | null | undefined;
     workerSessionId: string;
     prompt: string;
     model?: string | undefined;
   },
 ) {
-  const workerBaseUrl = requireRunningWorkerEndpoint(app, {
+  const { workerBaseUrl, routeToken } = workerProxyBaseUrl(app, {
     sandbox: input.sandbox,
-    unavailableCode: 'worker_session_unavailable',
-    unavailableMessage: 'Sandbox worker endpoint is unavailable.',
+    userId: input.userId,
+    projectId: input.projectId,
+    sessionId: input.sessionId,
+    scopes: ['worker:read', 'worker:write', 'provider:turn:create'],
   });
   return sendWorkerJsonRequest(app, {
     workerBaseUrl,
+    routeToken,
     path: `/api/threads/${encodeURIComponent(input.workerSessionId)}/prompt`,
     body: {
       prompt: input.prompt,
@@ -715,17 +809,14 @@ async function sendWorkerSessionLifecycleRequest(
       k8sNamespace: string | null;
       workerServiceName: string | null;
     };
+    userId: string;
+    projectId?: string | null | undefined;
+    workspaceId?: string | null | undefined;
+    sessionId?: string | null | undefined;
     workerSessionId: string | null;
     action: 'disconnect' | 'resume';
   },
 ) {
-  if (input.sandbox.state !== 'running') {
-    throw new HttpError(
-      409,
-      'sandbox_not_running',
-      'Sandbox must be running before changing worker session state.',
-    );
-  }
   if (!input.workerSessionId) {
     throw new HttpError(
       409,
@@ -733,56 +824,23 @@ async function sendWorkerSessionLifecycleRequest(
       'Session does not have a worker session id yet.',
     );
   }
-  if (!app.services.config.sandboxWorkerAuthToken) {
-    throw new HttpError(
-      503,
-      'worker_session_unavailable',
-      'Worker session control is not configured.',
-    );
-  }
-
-  const workerBaseUrl = workerBaseUrlForSandbox(app, input.sandbox);
-  if (!workerBaseUrl) {
-    throw new HttpError(
-      409,
-      'worker_session_unavailable',
-      'Sandbox worker endpoint is unavailable.',
-    );
-  }
-
-  const response = await fetch(
-    `${workerBaseUrl.replace(/\/+$/, '')}/api/threads/${encodeURIComponent(input.workerSessionId)}/${input.action}`,
-    {
-      method: 'POST',
-      headers: {
-        'x-remote-codex-worker-token': app.services.config.sandboxWorkerAuthToken,
-      },
-    },
-  ).catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new HttpError(
-      503,
-      'worker_session_unavailable',
-      `Worker session request failed: ${message}`,
-    );
+  const { workerBaseUrl, routeToken } = workerProxyBaseUrl(app, {
+    sandbox: input.sandbox,
+    userId: input.userId,
+    projectId: input.projectId,
+    workspaceId: input.workspaceId,
+    sessionId: input.sessionId,
+    scopes: ['worker:read', 'worker:write'],
   });
 
-  if (!response.ok) {
-    let message = `Worker session ${input.action} failed.`;
-    try {
-      const payload = (await response.json()) as { message?: unknown };
-      if (typeof payload.message === 'string') {
-        message = payload.message;
-      }
-    } catch {
-      // Keep the stable fallback message.
-    }
-    throw new HttpError(
-      response.status === 404 ? 409 : 502,
-      'worker_session_unavailable',
-      message,
-    );
-  }
+  await sendWorkerJsonRequest(app, {
+    workerBaseUrl,
+    routeToken,
+    path: `/api/threads/${encodeURIComponent(input.workerSessionId)}/${input.action}`,
+    body: {},
+    failureCode: 'worker_session_unavailable',
+    fallbackMessage: `Worker session ${input.action} failed`,
+  });
 }
 
 function quotaExceededError(denial: QuotaDenial) {
@@ -1925,6 +1983,10 @@ export function buildControlPlaneApp(
     }
     await sendWorkerSessionLifecycleRequest(app, {
       sandbox,
+      userId: user.id,
+      projectId: repository.getWorkspaceById(session.workspaceId)?.projectId,
+      workspaceId: session.workspaceId,
+      sessionId: session.id,
       workerSessionId: session.workerSessionId,
       action: 'disconnect',
     });
@@ -1946,6 +2008,10 @@ export function buildControlPlaneApp(
     }
     await sendWorkerSessionLifecycleRequest(app, {
       sandbox,
+      userId: user.id,
+      projectId: repository.getWorkspaceById(session.workspaceId)?.projectId,
+      workspaceId: session.workspaceId,
+      sessionId: session.id,
       workerSessionId: session.workerSessionId,
       action: 'resume',
     });
@@ -1981,6 +2047,7 @@ export function buildControlPlaneApp(
       sandbox,
       userId: user.id,
       projectId: workspace.projectId,
+      sessionId: session.id,
       workerSessionId: session.workerSessionId,
       prompt: input.prompt,
       ...(input.model ? { model: input.model } : {}),
