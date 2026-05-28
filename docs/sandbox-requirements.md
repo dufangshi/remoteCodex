@@ -1,6 +1,6 @@
 # Remote Codex Sandbox Requirements
 
-Last updated: 2026-05-27
+Last updated: 2026-05-28
 
 This document describes what a usable Remote Codex sandbox must contain and what is still missing in the current EKS/Railway deployment. It is intended as an implementation handoff for the next agent.
 
@@ -16,9 +16,12 @@ Observed running sandbox:
 - Worker Service type: `ClusterIP`
 - Worker port: `8787`
 - Router: public LoadBalancer forwarding to private worker Services
-- Worker image: `918876873590.dkr.ecr.ca-central-1.amazonaws.com/remote-codex-worker-staging:b27bd8c`
+- Worker image: `918876873590.dkr.ecr.ca-central-1.amazonaws.com/remote-codex-worker-staging:ea97a72`
+- Branch pushed to: `origin/sandbox-worker-control-plane`
+- Worker image source commit: `ea97a72`
+- Latest control-plane branch commit: `5fdf4f8`
 
-Current worker `/readyz` response is healthy but incomplete:
+Current worker `/readyz` response is healthy and reports Codex as the only enabled runtime:
 
 ```json
 {
@@ -29,11 +32,19 @@ Current worker `/readyz` response is healthy but incomplete:
     "userId": "7811a2dd-a2d8-43f2-a637-bdfacb50ef90",
     "workspaceRoot": "/workspace"
   },
-  "runtimes": []
+  "runtimes": [
+    {
+      "provider": "codex",
+      "enabled": true,
+      "status": {
+        "state": "ready"
+      }
+    }
+  ]
 }
 ```
 
-The important limitation is `runtimes: []`. The sandbox is a healthy empty worker container, not yet a complete coding-agent environment.
+The important remaining limitation is that control-plane workspace/session rows are not yet materialized into real worker workspaces and Codex sessions. The sandbox has a ready Codex runtime, but the product path does not yet run a real prompt through that runtime.
 
 ## Required Sandbox Contract
 
@@ -67,7 +78,7 @@ Current status:
 
 - Worker API starts and is ready.
 - `/api/worker/metadata` is protected and works only through router/internal headers.
-- Runtime manifest is not producing enabled runtimes in staging.
+- Runtime manifest reports Codex as enabled and ready in staging.
 
 ## 2. Workspace Filesystem
 
@@ -123,7 +134,7 @@ Current status:
 
 - Control-plane session creation creates a DB row only.
 - `workerSessionId` stays `null`.
-- Worker runtimes are disabled in current staging, so no real agent session is started.
+- Worker has a ready Codex runtime, but control-plane session creation is not yet bound to a real worker/Codex session.
 
 Relevant files:
 
@@ -156,9 +167,10 @@ Required:
 
 Current status:
 
-- Staging intentionally disables providers with `REMOTE_CODEX_ENABLED_AGENT_PROVIDERS=""`.
-- `/readyz` returns `runtimes: []`.
-- Gateway key rows can be created, but no real LLM gateway execution is wired.
+- Staging enables Codex only with `REMOTE_CODEX_ENABLED_AGENT_PROVIDERS=codex`.
+- `/readyz` returns Codex as ready.
+- Worker launch injects the sub2api gateway base URL and token from Kubernetes Secret-backed environment variables.
+- A full user prompt through Codex/sub2api has not yet been added to the staging smoke because control-plane session binding is still incomplete.
 
 Relevant files:
 
@@ -171,10 +183,56 @@ Relevant files:
 
 Implementation requirement:
 
-- Decide provider path for staging.
-- Configure worker runtime manifest or provider discovery so `/readyz` reports enabled providers.
-- Wire `REMOTE_CODEX_LLM_GATEWAY_TOKEN` or equivalent worker credentials.
-- Add smoke test proving a trivial turn can be started or that runtime availability is correctly reported.
+- Keep Codex as the first staging runtime.
+- Add worker session binding so control-plane session creation starts or resumes a real Codex thread.
+- Add smoke test proving a trivial Codex turn can be started through sub2api.
+
+## 4a. Codex Gateway Launch Configuration
+
+The worker image must not bake mutable provider configuration or raw API keys. Codex must be configured when the sandbox container starts.
+
+Required launch-time environment:
+
+- `REMOTE_CODEX_ENABLED_AGENT_PROVIDERS=codex`
+- `REMOTE_CODEX_LLM_GATEWAY_BASE_URL=<Railway sub2api base URL>`
+- `REMOTE_CODEX_LLM_GATEWAY_TOKEN=<sub2api API key from Kubernetes Secret>`
+- `CODEX_HOME=/home/agent/.codex`
+- `HOME=/home/agent`
+
+Required files written by worker startup:
+
+- `/home/agent/.codex/config.toml`
+- `/home/agent/.codex/auth.json`
+
+The current Codex config shape is:
+
+```toml
+model_provider = "sub2api"
+forced_login_method = "api"
+sandbox_mode = "workspace-write"
+approval_policy = "never"
+
+[model_providers.sub2api]
+name = "sub2api"
+base_url = "<REMOTE_CODEX_LLM_GATEWAY_BASE_URL without trailing slash>"
+wire_api = "responses"
+requires_openai_auth = true
+```
+
+The current Codex auth shape is:
+
+```json
+{
+  "OPENAI_API_KEY": "<REMOTE_CODEX_LLM_GATEWAY_TOKEN>"
+}
+```
+
+Current status:
+
+- Implemented in `apps/supervisor-api/src/worker-bootstrap.ts`.
+- The AWS sandbox adapter injects the gateway base URL as a normal environment variable.
+- The AWS sandbox adapter injects the token as `REMOTE_CODEX_LLM_GATEWAY_TOKEN` from Kubernetes Secret `remote-codex-llm-gateway-tokens`, key `sub2api-api-key`.
+- The token must not be printed, logged, committed, added to Terraform state, or returned by any API response.
 
 ## 5. Router And Browser Connectivity
 
@@ -280,7 +338,7 @@ The next implementation should satisfy these checks before calling the sandbox u
 
 1. Start sandbox from control-plane.
 2. EKS shows one worker Pod `Ready=1/1` and one private worker Service.
-3. `/readyz` reports at least one enabled runtime provider, or returns a clear unavailable state that UI handles.
+3. `/readyz` reports Codex as the enabled runtime provider.
 4. Create workspace through frontend/API.
 5. Worker contains `/workspace/<slug>`.
 6. Create session through frontend/API.
@@ -291,6 +349,7 @@ The next implementation should satisfy these checks before calling the sandbox u
 11. Direct worker access remains impossible from the public internet.
 12. Stop sandbox deletes worker Pod and Service.
 13. Restart sandbox restores or clearly resets workspace state according to the chosen persistence model.
+14. A smoke test can send one trivial prompt through Codex and the sub2api gateway.
 
 ## Recommended Task Split
 
@@ -298,7 +357,7 @@ Recommended order for the next agent:
 
 1. Implement workspace materialization.
 2. Implement worker session binding.
-3. Enable one runtime provider in staging.
+3. Add a real Codex prompt smoke through sub2api.
 4. Add TLS/WSS for sandbox-router.
 5. Add end-to-end smoke covering workspace -> session -> route token -> worker metadata -> WebSocket.
 6. Decide and implement workspace persistence model.
@@ -307,7 +366,7 @@ Recommended order for the next agent:
 
 - Workspace DB rows do not create directories in `/workspace`.
 - Sessions are DB rows only; no real worker session binding.
-- Worker runtime providers are disabled in staging.
+- Codex runtime is ready, but no full control-plane -> worker -> Codex prompt path is wired yet.
 - Route token currently returns `ws://...`, which is not suitable for an HTTPS frontend.
 - Worker filesystem is ephemeral.
 - Frontend control-plane page is diagnostic/dev UI, not a polished user workflow.
