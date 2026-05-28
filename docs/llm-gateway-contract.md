@@ -82,6 +82,7 @@ LLM_GATEWAY_PROVIDER=sub2api
 LLM_GATEWAY_ADMIN_BASE_URL=https://llm-gateway-admin.example.com
 LLM_GATEWAY_ADMIN_TOKEN=<admin-token>
 LLM_GATEWAY_TOKEN_SECRET_NAME=<aws-secret-containing-sandbox-key-material>
+LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY=<optional-secret-key-for-shared-staging-token>
 ```
 
 Worker environment injected by the sandbox manager:
@@ -94,6 +95,12 @@ REMOTE_CODEX_LLM_GATEWAY_TOKEN=<sandbox-scoped-gateway-token>
 The worker token must be user or sandbox scoped. Real provider root keys must
 not enter worker env, generated provider config, browser local storage,
 control-plane route tokens, or worker identity headers.
+
+Staging may use one shared sub2api API key while the gateway admin contract is
+not available. In that case `LLM_GATEWAY_TOKEN_SECRET_NAME` names the Kubernetes
+Secret and `LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY` names the data key to inject
+into worker Pods. The worker still receives the key only at launch time and
+writes it to `/home/agent/.codex/auth.json`; the image must not contain it.
 
 ## Admin Credentials
 

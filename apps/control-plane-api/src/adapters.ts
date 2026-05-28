@@ -31,6 +31,7 @@ export interface SandboxStartInput {
   image: string;
   region: string;
   s3Prefix: string;
+  enabledAgentProviders?: string;
   gateway?: {
     baseUrl: string;
     keyId: string;
@@ -295,6 +296,7 @@ const awsSandboxAdapterEnvSchema = z.object({
   SANDBOX_SUBNET_IDS: z.string().min(1),
   SANDBOX_SECURITY_GROUP_IDS: z.string().min(1),
   SANDBOX_RESOURCE_PROFILE: z.enum(['small', 'standard', 'large']).default('standard'),
+  SANDBOX_WORKER_ENABLED_AGENT_PROVIDERS: z.string().default('codex'),
 });
 
 export interface AwsSandboxAdapterConfig {
@@ -310,6 +312,7 @@ export interface AwsSandboxAdapterConfig {
   subnetIds: string[];
   securityGroupIds: string[];
   resourceProfile: 'small' | 'standard' | 'large';
+  enabledAgentProviders: string;
 }
 
 export interface AwsWorkerPodSpec {
@@ -731,6 +734,7 @@ export function loadAwsSandboxAdapterConfig(
     subnetIds,
     securityGroupIds,
     resourceProfile: parsed.SANDBOX_RESOURCE_PROFILE,
+    enabledAgentProviders: parsed.SANDBOX_WORKER_ENABLED_AGENT_PROVIDERS,
   };
 }
 
@@ -934,14 +938,24 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
         REMOTE_CODEX_SANDBOX_REGION: input.region,
         REMOTE_CODEX_SANDBOX_S3_PREFIX: input.s3Prefix,
         SANDBOX_ROUTER_BASE_URL: this.config.routerBaseUrl,
+        HOST: '0.0.0.0',
+        PORT: '8787',
+        WORKSPACE_ROOT: '/workspace',
+        HOME: '/home/agent',
+        CODEX_HOME: '/home/agent/.codex',
+        CLAUDE_HOME: '/home/agent/.claude',
+        CLAUDE_CONFIG_DIR: '/home/agent/.claude',
+        OPENCODE_HOME: '/home/agent/.opencode',
+        DATABASE_URL: '/home/agent/.remote-codex/worker.sqlite',
+        REMOTE_CODEX_DISABLE_BUILD_RESTART: 'true',
+        REMOTE_CODEX_ENABLED_AGENT_PROVIDERS:
+          input.enabledAgentProviders ?? this.config.enabledAgentProviders,
         ...(input.gateway
           ? {
               REMOTE_CODEX_LLM_GATEWAY_BASE_URL: input.gateway.baseUrl,
               REMOTE_CODEX_LLM_GATEWAY_KEY_ID: input.gateway.keyId,
             }
-          : {
-              REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: '',
-            }),
+          : {}),
         ...(input.harness
           ? {
               ELAGENTE_HARNESS_BASE_URL: input.harness.baseUrl,
@@ -950,8 +964,6 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
                 : 'false',
             }
           : {}),
-        WORKSPACE_ROOT: '/workspace',
-        HOME: '/home/agent',
       },
       secretEnv: {
         REMOTE_CODEX_WORKER_AUTH_TOKEN: {

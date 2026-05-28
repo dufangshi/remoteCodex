@@ -151,6 +151,7 @@ describe('sandbox manager adapters', () => {
       subnetIds: ['subnet-a', 'subnet-b'],
       securityGroupIds: ['sg-worker'],
       resourceProfile: 'standard',
+      enabledAgentProviders: 'codex',
     });
   });
 
@@ -233,10 +234,17 @@ describe('sandbox manager adapters', () => {
       SANDBOX_ROUTER_BASE_URL: 'https://sandbox-router.example.test',
       REMOTE_CODEX_LLM_GATEWAY_BASE_URL: 'https://llm-gateway.example.test',
       REMOTE_CODEX_LLM_GATEWAY_KEY_ID: 'gw-key-sbx-test',
+      REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: 'codex',
       ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
       REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
       WORKSPACE_ROOT: '/workspace',
       HOME: '/home/agent',
+      CODEX_HOME: '/home/agent/.codex',
+      CLAUDE_HOME: '/home/agent/.claude',
+      CLAUDE_CONFIG_DIR: '/home/agent/.claude',
+      OPENCODE_HOME: '/home/agent/.opencode',
+      DATABASE_URL: '/home/agent/.remote-codex/worker.sqlite',
+      REMOTE_CODEX_DISABLE_BUILD_RESTART: 'true',
     });
     expect(env.secretEnv).toMatchObject({
       REMOTE_CODEX_WORKER_AUTH_TOKEN: {
@@ -256,6 +264,17 @@ describe('sandbox manager adapters', () => {
     expect(Object.keys(env.env)).not.toContain('ANTHROPIC_API_KEY');
     expect(Object.keys(env.env)).not.toContain('REMOTE_CODEX_LLM_GATEWAY_TOKEN');
     expect(Object.keys(env.env)).not.toContain('INACT_X_APP_KEY');
+  });
+
+  it('lets control plane override the AWS worker enabled provider list at launch', async () => {
+    const manager = new AwsEksFargateSandboxManager(awsConfig());
+
+    const env = await manager.prepareSandboxEnvironment({
+      ...sandboxInput,
+      enabledAgentProviders: 'codex,opencode',
+    });
+
+    expect(env.env.REMOTE_CODEX_ENABLED_AGENT_PROVIDERS).toBe('codex,opencode');
   });
 
   it('applies an AWS worker Pod spec with deterministic names, env, and secrets', async () => {
@@ -312,8 +331,17 @@ describe('sandbox manager adapters', () => {
       REMOTE_CODEX_RUNTIME_ROLE: 'worker',
       REMOTE_CODEX_SANDBOX_ID: 'sbx_test',
       REMOTE_CODEX_USER_ID: 'user_test',
+      REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: 'codex',
+      HOST: '0.0.0.0',
+      PORT: '8787',
       WORKSPACE_ROOT: '/workspace',
       HOME: '/home/agent',
+      CODEX_HOME: '/home/agent/.codex',
+      CLAUDE_HOME: '/home/agent/.claude',
+      CLAUDE_CONFIG_DIR: '/home/agent/.claude',
+      OPENCODE_HOME: '/home/agent/.opencode',
+      DATABASE_URL: '/home/agent/.remote-codex/worker.sqlite',
+      REMOTE_CODEX_DISABLE_BUILD_RESTART: 'true',
     });
     expect(podSpec!.secretEnv).toMatchObject({
       REMOTE_CODEX_WORKER_AUTH_TOKEN: {

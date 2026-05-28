@@ -486,6 +486,7 @@ describe('control plane api', () => {
         ...testEnv('gateway-start'),
         LLM_GATEWAY_BASE_URL: 'https://llm-gateway.example.test',
         LLM_GATEWAY_TOKEN_SECRET_NAME: 'remote-codex-gateway-tokens',
+        LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY: 'sub2api-api-key',
         ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
         ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: 'remote-codex-harness-app-keys',
         REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
@@ -514,9 +515,10 @@ describe('control plane api', () => {
     expect(sandboxManager.starts).toHaveLength(1);
     expect(sandboxManager.starts[0]).toMatchObject({
       sandboxId: bootstrap.json().sandbox.id,
+      enabledAgentProviders: 'codex',
       gateway: {
         baseUrl: 'https://llm-gateway.example.test',
-        keyId: `sub2api-key-${bootstrap.json().sandbox.id}`,
+        keyId: 'sub2api-api-key',
         tokenSecretName: 'remote-codex-gateway-tokens',
       },
       harness: {
@@ -527,6 +529,38 @@ describe('control plane api', () => {
     });
   });
 
+  it('passes configured worker provider list when starting a sandbox', async () => {
+    const sandboxManager = new RecordingSandboxManager();
+    const app = buildControlPlaneApp({
+      env: {
+        ...testEnv('provider-start'),
+        SANDBOX_WORKER_ENABLED_AGENT_PROVIDERS: 'codex,opencode',
+      },
+      sandboxManager,
+    });
+    apps.push(app);
+
+    const auth = { authorization: 'Bearer dev:provider-start-user' };
+    await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: auth,
+      payload: {
+        email: 'provider-start@example.com',
+      },
+    });
+
+    const started = await app.inject({
+      method: 'POST',
+      url: '/api/sandbox/start',
+      headers: auth,
+    });
+    expect(started.statusCode).toBe(200);
+    expect(sandboxManager.starts[0]).toMatchObject({
+      enabledAgentProviders: 'codex,opencode',
+    });
+  });
+
   it('attaches gateway and harness metadata when restarting a sandbox', async () => {
     const sandboxManager = new RecordingSandboxManager();
     const app = buildControlPlaneApp({
@@ -534,6 +568,7 @@ describe('control plane api', () => {
         ...testEnv('gateway-restart'),
         LLM_GATEWAY_BASE_URL: 'https://llm-gateway.example.test',
         LLM_GATEWAY_TOKEN_SECRET_NAME: 'remote-codex-gateway-tokens',
+        LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY: 'sub2api-api-key',
         ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
         ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: 'remote-codex-harness-app-keys',
         REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
@@ -562,9 +597,10 @@ describe('control plane api', () => {
     expect(sandboxManager.starts).toHaveLength(1);
     expect(sandboxManager.starts[0]).toMatchObject({
       sandboxId: bootstrap.json().sandbox.id,
+      enabledAgentProviders: 'codex',
       gateway: {
         baseUrl: 'https://llm-gateway.example.test',
-        keyId: `sub2api-key-${bootstrap.json().sandbox.id}`,
+        keyId: 'sub2api-api-key',
         tokenSecretName: 'remote-codex-gateway-tokens',
       },
       harness: {

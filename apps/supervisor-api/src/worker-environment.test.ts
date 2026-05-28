@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 import {
   validateWorkerEntrypointEnvironment,
   workerStartupLogPayload,
   type WorkerEnvironmentFilesystem,
 } from './worker-environment';
+import { loadRuntimeConfig } from '../../../packages/config/src/index';
+import { configureWorkerProviderGateway } from './worker-bootstrap';
 
 const fakeFilesystem: WorkerEnvironmentFilesystem = {
   mkdirSync() {},
@@ -179,5 +184,41 @@ describe('worker entrypoint environment validation', () => {
     expect(serialized).not.toContain('must-not-leak-harness-key');
     expect(serialized).not.toContain('REMOTE_CODEX_LLM_GATEWAY_TOKEN');
     expect(serialized).not.toContain('INACT_X_APP_KEY');
+  });
+});
+
+describe('worker provider gateway bootstrap', () => {
+  it('writes Codex sub2api config and auth from launch env', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'remote-codex-worker-bootstrap-'));
+    const env = baseWorkerEnv({
+      CODEX_HOME: path.join(tempDir, '.codex'),
+      CLAUDE_HOME: path.join(tempDir, '.claude'),
+      OPENCODE_HOME: path.join(tempDir, '.opencode'),
+      WORKSPACE_ROOT: '/workspace',
+      REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: 'codex',
+      REMOTE_CODEX_LLM_GATEWAY_BASE_URL: 'https://sub.example.test/',
+      REMOTE_CODEX_LLM_GATEWAY_TOKEN: 'sandbox-sub2api-key',
+    });
+
+    await configureWorkerProviderGateway(loadRuntimeConfig(env));
+
+    const configToml = await fs.readFile(path.join(tempDir, '.codex', 'config.toml'), 'utf8');
+    const authJson = JSON.parse(
+      await fs.readFile(path.join(tempDir, '.codex', 'auth.json'), 'utf8'),
+    );
+    expect(configToml).toContain('model_provider = "sub2api"');
+    expect(configToml).toContain('base_url = "https://sub.example.test"');
+    expect(configToml).toContain('wire_api = "responses"');
+    expect(configToml).toContain('requires_openai_auth = true');
+    expect(configToml).not.toContain('sandbox-sub2api-key');
+    expect(authJson).toEqual({
+      OPENAI_API_KEY: 'sandbox-sub2api-key',
+    });
+    await expect(fs.stat(path.join(tempDir, '.claude', 'settings.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    await expect(fs.stat(path.join(tempDir, '.opencode', 'opencode.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
   });
 });

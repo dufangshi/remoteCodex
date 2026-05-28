@@ -608,7 +608,7 @@ function gatewayStartInput(
   }
   return {
     baseUrl: app.services.config.llmGatewayBaseUrl,
-    keyId: gatewayKey.externalKeyId,
+    keyId: app.services.config.llmGatewayStaticTokenSecretKey ?? gatewayKey.externalKeyId,
     tokenSecretName: app.services.config.llmGatewayTokenSecretName,
   };
 }
@@ -1046,6 +1046,7 @@ export function buildControlPlaneApp(
       image: sandbox.image,
       region: sandbox.region,
       s3Prefix: sandbox.s3Prefix,
+      enabledAgentProviders: config.sandboxWorkerEnabledAgentProviders,
       gateway: gatewayStartInput(app, sandbox),
       harness: harnessStartInput(app),
     });
@@ -1197,6 +1198,7 @@ export function buildControlPlaneApp(
       image: sandbox.image,
       region: sandbox.region,
       s3Prefix: sandbox.s3Prefix,
+      enabledAgentProviders: config.sandboxWorkerEnabledAgentProviders,
       gateway: gatewayStartInput(app, sandbox),
       harness: harnessStartInput(app),
     });
@@ -1232,6 +1234,7 @@ export function buildControlPlaneApp(
       image: sandbox.image,
       region: sandbox.region,
       s3Prefix: sandbox.s3Prefix,
+      enabledAgentProviders: config.sandboxWorkerEnabledAgentProviders,
       gateway: gatewayStartInput(app, sandbox),
       harness: harnessStartInput(app),
     });

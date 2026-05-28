@@ -547,6 +547,29 @@ async function main() {
     },
   });
 
+  const workerReady = await requestJson({
+    baseUrl: routerBaseUrl,
+    path: `/api/sandboxes/${sandbox.id}/readyz?token=${encodeURIComponent(routeToken.json.token)}`,
+    token: productJwt,
+    expectedStatus: 200,
+  });
+  const runtimeProviders = Array.isArray(workerReady.json.runtimes)
+    ? workerReady.json.runtimes.map((runtime: JsonObject) => runtime.provider)
+    : [];
+  steps.push({
+    name: 'worker_codex_runtime_enabled',
+    ok:
+      workerReady.json.status === 'ready' &&
+      runtimeProviders.includes('codex') &&
+      !runtimeProviders.includes('claude') &&
+      !runtimeProviders.includes('opencode'),
+    details: {
+      sandboxId: sandbox.id,
+      providers: runtimeProviders,
+      runtimes: workerReady.json.runtimes,
+    },
+  });
+
   const directWorkerBaseUrl = envValue('STAGING_DIRECT_WORKER_BASE_URL');
   if (directWorkerBaseUrl) {
     const direct = await requestJson({

@@ -19,11 +19,13 @@ const envSchema = z.object({
   SANDBOX_DEFAULT_RESOURCE_PROFILE: z.enum(['small', 'standard', 'large']).optional(),
   SANDBOX_S3_PREFIX_BASE: z.string().min(1).optional(),
   SANDBOX_WORKER_INTERNAL_PORT: z.coerce.number().int().positive().optional(),
+  SANDBOX_WORKER_ENABLED_AGENT_PROVIDERS: z.string().optional(),
   SANDBOX_WORKER_AUTH_TOKEN: z.string().min(1).optional(),
   CONTROL_PLANE_INTERNAL_SERVICE_TOKEN: z.string().min(16).optional(),
   LLM_GATEWAY_BASE_URL: z.string().url().optional(),
   LLM_GATEWAY_PROVIDER: z.string().trim().min(1).optional(),
   LLM_GATEWAY_TOKEN_SECRET_NAME: z.string().min(1).optional(),
+  LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY: z.string().min(1).optional(),
   LLM_GATEWAY_ADMIN_BASE_URL: z.string().url().optional(),
   LLM_GATEWAY_ADMIN_TOKEN: z.string().min(1).optional(),
   ELAGENTE_HARNESS_BASE_URL: z.string().url().optional(),
@@ -58,11 +60,13 @@ export interface ControlPlaneConfig {
   sandboxDefaultResourceProfile: 'small' | 'standard' | 'large';
   sandboxS3PrefixBase: string;
   sandboxWorkerInternalPort: number;
+  sandboxWorkerEnabledAgentProviders: string;
   sandboxWorkerAuthToken: string | null;
   internalServiceToken: string | null;
   llmGatewayBaseUrl: string | null;
   llmGatewayProvider: string;
   llmGatewayTokenSecretName: string | null;
+  llmGatewayStaticTokenSecretKey: string | null;
   llmGatewayAdminBaseUrl: string | null;
   llmGatewayAdminToken: string | null;
   harnessBaseUrl: string | null;
@@ -161,11 +165,14 @@ export function loadControlPlaneConfig(
     sandboxS3PrefixBase:
       parsed.SANDBOX_S3_PREFIX_BASE ?? 's3://remote-codex-sandboxes/dev',
     sandboxWorkerInternalPort: parsed.SANDBOX_WORKER_INTERNAL_PORT ?? 8787,
+    sandboxWorkerEnabledAgentProviders:
+      parsed.SANDBOX_WORKER_ENABLED_AGENT_PROVIDERS ?? 'codex',
     sandboxWorkerAuthToken: parsed.SANDBOX_WORKER_AUTH_TOKEN ?? null,
     internalServiceToken: parsed.CONTROL_PLANE_INTERNAL_SERVICE_TOKEN ?? null,
     llmGatewayBaseUrl: parsed.LLM_GATEWAY_BASE_URL ?? null,
     llmGatewayProvider: parsed.LLM_GATEWAY_PROVIDER ?? 'sub2api',
     llmGatewayTokenSecretName: parsed.LLM_GATEWAY_TOKEN_SECRET_NAME ?? null,
+    llmGatewayStaticTokenSecretKey: parsed.LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY ?? null,
     llmGatewayAdminBaseUrl: parsed.LLM_GATEWAY_ADMIN_BASE_URL ?? null,
     llmGatewayAdminToken: parsed.LLM_GATEWAY_ADMIN_TOKEN ?? null,
     harnessBaseUrl: parsed.ELAGENTE_HARNESS_BASE_URL ?? null,

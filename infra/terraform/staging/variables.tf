@@ -101,6 +101,26 @@ variable "worker_auth_token" {
   default     = null
 }
 
+variable "llm_gateway_token_secret_name" {
+  description = "Kubernetes Secret name containing worker LLM gateway API keys."
+  type        = string
+  default     = "remote-codex-llm-gateway-tokens"
+}
+
+variable "llm_gateway_static_token_secret_key" {
+  description = "Secret data key used when all staging Codex workers share one sub2api token."
+  type        = string
+  default     = "sub2api-api-key"
+}
+
+variable "llm_gateway_static_token" {
+  description = "Optional staging sub2api API key. If null, create the Secret outside Terraform."
+  type        = string
+  sensitive   = true
+  nullable    = true
+  default     = null
+}
+
 variable "worker_log_group_name" {
   description = "CloudWatch log group name for worker logs."
   type        = string
@@ -128,6 +148,12 @@ variable "default_resource_profile" {
     condition     = contains(["small", "standard", "large"], var.default_resource_profile)
     error_message = "default_resource_profile must be one of: small, standard, large."
   }
+}
+
+variable "worker_enabled_agent_providers" {
+  description = "Comma-separated worker runtime providers injected when starting sandbox Pods. Staging defaults to codex only."
+  type        = string
+  default     = "codex"
 }
 
 variable "sandbox_router_base_url" {

@@ -13,7 +13,9 @@ kubernetes_namespace = "remote-codex-staging"
 sandbox_manager_role_arn = "arn:aws:iam::123456789012:role/remote-codex-staging-sandbox-manager"
 
 worker_image_tag = "replace-with-git-sha"
+worker_enabled_agent_providers = "codex"
 worker_auth_token = "replace-with-worker-internal-token"
+llm_gateway_static_token = "replace-with-sub2api-api-key"
 
 sandbox_router_base_url = "https://router-staging.example.com"
 control_plane_base_url  = "https://control-plane-staging.example.com"

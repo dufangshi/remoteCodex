@@ -64,18 +64,21 @@ locals {
   worker_image_repository_url = aws_ecr_repository.worker.repository_url
 
   control_plane_env = {
-    SANDBOX_AWS_REGION                    = var.aws_region
-    SANDBOX_ENVIRONMENT                   = var.environment
-    SANDBOX_EKS_CLUSTER_NAME              = var.eks_cluster_name
-    SANDBOX_K8S_NAMESPACE                 = kubernetes_namespace_v1.remote_codex.metadata[0].name
-    SANDBOX_K8S_SERVICE_ACCOUNT           = kubernetes_service_account_v1.sandbox_manager.metadata[0].name
-    SANDBOX_WORKER_IMAGE_REPOSITORY       = local.worker_image_repository_url
-    SANDBOX_WORKER_IMAGE_TAG              = var.worker_image_tag
-    SANDBOX_ROUTER_BASE_URL               = var.sandbox_router_base_url
-    SANDBOX_WORKER_AUTH_TOKEN_SECRET_NAME = var.worker_auth_token_secret_name
-    SANDBOX_SUBNET_IDS                    = join(",", var.private_subnet_ids)
-    SANDBOX_SECURITY_GROUP_IDS            = join(",", var.worker_security_group_ids)
-    SANDBOX_RESOURCE_PROFILE              = var.default_resource_profile
+    SANDBOX_AWS_REGION                     = var.aws_region
+    SANDBOX_ENVIRONMENT                    = var.environment
+    SANDBOX_EKS_CLUSTER_NAME               = var.eks_cluster_name
+    SANDBOX_K8S_NAMESPACE                  = kubernetes_namespace_v1.remote_codex.metadata[0].name
+    SANDBOX_K8S_SERVICE_ACCOUNT            = kubernetes_service_account_v1.sandbox_manager.metadata[0].name
+    SANDBOX_WORKER_IMAGE_REPOSITORY        = local.worker_image_repository_url
+    SANDBOX_WORKER_IMAGE_TAG               = var.worker_image_tag
+    SANDBOX_ROUTER_BASE_URL                = var.sandbox_router_base_url
+    SANDBOX_WORKER_AUTH_TOKEN_SECRET_NAME  = var.worker_auth_token_secret_name
+    SANDBOX_WORKER_ENABLED_AGENT_PROVIDERS = var.worker_enabled_agent_providers
+    LLM_GATEWAY_TOKEN_SECRET_NAME          = var.llm_gateway_token_secret_name
+    LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY    = var.llm_gateway_static_token_secret_key
+    SANDBOX_SUBNET_IDS                     = join(",", var.private_subnet_ids)
+    SANDBOX_SECURITY_GROUP_IDS             = join(",", var.worker_security_group_ids)
+    SANDBOX_RESOURCE_PROFILE               = var.default_resource_profile
   }
 
   aws_staging_evidence_env = {
@@ -263,6 +266,22 @@ resource "kubernetes_secret_v1" "worker_auth_token" {
 
   data = {
     token = var.worker_auth_token
+  }
+
+  type = "Opaque"
+}
+
+resource "kubernetes_secret_v1" "llm_gateway_token" {
+  count = var.llm_gateway_static_token == null ? 0 : 1
+
+  metadata {
+    name      = var.llm_gateway_token_secret_name
+    namespace = kubernetes_namespace_v1.remote_codex.metadata[0].name
+    labels    = local.worker_labels
+  }
+
+  data = {
+    (var.llm_gateway_static_token_secret_key) = var.llm_gateway_static_token
   }
 
   type = "Opaque"

@@ -14,16 +14,6 @@ LABEL org.opencontainers.image.title="remote-codex-worker" \
       org.opencontainers.image.description="Remote Codex sandbox worker image"
 
 ENV NODE_ENV=production \
-    REMOTE_CODEX_RUNTIME_ROLE=worker \
-    HOST=0.0.0.0 \
-    PORT=8787 \
-    HOME=/home/agent \
-    WORKSPACE_ROOT=/workspace \
-    CODEX_HOME=/home/agent/.codex \
-    CLAUDE_HOME=/home/agent/.claude \
-    CLAUDE_CONFIG_DIR=/home/agent/.claude \
-    OPENCODE_HOME=/home/agent/.opencode \
-    DATABASE_URL=/home/agent/.remote-codex/worker.sqlite \
     REMOTE_CODEX_PACKAGE_ROOT=/opt/remote-codex \
     REMOTE_CODEX_WORKER_RUNTIME_MANIFEST=/opt/remote-codex/worker-runtime-manifest.json \
     REMOTE_CODEX_DISABLE_BUILD_RESTART=true

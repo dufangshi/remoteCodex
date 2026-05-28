@@ -36,6 +36,10 @@ const configPaths: Record<Provider, (env: NodeJS.ProcessEnv) => string> = {
   opencode: (env) => path.join(env.OPENCODE_HOME?.trim() || path.join(home(env), '.opencode'), 'opencode.json'),
 };
 
+const authPaths: Partial<Record<Provider, (env: NodeJS.ProcessEnv) => string>> = {
+  codex: (env) => path.join(env.CODEX_HOME?.trim() || path.join(home(env), '.codex'), 'auth.json'),
+};
+
 function home(env: NodeJS.ProcessEnv) {
   return env.HOME?.trim() || os.homedir();
 }
@@ -94,9 +98,34 @@ async function readProviderConfig(provider: Provider) {
   }
 }
 
+async function readProviderAuth(provider: Provider) {
+  const authPath = authPaths[provider]?.(process.env);
+  if (!authPath) {
+    return {
+      filePath: null,
+      content: '',
+      readError: null,
+    };
+  }
+  try {
+    return {
+      filePath: authPath,
+      content: await readFile(authPath, 'utf8'),
+      readError: null,
+    };
+  } catch (error) {
+    return {
+      filePath: authPath,
+      content: '',
+      readError: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 function configUsesGateway(input: {
   provider: Provider;
   configContent: string;
+  authContent: string;
   gatewayBaseUrl: string | null;
 }) {
   if (!input.configContent) {
@@ -105,7 +134,12 @@ function configUsesGateway(input: {
   const expectedBase = input.gatewayBaseUrl?.replace(/\/+$/, '') ?? '';
   const hasGatewayBase = expectedBase ? input.configContent.includes(expectedBase) : true;
   if (input.provider === 'codex') {
-    return hasGatewayBase && input.configContent.includes('REMOTE_CODEX_LLM_GATEWAY_TOKEN');
+    return (
+      hasGatewayBase &&
+      input.configContent.includes('model_provider = "sub2api"') &&
+      input.configContent.includes('requires_openai_auth = true') &&
+      input.authContent.includes('OPENAI_API_KEY')
+    );
   }
   if (input.provider === 'claude') {
     return hasGatewayBase && input.configContent.includes('ANTHROPIC_BASE_URL');
@@ -196,11 +230,13 @@ async function main() {
   const provider = providerFromArg();
   const gatewayBaseUrl = envValue('REMOTE_CODEX_LLM_GATEWAY_BASE_URL');
   const config = await readProviderConfig(provider);
+  const auth = await readProviderAuth(provider);
   const commandResult = await runProviderCommand();
   const rootKeyCheck = rootKeysAbsent(config.content);
   const workerConfigUsesGateway = configUsesGateway({
     provider,
     configContent: config.content,
+    authContent: auth.content,
     gatewayBaseUrl,
   });
   const usageRecorded = gatewayUsageRecorded(commandResult);
@@ -225,6 +261,8 @@ async function main() {
       commandStderr: commandResult.stderr,
       providerConfigPath: config.filePath,
       providerConfigReadError: config.readError,
+      providerAuthPath: auth.filePath,
+      providerAuthReadError: auth.readError,
       gatewayBaseUrlConfigured: Boolean(gatewayBaseUrl),
       leakedEnvNames: rootKeyCheck.leakedEnvNames,
       leakedConfigNames: rootKeyCheck.leakedConfigNames,
