@@ -1040,18 +1040,23 @@ export function buildControlPlaneApp(
     if (!sandbox) {
       throw new HttpError(404, 'not_found', 'Sandbox not found.');
     }
+    const runtimeSandbox = repository.patchSandbox(sandbox.id, {
+      image: config.sandboxDefaultImage,
+      region: config.sandboxDefaultRegion,
+      resourceProfile: config.sandboxDefaultResourceProfile,
+    }) ?? sandbox;
     const result = await app.services.sandboxManager.restartSandbox({
-      sandboxId: sandbox.id,
-      userId: sandbox.userId,
-      image: sandbox.image,
-      region: sandbox.region,
-      s3Prefix: sandbox.s3Prefix,
+      sandboxId: runtimeSandbox.id,
+      userId: runtimeSandbox.userId,
+      image: runtimeSandbox.image,
+      region: runtimeSandbox.region,
+      s3Prefix: runtimeSandbox.s3Prefix,
       enabledAgentProviders: config.sandboxWorkerEnabledAgentProviders,
-      gateway: gatewayStartInput(app, sandbox),
+      gateway: gatewayStartInput(app, runtimeSandbox),
       harness: harnessStartInput(app),
     });
     return {
-      sandbox: repository.updateSandboxState(sandbox.id, {
+      sandbox: repository.updateSandboxState(runtimeSandbox.id, {
         ...result,
         statusReason: input.reason ?? result.statusReason ?? 'restarted by administrator',
         auditMetadata: {
@@ -1192,18 +1197,23 @@ export function buildControlPlaneApp(
       resourceProfile: config.sandboxDefaultResourceProfile,
       s3PrefixBase: config.sandboxS3PrefixBase,
     });
+    const runtimeSandbox = repository.patchSandbox(sandbox.id, {
+      image: config.sandboxDefaultImage,
+      region: config.sandboxDefaultRegion,
+      resourceProfile: config.sandboxDefaultResourceProfile,
+    }) ?? sandbox;
     const result = await app.services.sandboxManager.startSandbox({
-      sandboxId: sandbox.id,
+      sandboxId: runtimeSandbox.id,
       userId: user.id,
-      image: sandbox.image,
-      region: sandbox.region,
-      s3Prefix: sandbox.s3Prefix,
+      image: runtimeSandbox.image,
+      region: runtimeSandbox.region,
+      s3Prefix: runtimeSandbox.s3Prefix,
       enabledAgentProviders: config.sandboxWorkerEnabledAgentProviders,
-      gateway: gatewayStartInput(app, sandbox),
+      gateway: gatewayStartInput(app, runtimeSandbox),
       harness: harnessStartInput(app),
     });
     return {
-      sandbox: repository.updateSandboxState(sandbox.id, result),
+      sandbox: repository.updateSandboxState(runtimeSandbox.id, result),
     };
   });
 
@@ -1228,18 +1238,23 @@ export function buildControlPlaneApp(
     if (!sandbox) {
       throw new HttpError(404, 'not_found', 'Sandbox not found.');
     }
+    const runtimeSandbox = repository.patchSandbox(sandbox.id, {
+      image: config.sandboxDefaultImage,
+      region: config.sandboxDefaultRegion,
+      resourceProfile: config.sandboxDefaultResourceProfile,
+    }) ?? sandbox;
     const result = await app.services.sandboxManager.restartSandbox({
-      sandboxId: sandbox.id,
+      sandboxId: runtimeSandbox.id,
       userId: user.id,
-      image: sandbox.image,
-      region: sandbox.region,
-      s3Prefix: sandbox.s3Prefix,
+      image: runtimeSandbox.image,
+      region: runtimeSandbox.region,
+      s3Prefix: runtimeSandbox.s3Prefix,
       enabledAgentProviders: config.sandboxWorkerEnabledAgentProviders,
-      gateway: gatewayStartInput(app, sandbox),
+      gateway: gatewayStartInput(app, runtimeSandbox),
       harness: harnessStartInput(app),
     });
     return {
-      sandbox: repository.updateSandboxState(sandbox.id, result),
+      sandbox: repository.updateSandboxState(runtimeSandbox.id, result),
     };
   });
 

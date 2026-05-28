@@ -388,6 +388,9 @@ export class ControlPlaneRepository {
     sandboxId: string,
     input: Partial<{
       state: string;
+      image: string;
+      region: string;
+      resourceProfile: 'small' | 'standard' | 'large';
       routerBaseUrl: string | null;
       workerServiceName: string | null;
       k8sNamespace: string | null;
