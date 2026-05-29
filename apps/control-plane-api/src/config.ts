@@ -36,10 +36,20 @@ const envSchema = z.object({
   CONTROL_PLANE_AUTH_JWT_ISSUER: z.string().min(1).optional(),
   CONTROL_PLANE_AUTH_JWT_AUDIENCE: z.string().min(1).optional(),
   CONTROL_PLANE_AUTH_JWT_CLOCK_SKEW_SECONDS: z.coerce.number().int().nonnegative().optional(),
+  CONTROL_PLANE_PRODUCT_SESSION_SECRET: z.string().min(16).optional(),
+  CONTROL_PLANE_PRODUCT_SESSION_TTL_SECONDS: z.coerce.number().int().positive().optional(),
+  CONTROL_PLANE_PUBLIC_BASE_URL: z.string().url().optional(),
+  CONTROL_PLANE_FRONTEND_BASE_URL: z.string().url().optional(),
+  CONTROL_PLANE_GOOGLE_CLIENT_ID: z.string().min(1).optional(),
+  CONTROL_PLANE_GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
+  CONTROL_PLANE_GITHUB_CLIENT_ID: z.string().min(1).optional(),
+  CONTROL_PLANE_GITHUB_CLIENT_SECRET: z.string().min(1).optional(),
   CONTROL_PLANE_CORS_ALLOWED_ORIGINS: z.string().optional(),
 });
 
 const DEFAULT_CORS_ALLOWED_ORIGINS = [
+  'http://127.0.0.1:5173',
+  'http://localhost:5173',
   'https://remote-codex-frontend-production.up.railway.app',
 ];
 
@@ -75,6 +85,14 @@ export interface ControlPlaneConfig {
   authJwtIssuer: string | null;
   authJwtAudience: string | null;
   authJwtClockSkewSeconds: number;
+  productSessionSecret: string;
+  productSessionTtlSeconds: number;
+  publicBaseUrl: string;
+  frontendBaseUrl: string | null;
+  googleClientId: string | null;
+  googleClientSecret: string | null;
+  githubClientId: string | null;
+  githubClientSecret: string | null;
   routeTokenSigningKeys: Array<{ id: string; secret: string }>;
   corsAllowedOrigins: Set<string>;
 }
@@ -183,6 +201,17 @@ export function loadControlPlaneConfig(
     authJwtIssuer: parsed.CONTROL_PLANE_AUTH_JWT_ISSUER ?? null,
     authJwtAudience: parsed.CONTROL_PLANE_AUTH_JWT_AUDIENCE ?? null,
     authJwtClockSkewSeconds: parsed.CONTROL_PLANE_AUTH_JWT_CLOCK_SKEW_SECONDS ?? 60,
+    productSessionSecret:
+      parsed.CONTROL_PLANE_PRODUCT_SESSION_SECRET ??
+      parsed.CONTROL_PLANE_AUTH_JWT_SECRET ??
+      jwtSecret,
+    productSessionTtlSeconds: parsed.CONTROL_PLANE_PRODUCT_SESSION_TTL_SECONDS ?? 60 * 60 * 24 * 14,
+    publicBaseUrl: parsed.CONTROL_PLANE_PUBLIC_BASE_URL ?? `http://${parsed.HOST ?? '127.0.0.1'}:${parsed.PORT ?? 8790}`,
+    frontendBaseUrl: parsed.CONTROL_PLANE_FRONTEND_BASE_URL ?? null,
+    googleClientId: parsed.CONTROL_PLANE_GOOGLE_CLIENT_ID ?? null,
+    googleClientSecret: parsed.CONTROL_PLANE_GOOGLE_CLIENT_SECRET ?? null,
+    githubClientId: parsed.CONTROL_PLANE_GITHUB_CLIENT_ID ?? null,
+    githubClientSecret: parsed.CONTROL_PLANE_GITHUB_CLIENT_SECRET ?? null,
     routeTokenSigningKeys,
     corsAllowedOrigins: new Set([
       ...DEFAULT_CORS_ALLOWED_ORIGINS,

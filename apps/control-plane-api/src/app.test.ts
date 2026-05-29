@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createSignedToken } from '../../../packages/shared/src/tokens';
 import type {
@@ -111,6 +111,7 @@ describe('control plane api', () => {
   afterEach(async () => {
     await Promise.all(apps.map((app) => app.close()));
     apps.length = 0;
+    vi.unstubAllGlobals();
   });
 
   it('configures log redaction for gateway credentials', () => {
@@ -640,6 +641,270 @@ describe('control plane api', () => {
       authProvider: 'dev',
       authSubject: 'register-user',
       email: 'register@example.com',
+    });
+  });
+
+  it('registers and logs in with email and password session tokens', async () => {
+    const app = buildControlPlaneApp({ env: testEnv('password-auth') });
+    apps.push(app);
+
+    const registered = await app.inject({
+      method: 'POST',
+      url: '/api/auth/password/register',
+      payload: {
+        email: 'Password.User@Example.com',
+        password: 'correct-horse-battery-staple',
+        displayName: 'Password User',
+      },
+    });
+
+    expect(registered.statusCode).toBe(200);
+    expect(registered.json().user).toMatchObject({
+      authProvider: 'password',
+      authSubject: 'password.user@example.com',
+      email: 'password.user@example.com',
+      displayName: 'Password User',
+    });
+    expect(registered.json().session.token).toEqual(expect.any(String));
+
+    const duplicate = await app.inject({
+      method: 'POST',
+      url: '/api/auth/password/register',
+      payload: {
+        email: 'password.user@example.com',
+        password: 'correct-horse-battery-staple',
+      },
+    });
+    expect(duplicate.statusCode).toBe(409);
+
+    const rejected = await app.inject({
+      method: 'POST',
+      url: '/api/auth/password/login',
+      payload: {
+        email: 'password.user@example.com',
+        password: 'wrong-password',
+      },
+    });
+    expect(rejected.statusCode).toBe(401);
+
+    const login = await app.inject({
+      method: 'POST',
+      url: '/api/auth/password/login',
+      payload: {
+        email: 'password.user@example.com',
+        password: 'correct-horse-battery-staple',
+      },
+    });
+    expect(login.statusCode).toBe(200);
+    const token = login.json().session.token;
+
+    const me = await app.inject({
+      method: 'GET',
+      url: '/api/me',
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    });
+    expect(me.statusCode).toBe(200);
+    expect(me.json().user.email).toBe('password.user@example.com');
+  });
+
+  it('starts google and github oauth flows with provider callbacks', async () => {
+    const app = buildControlPlaneApp({
+      env: {
+        ...testEnv('oauth-start'),
+        CONTROL_PLANE_PUBLIC_BASE_URL: 'https://control.example.test',
+        CONTROL_PLANE_FRONTEND_BASE_URL: 'https://frontend.example.test',
+        CONTROL_PLANE_GOOGLE_CLIENT_ID: 'google-client',
+        CONTROL_PLANE_GOOGLE_CLIENT_SECRET: 'google-secret',
+        CONTROL_PLANE_GITHUB_CLIENT_ID: 'github-client',
+        CONTROL_PLANE_GITHUB_CLIENT_SECRET: 'github-secret',
+      },
+    });
+    apps.push(app);
+
+    const google = await app.inject({
+      method: 'GET',
+      url: '/api/auth/oauth/google/start',
+    });
+    expect(google.statusCode).toBe(302);
+    const googleUrl = new URL(google.headers.location as string);
+    expect(googleUrl.origin + googleUrl.pathname).toBe('https://accounts.google.com/o/oauth2/v2/auth');
+    expect(googleUrl.searchParams.get('client_id')).toBe('google-client');
+    expect(googleUrl.searchParams.get('scope')).toContain('openid');
+    expect(googleUrl.searchParams.get('redirect_uri')).toBe(
+      'https://control.example.test/api/auth/oauth/google/callback',
+    );
+
+    const github = await app.inject({
+      method: 'GET',
+      url: '/api/auth/oauth/github/start',
+    });
+    expect(github.statusCode).toBe(302);
+    const githubUrl = new URL(github.headers.location as string);
+    expect(githubUrl.origin + githubUrl.pathname).toBe('https://github.com/login/oauth/authorize');
+    expect(githubUrl.searchParams.get('client_id')).toBe('github-client');
+    expect(githubUrl.searchParams.get('scope')).toContain('user:email');
+    expect(githubUrl.searchParams.get('redirect_uri')).toBe(
+      'https://control.example.test/api/auth/oauth/github/callback',
+    );
+  });
+
+  it('rejects oauth return urls outside the configured frontend origin', async () => {
+    const app = buildControlPlaneApp({
+      env: {
+        ...testEnv('oauth-return-origin'),
+        CONTROL_PLANE_PUBLIC_BASE_URL: 'https://control.example.test',
+        CONTROL_PLANE_FRONTEND_BASE_URL: 'https://frontend.example.test',
+        CONTROL_PLANE_GOOGLE_CLIENT_ID: 'google-client',
+        CONTROL_PLANE_GOOGLE_CLIENT_SECRET: 'google-secret',
+      },
+    });
+    apps.push(app);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/auth/oauth/google/start?returnTo=https%3A%2F%2Fevil.example.test%2Fcallback',
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      code: 'bad_request',
+      message: 'OAuth return URL is not allowed.',
+    });
+  });
+
+  it('completes google oauth callback, stores identity, and issues a product session', async () => {
+    const app = buildControlPlaneApp({
+      env: {
+        ...testEnv('oauth-google-callback'),
+        CONTROL_PLANE_PUBLIC_BASE_URL: 'https://control.example.test',
+        CONTROL_PLANE_FRONTEND_BASE_URL: 'https://frontend.example.test',
+        CONTROL_PLANE_GOOGLE_CLIENT_ID: 'google-client',
+        CONTROL_PLANE_GOOGLE_CLIENT_SECRET: 'google-secret',
+      },
+    });
+    apps.push(app);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === 'https://oauth2.googleapis.com/token') {
+          return Response.json({ access_token: 'google-access-token' });
+        }
+        if (url === 'https://openidconnect.googleapis.com/v1/userinfo') {
+          return Response.json({
+            sub: 'google-user-1',
+            email: 'Google.User@Example.com',
+            name: 'Google User',
+          });
+        }
+        return Response.json({ message: `Unhandled ${url}` }, { status: 404 });
+      }),
+    );
+
+    const start = await app.inject({
+      method: 'GET',
+      url: '/api/auth/oauth/google/start?returnTo=https%3A%2F%2Ffrontend.example.test%2Fcontrol-plane%2Flogin',
+    });
+    const startUrl = new URL(start.headers.location as string);
+    const callback = await app.inject({
+      method: 'GET',
+      url: `/api/auth/oauth/google/callback?code=google-code&state=${encodeURIComponent(startUrl.searchParams.get('state') ?? '')}`,
+    });
+
+    expect(callback.statusCode).toBe(302);
+    const redirectUrl = new URL(callback.headers.location as string);
+    expect(redirectUrl.origin + redirectUrl.pathname).toBe(
+      'https://frontend.example.test/control-plane/login',
+    );
+    expect(redirectUrl.searchParams.get('control_plane_base_url')).toBe('https://control.example.test');
+    const token = redirectUrl.searchParams.get('control_plane_token');
+    expect(token).toEqual(expect.any(String));
+
+    const me = await app.inject({
+      method: 'GET',
+      url: '/api/me',
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    });
+    expect(me.statusCode).toBe(200);
+    expect(me.json().user).toMatchObject({
+      authProvider: 'google',
+      authSubject: 'google-user-1',
+      email: 'google.user@example.com',
+      displayName: 'Google User',
+    });
+  });
+
+  it('completes github oauth callback using verified email fallback', async () => {
+    const app = buildControlPlaneApp({
+      env: {
+        ...testEnv('oauth-github-callback'),
+        CONTROL_PLANE_PUBLIC_BASE_URL: 'https://control.example.test',
+        CONTROL_PLANE_FRONTEND_BASE_URL: 'https://frontend.example.test',
+        CONTROL_PLANE_GITHUB_CLIENT_ID: 'github-client',
+        CONTROL_PLANE_GITHUB_CLIENT_SECRET: 'github-secret',
+      },
+    });
+    apps.push(app);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === 'https://github.com/login/oauth/access_token') {
+          return Response.json({ access_token: 'github-access-token' });
+        }
+        if (url === 'https://api.github.com/user') {
+          return Response.json({
+            id: 12345,
+            login: 'github-user',
+            name: 'GitHub User',
+            email: null,
+          });
+        }
+        if (url === 'https://api.github.com/user/emails') {
+          return Response.json([
+            {
+              email: 'github.user@example.com',
+              primary: true,
+              verified: true,
+            },
+          ]);
+        }
+        return Response.json({ message: `Unhandled ${url}` }, { status: 404 });
+      }),
+    );
+
+    const start = await app.inject({
+      method: 'GET',
+      url: '/api/auth/oauth/github/start',
+    });
+    const startUrl = new URL(start.headers.location as string);
+    const callback = await app.inject({
+      method: 'GET',
+      url: `/api/auth/oauth/github/callback?code=github-code&state=${encodeURIComponent(startUrl.searchParams.get('state') ?? '')}`,
+    });
+
+    expect(callback.statusCode).toBe(302);
+    const redirectUrl = new URL(callback.headers.location as string);
+    const token = redirectUrl.searchParams.get('control_plane_token');
+    expect(token).toEqual(expect.any(String));
+
+    const me = await app.inject({
+      method: 'GET',
+      url: '/api/me',
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    });
+    expect(me.statusCode).toBe(200);
+    expect(me.json().user).toMatchObject({
+      authProvider: 'github',
+      authSubject: '12345',
+      email: 'github.user@example.com',
+      displayName: 'GitHub User',
     });
   });
 

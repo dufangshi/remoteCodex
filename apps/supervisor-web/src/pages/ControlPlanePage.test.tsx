@@ -264,15 +264,20 @@ describe('ControlPlanePage', () => {
     MockWorkerWebSocket.instances = [];
     vi.stubGlobal('WebSocket', MockWorkerWebSocket);
     window.localStorage.clear();
+    window.localStorage.setItem(
+      'remote-codex-control-plane-auth',
+      JSON.stringify({
+        baseUrl,
+        token: 'dev:dev-user',
+        email: 'dev@example.com',
+        displayName: 'Developer',
+      }),
+    );
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
-
-        if (path === '/api/me/bootstrap' && init?.method === 'POST') {
-          return jsonResponse({ user, sandbox: stoppedSandbox, gatewayKey: null });
-        }
 
         if (path === '/api/me' && !init?.method) {
           return jsonResponse({
@@ -372,10 +377,8 @@ describe('ControlPlanePage', () => {
   it('bootstraps a user and exercises project, workspace, session, sandbox, and route-token flows', async () => {
     render(<ControlPlanePage />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
-
     await waitFor(() => {
-      expect(screen.getByText('dev@example.com')).toBeInTheDocument();
+      expect(screen.getAllByText('dev@example.com').length).toBeGreaterThan(0);
     });
     expect(screen.getByText('remote-codex-worker:dev')).toBeInTheDocument();
     expect(screen.getByText('No projects yet.')).toBeInTheDocument();
@@ -385,9 +388,8 @@ describe('ControlPlanePage', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Computational chemistry/i })).toBeInTheDocument();
     });
-    expect(screen.getByText('Project detail')).toBeInTheDocument();
     expect(screen.getAllByText('computational-chemistry').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('Workspaces:')).toBeInTheDocument();
+    expect(screen.getByText('Selected project')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Create workspace' }));
 
@@ -470,7 +472,7 @@ describe('ControlPlanePage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
 
     await waitFor(() => {
-      expect(screen.getByText('stopped')).toBeInTheDocument();
+      expect(screen.getAllByText('stopped').length).toBeGreaterThan(0);
     });
     expect(MockWorkerWebSocket.instances[0]?.readyState).toBe(MockWorkerWebSocket.CLOSED);
 
@@ -502,10 +504,6 @@ describe('ControlPlanePage', () => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
-
-      if (path === '/api/me/bootstrap' && init?.method === 'POST') {
-        return jsonResponse({ user, sandbox: runningSandbox, gatewayKey: null });
-      }
 
       if (path === '/api/me' && !init?.method) {
         return jsonResponse({ user, sandbox: runningSandbox, usage });
@@ -543,8 +541,6 @@ describe('ControlPlanePage', () => {
 
     render(<ControlPlanePage />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
-
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Plan calculation/i })).toBeInTheDocument();
     });
@@ -562,10 +558,6 @@ describe('ControlPlanePage', () => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
-
-      if (path === '/api/me/bootstrap' && init?.method === 'POST') {
-        return jsonResponse({ user, sandbox: runningSandbox, gatewayKey: null });
-      }
 
       if (path === '/api/me' && !init?.method) {
         return jsonResponse({ user, sandbox: runningSandbox, usage });
@@ -606,7 +598,6 @@ describe('ControlPlanePage', () => {
 
     render(<ControlPlanePage />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Plan calculation/i })).toBeInTheDocument();
     });
@@ -627,10 +618,6 @@ describe('ControlPlanePage', () => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
-
-      if (path === '/api/me/bootstrap' && init?.method === 'POST') {
-        return jsonResponse({ user, sandbox: runningSandbox, gatewayKey: null });
-      }
 
       if (path === '/api/me' && !init?.method) {
         return jsonResponse({ user, sandbox: runningSandbox, usage });
@@ -678,8 +665,6 @@ describe('ControlPlanePage', () => {
 
     render(<ControlPlanePage />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
-
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Plan calculation/i })).toBeInTheDocument();
     });
@@ -717,10 +702,8 @@ describe('ControlPlanePage', () => {
   it('stores only local dev auth settings and keeps route tokens in memory', async () => {
     render(<ControlPlanePage />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
-
     await waitFor(() => {
-      expect(screen.getByText('dev@example.com')).toBeInTheDocument();
+      expect(screen.getAllByText('dev@example.com').length).toBeGreaterThan(0);
     });
 
     const storedAuth = JSON.parse(
@@ -728,7 +711,7 @@ describe('ControlPlanePage', () => {
     );
     expect(storedAuth).toEqual({
       baseUrl,
-      subject: 'dev-user',
+      token: 'dev:dev-user',
       email: 'dev@example.com',
       displayName: 'Developer',
     });
@@ -738,10 +721,6 @@ describe('ControlPlanePage', () => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
-
-      if (path === '/api/me/bootstrap' && init?.method === 'POST') {
-        return jsonResponse({ user, sandbox: stoppedSandbox, gatewayKey: null });
-      }
 
       if (path === '/api/me' && !init?.method) {
         return jsonResponse({ user, sandbox: stoppedSandbox, usage: usageWithSpend });
@@ -768,28 +747,23 @@ describe('ControlPlanePage', () => {
 
     render(<ControlPlanePage />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
-
     await waitFor(() => {
-      expect(screen.getByText('dev@example.com')).toBeInTheDocument();
+      expect(screen.getAllByText('dev@example.com').length).toBeGreaterThan(0);
     });
-    expect(screen.getByText('Quota:')).toBeInTheDocument();
+    expect(screen.getByText('Quota')).toBeInTheDocument();
     expect(screen.getByText('default')).toBeInTheDocument();
-    expect(screen.getByText('LLM requests:')).toBeInTheDocument();
-    expect(screen.getByText('3')).toBeInTheDocument();
-    expect(screen.getByText('LLM tokens:')).toBeInTheDocument();
-    expect(screen.getAllByText('1500 total').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('LLM cost:')).toBeInTheDocument();
+    expect(screen.getByText('3 requests')).toBeInTheDocument();
+    expect(screen.getByText('Tokens')).toBeInTheDocument();
+    expect(screen.getAllByText('1500').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('LLM cost')).toBeInTheDocument();
     expect(screen.getAllByText('$1.25').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('gpt-5.1-codex')).toBeInTheDocument();
-    expect(screen.getByText('sub2api')).toBeInTheDocument();
+    expect(screen.getByText(/sub2api/)).toBeInTheDocument();
     expect(screen.getByText('2026-05-25T00:02:00.000Z')).toBeInTheDocument();
   });
 
   it('shows an empty LLM usage detail state', async () => {
     render(<ControlPlanePage />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
 
     await waitFor(() => {
       expect(screen.getByText('No LLM usage events yet.')).toBeInTheDocument();
@@ -801,10 +775,6 @@ describe('ControlPlanePage', () => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
-
-      if (path === '/api/me/bootstrap' && init?.method === 'POST') {
-        return jsonResponse({ user, sandbox: stoppedSandbox, gatewayKey: null });
-      }
 
       if (path === '/api/me' && !init?.method) {
         return jsonResponse({ user, sandbox: stoppedSandbox, usage });
@@ -843,9 +813,8 @@ describe('ControlPlanePage', () => {
 
     render(<ControlPlanePage />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
     await waitFor(() => {
-      expect(screen.getByText('dev@example.com')).toBeInTheDocument();
+      expect(screen.getAllByText('dev@example.com').length).toBeGreaterThan(0);
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Load users' }));
@@ -885,10 +854,6 @@ describe('ControlPlanePage', () => {
       const url = String(input);
       const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
 
-      if (path === '/api/me/bootstrap' && init?.method === 'POST') {
-        return jsonResponse({ user, sandbox: stoppedSandbox, gatewayKey: null });
-      }
-
       if (path === '/api/me' && !init?.method) {
         return jsonResponse({ user, sandbox: stoppedSandbox, usage });
       }
@@ -921,9 +886,8 @@ describe('ControlPlanePage', () => {
 
     render(<ControlPlanePage />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
     await waitFor(() => {
-      expect(screen.getByText('dev@example.com')).toBeInTheDocument();
+      expect(screen.getAllByText('dev@example.com').length).toBeGreaterThan(0);
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Load users' }));
@@ -938,10 +902,6 @@ describe('ControlPlanePage', () => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
-
-      if (path === '/api/me/bootstrap' && init?.method === 'POST') {
-        return jsonResponse({ user, sandbox: stoppedSandbox, gatewayKey: null });
-      }
 
       if (path === '/api/me' && !init?.method) {
         return jsonResponse({ user, sandbox: stoppedSandbox, usage });
@@ -975,10 +935,8 @@ describe('ControlPlanePage', () => {
 
     render(<ControlPlanePage />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
-
     await waitFor(() => {
-      expect(screen.getByText('dev@example.com')).toBeInTheDocument();
+      expect(screen.getAllByText('dev@example.com').length).toBeGreaterThan(0);
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Create project' }));
@@ -993,7 +951,7 @@ describe('ControlPlanePage', () => {
       const url = String(input);
       const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
 
-      if (path === '/api/me/bootstrap' && init?.method === 'POST') {
+      if (path === '/api/me' && !init?.method) {
         return jsonResponse({
           code: 'gateway_unavailable',
           message: 'gateway unavailable',
@@ -1013,8 +971,6 @@ describe('ControlPlanePage', () => {
 
     render(<ControlPlanePage />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
-
     await waitFor(() => {
       expect(screen.getByText('LLM gateway unavailable: gateway unavailable')).toBeInTheDocument();
     });
@@ -1025,7 +981,7 @@ describe('ControlPlanePage', () => {
       const url = String(input);
       const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
 
-      if (path === '/api/me/bootstrap' && init?.method === 'POST') {
+      if (path === '/api/me' && !init?.method) {
         return jsonResponse({
           code: 'unauthorized',
           message: 'Token expired.',
@@ -1045,8 +1001,6 @@ describe('ControlPlanePage', () => {
 
     render(<ControlPlanePage />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
-
     await waitFor(() => {
       expect(screen.getByText('Session expired: Token expired.')).toBeInTheDocument();
     });
@@ -1057,7 +1011,7 @@ describe('ControlPlanePage', () => {
       const url = String(input);
       const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
 
-      if (path === '/api/me/bootstrap' && init?.method === 'POST') {
+      if (path === '/api/me' && !init?.method) {
         return jsonResponse({
           code: 'account_inactive',
           message: 'Account is not active.',
@@ -1077,8 +1031,6 @@ describe('ControlPlanePage', () => {
 
     render(<ControlPlanePage />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
-
     await waitFor(() => {
       expect(screen.getByText('Account disabled: Account is not active.')).toBeInTheDocument();
     });
@@ -1088,10 +1040,6 @@ describe('ControlPlanePage', () => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
-
-      if (path === '/api/me/bootstrap' && init?.method === 'POST') {
-        return jsonResponse({ user, sandbox: runningSandbox, gatewayKey: null });
-      }
 
       if (path === '/api/me' && !init?.method) {
         return jsonResponse({
@@ -1142,8 +1090,6 @@ describe('ControlPlanePage', () => {
 
     render(<ControlPlanePage />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
-
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Plan calculation/i })).toBeInTheDocument();
     });
@@ -1163,10 +1109,6 @@ describe('ControlPlanePage', () => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
-
-      if (path === '/api/me/bootstrap' && init?.method === 'POST') {
-        return jsonResponse({ user, sandbox: currentSandbox, gatewayKey: null });
-      }
 
       if (path === '/api/me' && !init?.method) {
         return jsonResponse({ user, sandbox: currentSandbox, usage });
@@ -1211,8 +1153,6 @@ describe('ControlPlanePage', () => {
 
     render(<ControlPlanePage />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
-
     await waitFor(() => {
       expect(screen.getByText('Startup progress')).toBeInTheDocument();
     });
@@ -1239,10 +1179,6 @@ describe('ControlPlanePage', () => {
       const url = String(input);
       const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
 
-      if (path === '/api/me/bootstrap' && init?.method === 'POST') {
-        return jsonResponse({ user, sandbox: idleWarningSandbox, gatewayKey: null });
-      }
-
       if (path === '/api/me' && !init?.method) {
         return jsonResponse({ user, sandbox: idleWarningSandbox, usage });
       }
@@ -1264,8 +1200,6 @@ describe('ControlPlanePage', () => {
 
     render(<ControlPlanePage />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
-
     await waitFor(() => {
       expect(
         screen.getByText('Sandbox will stop after idle timeout at 2026-05-25T01:00:00.000Z.'),
@@ -1277,10 +1211,6 @@ describe('ControlPlanePage', () => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
-
-      if (path === '/api/me/bootstrap' && init?.method === 'POST') {
-        return jsonResponse({ user, sandbox: runningSandbox, gatewayKey: null });
-      }
 
       if (path === '/api/me' && !init?.method) {
         return jsonResponse({ user, sandbox: runningSandbox, usage });
@@ -1317,9 +1247,6 @@ describe('ControlPlanePage', () => {
     });
 
     render(<ControlPlanePage />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
-
     expect(await screen.findByText('Loading projects...')).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByText('Loading LLM usage...')).toBeInTheDocument();
