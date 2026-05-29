@@ -2144,10 +2144,14 @@ export function buildControlPlaneApp(
       scopes: input.scopes,
     });
 
+    const routerBaseUrl = config.routerBaseUrl || sandbox.routerBaseUrl;
+    if (!routerBaseUrl) {
+      throw new HttpError(409, 'sandbox_route_unavailable', 'Sandbox router endpoint is unavailable.');
+    }
     return {
       sandboxId: sandbox.id,
-      routerBaseUrl: sandbox.routerBaseUrl ?? config.routerBaseUrl,
-      wsBaseUrl: (sandbox.routerBaseUrl ?? config.routerBaseUrl).replace(/^http/, 'ws'),
+      routerBaseUrl,
+      wsBaseUrl: routerBaseUrl.replace(/^http/, 'ws'),
       token,
       expiresAt: new Date(expiresAtSeconds * 1000).toISOString(),
     };
