@@ -100,6 +100,14 @@ GitHub Actions work completed:
 - Created AWS OIDC provider for GitHub Actions.
 - Created IAM Role `remote-codex-github-actions-staging` with ECR push
   permissions.
+- Added EKS deploy access for the same GitHub Actions role:
+  - IAM inline policy `remote-codex-gh-eks-router-deploy-staging` allows
+    `eks:DescribeCluster` on `inact-harness-agents`
+  - EKS access entry maps the role to Kubernetes group
+    `remote-codex-github-actions-staging`
+  - namespace RBAC role `remote-codex-router-deployer` allows updating
+    `deployment/remote-codex-sandbox-router` and reading rollout state in
+    `remote-codex-staging`
 - Trust policy covers:
   - `dufangshi/remoteCodex`
   - `EvoEvolver/ElAgenteHarness`
@@ -111,6 +119,8 @@ GitHub Actions work completed:
   - builds worker and router images
   - runs smoke checks
   - pushes images to ECR
+  - updates the EKS sandbox-router Deployment image
+  - waits for router rollout completion
 
 Latest known successful image build:
 
@@ -121,9 +131,10 @@ result: worker and router images pushed to ECR
 
 Still missing:
 
-- GitHub Actions does not yet update the EKS router Deployment image after
-  pushing a new router image.
 - Railway service deployment is not yet wired to this branch.
+- Worker image publication is automatic, but control-plane/Railway still needs
+  to consume the desired worker image tag before newly started worker Pods will
+  use it.
 
 ## Current Deployment Shape
 
@@ -505,16 +516,18 @@ Recommended cost follow-up:
 1. Configure Railway GitHub integration to watch
    `sandbox-worker-control-plane`, or manually run `railway redeploy`, so the
    merged `ui-optimization` code is online.
-2. Add kubeconfig/EKS access for GitHub Actions so `staging-images.yml` can
-   update the router Deployment image tag after pushing to ECR.
-3. Deploy and verify the already-implemented workspace/session path from the
+2. Run and verify `staging-images.yml` deploys the EKS sandbox-router image
+   after pushing to ECR.
+3. Wire the published worker image tag into the control-plane/Railway runtime
+   config used for newly started worker Pods.
+4. Deploy and verify the already-implemented workspace/session path from the
    current branch:
    - control-plane materializes worker workspaces through the sandbox-router
    - control-plane session creation starts a real worker Codex thread
    - prompts are forwarded to the bound worker session
-4. Tighten `codex_worker_prompt_e2e` to wait for final LLM completion and assert
+5. Tighten `codex_worker_prompt_e2e` to wait for final LLM completion and assert
    the expected response text, not just the presence of a returned turn.
-5. Confirm sub2api has a valid upstream key, then rerun the stricter e2e.
-6. Verify the production HTTPS frontend can open the routed worker WebSocket via
+6. Confirm sub2api has a valid upstream key, then rerun the stricter e2e.
+7. Verify the production HTTPS frontend can open the routed worker WebSocket via
    `wss://sandbox-router.lnz.app` after Railway deploys this branch.
-7. Review EKS Auto Mode capacity before leaving staging running long-term.
+8. Review EKS Auto Mode capacity before leaving staging running long-term.
