@@ -7,6 +7,23 @@ on:
         description: Immutable image tag to publish. Defaults to the commit SHA.
         required: false
         type: string
+  push:
+    branches:
+      - sandbox-worker-control-plane
+    paths:
+      - Dockerfile.worker
+      - Dockerfile.sandbox-router
+      - Dockerfile.control-plane
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - tsconfig.base.json
+      - apps/supervisor-api/**
+      - apps/sandbox-router/**
+      - apps/control-plane-api/**
+      - packages/**
+      - config/**
+      - .github/workflows/staging-images.yml
 
 permissions:
   contents: read
