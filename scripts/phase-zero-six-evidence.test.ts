@@ -184,7 +184,13 @@ async function withFakeStagingServers(
       return;
     }
     if (request.method === 'POST' && url.pathname === '/api/workspaces/workspace-smoke/sessions') {
-      json({ session: { id: 'session-smoke' } });
+      json({
+        session: {
+          id: 'session-smoke',
+          workerSessionId: 'worker-session-smoke',
+          status: 'active',
+        },
+      });
       return;
     }
     if (request.method === 'POST' && url.pathname === '/api/sandboxes/sandbox-smoke/route-token') {
@@ -212,6 +218,31 @@ async function withFakeStagingServers(
         requestDiagnostics: {
           authorizationHeaderPresent: false,
           workerTokenHeaderPresent: true,
+        },
+      });
+      return;
+    }
+    if (request.method === 'GET' && url.pathname === '/api/sandboxes/sandbox-smoke/readyz') {
+      json({
+        status: 'ready',
+        runtimes: [
+          {
+            provider: 'codex',
+            status: 'ready',
+          },
+        ],
+      });
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/api/sessions/session-smoke/prompt') {
+      json({
+        turn: {
+          id: 'turn-smoke',
+          status: 'completed',
+        },
+        session: {
+          id: 'session-smoke',
+          status: 'active',
         },
       });
       return;
@@ -288,7 +319,13 @@ async function withFailingRouteTokenServer(
       return;
     }
     if (request.method === 'POST' && url.pathname === '/api/workspaces/workspace-smoke/sessions') {
-      json({ session: { id: 'session-smoke' } });
+      json({
+        session: {
+          id: 'session-smoke',
+          workerSessionId: 'worker-session-smoke',
+          status: 'active',
+        },
+      });
       return;
     }
     if (request.method === 'POST' && url.pathname === '/api/sandboxes/sandbox-smoke/route-token') {
@@ -1975,13 +2012,22 @@ describe('phase zero-six evidence tooling', () => {
   it('redacts provider command output in provider gateway smoke evidence', async () => {
     const dir = await tempDir();
     const configPath = path.join(dir, 'config.toml');
+    const codexHome = path.join(dir, 'codex-home');
+    const authPath = path.join(codexHome, 'auth.json');
     const commandPath = path.join(dir, 'provider-command.mjs');
+    await mkdir(codexHome, { recursive: true });
     await writeFile(
       configPath,
       [
+        'model_provider = "sub2api"',
         'base_url = "https://gateway.example.test"',
+        'requires_openai_auth = true',
         'token_env = "REMOTE_CODEX_LLM_GATEWAY_TOKEN"',
       ].join('\n'),
+    );
+    await writeFile(
+      authPath,
+      JSON.stringify({ OPENAI_API_KEY: 'redacted-test-token' }),
     );
     await writeFile(
       commandPath,
@@ -1999,6 +2045,7 @@ describe('phase zero-six evidence tooling', () => {
         PROVIDER_GATEWAY_SMOKE_COMMAND_JSON: JSON.stringify(['node', commandPath]),
         PROVIDER_GATEWAY_SMOKE_USAGE_RECORDED: '1',
         REMOTE_CODEX_LLM_GATEWAY_BASE_URL: 'https://gateway.example.test',
+        CODEX_HOME: codexHome,
       },
     );
     const parsed = JSON.parse(result.stdout);
