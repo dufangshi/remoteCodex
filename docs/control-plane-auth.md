@@ -1,77 +1,144 @@
 # Control Plane Auth
 
-Remote Codex uses a pluggable auth verifier in the control plane.
+Remote Codex control-plane auth supports product accounts while keeping sandbox
+and worker authorization separate. Browser product sessions are accepted only by
+the control-plane API. Worker access still uses route tokens and router-injected
+worker tokens.
 
-## Phase-One Choice
+## Supported Sign-In Methods
 
-Phase one keeps the product auth provider behind an interface instead of
-binding the business logic directly to a vendor SDK. The implementation supports
-two modes:
+The current implementation supports three product login methods:
 
-- `dev`: local development identities.
-- `jwt`: production-style signed bearer tokens.
+- Google OAuth.
+- GitHub OAuth.
+- Email and password.
 
-The `jwt` mode is intentionally generic. It validates a signed bearer token and
-maps its `sub` claim to a product user identity. A later Clerk, Auth0, Cognito,
-or custom auth provider can replace the verifier without changing the
-repository or route ownership checks.
+Email/password registration currently asks only for an email address and a
+password. There is no email verification yet because no email provider is wired
+in. A later email provider should add verification, password reset, and account
+recovery without changing worker authorization.
 
-The phase-one production provider choice is a JWT-compatible product auth
-issuer operated outside sandbox workers. In the first deployment this can be a
-managed auth product, for example Clerk, Auth0, Cognito, or a custom Railway API
-that issues signed product-session JWTs. Remote Codex should only depend on the
-verified JWT claims, not on a provider SDK in route handlers.
+## Product Session Tokens
 
-For the current repository implementation, production mode means:
+Successful OAuth or email/password login returns a short product session:
 
-- The frontend obtains a product-session JWT from the chosen auth service.
-- The browser sends that JWT only to the control-plane API.
-- The control plane validates signature, issuer, audience, time claims, and
-  subject.
-- The control plane maps the verified subject into `control_users`.
-- Worker traffic uses route tokens and worker tokens instead of the product JWT.
-
-## Environment
-
-```text
-CONTROL_PLANE_AUTH_MODE=dev | jwt
-CONTROL_PLANE_AUTH_JWT_SECRET=<secret-for-jwt-mode>
-CONTROL_PLANE_AUTH_JWT_PROVIDER=jwt
-CONTROL_PLANE_AUTH_JWT_ISSUER=<expected-iss>
-CONTROL_PLANE_AUTH_JWT_AUDIENCE=<expected-aud>
-CONTROL_PLANE_AUTH_JWT_CLOCK_SKEW_SECONDS=60
+```json
+{
+  "session": {
+    "token": "<signed-control-plane-session>",
+    "expiresAt": "2026-06-01T00:00:00.000Z"
+  }
+}
 ```
 
-`CONTROL_PLANE_AUTH_MODE=dev` is the default for local development and tests.
+The token is an HMAC-signed bearer token whose subject is the durable
+`control_users.id`. The control-plane API maps this token to the product user
+through the `control-plane:<userId>` identity path. The frontend stores this
+session in local storage for the control-plane shell.
 
-## Subject Mapping
-
-The product user identity is keyed by:
-
-```text
-authProvider + authSubject
-```
-
-For JWT mode:
-
-- `authProvider` is `CONTROL_PLANE_AUTH_JWT_PROVIDER`.
-- `authSubject` is the JWT `sub` claim.
-- `email` and `displayName` still come from the bootstrap/register payload for
-  now, because provider-specific claim mapping is intentionally not coupled to
-  the control-plane route code.
-
-Recommended phase-one values:
+Configure the signing secret and TTL with:
 
 ```text
-CONTROL_PLANE_AUTH_MODE=jwt
-CONTROL_PLANE_AUTH_JWT_PROVIDER=clerk
-CONTROL_PLANE_AUTH_JWT_ISSUER=<clerk-or-auth-service-issuer>
-CONTROL_PLANE_AUTH_JWT_AUDIENCE=remote-codex-control-plane
+CONTROL_PLANE_PRODUCT_SESSION_SECRET=<secret-at-least-16-chars>
+CONTROL_PLANE_PRODUCT_SESSION_TTL_SECONDS=1209600
 ```
 
-## Local Development Auth
+If `CONTROL_PLANE_PRODUCT_SESSION_SECRET` is omitted, the control plane falls
+back to `CONTROL_PLANE_AUTH_JWT_SECRET` and then `CONTROL_PLANE_JWT_SECRET`.
+Production deployments should set an explicit product-session secret.
 
-The dev verifier accepts either:
+## Database Records
+
+Product identity is stored in SQLite:
+
+- `control_users` is the durable account row.
+- `control_auth_identities` links OAuth/password identities to a user.
+- `control_password_credentials` stores normalized email addresses and password
+  hashes.
+
+Passwords are stored as scrypt hashes. Plaintext passwords are never persisted.
+
+## OAuth Configuration
+
+Google and GitHub OAuth use the control-plane API as the callback receiver. Set
+the public API base URL and frontend base URL:
+
+```text
+CONTROL_PLANE_PUBLIC_BASE_URL=https://control.example.com
+CONTROL_PLANE_FRONTEND_BASE_URL=https://app.example.com
+```
+
+Google:
+
+```text
+CONTROL_PLANE_GOOGLE_CLIENT_ID=<google-oauth-client-id>
+CONTROL_PLANE_GOOGLE_CLIENT_SECRET=<google-oauth-client-secret>
+```
+
+The Google OAuth callback URL is:
+
+```text
+https://control.example.com/api/auth/oauth/google/callback
+```
+
+GitHub:
+
+```text
+CONTROL_PLANE_GITHUB_CLIENT_ID=<github-oauth-client-id>
+CONTROL_PLANE_GITHUB_CLIENT_SECRET=<github-oauth-client-secret>
+```
+
+The GitHub OAuth callback URL is:
+
+```text
+https://control.example.com/api/auth/oauth/github/callback
+```
+
+The OAuth start endpoints are:
+
+```text
+GET /api/auth/oauth/google/start
+GET /api/auth/oauth/github/start
+```
+
+The optional `returnTo` query parameter must be on the configured frontend
+origin. This prevents the control plane from redirecting a freshly issued
+product session token to an arbitrary domain.
+
+## Email And Password Endpoints
+
+```text
+POST /api/auth/password/register
+POST /api/auth/password/login
+```
+
+Register payload:
+
+```json
+{
+  "email": "user@example.com",
+  "password": "correct horse battery staple",
+  "displayName": "User"
+}
+```
+
+`displayName` is optional. The current registration flow intentionally does not
+send a verification email.
+
+Login payload:
+
+```json
+{
+  "email": "user@example.com",
+  "password": "correct horse battery staple"
+}
+```
+
+Both successful endpoints return `{ user, sandbox, session }`.
+
+## Legacy Dev And JWT Modes
+
+Local development auth remains supported:
 
 ```text
 Authorization: Bearer dev:<subject>
@@ -84,22 +151,20 @@ X-Auth-Provider: <provider>
 X-Auth-Subject: <subject>
 ```
 
-This is only for development and tests. Production deployments should use
-`CONTROL_PLANE_AUTH_MODE=jwt` or a provider-specific verifier.
+The generic JWT verifier also remains for staging-style integration with a
+separate auth service:
 
-The generic `jwt` verifier checks:
+```text
+CONTROL_PLANE_AUTH_MODE=dev | jwt
+CONTROL_PLANE_AUTH_JWT_SECRET=<secret-for-jwt-mode>
+CONTROL_PLANE_AUTH_JWT_PROVIDER=jwt
+CONTROL_PLANE_AUTH_JWT_ISSUER=<expected-iss>
+CONTROL_PLANE_AUTH_JWT_AUDIENCE=<expected-aud>
+CONTROL_PLANE_AUTH_JWT_CLOCK_SKEW_SECONDS=60
+```
 
-- HMAC signature.
-- Expiry with configured clock-skew tolerance.
-- `nbf` and future `iat` with configured clock-skew tolerance.
-- `iss` when `CONTROL_PLANE_AUTH_JWT_ISSUER` is set.
-- `aud` when `CONTROL_PLANE_AUTH_JWT_AUDIENCE` is set.
-
-## Product User Records
-
-The browser product session is used only with the control plane. It must not be
-forwarded to sandbox workers. Worker traffic uses separate short-lived route
-tokens and router-injected worker tokens.
+JWT mode validates signature, time claims, optional issuer, optional audience,
+and maps the `sub` claim into `control_users`.
 
 ## Local Production-Style Smoke
 
@@ -111,13 +176,12 @@ pnpm smoke:production-auth
 
 The smoke starts a temporary control-plane API in `CONTROL_PLANE_AUTH_MODE=jwt`
 with issuer and audience checks enabled. It verifies that a valid
-JWT-compatible product-session token is accepted, while expired,
-wrong-issuer, and wrong-audience tokens are rejected with `401`.
+JWT-compatible product-session token is accepted, while expired, wrong-issuer,
+and wrong-audience tokens are rejected with `401`.
 
-This is the Remote Codex side production-style auth smoke for phase one. It
-does not prove a live Clerk, Auth0, Cognito, or custom auth deployment is
-issuing tokens correctly; that remains a staging deployment check when a vendor
-or auth service is selected for the environment.
+OAuth provider callbacks are covered by control-plane API tests with mocked
+provider token and profile responses. Live Google/GitHub OAuth still needs a
+deployed environment with real OAuth client credentials.
 
 ## Error Shape
 

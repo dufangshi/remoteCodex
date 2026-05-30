@@ -4,9 +4,11 @@ import { and, desc, eq, inArray, like, sql } from 'drizzle-orm';
 
 import { DatabaseClient } from '../../../packages/db/src/index';
 import {
+  controlAuthIdentities,
   controlAuditLogs,
   controlGatewayKeys,
   controlGatewayUsers,
+  controlPasswordCredentials,
   controlProjects,
   controlSandboxes,
   controlSessions,
@@ -21,6 +23,10 @@ export interface RegisterUserInput {
   authSubject: string;
   email: string;
   displayName?: string | null | undefined;
+}
+
+export interface AuthIdentityInput extends RegisterUserInput {
+  userId: string;
 }
 
 export interface UsageEventInput {
@@ -178,6 +184,126 @@ export class ControlPlaneRepository {
         ),
       )
       .get();
+  }
+
+  getUserByEmail(email: string) {
+    return this.db
+      .select()
+      .from(controlUsers)
+      .where(eq(controlUsers.email, normalizeEmail(email)))
+      .get();
+  }
+
+  getUserByAuthIdentity(authProvider: string, authSubject: string) {
+    const identity = this.db
+      .select()
+      .from(controlAuthIdentities)
+      .where(
+        and(
+          eq(controlAuthIdentities.authProvider, authProvider),
+          eq(controlAuthIdentities.authSubject, authSubject),
+        ),
+      )
+      .get();
+    return identity ? this.getUserById(identity.userId) : null;
+  }
+
+  upsertAuthIdentity(input: AuthIdentityInput) {
+    const now = new Date().toISOString();
+    const existing = this.db
+      .select()
+      .from(controlAuthIdentities)
+      .where(
+        and(
+          eq(controlAuthIdentities.authProvider, input.authProvider),
+          eq(controlAuthIdentities.authSubject, input.authSubject),
+        ),
+      )
+      .get();
+    if (existing) {
+      this.db
+        .update(controlAuthIdentities)
+        .set({
+          userId: input.userId,
+          email: normalizeEmail(input.email),
+          displayName: input.displayName ?? existing.displayName,
+          updatedAt: now,
+        })
+        .where(eq(controlAuthIdentities.id, existing.id))
+        .run();
+      return this.db
+        .select()
+        .from(controlAuthIdentities)
+        .where(eq(controlAuthIdentities.id, existing.id))
+        .get()!;
+    }
+    const record = {
+      id: randomUUID(),
+      userId: input.userId,
+      authProvider: input.authProvider,
+      authSubject: input.authSubject,
+      email: normalizeEmail(input.email),
+      displayName: input.displayName ?? null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.db.insert(controlAuthIdentities).values(record).run();
+    this.audit(input.userId, 'auth_identity.linked', 'user', input.userId, {
+      authProvider: input.authProvider,
+    });
+    return record;
+  }
+
+  getPasswordCredentialByEmail(email: string) {
+    return this.db
+      .select()
+      .from(controlPasswordCredentials)
+      .where(eq(controlPasswordCredentials.email, normalizeEmail(email)))
+      .get();
+  }
+
+  upsertPasswordCredential(input: {
+    userId: string;
+    email: string;
+    passwordHash: string;
+  }) {
+    const now = new Date().toISOString();
+    const email = normalizeEmail(input.email);
+    const existing = this.getPasswordCredentialByEmail(email);
+    if (existing) {
+      this.db
+        .update(controlPasswordCredentials)
+        .set({
+          userId: input.userId,
+          passwordHash: input.passwordHash,
+          updatedAt: now,
+        })
+        .where(eq(controlPasswordCredentials.id, existing.id))
+        .run();
+      return this.getPasswordCredentialByEmail(email)!;
+    }
+    const record = {
+      id: randomUUID(),
+      userId: input.userId,
+      email,
+      passwordHash: input.passwordHash,
+      createdAt: now,
+      updatedAt: now,
+      lastUsedAt: null,
+    };
+    this.db.insert(controlPasswordCredentials).values(record).run();
+    this.audit(input.userId, 'password_credential.created', 'user', input.userId, {});
+    return record;
+  }
+
+  markPasswordCredentialUsed(id: string) {
+    this.db
+      .update(controlPasswordCredentials)
+      .set({
+        lastUsedAt: new Date().toISOString(),
+      })
+      .where(eq(controlPasswordCredentials.id, id))
+      .run();
   }
 
   updateUser(id: string, input: {
@@ -1008,4 +1134,8 @@ function paginated<T>(items: T[], pagination: PaginationInput | undefined, total
 
 function escapeLike(value: string) {
   return value.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_');
+}
+
+function normalizeEmail(value: string) {
+  return value.trim().toLowerCase();
 }

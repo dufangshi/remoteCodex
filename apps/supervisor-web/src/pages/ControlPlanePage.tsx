@@ -2,7 +2,6 @@ import { FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 
 
 import type { AgentBackendIdDto } from '../../../../packages/shared/src/index';
 import {
-  bootstrapControlPlaneUser,
   closeControlPlaneSession,
   createControlPlaneProject,
   createControlPlaneRouteToken,
@@ -35,19 +34,14 @@ import {
   type ControlPlaneUser,
   type ControlPlaneWorkspace,
 } from '../lib/api';
+import {
+  clearStoredControlPlaneAuth,
+  readStoredControlPlaneAuth,
+  writeStoredControlPlaneAuth,
+} from './controlPlaneAuthStorage';
 
-export const CONTROL_PLANE_AUTH_STORAGE_KEY = 'remote-codex-control-plane-auth';
-const DEFAULT_CONTROL_PLANE_BASE_URL =
-  import.meta.env.VITE_CONTROL_PLANE_BASE_URL || 'http://127.0.0.1:8790';
 const ROUTE_TOKEN_REFRESH_SKEW_MS = 60_000;
 const ROUTE_TOKEN_MIN_REFRESH_MS = 5_000;
-
-interface StoredControlPlaneAuth {
-  baseUrl: string;
-  subject: string;
-  email: string;
-  displayName: string;
-}
 
 function slugFromName(value: string) {
   return value
@@ -56,39 +50,6 @@ function slugFromName(value: string) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 48);
-}
-
-function readStoredAuth(): StoredControlPlaneAuth {
-  if (typeof window === 'undefined') {
-    return {
-      baseUrl: DEFAULT_CONTROL_PLANE_BASE_URL,
-      subject: 'dev-user',
-      email: 'dev@example.com',
-      displayName: 'Developer',
-    };
-  }
-
-  const raw = window.localStorage.getItem(CONTROL_PLANE_AUTH_STORAGE_KEY);
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw) as Partial<StoredControlPlaneAuth>;
-      return {
-        baseUrl: parsed.baseUrl || DEFAULT_CONTROL_PLANE_BASE_URL,
-        subject: parsed.subject || 'dev-user',
-        email: parsed.email || 'dev@example.com',
-        displayName: parsed.displayName || 'Developer',
-      };
-    } catch {
-      // Fall through to defaults.
-    }
-  }
-
-  return {
-    baseUrl: DEFAULT_CONTROL_PLANE_BASE_URL,
-    subject: 'dev-user',
-    email: 'dev@example.com',
-    displayName: 'Developer',
-  };
 }
 
 function statusTone(state: string) {
@@ -146,26 +107,6 @@ function sandboxBanner(sandbox: ControlPlaneSandbox | null) {
   return null;
 }
 
-function Section({
-  title,
-  children,
-  action,
-}: {
-  title: string;
-  children: ReactNode;
-  action?: ReactNode;
-}) {
-  return (
-    <section className="border-t border-[var(--theme-border)] py-5">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold text-[var(--theme-fg)]">{title}</h2>
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}
-
 function Field({
   label,
   value,
@@ -216,8 +157,10 @@ function ActionButton({
 const USER_STATUSES = ['active', 'suspended', 'deleted'] as const;
 
 export function ControlPlanePage() {
-  const [storedAuth, setStoredAuth] = useState<StoredControlPlaneAuth>(() => readStoredAuth());
-  const [auth, setAuth] = useState<ControlPlaneAuth | null>(null);
+  const [auth, setAuth] = useState<ControlPlaneAuth | null>(() => {
+    const stored = readStoredControlPlaneAuth();
+    return stored ? { baseUrl: stored.baseUrl, token: stored.token } : null;
+  });
   const [user, setUser] = useState<ControlPlaneUser | null>(null);
   const [sandbox, setSandbox] = useState<ControlPlaneSandbox | null>(null);
   const [adminSandboxDetail, setAdminSandboxDetail] = useState<ControlPlaneSandboxDetail | null>(null);
@@ -239,6 +182,7 @@ export function ControlPlanePage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [profileName, setProfileName] = useState(() => readStoredControlPlaneAuth()?.displayName ?? '');
   const [gatewayUnavailable, setGatewayUnavailable] = useState<string | null>(null);
   const [quotaExceeded, setQuotaExceeded] = useState<string | null>(null);
   const [disabledAccount, setDisabledAccount] = useState<string | null>(null);
@@ -310,6 +254,7 @@ export function ControlPlanePage() {
         (caught.statusCode === 401 || caught.payload.code === 'unauthorized')
       ) {
         setExpiredSession(caught.message);
+        clearStoredControlPlaneAuth();
       }
       if (caught instanceof ApiError && caught.payload.code === 'forbidden') {
         setAdminUsersForbidden(caught.message);
@@ -338,6 +283,7 @@ export function ControlPlanePage() {
       setUsage(me.usage);
       setUsageEvents(usageEventResult.events);
       setProjects(projectResult.projects);
+      setProfileName(me.user.displayName ?? '');
       if (!selectedProjectId && projectResult.projects[0]) {
         setSelectedProjectId(projectResult.projects[0].id);
       }
@@ -345,6 +291,16 @@ export function ControlPlanePage() {
       setMetadataLoading((current) => ({ ...current, projects: false, usageEvents: false }));
     }
   }
+
+  useEffect(() => {
+    if (!auth) {
+      return;
+    }
+    void run('Load control plane', async () => {
+      await refresh(auth);
+      setMessage('Control plane session is ready.');
+    });
+  }, []);
 
   useEffect(() => {
     if (!auth || !selectedWorkspaceId) {
@@ -470,27 +426,8 @@ export function ControlPlanePage() {
     }, delayMs);
   }
 
-  async function handleBootstrap(event: FormEvent) {
-    event.preventDefault();
-    const nextAuth = {
-      baseUrl: storedAuth.baseUrl,
-      token: `dev:${storedAuth.subject}`,
-    };
-    await run('Bootstrap account', async () => {
-      const bootstrapped = await bootstrapControlPlaneUser(nextAuth, {
-        email: storedAuth.email,
-        displayName: storedAuth.displayName,
-      });
-      window.localStorage.setItem(CONTROL_PLANE_AUTH_STORAGE_KEY, JSON.stringify(storedAuth));
-      setAuth(nextAuth);
-      setUser(bootstrapped.user);
-      setSandbox(bootstrapped.sandbox);
-      await refresh(nextAuth);
-      setMessage('Control plane session is ready.');
-    });
-  }
-
   async function handleLogout() {
+    clearStoredControlPlaneAuth();
     setAuth(null);
     setUser(null);
     setSandbox(null);
@@ -515,9 +452,17 @@ export function ControlPlanePage() {
     }
     await run('Update profile', async () => {
       const result = await updateControlPlaneMe(auth, {
-        displayName: storedAuth.displayName,
+        displayName: profileName,
       });
       setUser(result.user);
+      const stored = readStoredControlPlaneAuth();
+      if (stored) {
+        writeStoredControlPlaneAuth({
+          ...stored,
+          email: result.user.email,
+          displayName: result.user.displayName,
+        });
+      }
       setMessage('Profile updated.');
     });
   }
@@ -741,514 +686,394 @@ export function ControlPlanePage() {
     });
   }
 
+  const selectedSession = useMemo(
+    () => sessions.find((session) => session.id === selectedSessionId) ?? null,
+    [selectedSessionId, sessions],
+  );
+  const totalTokens = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
+  const activeSessions = sessions.filter((session) => session.status === 'active').length;
+  const controlPlaneBaseUrl = auth?.baseUrl ?? readStoredControlPlaneAuth()?.baseUrl ?? 'not connected';
+
   return (
-    <div className="mx-auto grid max-w-6xl gap-5 py-2 text-[var(--theme-fg)]">
-      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[var(--theme-border)] pb-5">
-        <div className="max-w-2xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-fg-muted)]">
-            Control plane
-          </p>
-          <h1 className="mt-2 text-2xl font-semibold text-[var(--theme-fg)]">
-            Product account and sandbox registry
-          </h1>
-          <p className="mt-2 max-w-[68ch] text-sm leading-6 text-[var(--theme-fg-muted)]">
-            This panel exercises the cloud-facing Remote Codex control plane: product auth,
-            projects, workspaces, sessions, sandbox lifecycle, and route-token issuance.
+    <div className="control-plane-console">
+      <header className="control-console-header">
+        <div>
+          <p className="control-kicker">Control plane</p>
+          <h1>Product account and sandbox registry</h1>
+          <p>
+            Account, sandbox lifecycle, workspace inventory, sessions, and route-token access in
+            one operator surface.
           </p>
         </div>
-        {sandbox ? (
-          <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${statusTone(sandbox.state)}`}>
-            {sandbox.state}
-          </span>
-        ) : null}
+        <div className="control-header-actions">
+          {sandbox ? (
+            <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${statusTone(sandbox.state)}`}>
+              {sandbox.state}
+            </span>
+          ) : null}
+          <ActionButton onClick={() => void refresh(auth)} disabled={!auth || busy === 'Load control plane'}>
+            Refresh
+          </ActionButton>
+          <ActionButton onClick={handleLogout}>
+            Sign out
+          </ActionButton>
+        </div>
+      </header>
+
+      <div className="control-alert-stack">
+        {error ? <div className="control-alert danger">{error}</div> : null}
+        {message ? <div className="control-alert success">{message}</div> : null}
+        {gatewayUnavailable ? <div className="control-alert warning">LLM gateway unavailable: {gatewayUnavailable}</div> : null}
+        {quotaExceeded ? <div className="control-alert danger">LLM quota exceeded: {quotaExceeded}</div> : null}
+        {disabledAccount ? <div className="control-alert danger">Account disabled: {disabledAccount}</div> : null}
+        {expiredSession ? <div className="control-alert warning">Session expired: {expiredSession}</div> : null}
+        {adminUsersForbidden ? <div className="control-alert warning">Admin access denied: {adminUsersForbidden}</div> : null}
+        {workerConnectionState === 'reconnecting' ? <div className="control-alert warning">Reconnecting worker route.</div> : null}
+        {workerConnectionState === 'connecting' ? <div className="control-alert neutral">Connecting worker route.</div> : null}
+        {sandboxOffline ? <div className="control-alert danger">Sandbox offline: {sandboxOffline}</div> : null}
+        {sandboxNotice ? <div className={`control-alert ${sandboxNotice.tone}`}>{sandboxNotice.text}</div> : null}
       </div>
 
-      {error ? (
-        <div className="rounded-[0.9rem] border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-4 py-3 text-sm text-[var(--status-danger-fg)]">
-          {error}
+      <section className="control-summary-strip" aria-label="Control plane summary">
+        <div>
+          <span>Account</span>
+          <strong>{user?.email ?? 'Loading'}</strong>
         </div>
-      ) : null}
-      {message ? (
-        <div className="rounded-[0.9rem] border border-[var(--status-success-border)] bg-[var(--status-success-bg)] px-4 py-3 text-sm text-[var(--status-success-fg)]">
-          {message}
+        <div>
+          <span>Sandbox</span>
+          <strong>{sandbox?.state ?? 'unknown'}</strong>
         </div>
-      ) : null}
-      {gatewayUnavailable ? (
-        <div className="rounded-[0.9rem] border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-4 py-3 text-sm text-[var(--status-warning-fg)]">
-          LLM gateway unavailable: {gatewayUnavailable}
+        <div>
+          <span>Projects</span>
+          <strong>{projects.length}</strong>
         </div>
-      ) : null}
-      {quotaExceeded ? (
-        <div className="rounded-[0.9rem] border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-4 py-3 text-sm text-[var(--status-danger-fg)]">
-          LLM quota exceeded: {quotaExceeded}
+        <div>
+          <span>Active sessions</span>
+          <strong>{activeSessions}</strong>
         </div>
-      ) : null}
-      {disabledAccount ? (
-        <div className="rounded-[0.9rem] border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-4 py-3 text-sm text-[var(--status-danger-fg)]">
-          Account disabled: {disabledAccount}
+        <div>
+          <span>LLM cost</span>
+          <strong>${Number(usage?.costUsd ?? 0).toFixed(2)}</strong>
         </div>
-      ) : null}
-      {expiredSession ? (
-        <div className="rounded-[0.9rem] border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-4 py-3 text-sm text-[var(--status-warning-fg)]">
-          Session expired: {expiredSession}
-        </div>
-      ) : null}
-      {adminUsersForbidden ? (
-        <div className="rounded-[0.9rem] border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-4 py-3 text-sm text-[var(--status-warning-fg)]">
-          Admin access denied: {adminUsersForbidden}
-        </div>
-      ) : null}
-      {workerConnectionState === 'reconnecting' ? (
-        <div className="rounded-[0.9rem] border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-4 py-3 text-sm text-[var(--status-warning-fg)]">
-          Reconnecting worker route.
-        </div>
-      ) : null}
-      {workerConnectionState === 'connecting' ? (
-        <div className="rounded-[0.9rem] border border-[var(--status-neutral-border)] bg-[var(--status-neutral-bg)] px-4 py-3 text-sm text-[var(--status-neutral-fg)]">
-          Connecting worker route.
-        </div>
-      ) : null}
-      {sandboxOffline ? (
-        <div className="rounded-[0.9rem] border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-4 py-3 text-sm text-[var(--status-danger-fg)]">
-          Sandbox offline: {sandboxOffline}
-        </div>
-      ) : null}
-      {sandboxNotice ? (
-        <div
-          className={`rounded-[0.9rem] border px-4 py-3 text-sm ${
-            sandboxNotice.tone === 'danger'
-              ? 'border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)]'
-              : sandboxNotice.tone === 'warning'
-                ? 'border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] text-[var(--status-warning-fg)]'
-                : 'border-[var(--status-neutral-border)] bg-[var(--status-neutral-bg)] text-[var(--status-neutral-fg)]'
-          }`}
-        >
-          {sandboxNotice.text}
-        </div>
-      ) : null}
+      </section>
 
-      <Section
-        title="Account"
-        action={
-          user ? (
-            <ActionButton onClick={handleLogout}>
-              Logout
-            </ActionButton>
-          ) : null
-        }
-      >
-        <form onSubmit={handleBootstrap} className="grid gap-3 md:grid-cols-4">
-          <Field
-            label="Control plane URL"
-            value={storedAuth.baseUrl}
-            onChange={(baseUrl) => setStoredAuth((current) => ({ ...current, baseUrl }))}
-          />
-          <Field
-            label="Dev subject"
-            value={storedAuth.subject}
-            onChange={(subject) => setStoredAuth((current) => ({ ...current, subject }))}
-          />
-          <Field
-            label="Email"
-            type="email"
-            value={storedAuth.email}
-            onChange={(email) => setStoredAuth((current) => ({ ...current, email }))}
-          />
-          <div className="flex items-end">
-            <ActionButton type="submit" disabled={busy === 'Bootstrap account'}>
-              {user ? 'Reconnect' : 'Login / register'}
-            </ActionButton>
-          </div>
-        </form>
-        {user ? (
-          <form onSubmit={handleProfileSave} className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
-            <Field
-              label="Display name"
-              value={storedAuth.displayName}
-              onChange={(displayName) => setStoredAuth((current) => ({ ...current, displayName }))}
-            />
-            <div className="flex items-end">
-              <ActionButton type="submit" disabled={busy === 'Update profile'}>
+      <div className="control-console-grid">
+        <aside className="control-sidebar-column">
+          <section className="control-panel">
+            <div className="control-panel-heading">
+              <h2>Account</h2>
+              <span>{user?.status ?? 'loading'}</span>
+            </div>
+            <dl className="control-detail-list">
+              <div><dt>User</dt><dd>{user?.email ?? 'Loading account'}</dd></div>
+              <div><dt>Name</dt><dd>{user?.displayName ?? 'No display name'}</dd></div>
+              <div><dt>Plan</dt><dd>{user?.plan ?? 'developer'}</dd></div>
+              <div><dt>Quota</dt><dd>{user?.quotaProfile ?? 'default'}</dd></div>
+              <div><dt>API</dt><dd>{controlPlaneBaseUrl}</dd></div>
+            </dl>
+            <form onSubmit={handleProfileSave} className="control-inline-form">
+              <Field label="Display name" value={profileName} onChange={setProfileName} />
+              <ActionButton type="submit" disabled={!auth || busy === 'Update profile'}>
                 Save profile
               </ActionButton>
+            </form>
+          </section>
+
+          <section className="control-panel">
+            <div className="control-panel-heading">
+              <h2>Sandbox</h2>
+              {sandbox ? <span>{sandbox.resourceProfile}</span> : null}
             </div>
-          </form>
-        ) : null}
-        {user ? (
-          <div className="mt-4 grid gap-2 text-sm text-[var(--theme-fg-muted)] sm:grid-cols-3">
-            <p><span className="text-[var(--theme-fg)]">User:</span> {user.email}</p>
-            <p><span className="text-[var(--theme-fg)]">Plan:</span> {user.plan}</p>
-            <p><span className="text-[var(--theme-fg)]">Quota:</span> {user.quotaProfile ?? 'default'}</p>
-            <p><span className="text-[var(--theme-fg)]">LLM requests:</span> {usage?.requestCount ?? 0}</p>
-            <p><span className="text-[var(--theme-fg)]">LLM tokens:</span> {(usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0)} total</p>
-            <p><span className="text-[var(--theme-fg)]">LLM cost:</span> ${Number(usage?.costUsd ?? 0).toFixed(2)}</p>
-          </div>
-        ) : null}
-      </Section>
-
-      <Section title="LLM usage">
-        {metadataLoading.usageEvents ? (
-          <p className="text-sm text-[var(--theme-fg-muted)]">Loading LLM usage...</p>
-        ) : !user ? (
-          <p className="text-sm text-[var(--theme-fg-muted)]">Login to inspect LLM usage.</p>
-        ) : usageEvents.length === 0 ? (
-          <p className="text-sm text-[var(--theme-fg-muted)]">No LLM usage events yet.</p>
-        ) : (
-          <div className="grid gap-2">
-            {usageEvents.map((event) => (
-              <div
-                key={event.id}
-                className="grid gap-2 rounded-[0.85rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-2 text-sm text-[var(--theme-fg-muted)] md:grid-cols-[1.1fr_0.8fr_0.8fr_0.7fr]"
-              >
-                <div>
-                  <p className="font-medium text-[var(--theme-fg)]">{event.model}</p>
-                  <p className="text-xs">{event.provider}</p>
-                </div>
-                <p>
-                  <span className="text-[var(--theme-fg)]">Tokens:</span>{' '}
-                  {event.inputTokens + event.outputTokens} total
-                </p>
-                <p>
-                  <span className="text-[var(--theme-fg)]">Cost:</span>{' '}
-                  ${Number(event.costUsd).toFixed(2)}
-                </p>
-                <p className="text-xs">{event.occurredAt}</p>
-              </div>
-            ))}
-          </div>
-        )}
-      </Section>
-
-      <Section
-        title="Admin users"
-        action={
-          <ActionButton
-            onClick={() => void handleLoadAdminUsers()}
-            disabled={!canUseControlPlane || metadataLoading.adminUsers}
-          >
-            Load users
-          </ActionButton>
-        }
-      >
-        {metadataLoading.adminUsers ? (
-          <p className="text-sm text-[var(--theme-fg-muted)]">Loading admin users...</p>
-        ) : adminUsers.length === 0 ? (
-          <p className="text-sm text-[var(--theme-fg-muted)]">No admin users loaded.</p>
-        ) : (
-          <div className="grid gap-3">
-            {adminUsers.map((adminUser) => (
-              <div
-                key={adminUser.id}
-                className="grid gap-3 rounded-[0.85rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] p-3 text-sm text-[var(--theme-fg-muted)] lg:grid-cols-[1.2fr_0.8fr_0.9fr_auto]"
-              >
-                <div>
-                  <p className="font-medium text-[var(--theme-fg)]">{adminUser.email}</p>
-                  <p className="text-xs">{adminUser.displayName ?? 'No display name'}</p>
-                </div>
-                <label className="grid gap-1.5 text-xs font-medium">
-                  <span>Status</span>
-                  <select
-                    value={adminUser.status}
-                    onChange={(event) => {
-                      const status = event.currentTarget.value as (typeof USER_STATUSES)[number];
-                      void handleAdminUserUpdate(adminUser, { status });
-                    }}
-                    className="h-10 rounded-[0.7rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 text-sm text-[var(--theme-fg)] outline-none"
-                  >
-                    {USER_STATUSES.map((status) => (
-                      <option key={status} value={status}>
-                        {status}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="grid gap-1.5 text-xs font-medium">
-                  <span>Quota profile</span>
-                  <input
-                    aria-label={`Quota profile for ${adminUser.email}`}
-                    defaultValue={adminUser.quotaProfile ?? 'default'}
-                    onBlur={(event) => {
-                      const quotaProfile = event.currentTarget.value.trim();
-                      if (quotaProfile && quotaProfile !== adminUser.quotaProfile) {
-                        void handleAdminUserUpdate(adminUser, { quotaProfile });
-                      }
-                    }}
-                    className="h-10 rounded-[0.7rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 text-sm text-[var(--theme-fg)] outline-none"
-                  />
-                </label>
-                <div className="grid content-center gap-1 text-xs">
-                  <p><span className="text-[var(--theme-fg)]">Plan:</span> {adminUser.plan}</p>
-                  <p><span className="text-[var(--theme-fg)]">Last seen:</span> {adminUser.lastSeenAt ?? 'never'}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Section>
-
-      <Section
-        title="Sandbox"
-        action={
-          <div className="flex flex-wrap gap-2">
-            <ActionButton onClick={() => void sandboxAction('start')} disabled={!canUseControlPlane}>
-              Start
-            </ActionButton>
-            <ActionButton onClick={() => void sandboxAction('stop')} disabled={!canUseControlPlane}>
-              Stop
-            </ActionButton>
-            <ActionButton onClick={() => void sandboxAction('restart')} disabled={!canUseControlPlane}>
-              Restart
-            </ActionButton>
-            <ActionButton onClick={() => void sandboxAction('health')} disabled={!canUseControlPlane}>
-              Health
-            </ActionButton>
-            <ActionButton onClick={handleInspectSandbox} disabled={!canUseControlPlane || !sandbox}>
-              Inspect
-            </ActionButton>
-          </div>
-        }
-      >
-        {sandbox ? (
-          <div className="grid gap-4">
-            <div className="grid gap-3 text-sm text-[var(--theme-fg-muted)] md:grid-cols-2">
-              <p><span className="text-[var(--theme-fg)]">Sandbox id:</span> {sandbox.id}</p>
-              <p><span className="text-[var(--theme-fg)]">Image:</span> {sandbox.image}</p>
-              <p><span className="text-[var(--theme-fg)]">Resource:</span> {sandbox.resourceProfile}</p>
-              <p><span className="text-[var(--theme-fg)]">Owner:</span> {sandbox.userId}</p>
-              <p><span className="text-[var(--theme-fg)]">Router:</span> {sandbox.routerBaseUrl ?? 'not assigned'}</p>
-              <p><span className="text-[var(--theme-fg)]">Worker:</span> {sandbox.workerServiceName ?? 'not assigned'}</p>
-              <p><span className="text-[var(--theme-fg)]">S3 prefix:</span> {sandbox.s3Prefix}</p>
-              {sandbox.statusReason ? (
-                <p><span className="text-[var(--theme-fg)]">Status:</span> {sandbox.statusReason}</p>
-              ) : null}
-              {sandbox.lastFailureCode ? (
-                <p><span className="text-[var(--theme-fg)]">Failure:</span> {sandbox.lastFailureCode}</p>
-              ) : null}
+            <div className="control-action-row">
+              <ActionButton onClick={() => void sandboxAction('start')} disabled={!canUseControlPlane}>
+                Start
+              </ActionButton>
+              <ActionButton onClick={() => void sandboxAction('stop')} disabled={!canUseControlPlane}>
+                Stop
+              </ActionButton>
+              <ActionButton onClick={() => void sandboxAction('restart')} disabled={!canUseControlPlane}>
+                Restart
+              </ActionButton>
+              <ActionButton onClick={() => void sandboxAction('health')} disabled={!canUseControlPlane}>
+                Health
+              </ActionButton>
+              <ActionButton onClick={handleInspectSandbox} disabled={!canUseControlPlane || !sandbox}>
+                Inspect
+              </ActionButton>
             </div>
-            {typeof sandbox.startupProgress === 'number' && sandbox.startupProgress > 0 && sandbox.startupProgress < 100 ? (
-              <div className="grid gap-2">
-                <div className="flex items-center justify-between text-xs text-[var(--theme-fg-muted)]">
-                  <span>Startup progress</span>
-                  <span>{sandbox.startupProgress}%</span>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-[var(--theme-muted)]">
-                  <div
-                    className="h-full rounded-full bg-[var(--theme-accent-solid)]"
-                    style={{ width: `${sandbox.startupProgress}%` }}
-                  />
-                </div>
-              </div>
-            ) : null}
-            {adminSandboxDetail ? (
-              <div className="grid gap-4 border-t border-[var(--theme-border)] pt-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-sm font-semibold text-[var(--theme-fg)]">Admin inspection</h3>
-                    <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
-                      Runtime status, endpoint, and recent lifecycle audit for this sandbox.
-                    </p>
+            {sandbox ? (
+              <>
+                <dl className="control-detail-list">
+                  <div><dt>Sandbox id</dt><dd>{sandbox.id}</dd></div>
+                  <div><dt>Image</dt><dd>{sandbox.image}</dd></div>
+                  <div><dt>Router</dt><dd>{sandbox.routerBaseUrl ?? 'not assigned'}</dd></div>
+                  <div><dt>Worker</dt><dd>{sandbox.workerServiceName ?? 'not assigned'}</dd></div>
+                  <div><dt>S3 prefix</dt><dd>{sandbox.s3Prefix}</dd></div>
+                  {sandbox.statusReason ? <div><dt>Status</dt><dd>{sandbox.statusReason}</dd></div> : null}
+                  {sandbox.lastFailureCode ? <div><dt>Failure</dt><dd>{sandbox.lastFailureCode}</dd></div> : null}
+                </dl>
+                {typeof sandbox.startupProgress === 'number' && sandbox.startupProgress > 0 && sandbox.startupProgress < 100 ? (
+                  <div className="control-progress">
+                    <span>Startup progress</span>
+                    <span>{sandbox.startupProgress}%</span>
+                    <div><i style={{ width: `${sandbox.startupProgress}%` }} /></div>
                   </div>
-                  <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${statusTone(adminSandboxDetail.runtimeStatus.state)}`}>
-                    {adminSandboxDetail.runtimeStatus.state}
-                  </span>
-                </div>
-                <div className="grid gap-3 text-sm text-[var(--theme-fg-muted)] md:grid-cols-2">
-                  <p><span className="text-[var(--theme-fg)]">Namespace:</span> {adminSandboxDetail.sandbox.k8sNamespace ?? adminSandboxDetail.runtimeStatus.k8sNamespace ?? 'not assigned'}</p>
-                  <p><span className="text-[var(--theme-fg)]">Pod:</span> {adminSandboxDetail.sandbox.k8sPodName ?? adminSandboxDetail.runtimeStatus.k8sPodName ?? 'not assigned'}</p>
-                  <p><span className="text-[var(--theme-fg)]">Endpoint:</span> {adminSandboxDetail.endpoint.routerBaseUrl ?? 'not assigned'}</p>
-                  <p><span className="text-[var(--theme-fg)]">Worker URL:</span> {adminSandboxDetail.workerBaseUrl ?? 'not assigned'}</p>
-                  <p><span className="text-[var(--theme-fg)]">Last seen:</span> {adminSandboxDetail.sandbox.lastSeenAt ?? 'never'}</p>
-                  <p><span className="text-[var(--theme-fg)]">Failure:</span> {adminSandboxDetail.runtimeStatus.lastFailureCode ?? adminSandboxDetail.sandbox.lastFailureCode ?? 'none'}</p>
-                </div>
-                {adminSandboxDetail.runtimeStatus.statusReason ? (
-                  <p className="rounded-[0.75rem] border border-[var(--status-neutral-border)] bg-[var(--status-neutral-bg)] px-3 py-2 text-sm text-[var(--status-neutral-fg)]">
-                    {adminSandboxDetail.runtimeStatus.statusReason}
-                  </p>
                 ) : null}
-                <div className="grid gap-2">
-                  <h4 className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--theme-fg-muted)]">
-                    Lifecycle audit
-                  </h4>
-                  {adminSandboxDetail.recentLifecycleErrors.length === 0 ? (
-                    <p className="text-sm text-[var(--theme-fg-muted)]">No lifecycle audit entries.</p>
-                  ) : (
-                    adminSandboxDetail.recentLifecycleErrors.slice(0, 5).map((entry) => (
-                      <div
-                        key={entry.id}
-                        className="rounded-[0.75rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-2 text-xs text-[var(--theme-fg-muted)]"
-                      >
-                        <p className="font-medium text-[var(--theme-fg)]">{entry.action}</p>
-                        <p>{entry.createdAt}</p>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
+              </>
+            ) : (
+              <p className="control-empty">Loading sandbox registry.</p>
+            )}
+          </section>
+        </aside>
+
+        <main className="control-main-column">
+          <section className="control-panel">
+            <div className="control-panel-heading">
+              <h2>Projects</h2>
+              <span>{projects.length} total</span>
+            </div>
+            <form onSubmit={handleCreateProject} className="control-compose-row">
+              <Field label="Project name" value={projectName} onChange={setProjectName} />
+              <ActionButton type="submit" disabled={!canUseControlPlane}>
+                Create project
+              </ActionButton>
+            </form>
+            <div className="control-list">
+              {metadataLoading.projects ? (
+                <p className="control-empty">Loading projects...</p>
+              ) : projects.length === 0 ? (
+                <p className="control-empty">No projects yet.</p>
+              ) : (
+                projects.map((project) => (
+                  <button
+                    key={project.id}
+                    type="button"
+                    onClick={() => setSelectedProjectId(project.id)}
+                    className={selectedProjectId === project.id ? 'selected' : ''}
+                  >
+                    <strong>{project.name}</strong>
+                    <span>{project.slug}</span>
+                  </button>
+                ))
+              )}
+            </div>
+            {selectedProject ? (
+              <dl className="control-detail-list compact">
+                <div><dt>Selected project</dt><dd>{selectedProject.name}</dd></div>
+                <div><dt>Status</dt><dd>{selectedProject.status}</dd></div>
+                <div><dt>Workspaces</dt><dd>{workspaces.length}</dd></div>
+              </dl>
             ) : null}
-          </div>
-        ) : (
-          <p className="text-sm text-[var(--theme-fg-muted)]">Login to bootstrap the user sandbox.</p>
-        )}
-      </Section>
+          </section>
 
-      <Section title="Projects">
-        <form onSubmit={handleCreateProject} className="mb-4 grid gap-3 md:grid-cols-[1fr_auto]">
-          <Field label="Project name" value={projectName} onChange={setProjectName} />
-          <div className="flex items-end">
-            <ActionButton type="submit" disabled={!canUseControlPlane}>
-              Create project
-            </ActionButton>
-          </div>
-        </form>
-        <div className="grid gap-2">
-          {metadataLoading.projects ? (
-            <p className="text-sm text-[var(--theme-fg-muted)]">Loading projects...</p>
-          ) : projects.length === 0 ? (
-            <p className="text-sm text-[var(--theme-fg-muted)]">No projects yet.</p>
-          ) : (
-            projects.map((project) => (
-              <button
-                key={project.id}
-                type="button"
-                onClick={() => setSelectedProjectId(project.id)}
-                className={`rounded-[0.85rem] border px-3 py-2 text-left text-sm transition ${
-                  selectedProjectId === project.id
-                    ? 'border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)] text-[var(--theme-accent-strong)]'
-                    : 'border-[var(--theme-border)] bg-[var(--theme-surface)] text-[var(--theme-fg)] hover:bg-[var(--theme-hover)]'
-                }`}
-              >
-                <span className="font-medium">{project.name}</span>
-                <span className="ml-2 text-xs text-[var(--theme-fg-muted)]">{project.slug}</span>
-              </button>
-            ))
-          )}
-        </div>
-        {selectedProject ? (
-          <div className="mt-4 grid gap-2 rounded-[0.85rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] p-3 text-sm text-[var(--theme-fg-muted)]">
-            <h3 className="text-sm font-semibold text-[var(--theme-fg)]">Project detail</h3>
-            <p><span className="text-[var(--theme-fg)]">Name:</span> {selectedProject.name}</p>
-            <p><span className="text-[var(--theme-fg)]">Slug:</span> {selectedProject.slug}</p>
-            <p><span className="text-[var(--theme-fg)]">Status:</span> {selectedProject.status}</p>
-            <p><span className="text-[var(--theme-fg)]">Workspaces:</span> {workspaces.length}</p>
-          </div>
-        ) : null}
-      </Section>
+          <section className="control-panel">
+            <div className="control-panel-heading">
+              <h2>Workspaces</h2>
+              <span>{workspaces.length} in scope</span>
+            </div>
+            <form onSubmit={handleCreateWorkspace} className="control-compose-row">
+              <Field label="Workspace name" value={workspaceName} onChange={setWorkspaceName} />
+              <ActionButton type="submit" disabled={!canUseControlPlane}>
+                Create workspace
+              </ActionButton>
+            </form>
+            <div className="control-list">
+              {metadataLoading.workspaces ? (
+                <p className="control-empty">Loading workspaces...</p>
+              ) : workspaces.length === 0 ? (
+                <p className="control-empty">No workspaces yet.</p>
+              ) : (
+                workspaces.map((workspace) => (
+                  <button
+                    key={workspace.id}
+                    type="button"
+                    onClick={() => setSelectedWorkspaceId(workspace.id)}
+                    className={selectedWorkspaceId === workspace.id ? 'selected' : ''}
+                  >
+                    <strong>{workspace.name}</strong>
+                    <span>{workspace.path}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          </section>
 
-      <Section title="Workspaces">
-        <form onSubmit={handleCreateWorkspace} className="mb-4 grid gap-3 md:grid-cols-[1fr_auto]">
-          <Field label="Workspace name" value={workspaceName} onChange={setWorkspaceName} />
-          <div className="flex items-end">
-            <ActionButton type="submit" disabled={!canUseControlPlane}>
-              Create workspace
-            </ActionButton>
-          </div>
-        </form>
-        <div className="grid gap-2">
-          {metadataLoading.workspaces ? (
-            <p className="text-sm text-[var(--theme-fg-muted)]">Loading workspaces...</p>
-          ) : workspaces.length === 0 ? (
-            <p className="text-sm text-[var(--theme-fg-muted)]">No workspaces yet.</p>
-          ) : (
-            workspaces.map((workspace) => (
-              <button
-                key={workspace.id}
-                type="button"
-                onClick={() => setSelectedWorkspaceId(workspace.id)}
-                className={`rounded-[0.85rem] border px-3 py-2 text-left text-sm transition ${
-                  selectedWorkspaceId === workspace.id
-                    ? 'border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)] text-[var(--theme-accent-strong)]'
-                    : 'border-[var(--theme-border)] bg-[var(--theme-surface)] text-[var(--theme-fg)] hover:bg-[var(--theme-hover)]'
-                }`}
-              >
-                <span className="font-medium">{workspace.name}</span>
-                <span className="ml-2 text-xs text-[var(--theme-fg-muted)]">{workspace.path}</span>
-              </button>
-            ))
-          )}
-        </div>
-      </Section>
-
-      <Section
-        title="Sessions"
-        action={
-          <ActionButton onClick={handleRouteToken} disabled={!sandbox || sandbox.state !== 'running'}>
-            Create route token
-          </ActionButton>
-        }
-      >
-        <form onSubmit={handleCreateSession} className="mb-4 grid gap-3 md:grid-cols-[1fr_12rem_auto]">
-          <Field label="Session title" value={sessionTitle} onChange={setSessionTitle} />
-          <label className="grid gap-1.5 text-xs font-medium text-[var(--theme-fg-muted)]">
-            <span>Provider</span>
-            <select
-              value={sessionProvider}
-              onChange={(event) => setSessionProvider(event.currentTarget.value as AgentBackendIdDto)}
-              className="h-10 rounded-[0.7rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 text-sm text-[var(--theme-fg)] outline-none"
-            >
-              <option value="codex">Codex</option>
-              <option value="claude">Claude</option>
-              <option value="opencode">OpenCode</option>
-            </select>
-          </label>
-          <div className="flex items-end">
-            <ActionButton type="submit" disabled={!selectedWorkspace}>
-              Create session
-            </ActionButton>
-          </div>
-        </form>
-        <div className="grid gap-2">
-          {metadataLoading.sessions ? (
-            <p className="text-sm text-[var(--theme-fg-muted)]">Loading sessions...</p>
-          ) : sessions.length === 0 ? (
-            <p className="text-sm text-[var(--theme-fg-muted)]">No sessions for this workspace.</p>
-          ) : (
-            sessions.map((session) => (
-              <div
-                key={session.id}
-                className={`grid gap-2 rounded-[0.85rem] border px-3 py-2 text-sm transition md:grid-cols-[1fr_auto] ${
-                  selectedSessionId === session.id
-                    ? 'border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)] text-[var(--theme-accent-strong)]'
-                    : 'border-[var(--theme-border)] bg-[var(--theme-surface)] text-[var(--theme-fg)] hover:bg-[var(--theme-hover)]'
-                }`}
-              >
-                <button
-                  type="button"
-                  onClick={() => void handleOpenSession(session)}
-                  className="min-w-0 text-left"
+          <section className="control-panel">
+            <div className="control-panel-heading">
+              <h2>Sessions</h2>
+              <ActionButton onClick={handleRouteToken} disabled={!sandbox || sandbox.state !== 'running'}>
+                Create route token
+              </ActionButton>
+            </div>
+            <form onSubmit={handleCreateSession} className="control-compose-row session">
+              <Field label="Session title" value={sessionTitle} onChange={setSessionTitle} />
+              <label className="control-field">
+                <span>Provider</span>
+                <select
+                  value={sessionProvider}
+                  onChange={(event) => setSessionProvider(event.currentTarget.value as AgentBackendIdDto)}
                 >
-                  <span className="font-medium">{session.title}</span>
-                  <span className="ml-2 text-xs text-[var(--theme-fg-muted)]">
-                    {session.provider} / {session.status}
-                  </span>
-                </button>
-                <div className="flex flex-wrap gap-2 md:justify-end">
-                  <ActionButton
-                    onClick={() => void handleResumeSession(session)}
-                    disabled={!auth || !session.workerSessionId || sandbox?.state !== 'running'}
-                  >
-                    Resume
-                  </ActionButton>
-                  <ActionButton
-                    onClick={() => void handleCloseSession(session)}
-                    disabled={!auth || !session.workerSessionId || sandbox?.state !== 'running'}
-                  >
-                    Close
-                  </ActionButton>
-                </div>
+                  <option value="codex">Codex</option>
+                  <option value="claude">Claude</option>
+                  <option value="opencode">OpenCode</option>
+                </select>
+              </label>
+              <ActionButton type="submit" disabled={!selectedWorkspace}>
+                Create session
+              </ActionButton>
+            </form>
+            <div className="control-session-list">
+              {metadataLoading.sessions ? (
+                <p className="control-empty">Loading sessions...</p>
+              ) : sessions.length === 0 ? (
+                <p className="control-empty">No sessions for this workspace.</p>
+              ) : (
+                sessions.map((session) => (
+                  <div key={session.id} className={selectedSessionId === session.id ? 'selected' : ''}>
+                    <button type="button" onClick={() => void handleOpenSession(session)}>
+                      <strong>{session.title}</strong>
+                      <span>{session.provider} / {session.status}</span>
+                    </button>
+                    <div>
+                      <ActionButton
+                        onClick={() => void handleResumeSession(session)}
+                        disabled={!auth || !session.workerSessionId || sandbox?.state !== 'running'}
+                      >
+                        Resume
+                      </ActionButton>
+                      <ActionButton
+                        onClick={() => void handleCloseSession(session)}
+                        disabled={!auth || !session.workerSessionId || sandbox?.state !== 'running'}
+                      >
+                        Close
+                      </ActionButton>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            {routeToken ? (
+              <dl className="control-detail-list compact route-token">
+                <div><dt>Router</dt><dd>{routeToken.routerBaseUrl}</dd></div>
+                <div><dt>WebSocket</dt><dd>{routeToken.wsBaseUrl}</dd></div>
+                <div><dt>Connection</dt><dd>{workerConnectionState}</dd></div>
+                <div><dt>Worker socket</dt><dd>{workerSocketUrl ?? 'not connected'}</dd></div>
+                <div><dt>Expires</dt><dd>{routeToken.expiresAt}</dd></div>
+              </dl>
+            ) : selectedSession ? (
+              <p className="control-empty">Selected session: {selectedSession.title}</p>
+            ) : null}
+          </section>
+        </main>
+
+        <aside className="control-right-column">
+          <section className="control-panel">
+            <div className="control-panel-heading">
+              <h2>LLM usage</h2>
+              <span>{usage?.requestCount ?? 0} requests</span>
+            </div>
+            <div className="control-usage-grid">
+              <div><span>Tokens</span><strong>{totalTokens}</strong></div>
+              <div><span>Cached</span><strong>{usage?.cachedTokens ?? 0}</strong></div>
+              <div><span>Cost</span><strong>${Number(usage?.costUsd ?? 0).toFixed(2)}</strong></div>
+            </div>
+            <div className="control-usage-events">
+              {metadataLoading.usageEvents ? (
+                <p className="control-empty">Loading LLM usage...</p>
+              ) : usageEvents.length === 0 ? (
+                <p className="control-empty">No LLM usage events yet.</p>
+              ) : (
+                usageEvents.map((event) => (
+                  <div key={event.id}>
+                    <strong>{event.model}</strong>
+                    <span>{event.provider}, {event.inputTokens + event.outputTokens} tokens, ${Number(event.costUsd).toFixed(2)}</span>
+                    <small>{event.occurredAt}</small>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+
+          <section className="control-panel">
+            <div className="control-panel-heading">
+              <h2>Admin users</h2>
+              <ActionButton
+                onClick={() => void handleLoadAdminUsers()}
+                disabled={!canUseControlPlane || metadataLoading.adminUsers}
+              >
+                Load users
+              </ActionButton>
+            </div>
+            {metadataLoading.adminUsers ? (
+              <p className="control-empty">Loading admin users...</p>
+            ) : adminUsers.length === 0 ? (
+              <p className="control-empty">No admin users loaded.</p>
+            ) : (
+              <div className="control-admin-list">
+                {adminUsers.map((adminUser) => (
+                  <div key={adminUser.id}>
+                    <strong>{adminUser.email}</strong>
+                    <span>{adminUser.displayName ?? 'No display name'}</span>
+                    <select
+                      value={adminUser.status}
+                      onChange={(event) => {
+                        const status = event.currentTarget.value as (typeof USER_STATUSES)[number];
+                        void handleAdminUserUpdate(adminUser, { status });
+                      }}
+                    >
+                      {USER_STATUSES.map((status) => (
+                        <option key={status} value={status}>
+                          {status}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      aria-label={`Quota profile for ${adminUser.email}`}
+                      defaultValue={adminUser.quotaProfile ?? 'default'}
+                      onBlur={(event) => {
+                        const quotaProfile = event.currentTarget.value.trim();
+                        if (quotaProfile && quotaProfile !== adminUser.quotaProfile) {
+                          void handleAdminUserUpdate(adminUser, { quotaProfile });
+                        }
+                      }}
+                    />
+                  </div>
+                ))}
               </div>
-            ))
-          )}
-        </div>
-        {routeToken ? (
-          <div className="mt-4 rounded-[0.9rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] p-3 text-xs text-[var(--theme-fg-muted)]">
-            <p><span className="text-[var(--theme-fg)]">Router:</span> {routeToken.routerBaseUrl}</p>
-            <p><span className="text-[var(--theme-fg)]">WebSocket:</span> {routeToken.wsBaseUrl}</p>
-            <p><span className="text-[var(--theme-fg)]">Connection:</span> {workerConnectionState}</p>
-            <p><span className="text-[var(--theme-fg)]">Worker socket:</span> {workerSocketUrl ?? 'not connected'}</p>
-            <p><span className="text-[var(--theme-fg)]">Expires:</span> {routeToken.expiresAt}</p>
-          </div>
-        ) : null}
-      </Section>
+            )}
+          </section>
+
+          {adminSandboxDetail ? (
+            <section className="control-panel">
+              <div className="control-panel-heading">
+                <h2>Admin inspection</h2>
+                <span>{adminSandboxDetail.runtimeStatus.state}</span>
+              </div>
+              <dl className="control-detail-list">
+                <div><dt>Namespace</dt><dd>{adminSandboxDetail.sandbox.k8sNamespace ?? adminSandboxDetail.runtimeStatus.k8sNamespace ?? 'not assigned'}</dd></div>
+                <div><dt>Pod</dt><dd>{adminSandboxDetail.sandbox.k8sPodName ?? adminSandboxDetail.runtimeStatus.k8sPodName ?? 'not assigned'}</dd></div>
+                <div><dt>Endpoint</dt><dd>{adminSandboxDetail.endpoint.routerBaseUrl ?? 'not assigned'}</dd></div>
+                <div><dt>Worker URL</dt><dd>{adminSandboxDetail.workerBaseUrl ?? 'not assigned'}</dd></div>
+              </dl>
+              {adminSandboxDetail.runtimeStatus.statusReason ? (
+                <p className="control-empty">{adminSandboxDetail.runtimeStatus.statusReason}</p>
+              ) : null}
+              <div className="control-usage-events">
+                {adminSandboxDetail.recentLifecycleErrors.length === 0 ? (
+                  <p className="control-empty">No lifecycle audit entries.</p>
+                ) : (
+                  adminSandboxDetail.recentLifecycleErrors.slice(0, 5).map((entry) => (
+                    <div key={entry.id}>
+                      <strong>{entry.action}</strong>
+                      <small>{entry.createdAt}</small>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+          ) : null}
+        </aside>
+      </div>
     </div>
   );
 }

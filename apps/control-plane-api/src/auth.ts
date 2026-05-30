@@ -98,6 +98,44 @@ export class JwtAuthVerifier implements AuthVerifier {
   }
 }
 
+export class ProductSessionAuthVerifier extends JwtAuthVerifier {
+  constructor(input: {
+    secret: string;
+    clockSkewSeconds?: number;
+  }) {
+    const verifierInput: {
+      secret: string;
+      provider: string;
+      issuer: string;
+      audience: string;
+      clockSkewSeconds?: number;
+    } = {
+      secret: input.secret,
+      provider: 'control-plane',
+      issuer: 'remote-codex-control-plane',
+      audience: 'remote-codex-control-plane',
+    };
+    if (input.clockSkewSeconds !== undefined) {
+      verifierInput.clockSkewSeconds = input.clockSkewSeconds;
+    }
+    super(verifierInput);
+  }
+}
+
+export class CompositeAuthVerifier implements AuthVerifier {
+  constructor(private readonly verifiers: AuthVerifier[]) {}
+
+  identityFromRequest(request: FastifyRequest): AuthIdentity | null {
+    for (const verifier of this.verifiers) {
+      const identity = verifier.identityFromRequest(request);
+      if (identity) {
+        return identity;
+      }
+    }
+    return null;
+  }
+}
+
 function payloadHasAudience(value: unknown, expected: string) {
   if (typeof value === 'string') {
     return value === expected;
@@ -115,7 +153,16 @@ export function createAuthVerifier(input: {
   jwtIssuer?: string | null;
   jwtAudience?: string | null;
   jwtClockSkewSeconds?: number;
+  productSessionSecret?: string;
 }): AuthVerifier {
+  const productSessionVerifier = input.productSessionSecret
+    ? new ProductSessionAuthVerifier({
+        secret: input.productSessionSecret,
+        ...(input.jwtClockSkewSeconds === undefined
+          ? {}
+          : { clockSkewSeconds: input.jwtClockSkewSeconds }),
+      })
+    : null;
   if (input.mode === 'jwt') {
     if (!input.jwtSecret) {
       throw new Error('CONTROL_PLANE_AUTH_JWT_SECRET is required when CONTROL_PLANE_AUTH_MODE=jwt.');
@@ -139,9 +186,15 @@ export function createAuthVerifier(input: {
     if (input.jwtClockSkewSeconds !== undefined) {
       verifierInput.clockSkewSeconds = input.jwtClockSkewSeconds;
     }
-    return new JwtAuthVerifier(verifierInput);
+    const jwtVerifier = new JwtAuthVerifier(verifierInput);
+    return productSessionVerifier
+      ? new CompositeAuthVerifier([productSessionVerifier, jwtVerifier])
+      : jwtVerifier;
   }
-  return new DevAuthVerifier();
+  const devVerifier = new DevAuthVerifier();
+  return productSessionVerifier
+    ? new CompositeAuthVerifier([productSessionVerifier, devVerifier])
+    : devVerifier;
 }
 
 export function identityFromRequest(request: FastifyRequest): AuthIdentity | null {
@@ -182,5 +235,12 @@ export function requireAuthenticatedUser(
   if (!identity) {
     return null;
   }
-  return repository.getUserByAuthSubject(identity.authProvider, identity.authSubject) ?? null;
+  if (identity.authProvider === 'control-plane') {
+    return repository.getUserById(identity.authSubject) ?? null;
+  }
+  return (
+    repository.getUserByAuthSubject(identity.authProvider, identity.authSubject) ??
+    repository.getUserByAuthIdentity(identity.authProvider, identity.authSubject) ??
+    null
+  );
 }

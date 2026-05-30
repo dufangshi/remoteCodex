@@ -1,4 +1,4 @@
-import { createHmac, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 
 import Fastify, { FastifyInstance, FastifyRequest } from 'fastify';
 import { z, ZodError } from 'zod';
@@ -10,6 +10,7 @@ import {
 } from '../../../packages/db/src/index';
 import {
   createSignedToken,
+  SignedTokenPayload,
   verifySignedTokenWithKeys,
 } from '../../../packages/shared/src/tokens';
 import {
@@ -91,6 +92,14 @@ const updateUserSchema = z.object({
   billingCustomerId: z.string().min(1).nullable().optional(),
   quotaProfile: z.string().min(1).optional(),
 });
+
+const emailPasswordAuthSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8).max(256),
+  displayName: z.string().min(1).nullable().optional(),
+});
+
+const oauthProviderSchema = z.enum(['google', 'github']);
 
 const createProjectSchema = z.object({
   name: z.string().min(1),
@@ -337,6 +346,237 @@ function requireUser(app: FastifyInstance, request: FastifyRequest) {
 
 function identityKey(authProvider: string, authSubject: string) {
   return `${authProvider}:${authSubject}`;
+}
+
+function normalizeEmail(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function passwordHash(password: string, salt = randomBytes(16).toString('base64url')) {
+  const derived = scryptSync(password, salt, 64).toString('base64url');
+  return `scrypt:${salt}:${derived}`;
+}
+
+function verifyPassword(password: string, storedHash: string) {
+  const [scheme, salt, hash] = storedHash.split(':');
+  if (scheme !== 'scrypt' || !salt || !hash) {
+    return false;
+  }
+  const actual = Buffer.from(scryptSync(password, salt, 64).toString('base64url'));
+  const expected = Buffer.from(hash);
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+function createProductSessionToken(
+  config: ControlPlaneConfig,
+  user: { id: string },
+) {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const payload: SignedTokenPayload = {
+    sub: user.id,
+    iss: 'remote-codex-control-plane',
+    aud: 'remote-codex-control-plane',
+    iat: nowSeconds,
+    exp: nowSeconds + config.productSessionTtlSeconds,
+    jti: randomUUID(),
+  };
+  return {
+    token: createSignedToken(payload, config.productSessionSecret),
+    expiresAt: new Date(payload.exp * 1000).toISOString(),
+  };
+}
+
+function sessionResponse(
+  app: FastifyInstance,
+  user: NonNullable<ReturnType<ControlPlaneRepository['getUserById']>>,
+) {
+  const sandbox = app.services.repository.ensureSandboxForUser(user.id, {
+    image: app.services.config.sandboxDefaultImage,
+    region: app.services.config.sandboxDefaultRegion,
+    resourceProfile: app.services.config.sandboxDefaultResourceProfile,
+    s3PrefixBase: app.services.config.sandboxS3PrefixBase,
+  });
+  return {
+    user,
+    sandbox,
+    session: createProductSessionToken(app.services.config, user),
+  };
+}
+
+function controlPlaneCallbackUrl(config: ControlPlaneConfig, provider: 'google' | 'github') {
+  return `${config.publicBaseUrl.replace(/\/+$/, '')}/api/auth/oauth/${provider}/callback`;
+}
+
+function frontendOAuthReturnUrl(config: ControlPlaneConfig) {
+  return `${(config.frontendBaseUrl ?? config.publicBaseUrl).replace(/\/+$/, '')}/control-plane/login`;
+}
+
+function allowedOAuthReturnUrl(config: ControlPlaneConfig, returnTo?: string | null) {
+  const fallback = frontendOAuthReturnUrl(config);
+  if (!returnTo) {
+    return fallback;
+  }
+  const fallbackUrl = new URL(fallback);
+  const requestedUrl = new URL(returnTo);
+  if (requestedUrl.origin !== fallbackUrl.origin) {
+    throw new HttpError(400, 'bad_request', 'OAuth return URL is not allowed.');
+  }
+  return requestedUrl.toString();
+}
+
+function oauthState(config: ControlPlaneConfig, input: { provider: 'google' | 'github'; returnTo?: string | null }) {
+  const payload: SignedTokenPayload = {
+    sub: input.provider,
+    provider: input.provider,
+    returnTo: input.returnTo ?? null,
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 600,
+    jti: randomUUID(),
+  };
+  return createSignedToken(payload, config.productSessionSecret);
+}
+
+function verifyOAuthState(config: ControlPlaneConfig, token: string, provider: 'google' | 'github') {
+  const payload = verifySignedTokenWithKeys<SignedTokenPayload & {
+    provider?: unknown;
+    returnTo?: unknown;
+  }>(
+    token,
+    [{ id: 'product-session', secret: config.productSessionSecret }],
+  );
+  if (payload.provider !== provider) {
+    throw new HttpError(400, 'bad_request', 'OAuth state is invalid.');
+  }
+  return allowedOAuthReturnUrl(
+    config,
+    typeof payload.returnTo === 'string' ? payload.returnTo : null,
+  );
+}
+
+interface OAuthProfile {
+  provider: 'google' | 'github';
+  subject: string;
+  email: string;
+  displayName: string | null;
+}
+
+async function requestFormToken(url: string, input: Record<string, string>) {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams(input).toString(),
+  });
+  const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+  if (!response.ok || typeof payload.access_token !== 'string') {
+    throw new HttpError(401, 'unauthorized', 'OAuth provider token exchange failed.');
+  }
+  return payload.access_token;
+}
+
+async function fetchGoogleProfile(config: ControlPlaneConfig, code: string): Promise<OAuthProfile> {
+  if (!config.googleClientId || !config.googleClientSecret) {
+    throw new HttpError(503, 'service_unavailable', 'Google login is not configured.');
+  }
+  const accessToken = await requestFormToken('https://oauth2.googleapis.com/token', {
+    code,
+    client_id: config.googleClientId,
+    client_secret: config.googleClientSecret,
+    redirect_uri: controlPlaneCallbackUrl(config, 'google'),
+    grant_type: 'authorization_code',
+  });
+  const response = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      accept: 'application/json',
+    },
+  });
+  const profile = await response.json().catch(() => ({})) as Record<string, unknown>;
+  if (!response.ok || typeof profile.sub !== 'string' || typeof profile.email !== 'string') {
+    throw new HttpError(401, 'unauthorized', 'Google account profile could not be resolved.');
+  }
+  return {
+    provider: 'google',
+    subject: profile.sub,
+    email: profile.email,
+    displayName: typeof profile.name === 'string' ? profile.name : null,
+  };
+}
+
+async function fetchGitHubEmail(accessToken: string) {
+  const response = await fetch('https://api.github.com/user/emails', {
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      accept: 'application/vnd.github+json',
+      'user-agent': 'remote-codex-control-plane',
+    },
+  });
+  const emails = await response.json().catch(() => []) as Array<Record<string, unknown>>;
+  if (!response.ok || !Array.isArray(emails)) {
+    return null;
+  }
+  const primary = emails.find((email) => email.primary === true && email.verified === true);
+  const verified = primary ?? emails.find((email) => email.verified === true);
+  return typeof verified?.email === 'string' ? verified.email : null;
+}
+
+async function fetchGitHubProfile(config: ControlPlaneConfig, code: string): Promise<OAuthProfile> {
+  if (!config.githubClientId || !config.githubClientSecret) {
+    throw new HttpError(503, 'service_unavailable', 'GitHub login is not configured.');
+  }
+  const accessToken = await requestFormToken('https://github.com/login/oauth/access_token', {
+    code,
+    client_id: config.githubClientId,
+    client_secret: config.githubClientSecret,
+    redirect_uri: controlPlaneCallbackUrl(config, 'github'),
+  });
+  const response = await fetch('https://api.github.com/user', {
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      accept: 'application/vnd.github+json',
+      'user-agent': 'remote-codex-control-plane',
+    },
+  });
+  const profile = await response.json().catch(() => ({})) as Record<string, unknown>;
+  if (!response.ok || typeof profile.id !== 'number') {
+    throw new HttpError(401, 'unauthorized', 'GitHub account profile could not be resolved.');
+  }
+  const email = typeof profile.email === 'string' ? profile.email : await fetchGitHubEmail(accessToken);
+  if (!email) {
+    throw new HttpError(400, 'bad_request', 'GitHub account does not expose a verified email.');
+  }
+  return {
+    provider: 'github',
+    subject: String(profile.id),
+    email,
+    displayName:
+      typeof profile.name === 'string' && profile.name.trim()
+        ? profile.name
+        : typeof profile.login === 'string'
+          ? profile.login
+          : null,
+  };
+}
+
+function upsertOAuthUser(repository: ControlPlaneRepository, profile: OAuthProfile) {
+  const existingByIdentity = repository.getUserByAuthIdentity(profile.provider, profile.subject);
+  const existingByEmail = repository.getUserByEmail(profile.email);
+  const user = existingByIdentity ?? existingByEmail ?? repository.upsertUser({
+    authProvider: profile.provider,
+    authSubject: profile.subject,
+    email: normalizeEmail(profile.email),
+    displayName: profile.displayName,
+  });
+  repository.upsertAuthIdentity({
+    userId: user.id,
+    authProvider: profile.provider,
+    authSubject: profile.subject,
+    email: normalizeEmail(profile.email),
+    displayName: profile.displayName,
+  });
+  return repository.getUserById(user.id)!;
 }
 
 function requireAdmin(app: FastifyInstance, request: FastifyRequest) {
@@ -1107,6 +1347,7 @@ export function buildControlPlaneApp(
     jwtIssuer: config.authJwtIssuer,
     jwtAudience: config.authJwtAudience,
     jwtClockSkewSeconds: config.authJwtClockSkewSeconds,
+    productSessionSecret: config.productSessionSecret,
   });
 
   const app = Fastify({
@@ -1161,6 +1402,117 @@ export function buildControlPlaneApp(
     ok: true,
     service: 'control-plane-api',
   }));
+
+  app.post('/api/auth/password/register', async (request) => {
+    const input = emailPasswordAuthSchema.parse(request.body);
+    const email = normalizeEmail(input.email);
+    if (repository.getPasswordCredentialByEmail(email)) {
+      throw new HttpError(409, 'conflict', 'An account already exists for this email.');
+    }
+    const user =
+      repository.getUserByEmail(email) ??
+      repository.upsertUser({
+        authProvider: 'password',
+        authSubject: email,
+        email,
+        displayName: input.displayName ?? email.split('@')[0],
+      });
+    repository.upsertAuthIdentity({
+      userId: user.id,
+      authProvider: 'password',
+      authSubject: email,
+      email,
+      displayName: input.displayName ?? user.displayName,
+    });
+    repository.upsertPasswordCredential({
+      userId: user.id,
+      email,
+      passwordHash: passwordHash(input.password),
+    });
+    return sessionResponse(app, repository.getUserById(user.id)!);
+  });
+
+  app.post('/api/auth/password/login', async (request) => {
+    const input = emailPasswordAuthSchema.omit({ displayName: true }).parse(request.body);
+    const credential = repository.getPasswordCredentialByEmail(input.email);
+    if (!credential || !verifyPassword(input.password, credential.passwordHash)) {
+      throw new HttpError(401, 'unauthorized', 'Email or password is incorrect.');
+    }
+    repository.markPasswordCredentialUsed(credential.id);
+    const user = repository.getUserById(credential.userId);
+    if (!user || user.status !== 'active') {
+      throw new HttpError(403, 'account_inactive', 'Account is not active.');
+    }
+    repository.upsertUser({
+      authProvider: user.authProvider,
+      authSubject: user.authSubject,
+      email: user.email,
+      displayName: user.displayName,
+    });
+    return sessionResponse(app, repository.getUserById(user.id)!);
+  });
+
+  app.get('/api/auth/oauth/:provider/start', async (request, reply) => {
+    const params = z.object({ provider: oauthProviderSchema }).parse(request.params);
+    const query = z.object({ returnTo: z.string().url().optional() }).parse(request.query);
+    const state = oauthState(config, {
+      provider: params.provider,
+      returnTo: allowedOAuthReturnUrl(config, query.returnTo),
+    });
+    if (params.provider === 'google') {
+      if (!config.googleClientId || !config.googleClientSecret) {
+        throw new HttpError(503, 'service_unavailable', 'Google login is not configured.');
+      }
+      const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+      url.searchParams.set('client_id', config.googleClientId);
+      url.searchParams.set('redirect_uri', controlPlaneCallbackUrl(config, 'google'));
+      url.searchParams.set('response_type', 'code');
+      url.searchParams.set('scope', 'openid email profile');
+      url.searchParams.set('state', state);
+      url.searchParams.set('access_type', 'online');
+      reply.redirect(url.toString());
+      return;
+    }
+    if (!config.githubClientId || !config.githubClientSecret) {
+      throw new HttpError(503, 'service_unavailable', 'GitHub login is not configured.');
+    }
+    const url = new URL('https://github.com/login/oauth/authorize');
+    url.searchParams.set('client_id', config.githubClientId);
+    url.searchParams.set('redirect_uri', controlPlaneCallbackUrl(config, 'github'));
+    url.searchParams.set('scope', 'read:user user:email');
+    url.searchParams.set('state', state);
+    reply.redirect(url.toString());
+  });
+
+  app.get('/api/auth/oauth/:provider/callback', async (request, reply) => {
+    const params = z.object({ provider: oauthProviderSchema }).parse(request.params);
+    const query = z
+      .object({
+        code: z.string().min(1).optional(),
+        state: z.string().min(1).optional(),
+        error: z.string().min(1).optional(),
+      })
+      .parse(request.query);
+    const returnTo = query.state
+      ? verifyOAuthState(config, query.state, params.provider)
+      : frontendOAuthReturnUrl(config);
+    const redirectUrl = new URL(returnTo ?? frontendOAuthReturnUrl(config));
+    if (query.error || !query.code) {
+      redirectUrl.searchParams.set('auth_error', query.error ?? 'oauth_cancelled');
+      reply.redirect(redirectUrl.toString());
+      return;
+    }
+    const profile =
+      params.provider === 'google'
+        ? await fetchGoogleProfile(config, query.code)
+        : await fetchGitHubProfile(config, query.code);
+    const user = upsertOAuthUser(repository, profile);
+    const session = createProductSessionToken(config, user);
+    redirectUrl.searchParams.set('control_plane_token', session.token);
+    redirectUrl.searchParams.set('control_plane_expires_at', session.expiresAt);
+    redirectUrl.searchParams.set('control_plane_base_url', config.publicBaseUrl);
+    reply.redirect(redirectUrl.toString());
+  });
 
   app.post('/api/auth/register', async (request) => {
     const identity = app.services.authVerifier.identityFromRequest(request);

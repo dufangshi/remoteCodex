@@ -4,6 +4,7 @@ import {
   applyProviderHostConfigArchive,
   bootstrapControlPlaneUser,
   closeControlPlaneSession,
+  controlPlaneOAuthStartUrl,
   createThreadShell,
   createProviderHostConfigArchive,
   createControlPlaneWorkspace,
@@ -17,6 +18,8 @@ import {
   buildAndRestartService,
   renameProviderHostConfigArchive,
   restartAgentBackend,
+  loginControlPlanePasswordAccount,
+  registerControlPlanePasswordAccount,
   resumeControlPlaneSession,
   resumeThread,
   sendThreadPrompt,
@@ -149,6 +152,39 @@ describe('api request helper', () => {
     expect(calls[2]?.[0]).toBe('/api/agent-runtimes/codex/models');
     expect(calls[3]?.[0]).toBe('/api/service/build-restart');
     expect(calls[3]?.[1]?.method).toBe('POST');
+  });
+
+  it('uses control-plane password auth endpoints', async () => {
+    await registerControlPlanePasswordAccount('https://control.example.test/', {
+      email: 'user@example.com',
+      password: 'password123',
+      displayName: 'User',
+    });
+    await loginControlPlanePasswordAccount('https://control.example.test/', {
+      email: 'user@example.com',
+      password: 'password123',
+    });
+
+    const calls = vi.mocked(fetch).mock.calls;
+    expect(calls[0]?.[0]).toBe('https://control.example.test/api/auth/password/register');
+    expect(calls[0]?.[1]?.method).toBe('POST');
+    expect(JSON.parse(String(calls[0]?.[1]?.body))).toEqual({
+      email: 'user@example.com',
+      password: 'password123',
+      displayName: 'User',
+    });
+    expect(calls[1]?.[0]).toBe('https://control.example.test/api/auth/password/login');
+    expect(calls[1]?.[1]?.method).toBe('POST');
+  });
+
+  it('builds oauth start urls with return targets', () => {
+    const url = new URL(controlPlaneOAuthStartUrl(
+      'https://control.example.test/',
+      'github',
+      'https://frontend.example.test/control-plane/login',
+    ));
+    expect(url.origin + url.pathname).toBe('https://control.example.test/api/auth/oauth/github/start');
+    expect(url.searchParams.get('returnTo')).toBe('https://frontend.example.test/control-plane/login');
   });
 
   it('keeps control-plane auth headers and JSON request shape', async () => {

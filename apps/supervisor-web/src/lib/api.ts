@@ -165,6 +165,17 @@ export interface ControlPlaneAuth {
   token: string;
 }
 
+export interface ControlPlaneSessionToken {
+  token: string;
+  expiresAt: string;
+}
+
+export interface ControlPlaneAuthResult {
+  user: ControlPlaneUser;
+  sandbox: ControlPlaneSandbox;
+  session: ControlPlaneSessionToken;
+}
+
 export interface ControlPlaneUser {
   id: string;
   authProvider: string;
@@ -331,6 +342,48 @@ async function controlPlaneRequest<T>(
     ...init,
     headers: controlPlaneHeaders(auth, init),
   });
+}
+
+function controlPlaneBaseUrl(baseUrl: string, path: string) {
+  return `${baseUrl.replace(/\/+$/, '')}${path}`;
+}
+
+export function controlPlaneOAuthStartUrl(
+  baseUrl: string,
+  provider: 'google' | 'github',
+  returnTo = typeof window === 'undefined' ? undefined : window.location.href,
+) {
+  const url = new URL(controlPlaneBaseUrl(baseUrl, `/api/auth/oauth/${provider}/start`));
+  if (returnTo) {
+    url.searchParams.set('returnTo', returnTo);
+  }
+  return url.toString();
+}
+
+export function registerControlPlanePasswordAccount(
+  baseUrl: string,
+  input: { email: string; password: string; displayName?: string | null },
+) {
+  return request<ControlPlaneAuthResult>(
+    controlPlaneBaseUrl(baseUrl, '/api/auth/password/register'),
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function loginControlPlanePasswordAccount(
+  baseUrl: string,
+  input: { email: string; password: string },
+) {
+  return request<ControlPlaneAuthResult>(
+    controlPlaneBaseUrl(baseUrl, '/api/auth/password/login'),
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  );
 }
 
 export function bootstrapControlPlaneUser(

@@ -37,7 +37,7 @@ describe('App', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Login' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Control plane sign in' })).toBeInTheDocument();
     });
   });
 
@@ -54,7 +54,7 @@ describe('App', () => {
     window.history.pushState({}, '', '/control-plane/login');
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input).replace('http://127.0.0.1:8790', '');
-      if (path === '/api/me/bootstrap' && init?.method === 'POST') {
+      if (path === '/api/auth/password/login' && init?.method === 'POST') {
         return Response.json({
           user: {
             id: 'user-1',
@@ -93,7 +93,10 @@ describe('App', () => {
             createdAt: '2026-05-25T00:00:00.000Z',
             updatedAt: '2026-05-25T00:00:00.000Z',
           },
-          gatewayKey: null,
+          session: {
+            token: 'session-token',
+            expiresAt: '2026-06-01T00:00:00.000Z',
+          },
         });
       }
       if (path === '/api/me') {
@@ -158,13 +161,10 @@ describe('App', () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
     await waitFor(() => {
-      expect(screen.getByText('Product account and sandbox registry')).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Login / register' }));
-    await waitFor(() => {
-      expect(screen.getByText('dev@example.com')).toBeInTheDocument();
+      expect(screen.getAllByText('dev@example.com').length).toBeGreaterThan(0);
     });
   });
 });

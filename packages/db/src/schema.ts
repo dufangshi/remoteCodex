@@ -201,6 +201,43 @@ export const controlUsers = sqliteTable(
   }),
 );
 
+export const controlAuthIdentities = sqliteTable(
+  'control_auth_identities',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull(),
+    authProvider: text('auth_provider').notNull(),
+    authSubject: text('auth_subject').notNull(),
+    email: text('email'),
+    displayName: text('display_name'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => ({
+    authSubjectUnique: uniqueIndex('control_auth_identities_subject_idx').on(
+      table.authProvider,
+      table.authSubject,
+    ),
+  }),
+);
+
+export const controlPasswordCredentials = sqliteTable(
+  'control_password_credentials',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull(),
+    email: text('email').notNull(),
+    passwordHash: text('password_hash').notNull(),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+    lastUsedAt: text('last_used_at'),
+  },
+  (table) => ({
+    emailUnique: uniqueIndex('control_password_credentials_email_idx').on(table.email),
+    userUnique: uniqueIndex('control_password_credentials_user_idx').on(table.userId),
+  }),
+);
+
 export const controlProjects = sqliteTable('control_projects', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull(),
