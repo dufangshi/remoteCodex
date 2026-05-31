@@ -257,8 +257,8 @@ Latest verified staging image run:
 
 ```text
 Workflow: Staging Images
-Run: 26703070983
-Commit: 1f27c3f
+Run: 26720736147
+Commit: 01ab5b7ed48ee92fb8e31f96dba91ada3538d907
 Result: success
 ```
 
@@ -266,14 +266,15 @@ Railway production control-plane variables are currently aligned to:
 
 ```text
 SANDBOX_WORKER_IMAGE_REPOSITORY=918876873590.dkr.ecr.ca-central-1.amazonaws.com/remote-codex-worker-staging
-SANDBOX_WORKER_IMAGE_TAG=1f27c3f4e85742ca1bbff5d31ba5ad2d2ed19f3f
-SANDBOX_DEFAULT_IMAGE=918876873590.dkr.ecr.ca-central-1.amazonaws.com/remote-codex-worker-staging:1f27c3f4e85742ca1bbff5d31ba5ad2d2ed19f3f
+SANDBOX_WORKER_IMAGE_TAG=01ab5b7ed48ee92fb8e31f96dba91ada3538d907
+SANDBOX_DEFAULT_IMAGE=918876873590.dkr.ecr.ca-central-1.amazonaws.com/remote-codex-worker-staging:01ab5b7ed48ee92fb8e31f96dba91ada3538d907
 ```
 
-EKS sandbox-router Deployment is currently aligned to:
+EKS sandbox-router Deployment was rolled out by the latest successful workflow
+run to:
 
 ```text
-918876873590.dkr.ecr.ca-central-1.amazonaws.com/remote-codex-sandbox-router-staging:1f27c3f5f69025c762c72e7a2abc17d493cb02df
+918876873590.dkr.ecr.ca-central-1.amazonaws.com/remote-codex-sandbox-router-staging:01ab5b7ed48ee92fb8e31f96dba91ada3538d907
 ```
 
 Control-plane health:
@@ -345,9 +346,6 @@ curl -fsS https://sandbox-router.lnz.app/healthz
 
 ## Known Limits
 
-- `RAILWAY_TOKEN` is not configured in GitHub repository secrets yet. Until it
-  is added, Railway worker image variables must be updated manually after image
-  pushes.
 - Railway still needs to be configured to deploy this branch automatically, or
   deployments must be triggered manually/through variable changes.
 - Worker image tag changes only affect newly created worker Pods.

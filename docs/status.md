@@ -15,7 +15,7 @@ router rollout path, see:
 docs/staging-cicd.md
 ```
 
-## 2026-05-30 Current Handoff
+## 2026-05-31 Current Handoff
 
 ### Executive Summary
 
@@ -29,6 +29,8 @@ Current shape:
 - Product auth and the UI refresh from `origin/ui-optimization` are merged.
 - GitHub Actions can build, smoke-test, and push worker/router images to ECR on
   pushes to this branch.
+- GitHub Actions now updates Railway worker image variables with `RAILWAY_TOKEN`
+  and rolls out the EKS sandbox-router Deployment after image pushes.
 - Browser-facing router traffic uses Cloudflare Flexible SSL:
   browser -> Cloudflare is HTTPS/WSS, Cloudflare -> NLB is plain HTTP.
 - `SANDBOX_ROUTER_BASE_URL` is configured as
@@ -42,9 +44,6 @@ Current shape:
 
 - Railway is not auto-deploying this branch; it watches `main`, not
   `sandbox-worker-control-plane`.
-- EKS router Deployment is not auto-updated when ECR images change; the missing
-  CD step is kubeconfig/EKS access plus a deployment image update from GitHub
-  Actions.
 - `codex_worker_prompt_e2e` needs to wait for final LLM completion and assert
   the expected assistant text.
 - EKS Auto Mode capacity should be reviewed before leaving staging running
@@ -133,26 +132,27 @@ GitHub Actions work completed:
   - updates the EKS sandbox-router Deployment image
   - waits for router rollout completion
 
-Latest known successful image build and router deploy:
+Latest known successful image build, Railway worker variable update, and router
+deploy:
 
 ```text
-commit: 1f27c3f
-result: worker/router images pushed to ECR and sandbox-router rolled out in EKS
+workflow: Staging Images
+run: 26720736147
+commit: 01ab5b7ed48ee92fb8e31f96dba91ada3538d907
+result: worker/router images pushed to ECR, Railway worker image variables updated, sandbox-router rolled out in EKS
 ```
 
-Railway production control-plane was manually updated on 2026-05-31 to:
+Railway production control-plane variables were updated by GitHub Actions on
+2026-05-31 to:
 
 ```text
-SANDBOX_WORKER_IMAGE_TAG=1f27c3f4e85742ca1bbff5d31ba5ad2d2ed19f3f
-SANDBOX_DEFAULT_IMAGE=918876873590.dkr.ecr.ca-central-1.amazonaws.com/remote-codex-worker-staging:1f27c3f4e85742ca1bbff5d31ba5ad2d2ed19f3f
+SANDBOX_WORKER_IMAGE_TAG=01ab5b7ed48ee92fb8e31f96dba91ada3538d907
+SANDBOX_DEFAULT_IMAGE=918876873590.dkr.ecr.ca-central-1.amazonaws.com/remote-codex-worker-staging:01ab5b7ed48ee92fb8e31f96dba91ada3538d907
 ```
 
 Still missing:
 
 - Railway service deployment is not yet wired to this branch.
-- GitHub secret `RAILWAY_TOKEN` is not yet configured. Until a Railway project
-  token is added, `staging-images.yml` will build/push the worker image but skip
-  the automatic Railway variable update.
 
 ## Current Deployment Shape
 
