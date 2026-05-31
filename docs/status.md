@@ -119,22 +119,33 @@ GitHub Actions work completed:
   - builds worker and router images
   - runs smoke checks
   - pushes images to ECR
+  - updates Railway control-plane worker image variables when the repo secret
+    `RAILWAY_TOKEN` is configured:
+    - `SANDBOX_WORKER_IMAGE_TAG`
+    - `SANDBOX_DEFAULT_IMAGE`
   - updates the EKS sandbox-router Deployment image
   - waits for router rollout completion
 
-Latest known successful image build:
+Latest known successful image build and router deploy:
 
 ```text
-commit: e52d81f
-result: worker and router images pushed to ECR
+commit: 6132990
+result: worker/router images pushed to ECR and sandbox-router rolled out in EKS
+```
+
+Railway production control-plane was manually updated on 2026-05-31 to:
+
+```text
+SANDBOX_WORKER_IMAGE_TAG=61329902d3518dfef8baa748c357ae8f869110fe
+SANDBOX_DEFAULT_IMAGE=918876873590.dkr.ecr.ca-central-1.amazonaws.com/remote-codex-worker-staging:61329902d3518dfef8baa748c357ae8f869110fe
 ```
 
 Still missing:
 
 - Railway service deployment is not yet wired to this branch.
-- Worker image publication is automatic, but control-plane/Railway still needs
-  to consume the desired worker image tag before newly started worker Pods will
-  use it.
+- GitHub secret `RAILWAY_TOKEN` is not yet configured. Until a Railway project
+  token is added, `staging-images.yml` will build/push the worker image but skip
+  the automatic Railway variable update.
 
 ## Current Deployment Shape
 
@@ -516,10 +527,11 @@ Recommended cost follow-up:
 1. Configure Railway GitHub integration to watch
    `sandbox-worker-control-plane`, or manually run `railway redeploy`, so the
    merged `ui-optimization` code is online.
-2. Run and verify `staging-images.yml` deploys the EKS sandbox-router image
-   after pushing to ECR.
-3. Wire the published worker image tag into the control-plane/Railway runtime
-   config used for newly started worker Pods.
+2. Add a Railway project token as GitHub secret `RAILWAY_TOKEN`, then verify
+   `staging-images.yml` automatically updates Railway worker image variables on
+   the next image build.
+3. Run and verify a new sandbox starts a worker Pod with the latest published
+   worker image tag.
 4. Deploy and verify the already-implemented workspace/session path from the
    current branch:
    - control-plane materializes worker workspaces through the sandbox-router

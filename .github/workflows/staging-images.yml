@@ -40,6 +40,8 @@ env:
   K8S_NAMESPACE: remote-codex-staging
   WORKER_ECR_REPOSITORY: remote-codex-worker-staging
   ROUTER_ECR_REPOSITORY: remote-codex-sandbox-router-staging
+  RAILWAY_CONTROL_PLANE_SERVICE: remote-codex-control-plane
+  RAILWAY_ENVIRONMENT: production
   ROUTER_DEPLOYMENT: remote-codex-sandbox-router
   ROUTER_CONTAINER: sandbox-router
 
@@ -48,6 +50,8 @@ jobs:
     name: Build and push staging images
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
     steps:
       - name: Checkout
@@ -141,6 +145,30 @@ jobs:
       - name: Push worker image
         run: |
           docker push "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${WORKER_ECR_REPOSITORY}:${{ steps.image.outputs.tag }}"
+
+      - name: Set up Node for Railway CLI
+        if: env.RAILWAY_TOKEN != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Update Railway worker image tag
+        if: env.RAILWAY_TOKEN != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          worker_image="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${WORKER_ECR_REPOSITORY}:${{ steps.image.outputs.tag }}"
+          npm install -g @railway/cli
+          railway variable set \
+            --service "${RAILWAY_CONTROL_PLANE_SERVICE}" \
+            --environment "${RAILWAY_ENVIRONMENT}" \
+            "SANDBOX_WORKER_IMAGE_TAG=${{ steps.image.outputs.tag }}" \
+            "SANDBOX_DEFAULT_IMAGE=${worker_image}"
+
+      - name: Skip Railway worker image tag update
+        if: env.RAILWAY_TOKEN == ''
+        run: |
+          echo "RAILWAY_TOKEN secret is not configured; skipped Railway worker image tag update."
 
       - name: Push sandbox router image
         run: |
