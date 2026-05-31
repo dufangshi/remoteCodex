@@ -167,6 +167,11 @@ SANDBOX_WORKER_IMAGE_TAG=<image-tag>
 SANDBOX_DEFAULT_IMAGE=<worker-ecr-repository>:<image-tag>
 ```
 
+The Railway update step retries transient Railway API failures. If
+`railway variable set` returns an error after the mutation was applied, the
+workflow checks `railway variable list --kv`; matching desired values are
+treated as success.
+
 Changing these Railway variables triggers a Railway control-plane deployment.
 Once that deployment is healthy, newly started worker Pods should use the new
 worker image tag.

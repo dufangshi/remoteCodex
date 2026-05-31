@@ -159,11 +159,32 @@ jobs:
           set -euo pipefail
           worker_image="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${WORKER_ECR_REPOSITORY}:${{ steps.image.outputs.tag }}"
           npm install -g @railway/cli
-          railway variable set \
-            --service "${RAILWAY_CONTROL_PLANE_SERVICE}" \
-            --environment "${RAILWAY_ENVIRONMENT}" \
-            "SANDBOX_WORKER_IMAGE_TAG=${{ steps.image.outputs.tag }}" \
-            "SANDBOX_DEFAULT_IMAGE=${worker_image}"
+          for attempt in 1 2 3; do
+            if railway variable set \
+              --service "${RAILWAY_CONTROL_PLANE_SERVICE}" \
+              --environment "${RAILWAY_ENVIRONMENT}" \
+              "SANDBOX_WORKER_IMAGE_TAG=${{ steps.image.outputs.tag }}" \
+              "SANDBOX_DEFAULT_IMAGE=${worker_image}"; then
+              break
+            fi
+
+            variables="$(railway variable list \
+              --service "${RAILWAY_CONTROL_PLANE_SERVICE}" \
+              --environment "${RAILWAY_ENVIRONMENT}" \
+              --kv || true)"
+            if grep -qx "SANDBOX_WORKER_IMAGE_TAG=${{ steps.image.outputs.tag }}" <<<"${variables}" &&
+              grep -qx "SANDBOX_DEFAULT_IMAGE=${worker_image}" <<<"${variables}"; then
+              echo "Railway variables match desired worker image after a failed set attempt."
+              break
+            fi
+
+            if [[ "${attempt}" == "3" ]]; then
+              echo "Railway worker image variables were not updated after ${attempt} attempts." >&2
+              exit 1
+            fi
+
+            sleep $((attempt * 10))
+          done
 
       - name: Skip Railway worker image tag update
         if: env.RAILWAY_TOKEN == ''
