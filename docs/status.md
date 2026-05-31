@@ -129,15 +129,15 @@ GitHub Actions work completed:
 Latest known successful image build and router deploy:
 
 ```text
-commit: 6132990
+commit: 1f27c3f
 result: worker/router images pushed to ECR and sandbox-router rolled out in EKS
 ```
 
 Railway production control-plane was manually updated on 2026-05-31 to:
 
 ```text
-SANDBOX_WORKER_IMAGE_TAG=61329902d3518dfef8baa748c357ae8f869110fe
-SANDBOX_DEFAULT_IMAGE=918876873590.dkr.ecr.ca-central-1.amazonaws.com/remote-codex-worker-staging:61329902d3518dfef8baa748c357ae8f869110fe
+SANDBOX_WORKER_IMAGE_TAG=1f27c3f4e85742ca1bbff5d31ba5ad2d2ed19f3f
+SANDBOX_DEFAULT_IMAGE=918876873590.dkr.ecr.ca-central-1.amazonaws.com/remote-codex-worker-staging:1f27c3f4e85742ca1bbff5d31ba5ad2d2ed19f3f
 ```
 
 Still missing:
