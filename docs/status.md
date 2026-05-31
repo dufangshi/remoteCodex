@@ -8,6 +8,13 @@ The former detailed note in `docs/2026-05-29-deployment-state.md` has been
 merged into this file. Treat this file as the current source of truth; the
 2026-05-29 note is now historical context only.
 
+For the staging image build, ECR push, Railway worker tag update, and EKS
+router rollout path, see:
+
+```text
+docs/staging-cicd.md
+```
+
 ## 2026-05-30 Current Handoff
 
 ### Executive Summary
