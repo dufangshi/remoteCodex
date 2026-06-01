@@ -181,6 +181,7 @@ jobs:
               "CONTROL_PLANE_CORS_ALLOWED_ORIGINS=${cors_allowed_origins}" \
               "SANDBOX_WORKER_DEFAULT_CODEX_MODEL=${SANDBOX_WORKER_DEFAULT_CODEX_MODEL}" \
               "SANDBOX_WORKER_DEFAULT_REASONING_EFFORT=${SANDBOX_WORKER_DEFAULT_REASONING_EFFORT}" \
+              "CONTROL_PLANE_BUILD_SHA=${GITHUB_SHA}" \
               "LLM_GATEWAY_PROVIDER=sub2api" \
               "LLM_GATEWAY_BASE_URL=${SUB2API_BASE_URL}" \
               "LLM_GATEWAY_TOKEN_SECRET_NAME=${LLM_GATEWAY_TOKEN_SECRET_NAME}" \
@@ -198,6 +199,7 @@ jobs:
               grep -qx "CONTROL_PLANE_CORS_ALLOWED_ORIGINS=${cors_allowed_origins}" <<<"${variables}" &&
               grep -qx "SANDBOX_WORKER_DEFAULT_CODEX_MODEL=${SANDBOX_WORKER_DEFAULT_CODEX_MODEL}" <<<"${variables}" &&
               grep -qx "SANDBOX_WORKER_DEFAULT_REASONING_EFFORT=${SANDBOX_WORKER_DEFAULT_REASONING_EFFORT}" <<<"${variables}" &&
+              grep -qx "CONTROL_PLANE_BUILD_SHA=${GITHUB_SHA}" <<<"${variables}" &&
               grep -qx "LLM_GATEWAY_PROVIDER=sub2api" <<<"${variables}" &&
               grep -qx "LLM_GATEWAY_BASE_URL=${SUB2API_BASE_URL}" <<<"${variables}" &&
               grep -qx "LLM_GATEWAY_TOKEN_SECRET_NAME=${LLM_GATEWAY_TOKEN_SECRET_NAME}" <<<"${variables}" &&
@@ -216,7 +218,7 @@ jobs:
           railway up \
             --service "${RAILWAY_CONTROL_PLANE_SERVICE}" \
             --environment "${RAILWAY_ENVIRONMENT}" \
-            --detach \
+            --ci \
             --message "staging control-plane ${GITHUB_SHA}"
 
       - name: Skip Railway worker image tag update

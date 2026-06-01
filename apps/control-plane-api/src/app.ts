@@ -1495,6 +1495,7 @@ export function buildControlPlaneApp(
   app.get('/healthz', async () => ({
     ok: true,
     service: 'control-plane-api',
+    buildSha: config.buildSha,
   }));
 
   app.post('/api/auth/password/register', async (request) => {

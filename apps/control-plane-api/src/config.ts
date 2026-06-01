@@ -53,6 +53,7 @@ const envSchema = z.object({
   CONTROL_PLANE_GITHUB_CLIENT_ID: z.string().min(1).optional(),
   CONTROL_PLANE_GITHUB_CLIENT_SECRET: z.string().min(1).optional(),
   CONTROL_PLANE_CORS_ALLOWED_ORIGINS: z.string().optional(),
+  CONTROL_PLANE_BUILD_SHA: z.string().min(1).optional(),
 });
 
 const DEFAULT_CORS_ALLOWED_ORIGINS = [
@@ -110,6 +111,7 @@ export interface ControlPlaneConfig {
   githubClientSecret: string | null;
   routeTokenSigningKeys: Array<{ id: string; secret: string }>;
   corsAllowedOrigins: Set<string>;
+  buildSha: string | null;
 }
 
 function parsePreviousSigningKeys(value: string | undefined) {
@@ -244,5 +246,6 @@ export function loadControlPlaneConfig(
         .map((origin) => origin.trim())
         .filter(Boolean),
     ]),
+    buildSha: parsed.CONTROL_PLANE_BUILD_SHA ?? null,
   };
 }

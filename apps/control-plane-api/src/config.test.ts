@@ -30,6 +30,7 @@ describe('control plane config', () => {
       LLM_GATEWAY_ADMIN_TOKEN: 'gateway-admin-token',
       SANDBOX_DEFAULT_RESOURCE_PROFILE: 'large',
       SANDBOX_WORKER_ENABLED_AGENT_PROVIDERS: 'codex',
+      CONTROL_PLANE_BUILD_SHA: 'abc123',
       ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
       ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: 'remote-codex-harness-app-keys',
       REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
@@ -58,6 +59,7 @@ describe('control plane config', () => {
     expect(config.llmGatewayAdminToken).toBe('gateway-admin-token');
     expect(config.sandboxDefaultResourceProfile).toBe('large');
     expect(config.sandboxWorkerEnabledAgentProviders).toBe('codex');
+    expect(config.buildSha).toBe('abc123');
     expect(config.harnessBaseUrl).toBe('https://harness.example.test');
     expect(config.harnessAppKeySecretName).toBe('remote-codex-harness-app-keys');
     expect(config.chemistryToolsEnabled).toBe(true);
