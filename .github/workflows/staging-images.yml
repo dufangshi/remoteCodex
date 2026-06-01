@@ -250,3 +250,22 @@ jobs:
             --timeout=5m
           kubectl -n "${K8S_NAMESPACE}" get deployment "${ROUTER_DEPLOYMENT}" \
             -o jsonpath='{.spec.template.spec.containers[?(@.name=="sandbox-router")].image}{"\n"}'
+
+      - name: Fetch recent control-plane error logs
+        if: always() && env.RAILWAY_TOKEN != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          railway logs \
+            --service "${RAILWAY_CONTROL_PLANE_SERVICE}" \
+            --environment "${RAILWAY_ENVIRONMENT}" \
+            --latest \
+            --lines 120 \
+            --json || true
+          railway logs \
+            --service "${RAILWAY_CONTROL_PLANE_SERVICE}" \
+            --environment "${RAILWAY_ENVIRONMENT}" \
+            --http \
+            --status "500..599" \
+            --since 30m \
+            --json || true
