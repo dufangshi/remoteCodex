@@ -175,6 +175,30 @@ describe('control plane api', () => {
     );
   });
 
+  it('allows the debug frontend origin to call password auth endpoints by default', async () => {
+    const app = buildControlPlaneApp({
+      env: testEnv('cors-debug-origin'),
+    });
+    apps.push(app);
+
+    const response = await app.inject({
+      method: 'OPTIONS',
+      url: '/api/auth/password/register',
+      headers: {
+        origin: 'https://debug.lnz-study.com',
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'content-type',
+      },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(response.headers['access-control-allow-origin']).toBe(
+      'https://debug.lnz-study.com',
+    );
+    expect(response.headers['access-control-allow-methods']).toContain('POST');
+    expect(response.headers['access-control-allow-headers']).toContain('content-type');
+  });
+
   it('does not allow unconfigured browser origins', async () => {
     const app = buildControlPlaneApp({
       env: {

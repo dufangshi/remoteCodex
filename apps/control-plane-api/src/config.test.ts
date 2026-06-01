@@ -71,7 +71,7 @@ describe('control plane config', () => {
     expect(config.sandboxWorkerEnabledAgentProviders).toBe('codex');
   });
 
-  it('allows local supervisor web dev origins by default', () => {
+  it('allows local supervisor web dev and debug origins by default', () => {
     const config = loadControlPlaneConfig({
       NODE_ENV: 'test',
       CONTROL_PLANE_DATABASE_URL: ':memory:',
@@ -79,6 +79,7 @@ describe('control plane config', () => {
 
     expect(config.corsAllowedOrigins.has('http://127.0.0.1:5173')).toBe(true);
     expect(config.corsAllowedOrigins.has('http://localhost:5173')).toBe(true);
+    expect(config.corsAllowedOrigins.has('https://debug.lnz-study.com')).toBe(true);
   });
 
   it('requires a harness base URL when chemistry tools are enabled', () => {
