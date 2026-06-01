@@ -638,6 +638,46 @@ describe('control plane api', () => {
     });
   });
 
+  it('accepts empty JSON bodies on sandbox lifecycle actions', async () => {
+    const sandboxManager = new RecordingSandboxManager();
+    const app = buildControlPlaneApp({
+      env: testEnv('empty-json-lifecycle'),
+      sandboxManager,
+    });
+    apps.push(app);
+
+    const auth = {
+      authorization: 'Bearer dev:empty-json-lifecycle-user',
+      'content-type': 'application/json',
+    };
+    const bootstrap = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: auth,
+      payload: {
+        email: 'empty-json-lifecycle@example.com',
+      },
+    });
+    expect(bootstrap.statusCode).toBe(200);
+
+    const started = await app.inject({
+      method: 'POST',
+      url: '/api/sandbox/start',
+      headers: auth,
+    });
+    expect(started.statusCode).toBe(200);
+    expect(started.json().sandbox.state).toBe('running');
+
+    const restarted = await app.inject({
+      method: 'POST',
+      url: '/api/sandbox/restart',
+      headers: auth,
+    });
+    expect(restarted.statusCode).toBe(200);
+    expect(restarted.json().sandbox.state).toBe('running');
+    expect(sandboxManager.starts).toHaveLength(2);
+  });
+
   it('keeps account bootstrap idempotent for the authenticated identity', async () => {
     const app = buildControlPlaneApp({ env: testEnv('bootstrap-idempotent') });
     apps.push(app);

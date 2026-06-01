@@ -84,10 +84,6 @@ function sandboxLifecycleErrorMessage(operation: string, error: unknown) {
   return `Unable to ${operation} sandbox: ${message}`;
 }
 
-function sanitizedUnknownErrorMessage(error: unknown) {
-  return sandboxLifecycleErrorMessage('run', error).replace(/^Unable to run sandbox: /, '');
-}
-
 async function withSandboxLifecycleError<T>(operation: string, task: () => Promise<T>): Promise<T> {
   try {
     return await task();
@@ -97,6 +93,22 @@ async function withSandboxLifecycleError<T>(operation: string, task: () => Promi
     }
     throw new SandboxManagerError('provider', sandboxLifecycleErrorMessage(operation, error));
   }
+}
+
+function registerJsonParser(app: FastifyInstance) {
+  const defaultJsonParser = app.getDefaultJsonParser('error', 'ignore');
+  app.removeContentTypeParser('application/json');
+  app.addContentTypeParser<string>(
+    'application/json',
+    { parseAs: 'string' },
+    (request, body, done) => {
+      if (!body.trim()) {
+        done(null, {});
+        return;
+      }
+      defaultJsonParser(request, body, done);
+    },
+  );
 }
 
 declare module 'fastify' {
@@ -279,7 +291,7 @@ function requireGatewayKeyContext(app: FastifyInstance, sandboxId: string) {
   };
 }
 
-function toErrorPayload(error: unknown, options: { exposeUnknownMessage?: boolean } = {}) {
+function toErrorPayload(error: unknown) {
   if (error instanceof HttpError) {
     return {
       statusCode: error.statusCode,
@@ -340,9 +352,7 @@ function toErrorPayload(error: unknown, options: { exposeUnknownMessage?: boolea
     statusCode: 500,
     payload: {
       code: 'internal_error',
-      message: options.exposeUnknownMessage
-        ? `Unexpected control plane error: ${sanitizedUnknownErrorMessage(error)}`
-        : 'Unexpected control plane error.',
+      message: 'Unexpected control plane error.',
     },
   };
 }
@@ -1475,6 +1485,7 @@ export function buildControlPlaneApp(
     disableRequestLogging: config.disableRequestLogging,
   });
 
+  registerJsonParser(app);
   registerCorsHooks(app, config);
 
   const runtimeEnv = options.env ?? process.env;
@@ -1501,12 +1512,8 @@ export function buildControlPlaneApp(
 
   app.decorate('services', services);
 
-  app.setErrorHandler((error, request, reply) => {
-    const { statusCode, payload } = toErrorPayload(error, {
-      exposeUnknownMessage:
-        request.method === 'POST' &&
-        (request.url === '/api/sandbox/start' || request.url === '/api/sandbox/restart'),
-    });
+  app.setErrorHandler((error, _request, reply) => {
+    const { statusCode, payload } = toErrorPayload(error);
     if (statusCode >= 500) {
       app.log.error(error);
     }
