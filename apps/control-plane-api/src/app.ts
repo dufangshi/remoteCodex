@@ -1040,6 +1040,64 @@ async function sendWorkerThreadPrompt(
   });
 }
 
+async function materializeControlPlaneSession(
+  app: FastifyInstance,
+  input: {
+    session: {
+      id: string;
+      provider: string;
+      title: string;
+    };
+    sandbox: {
+      id: string;
+      state: string;
+      k8sNamespace: string | null;
+      workerServiceName: string | null;
+    };
+    workspace: {
+      id: string;
+      userId: string;
+      projectId: string | null;
+      path: string;
+      name: string;
+      sourceType: string;
+      gitUrl: string | null;
+    };
+  },
+) {
+  if (!canControlRunningWorker(app, input.sandbox)) {
+    throw new HttpError(
+      409,
+      'worker_session_unavailable',
+      'Sandbox must be running before this session can be started in the worker.',
+    );
+  }
+  const provider = createSessionSchema.shape.provider.parse(input.session.provider);
+  const workerThread = await createWorkerThreadSession(app, {
+    sandbox: input.sandbox,
+    workspace: input.workspace,
+    provider,
+    title: input.session.title,
+  });
+  return app.services.repository.updateSession(input.session.id, {
+    status: 'active',
+    workerSessionId: workerThread.id,
+  });
+}
+
+function requireMaterializedSession<T extends { id: string; workerSessionId: string | null }>(
+  session: T | undefined,
+) {
+  if (!session?.workerSessionId) {
+    throw new HttpError(
+      500,
+      'worker_session_unavailable',
+      'Control-plane session materialization did not persist a worker session id.',
+    );
+  }
+  return session as T & { workerSessionId: string };
+}
+
 async function sendWorkerSessionLifecycleRequest(
   app: FastifyInstance,
   input: {
@@ -2364,37 +2422,42 @@ export function buildControlPlaneApp(
     }
 
     if (!session.workerSessionId) {
-      if (!canControlRunningWorker(app, sandbox)) {
-        throw new HttpError(
-          409,
-          'worker_session_unavailable',
-          'Sandbox must be running before this session can be started in the worker.',
-        );
-      }
-      const provider = createSessionSchema.shape.provider.parse(session.provider);
-      const workerThread = await createWorkerThreadSession(app, {
-        sandbox,
-        workspace,
-        provider,
-        title: session.title,
-      });
       return {
-        session: repository.updateSession(session.id, {
-          status: 'active',
-          workerSessionId: workerThread.id,
+        session: await materializeControlPlaneSession(app, {
+          session,
+          sandbox,
+          workspace,
         }),
       };
     }
 
-    await sendWorkerSessionLifecycleRequest(app, {
-      sandbox,
-      userId: user.id,
-      projectId: workspace.projectId,
-      workspaceId: session.workspaceId,
-      sessionId: session.id,
-      workerSessionId: session.workerSessionId,
-      action: 'resume',
-    });
+    try {
+      await sendWorkerSessionLifecycleRequest(app, {
+        sandbox,
+        userId: user.id,
+        projectId: workspace.projectId,
+        workspaceId: session.workspaceId,
+        sessionId: session.id,
+        workerSessionId: session.workerSessionId,
+        action: 'resume',
+      });
+    } catch (error) {
+      if (
+        error instanceof HttpError &&
+        error.code === 'worker_session_unavailable' &&
+        canControlRunningWorker(app, sandbox)
+      ) {
+        return {
+          session: await materializeControlPlaneSession(app, {
+            session,
+            sandbox,
+            workspace,
+          }),
+        };
+      }
+      throw error;
+    }
+
     return {
       session: repository.updateSession(session.id, { status: 'active' }),
     };
@@ -2404,7 +2467,7 @@ export function buildControlPlaneApp(
     const user = requireUser(app, request);
     const params = z.object({ sessionId: z.string().uuid() }).parse(request.params);
     const input = sendSessionPromptSchema.parse(request.body);
-    const session = repository.getSessionById(params.sessionId);
+    let session = repository.getSessionById(params.sessionId);
     if (!session || session.userId !== user.id) {
       throw new HttpError(404, 'not_found', 'Session not found.');
     }
@@ -2412,30 +2475,65 @@ export function buildControlPlaneApp(
     if (!sandbox || sandbox.userId !== user.id) {
       throw new HttpError(404, 'not_found', 'Sandbox not found.');
     }
-    if (!session.workerSessionId) {
-      throw new HttpError(
-        409,
-        'worker_session_unavailable',
-        'Session does not have a worker session id yet.',
-      );
-    }
     const workspace = repository.getWorkspaceById(session.workspaceId);
     if (!workspace || workspace.userId !== user.id) {
       throw new HttpError(404, 'not_found', 'Workspace not found.');
     }
-    const turn = await sendWorkerThreadPrompt(app, {
-      sandbox,
-      userId: user.id,
-      projectId: workspace.projectId,
-      sessionId: session.id,
-      workerSessionId: session.workerSessionId,
-      prompt: input.prompt,
-      ...(input.model ? { model: input.model } : {}),
-    });
-    return {
-      session: repository.updateSession(session.id, { status: 'active' }),
-      turn,
-    };
+
+    if (!session.workerSessionId) {
+      session = requireMaterializedSession(
+        await materializeControlPlaneSession(app, {
+          session,
+          sandbox,
+          workspace,
+        }),
+      );
+    }
+    const materializedSession = requireMaterializedSession(session);
+
+    try {
+      const turn = await sendWorkerThreadPrompt(app, {
+        sandbox,
+        userId: user.id,
+        projectId: workspace.projectId,
+        sessionId: materializedSession.id,
+        workerSessionId: materializedSession.workerSessionId,
+        prompt: input.prompt,
+        ...(input.model ? { model: input.model } : {}),
+      });
+      return {
+        session: repository.updateSession(materializedSession.id, { status: 'active' }),
+        turn,
+      };
+    } catch (error) {
+      if (
+        error instanceof HttpError &&
+        error.code === 'worker_turn_unavailable' &&
+        canControlRunningWorker(app, sandbox)
+      ) {
+        const rematerialized = requireMaterializedSession(
+          await materializeControlPlaneSession(app, {
+            session: materializedSession,
+            sandbox,
+            workspace,
+          }),
+        );
+        const turn = await sendWorkerThreadPrompt(app, {
+          sandbox,
+          userId: user.id,
+          projectId: workspace.projectId,
+          sessionId: rematerialized.id,
+          workerSessionId: rematerialized.workerSessionId,
+          prompt: input.prompt,
+          ...(input.model ? { model: input.model } : {}),
+        });
+        return {
+          session: repository.updateSession(rematerialized.id, { status: 'active' }),
+          turn,
+        };
+      }
+      throw error;
+    }
   });
 
   app.post('/api/sandboxes/:sandboxId/route-token', async (request) => {

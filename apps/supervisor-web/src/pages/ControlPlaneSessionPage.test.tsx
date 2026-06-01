@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ControlPlaneSessionPage } from './ControlPlaneSessionPage';
 
@@ -143,6 +143,11 @@ const threadDetail = {
   pendingSteers: [],
 };
 
+function setPromptValue(element: HTMLElement, value: string) {
+  element.textContent = value;
+  fireEvent.input(element);
+}
+
 describe('ControlPlaneSessionPage', () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -200,6 +205,10 @@ describe('ControlPlaneSessionPage', () => {
     );
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('opens a control-plane session through the router and sends prompts to the worker thread', async () => {
     render(
       <MemoryRouter initialEntries={['/control-plane/sessions/session-1']}>
@@ -216,13 +225,11 @@ describe('ControlPlaneSessionPage', () => {
     expect(screen.getByText('Hello remote worker')).toBeInTheDocument();
     expect(screen.getByText('Ready from sandbox')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByPlaceholderText(/send a prompt/i), {
-      target: { value: 'Continue from here' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    setPromptValue(screen.getByRole('textbox', { name: 'Prompt' }), 'Continue from here');
+    fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
 
     await waitFor(() => {
-      expect(screen.getByText('Prompt sent.')).toBeInTheDocument();
+      expect(screen.getByText('Prompt sent. Waiting for worker updates...')).toBeInTheDocument();
     });
 
     const promptCall = vi.mocked(fetch).mock.calls.find(
@@ -260,5 +267,217 @@ describe('ControlPlaneSessionPage', () => {
         ([input]) => String(input) === `${baseUrl}/api/sessions/session-1/thread`,
       ),
     ).toBe(false);
+  });
+
+  it('polls the router while a prompt turn is running', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const runningThreadDetail = {
+      ...threadDetail,
+      thread: {
+        ...threadDetail.thread,
+        status: 'running',
+        activeTurnId: 'turn-2',
+      },
+      turns: [
+        ...threadDetail.turns,
+        {
+          id: 'turn-2',
+          startedAt: '2026-05-25T00:03:00.000Z',
+          status: 'running',
+          error: null,
+          items: [
+            {
+              id: 'item-3',
+              kind: 'userMessage',
+              text: 'Keep going',
+            },
+          ],
+        },
+      ],
+      totalTurnCount: 2,
+    };
+    let threadReads = 0;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
+
+      if (path === '/api/me' && !init?.method) {
+        return jsonResponse({ user, sandbox, usage: {} });
+      }
+      if (path === '/api/projects' && !init?.method) {
+        return jsonResponse({ projects: [project] });
+      }
+      if (path === '/api/workspaces?projectId=project-1' && !init?.method) {
+        return jsonResponse({ workspaces: [workspace] });
+      }
+      if (path === '/api/workspaces/workspace-1/sessions' && !init?.method) {
+        return jsonResponse({ sessions: [session] });
+      }
+      if (path === '/api/sessions/session-1/resume' && init?.method === 'POST') {
+        return jsonResponse({ session });
+      }
+      if (path === '/api/sandboxes/sandbox-1/route-token' && init?.method === 'POST') {
+        return jsonResponse({
+          sandboxId: 'sandbox-1',
+          routerBaseUrl,
+          wsBaseUrl: 'wss://router.example.test',
+          token: 'route-token',
+          expiresAt: '2026-05-25T00:05:00.000Z',
+        });
+      }
+      if (url === `${routerBaseUrl}/api/sandboxes/sandbox-1/api/threads/worker-session-1`) {
+        threadReads += 1;
+        return jsonResponse(threadReads === 1 ? runningThreadDetail : threadDetail);
+      }
+
+      return jsonResponse({ code: 'not_found', message: `Unhandled request: ${url}` }, 404);
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/control-plane/sessions/session-1']}>
+        <Routes>
+          <Route path="/control-plane/sessions/:sessionId" element={<ControlPlaneSessionPage />} />
+          <Route path="/control-plane/login" element={<div>Login</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Keep going')).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Ready from sandbox')).toBeInTheDocument();
+    });
+    expect(threadReads).toBeGreaterThanOrEqual(2);
+  });
+
+  it('reconnects and retries a prompt when the worker thread disappeared after page load', async () => {
+    const rematerializedSession = {
+      ...session,
+      workerSessionId: 'worker-session-2',
+    };
+    const rematerializedThreadDetail = {
+      ...threadDetail,
+      thread: {
+        ...threadDetail.thread,
+        id: 'worker-session-2',
+        status: 'running',
+        activeTurnId: 'turn-2',
+      },
+      turns: [
+        ...threadDetail.turns,
+        {
+          id: 'turn-2',
+          startedAt: '2026-05-25T00:03:00.000Z',
+          status: 'running',
+          error: null,
+          items: [
+            {
+              id: 'item-3',
+              kind: 'userMessage',
+              text: 'Retry after worker restart',
+            },
+          ],
+        },
+      ],
+      totalTurnCount: 2,
+    };
+    let resumeCount = 0;
+
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
+
+      if (path === '/api/me' && !init?.method) {
+        return jsonResponse({ user, sandbox, usage: {} });
+      }
+      if (path === '/api/projects' && !init?.method) {
+        return jsonResponse({ projects: [project] });
+      }
+      if (path === '/api/workspaces?projectId=project-1' && !init?.method) {
+        return jsonResponse({ workspaces: [workspace] });
+      }
+      if (path === '/api/workspaces/workspace-1/sessions' && !init?.method) {
+        return jsonResponse({ sessions: [session] });
+      }
+      if (path === '/api/sessions/session-1/resume' && init?.method === 'POST') {
+        resumeCount += 1;
+        return jsonResponse({ session: resumeCount === 1 ? session : rematerializedSession });
+      }
+      if (path === '/api/sandboxes/sandbox-1/route-token' && init?.method === 'POST') {
+        return jsonResponse({
+          sandboxId: 'sandbox-1',
+          routerBaseUrl,
+          wsBaseUrl: 'wss://router.example.test',
+          token: 'route-token',
+          expiresAt: '2026-05-25T00:05:00.000Z',
+        });
+      }
+      if (url === `${routerBaseUrl}/api/sandboxes/sandbox-1/api/threads/worker-session-1`) {
+        return jsonResponse(threadDetail);
+      }
+      if (
+        url === `${routerBaseUrl}/api/sandboxes/sandbox-1/api/threads/worker-session-1/prompt` &&
+        init?.method === 'POST'
+      ) {
+        return jsonResponse({ code: 'not_found', message: 'Thread not found.' }, 404);
+      }
+      if (url === `${routerBaseUrl}/api/sandboxes/sandbox-1/api/threads/worker-session-2`) {
+        return jsonResponse(rematerializedThreadDetail);
+      }
+      if (
+        url === `${routerBaseUrl}/api/sandboxes/sandbox-1/api/threads/worker-session-2/prompt` &&
+        init?.method === 'POST'
+      ) {
+        return jsonResponse({ ...rematerializedThreadDetail.thread, status: 'running' });
+      }
+
+      return jsonResponse({ code: 'not_found', message: `Unhandled request: ${url}` }, 404);
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/control-plane/sessions/session-1']}>
+        <Routes>
+          <Route path="/control-plane/sessions/:sessionId" element={<ControlPlaneSessionPage />} />
+          <Route path="/control-plane/login" element={<div>Login</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Plan calculation' })).toBeInTheDocument();
+    });
+
+    setPromptValue(
+      screen.getByRole('textbox', { name: 'Prompt' }),
+      'Retry after worker restart',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('Prompt sent after reconnect. Waiting for worker updates...'),
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByText('Retry after worker restart')).toBeInTheDocument();
+
+    const oldPromptCall = vi.mocked(fetch).mock.calls.find(
+      ([input]) =>
+        String(input) ===
+        `${routerBaseUrl}/api/sandboxes/sandbox-1/api/threads/worker-session-1/prompt`,
+    );
+    const newPromptCall = vi.mocked(fetch).mock.calls.find(
+      ([input]) =>
+        String(input) ===
+        `${routerBaseUrl}/api/sandboxes/sandbox-1/api/threads/worker-session-2/prompt`,
+    );
+    expect(oldPromptCall?.[1]?.method).toBe('POST');
+    expect(newPromptCall?.[1]?.method).toBe('POST');
+    expect(new Headers(newPromptCall?.[1]?.headers).get('Authorization')).toBe('Bearer route-token');
   });
 });

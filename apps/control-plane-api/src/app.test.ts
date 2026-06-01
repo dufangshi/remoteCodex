@@ -1856,6 +1856,247 @@ describe('control plane api', () => {
     }
   });
 
+  it('recreates stale worker sessions on resume after worker storage is reset', async () => {
+    const workerRequests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      workerRequests.push({ url: String(url), init });
+      const requestUrl = String(url);
+      if (requestUrl.endsWith('/api/threads/stale-worker-session/resume')) {
+        return Response.json({ code: 'not_found', message: 'Thread not found.' }, { status: 404 });
+      }
+      if (requestUrl.endsWith('/api/workspaces')) {
+        return Response.json({ id: 'worker-workspace-after-reset' });
+      }
+      if (requestUrl.endsWith('/api/threads/start')) {
+        return Response.json({
+          id: 'worker-session-after-reset',
+          providerSessionId: 'codex-session-after-reset',
+        });
+      }
+      return Response.json({ message: 'unexpected worker request' }, { status: 404 });
+    }) as typeof fetch;
+
+    try {
+      const app = buildControlPlaneApp({
+        env: {
+          ...testEnv('session-stale-resume'),
+          SANDBOX_WORKER_AUTH_TOKEN: 'internal-worker-session-token',
+        },
+      });
+      apps.push(app);
+
+      const auth = { authorization: 'Bearer dev:stale-resume-owner' };
+      await app.inject({
+        method: 'POST',
+        url: '/api/me/bootstrap',
+        headers: auth,
+        payload: {
+          email: 'stale-resume-owner@example.com',
+        },
+      });
+
+      const projectResponse = await app.inject({
+        method: 'POST',
+        url: '/api/projects',
+        headers: auth,
+        payload: {
+          name: 'Stale Resume Project',
+          slug: 'stale-resume-project',
+        },
+      });
+      const workspaceResponse = await app.inject({
+        method: 'POST',
+        url: `/api/projects/${projectResponse.json().project.id}/workspaces`,
+        headers: auth,
+        payload: {
+          name: 'Stale Resume Workspace',
+          slug: 'stale-resume-workspace',
+        },
+      });
+      const sessionResponse = await app.inject({
+        method: 'POST',
+        url: `/api/workspaces/${workspaceResponse.json().workspace.id}/sessions`,
+        headers: auth,
+        payload: {
+          provider: 'codex',
+          title: 'Stale Resume Session',
+        },
+      });
+
+      await app.inject({
+        method: 'POST',
+        url: '/api/sandbox/start',
+        headers: auth,
+      });
+      await app.inject({
+        method: 'PATCH',
+        url: `/api/sessions/${sessionResponse.json().session.id}`,
+        headers: auth,
+        payload: {
+          status: 'idle',
+          workerSessionId: 'stale-worker-session',
+        },
+      });
+      workerRequests.length = 0;
+
+      const resume = await app.inject({
+        method: 'POST',
+        url: `/api/sessions/${sessionResponse.json().session.id}/resume`,
+        headers: auth,
+      });
+      expect(resume.statusCode).toBe(200);
+      expect(resume.json().session).toMatchObject({
+        status: 'active',
+        workerSessionId: 'worker-session-after-reset',
+      });
+
+      const requestUrls = workerRequests.map((request) => request.url);
+      expect(requestUrls).toEqual([
+        `https://sandbox-gateway.test/api/sandboxes/${resume.json().session.sandboxId}/api/threads/stale-worker-session/resume`,
+        `https://sandbox-gateway.test/api/sandboxes/${resume.json().session.sandboxId}/api/workspaces`,
+        `https://sandbox-gateway.test/api/sandboxes/${resume.json().session.sandboxId}/api/threads/start`,
+      ]);
+      expect(JSON.parse(String(workerRequests.at(-1)?.init?.body))).toMatchObject({
+        workspaceId: 'worker-workspace-after-reset',
+        provider: 'codex',
+        title: 'Stale Resume Session',
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('recreates stale worker sessions and retries prompts when worker storage is reset', async () => {
+    const workerRequests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      workerRequests.push({ url: String(url), init });
+      const requestUrl = String(url);
+      if (requestUrl.endsWith('/api/threads/stale-worker-session/prompt')) {
+        return Response.json({ code: 'not_found', message: 'Thread not found.' }, { status: 404 });
+      }
+      if (requestUrl.endsWith('/api/workspaces')) {
+        return Response.json({ id: 'worker-workspace-after-prompt-reset' });
+      }
+      if (requestUrl.endsWith('/api/threads/start')) {
+        return Response.json({
+          id: 'worker-session-after-prompt-reset',
+          providerSessionId: 'codex-session-after-prompt-reset',
+        });
+      }
+      if (requestUrl.endsWith('/api/threads/worker-session-after-prompt-reset/prompt')) {
+        return Response.json({
+          turn: {
+            id: 'turn-after-reset',
+            status: 'running',
+          },
+        });
+      }
+      return Response.json({ message: 'unexpected worker request' }, { status: 404 });
+    }) as typeof fetch;
+
+    try {
+      const app = buildControlPlaneApp({
+        env: {
+          ...testEnv('session-stale-prompt'),
+          SANDBOX_WORKER_AUTH_TOKEN: 'internal-worker-session-token',
+        },
+      });
+      apps.push(app);
+
+      const auth = { authorization: 'Bearer dev:stale-prompt-owner' };
+      await app.inject({
+        method: 'POST',
+        url: '/api/me/bootstrap',
+        headers: auth,
+        payload: {
+          email: 'stale-prompt-owner@example.com',
+        },
+      });
+
+      const projectResponse = await app.inject({
+        method: 'POST',
+        url: '/api/projects',
+        headers: auth,
+        payload: {
+          name: 'Stale Prompt Project',
+          slug: 'stale-prompt-project',
+        },
+      });
+      const workspaceResponse = await app.inject({
+        method: 'POST',
+        url: `/api/projects/${projectResponse.json().project.id}/workspaces`,
+        headers: auth,
+        payload: {
+          name: 'Stale Prompt Workspace',
+          slug: 'stale-prompt-workspace',
+        },
+      });
+      const sessionResponse = await app.inject({
+        method: 'POST',
+        url: `/api/workspaces/${workspaceResponse.json().workspace.id}/sessions`,
+        headers: auth,
+        payload: {
+          provider: 'codex',
+          title: 'Stale Prompt Session',
+        },
+      });
+
+      await app.inject({
+        method: 'POST',
+        url: '/api/sandbox/start',
+        headers: auth,
+      });
+      await app.inject({
+        method: 'PATCH',
+        url: `/api/sessions/${sessionResponse.json().session.id}`,
+        headers: auth,
+        payload: {
+          status: 'active',
+          workerSessionId: 'stale-worker-session',
+        },
+      });
+      workerRequests.length = 0;
+
+      const prompt = await app.inject({
+        method: 'POST',
+        url: `/api/sessions/${sessionResponse.json().session.id}/prompt`,
+        headers: auth,
+        payload: {
+          prompt: 'Continue after redeploy.',
+        },
+      });
+      expect(prompt.statusCode).toBe(200);
+      expect(prompt.json().session).toMatchObject({
+        status: 'active',
+        workerSessionId: 'worker-session-after-prompt-reset',
+      });
+      expect(prompt.json().turn).toMatchObject({
+        turn: {
+          id: 'turn-after-reset',
+          status: 'running',
+        },
+      });
+
+      const requestUrls = workerRequests.map((request) => request.url);
+      expect(requestUrls).toEqual([
+        `https://sandbox-gateway.test/api/sandboxes/${prompt.json().session.sandboxId}/api/threads/stale-worker-session/prompt`,
+        `https://sandbox-gateway.test/api/sandboxes/${prompt.json().session.sandboxId}/api/workspaces`,
+        `https://sandbox-gateway.test/api/sandboxes/${prompt.json().session.sandboxId}/api/threads/start`,
+        `https://sandbox-gateway.test/api/sandboxes/${prompt.json().session.sandboxId}/api/threads/worker-session-after-prompt-reset/prompt`,
+      ]);
+      expect(JSON.parse(String(workerRequests[0]?.init?.body))).toMatchObject({
+        prompt: 'Continue after redeploy.',
+      });
+      expect(JSON.parse(String(workerRequests.at(-1)?.init?.body))).toMatchObject({
+        prompt: 'Continue after redeploy.',
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('paginates project, workspace, and session lists', async () => {
     const app = buildControlPlaneApp({ env: testEnv('product-list-pagination') });
     apps.push(app);

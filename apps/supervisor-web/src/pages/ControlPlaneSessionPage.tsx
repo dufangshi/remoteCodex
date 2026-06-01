@@ -1,9 +1,9 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import type {
+  AgentProviderCapabilitiesDto,
   ThreadDetailDto,
-  ThreadHistoryItemDto,
 } from '../../../../packages/shared/src/index';
 import {
   ApiError,
@@ -21,12 +21,40 @@ import {
   type ControlPlaneSandbox,
   type ControlPlaneSession,
   type ControlPlaneWorkspace,
+  type PromptAttachmentUpload,
 } from '../lib/api';
 import { formatLongTimestamp } from '../components/threadPresentation';
+import { ThreadComposer } from '../components/ThreadComposer';
+import { ThreadTimeline } from '../components/ThreadTimeline';
 import {
   clearStoredControlPlaneAuth,
   readStoredControlPlaneAuth,
 } from './controlPlaneAuthStorage';
+
+const REMOTE_THREAD_REFRESH_INTERVAL_MS = 3000;
+
+const controlPlaneCapabilities: AgentProviderCapabilitiesDto = {
+  sessions: { list: false, read: true, resume: true, importLocal: false },
+  turns: { start: true, streamInput: false, steer: false, interrupt: false, compact: false },
+  branching: { fork: false, hardRollback: false, resumeAt: false, rewindFiles: false },
+  controls: {
+    planMode: false,
+    permissionRequests: false,
+    sandboxMode: false,
+    performanceMode: false,
+    goals: false,
+  },
+  management: {
+    models: false,
+    mcpStatus: false,
+    skills: false,
+    hooks: false,
+    hookTrust: false,
+    hostConfigFiles: false,
+    providerSettings: false,
+  },
+  usage: { contextWindow: true, tokenUsage: true, costUsd: false },
+};
 
 function storedAuth(): ControlPlaneAuth | null {
   const stored = readStoredControlPlaneAuth();
@@ -39,46 +67,6 @@ function storedAuth(): ControlPlaneAuth | null {
   };
 }
 
-function itemLabel(item: ThreadHistoryItemDto) {
-  switch (item.kind) {
-    case 'userMessage':
-      return 'You';
-    case 'agentMessage':
-      return 'Codex';
-    case 'commandExecution':
-      return 'Command';
-    case 'fileChange':
-      return 'File change';
-    case 'reasoning':
-      return 'Reasoning';
-    case 'plan':
-      return 'Plan';
-    case 'webSearch':
-      return 'Web search';
-    case 'fileRead':
-      return 'File read';
-    default:
-      return item.kind;
-  }
-}
-
-function itemText(item: ThreadHistoryItemDto) {
-  return item.text || item.previewText || item.detailText || '';
-}
-
-function flattenThreadItems(detail: ThreadDetailDto | null) {
-  return (
-    detail?.turns.flatMap((turn) =>
-      turn.items.map((item) => ({
-        ...item,
-        turnId: turn.id,
-        turnStatus: turn.status,
-        startedAt: turn.startedAt,
-      })),
-    ) ?? []
-  );
-}
-
 export function ControlPlaneSessionPage() {
   const { sessionId = '' } = useParams();
   const navigate = useNavigate();
@@ -89,16 +77,21 @@ export function ControlPlaneSessionPage() {
   const [session, setSession] = useState<ControlPlaneSession | null>(null);
   const [routeToken, setRouteToken] = useState<ControlPlaneRouteToken | null>(null);
   const [detail, setDetail] = useState<ThreadDetailDto | null>(null);
-  const [prompt, setPrompt] = useState('');
+  const [draft, setDraft] = useState<{ prompt: string; attachments: PromptAttachmentUpload[] }>({
+    prompt: '',
+    attachments: [],
+  });
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [scrollRequestKey, setScrollRequestKey] = useState(0);
+  const reconnectingRef = useRef(false);
 
-  async function loadSession() {
+  const loadSession = useCallback(async () => {
     if (!auth) {
       navigate('/control-plane/login', { replace: true });
-      return;
+      return null;
     }
     setLoading(true);
     setError(null);
@@ -110,7 +103,7 @@ export function ControlPlaneSessionPage() {
         setRouteToken(null);
         setDetail(null);
         setError('Sandbox is not running. Start the sandbox from the control plane before opening chat.');
-        return;
+        return null;
       }
 
       const projectsResult = await fetchControlPlaneProjects(auth);
@@ -137,47 +130,88 @@ export function ControlPlaneSessionPage() {
           if (!resumed.session.workerSessionId) {
             setDetail(null);
             setError('Session resumed, but the worker did not return a thread id.');
-            return;
+            return null;
           }
-          setDetail(await fetchControlPlaneWorkerThread(token, resumed.session.workerSessionId));
+          const thread = await fetchControlPlaneWorkerThread(token, resumed.session.workerSessionId);
+          setDetail(thread);
+          setScrollRequestKey((current) => current + 1);
           setMessage('Chat session connected.');
-          return;
+          return { session: resumed.session, token, detail: thread };
         }
       }
       setError('Session was not found in any project workspace.');
+      return null;
     } catch (caught) {
       if (caught instanceof ApiError && caught.payload.code === 'unauthorized') {
         clearStoredControlPlaneAuth();
         navigate('/control-plane/login', { replace: true });
-        return;
+        return null;
       }
       setError(caught instanceof Error ? caught.message : 'Unable to open control-plane session.');
+      return null;
     } finally {
       setLoading(false);
     }
-  }
+  }, [auth, navigate, sessionId]);
 
   useEffect(() => {
     void loadSession();
-  }, [sessionId]);
+  }, [loadSession]);
 
-  async function refreshThread() {
+  const refreshThread = useCallback(async (input: { silent?: boolean } = {}) => {
     if (!routeToken || !session?.workerSessionId) {
       return;
     }
-    setError(null);
+    if (!input.silent) {
+      setError(null);
+    }
     try {
       setDetail(await fetchControlPlaneWorkerThread(routeToken, session.workerSessionId));
     } catch (caught) {
+      if (
+        caught instanceof ApiError &&
+        (caught.statusCode === 404 || caught.statusCode === 409) &&
+        !reconnectingRef.current
+      ) {
+        reconnectingRef.current = true;
+        try {
+          setMessage('Worker thread was not found. Reconnecting this session...');
+          await loadSession();
+          return;
+        } finally {
+          reconnectingRef.current = false;
+        }
+      }
       setError(caught instanceof Error ? caught.message : 'Unable to refresh worker thread.');
     }
-  }
+  }, [loadSession, routeToken, session?.workerSessionId]);
 
-  async function handlePromptSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const trimmed = prompt.trim();
-    if (!trimmed || !routeToken || !session?.workerSessionId) {
+  useEffect(() => {
+    const active =
+      detail?.thread.status === 'running' || Boolean(detail?.thread.activeTurnId) || sending;
+    if (!active || !routeToken || !session?.workerSessionId) {
       return;
+    }
+    const interval = window.setInterval(() => {
+      void refreshThread({ silent: true });
+    }, REMOTE_THREAD_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, [
+    detail?.thread.activeTurnId,
+    detail?.thread.status,
+    refreshThread,
+    routeToken,
+    sending,
+    session?.workerSessionId,
+  ]);
+
+  async function handlePromptSubmit(input: {
+    prompt: string;
+    attachments?: PromptAttachmentUpload[];
+  }) {
+    const trimmed = input.prompt.trim();
+    if (!trimmed || !routeToken || !session?.workerSessionId) {
+      return false;
     }
     setSending(true);
     setError(null);
@@ -186,18 +220,60 @@ export function ControlPlaneSessionPage() {
       await sendControlPlaneWorkerThreadPrompt(routeToken, session.workerSessionId, {
         prompt: trimmed,
       });
-      setPrompt('');
-      setMessage('Prompt sent.');
+      setDraft({ prompt: '', attachments: [] });
+      setMessage('Prompt sent. Waiting for worker updates...');
       await refreshThread();
+      setScrollRequestKey((current) => current + 1);
+      return true;
     } catch (caught) {
+      if (
+        caught instanceof ApiError &&
+        (caught.statusCode === 404 || caught.statusCode === 409) &&
+        !reconnectingRef.current
+      ) {
+        reconnectingRef.current = true;
+        try {
+          setMessage('Worker thread was not found. Reconnecting this session...');
+          const reconnected = await loadSession();
+          if (!reconnected?.session.workerSessionId) {
+            throw caught;
+          }
+          await sendControlPlaneWorkerThreadPrompt(
+            reconnected.token,
+            reconnected.session.workerSessionId,
+            {
+              prompt: trimmed,
+            },
+          );
+          const thread = await fetchControlPlaneWorkerThread(
+            reconnected.token,
+            reconnected.session.workerSessionId,
+          );
+          setDetail(thread);
+          setDraft({ prompt: '', attachments: [] });
+          setMessage('Prompt sent after reconnect. Waiting for worker updates...');
+          setScrollRequestKey((current) => current + 1);
+          return true;
+        } catch (retryError) {
+          setError(retryError instanceof Error ? retryError.message : 'Unable to send prompt.');
+          return false;
+        } finally {
+          reconnectingRef.current = false;
+        }
+      }
       setError(caught instanceof Error ? caught.message : 'Unable to send prompt.');
+      return false;
     } finally {
       setSending(false);
     }
   }
 
-  const items = flattenThreadItems(detail);
-  const canSend = Boolean(routeToken && session?.workerSessionId && prompt.trim() && !sending);
+  const threadRunning = detail?.thread.status === 'running' || Boolean(detail?.thread.activeTurnId);
+  const promptDisabledReason = !routeToken
+    ? 'Waiting for a router token...'
+    : !session?.workerSessionId
+      ? 'Reconnect this session before sending a prompt.'
+      : undefined;
 
   return (
     <div className="control-session-page">
@@ -227,42 +303,53 @@ export function ControlPlaneSessionPage() {
 
       <section className="control-session-grid">
         <main className="control-chat-panel" aria-label="Control-plane chat">
-          {loading && items.length === 0 ? (
+          {loading && !detail ? (
             <p className="control-empty">Opening worker thread...</p>
-          ) : items.length === 0 ? (
-            <p className="control-empty">No transcript yet. Send the first prompt below.</p>
+          ) : detail ? (
+            <>
+              <ThreadTimeline
+                threadId={detail.thread.id}
+                turns={detail.turns}
+                {...(detail.totalTurnCount === undefined
+                  ? {}
+                  : { totalTurnCount: detail.totalTurnCount })}
+                pendingRequests={detail.pendingRequests}
+                activeTurnId={detail.thread.activeTurnId}
+                threadRunning={threadRunning}
+                liveOutput=""
+                scrollRequestKey={scrollRequestKey}
+                className="thread-timeline-surface control-session-timeline"
+                answeredRequestNotes={detail.answeredRequestNotes ?? []}
+                activityNotes={detail.activityNotes ?? []}
+                pendingSteers={detail.pendingSteers ?? []}
+              />
+              <ThreadComposer
+                activeView="chat"
+                busy={sending}
+                error={error}
+                model={detail.thread.model}
+                reasoningEffort={detail.thread.reasoningEffort}
+                fastMode={detail.thread.fastMode ?? false}
+                collaborationMode={detail.thread.collaborationMode}
+                contextUsage={detail.thread.contextUsage}
+                capabilities={controlPlaneCapabilities}
+                toolboxItems={[]}
+                followTail
+                threadConnected={detail.thread.isLoaded}
+                shellAvailable={false}
+                disabled={Boolean(promptDisabledReason)}
+                disabledPlaceholder={promptDisabledReason}
+                draftPrompt={draft.prompt}
+                draftAttachments={draft.attachments}
+                onDraftChange={setDraft}
+                onSubmit={handlePromptSubmit}
+                canInterrupt={false}
+                onToggleFollow={() => setScrollRequestKey((current) => current + 1)}
+              />
+            </>
           ) : (
-            <div className="control-chat-list">
-              {items.map((item) => (
-                <article key={`${item.turnId}:${item.id}`} className={`control-chat-item ${item.kind}`}>
-                  <div>
-                    <strong>{itemLabel(item)}</strong>
-                    <span>{formatLongTimestamp(item.startedAt)}</span>
-                  </div>
-                  <pre>{itemText(item)}</pre>
-                </article>
-              ))}
-            </div>
+            <p className="control-empty">No worker thread is connected yet.</p>
           )}
-
-          <form onSubmit={handlePromptSubmit} className="control-chat-composer">
-            <textarea
-              value={prompt}
-              onChange={(event) => setPrompt(event.currentTarget.value)}
-              placeholder="Send a prompt to this sandbox session..."
-              rows={4}
-            />
-            <div>
-              <span>
-                {routeToken
-                  ? `Direct router token expires ${formatLongTimestamp(routeToken.expiresAt)}`
-                  : 'No route token'}
-              </span>
-              <button type="submit" disabled={!canSend}>
-                {sending ? 'Sending...' : 'Send'}
-              </button>
-            </div>
-          </form>
         </main>
 
         <aside className="control-session-side">
