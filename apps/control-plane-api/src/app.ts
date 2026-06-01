@@ -76,6 +76,14 @@ export const CONTROL_PLANE_LOG_REDACTION_PATHS = [
   'keyCiphertext',
 ];
 
+function sandboxLifecycleErrorMessage(operation: string, error: unknown) {
+  const rawMessage = error instanceof Error ? error.message : String(error);
+  const message = rawMessage
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [redacted]')
+    .replace(/sk-[A-Za-z0-9._~+/=-]+/g, 'sk-[redacted]');
+  return `Unable to ${operation} sandbox: ${message}`;
+}
+
 declare module 'fastify' {
   interface FastifyInstance {
     services: ControlPlaneServices;
@@ -932,6 +940,25 @@ async function materializeSandboxWorkspaces(
       sandbox: input.sandbox,
       workspace,
     });
+  }
+}
+
+async function tryMaterializeSandboxWorkspaces(
+  app: FastifyInstance,
+  input: Parameters<typeof materializeSandboxWorkspaces>[1] & { operation: string },
+) {
+  try {
+    await materializeSandboxWorkspaces(app, input);
+  } catch (error) {
+    app.log.warn(
+      {
+        err: error,
+        sandboxId: input.sandbox.id,
+        userId: input.userId,
+        operation: input.operation,
+      },
+      'Unable to materialize sandbox workspaces after lifecycle operation.',
+    );
   }
 }
 
@@ -1888,6 +1915,11 @@ export function buildControlPlaneApp(
       enabledAgentProviders: config.sandboxWorkerEnabledAgentProviders,
       gateway: gatewayStartInput(app, runtimeSandbox),
       harness: harnessStartInput(app),
+    }).catch((error: unknown) => {
+      if (error instanceof SandboxManagerError) {
+        throw error;
+      }
+      throw new SandboxManagerError('provider', sandboxLifecycleErrorMessage('restart', error));
     });
     const updatedSandbox = repository.updateSandboxState(runtimeSandbox.id, {
       ...result,
@@ -1900,9 +1932,10 @@ export function buildControlPlaneApp(
       },
     });
     if (updatedSandbox && canControlRunningWorker(app, updatedSandbox)) {
-      await materializeSandboxWorkspaces(app, {
+      await tryMaterializeSandboxWorkspaces(app, {
         userId: updatedSandbox.userId,
         sandbox: updatedSandbox,
+        operation: 'admin-restart',
       });
     }
     return {
@@ -2052,12 +2085,18 @@ export function buildControlPlaneApp(
       enabledAgentProviders: config.sandboxWorkerEnabledAgentProviders,
       gateway: gatewayStartInput(app, runtimeSandbox),
       harness: harnessStartInput(app),
+    }).catch((error: unknown) => {
+      if (error instanceof SandboxManagerError) {
+        throw error;
+      }
+      throw new SandboxManagerError('provider', sandboxLifecycleErrorMessage('start', error));
     });
     const updatedSandbox = repository.updateSandboxState(runtimeSandbox.id, result);
     if (updatedSandbox && canControlRunningWorker(app, updatedSandbox)) {
-      await materializeSandboxWorkspaces(app, {
+      await tryMaterializeSandboxWorkspaces(app, {
         userId: user.id,
         sandbox: updatedSandbox,
+        operation: 'start',
       });
     }
     return {
@@ -2100,12 +2139,18 @@ export function buildControlPlaneApp(
       enabledAgentProviders: config.sandboxWorkerEnabledAgentProviders,
       gateway: gatewayStartInput(app, runtimeSandbox),
       harness: harnessStartInput(app),
+    }).catch((error: unknown) => {
+      if (error instanceof SandboxManagerError) {
+        throw error;
+      }
+      throw new SandboxManagerError('provider', sandboxLifecycleErrorMessage('restart', error));
     });
     const updatedSandbox = repository.updateSandboxState(runtimeSandbox.id, result);
     if (updatedSandbox && canControlRunningWorker(app, updatedSandbox)) {
-      await materializeSandboxWorkspaces(app, {
+      await tryMaterializeSandboxWorkspaces(app, {
         userId: user.id,
         sandbox: updatedSandbox,
+        operation: 'restart',
       });
     }
     return {
