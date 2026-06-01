@@ -128,6 +128,20 @@ describe('sandbox router', () => {
     expect(response.headers['access-control-allow-methods']).toBe('GET,POST,PATCH,DELETE,OPTIONS');
     expect(response.headers['access-control-allow-headers']).toBe('authorization,content-type');
     expect(response.headers['access-control-max-age']).toBe('600');
+
+    const debugResponse = await app.inject({
+      method: 'OPTIONS',
+      url: '/api/sandboxes/sandbox_1/api/threads/thread_1',
+      headers: {
+        origin: 'https://debug.lnz-study.com',
+        'access-control-request-method': 'GET',
+        'access-control-request-headers': 'authorization',
+      },
+    });
+    expect(debugResponse.statusCode).toBe(204);
+    expect(debugResponse.headers['access-control-allow-origin']).toBe(
+      'https://debug.lnz-study.com',
+    );
   });
 
   it('does not add CORS headers for disallowed browser origins', async () => {

@@ -47,6 +47,7 @@ export interface SandboxRouterConfig {
 const DEFAULT_CORS_ALLOWED_ORIGINS = [
   'http://127.0.0.1:5173',
   'http://localhost:5173',
+  'https://debug.lnz-study.com',
   'https://remote-codex-frontend-production.up.railway.app',
 ];
 

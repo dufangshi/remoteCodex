@@ -590,6 +590,66 @@ export function createControlPlaneRouteToken(
   );
 }
 
+function controlPlaneWorkerProxyUrl(
+  routeToken: ControlPlaneRouteToken,
+  path: string,
+  params?: Record<string, string | number | boolean | undefined | null>,
+) {
+  const proxyPath = path.replace(/^\/+/, '');
+  const url = new URL(
+    `/api/sandboxes/${encodeURIComponent(routeToken.sandboxId)}/${proxyPath}`,
+    routeToken.routerBaseUrl,
+  );
+  for (const [key, value] of Object.entries(params ?? {})) {
+    if (value !== undefined && value !== null) {
+      url.searchParams.set(key, String(value));
+    }
+  }
+  return url.toString();
+}
+
+function routeTokenHeaders(routeToken: ControlPlaneRouteToken, init?: RequestInit) {
+  const headers = new Headers(init?.headers);
+  headers.set('Authorization', `Bearer ${routeToken.token}`);
+  return headers;
+}
+
+export function fetchControlPlaneWorkerThread(
+  routeToken: ControlPlaneRouteToken,
+  workerSessionId: string,
+  input: { limit?: number; beforeTurnId?: string } = {},
+) {
+  return request<ThreadDetailDto>(
+    controlPlaneWorkerProxyUrl(
+      routeToken,
+      `/api/threads/${encodeURIComponent(workerSessionId)}`,
+      input,
+    ),
+    {
+      cache: 'no-store',
+      headers: routeTokenHeaders(routeToken),
+    },
+  );
+}
+
+export function sendControlPlaneWorkerThreadPrompt(
+  routeToken: ControlPlaneRouteToken,
+  workerSessionId: string,
+  input: SendThreadPromptInput,
+) {
+  return request<ThreadDto>(
+    controlPlaneWorkerProxyUrl(
+      routeToken,
+      `/api/threads/${encodeURIComponent(workerSessionId)}/prompt`,
+    ),
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: routeTokenHeaders(routeToken),
+    },
+  );
+}
+
 function normalizedUploadFileName(attachment: PromptAttachmentUpload, index: number) {
   const explicitName = attachment.originalName.trim();
   if (explicitName) {

@@ -1,4 +1,5 @@
 import { FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import type { AgentBackendIdDto } from '../../../../packages/shared/src/index';
 import {
@@ -161,6 +162,7 @@ function ActionButton({
 const USER_STATUSES = ['active', 'suspended', 'deleted'] as const;
 
 export function ControlPlanePage() {
+  const navigate = useNavigate();
   const [auth, setAuth] = useState<ControlPlaneAuth | null>(() => {
     const stored = readStoredControlPlaneAuth();
     return stored ? { baseUrl: stored.baseUrl, token: stored.token } : null;
@@ -212,6 +214,10 @@ export function ControlPlanePage() {
 
   const canUseControlPlane = Boolean(auth && user);
   const sandboxReady = sandbox?.state === 'running';
+  const sandboxStarting = sandbox?.state === 'starting';
+  const sandboxStopping = sandbox?.state === 'stopping';
+  const canStartSandbox = canUseControlPlane && Boolean(sandbox) && !sandboxReady && !sandboxStarting && !sandboxStopping;
+  const startSandboxLabel = sandboxStarting ? 'Starting...' : sandboxReady ? 'Running' : 'Start';
   const sandboxProvisioning =
     sandbox?.state === 'starting' ||
     sandbox?.state === 'stopping' ||
@@ -661,7 +667,7 @@ export function ControlPlanePage() {
         sessionId?: string;
         scopes: string[];
       } = {
-        scopes: ['worker:read', 'worker:write', 'session:prompt'],
+        scopes: ['worker:read', 'worker:write', 'session:prompt', 'provider:turn:create'],
       };
       if (selectedProject?.id) {
         routeTokenInput.projectId = selectedProject.id;
@@ -732,6 +738,7 @@ export function ControlPlanePage() {
       setSelectedSessionId(result.session.id);
       await handleRouteToken('connecting', result.session.id);
       setMessage('Session resumed.');
+      navigate(`/control-plane/sessions/${encodeURIComponent(result.session.id)}`);
     });
   }
   const totalTokens = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
@@ -829,8 +836,20 @@ export function ControlPlanePage() {
               {sandbox ? <span>{sandbox.resourceProfile}</span> : null}
             </div>
             <div className="control-action-row">
-              <ActionButton onClick={() => void sandboxAction('start')} disabled={!canUseControlPlane}>
-                Start
+              <ActionButton
+                onClick={() => void sandboxAction('start')}
+                disabled={!canStartSandbox}
+                title={
+                  sandboxStarting
+                    ? 'Sandbox startup is already in progress.'
+                    : sandboxReady
+                      ? 'Sandbox is already running.'
+                      : sandboxStopping
+                        ? 'Wait for sandbox shutdown to finish before starting again.'
+                        : undefined
+                }
+              >
+                {startSandboxLabel}
               </ActionButton>
               <ActionButton onClick={() => void sandboxAction('stop')} disabled={!canUseControlPlane}>
                 Stop

@@ -4,6 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ControlPlaneSandbox, ControlPlaneSession } from '../lib/api';
 import { ControlPlanePage } from './ControlPlanePage';
 
+const navigateMock = vi.hoisted(() => vi.fn());
+
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
+  return {
+    ...actual,
+    useNavigate: () => navigateMock,
+  };
+});
+
 const baseUrl = 'http://127.0.0.1:8790';
 
 class MockWorkerWebSocket extends EventTarget {
@@ -282,6 +292,7 @@ describe('ControlPlanePage', () => {
     let sessionCreated = false;
     let currentSession = session;
     let sandboxRunning = false;
+    navigateMock.mockReset();
     MockWorkerWebSocket.instances = [];
     vi.stubGlobal('WebSocket', MockWorkerWebSocket);
     window.localStorage.clear();
@@ -483,7 +494,7 @@ describe('ControlPlanePage', () => {
       projectId: 'project-1',
       workspaceId: 'workspace-1',
       sessionId: 'session-1',
-      scopes: ['worker:read', 'worker:write', 'session:prompt'],
+      scopes: ['worker:read', 'worker:write', 'session:prompt', 'provider:turn:create'],
     });
     expect(new Headers(routeTokenCall?.[1]?.headers).get('Authorization')).toBe(
       'Bearer dev:dev-user',
@@ -503,6 +514,7 @@ describe('ControlPlanePage', () => {
       expect(screen.getByText('Session resumed.')).toBeInTheDocument();
     });
     expect(screen.getByText(/codex \/ active/i)).toBeInTheDocument();
+    expect(navigateMock).toHaveBeenCalledWith('/control-plane/sessions/session-1');
 
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
 
@@ -744,6 +756,7 @@ describe('ControlPlanePage', () => {
     });
     expect(screen.getByText(/codex \/ active/i)).toBeInTheDocument();
     expect(MockWorkerWebSocket.instances).toHaveLength(1);
+    expect(navigateMock).toHaveBeenCalledWith('/control-plane/sessions/session-1');
     const resumeCall = vi.mocked(fetch).mock.calls.find(
       ([input]) => String(input) === `${baseUrl}/api/sessions/session-1/resume`,
     );

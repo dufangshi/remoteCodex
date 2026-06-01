@@ -27,6 +27,7 @@ import {
   ControlPlaneAuthGuard,
   ControlPlaneLoginPage,
 } from './pages/ControlPlaneLoginPage';
+import { ControlPlaneSessionPage } from './pages/ControlPlaneSessionPage';
 import { LandingPage } from './pages/LandingPage';
 import { ThreadDetailPage } from './pages/ThreadDetailPage';
 import { ThreadImportPage } from './pages/ThreadImportPage';
@@ -257,6 +258,14 @@ export function App() {
                 element={
                   <ControlPlaneAuthGuard>
                     <ControlPlanePage />
+                  </ControlPlaneAuthGuard>
+                }
+              />
+              <Route
+                path="/control-plane/sessions/:sessionId"
+                element={
+                  <ControlPlaneAuthGuard>
+                    <ControlPlaneSessionPage />
                   </ControlPlaneAuthGuard>
                 }
               />
