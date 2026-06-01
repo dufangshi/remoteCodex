@@ -315,9 +315,9 @@ export function ControlPlanePage() {
       setUsageEvents(usageEventResult.events);
       setProjects(projectResult.projects);
       setProfileName(me.user.displayName ?? '');
-      if (!selectedProjectId && projectResult.projects[0]) {
-        setSelectedProjectId(projectResult.projects[0].id);
-      }
+      setSelectedProjectId((current) =>
+        projectResult.projects.some((project) => project.id === current) ? current : '',
+      );
     } finally {
       setMetadataLoading((current) => ({ ...current, projects: false, usageEvents: false }));
     }
@@ -336,19 +336,16 @@ export function ControlPlanePage() {
   useEffect(() => {
     if (!auth || !selectedWorkspaceId) {
       setSessions([]);
+      setSelectedSessionId('');
       return;
     }
 
+    setSelectedSessionId('');
     setMetadataLoading((current) => ({ ...current, sessions: true }));
     void run('Load sessions', async () => {
       try {
         const result = await fetchControlPlaneSessions(auth, selectedWorkspaceId);
         setSessions(result.sessions);
-        setSelectedSessionId((current) =>
-          result.sessions.some((session) => session.id === current)
-            ? current
-            : result.sessions[0]?.id ?? '',
-        );
       } finally {
         setMetadataLoading((current) => ({ ...current, sessions: false }));
       }
@@ -388,16 +385,14 @@ export function ControlPlanePage() {
       return;
     }
 
+    setSelectedWorkspaceId('');
+    setSessions([]);
+    setSelectedSessionId('');
     setMetadataLoading((current) => ({ ...current, workspaces: true }));
     void run('Load workspaces', async () => {
       try {
         const result = await fetchControlPlaneWorkspaces(auth, selectedProjectId);
         setWorkspaces(result.workspaces);
-        setSelectedWorkspaceId((current) =>
-          result.workspaces.some((workspace) => workspace.id === current)
-            ? current
-            : result.workspaces[0]?.id ?? '',
-        );
       } finally {
         setMetadataLoading((current) => ({ ...current, workspaces: false }));
       }
@@ -533,8 +528,7 @@ export function ControlPlanePage() {
         slug: slugFromName(projectName),
       });
       await refresh(auth);
-      setSelectedProjectId(created.project.id);
-      setMessage('Project created.');
+      setMessage(`Project "${created.project.name}" created. Select it before creating a workspace.`);
     });
   }
 
@@ -551,8 +545,10 @@ export function ControlPlanePage() {
       });
       const result = await fetchControlPlaneWorkspaces(auth, selectedProject.id);
       setWorkspaces(result.workspaces);
-      setSelectedWorkspaceId(created.workspace.id);
-      setMessage('Workspace created.');
+      setSelectedWorkspaceId('');
+      setSessions([]);
+      setSelectedSessionId('');
+      setMessage(`Workspace "${created.workspace.name}" created. Select it before creating a session.`);
     });
   }
 
@@ -568,8 +564,8 @@ export function ControlPlanePage() {
       });
       const result = await fetchControlPlaneSessions(auth, selectedWorkspace.id);
       setSessions(result.sessions);
-      setSelectedSessionId(created.session.id);
-      setMessage('Session created.');
+      setSelectedSessionId('');
+      setMessage(`Session "${created.session.title}" created. Select it before connecting.`);
     });
   }
 
@@ -696,16 +692,13 @@ export function ControlPlanePage() {
     }
   }
 
-  async function handleOpenSession(session: ControlPlaneSession) {
+  function handleOpenSession(session: ControlPlaneSession) {
     setSelectedSessionId(session.id);
-    if (!sandbox || sandbox.state !== 'running') {
-      setRouteToken(null);
-      setWorkerSocketUrl(null);
-      closeWorkerSocket();
-      setError('Sandbox must be running before opening a worker session.');
-      return;
-    }
-    await handleRouteToken('connecting', session.id);
+    setRouteToken(null);
+    setWorkerSocketUrl(null);
+    closeWorkerSocket();
+    clearRouteTokenRefreshTimer();
+    setWorkerConnectionState('idle');
   }
 
   async function handleCloseSession(session: ControlPlaneSession) {
@@ -910,7 +903,17 @@ export function ControlPlanePage() {
                       <button
                         key={project.id}
                         type="button"
-                        onClick={() => setSelectedProjectId(project.id)}
+                        onClick={() => {
+                          setSelectedProjectId(project.id);
+                          setSelectedWorkspaceId('');
+                          setSessions([]);
+                          setSelectedSessionId('');
+                          setRouteToken(null);
+                          setWorkerSocketUrl(null);
+                          closeWorkerSocket();
+                          clearRouteTokenRefreshTimer();
+                          setWorkerConnectionState('idle');
+                        }}
                         className={selectedProjectId === project.id ? 'selected' : ''}
                       >
                         <strong>{project.name}</strong>
@@ -966,7 +969,15 @@ export function ControlPlanePage() {
                       <button
                         key={workspace.id}
                         type="button"
-                        onClick={() => setSelectedWorkspaceId(workspace.id)}
+                        onClick={() => {
+                          setSelectedWorkspaceId(workspace.id);
+                          setSelectedSessionId('');
+                          setRouteToken(null);
+                          setWorkerSocketUrl(null);
+                          closeWorkerSocket();
+                          clearRouteTokenRefreshTimer();
+                          setWorkerConnectionState('idle');
+                        }}
                         className={selectedWorkspaceId === workspace.id ? 'selected' : ''}
                       >
                         <strong>{workspace.name}</strong>

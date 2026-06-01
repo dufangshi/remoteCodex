@@ -256,6 +256,21 @@ function usageEventsResponse(path: string, events: unknown[] = []) {
   return path === '/api/usage/events?limit=10' ? jsonResponse({ events }) : null;
 }
 
+async function selectExistingHierarchy() {
+  await waitFor(() => {
+    expect(screen.getByRole('button', { name: /Computational chemistry/i })).toBeInTheDocument();
+  });
+  fireEvent.click(screen.getByRole('button', { name: /Computational chemistry/i }));
+  await waitFor(() => {
+    expect(screen.getByRole('button', { name: /Molecule study/i })).toBeInTheDocument();
+  });
+  fireEvent.click(screen.getByRole('button', { name: /Molecule study/i }));
+  await waitFor(() => {
+    expect(screen.getByRole('button', { name: /Plan calculation/i })).toBeInTheDocument();
+  });
+  fireEvent.click(screen.getByRole('button', { name: /Plan calculation/i }));
+}
+
 describe('ControlPlanePage', () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -395,13 +410,24 @@ describe('ControlPlanePage', () => {
       expect(screen.getByRole('button', { name: /Computational chemistry/i })).toBeInTheDocument();
     });
     expect(screen.getAllByText('computational-chemistry').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('Selected project')).toBeInTheDocument();
+    expect(screen.getByText('Project "Computational chemistry" created. Select it before creating a workspace.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create workspace' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: /Computational chemistry/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Selected project')).toBeInTheDocument();
+    });
 
     fireEvent.click(screen.getByRole('button', { name: 'Create workspace' }));
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Molecule study/i })).toBeInTheDocument();
     });
+    expect(screen.getByText('Workspace "Molecule study" created. Select it before creating a session.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create session' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: /Molecule study/i }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
@@ -414,6 +440,9 @@ describe('ControlPlanePage', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Plan calculation/i })).toBeInTheDocument();
     });
+    expect(screen.getByText('Session "Plan calculation" created. Select it before connecting.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Plan calculation/i }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Inspect' }));
 
@@ -426,7 +455,7 @@ describe('ControlPlanePage', () => {
     expect(screen.getByText('Worker Pod is running and ready.')).toBeInTheDocument();
     expect(screen.getByText('sandbox.running')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Plan calculation/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create route token' }));
 
     await waitFor(() => {
       expect(screen.getByText('wss://router.example.test')).toBeInTheDocument();
@@ -547,11 +576,10 @@ describe('ControlPlanePage', () => {
 
     render(<ControlPlanePage />);
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Plan calculation/i })).toBeInTheDocument();
-    });
+    await selectExistingHierarchy();
 
     fireEvent.click(screen.getByRole('button', { name: /Plan calculation/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create route token' }));
 
     await waitFor(() => {
       expect(
@@ -576,15 +604,25 @@ describe('ControlPlanePage', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Computational chemistry/i })).toBeInTheDocument();
     });
-    expect(screen.getByRole('button', { name: 'Create workspace' })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Create workspace' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Create session' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: /Computational chemistry/i }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Create workspace' })).not.toBeDisabled();
+    });
 
     fireEvent.click(screen.getByRole('button', { name: 'Create workspace' }));
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Molecule study/i })).toBeInTheDocument();
     });
     expect(screen.getByRole('button', { name: 'Create session' })).toBeDisabled();
-    expect(screen.getByText('Start the sandbox before creating a session.')).toBeInTheDocument();
+    expect(screen.getByText('Select a workspace before creating a session.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Molecule study/i }));
+    await waitFor(() => {
+      expect(screen.getByText('Start the sandbox before creating a session.')).toBeInTheDocument();
+    });
 
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     await waitFor(() => {
@@ -636,9 +674,7 @@ describe('ControlPlanePage', () => {
 
     render(<ControlPlanePage />);
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Plan calculation/i })).toBeInTheDocument();
-    });
+    await selectExistingHierarchy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Create route token' }));
 
@@ -699,9 +735,7 @@ describe('ControlPlanePage', () => {
 
     render(<ControlPlanePage />);
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Start in sandbox' })).toBeInTheDocument();
-    });
+    await selectExistingHierarchy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Start in sandbox' }));
 
@@ -760,11 +794,10 @@ describe('ControlPlanePage', () => {
 
     render(<ControlPlanePage />);
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Plan calculation/i })).toBeInTheDocument();
-    });
+    await selectExistingHierarchy();
 
     fireEvent.click(screen.getByRole('button', { name: /Plan calculation/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create route token' }));
     await waitFor(() => {
       expect(MockWorkerWebSocket.instances).toHaveLength(1);
     });
@@ -827,11 +860,10 @@ describe('ControlPlanePage', () => {
 
     render(<ControlPlanePage />);
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Plan calculation/i })).toBeInTheDocument();
-    });
+    await selectExistingHierarchy();
 
     fireEvent.click(screen.getByRole('button', { name: /Plan calculation/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create route token' }));
 
     await waitFor(() => {
       expect(routeTokenCount).toBe(1);
@@ -1252,11 +1284,10 @@ describe('ControlPlanePage', () => {
 
     render(<ControlPlanePage />);
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Plan calculation/i })).toBeInTheDocument();
-    });
+    await selectExistingHierarchy();
 
     fireEvent.click(screen.getByRole('button', { name: /Plan calculation/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create route token' }));
 
     await waitFor(() => {
       expect(
@@ -1422,8 +1453,16 @@ describe('ControlPlanePage', () => {
       expect(screen.getByText('Loading LLM usage...')).toBeInTheDocument();
     });
     await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Computational chemistry/i })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Computational chemistry/i }));
+    await waitFor(() => {
       expect(screen.getByText('Loading workspaces...')).toBeInTheDocument();
     });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Molecule study/i })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Molecule study/i }));
     await waitFor(() => {
       expect(screen.getByText('Loading sessions...')).toBeInTheDocument();
     });
