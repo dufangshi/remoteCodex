@@ -2358,10 +2358,38 @@ export function buildControlPlaneApp(
     if (!sandbox || sandbox.userId !== user.id) {
       throw new HttpError(404, 'not_found', 'Sandbox not found.');
     }
+    const workspace = repository.getWorkspaceById(session.workspaceId);
+    if (!workspace || workspace.userId !== user.id) {
+      throw new HttpError(404, 'not_found', 'Workspace not found.');
+    }
+
+    if (!session.workerSessionId) {
+      if (!canControlRunningWorker(app, sandbox)) {
+        throw new HttpError(
+          409,
+          'worker_session_unavailable',
+          'Sandbox must be running before this session can be started in the worker.',
+        );
+      }
+      const provider = createSessionSchema.shape.provider.parse(session.provider);
+      const workerThread = await createWorkerThreadSession(app, {
+        sandbox,
+        workspace,
+        provider,
+        title: session.title,
+      });
+      return {
+        session: repository.updateSession(session.id, {
+          status: 'active',
+          workerSessionId: workerThread.id,
+        }),
+      };
+    }
+
     await sendWorkerSessionLifecycleRequest(app, {
       sandbox,
       userId: user.id,
-      projectId: repository.getWorkspaceById(session.workspaceId)?.projectId,
+      projectId: workspace.projectId,
       workspaceId: session.workspaceId,
       sessionId: session.id,
       workerSessionId: session.workerSessionId,

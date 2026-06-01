@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ControlPlaneSandbox } from '../lib/api';
+import type { ControlPlaneSandbox, ControlPlaneSession } from '../lib/api';
 import { ControlPlanePage } from './ControlPlanePage';
 
 const baseUrl = 'http://127.0.0.1:8790';
@@ -145,7 +145,7 @@ const workspace = {
   updatedAt: '2026-05-25T00:00:00.000Z',
 };
 
-const session = {
+const session: ControlPlaneSession = {
   id: 'session-1',
   userId: 'user-1',
   sandboxId: 'sandbox-1',
@@ -157,6 +157,12 @@ const session = {
   lastActivityAt: null,
   createdAt: '2026-05-25T00:00:00.000Z',
   updatedAt: '2026-05-25T00:00:00.000Z',
+};
+
+const createdSession: typeof session = {
+  ...session,
+  workerSessionId: null,
+  status: 'created',
 };
 
 const usage = {
@@ -397,16 +403,16 @@ describe('ControlPlanePage', () => {
       expect(screen.getByRole('button', { name: /Molecule study/i })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Plan calculation/i })).toBeInTheDocument();
-    });
-
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
     await waitFor(() => {
       expect(screen.getByText('https://router.example.test')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Plan calculation/i })).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Inspect' }));
@@ -552,6 +558,162 @@ describe('ControlPlanePage', () => {
         screen.getByText('Sandbox must be running before issuing a route token.'),
       ).toBeInTheDocument();
     });
+  });
+
+  it('requires hierarchy selection and a running sandbox before creating child resources', async () => {
+    render(<ControlPlanePage />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('dev@example.com').length).toBeGreaterThan(0);
+    });
+
+    expect(screen.getByRole('button', { name: 'Create workspace' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Create session' })).toBeDisabled();
+    expect(screen.getByText('Select a project before creating a workspace.')).toBeInTheDocument();
+    expect(screen.getByText('Select a workspace before creating a session.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create project' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Computational chemistry/i })).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: 'Create workspace' })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Create session' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create workspace' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Molecule study/i })).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: 'Create session' })).toBeDisabled();
+    expect(screen.getByText('Start the sandbox before creating a session.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Create session' })).not.toBeDisabled();
+    });
+  });
+
+  it('does not crash when creating a route token from the connection panel', async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
+
+      if (path === '/api/me' && !init?.method) {
+        return jsonResponse({ user, sandbox: runningSandbox, usage });
+      }
+
+      if (path === '/api/projects' && !init?.method) {
+        return jsonResponse({ projects: [project] });
+      }
+
+      if (path === '/api/workspaces?projectId=project-1' && !init?.method) {
+        return jsonResponse({ workspaces: [workspace] });
+      }
+
+      if (path === '/api/workspaces/workspace-1/sessions' && !init?.method) {
+        return jsonResponse({ sessions: [session] });
+      }
+
+      if (path === '/api/sandboxes/sandbox-1/route-token' && init?.method === 'POST') {
+        return jsonResponse({
+          sandboxId: 'sandbox-1',
+          routerBaseUrl: 'https://router.example.test',
+          wsBaseUrl: 'wss://router.example.test',
+          token: 'route-token-direct',
+          expiresAt: '2026-05-25T00:05:00.000Z',
+        });
+      }
+
+      const usageEvents = usageEventsResponse(path);
+      if (usageEvents) {
+        return usageEvents;
+      }
+
+      return jsonResponse({
+        code: 'not_found',
+        message: `Unhandled request: ${path}`,
+      }, 404);
+    });
+
+    render(<ControlPlanePage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Plan calculation/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create route token' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('wss://router.example.test')).toBeInTheDocument();
+    });
+    expect(screen.getByText('connecting')).toBeInTheDocument();
+    expect(MockWorkerWebSocket.instances).toHaveLength(1);
+  });
+
+  it('starts a created session in the worker when resumed after sandbox startup', async () => {
+    let currentSession = createdSession;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
+
+      if (path === '/api/me' && !init?.method) {
+        return jsonResponse({ user, sandbox: runningSandbox, usage });
+      }
+
+      if (path === '/api/projects' && !init?.method) {
+        return jsonResponse({ projects: [project] });
+      }
+
+      if (path === '/api/workspaces?projectId=project-1' && !init?.method) {
+        return jsonResponse({ workspaces: [workspace] });
+      }
+
+      if (path === '/api/workspaces/workspace-1/sessions' && !init?.method) {
+        return jsonResponse({ sessions: [currentSession] });
+      }
+
+      if (path === '/api/sessions/session-1/resume' && init?.method === 'POST') {
+        currentSession = { ...session, status: 'active', workerSessionId: 'worker-session-1' };
+        return jsonResponse({ session: currentSession });
+      }
+
+      if (path === '/api/sandboxes/sandbox-1/route-token' && init?.method === 'POST') {
+        return jsonResponse({
+          sandboxId: 'sandbox-1',
+          routerBaseUrl: 'https://router.example.test',
+          wsBaseUrl: 'wss://router.example.test',
+          token: 'route-token-materialized',
+          expiresAt: '2026-05-25T00:05:00.000Z',
+        });
+      }
+
+      const usageEvents = usageEventsResponse(path);
+      if (usageEvents) {
+        return usageEvents;
+      }
+
+      return jsonResponse({
+        code: 'not_found',
+        message: `Unhandled request: ${path}`,
+      }, 404);
+    });
+
+    render(<ControlPlanePage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Start in sandbox' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start in sandbox' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Session resumed.')).toBeInTheDocument();
+    });
+    expect(screen.getByText(/codex \/ active/i)).toBeInTheDocument();
+    expect(MockWorkerWebSocket.instances).toHaveLength(1);
+    const resumeCall = vi.mocked(fetch).mock.calls.find(
+      ([input]) => String(input) === `${baseUrl}/api/sessions/session-1/resume`,
+    );
+    expect(resumeCall?.[1]?.method).toBe('POST');
   });
 
   it('shows sandbox offline state when the router websocket fails', async () => {
@@ -1106,6 +1268,7 @@ describe('ControlPlanePage', () => {
 
   it('shows sandbox startup, degraded, and failure states', async () => {
     let currentSandbox: ControlPlaneSandbox = startingSandbox;
+    let healthRequests = 0;
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
@@ -1123,11 +1286,12 @@ describe('ControlPlanePage', () => {
       }
 
       if (path === '/api/sandbox/health' && !init?.method) {
-        currentSandbox = degradedSandbox;
+        healthRequests += 1;
+        currentSandbox = healthRequests === 1 ? runningSandbox : degradedSandbox;
         return jsonResponse({
           sandbox: currentSandbox,
           status: {
-            state: 'degraded',
+            state: currentSandbox.state,
           },
           endpoint: {
             routerBaseUrl: 'https://router.example.test',
@@ -1159,6 +1323,12 @@ describe('ControlPlanePage', () => {
     expect(screen.getByText('25%')).toBeInTheDocument();
     expect(screen.getByText('Worker Pod has been applied and is waiting for readiness.')).toBeInTheDocument();
 
+    await waitFor(() => {
+      expect(screen.getAllByText('running').length).toBeGreaterThan(0);
+    }, { timeout: 4000 });
+    expect(healthRequests).toBe(1);
+
+    currentSandbox = startingSandbox;
     fireEvent.click(screen.getByRole('button', { name: 'Health' }));
 
     await waitFor(() => {

@@ -587,6 +587,99 @@ body.thread-detail-scroll-locked {
   white-space: nowrap;
 }
 
+.control-flow-panel {
+  gap: 1rem;
+}
+
+.control-flow-stack {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.control-flow-step {
+  min-width: 0;
+  display: grid;
+  gap: 0.75rem;
+  border: 1px solid var(--theme-border);
+  border-radius: 0.78rem;
+  padding: 0.85rem;
+  background: var(--theme-surface);
+}
+
+.control-flow-step.disabled {
+  background: color-mix(in srgb, var(--theme-surface) 70%, var(--theme-muted));
+}
+
+.control-step-heading {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.65rem;
+}
+
+.control-step-index {
+  display: grid;
+  width: 1.65rem;
+  height: 1.65rem;
+  place-items: center;
+  border: 1px solid var(--theme-accent-border);
+  border-radius: 999px;
+  background: var(--theme-accent-soft);
+  color: var(--theme-accent-fg);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.control-step-heading h3 {
+  margin: 0;
+  color: var(--theme-fg);
+  font-size: 0.94rem;
+  font-weight: 750;
+}
+
+.control-step-heading p,
+.control-rule-note {
+  margin: 0.18rem 0 0;
+  color: var(--theme-fg-muted);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.control-count-pill {
+  max-width: 10rem;
+  overflow: hidden;
+  border: 1px solid var(--theme-border);
+  border-radius: 999px;
+  padding: 0.25rem 0.52rem;
+  background: var(--theme-panel);
+  color: var(--theme-fg-soft);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.control-count-pill.ready {
+  border-color: var(--status-success-border);
+  background: var(--status-success-bg);
+  color: var(--status-success-fg);
+}
+
+.control-count-pill.blocked {
+  border-color: var(--status-warning-border);
+  background: var(--status-warning-bg);
+  color: var(--status-warning-fg);
+}
+
+.control-rule-note {
+  border: 1px solid var(--status-warning-border);
+  border-radius: 0.68rem;
+  padding: 0.55rem 0.65rem;
+  background: var(--status-warning-bg);
+  color: var(--status-warning-fg);
+}
+
 .control-detail-list {
   display: grid;
   gap: 0.64rem;
@@ -810,7 +903,8 @@ body.thread-detail-scroll-locked {
   }
 
   .control-console-header,
-  .control-session-list > div {
+  .control-session-list > div,
+  .control-step-heading {
     grid-template-columns: 1fr;
     display: grid;
   }

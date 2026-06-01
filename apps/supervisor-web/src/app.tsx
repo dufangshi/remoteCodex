@@ -1,5 +1,6 @@
 import {
   BrowserRouter,
+  Navigate,
   Outlet,
   Route,
   Routes,
@@ -37,6 +38,14 @@ import { PluginProvider } from './plugins/PluginProvider';
 
 const THEME_STORAGE_KEY = 'remote-codex-theme-mode';
 const BACKEND_STORAGE_KEY = 'remote-codex-default-backend';
+
+function controlPlaneDefaultEnabled() {
+  return Boolean(import.meta.env.VITE_CONTROL_PLANE_BASE_URL);
+}
+
+function RootPage() {
+  return controlPlaneDefaultEnabled() ? <Navigate to="/control-plane" replace /> : <LandingPage />;
+}
 
 function readInitialThemeMode(): ThemeMode {
   if (typeof window === 'undefined') {
@@ -230,7 +239,7 @@ export function App() {
       <PluginProvider>
         <BrowserRouter>
           <Routes>
-            <Route path="/" element={<LandingPage />} />
+            <Route path="/" element={<RootPage />} />
             <Route
               element={
                 <AppShell

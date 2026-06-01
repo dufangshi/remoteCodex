@@ -1758,6 +1758,104 @@ describe('control plane api', () => {
     }
   });
 
+  it('materializes created control-plane sessions on resume after the sandbox is running', async () => {
+    const workerRequests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      workerRequests.push({ url: String(url), init });
+      if (String(url).endsWith('/api/workspaces')) {
+        return Response.json({ id: 'worker-workspace-1' });
+      }
+      return Response.json({
+        id: 'worker-session-created-on-resume',
+      });
+    }) as typeof fetch;
+
+    try {
+      const app = buildControlPlaneApp({
+        env: {
+          ...testEnv('session-materialize-on-resume'),
+          SANDBOX_WORKER_AUTH_TOKEN: 'internal-worker-session-token',
+        },
+      });
+      apps.push(app);
+
+      const auth = { authorization: 'Bearer dev:materialize-owner' };
+      await app.inject({
+        method: 'POST',
+        url: '/api/me/bootstrap',
+        headers: auth,
+        payload: {
+          email: 'materialize-owner@example.com',
+        },
+      });
+
+      const projectResponse = await app.inject({
+        method: 'POST',
+        url: '/api/projects',
+        headers: auth,
+        payload: {
+          name: 'Materialize Project',
+          slug: 'materialize-project',
+        },
+      });
+      const workspaceResponse = await app.inject({
+        method: 'POST',
+        url: `/api/projects/${projectResponse.json().project.id}/workspaces`,
+        headers: auth,
+        payload: {
+          name: 'Materialize Workspace',
+          slug: 'materialize-workspace',
+        },
+      });
+      const sessionResponse = await app.inject({
+        method: 'POST',
+        url: `/api/workspaces/${workspaceResponse.json().workspace.id}/sessions`,
+        headers: auth,
+        payload: {
+          provider: 'codex',
+          title: 'Created Before Start',
+        },
+      });
+      expect(sessionResponse.statusCode).toBe(200);
+      expect(sessionResponse.json().session).toMatchObject({
+        status: 'created',
+        workerSessionId: null,
+      });
+
+      await app.inject({
+        method: 'POST',
+        url: '/api/sandbox/start',
+        headers: auth,
+      });
+
+      const resume = await app.inject({
+        method: 'POST',
+        url: `/api/sessions/${sessionResponse.json().session.id}/resume`,
+        headers: auth,
+      });
+      expect(resume.statusCode).toBe(200);
+      expect(resume.json().session).toMatchObject({
+        status: 'active',
+        workerSessionId: 'worker-session-created-on-resume',
+      });
+
+      const requestUrls = workerRequests.map((request) => request.url);
+      expect(requestUrls.filter((url) => url.endsWith('/api/workspaces'))).toHaveLength(2);
+      expect(requestUrls.at(-1)).toBe(
+        `https://sandbox-gateway.test/api/sandboxes/${resume.json().session.sandboxId}/api/threads/start`,
+      );
+      const threadStart = workerRequests.at(-1);
+      expect(JSON.parse(String(threadStart?.init?.body))).toMatchObject({
+        workspaceId: 'worker-workspace-1',
+        provider: 'codex',
+        title: 'Created Before Start',
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('paginates project, workspace, and session lists', async () => {
     const app = buildControlPlaneApp({ env: testEnv('product-list-pagination') });
     apps.push(app);

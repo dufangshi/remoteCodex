@@ -5,6 +5,7 @@ import { App } from './app';
 
 describe('App', () => {
   beforeEach(() => {
+    vi.stubEnv('VITE_CONTROL_PLANE_BASE_URL', '');
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -31,6 +32,17 @@ describe('App', () => {
     });
   });
 
+  it('redirects the root route to control-plane when a control-plane base URL is configured', async () => {
+    vi.stubEnv('VITE_CONTROL_PLANE_BASE_URL', 'https://control.example.test');
+    window.localStorage.clear();
+    window.history.pushState({}, '', '/');
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Control plane sign in' })).toBeInTheDocument();
+    });
+  });
+
   it('redirects protected control-plane routes to login until local auth exists', async () => {
     window.localStorage.clear();
     window.history.pushState({}, '', '/control-plane');
@@ -53,7 +65,8 @@ describe('App', () => {
     window.localStorage.clear();
     window.history.pushState({}, '', '/control-plane/login');
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input).replace('http://127.0.0.1:8790', '');
+      const url = new URL(String(input), 'http://127.0.0.1:8790');
+      const path = `${url.pathname}${url.search}`;
       if (path === '/api/auth/password/login' && init?.method === 'POST') {
         return Response.json({
           user: {
@@ -95,7 +108,7 @@ describe('App', () => {
           },
           session: {
             token: 'session-token',
-            expiresAt: '2026-06-01T00:00:00.000Z',
+            expiresAt: '2099-06-01T00:00:00.000Z',
           },
         });
       }
@@ -161,8 +174,10 @@ describe('App', () => {
 
     render(<App />);
 
-    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    const passwordInput = screen.getByLabelText('Password');
+    fireEvent.change(passwordInput, { target: { value: 'password123' } });
+    expect(passwordInput).toHaveValue('password123');
+    fireEvent.submit(passwordInput.closest('form')!);
     await waitFor(() => {
       expect(screen.getAllByText('dev@example.com').length).toBeGreaterThan(0);
     });
