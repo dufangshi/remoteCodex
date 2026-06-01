@@ -84,6 +84,17 @@ function sandboxLifecycleErrorMessage(operation: string, error: unknown) {
   return `Unable to ${operation} sandbox: ${message}`;
 }
 
+async function withSandboxLifecycleError<T>(operation: string, task: () => Promise<T>): Promise<T> {
+  try {
+    return await task();
+  } catch (error) {
+    if (error instanceof HttpError || error instanceof SandboxManagerError) {
+      throw error;
+    }
+    throw new SandboxManagerError('provider', sandboxLifecycleErrorMessage(operation, error));
+  }
+}
+
 declare module 'fastify' {
   interface FastifyInstance {
     services: ControlPlaneServices;
@@ -2065,44 +2076,46 @@ export function buildControlPlaneApp(
   });
 
   app.post('/api/sandbox/start', async (request) => {
-    const user = requireUser(app, request);
-    const sandbox = repository.ensureSandboxForUser(user.id, {
-      image: config.sandboxDefaultImage,
-      region: config.sandboxDefaultRegion,
-      resourceProfile: config.sandboxDefaultResourceProfile,
-      s3PrefixBase: config.sandboxS3PrefixBase,
-    });
-    const runtimeSandbox = repository.patchSandbox(sandbox.id, {
-      image: config.sandboxDefaultImage,
-      region: config.sandboxDefaultRegion,
-      resourceProfile: config.sandboxDefaultResourceProfile,
-    }) ?? sandbox;
-    const result = await app.services.sandboxManager.startSandbox({
-      sandboxId: runtimeSandbox.id,
-      userId: user.id,
-      image: runtimeSandbox.image,
-      region: runtimeSandbox.region,
-      s3Prefix: runtimeSandbox.s3Prefix,
-      enabledAgentProviders: config.sandboxWorkerEnabledAgentProviders,
-      gateway: gatewayStartInput(app, runtimeSandbox),
-      harness: harnessStartInput(app),
-    }).catch((error: unknown) => {
-      if (error instanceof SandboxManagerError) {
-        throw error;
-      }
-      throw new SandboxManagerError('provider', sandboxLifecycleErrorMessage('start', error));
-    });
-    const updatedSandbox = repository.updateSandboxState(runtimeSandbox.id, result);
-    if (updatedSandbox && canControlRunningWorker(app, updatedSandbox)) {
-      await tryMaterializeSandboxWorkspaces(app, {
-        userId: user.id,
-        sandbox: updatedSandbox,
-        operation: 'start',
+    return withSandboxLifecycleError('start', async () => {
+      const user = requireUser(app, request);
+      const sandbox = repository.ensureSandboxForUser(user.id, {
+        image: config.sandboxDefaultImage,
+        region: config.sandboxDefaultRegion,
+        resourceProfile: config.sandboxDefaultResourceProfile,
+        s3PrefixBase: config.sandboxS3PrefixBase,
       });
-    }
-    return {
-      sandbox: updatedSandbox,
-    };
+      const runtimeSandbox = repository.patchSandbox(sandbox.id, {
+        image: config.sandboxDefaultImage,
+        region: config.sandboxDefaultRegion,
+        resourceProfile: config.sandboxDefaultResourceProfile,
+      }) ?? sandbox;
+      const result = await app.services.sandboxManager.startSandbox({
+        sandboxId: runtimeSandbox.id,
+        userId: user.id,
+        image: runtimeSandbox.image,
+        region: runtimeSandbox.region,
+        s3Prefix: runtimeSandbox.s3Prefix,
+        enabledAgentProviders: config.sandboxWorkerEnabledAgentProviders,
+        gateway: gatewayStartInput(app, runtimeSandbox),
+        harness: harnessStartInput(app),
+      }).catch((error: unknown) => {
+        if (error instanceof SandboxManagerError) {
+          throw error;
+        }
+        throw new SandboxManagerError('provider', sandboxLifecycleErrorMessage('start', error));
+      });
+      const updatedSandbox = repository.updateSandboxState(runtimeSandbox.id, result);
+      if (updatedSandbox && canControlRunningWorker(app, updatedSandbox)) {
+        await tryMaterializeSandboxWorkspaces(app, {
+          userId: user.id,
+          sandbox: updatedSandbox,
+          operation: 'start',
+        });
+      }
+      return {
+        sandbox: updatedSandbox,
+      };
+    });
   });
 
   app.post('/api/sandbox/stop', async (request) => {
@@ -2121,42 +2134,44 @@ export function buildControlPlaneApp(
   });
 
   app.post('/api/sandbox/restart', async (request) => {
-    const user = requireUser(app, request);
-    const sandbox = repository.getSandboxByUserId(user.id);
-    if (!sandbox) {
-      throw new HttpError(404, 'not_found', 'Sandbox not found.');
-    }
-    const runtimeSandbox = repository.patchSandbox(sandbox.id, {
-      image: config.sandboxDefaultImage,
-      region: config.sandboxDefaultRegion,
-      resourceProfile: config.sandboxDefaultResourceProfile,
-    }) ?? sandbox;
-    const result = await app.services.sandboxManager.restartSandbox({
-      sandboxId: runtimeSandbox.id,
-      userId: user.id,
-      image: runtimeSandbox.image,
-      region: runtimeSandbox.region,
-      s3Prefix: runtimeSandbox.s3Prefix,
-      enabledAgentProviders: config.sandboxWorkerEnabledAgentProviders,
-      gateway: gatewayStartInput(app, runtimeSandbox),
-      harness: harnessStartInput(app),
-    }).catch((error: unknown) => {
-      if (error instanceof SandboxManagerError) {
-        throw error;
+    return withSandboxLifecycleError('restart', async () => {
+      const user = requireUser(app, request);
+      const sandbox = repository.getSandboxByUserId(user.id);
+      if (!sandbox) {
+        throw new HttpError(404, 'not_found', 'Sandbox not found.');
       }
-      throw new SandboxManagerError('provider', sandboxLifecycleErrorMessage('restart', error));
-    });
-    const updatedSandbox = repository.updateSandboxState(runtimeSandbox.id, result);
-    if (updatedSandbox && canControlRunningWorker(app, updatedSandbox)) {
-      await tryMaterializeSandboxWorkspaces(app, {
+      const runtimeSandbox = repository.patchSandbox(sandbox.id, {
+        image: config.sandboxDefaultImage,
+        region: config.sandboxDefaultRegion,
+        resourceProfile: config.sandboxDefaultResourceProfile,
+      }) ?? sandbox;
+      const result = await app.services.sandboxManager.restartSandbox({
+        sandboxId: runtimeSandbox.id,
         userId: user.id,
-        sandbox: updatedSandbox,
-        operation: 'restart',
+        image: runtimeSandbox.image,
+        region: runtimeSandbox.region,
+        s3Prefix: runtimeSandbox.s3Prefix,
+        enabledAgentProviders: config.sandboxWorkerEnabledAgentProviders,
+        gateway: gatewayStartInput(app, runtimeSandbox),
+        harness: harnessStartInput(app),
+      }).catch((error: unknown) => {
+        if (error instanceof SandboxManagerError) {
+          throw error;
+        }
+        throw new SandboxManagerError('provider', sandboxLifecycleErrorMessage('restart', error));
       });
-    }
-    return {
-      sandbox: updatedSandbox,
-    };
+      const updatedSandbox = repository.updateSandboxState(runtimeSandbox.id, result);
+      if (updatedSandbox && canControlRunningWorker(app, updatedSandbox)) {
+        await tryMaterializeSandboxWorkspaces(app, {
+          userId: user.id,
+          sandbox: updatedSandbox,
+          operation: 'restart',
+        });
+      }
+      return {
+        sandbox: updatedSandbox,
+      };
+    });
   });
 
   app.get('/api/projects', async (request) => {
