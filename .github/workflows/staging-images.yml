@@ -256,6 +256,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          npm install -g @railway/cli
           railway logs \
             --service "${RAILWAY_CONTROL_PLANE_SERVICE}" \
             --environment "${RAILWAY_ENVIRONMENT}" \
