@@ -84,6 +84,10 @@ function sandboxLifecycleErrorMessage(operation: string, error: unknown) {
   return `Unable to ${operation} sandbox: ${message}`;
 }
 
+function sanitizedUnknownErrorMessage(error: unknown) {
+  return sandboxLifecycleErrorMessage('run', error).replace(/^Unable to run sandbox: /, '');
+}
+
 async function withSandboxLifecycleError<T>(operation: string, task: () => Promise<T>): Promise<T> {
   try {
     return await task();
@@ -275,7 +279,7 @@ function requireGatewayKeyContext(app: FastifyInstance, sandboxId: string) {
   };
 }
 
-function toErrorPayload(error: unknown) {
+function toErrorPayload(error: unknown, options: { exposeUnknownMessage?: boolean } = {}) {
   if (error instanceof HttpError) {
     return {
       statusCode: error.statusCode,
@@ -336,7 +340,9 @@ function toErrorPayload(error: unknown) {
     statusCode: 500,
     payload: {
       code: 'internal_error',
-      message: 'Unexpected control plane error.',
+      message: options.exposeUnknownMessage
+        ? `Unexpected control plane error: ${sanitizedUnknownErrorMessage(error)}`
+        : 'Unexpected control plane error.',
     },
   };
 }
@@ -1495,8 +1501,12 @@ export function buildControlPlaneApp(
 
   app.decorate('services', services);
 
-  app.setErrorHandler((error, _request, reply) => {
-    const { statusCode, payload } = toErrorPayload(error);
+  app.setErrorHandler((error, request, reply) => {
+    const { statusCode, payload } = toErrorPayload(error, {
+      exposeUnknownMessage:
+        request.method === 'POST' &&
+        (request.url === '/api/sandbox/start' || request.url === '/api/sandbox/restart'),
+    });
     if (statusCode >= 500) {
       app.log.error(error);
     }
