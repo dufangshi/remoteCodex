@@ -333,6 +333,22 @@ function copyResponseHeaders(response: Response, reply: FastifyReply) {
   });
 }
 
+function originAllowed(config: SandboxRouterConfig, origin: string) {
+  return config.corsAllowedOrigins.has(origin) || config.corsAllowedOrigins.has('*');
+}
+
+function applyCorsHeaders(request: FastifyRequest, reply: FastifyReply) {
+  const origin = request.headers.origin;
+  if (typeof origin !== 'string' || !originAllowed(request.server.services.config, origin)) {
+    return;
+  }
+  reply.header('Access-Control-Allow-Origin', origin);
+  reply.header('Vary', 'Origin');
+  reply.header('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+  reply.header('Access-Control-Allow-Headers', 'authorization,content-type');
+  reply.header('Access-Control-Max-Age', '600');
+}
+
 async function proxyRequest(request: FastifyRequest) {
   const { payload, path } = verifyRouteTokenForRequest(request);
   try {
@@ -525,6 +541,11 @@ export function buildSandboxRouterApp(options: {
     auditSink: options.auditSink ?? new LoggingSandboxRouterAuditSink(),
   });
 
+  app.addHook('onRequest', (request, reply, done) => {
+    applyCorsHeaders(request, reply);
+    done();
+  });
+
   app.get('/healthz', async () => ({ ok: true, role: 'sandbox-router' }));
   const httpProxyHandler = async (request: FastifyRequest, reply: FastifyReply) => {
     const response = await proxyRequest(request);
@@ -635,7 +656,9 @@ export function buildSandboxRouterApp(options: {
     app.route({
       method,
       url: '/api/sandboxes/:sandboxId/*',
-      handler: httpProxyHandler,
+      handler: method === 'OPTIONS'
+        ? async (_request, reply) => reply.status(204).send()
+        : httpProxyHandler,
     });
   }
 

@@ -17,6 +17,7 @@ const envSchema = z.object({
   SANDBOX_ROUTER_DEFAULT_WORKER_BASE_URL: z.string().url().optional(),
   SANDBOX_ROUTER_CONTROL_PLANE_BASE_URL: z.string().url().optional(),
   SANDBOX_ROUTER_CONTROL_PLANE_SERVICE_TOKEN: z.string().min(16).optional(),
+  SANDBOX_ROUTER_CORS_ALLOWED_ORIGINS: z.string().optional(),
   SANDBOX_ROUTER_MAX_REQUEST_BYTES: z.coerce.number().int().positive().optional(),
   SANDBOX_ROUTER_UPSTREAM_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
   SANDBOX_ROUTER_RATE_LIMIT_REQUESTS: z.coerce.number().int().positive().optional(),
@@ -36,11 +37,18 @@ export interface SandboxRouterConfig {
   defaultWorkerBaseUrl: string | null;
   controlPlaneBaseUrl: string | null;
   controlPlaneServiceToken: string | null;
+  corsAllowedOrigins: Set<string>;
   maxRequestBytes: number;
   upstreamTimeoutMs: number;
   rateLimitRequests: number;
   rateLimitWindowMs: number;
 }
+
+const DEFAULT_CORS_ALLOWED_ORIGINS = [
+  'http://127.0.0.1:5173',
+  'http://localhost:5173',
+  'https://remote-codex-frontend-production.up.railway.app',
+];
 
 function parseBoolean(value: string | undefined, defaultValue: boolean) {
   if (value === undefined) {
@@ -142,6 +150,13 @@ export function loadSandboxRouterConfig(
     defaultWorkerBaseUrl: parsed.SANDBOX_ROUTER_DEFAULT_WORKER_BASE_URL ?? null,
     controlPlaneBaseUrl: parsed.SANDBOX_ROUTER_CONTROL_PLANE_BASE_URL ?? null,
     controlPlaneServiceToken: parsed.SANDBOX_ROUTER_CONTROL_PLANE_SERVICE_TOKEN ?? null,
+    corsAllowedOrigins: new Set([
+      ...DEFAULT_CORS_ALLOWED_ORIGINS,
+      ...(parsed.SANDBOX_ROUTER_CORS_ALLOWED_ORIGINS ?? '')
+        .split(',')
+        .map((origin) => origin.trim())
+        .filter(Boolean),
+    ]),
     maxRequestBytes: parsed.SANDBOX_ROUTER_MAX_REQUEST_BYTES ?? 1024 * 1024 * 8,
     upstreamTimeoutMs: parsed.SANDBOX_ROUTER_UPSTREAM_TIMEOUT_MS ?? 1000 * 60,
     rateLimitRequests: parsed.SANDBOX_ROUTER_RATE_LIMIT_REQUESTS ?? 120,

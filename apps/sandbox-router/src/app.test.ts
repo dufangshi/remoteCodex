@@ -109,13 +109,55 @@ describe('sandbox router', () => {
     expect(response.json()).toEqual({ ok: true, role: 'sandbox-router' });
   });
 
+  it('answers browser preflight requests before route-token verification', async () => {
+    const app = buildApp();
+    const response = await app.inject({
+      method: 'OPTIONS',
+      url: '/api/sandboxes/sandbox_1/api/workspaces',
+      headers: {
+        origin: 'https://remote-codex-frontend-production.up.railway.app',
+        'access-control-request-method': 'GET',
+        'access-control-request-headers': 'authorization',
+      },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(response.headers['access-control-allow-origin']).toBe(
+      'https://remote-codex-frontend-production.up.railway.app',
+    );
+    expect(response.headers['access-control-allow-methods']).toBe('GET,POST,PATCH,DELETE,OPTIONS');
+    expect(response.headers['access-control-allow-headers']).toBe('authorization,content-type');
+    expect(response.headers['access-control-max-age']).toBe('600');
+  });
+
+  it('does not add CORS headers for disallowed browser origins', async () => {
+    const app = buildApp();
+    const response = await app.inject({
+      method: 'OPTIONS',
+      url: '/api/sandboxes/sandbox_1/api/workspaces',
+      headers: {
+        origin: 'https://evil.example.test',
+        'access-control-request-method': 'GET',
+      },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(response.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
   it('rejects missing, invalid, expired, and wrong-sandbox route tokens', async () => {
     const app = buildApp();
     const missing = await app.inject({
       method: 'GET',
       url: '/api/sandboxes/sandbox_1/api/worker/metadata',
+      headers: {
+        origin: 'https://remote-codex-frontend-production.up.railway.app',
+      },
     });
     expect(missing.statusCode).toBe(401);
+    expect(missing.headers['access-control-allow-origin']).toBe(
+      'https://remote-codex-frontend-production.up.railway.app',
+    );
 
     const invalid = await app.inject({
       method: 'GET',
@@ -158,6 +200,7 @@ describe('sandbox router', () => {
       method: 'POST',
       url: `/api/sandboxes/sandbox_1/api/threads/thread_1/prompt?token=${encodeURIComponent(token)}&trace=1`,
       headers: {
+        origin: 'https://remote-codex-frontend-production.up.railway.app',
         'content-type': 'application/json',
         authorization: `Bearer ${token}`,
         'x-remote-codex-worker-token': 'browser-forged-token',
@@ -169,6 +212,9 @@ describe('sandbox router', () => {
     });
 
     expect(response.statusCode).toBe(201);
+    expect(response.headers['access-control-allow-origin']).toBe(
+      'https://remote-codex-frontend-production.up.railway.app',
+    );
     expect(response.json()).toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
