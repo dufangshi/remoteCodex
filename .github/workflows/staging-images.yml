@@ -152,19 +152,21 @@ jobs:
         with:
           node-version: 22
 
-      - name: Update Railway worker image tag
+      - name: Update Railway control-plane variables
         if: env.RAILWAY_TOKEN != ''
         shell: bash
         run: |
           set -euo pipefail
           worker_image="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${WORKER_ECR_REPOSITORY}:${{ steps.image.outputs.tag }}"
+          cors_allowed_origins="https://debug.lnz-study.com"
           npm install -g @railway/cli
           for attempt in 1 2 3; do
             if railway variable set \
               --service "${RAILWAY_CONTROL_PLANE_SERVICE}" \
               --environment "${RAILWAY_ENVIRONMENT}" \
               "SANDBOX_WORKER_IMAGE_TAG=${{ steps.image.outputs.tag }}" \
-              "SANDBOX_DEFAULT_IMAGE=${worker_image}"; then
+              "SANDBOX_DEFAULT_IMAGE=${worker_image}" \
+              "CONTROL_PLANE_CORS_ALLOWED_ORIGINS=${cors_allowed_origins}"; then
               break
             fi
 
@@ -173,13 +175,14 @@ jobs:
               --environment "${RAILWAY_ENVIRONMENT}" \
               --kv || true)"
             if grep -qx "SANDBOX_WORKER_IMAGE_TAG=${{ steps.image.outputs.tag }}" <<<"${variables}" &&
-              grep -qx "SANDBOX_DEFAULT_IMAGE=${worker_image}" <<<"${variables}"; then
-              echo "Railway variables match desired worker image after a failed set attempt."
+              grep -qx "SANDBOX_DEFAULT_IMAGE=${worker_image}" <<<"${variables}" &&
+              grep -qx "CONTROL_PLANE_CORS_ALLOWED_ORIGINS=${cors_allowed_origins}" <<<"${variables}"; then
+              echo "Railway variables match desired control-plane values after a failed set attempt."
               break
             fi
 
             if [[ "${attempt}" == "3" ]]; then
-              echo "Railway worker image variables were not updated after ${attempt} attempts." >&2
+              echo "Railway control-plane variables were not updated after ${attempt} attempts." >&2
               exit 1
             fi
 
