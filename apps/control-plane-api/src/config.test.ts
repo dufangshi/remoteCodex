@@ -25,6 +25,7 @@ describe('control plane config', () => {
       LLM_GATEWAY_PROVIDER: 'custom-compatible',
       LLM_GATEWAY_TOKEN_SECRET_NAME: 'remote-codex-gateway-tokens',
       LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY: 'sub2api-api-key',
+      LLM_GATEWAY_STATIC_TOKEN: 'gateway-static-token',
       LLM_GATEWAY_ADMIN_BASE_URL: 'https://llm-gateway-admin.example.test',
       LLM_GATEWAY_ADMIN_TOKEN: 'gateway-admin-token',
       SANDBOX_DEFAULT_RESOURCE_PROFILE: 'large',
@@ -52,6 +53,7 @@ describe('control plane config', () => {
     expect(config.llmGatewayProvider).toBe('custom-compatible');
     expect(config.llmGatewayTokenSecretName).toBe('remote-codex-gateway-tokens');
     expect(config.llmGatewayStaticTokenSecretKey).toBe('sub2api-api-key');
+    expect(config.llmGatewayStaticToken).toBe('gateway-static-token');
     expect(config.llmGatewayAdminBaseUrl).toBe('https://llm-gateway-admin.example.test');
     expect(config.llmGatewayAdminToken).toBe('gateway-admin-token');
     expect(config.sandboxDefaultResourceProfile).toBe('large');

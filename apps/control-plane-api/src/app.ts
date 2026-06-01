@@ -66,6 +66,8 @@ export const CONTROL_PLANE_LOG_REDACTION_PATHS = [
   'sandboxWorkerAuthToken',
   'LLM_GATEWAY_ADMIN_TOKEN',
   'llmGatewayAdminToken',
+  'LLM_GATEWAY_STATIC_TOKEN',
+  'llmGatewayStaticToken',
   'gatewayKey.keyCiphertext',
   '*.gatewayKey.keyCiphertext',
   'body.gatewayKey.keyCiphertext',
@@ -145,9 +147,12 @@ const checkpointSessionSchema = z.object({
   status: z.enum(['created', 'active', 'idle', 'archived', 'deleted']).optional(),
 });
 
+const reasoningEffortSchema = z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']);
+
 const sendSessionPromptSchema = z.object({
   prompt: z.string().min(1),
   model: z.string().min(1).optional(),
+  reasoningEffort: reasoningEffortSchema.nullable().optional(),
 });
 
 const routeTokenSchema = z.object({
@@ -988,6 +993,7 @@ async function createWorkerThreadSession(
       provider: input.provider,
       title: input.title,
       model: input.model ?? app.services.config.sandboxWorkerDefaultCodexModel,
+      reasoningEffort: app.services.config.sandboxWorkerDefaultReasoningEffort,
       approvalMode: 'yolo',
     },
     failureCode: 'worker_session_unavailable',
@@ -1012,6 +1018,7 @@ async function sendWorkerThreadPrompt(
     workerSessionId: string;
     prompt: string;
     model?: string | undefined;
+    reasoningEffort?: z.infer<typeof reasoningEffortSchema> | null | undefined;
   },
 ) {
   const { workerBaseUrl, routeToken } = workerProxyBaseUrl(app, {
@@ -1028,6 +1035,7 @@ async function sendWorkerThreadPrompt(
     body: {
       prompt: input.prompt,
       ...(input.model ? { model: input.model } : {}),
+      ...(input.reasoningEffort !== undefined ? { reasoningEffort: input.reasoningEffort } : {}),
     },
     workerIdentity: {
       userId: input.userId,
@@ -1323,6 +1331,7 @@ function gatewayStartInput(
     baseUrl: app.services.config.llmGatewayBaseUrl,
     keyId: app.services.config.llmGatewayStaticTokenSecretKey ?? gatewayKey.externalKeyId,
     tokenSecretName: app.services.config.llmGatewayTokenSecretName,
+    staticToken: app.services.config.llmGatewayStaticToken,
   };
 }
 
@@ -2500,6 +2509,7 @@ export function buildControlPlaneApp(
         workerSessionId: materializedSession.workerSessionId,
         prompt: input.prompt,
         ...(input.model ? { model: input.model } : {}),
+        reasoningEffort: input.reasoningEffort ?? app.services.config.sandboxWorkerDefaultReasoningEffort,
       });
       return {
         session: repository.updateSession(materializedSession.id, { status: 'active' }),
@@ -2526,6 +2536,7 @@ export function buildControlPlaneApp(
           workerSessionId: rematerialized.workerSessionId,
           prompt: input.prompt,
           ...(input.model ? { model: input.model } : {}),
+          reasoningEffort: input.reasoningEffort ?? app.services.config.sandboxWorkerDefaultReasoningEffort,
         });
         return {
           session: repository.updateSession(rematerialized.id, { status: 'active' }),

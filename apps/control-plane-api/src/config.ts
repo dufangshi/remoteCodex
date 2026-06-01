@@ -21,6 +21,9 @@ const envSchema = z.object({
   SANDBOX_WORKER_INTERNAL_PORT: z.coerce.number().int().positive().optional(),
   SANDBOX_WORKER_ENABLED_AGENT_PROVIDERS: z.string().optional(),
   SANDBOX_WORKER_DEFAULT_CODEX_MODEL: z.string().trim().min(1).optional(),
+  SANDBOX_WORKER_DEFAULT_REASONING_EFFORT: z
+    .enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh'])
+    .optional(),
   SANDBOX_WORKER_AUTH_TOKEN: z.string().min(1).optional(),
   SANDBOX_WORKER_IDENTITY_SECRET: z.string().min(1).optional(),
   CONTROL_PLANE_INTERNAL_SERVICE_TOKEN: z.string().min(16).optional(),
@@ -28,6 +31,7 @@ const envSchema = z.object({
   LLM_GATEWAY_PROVIDER: z.string().trim().min(1).optional(),
   LLM_GATEWAY_TOKEN_SECRET_NAME: z.string().min(1).optional(),
   LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY: z.string().min(1).optional(),
+  LLM_GATEWAY_STATIC_TOKEN: z.string().min(1).optional(),
   LLM_GATEWAY_ADMIN_BASE_URL: z.string().url().optional(),
   LLM_GATEWAY_ADMIN_TOKEN: z.string().min(1).optional(),
   ELAGENTE_HARNESS_BASE_URL: z.string().url().optional(),
@@ -75,6 +79,7 @@ export interface ControlPlaneConfig {
   sandboxWorkerInternalPort: number;
   sandboxWorkerEnabledAgentProviders: string;
   sandboxWorkerDefaultCodexModel: string;
+  sandboxWorkerDefaultReasoningEffort: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
   sandboxWorkerAuthToken: string | null;
   sandboxWorkerIdentitySecret: string | null;
   internalServiceToken: string | null;
@@ -82,6 +87,7 @@ export interface ControlPlaneConfig {
   llmGatewayProvider: string;
   llmGatewayTokenSecretName: string | null;
   llmGatewayStaticTokenSecretKey: string | null;
+  llmGatewayStaticToken: string | null;
   llmGatewayAdminBaseUrl: string | null;
   llmGatewayAdminToken: string | null;
   harnessBaseUrl: string | null;
@@ -191,7 +197,9 @@ export function loadControlPlaneConfig(
     sandboxWorkerEnabledAgentProviders:
       parsed.SANDBOX_WORKER_ENABLED_AGENT_PROVIDERS ?? 'codex',
     sandboxWorkerDefaultCodexModel:
-      parsed.SANDBOX_WORKER_DEFAULT_CODEX_MODEL ?? 'gpt-5.1-codex',
+      parsed.SANDBOX_WORKER_DEFAULT_CODEX_MODEL ?? 'gpt-5.4',
+    sandboxWorkerDefaultReasoningEffort:
+      parsed.SANDBOX_WORKER_DEFAULT_REASONING_EFFORT ?? 'medium',
     sandboxWorkerAuthToken: parsed.SANDBOX_WORKER_AUTH_TOKEN ?? null,
     sandboxWorkerIdentitySecret: parsed.SANDBOX_WORKER_IDENTITY_SECRET ?? null,
     internalServiceToken: parsed.CONTROL_PLANE_INTERNAL_SERVICE_TOKEN ?? null,
@@ -199,6 +207,7 @@ export function loadControlPlaneConfig(
     llmGatewayProvider: parsed.LLM_GATEWAY_PROVIDER ?? 'sub2api',
     llmGatewayTokenSecretName: parsed.LLM_GATEWAY_TOKEN_SECRET_NAME ?? null,
     llmGatewayStaticTokenSecretKey: parsed.LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY ?? null,
+    llmGatewayStaticToken: parsed.LLM_GATEWAY_STATIC_TOKEN ?? null,
     llmGatewayAdminBaseUrl: parsed.LLM_GATEWAY_ADMIN_BASE_URL ?? null,
     llmGatewayAdminToken: parsed.LLM_GATEWAY_ADMIN_TOKEN ?? null,
     harnessBaseUrl: parsed.ELAGENTE_HARNESS_BASE_URL ?? null,

@@ -387,6 +387,7 @@ export class CodexAppServerManager extends EventEmitter {
     const response = await this.client!.request<{ thread: any; model: string; reasoningEffort?: ReasoningEffort | null; sandbox?: string | null }>('thread/start', {
       cwd: input.cwd,
       model: input.model,
+      effort: input.effort,
       serviceTier: input.serviceTier,
       approvalPolicy: input.approvalPolicy,
       sandbox: input.sandbox ?? null,

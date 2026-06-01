@@ -913,6 +913,7 @@ export interface CreateThreadInput {
   title?: string;
   provider?: AgentBackendIdDto;
   model: string;
+  reasoningEffort?: ReasoningEffortDto | null;
   approvalMode: ApprovalMode;
 }
 

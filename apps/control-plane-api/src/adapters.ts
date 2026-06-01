@@ -36,6 +36,7 @@ export interface SandboxStartInput {
     baseUrl: string;
     keyId: string;
     tokenSecretName?: string | null;
+    staticToken?: string | null;
   } | undefined;
   harness?: {
     baseUrl: string;
@@ -954,6 +955,9 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
           ? {
               REMOTE_CODEX_LLM_GATEWAY_BASE_URL: input.gateway.baseUrl,
               REMOTE_CODEX_LLM_GATEWAY_KEY_ID: input.gateway.keyId,
+              ...(input.gateway.staticToken
+                ? { REMOTE_CODEX_LLM_GATEWAY_TOKEN: input.gateway.staticToken }
+                : {}),
             }
           : {}),
         ...(input.harness
@@ -974,7 +978,7 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
           secretName: this.config.workerAuthTokenSecretName,
           key: 'identity-secret',
         },
-        ...(input.gateway?.tokenSecretName
+        ...(input.gateway?.tokenSecretName && !input.gateway.staticToken
           ? {
               REMOTE_CODEX_LLM_GATEWAY_TOKEN: {
                 secretName: input.gateway.tokenSecretName,

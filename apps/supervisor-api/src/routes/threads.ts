@@ -35,6 +35,7 @@ const createThreadSchema = z.object({
   title: z.string().optional(),
   provider: agentBackendIdSchema.optional(),
   model: z.string().min(1),
+  reasoningEffort: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as [ReasoningEffortDto, ...ReasoningEffortDto[]]).nullable().optional(),
   approvalMode: z.enum(['yolo', 'guarded']).default('yolo')
 });
 
@@ -383,6 +384,7 @@ export async function registerThreadRoutes(app: FastifyInstance) {
     const input = {
       workspaceId: body.workspaceId,
       model: body.model,
+      ...(body.reasoningEffort !== undefined ? { reasoningEffort: body.reasoningEffort } : {}),
       approvalMode: body.approvalMode,
       ...(body.provider !== undefined ? { provider: body.provider } : {}),
       ...(body.title ? { title: body.title } : {}),

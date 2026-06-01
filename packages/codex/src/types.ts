@@ -293,6 +293,7 @@ export interface CodexThreadGoalRecord {
 export interface ThreadStartInput {
   cwd: string;
   model: string;
+  effort?: ReasoningEffort | null;
   approvalPolicy: 'never' | 'on-request';
   sandbox?: SandboxMode | null;
   serviceTier?: ServiceTier | null;

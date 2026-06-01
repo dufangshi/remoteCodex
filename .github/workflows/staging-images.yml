@@ -44,6 +44,11 @@ env:
   RAILWAY_ENVIRONMENT: production
   ROUTER_DEPLOYMENT: remote-codex-sandbox-router
   ROUTER_CONTAINER: sandbox-router
+  SUB2API_BASE_URL: https://sub.lnz-study.com
+  LLM_GATEWAY_TOKEN_SECRET_NAME: remote-codex-llm-gateway-tokens
+  LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY: sub2api-api-key
+  SANDBOX_WORKER_DEFAULT_CODEX_MODEL: gpt-5.4
+  SANDBOX_WORKER_DEFAULT_REASONING_EFFORT: medium
 
 jobs:
   build-and-push:
@@ -52,6 +57,7 @@ jobs:
     timeout-minutes: 60
     env:
       RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      SUB2API_STAGING_API_KEY: ${{ secrets.SUB2API_STAGING_API_KEY }}
 
     steps:
       - name: Checkout
@@ -146,6 +152,12 @@ jobs:
         run: |
           docker push "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${WORKER_ECR_REPOSITORY}:${{ steps.image.outputs.tag }}"
 
+      - name: Require staging LLM gateway token
+        if: env.SUB2API_STAGING_API_KEY == ''
+        run: |
+          echo "SUB2API_STAGING_API_KEY secret is required to configure the staging LLM gateway token." >&2
+          exit 1
+
       - name: Set up Node for Railway CLI
         if: env.RAILWAY_TOKEN != ''
         uses: actions/setup-node@v4
@@ -166,7 +178,14 @@ jobs:
               --environment "${RAILWAY_ENVIRONMENT}" \
               "SANDBOX_WORKER_IMAGE_TAG=${{ steps.image.outputs.tag }}" \
               "SANDBOX_DEFAULT_IMAGE=${worker_image}" \
-              "CONTROL_PLANE_CORS_ALLOWED_ORIGINS=${cors_allowed_origins}"; then
+              "CONTROL_PLANE_CORS_ALLOWED_ORIGINS=${cors_allowed_origins}" \
+              "SANDBOX_WORKER_DEFAULT_CODEX_MODEL=${SANDBOX_WORKER_DEFAULT_CODEX_MODEL}" \
+              "SANDBOX_WORKER_DEFAULT_REASONING_EFFORT=${SANDBOX_WORKER_DEFAULT_REASONING_EFFORT}" \
+              "LLM_GATEWAY_PROVIDER=sub2api" \
+              "LLM_GATEWAY_BASE_URL=${SUB2API_BASE_URL}" \
+              "LLM_GATEWAY_TOKEN_SECRET_NAME=${LLM_GATEWAY_TOKEN_SECRET_NAME}" \
+              "LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY=${LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY}" \
+              "LLM_GATEWAY_STATIC_TOKEN=${SUB2API_STAGING_API_KEY}"; then
               break
             fi
 
@@ -176,7 +195,13 @@ jobs:
               --kv || true)"
             if grep -qx "SANDBOX_WORKER_IMAGE_TAG=${{ steps.image.outputs.tag }}" <<<"${variables}" &&
               grep -qx "SANDBOX_DEFAULT_IMAGE=${worker_image}" <<<"${variables}" &&
-              grep -qx "CONTROL_PLANE_CORS_ALLOWED_ORIGINS=${cors_allowed_origins}" <<<"${variables}"; then
+              grep -qx "CONTROL_PLANE_CORS_ALLOWED_ORIGINS=${cors_allowed_origins}" <<<"${variables}" &&
+              grep -qx "SANDBOX_WORKER_DEFAULT_CODEX_MODEL=${SANDBOX_WORKER_DEFAULT_CODEX_MODEL}" <<<"${variables}" &&
+              grep -qx "SANDBOX_WORKER_DEFAULT_REASONING_EFFORT=${SANDBOX_WORKER_DEFAULT_REASONING_EFFORT}" <<<"${variables}" &&
+              grep -qx "LLM_GATEWAY_PROVIDER=sub2api" <<<"${variables}" &&
+              grep -qx "LLM_GATEWAY_BASE_URL=${SUB2API_BASE_URL}" <<<"${variables}" &&
+              grep -qx "LLM_GATEWAY_TOKEN_SECRET_NAME=${LLM_GATEWAY_TOKEN_SECRET_NAME}" <<<"${variables}" &&
+              grep -qx "LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY=${LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY}" <<<"${variables}"; then
               echo "Railway variables match desired control-plane values after a failed set attempt."
               break
             fi
@@ -188,6 +213,11 @@ jobs:
 
             sleep $((attempt * 10))
           done
+          railway redeploy \
+            --service "${RAILWAY_CONTROL_PLANE_SERVICE}" \
+            --environment "${RAILWAY_ENVIRONMENT}" \
+            --from-source \
+            --yes
 
       - name: Skip Railway worker image tag update
         if: env.RAILWAY_TOKEN == ''
@@ -198,7 +228,7 @@ jobs:
         run: |
           docker push "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ROUTER_ECR_REPOSITORY}:${{ steps.image.outputs.tag }}"
 
-      - name: Set up kubectl
+      - name: Set up kubectl for router deploy
         uses: azure/setup-kubectl@v4
 
       - name: Deploy sandbox router to EKS

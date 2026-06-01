@@ -2909,7 +2909,7 @@ describe('supervisor api', () => {
       startedAt: '2026-05-20T17:03:35.740Z',
       status: 'completed',
       model: 'sonnet',
-      reasoningEffort: 'medium',
+      reasoningEffort: 'high',
       reasoningEffortAvailable: true,
       tokenUsage: {
         total: {

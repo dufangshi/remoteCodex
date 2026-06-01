@@ -123,6 +123,8 @@ describe('control plane api', () => {
         'sandboxWorkerAuthToken',
         'LLM_GATEWAY_ADMIN_TOKEN',
         'llmGatewayAdminToken',
+        'LLM_GATEWAY_STATIC_TOKEN',
+        'llmGatewayStaticToken',
         'gatewayKey.keyCiphertext',
         '*.gatewayKey.keyCiphertext',
         '*.keyCiphertext',

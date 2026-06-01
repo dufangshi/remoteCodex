@@ -270,6 +270,27 @@ describe('sandbox manager adapters', () => {
     expect(Object.keys(env.env)).not.toContain('INACT_X_APP_KEY');
   });
 
+  it('supports a control-plane managed staging gateway token without a Kubernetes Secret', async () => {
+    const manager = new AwsEksFargateSandboxManager(awsConfig());
+
+    const env = await manager.prepareSandboxEnvironment({
+      ...sandboxInput,
+      gateway: {
+        baseUrl: 'https://llm-gateway.example.test',
+        keyId: 'sub2api-api-key',
+        tokenSecretName: 'remote-codex-gateway-tokens',
+        staticToken: 'gateway-static-token',
+      },
+    });
+
+    expect(env.env).toMatchObject({
+      REMOTE_CODEX_LLM_GATEWAY_BASE_URL: 'https://llm-gateway.example.test',
+      REMOTE_CODEX_LLM_GATEWAY_KEY_ID: 'sub2api-api-key',
+      REMOTE_CODEX_LLM_GATEWAY_TOKEN: 'gateway-static-token',
+    });
+    expect(env.secretEnv).not.toHaveProperty('REMOTE_CODEX_LLM_GATEWAY_TOKEN');
+  });
+
   it('lets control plane override the AWS worker enabled provider list at launch', async () => {
     const manager = new AwsEksFargateSandboxManager(awsConfig());
 

@@ -227,6 +227,7 @@ export interface ReadAgentSessionOptions {
 export interface StartAgentSessionInput {
   cwd: string;
   model: string;
+  reasoningEffort?: string | null;
   approvalMode: 'yolo' | 'guarded';
   sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access' | null;
   performanceMode?: 'standard' | 'fast' | null;
