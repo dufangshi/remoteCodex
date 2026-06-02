@@ -21,27 +21,35 @@ import {
   ThreadTurnTokenUsageDto,
   truncateAutoThreadTitle,
 } from '../../../../packages/shared/src/index';
-import { ExportTranscriptDialog } from '../components/ExportTranscriptDialog';
-import { ConfirmDialog } from '../components/ConfirmDialog';
-import { ThreadComposer } from '../components/ThreadComposer';
 import {
+  AppShellMenuButton,
+  AppShellNavigationMenu,
+} from '../components/AppShellNavigation';
+import { useAppShellNav } from '../components/AppShellNavContext';
+import {
+  ConfirmDialog,
+  ExportTranscriptDialog,
+  ThreadDetailSurface,
   ThreadShellPanel,
+  ThreadTimeline,
   type ThreadShellControlState,
   type ThreadShellPanelHandle,
-} from '../components/ThreadShellPanel';
-import { ThreadTimeline } from '../components/ThreadTimeline';
-import { ThreadWorkspaceLayout } from '../components/ThreadWorkspaceLayout';
+  type ThreadComposerProps,
+  type ThreadTimelineProps,
+} from '@remote-codex/thread-ui';
 import {
   formatLongTimestamp,
   threadStatusLabel,
-} from '../components/threadPresentation';
-import { usePlugins } from '../plugins/usePlugins';
+} from '@remote-codex/thread-ui';
+import { usePlugins } from '@remote-codex/thread-ui';
 import {
   ApiError,
   buildThreadPdfExportUrl,
   compactThread,
   connectSupervisorEvents,
+  connectShellSocket,
   createThreadHook,
+  createThreadShell,
   clearThreadGoal,
   disconnectThread,
   downloadThreadTranscriptExport,
@@ -54,6 +62,7 @@ import {
   fetchThreadHooks,
   fetchThreadMcpServers,
   fetchThreadHistoryItemDetail,
+  fetchThreadShellState,
   fetchThreadSkills,
   fetchSupervisorHealth,
   fetchThreads,
@@ -68,10 +77,12 @@ import {
   type SendThreadPromptRequestInput,
   trustThreadHook,
   updateThread,
+  updateShell,
   updateProviderHostFile,
   updateThreadGoal,
   updateThreadHook,
   updateThreadSettings,
+  terminateShell,
   untrustThreadHook,
 } from '../lib/api';
 import {
@@ -251,6 +262,7 @@ function threadConnectionSummary(isLoaded: boolean, connection: RealtimeConnecti
 export function ThreadDetailPage() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
+  const shellNav = useAppShellNav();
   const plugins = usePlugins();
   const liveOutputBufferRef = useRef('');
   const liveOutputFrameRef = useRef<number | null>(null);
@@ -296,6 +308,38 @@ export function ThreadDetailPage() {
   const [activeView, setActiveView] = useState<'chat' | 'shell'>('chat');
   const terminalPluginEnabled = plugins.getThreadPanels().some(
     (panel) => panel.kind === 'terminal',
+  );
+  const localShellAdapter = useMemo(
+    () => ({
+      fetchState: fetchThreadShellState,
+      createShell: createThreadShell,
+      terminateShell,
+      updateShell,
+      connectSocket: connectShellSocket,
+    }),
+    [],
+  );
+  const getThreadHref = useCallback(
+    (threadId: string) => `/threads/${threadId}`,
+    [],
+  );
+  const openThread = useCallback(
+    (threadId: string) => {
+      navigate(`/threads/${threadId}`);
+    },
+    [navigate],
+  );
+  const getNewThreadHref = useCallback(
+    (workspaceId?: string | null) =>
+      workspaceId
+        ? `/threads/new?workspaceId=${encodeURIComponent(workspaceId)}`
+        : '/threads/new',
+    [],
+  );
+  const getThreadImageAssetUrl = useCallback(
+    ({ threadId, path }: { threadId: string; path: string }) =>
+      `/api/threads/${threadId}/assets/image?path=${encodeURIComponent(path)}`,
+    [],
   );
   const [chatDraft, setChatDraft] = useState<{
     prompt: string;
@@ -3201,357 +3245,254 @@ export function ThreadDetailPage() {
       {mobileSessionConnectionControl}
     </div>
   );
+  const surfaceActions = (
+    <div className="flex items-center justify-end gap-2">
+      {exportTranscriptButton}
+      {goalMonitorButton}
+      {desktopSessionConnectionIndicator}
+    </div>
+  );
+  const timelineProps = useMemo<Partial<ThreadTimelineProps>>(
+    () => ({
+      livePlan,
+      liveItems,
+      respondingRequestId,
+      onRespondToRequest: handleRespondToRequest,
+      scrollRequestKey,
+      bottomSpacer: timelineBottomSpacer,
+      className: 'thread-timeline-surface min-h-0 flex-1',
+      onTailVisibilityChange: setFollowTail,
+      loadingEarlier,
+      onLoadEarlier: handleLoadEarlierTurns,
+      onOpenThread: openThread,
+      answeredRequestNotes:
+        detail?.answeredRequestNotes ?? EMPTY_ANSWERED_REQUEST_NOTES,
+      activityNotes: detail?.activityNotes ?? EMPTY_ACTIVITY_NOTES,
+      pendingSteers: detail?.pendingSteers ?? EMPTY_PENDING_STEERS,
+      optimisticSteers,
+      optimisticTurn: timelineOptimisticTurn,
+    }),
+    [
+      detail?.answeredRequestNotes,
+      detail?.activityNotes,
+      detail?.pendingSteers,
+      handleLoadEarlierTurns,
+      handleRespondToRequest,
+      liveItems,
+      livePlan,
+      loadingEarlier,
+      openThread,
+      optimisticSteers,
+      respondingRequestId,
+      scrollRequestKey,
+      timelineBottomSpacer,
+      timelineOptimisticTurn,
+    ],
+  );
+  const chatComposerProps = detail
+    ? ({
+        busy: activeView === 'chat' ? busy : false,
+        settingsBusy,
+        error: null,
+        model: detail.thread.model,
+        reasoningEffort: detail.thread.reasoningEffort,
+        fastMode: detail.thread.fastMode ?? false,
+        collaborationMode: detail.thread.collaborationMode,
+        modelOptions,
+        contextUsage: detail.thread.contextUsage,
+        capabilities: backendCapabilities,
+        toolboxItems: backendManagementSchema?.toolboxItems ?? [],
+        hookCommandTemplates:
+          backendManagementSchema?.hookCommandTemplates ?? [],
+        mcpConfigFormat: backendManagementSchema?.mcpConfigFormat ?? 'none',
+        followTail,
+        threadConnected: detail.thread.isLoaded,
+        shellAvailable: terminalPluginEnabled,
+        disabled: Boolean(promptDisabledReason),
+        ...(promptDisabledReason
+          ? { disabledPlaceholder: promptDisabledReason }
+          : {}),
+        shellControlState,
+        draftPrompt: chatDraft.prompt,
+        draftAttachments: chatDraft.attachments,
+        onDraftChange: setChatDraft,
+        canInterrupt: Boolean(detail.thread.activeTurnId),
+        onInterrupt: handleInterrupt,
+        onCompact: handleCompactThread,
+        onOpenForkTurns: handleOpenForkTurns,
+        onForkLatest: handleForkLatest,
+        onForkTurn: handleForkTurn,
+        onOpenSkills: handleOpenSkills,
+        onOpenMcp: handleOpenMcp,
+        onOpenHooks: handleOpenHooks,
+        onCreateHook: handleCreateHook,
+        onUpdateHook: handleUpdateHook,
+        onTrustHook: handleTrustHook,
+        onUntrustHook: handleUntrustHook,
+        goalState,
+        onOpenGoal: handleOpenGoal,
+        onUpdateGoal: handleUpdateGoal,
+        ...(mcpProviderConfigFileName
+          ? {
+              onReadProviderConfig: () =>
+                fetchProviderHostFile(
+                  detail.thread.provider,
+                  mcpProviderConfigFileName,
+                ),
+              onWriteProviderConfig: (content: string) =>
+                updateProviderHostFile(
+                  detail.thread.provider,
+                  mcpProviderConfigFileName,
+                  { content },
+                ),
+            }
+          : {}),
+        onToggleFollow: () => setScrollRequestKey((current) => current + 1),
+        onUpdateSettings: handleUpdateThreadSettings,
+        onToggleView: handleToggleView,
+        onShellCopy: handleShellCopy,
+        onShellControl: handleShellControl,
+        compactBusy,
+        skillsState,
+        mcpState,
+        hooksState,
+        forkTurnOptionsState,
+      } satisfies Omit<ThreadComposerProps, 'activeView' | 'onSubmit'>)
+    : null;
+  const shellComposerProps = detail
+    ? ({
+        busy,
+        settingsBusy: false,
+        error: detail.thread.isLoaded ? shellControlState?.error ?? null : null,
+        followTail: false,
+        capabilities: backendCapabilities,
+        toolboxItems: backendManagementSchema?.toolboxItems ?? [],
+        hookCommandTemplates:
+          backendManagementSchema?.hookCommandTemplates ?? [],
+        mcpConfigFormat: backendManagementSchema?.mcpConfigFormat ?? 'none',
+        threadConnected: detail.thread.isLoaded,
+        shellAvailable: terminalPluginEnabled,
+        shellControlState,
+        canInterrupt: Boolean(
+          detail.thread.isLoaded && shellControlState?.isCommandRunning,
+        ),
+        onInterrupt: handleInterrupt,
+        onToggleView: handleToggleView,
+        onShellCopy: handleShellCopy,
+        onShellControl: handleShellControl,
+      } satisfies Omit<ThreadComposerProps, 'activeView' | 'onSubmit'>)
+    : null;
+  const getCurrentThreadImageAssetUrl = useCallback(
+    (path: string) =>
+      detail
+        ? getThreadImageAssetUrl({ threadId: detail.thread.id, path })
+        : '',
+    [detail?.thread.id, getThreadImageAssetUrl],
+  );
+  const surfaceAdapter = useMemo(
+    () => ({
+      openThread,
+      getThreadHref,
+      getNewThreadHref,
+      renameThread: handleRenameThread,
+      deleteThread: setDeletingThread,
+      sendPrompt: handlePrompt,
+      interrupt: handleInterrupt,
+      compact: handleCompactThread,
+      updateSettings: handleUpdateThreadSettings,
+      loadHistoryItemDetail: handleLoadHistoryItemDetail,
+      getImageAssetUrl: getCurrentThreadImageAssetUrl,
+      shell: localShellAdapter,
+    }),
+    [
+      getCurrentThreadImageAssetUrl,
+      getNewThreadHref,
+      getThreadHref,
+      handleCompactThread,
+      handleInterrupt,
+      handleLoadHistoryItemDetail,
+      handlePrompt,
+      handleRenameThread,
+      handleUpdateThreadSettings,
+      localShellAdapter,
+      openThread,
+    ],
+  );
+  const dialogs = (
+    <>
+      <ExportTranscriptDialog
+        open={exportDialogOpen}
+        busy={exportBusy}
+        turnsState={exportTurnsState}
+        onCancel={() => {
+          if (!exportBusy) {
+            setExportDialogOpen(false);
+          }
+        }}
+        onLoadTurns={loadExportTurns}
+        onExport={handleExportTranscript}
+      />
+      <ConfirmDialog
+        open={deletingThread !== null}
+        title="Delete Thread"
+        description={
+          deletingThread
+            ? `Delete ${truncateAutoThreadTitle(deletingThread.title)} from supervisor. The backend session id will no longer appear in this workspace list.`
+            : ''
+        }
+        confirmLabel="Delete Thread"
+        busy={deletingThreadBusy}
+        onCancel={() => {
+          if (!deletingThreadBusy) {
+            setDeletingThread(null);
+          }
+        }}
+        onConfirm={() => void handleDeleteThread()}
+      />
+    </>
+  );
 
   return (
-    <ThreadWorkspaceLayout
+    <ThreadDetailSurface
       threads={threads}
+      detail={detail}
       status={status}
       loading={loading}
       error={loading ? null : error}
-      viewportConstrained
-      currentThreadId={detail?.thread.id}
-      currentThreadLabel={detail?.thread.title}
-      currentWorkspaceId={detail?.thread.workspaceId}
-      currentWorkspaceLabel={detail?.workspace.label}
+      plugins={plugins}
+      adapter={surfaceAdapter}
       metaContent={metaContent}
       settingsContent={settingsContent}
-      showMobileNewThreadShortcut={false}
       mobileHeaderAction={mobileSessionConnectionButton}
-      onRenameThread={handleRenameThread}
-      onDeleteThread={setDeletingThread}
-    >
-      <div className="thread-detail-surface relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-none border-y shadow-2xl shadow-stone-950/20 sm:flex-none sm:rounded-[2rem] sm:border">
-        <div className="pointer-events-none absolute right-4 top-4 z-30 hidden lg:block">
-          <div className="pointer-events-auto flex flex-col items-end gap-2">
-            <div className="flex items-center justify-end gap-2">
-              {exportTranscriptButton}
-              {goalMonitorButton}
-              {desktopSessionConnectionIndicator}
-            </div>
-          </div>
+      appMenuButton={<AppShellMenuButton />}
+      appNavigationMenu={<AppShellNavigationMenu />}
+      onCloseAppNavigation={shellNav?.closeNav ?? (() => {})}
+      surfaceActions={surfaceActions}
+      floatingPanel={goalMonitorPanel}
+      activeView={activeView}
+      liveOutput={liveOutput}
+      timelineProps={timelineProps}
+      timelineComponent={ThreadTimeline}
+      useFloatingMobileComposer={useFloatingMobileComposer}
+      floatingMobileComposerBottomOffset={floatingMobileComposerBottomOffset}
+      composerHostRef={composerHostRef}
+      shellPanelRef={shellPanelRef}
+      shellPanelComponent={ThreadShellPanel}
+      shellEffectiveTheme={shellNav?.effectiveTheme ?? 'dark'}
+      onShellStateChange={setShellControlState}
+      loadingContent={
+        <div className="flex flex-1 items-center justify-center px-6 py-12 text-center text-stone-400">
+          Loading thread detail...
         </div>
-        {goalMonitorPanel ? (
-          <div className="fixed right-3 top-20 z-50 lg:absolute lg:top-16 lg:right-4">
-            {goalMonitorPanel}
-          </div>
-        ) : null}
-        {error && !loading && (
-          <div className="shrink-0 border-b border-rose-500/20 bg-rose-500/10 px-5 py-4 text-sm text-rose-100 sm:px-6">
-            {error}
-          </div>
-        )}
-
-        {loading ? (
-          <div className="flex flex-1 items-center justify-center px-6 py-12 text-center text-stone-400">
-            Loading thread detail...
-          </div>
-        ) : detail ? (
-          <>
-            {detail.workspacePathStatus === 'missing' && (
-              <div className="shrink-0 border-b border-rose-500/20 bg-rose-500/10 px-5 py-4 text-sm text-rose-100 sm:px-6">
-                <p className="font-medium text-rose-50">Workspace path missing</p>
-                <p className="mt-1 break-words text-rose-100/90">
-                  {detail.workspace.absPath}
-                </p>
-              </div>
-            )}
-            <>
-              <div
-                className={
-                  activeView === 'chat'
-                    ? 'flex min-h-0 flex-1 flex-col'
-                    : 'hidden'
-                }
-              >
-                <ThreadTimeline
-                  threadId={detail.thread.id}
-                  turns={detail.turns}
-                  totalTurnCount={detail.totalTurnCount ?? detail.turns.length}
-                  pendingRequests={detail.pendingRequests}
-                  activeTurnId={detail.thread.activeTurnId}
-                  threadRunning={
-                    detail.thread.status === 'running' ||
-                    detail.thread.activeTurnId !== null
-                  }
-                  livePlan={livePlan}
-                  liveItems={liveItems}
-                  respondingRequestId={respondingRequestId}
-                  onRespondToRequest={handleRespondToRequest}
-                  liveOutput={liveOutput}
-                  scrollRequestKey={scrollRequestKey}
-                  bottomSpacer={timelineBottomSpacer}
-                  className="thread-timeline-surface min-h-0 flex-1"
-                  onTailVisibilityChange={setFollowTail}
-                  loadingEarlier={loadingEarlier}
-                  onLoadEarlier={handleLoadEarlierTurns}
-                  onLoadHistoryItemDetail={handleLoadHistoryItemDetail}
-                  answeredRequestNotes={
-                    detail.answeredRequestNotes ?? EMPTY_ANSWERED_REQUEST_NOTES
-                  }
-                  activityNotes={detail.activityNotes ?? EMPTY_ACTIVITY_NOTES}
-                  pendingSteers={detail.pendingSteers ?? EMPTY_PENDING_STEERS}
-                  optimisticSteers={optimisticSteers}
-                  optimisticTurn={timelineOptimisticTurn}
-                />
-                {useFloatingMobileComposer ? (
-                  <div
-                    ref={composerHostRef}
-                    className="fixed inset-x-0 bottom-0 z-50 overflow-visible sm:hidden"
-                    style={{
-                      bottom: `${floatingMobileComposerBottomOffset}px`,
-                      paddingBottom: 'env(safe-area-inset-bottom)',
-                    }}
-                  >
-                    <ThreadComposer
-                      activeView={activeView}
-                      edgeToEdgeMobile
-                      busy={activeView === 'chat' ? busy : false}
-                      settingsBusy={settingsBusy}
-                      error={null}
-                      model={detail.thread.model}
-                      reasoningEffort={detail.thread.reasoningEffort}
-                      fastMode={detail.thread.fastMode ?? false}
-                      collaborationMode={detail.thread.collaborationMode}
-                      modelOptions={modelOptions}
-                      contextUsage={detail.thread.contextUsage}
-                      capabilities={backendCapabilities}
-                      toolboxItems={backendManagementSchema?.toolboxItems ?? []}
-                      hookCommandTemplates={backendManagementSchema?.hookCommandTemplates ?? []}
-                      mcpConfigFormat={backendManagementSchema?.mcpConfigFormat ?? 'none'}
-                      followTail={followTail}
-                      threadConnected={detail.thread.isLoaded}
-                      shellAvailable={terminalPluginEnabled}
-                      disabled={Boolean(promptDisabledReason)}
-                      disabledPlaceholder={promptDisabledReason ?? undefined}
-                      shellControlState={shellControlState}
-                      draftPrompt={chatDraft.prompt}
-                      draftAttachments={chatDraft.attachments}
-                      onDraftChange={setChatDraft}
-                      canInterrupt={Boolean(detail.thread.activeTurnId)}
-                      onSubmit={handlePrompt}
-                      onInterrupt={handleInterrupt}
-                      onCompact={handleCompactThread}
-                      onOpenForkTurns={handleOpenForkTurns}
-                      onForkLatest={handleForkLatest}
-                      onForkTurn={handleForkTurn}
-                      onOpenSkills={handleOpenSkills}
-                      onOpenMcp={handleOpenMcp}
-                      onOpenHooks={handleOpenHooks}
-                      onCreateHook={handleCreateHook}
-                      onUpdateHook={handleUpdateHook}
-                      onTrustHook={handleTrustHook}
-                      onUntrustHook={handleUntrustHook}
-                      goalState={goalState}
-                      onOpenGoal={handleOpenGoal}
-                      onUpdateGoal={handleUpdateGoal}
-                      onReadProviderConfig={
-                        mcpProviderConfigFileName
-                          ? () =>
-                              fetchProviderHostFile(
-                                detail.thread.provider,
-                                mcpProviderConfigFileName,
-                              )
-                          : undefined
-                      }
-                      onWriteProviderConfig={
-                        mcpProviderConfigFileName
-                          ? (content) =>
-                              updateProviderHostFile(
-                                detail.thread.provider,
-                                mcpProviderConfigFileName,
-                                { content },
-                              )
-                          : undefined
-                      }
-                      onToggleFollow={() => setScrollRequestKey((current) => current + 1)}
-                      onUpdateSettings={handleUpdateThreadSettings}
-                      onToggleView={handleToggleView}
-                      onShellCopy={handleShellCopy}
-                      onShellControl={handleShellControl}
-                      compactBusy={compactBusy}
-                      skillsState={skillsState}
-                      mcpState={mcpState}
-                      hooksState={hooksState}
-                      forkTurnOptionsState={forkTurnOptionsState}
-                    />
-                  </div>
-                ) : (
-                  <div ref={composerHostRef}>
-                    <ThreadComposer
-                      activeView={activeView}
-                      busy={activeView === 'chat' ? busy : false}
-                      settingsBusy={settingsBusy}
-                      error={null}
-                      model={detail.thread.model}
-                      reasoningEffort={detail.thread.reasoningEffort}
-                      fastMode={detail.thread.fastMode ?? false}
-                      collaborationMode={detail.thread.collaborationMode}
-                      modelOptions={modelOptions}
-                      contextUsage={detail.thread.contextUsage}
-                      capabilities={backendCapabilities}
-                      toolboxItems={backendManagementSchema?.toolboxItems ?? []}
-                      hookCommandTemplates={backendManagementSchema?.hookCommandTemplates ?? []}
-                      mcpConfigFormat={backendManagementSchema?.mcpConfigFormat ?? 'none'}
-                      followTail={followTail}
-                      threadConnected={detail.thread.isLoaded}
-                      shellAvailable={terminalPluginEnabled}
-                      disabled={Boolean(promptDisabledReason)}
-                      disabledPlaceholder={promptDisabledReason ?? undefined}
-                      shellControlState={shellControlState}
-                      draftPrompt={chatDraft.prompt}
-                      draftAttachments={chatDraft.attachments}
-                      onDraftChange={setChatDraft}
-                      canInterrupt={Boolean(detail.thread.activeTurnId)}
-                      onSubmit={handlePrompt}
-                      onInterrupt={handleInterrupt}
-                      onCompact={handleCompactThread}
-                      onOpenForkTurns={handleOpenForkTurns}
-                      onForkLatest={handleForkLatest}
-                      onForkTurn={handleForkTurn}
-                      onOpenSkills={handleOpenSkills}
-                      onOpenMcp={handleOpenMcp}
-                      onOpenHooks={handleOpenHooks}
-                      onCreateHook={handleCreateHook}
-                      onUpdateHook={handleUpdateHook}
-                      onTrustHook={handleTrustHook}
-                      onUntrustHook={handleUntrustHook}
-                      goalState={goalState}
-                      onOpenGoal={handleOpenGoal}
-                      onUpdateGoal={handleUpdateGoal}
-                      onReadProviderConfig={
-                        mcpProviderConfigFileName
-                          ? () =>
-                              fetchProviderHostFile(
-                                detail.thread.provider,
-                                mcpProviderConfigFileName,
-                              )
-                          : undefined
-                      }
-                      onWriteProviderConfig={
-                        mcpProviderConfigFileName
-                          ? (content) =>
-                              updateProviderHostFile(
-                                detail.thread.provider,
-                                mcpProviderConfigFileName,
-                                { content },
-                              )
-                          : undefined
-                      }
-                      onToggleFollow={() => setScrollRequestKey((current) => current + 1)}
-                      onUpdateSettings={handleUpdateThreadSettings}
-                      onToggleView={handleToggleView}
-                      onShellCopy={handleShellCopy}
-                      onShellControl={handleShellControl}
-                      compactBusy={compactBusy}
-                      skillsState={skillsState}
-                      mcpState={mcpState}
-                      hooksState={hooksState}
-                      forkTurnOptionsState={forkTurnOptionsState}
-                    />
-                  </div>
-                )}
-              </div>
-              <div
-                className={
-                  activeView === 'shell'
-                    ? 'flex min-h-0 flex-1 flex-col'
-                    : 'hidden'
-                }
-              >
-                {detail.thread.isLoaded && terminalPluginEnabled && (
-                  <ThreadShellPanel
-                    ref={shellPanelRef}
-                    threadId={detail.thread.id}
-                    isVisible={activeView === 'shell'}
-                    showHeader={false}
-                    showFloatingToolbox={false}
-                    onStateChange={setShellControlState}
-                  />
-                )}
-                {detail.thread.isLoaded && !terminalPluginEnabled && activeView === 'shell' && (
-                  <div className="flex min-h-0 flex-1 items-center justify-center p-4 sm:p-6">
-                    <div className="thread-empty-surface max-w-md rounded-[1.6rem] border px-6 py-8 text-center">
-                      <p className="text-base font-medium text-[var(--theme-fg)]">
-                        Terminal plugin disabled
-                      </p>
-                      <p className="mt-3 text-sm leading-6 text-[var(--theme-fg-muted)]">
-                        Enable the Terminal plugin in Settings to use the shell panel.
-                      </p>
-                    </div>
-                  </div>
-                )}
-                {activeView === 'shell' && !detail.thread.isLoaded && (
-                  <div className="flex min-h-0 flex-1 items-center justify-center p-4 sm:p-6">
-                    <div className="thread-empty-surface max-w-md rounded-[1.6rem] border px-6 py-8 text-center">
-                      <p className="text-base font-medium text-[var(--theme-fg)]">
-                        Thread disconnected
-                      </p>
-                      <p className="mt-3 text-sm leading-6 text-[var(--theme-fg-soft)]">
-                        Reconnect this thread before creating or attaching a shell.
-                      </p>
-                    </div>
-                  </div>
-                )}
-                {activeView === 'shell' && (
-                  <ThreadComposer
-                    activeView={activeView}
-                    busy={busy}
-                    settingsBusy={false}
-                    error={detail.thread.isLoaded ? shellControlState?.error ?? null : null}
-                    followTail={false}
-                    capabilities={backendCapabilities}
-                    toolboxItems={backendManagementSchema?.toolboxItems ?? []}
-                    hookCommandTemplates={backendManagementSchema?.hookCommandTemplates ?? []}
-                    mcpConfigFormat={backendManagementSchema?.mcpConfigFormat ?? 'none'}
-                    threadConnected={detail.thread.isLoaded}
-                    shellAvailable={terminalPluginEnabled}
-                    shellControlState={shellControlState}
-                    canInterrupt={Boolean(detail.thread.isLoaded && shellControlState?.isCommandRunning)}
-                    onSubmit={handlePrompt}
-                    onInterrupt={handleInterrupt}
-                    onToggleView={handleToggleView}
-                    onShellCopy={handleShellCopy}
-                    onShellControl={handleShellControl}
-                  />
-                )}
-              </div>
-            </>
-          </>
-        ) : (
-          <div className="flex flex-1 items-center justify-center px-6 py-12 text-center text-stone-400">
-            Unable to resolve this thread.
-          </div>
-        )}
-        <ExportTranscriptDialog
-          open={exportDialogOpen}
-          busy={exportBusy}
-          turnsState={exportTurnsState}
-          onCancel={() => {
-            if (!exportBusy) {
-              setExportDialogOpen(false);
-            }
-          }}
-          onLoadTurns={loadExportTurns}
-          onExport={handleExportTranscript}
-        />
-        <ConfirmDialog
-          open={deletingThread !== null}
-          title="Delete Thread"
-          description={
-            deletingThread
-              ? `Delete ${truncateAutoThreadTitle(deletingThread.title)} from supervisor. The backend session id will no longer appear in this workspace list.`
-              : ''
-          }
-          confirmLabel="Delete Thread"
-          busy={deletingThreadBusy}
-          onCancel={() => {
-            if (!deletingThreadBusy) {
-              setDeletingThread(null);
-            }
-          }}
-          onConfirm={() => void handleDeleteThread()}
-        />
-      </div>
-    </ThreadWorkspaceLayout>
+      }
+      emptyContent={
+        <div className="flex flex-1 items-center justify-center px-6 py-12 text-center text-stone-400">
+          Unable to resolve this thread.
+        </div>
+      }
+      dialogs={dialogs}
+      {...(chatComposerProps ? { composerProps: chatComposerProps } : {})}
+      {...(shellComposerProps ? { shellComposerProps } : {})}
+    />
   );
 }

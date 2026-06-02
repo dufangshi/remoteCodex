@@ -16,7 +16,6 @@ import type {
   HealthDto,
   ImportThreadInput,
   ImportPluginInput,
-  PromptAttachmentManifestEntryDto,
   InterruptTurnInput,
   ModelOptionDto,
   PluginDto,
@@ -56,6 +55,8 @@ import type {
   WorkspaceDto,
   WorkspaceSettingsDto,
 } from '../../../../packages/shared/src/index';
+export type { PromptAttachmentUpload } from '@remote-codex/thread-ui';
+import type { PromptAttachmentUpload } from '@remote-codex/thread-ui';
 
 export class ApiError extends Error {
   constructor(
@@ -149,11 +150,6 @@ async function downloadFile(input: RequestInfo | URL, init?: RequestInit): Promi
     blob: await response.blob(),
     filename,
   };
-}
-
-export interface PromptAttachmentUpload
-  extends PromptAttachmentManifestEntryDto {
-  file: File;
 }
 
 export interface SendThreadPromptRequestInput extends SendThreadPromptInput {
@@ -499,7 +495,12 @@ export function sendThreadPrompt(id: string, input: SendThreadPromptRequestInput
     formData.append('sandboxMode', input.sandboxMode);
   }
 
-  const manifest: PromptAttachmentManifestEntryDto[] = attachments.map(
+  const manifest: Array<
+    Pick<
+      PromptAttachmentUpload,
+      'clientId' | 'kind' | 'originalName' | 'placeholder'
+    >
+  > = attachments.map(
     (attachment, index) => ({
       clientId: attachment.clientId,
       kind: attachment.kind,

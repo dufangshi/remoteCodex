@@ -4460,6 +4460,7 @@ describe('ThreadTimeline', () => {
             turnIndex: 1,
           },
         ]}
+        adapter={{ onOpenLinkedThread: onOpenThread }}
         onOpenThread={onOpenThread}
       />,
     );

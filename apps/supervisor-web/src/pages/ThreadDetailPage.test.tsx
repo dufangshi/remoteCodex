@@ -21,8 +21,11 @@ const timelineRenderMock = vi.hoisted(() => ({
   render: vi.fn(),
 }));
 
-vi.mock('../components/ThreadShellPanel', async () => {
+vi.mock('@remote-codex/thread-ui', async () => {
   const React = await import('react');
+  const actual = await vi.importActual<typeof import('@remote-codex/thread-ui')>(
+    '@remote-codex/thread-ui',
+  );
 
   const ThreadShellPanel = React.forwardRef(function MockThreadShellPanel(
     props: {
@@ -83,16 +86,6 @@ vi.mock('../components/ThreadShellPanel', async () => {
       return <div data-testid="mock-thread-shell-panel" />;
   });
 
-  return {
-    ThreadShellPanel,
-  };
-});
-
-vi.mock('../components/ThreadTimeline', async () => {
-  const React = await import('react');
-  const actual = await vi.importActual<typeof import('../components/ThreadTimeline')>(
-    '../components/ThreadTimeline',
-  );
   type ThreadTimelineProps = React.ComponentProps<typeof actual.ThreadTimeline>;
 
   const ThreadTimeline = React.memo(function MockThreadTimeline(
@@ -104,39 +97,37 @@ vi.mock('../components/ThreadTimeline', async () => {
 
   return {
     ...actual,
+    ThreadShellPanel,
     ThreadTimeline,
+    usePlugins: () => ({
+      plugins: [
+        {
+          id: 'remote-codex.terminal',
+          enabled: true,
+          capabilities: {
+            artifactTypes: [],
+            timelineRenderers: [],
+            threadPanels: [
+              {
+                id: 'terminal',
+                label: 'Terminal',
+                kind: 'terminal',
+                artifactTypes: [],
+              },
+            ],
+          },
+        },
+      ],
+      getThreadPanels: () => [
+        {
+          id: 'terminal',
+          label: 'Terminal',
+          kind: 'terminal',
+        },
+      ],
+    }),
   };
 });
-
-vi.mock('../plugins/usePlugins', () => ({
-  usePlugins: () => ({
-    plugins: [
-      {
-        id: 'remote-codex.terminal',
-        enabled: true,
-        capabilities: {
-          artifactTypes: [],
-          timelineRenderers: [],
-          threadPanels: [
-            {
-              id: 'terminal',
-              label: 'Terminal',
-              kind: 'terminal',
-              artifactTypes: [],
-            },
-          ],
-        },
-      },
-    ],
-    getThreadPanels: () => [
-      {
-        id: 'terminal',
-        label: 'Terminal',
-        kind: 'terminal',
-      },
-    ],
-  }),
-}));
 
 import { ThreadDetailPage } from './ThreadDetailPage';
 

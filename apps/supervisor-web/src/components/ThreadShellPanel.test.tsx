@@ -1,8 +1,10 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ThreadShellPanel } from './ThreadShellPanel';
 import type { ShellSessionDto, ThreadShellStateDto } from '../../../../packages/shared/src/index';
+import type { ThreadShellAdapter } from '@remote-codex/thread-ui';
 
 vi.mock('xterm', () => ({
   Terminal: class MockTerminal {
@@ -115,6 +117,56 @@ function shellState(shells: ShellSessionDto[], activeShellId = shells[0]?.id ?? 
   };
 }
 
+const shellAdapter: ThreadShellAdapter = {
+  async fetchState(id) {
+    return (await fetch(`/api/threads/${id}/shell`)).json();
+  },
+  async createShell(id, input = {}) {
+    return (
+      await fetch(`/api/threads/${id}/shell`, {
+        method: 'POST',
+        ...(Object.keys(input).length > 0 ? { body: JSON.stringify(input) } : {}),
+      })
+    ).json();
+  },
+  async terminateShell(id) {
+    return (
+      await fetch(`/api/shells/${id}/terminate`, {
+        method: 'POST',
+      })
+    ).json();
+  },
+  async updateShell(id, input) {
+    return (
+      await fetch(`/api/shells/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(input),
+      })
+    ).json();
+  },
+  connectSocket(handlers = {}) {
+    const socket = new WebSocket('/ws');
+    socket.addEventListener('message', (message) => {
+      const parsed = JSON.parse((message as MessageEvent).data as string);
+      if (parsed.type === 'supervisor.connected') {
+        handlers.onConnected?.(parsed);
+        return;
+      }
+      handlers.onShellEvent?.(parsed);
+    });
+    return {
+      socket,
+      send(message) {
+        socket.send(JSON.stringify(message));
+      },
+    };
+  },
+};
+
+function renderShellPanel(props: Omit<ComponentProps<typeof ThreadShellPanel>, 'shellAdapter'>) {
+  return render(<ThreadShellPanel shellAdapter={shellAdapter} {...props} />);
+}
+
 describe('ThreadShellPanel', () => {
   beforeEach(() => {
     vi.stubGlobal('ResizeObserver', MockResizeObserver);
@@ -140,7 +192,7 @@ describe('ThreadShellPanel', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<ThreadShellPanel threadId={threadId} />);
+    renderShellPanel({ threadId });
 
     await screen.findByTitle('rcx-shell-1');
 
@@ -167,7 +219,7 @@ describe('ThreadShellPanel', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<ThreadShellPanel threadId={threadId} />);
+    renderShellPanel({ threadId });
 
     await waitFor(() => {
       expect(screen.getByText('2 live')).toBeInTheDocument();
@@ -203,7 +255,7 @@ describe('ThreadShellPanel', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<ThreadShellPanel threadId={threadId} />);
+    renderShellPanel({ threadId });
 
     await waitFor(() => {
       expect(screen.getByText('2 live')).toBeInTheDocument();
@@ -250,7 +302,7 @@ describe('ThreadShellPanel', () => {
       vi.fn(async () => Response.json(shellState([firstShell, secondShell], firstShell.id))),
     );
 
-    render(<ThreadShellPanel threadId={threadId} />);
+    renderShellPanel({ threadId });
 
     await screen.findByTitle('rcx-shell-1');
     fireEvent.click(screen.getByTitle('rcx-shell-2'));
@@ -282,7 +334,7 @@ describe('ThreadShellPanel', () => {
       vi.fn(async () => Response.json(shellState([firstShell, secondShell], firstShell.id))),
     );
 
-    render(<ThreadShellPanel threadId={threadId} />);
+    renderShellPanel({ threadId });
 
     await waitFor(() => {
       expect(MockWebSocket.instances[0]?.sentMessages).toContain(
@@ -359,7 +411,7 @@ describe('ThreadShellPanel', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<ThreadShellPanel threadId={threadId} />);
+    renderShellPanel({ threadId });
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -401,9 +453,7 @@ describe('ThreadShellPanel', () => {
       vi.fn(async () => Response.json(shellState([firstShell], firstShell.id))),
     );
 
-    const { rerender } = render(
-      <ThreadShellPanel threadId={threadId} isVisible />,
-    );
+    const { rerender } = renderShellPanel({ threadId, isVisible: true });
 
     await waitFor(() => {
       expect(MockWebSocket.instances[0]?.sentMessages).toContain(
@@ -427,8 +477,20 @@ describe('ThreadShellPanel', () => {
     } as MessageEvent);
     const sentBeforeToggle = socket.sentMessages.length;
 
-    rerender(<ThreadShellPanel threadId={threadId} isVisible={false} />);
-    rerender(<ThreadShellPanel threadId={threadId} isVisible />);
+    rerender(
+      <ThreadShellPanel
+        shellAdapter={shellAdapter}
+        threadId={threadId}
+        isVisible={false}
+      />,
+    );
+    rerender(
+      <ThreadShellPanel
+        shellAdapter={shellAdapter}
+        threadId={threadId}
+        isVisible
+      />,
+    );
 
     await new Promise((resolve) =>
       window.requestAnimationFrame(() => resolve(undefined)),
@@ -462,7 +524,7 @@ describe('ThreadShellPanel', () => {
       removeEventListener,
     })));
 
-    render(<ThreadShellPanel threadId={threadId} />);
+    renderShellPanel({ threadId });
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Show shell processes' })).toBeInTheDocument();

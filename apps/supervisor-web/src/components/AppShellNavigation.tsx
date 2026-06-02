@@ -29,7 +29,7 @@ import {
   updateWorkspaceSettings,
 } from '../lib/api';
 import { type AgentBackendId, type ThemeMode, useAppShellNav } from './AppShellNavContext';
-import { usePlugins } from '../plugins/usePlugins';
+import { usePlugins } from '@remote-codex/thread-ui';
 
 function MenuIcon() {
   return (
