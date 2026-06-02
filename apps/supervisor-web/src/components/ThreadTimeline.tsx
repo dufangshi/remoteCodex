@@ -171,6 +171,24 @@ interface TurnTokenDetail {
 const INITIAL_VISIBLE_TURNS = 10;
 const LOAD_STEP = 10;
 const FOLLOW_TAIL_THRESHOLD_PX = 80;
+const LARGE_MESSAGE_PREVIEW_CHARS = 4_000;
+
+function useChangeRevision(inputs: readonly unknown[]) {
+  const previousInputsRef = useRef<readonly unknown[] | null>(null);
+  const revisionRef = useRef(0);
+  const previousInputs = previousInputsRef.current;
+  const changed =
+    previousInputs === null ||
+    previousInputs.length !== inputs.length ||
+    inputs.some((input, index) => !Object.is(input, previousInputs[index]));
+
+  if (changed) {
+    revisionRef.current += 1;
+    previousInputsRef.current = inputs;
+  }
+
+  return revisionRef.current;
+}
 
 function itemSurfaceClassName(kind: ThreadHistoryItemDto['kind']) {
   switch (kind) {
@@ -2107,7 +2125,7 @@ function formatTurnRuntimeSummary(turn: TimelineTurn) {
   return [modelLabel, reasoningLabel].join(' · ');
 }
 
-function MarkdownContent({
+const MarkdownContent = memo(function MarkdownContent({
   text,
   className = 'agent-markdown',
 }: {
@@ -2154,7 +2172,7 @@ function MarkdownContent({
       {text}
     </Streamdown>
   );
-}
+});
 
 type MarkdownTreeNode = {
   type?: string;
@@ -2254,7 +2272,7 @@ function LinkifiedPlainText({ text }: { text: string }) {
   return <>{parts.length > 0 ? parts : text}</>;
 }
 
-function MarkdownAwareBody({
+const MarkdownAwareBody = memo(function MarkdownAwareBody({
   text,
   scrollRootRef,
   streaming = false,
@@ -2270,7 +2288,13 @@ function MarkdownAwareBody({
   markdownClassName?: string;
 }) {
   const messageRef = useRef<HTMLDivElement | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const shouldRenderMarkdown = hasLikelyMarkdownSyntax(text);
+  const isLargeText = !streaming && text.length > LARGE_MESSAGE_PREVIEW_CHARS;
+  const displayText =
+    isLargeText && !expanded
+      ? `${text.slice(0, LARGE_MESSAGE_PREVIEW_CHARS).trimEnd()}\n\n...`
+      : text;
   const [isActivated, setIsActivated] = useState(
     streaming || typeof IntersectionObserver === 'undefined',
   );
@@ -2310,17 +2334,26 @@ function MarkdownAwareBody({
   return (
     <div ref={messageRef} className={containerClassName}>
       {isActivated && shouldRenderMarkdown ? (
-        <MarkdownContent text={text} className={markdownClassName} />
+        <MarkdownContent text={displayText} className={markdownClassName} />
       ) : (
         <p className={plainTextClassName}>
-          <LinkifiedPlainText text={text} />
+          <LinkifiedPlainText text={displayText} />
         </p>
       )}
+      {isLargeText ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((current) => !current)}
+          className="timeline-meta-text mt-2 inline-flex rounded-full border border-[var(--theme-border)] px-2.5 py-1 text-xs transition hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)]"
+        >
+          {expanded ? 'Show less' : `Show full message (${text.length.toLocaleString()} chars)`}
+        </button>
+      ) : null}
     </div>
   );
-}
+});
 
-function AgentMessageBody({
+const AgentMessageBody = memo(function AgentMessageBody({
   text,
   scrollRootRef,
   streaming = false,
@@ -2337,9 +2370,9 @@ function AgentMessageBody({
       containerClassName="thread-message-prose"
     />
   );
-}
+});
 
-function UserMessageBody({
+const UserMessageBody = memo(function UserMessageBody({
   threadId,
   text,
 }: {
@@ -2405,7 +2438,7 @@ function UserMessageBody({
       })}
     </div>
   );
-}
+});
 
 function commandStatusBadgeClassName(status: ThreadHistoryItemDto['status']) {
   if (status === 'completed') {
@@ -4730,7 +4763,7 @@ function TimelineHistoryEntries({
   );
 }
 
-export function ThreadTimeline({
+function ThreadTimelineComponent({
   threadId,
   turns,
   totalTurnCount,
@@ -4760,7 +4793,7 @@ export function ThreadTimeline({
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollContentRef = useRef<HTMLDivElement | null>(null);
   const lastHandledScrollRequestKeyRef = useRef(scrollRequestKey);
-  const previousContentSignatureRef = useRef<string | null>(null);
+  const previousContentRevisionRef = useRef<number | null>(null);
   const previousBottomSpacerRef = useRef(bottomSpacer);
   const lastObservedScrollHeightRef = useRef(0);
   const tailSentinelRef = useRef<HTMLDivElement | null>(null);
@@ -4780,107 +4813,20 @@ export function ThreadTimeline({
     {},
   );
   const [isTailVisible, setIsTailVisible] = useState(true);
-  const contentSignature = useMemo(
-    () =>
-      JSON.stringify({
-        turns: turns.map((turn) => ({
-          id: turn.id,
-          status: turn.status,
-          startedAt: turn.startedAt,
-          error: turn.error,
-          items: turn.items.map((item) => ({
-            id: item.id,
-            kind: item.kind,
-            status: item.status,
-            sequence: item.sequence ?? null,
-            transcriptOrder: item.transcriptOrder ?? null,
-            textLength: item.text.length,
-          })),
-        })),
-        pendingRequests: pendingRequests.map((request) => ({
-          id: request.id,
-          turnId: request.turnId,
-          title: request.title,
-        })),
-        pendingSteers: pendingSteers.map((steer) => ({
-          id: steer.id,
-          turnId: steer.turnId,
-          prompt: steer.prompt,
-          clientRequestId: steer.clientRequestId,
-        })),
-        optimisticSteers: optimisticSteers.map((steer) => ({
-          id: steer.id,
-          turnId: steer.turnId,
-          prompt: steer.prompt,
-          status: steer.status,
-        })),
-        liveOutputLength: liveOutput.length,
-        livePlan:
-          livePlan === null
-            ? null
-            : {
-                turnId: livePlan.turnId,
-                explanation: livePlan.explanation,
-                steps: livePlan.plan.map((step) => `${step.status}:${step.step}`),
-              },
-        liveItems:
-          liveItems === null
-            ? null
-            : {
-                turnId: liveItems.turnId,
-                items: liveItems.items.map((item) => ({
-                  id: item.id,
-                  kind: item.kind,
-                  status: item.status,
-                  sequence: item.sequence ?? null,
-                  transcriptOrder: item.transcriptOrder ?? null,
-                  textLength: item.text.length,
-                })),
-              },
-        optimisticTurn:
-          optimisticTurn === null
-            ? null
-            : {
-                id: optimisticTurn.id,
-                status: optimisticTurn.status,
-                error: optimisticTurn.error,
-                items: optimisticTurn.items.map((item) => ({
-                  id: item.id,
-                  kind: item.kind,
-                  textLength: item.text.length,
-                })),
-              },
-        answeredRequestNotes: answeredRequestNotes.map((note) => ({
-          id: note.id,
-          turnId: note.turnId ?? null,
-          title: note.title,
-          createdAt: note.createdAt ?? '',
-          summaryLines: note.summaryLines,
-        })),
-        activityNotes: activityNotes.map((note) => ({
-          id: note.id,
-          kind: note.kind,
-          text: note.text,
-          createdAt: note.createdAt,
-        })),
-        ephemeralUserNote,
-        bottomSpacer,
-      }),
-    [
-      activityNotes,
-      answeredRequestNotes,
-      bottomSpacer,
-      ephemeralUserNote,
-      liveOutput,
-      liveItems,
-      livePlan,
-      optimisticSteers,
-      optimisticTurn,
-      pendingSteers,
-      pendingRequests,
-      turns,
-    ],
-  );
+  const contentRevision = useChangeRevision([
+    turns,
+    pendingRequests,
+    pendingSteers,
+    optimisticSteers,
+    liveOutput,
+    livePlan,
+    liveItems,
+    optimisticTurn,
+    answeredRequestNotes,
+    activityNotes,
+    ephemeralUserNote,
+    bottomSpacer,
+  ]);
   const serverManagedHistory =
     typeof onLoadEarlier === 'function' ||
     totalTurnCount !== undefined;
@@ -5005,7 +4951,9 @@ export function ThreadTimeline({
         ? isElementVisible(container, tailSentinel)
         : isNearBottom(container);
     isTailVisibleRef.current = nextIsTailVisible;
-    setIsTailVisible(nextIsTailVisible);
+    setIsTailVisible((current) =>
+      current === nextIsTailVisible ? current : nextIsTailVisible,
+    );
   }, []);
 
   const handleScroll = useCallback(() => {
@@ -5025,7 +4973,7 @@ export function ThreadTimeline({
     container.scrollTop = container.scrollHeight;
     lastObservedScrollHeightRef.current = container.scrollHeight;
     isTailVisibleRef.current = true;
-    setIsTailVisible(true);
+    setIsTailVisible((current) => (current ? current : true));
     shouldStickToBottomRef.current = true;
   }, []);
 
@@ -5062,8 +5010,8 @@ export function ThreadTimeline({
   useEffect(() => {
     const shouldForceScroll =
       scrollRequestKey !== lastHandledScrollRequestKeyRef.current;
-    const contentChanged = previousContentSignatureRef.current !== contentSignature;
-    previousContentSignatureRef.current = contentSignature;
+    const contentChanged = previousContentRevisionRef.current !== contentRevision;
+    previousContentRevisionRef.current = contentRevision;
     const shouldAutoScroll =
       shouldForceScroll ||
       (contentChanged && (isTailVisible || shouldStickToBottomRef.current));
@@ -5084,7 +5032,7 @@ export function ThreadTimeline({
       window.cancelAnimationFrame(frame);
     };
   }, [
-    contentSignature,
+    contentRevision,
     isTailVisible,
     scrollToBottom,
     scrollRequestKey,
@@ -5148,14 +5096,19 @@ export function ThreadTimeline({
 
   const effectiveTotalTurnCount = totalTurnCount ?? turns.length;
   const startIndex = Math.max(0, turns.length - visibleCount);
-  const visibleTurns = serverManagedHistory ? turns : turns.slice(startIndex);
-  const visibleTurnAbsoluteOffset = serverManagedHistory
+  const loadedTurnAbsoluteOffset = serverManagedHistory
     ? Math.max(0, effectiveTotalTurnCount - turns.length)
-    : startIndex;
+    : 0;
+  const visibleTurns = turns.slice(startIndex);
+  const visibleTurnAbsoluteOffset = loadedTurnAbsoluteOffset + startIndex;
   const optimisticAbsoluteIndex = effectiveTotalTurnCount + 1;
-  const hiddenCount = serverManagedHistory
+  const loadedHiddenCount = turns.length - visibleTurns.length;
+  const unloadedHiddenCount = serverManagedHistory
     ? Math.max(0, effectiveTotalTurnCount - turns.length)
-    : turns.length - visibleTurns.length;
+    : 0;
+  const hiddenCount = serverManagedHistory
+    ? unloadedHiddenCount + loadedHiddenCount
+    : loadedHiddenCount;
   const showLoadAll = !serverManagedHistory && hiddenCount > 0 && loadMoreClicks >= 2;
   const forceLatestTurnActive =
     threadRunning &&
@@ -5425,7 +5378,7 @@ export function ThreadTimeline({
                   <button
                     type="button"
                     onClick={() => {
-                      if (serverManagedHistory) {
+                      if (serverManagedHistory && loadedHiddenCount === 0) {
                         onLoadEarlier?.();
                         return;
                       }
@@ -5452,7 +5405,13 @@ export function ThreadTimeline({
                 )}
                 <p className="timeline-meta-text">
                   Showing {visibleTurns.length} of {effectiveTotalTurnCount} turns
-                  {hiddenCount > 0 ? ` · ${hiddenCount} earlier hidden` : ''}
+                  {hiddenCount > 0
+                    ? ` · ${hiddenCount} earlier hidden${
+                        loadedHiddenCount > 0 && unloadedHiddenCount > 0
+                          ? ` (${loadedHiddenCount} loaded)`
+                          : ''
+                      }`
+                    : ''}
                 </p>
               </div>
             </div>
@@ -5755,3 +5714,5 @@ export function ThreadTimeline({
     </>
   );
 }
+
+export const ThreadTimeline = memo(ThreadTimelineComponent);

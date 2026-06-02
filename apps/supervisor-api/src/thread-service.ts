@@ -131,6 +131,20 @@ async function pathExists(absPath: string) {
   }
 }
 
+function canUseRuntimePagedTurns(
+  cachedDetail: { totalTurnCount: number },
+  enrichedTurns: ThreadTurnDto[],
+  options: { limit?: number; beforeTurnId?: string },
+) {
+  const requestedLimit = options.limit ?? 10;
+
+  if (enrichedTurns.length > requestedLimit) {
+    return false;
+  }
+
+  return cachedDetail.totalTurnCount > enrichedTurns.length;
+}
+
 export class ThreadService {
   private readonly liveState = new ThreadLiveStateStore();
   private readonly detailAssembler: ThreadDetailAssembler;
@@ -646,7 +660,14 @@ export class ThreadService {
       workspacePath: workspace.absPath,
       turns: cachedDetail.turns,
     }) ?? cachedDetail.turns;
-    const pagedTurns = this.detailAssembler.sliceTurns(enrichedTurns, options);
+    const pagedTurns =
+      cachedDetail.isPaged &&
+      canUseRuntimePagedTurns(cachedDetail, enrichedTurns, options)
+      ? {
+          turns: enrichedTurns,
+          totalTurnCount: cachedDetail.totalTurnCount,
+        }
+      : this.detailAssembler.sliceTurns(enrichedTurns, options);
     this.syncPendingPlanDecisionRequestFromTurns(
       updated.id,
       updated.collaborationMode,

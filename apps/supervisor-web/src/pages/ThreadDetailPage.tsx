@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import {
@@ -112,6 +112,11 @@ const SANDBOX_MODE_OPTIONS: SandboxModeDto[] = [
   'workspace-write',
   'danger-full-access',
 ];
+const EMPTY_ANSWERED_REQUEST_NOTES: NonNullable<
+  ThreadDetailDto['answeredRequestNotes']
+> = [];
+const EMPTY_ACTIVITY_NOTES: NonNullable<ThreadDetailDto['activityNotes']> = [];
+const EMPTY_PENDING_STEERS: NonNullable<ThreadDetailDto['pendingSteers']> = [];
 
 type RealtimeConnectionStatus =
   | 'checking'
@@ -264,11 +269,6 @@ export function ThreadDetailPage() {
   const pageContextRequestIdRef = useRef(0);
   const pageContextProviderRef = useRef<ThreadDto['provider'] | null>(null);
   const terminalTurnPendingRef = useRef<string | null>(null);
-  const backgroundHistoryCursorRef = useRef<{
-    threadId: string;
-    beforeTurnId: string;
-  } | null>(null);
-  const backgroundHistoryLoadingRef = useRef(false);
   const detailRef = useRef<ThreadDetailDto | null>(null);
   const pendingThreadSettingsRef = useRef<PendingThreadSettings | null>(null);
   const resolvedRequestIdsRef = useRef<Set<string>>(new Set());
@@ -389,7 +389,9 @@ export function ThreadDetailPage() {
       return;
     }
 
-    setLiveOutput((current) => current + buffered);
+    startTransition(() => {
+      setLiveOutput((current) => current + buffered);
+    });
   }, []);
 
   const queueLiveOutputDelta = useCallback(
@@ -1314,8 +1316,6 @@ export function ThreadDetailPage() {
     setOptimisticTurn(null);
     setOptimisticSteers([]);
     setLiveItems(null);
-    backgroundHistoryCursorRef.current = null;
-    backgroundHistoryLoadingRef.current = false;
     pendingThreadSettingsRef.current = null;
     terminalTurnPendingRef.current = null;
     resolvedRequestIdsRef.current = new Set();
@@ -1510,81 +1510,6 @@ export function ThreadDetailPage() {
     });
     void loadPageContext();
   }, [loadPageContext, loadThreadDetail]);
-
-  useEffect(() => {
-    if (
-      !detail ||
-      detail.turns.length === 0 ||
-      loadingEarlier ||
-      backgroundHistoryLoadingRef.current
-    ) {
-      return;
-    }
-
-    const totalTurnCount = detail.totalTurnCount ?? detail.turns.length;
-    if (detail.turns.length >= totalTurnCount) {
-      backgroundHistoryCursorRef.current = null;
-      return;
-    }
-
-    const earliestLoadedTurnId = detail.turns[0]?.id;
-    if (!earliestLoadedTurnId) {
-      return;
-    }
-
-    const cursor = {
-      threadId: detail.thread.id,
-      beforeTurnId: earliestLoadedTurnId,
-    };
-    const previousCursor = backgroundHistoryCursorRef.current;
-    if (
-      previousCursor?.threadId === cursor.threadId &&
-      previousCursor.beforeTurnId === cursor.beforeTurnId
-    ) {
-      return;
-    }
-    backgroundHistoryCursorRef.current = cursor;
-
-    let cancelled = false;
-    const timeoutId = window.setTimeout(() => {
-      void (async () => {
-        backgroundHistoryLoadingRef.current = true;
-        try {
-          const earlier = await fetchThreadDetail(id, {
-            limit: DETAIL_TURN_PAGE_SIZE,
-            beforeTurnId: earliestLoadedTurnId,
-          });
-          if (cancelled) {
-            return;
-          }
-          setDetail((current) =>
-            current
-              ? {
-                  ...earlier,
-                  turns: prependTurns(current.turns, earlier.turns),
-                }
-              : earlier,
-          );
-          setThreads((current) =>
-            current.map((entry) =>
-              entry.id === earlier.thread.id ? earlier.thread : entry,
-            ),
-          );
-        } catch {
-          // Manual "Load earlier" still reports recoverable paging errors.
-        } finally {
-          if (backgroundHistoryCursorRef.current?.threadId === cursor.threadId) {
-            backgroundHistoryLoadingRef.current = false;
-          }
-        }
-      })();
-    }, 120);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeoutId);
-    };
-  }, [detail, id, loadingEarlier]);
 
   useEffect(() => {
     let isDisposed = false;
@@ -2169,7 +2094,7 @@ export function ThreadDetailPage() {
     optimisticTurn,
   ]);
 
-  async function handleLoadEarlierTurns() {
+  const handleLoadEarlierTurns = useCallback(async () => {
     if (!detail || detail.turns.length === 0 || loadingEarlier) {
       return;
     }
@@ -2205,7 +2130,7 @@ export function ThreadDetailPage() {
     } finally {
       setLoadingEarlier(false);
     }
-  }
+  }, [detail, id, loadingEarlier]);
 
   async function handlePrompt(input: SendThreadPromptRequestInput) {
     if (activeView === 'shell') {
@@ -2688,10 +2613,10 @@ export function ThreadDetailPage() {
     }
   }
 
-  async function handleRespondToRequest(
+  const handleRespondToRequest = useCallback(async (
     requestId: string,
     input: { answers: Record<string, { answers: string[] }> },
-  ) {
+  ) => {
     setRespondingRequestId(requestId);
     setError(null);
 
@@ -2716,7 +2641,12 @@ export function ThreadDetailPage() {
     } finally {
       setRespondingRequestId(null);
     }
-  }
+  }, [id]);
+
+  const handleLoadHistoryItemDetail = useCallback(
+    (itemId: string) => fetchThreadHistoryItemDetail(id, itemId),
+    [id],
+  );
 
   async function handleCompactThread() {
     if (!detail) {
@@ -3019,27 +2949,30 @@ export function ThreadDetailPage() {
               turnHasPhotoPromptText(turn, optimisticTurn.prompt)),
         ) ?? null
       : null;
-  const timelineOptimisticTurn =
-    optimisticTurn && !optimisticMaterializedTurn
-      ? {
-          id: optimisticTurn.id,
-          startedAt: optimisticTurn.startedAt,
-          status: optimisticTurn.status,
-          error: optimisticTurn.error,
-          model: optimisticTurn.model,
-          reasoningEffort: optimisticTurn.reasoningEffort,
-          reasoningEffortAvailable: optimisticTurn.reasoningEffortAvailable,
-          tokenUsage: optimisticTurn.tokenUsage,
-          priceEstimate: optimisticTurn.priceEstimate,
-          items: [
-            {
-              id: `${optimisticTurn.id}-user-message`,
-              kind: 'userMessage' as const,
-              text: optimisticTurn.prompt,
-            },
-          ],
-        }
-      : null;
+  const timelineOptimisticTurn = useMemo(
+    () =>
+      optimisticTurn && !optimisticMaterializedTurn
+        ? {
+            id: optimisticTurn.id,
+            startedAt: optimisticTurn.startedAt,
+            status: optimisticTurn.status,
+            error: optimisticTurn.error,
+            model: optimisticTurn.model,
+            reasoningEffort: optimisticTurn.reasoningEffort,
+            reasoningEffortAvailable: optimisticTurn.reasoningEffortAvailable,
+            tokenUsage: optimisticTurn.tokenUsage,
+            priceEstimate: optimisticTurn.priceEstimate,
+            items: [
+              {
+                id: `${optimisticTurn.id}-user-message`,
+                kind: 'userMessage' as const,
+                text: optimisticTurn.prompt,
+              },
+            ],
+          }
+        : null,
+    [optimisticMaterializedTurn, optimisticTurn],
+  );
 
   const threadLoaded = detail?.thread.isLoaded ?? false;
   const realtimeConnectionIndicatorClassName =
@@ -3351,12 +3284,12 @@ export function ThreadDetailPage() {
                   onTailVisibilityChange={setFollowTail}
                   loadingEarlier={loadingEarlier}
                   onLoadEarlier={handleLoadEarlierTurns}
-                  onLoadHistoryItemDetail={(itemId) =>
-                    fetchThreadHistoryItemDetail(detail.thread.id, itemId)
+                  onLoadHistoryItemDetail={handleLoadHistoryItemDetail}
+                  answeredRequestNotes={
+                    detail.answeredRequestNotes ?? EMPTY_ANSWERED_REQUEST_NOTES
                   }
-                  answeredRequestNotes={detail.answeredRequestNotes ?? []}
-                  activityNotes={detail.activityNotes ?? []}
-                  pendingSteers={detail.pendingSteers ?? []}
+                  activityNotes={detail.activityNotes ?? EMPTY_ACTIVITY_NOTES}
+                  pendingSteers={detail.pendingSteers ?? EMPTY_PENDING_STEERS}
                   optimisticSteers={optimisticSteers}
                   optimisticTurn={timelineOptimisticTurn}
                 />

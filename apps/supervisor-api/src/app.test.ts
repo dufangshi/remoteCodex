@@ -2221,6 +2221,66 @@ describe('supervisor api', () => {
     expect(fakeCodexManager.readThreadCallCount.get(createdThread.providerSessionId)).toBe(2);
   });
 
+  it('slices paged detail responses when a runtime ignores paging options', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Unpaged Runtime Thread'
+      }
+    });
+
+    const createdThread = createResponse.json();
+    const remoteThread = fakeCodexManager.threads.get(createdThread.providerSessionId);
+    expect(remoteThread).toBeTruthy();
+    remoteThread!.status = { type: 'idle' };
+    remoteThread!.turns = Array.from({ length: 15 }, (_, index) => ({
+      id: `turn-${index + 1}`,
+      status: 'completed',
+      error: null,
+      items: [
+        {
+          id: `item-${index + 1}`,
+          type: 'userMessage',
+          content: [{ type: 'text', text: `Prompt ${index + 1}` }]
+        }
+      ]
+    })) as any;
+
+    fakeCodexManager.ignoreReadThreadPaging = true;
+    const latestDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}?limit=10`
+    });
+    const earlierDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}?beforeTurnId=turn-6`
+    });
+
+    expect(latestDetailResponse.statusCode).toBe(200);
+    expect(latestDetailResponse.json().totalTurnCount).toBe(15);
+    expect(latestDetailResponse.json().turns).toHaveLength(10);
+    expect(latestDetailResponse.json().turns[0].id).toBe('turn-6');
+    expect(latestDetailResponse.json().turns.at(-1).id).toBe('turn-15');
+    expect(earlierDetailResponse.statusCode).toBe(200);
+    expect(earlierDetailResponse.json().totalTurnCount).toBe(15);
+    expect(earlierDetailResponse.json().turns).toHaveLength(5);
+    expect(earlierDetailResponse.json().turns[0].id).toBe('turn-1');
+    expect(earlierDetailResponse.json().turns.at(-1).id).toBe('turn-5');
+  });
+
   it('lists export turn options newest first with prompt previews and exports selected turns as a PDF', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',

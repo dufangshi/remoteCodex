@@ -236,9 +236,16 @@ describe('ThreadTimeline', () => {
       />,
     );
 
+    expect(screen.getByText(/Showing 10 of 35 turns/)).toBeInTheDocument();
+    expect(screen.getByText('Turn 26')).toBeInTheDocument();
+    expect(screen.getByText('Turn 35')).toBeInTheDocument();
+    expect(screen.queryByText('Turn 16')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load 10 earlier' }));
+
+    expect(onLoadEarlier).toHaveBeenCalledTimes(1);
     expect(screen.getByText(/Showing 20 of 35 turns/)).toBeInTheDocument();
     expect(screen.getByText('Turn 16')).toBeInTheDocument();
-    expect(screen.getByText('Turn 35')).toBeInTheDocument();
     expect(screen.queryByText('Turn 15')).not.toBeInTheDocument();
   });
 
@@ -282,6 +289,43 @@ describe('ThreadTimeline', () => {
     ).toBeInTheDocument();
     expect(screen.queryByText('User')).not.toBeInTheDocument();
     expect(screen.queryByText('Agent')).not.toBeInTheDocument();
+  });
+
+  it('collapses large completed messages behind an explicit full-message toggle', () => {
+    const longMessage = `${'A'.repeat(4_050)}TAIL-CONTENT`;
+
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'agent-1',
+                kind: 'agentMessage',
+                text: longMessage,
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText(/\.\.\./)).toBeInTheDocument();
+    expect(screen.queryByText(/TAIL-CONTENT/)).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: `Show full message (${longMessage.length.toLocaleString()} chars)`,
+      }),
+    );
+
+    expect(screen.getByText(/TAIL-CONTENT/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show less' })).toBeInTheDocument();
   });
 
   it('attaches reasoning to the following agent message behind an expander', async () => {

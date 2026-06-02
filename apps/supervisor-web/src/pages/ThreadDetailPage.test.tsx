@@ -17,6 +17,9 @@ const shellPanelMock = vi.hoisted(() => ({
   mounts: 0,
   unmounts: 0,
 }));
+const timelineRenderMock = vi.hoisted(() => ({
+  render: vi.fn(),
+}));
 
 vi.mock('../components/ThreadShellPanel', async () => {
   const React = await import('react');
@@ -82,6 +85,26 @@ vi.mock('../components/ThreadShellPanel', async () => {
 
   return {
     ThreadShellPanel,
+  };
+});
+
+vi.mock('../components/ThreadTimeline', async () => {
+  const React = await import('react');
+  const actual = await vi.importActual<typeof import('../components/ThreadTimeline')>(
+    '../components/ThreadTimeline',
+  );
+  type ThreadTimelineProps = React.ComponentProps<typeof actual.ThreadTimeline>;
+
+  const ThreadTimeline = React.memo(function MockThreadTimeline(
+    props: ThreadTimelineProps,
+  ) {
+    timelineRenderMock.render();
+    return <actual.ThreadTimeline {...props} />;
+  });
+
+  return {
+    ...actual,
+    ThreadTimeline,
   };
 });
 
@@ -369,6 +392,7 @@ describe('ThreadDetailPage', () => {
     shellPanelMock.isConnecting = false;
     shellPanelMock.mounts = 0;
     shellPanelMock.unmounts = 0;
+    timelineRenderMock.render.mockClear();
     vi.stubGlobal('WebSocket', FakeWebSocket as any);
     vi.stubGlobal(
       'fetch',
@@ -603,6 +627,26 @@ describe('ThreadDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Thread Meta/i }));
 
     expect(screen.queryByText('/tmp/demo')).not.toBeInTheDocument();
+  });
+
+  it('does not re-render the timeline when typing in the chat composer', async () => {
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText('hello');
+    const initialTimelineRenderCount = timelineRenderMock.render.mock.calls.length;
+    expect(initialTimelineRenderCount).toBeGreaterThan(0);
+
+    setPromptValue(screen.getByRole('textbox', { name: 'Prompt' }), 'draft input');
+
+    expect(timelineRenderMock.render.mock.calls.length).toBe(
+      initialTimelineRenderCount,
+    );
   });
 
   it('deletes a sibling thread from the detail sidebar after confirmation', async () => {
@@ -1206,7 +1250,7 @@ describe('ThreadDetailPage', () => {
     expect(screen.queryByText('No threads available in this view.')).not.toBeInTheDocument();
   });
 
-  it('loads a small latest turn page first and fills earlier turns in the background', async () => {
+  it('loads a small latest turn page first and only fetches earlier turns on request', async () => {
     const allTurns = Array.from({ length: 15 }, (_, index) => ({
       id: `turn-${index + 1}`,
       startedAt: new Date(Date.UTC(2026, 3, 10, 0, index, 0)).toISOString(),
@@ -1350,15 +1394,16 @@ describe('ThreadDetailPage', () => {
     expect(detailUrls[0]).toContain('/api/threads/thread-1?limit=3');
     expect(screen.queryByText('Prompt 12')).not.toBeInTheDocument();
     expect(screen.getByText('Prompt 15')).toBeInTheDocument();
+    expect(detailUrls).toHaveLength(1);
 
-    await waitFor(() => {
-      expect(screen.getByText('Prompt 5')).toBeInTheDocument();
-    });
+    fireEvent.click(screen.getByRole('button', { name: 'Load 10 earlier' }));
 
     expect(detailUrls.some((url) => url.includes('beforeTurnId=turn-13'))).toBe(true);
     await waitFor(() => {
-      expect(detailUrls.some((url) => url.includes('beforeTurnId=turn-3'))).toBe(true);
+      expect(screen.getByText('Prompt 6')).toBeInTheDocument();
     });
+    expect(screen.queryByText('Prompt 5')).not.toBeInTheDocument();
+    expect(detailUrls.some((url) => url.includes('beforeTurnId=turn-3'))).toBe(false);
   });
 
   it('surfaces imported thread warnings before resume', async () => {
