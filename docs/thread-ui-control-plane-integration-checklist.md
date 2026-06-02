@@ -536,33 +536,33 @@ Goal: prove the integrated UI works in the deployed control-plane environment.
     git log --oneline -1
     ```
 
-- [ ] Push `sandbox-worker-control-plane`.
+- [x] Push `sandbox-worker-control-plane`.
   - Acceptance: remote branch contains the integration commit.
   - Verification:
     ```bash
     git push origin sandbox-worker-control-plane
     ```
 
-- [ ] Trigger or observe staging CI/CD.
+- [x] Trigger or observe staging CI/CD.
   - Acceptance: `staging-images.yml` runs for the branch if changed paths match
     the workflow trigger.
   - Verification: record GitHub Actions run URL.
 
-- [ ] Smoke staging control-plane session open.
+- [x] Smoke staging control-plane session open.
   - Acceptance: opening a control-plane session shows the shared Remote Codex
     thread UI surface.
   - Verification: staging URL, browser check, and screenshot if available.
 
-- [ ] Smoke staging prompt submit.
+- [x] Smoke staging prompt submit.
   - Acceptance: prompt reaches the worker through the sandbox router and a reply
     appears or the running state updates then completes.
   - Verification: staging URL, session id, expected request path, and result.
 
-- [ ] Smoke plugin settings.
+- [x] Smoke plugin settings.
   - Acceptance: Terminal and XYZ Molecule Viewer are visible in settings.
   - Verification: staging URL and screenshot if available.
 
-- [ ] Smoke remote shell unavailable state.
+- [x] Smoke remote shell unavailable state.
   - Acceptance: switching to shell mode clearly shows remote shell transport is
     unavailable and does not fail with a local websocket error.
   - Verification: staging URL and screenshot if available.
@@ -572,14 +572,57 @@ Goal: prove the integrated UI works in the deployed control-plane environment.
 - Files: `packages/thread-ui/**`,
   `apps/supervisor-web/src/pages/ControlPlaneSessionPage.tsx`,
   `apps/supervisor-web/src/pages/ControlPlaneSessionPage.test.tsx`,
+  `Dockerfile.frontend`,
+  `.github/workflows/staging-images.yml`,
   `docs/thread-ui-control-plane-integration-checklist.md`.
 - Verification:
-  - `git status --short --branch` shows
-    `sandbox-worker-control-plane...origin/sandbox-worker-control-plane [ahead 5]`.
-  - `git log --oneline -1` shows
-    `469e3df Integrate shared thread UI in control plane`.
-- Residual risk: push, CI, and staging smoke remain unchecked below until
-  executed.
+  - `git push origin sandbox-worker-control-plane` pushed
+    `c097b0db3c5ad75b4463ee802c67f1b7523ef485`.
+  - GitHub Actions run
+    `https://github.com/dufangshi/remoteCodex/actions/runs/26851229642`
+    completed successfully in 5m37s for `Staging Images`.
+  - `curl -fsS https://remote-codex-control-plane-production.up.railway.app/healthz`
+    returned
+    `{"ok":true,"service":"control-plane-api","buildSha":"c097b0db3c5ad75b4463ee802c67f1b7523ef485"}`.
+  - `curl -fsS https://remote-codex-frontend-production.up.railway.app/build.json`
+    returned
+    `{"buildSha":"c097b0db3c5ad75b4463ee802c67f1b7523ef485"}`.
+  - `curl -fsSI https://remote-codex-frontend-production.up.railway.app/control-plane`
+    returned HTTP 200.
+  - Local Docker verification:
+    `docker build -f Dockerfile.frontend --build-arg VITE_CONTROL_PLANE_BASE_URL=https://remote-codex-control-plane-production.up.railway.app --build-arg FRONTEND_BUILD_SHA=local-frontend-smoke -t remote-codex-frontend:thread-ui-smoke .`
+    passed.
+  - Local image HTTP smoke passed:
+    `curl -fsS http://127.0.0.1:19080/healthz`,
+    `curl -fsS http://127.0.0.1:19080/build.json`, and
+    `curl -fsSI http://127.0.0.1:19080/control-plane`.
+  - Browser smoke against
+    `https://remote-codex-frontend-production.up.railway.app/control-plane/sessions/d754aa8a-7c85-4370-a090-3024f16d19e0`
+    passed with stored auth `dev:dev-user`.
+  - Browser smoke evidence artifacts were captured under
+    `.temp/thread-ui-smoke/browser/`:
+    `session-open.png`, `settings-open.png`, `shell-unavailable.png`,
+    `prompt-submitted.png`, and `evidence.json`.
+  - Browser smoke checks passed:
+    shared thread list visible; session title visible; Control Session and
+    Worker Thread meta visible; project, workspace, sandbox, and router meta
+    visible; existing worker turns visible; Terminal and XYZ Molecule Viewer
+    visible in settings; remote shell unavailable state visible; submitted
+    prompt visible in the timeline.
+  - Prompt submit reached the sandbox router with HTTP 200:
+    `https://sandbox-router.lnz.app/api/sandboxes/cced27cb-c543-4425-b0fd-6211e5baf41e/api/threads/e9537e52-2331-4507-be59-b9f0a1e4e4d7/prompt`.
+- Residual risk:
+  - `https://debug.lnz-study.com/control-plane` still returned Cloudflare
+    HTTP 502 during smoke; staging UI verification used the Railway frontend
+    URL instead.
+  - A newly registered smoke account on the new worker image
+    `c097b0db3c5ad75b4463ee802c67f1b7523ef485` reached `PodFailed` while
+    starting sandbox
+    `88ab9586-487a-4a7c-97de-39f90ad56cd5`. This appears to be a sandbox
+    startup/environment issue rather than the `@remote-codex/thread-ui`
+    integration itself; browser smoke was completed against the existing
+    running staging sandbox
+    `cced27cb-c543-4425-b0fd-6211e5baf41e`.
 
 ## Phase 9: Follow-Up After Integration
 
@@ -614,5 +657,5 @@ after the package integration lands.
 - [x] Remote shell remains explicitly unavailable until a real shell adapter is
   implemented.
 - [x] Focused and broad supervisor-web checks pass.
-- [ ] Staging smoke verifies session open, prompt submit, plugins, and shell
+- [x] Staging smoke verifies session open, prompt submit, plugins, and shell
   unavailable state.
