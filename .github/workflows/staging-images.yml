@@ -14,13 +14,16 @@ on:
       - Dockerfile.worker
       - Dockerfile.sandbox-router
       - Dockerfile.control-plane
+      - Dockerfile.frontend
       - package.json
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
       - tsconfig.base.json
       - apps/supervisor-api/**
+      - apps/supervisor-web/**
       - apps/sandbox-router/**
       - apps/control-plane-api/**
+      - infra/nginx/**
       - packages/**
       - config/**
       - .github/workflows/staging-images.yml
@@ -41,7 +44,9 @@ env:
   WORKER_ECR_REPOSITORY: remote-codex-worker-staging
   ROUTER_ECR_REPOSITORY: remote-codex-sandbox-router-staging
   RAILWAY_CONTROL_PLANE_SERVICE: remote-codex-control-plane
+  RAILWAY_FRONTEND_SERVICE: remote-codex-frontend
   RAILWAY_ENVIRONMENT: production
+  STAGING_CONTROL_PLANE_BASE_URL: https://remote-codex-control-plane-production.up.railway.app
   ROUTER_DEPLOYMENT: remote-codex-sandbox-router
   ROUTER_CONTAINER: sandbox-router
   SUB2API_BASE_URL: https://sub.lnz-study.com
@@ -221,10 +226,28 @@ jobs:
             --ci \
             --message "staging control-plane ${GITHUB_SHA}"
 
+      - name: Deploy Railway frontend
+        if: env.RAILWAY_TOKEN != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install -g @railway/cli
+          railway variable set \
+            --service "${RAILWAY_FRONTEND_SERVICE}" \
+            --environment "${RAILWAY_ENVIRONMENT}" \
+            "VITE_CONTROL_PLANE_BASE_URL=${STAGING_CONTROL_PLANE_BASE_URL}" \
+            "FRONTEND_BUILD_SHA=${GITHUB_SHA}"
+          cp railway.frontend.json railway.json
+          railway up \
+            --service "${RAILWAY_FRONTEND_SERVICE}" \
+            --environment "${RAILWAY_ENVIRONMENT}" \
+            --ci \
+            --message "staging frontend ${GITHUB_SHA}"
+
       - name: Skip Railway worker image tag update
         if: env.RAILWAY_TOKEN == ''
         run: |
-          echo "RAILWAY_TOKEN secret is not configured; skipped Railway worker image tag update."
+          echo "RAILWAY_TOKEN secret is not configured; skipped Railway control-plane and frontend deploys."
 
       - name: Push sandbox router image
         run: |
