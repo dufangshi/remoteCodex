@@ -528,7 +528,7 @@ Goal: prove the integrated UI works in the deployed control-plane environment.
 
 ### Tasks
 
-- [ ] Commit the integration.
+- [x] Commit the integration.
   - Acceptance: commit message names the thread-ui integration.
   - Verification:
     ```bash
@@ -569,9 +569,17 @@ Goal: prove the integrated UI works in the deployed control-plane environment.
 
 ### Evidence
 
-- Files:
+- Files: `packages/thread-ui/**`,
+  `apps/supervisor-web/src/pages/ControlPlaneSessionPage.tsx`,
+  `apps/supervisor-web/src/pages/ControlPlaneSessionPage.test.tsx`,
+  `docs/thread-ui-control-plane-integration-checklist.md`.
 - Verification:
-- Residual risk:
+  - `git status --short --branch` shows
+    `sandbox-worker-control-plane...origin/sandbox-worker-control-plane [ahead 5]`.
+  - `git log --oneline -1` shows
+    `469e3df Integrate shared thread UI in control plane`.
+- Residual risk: push, CI, and staging smoke remain unchecked below until
+  executed.
 
 ## Phase 9: Follow-Up After Integration
 
