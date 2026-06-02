@@ -96,10 +96,11 @@ function AppShell({
   const [defaultBackend, setDefaultBackendState] = useState<AgentBackendIdDto>(readInitialBackend);
   const location = useLocation();
   const isThreadDetailRoute = /^\/threads\/[^/]+$/.test(location.pathname);
+  const isControlPlaneSessionRoute = /^\/control-plane\/sessions\/[^/]+$/.test(location.pathname);
   const isThreadsRoute = location.pathname === '/threads';
-  const isViewportLockedRoute = isThreadDetailRoute || isThreadsRoute;
+  const isViewportLockedRoute = isThreadDetailRoute || isControlPlaneSessionRoute || isThreadsRoute;
   const isThreadWorkspaceRoute =
-    isThreadsRoute || isThreadDetailRoute;
+    isThreadsRoute || isThreadDetailRoute || isControlPlaneSessionRoute;
   const isWorkspacesRoute = location.pathname === '/workspaces';
   const isControlPlaneRoute = location.pathname.startsWith('/control-plane');
   const usesInlineTopbar = isWorkspacesRoute || isThreadsRoute || isControlPlaneRoute;
@@ -173,7 +174,7 @@ function AppShell({
           <section
             className={`min-w-0 ${
               isViewportLockedRoute
-                ? isThreadDetailRoute
+                ? isThreadDetailRoute || isControlPlaneSessionRoute
                   ? 'h-full min-h-0 overflow-hidden overscroll-none'
                   : 'h-full overflow-hidden overscroll-none'
                 : ''

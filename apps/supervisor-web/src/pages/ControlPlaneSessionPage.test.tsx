@@ -220,8 +220,11 @@ describe('ControlPlaneSessionPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Plan calculation' })).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Expand thread navigation' }),
+      ).toHaveTextContent('Molecule study / Plan calculation');
     });
+    expect(screen.getByRole('link', { name: /Plan calculation/ })).toBeInTheDocument();
     expect(screen.getByText('Hello remote worker')).toBeInTheDocument();
     expect(screen.getByText('Ready from sandbox')).toBeInTheDocument();
 
@@ -450,7 +453,9 @@ describe('ControlPlaneSessionPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Plan calculation' })).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Expand thread navigation' }),
+      ).toHaveTextContent('Molecule study / Plan calculation');
     });
 
     setPromptValue(

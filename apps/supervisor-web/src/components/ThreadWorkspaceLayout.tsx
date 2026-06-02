@@ -34,6 +34,9 @@ interface ThreadWorkspaceLayoutProps {
   workspaceLabels?: Record<string, string>;
   metaContent?: ReactNode;
   settingsContent?: ReactNode;
+  newThreadHref?: string;
+  newThreadLabel?: string;
+  getThreadHref?: (threadId: string) => string;
   onRenameThread?: ((threadId: string, title: string) => Promise<void> | void) | undefined;
   onDeleteThread?: ((thread: ThreadDto) => void) | undefined;
   children: ReactNode;
@@ -51,7 +54,7 @@ interface ThreadCardsProps {
   currentWorkspaceId?: string | null | undefined;
   workspaceLabels?: Record<string, string>;
   onOpenThread: (threadId: string) => void;
-  onBeginRenameThread: (thread: ThreadDto) => void;
+  onBeginRenameThread?: (thread: ThreadDto) => void;
   onDeleteThread?: (thread: ThreadDto) => void;
   scrollable?: boolean;
   maxHeightClassName?: string;
@@ -138,7 +141,7 @@ function ThreadCard({
   currentWorkspaceId?: string | null | undefined;
   workspaceLabels?: Record<string, string>;
   onOpenThread: (threadId: string) => void;
-  onBeginRenameThread: (thread: ThreadDto) => void;
+  onBeginRenameThread?: (thread: ThreadDto) => void;
   onDeleteThread?: (thread: ThreadDto) => void;
   showDeleteButton?: boolean;
   showSessionCopyButton?: boolean;
@@ -204,23 +207,25 @@ function ThreadCard({
             >
               {thread.title}
             </p>
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                onBeginRenameThread(thread);
-              }}
-              aria-label={`Rename thread ${thread.title}`}
-              className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-[var(--theme-fg-muted)] transition hover:text-[var(--theme-fg)]"
-            >
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 16 16"
-                className="h-3 w-3 fill-current"
+            {onBeginRenameThread && (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onBeginRenameThread(thread);
+                }}
+                aria-label={`Rename thread ${thread.title}`}
+                className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-[var(--theme-fg-muted)] transition hover:text-[var(--theme-fg)]"
               >
-                <path d="m11.9 1.6 2.5 2.5-8.2 8.2-3.3.7.7-3.3 8.3-8.1Zm-7.3 8.7-.3 1.3 1.3-.3 6.9-6.9-1-1-6.9 6.9Zm8.8-7.8-1-1-1 1 1 1 1-1Z" />
-              </svg>
-            </button>
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 16 16"
+                  className="h-3 w-3 fill-current"
+                >
+                  <path d="m11.9 1.6 2.5 2.5-8.2 8.2-3.3.7.7-3.3 8.3-8.1Zm-7.3 8.7-.3 1.3 1.3-.3 6.9-6.9-1-1-6.9 6.9Zm8.8-7.8-1-1-1 1 1 1 1-1Z" />
+                </svg>
+              </button>
+            )}
             {showDeleteButton && onDeleteThread && (
               <button
                 type="button"
@@ -311,9 +316,9 @@ export function ThreadCards({
             currentWorkspaceId={currentWorkspaceId}
             workspaceLabels={workspaceLabels}
             onOpenThread={onOpenThread}
-            onBeginRenameThread={onBeginRenameThread}
             showDeleteButton={showDeleteButton}
             showSessionCopyButton={showSessionCopyButton}
+            {...(onBeginRenameThread ? { onBeginRenameThread } : {})}
             {...(onDeleteThread ? { onDeleteThread } : {})}
           />
         ))}
@@ -338,6 +343,9 @@ export function ThreadWorkspaceLayout({
   workspaceLabels = {},
   metaContent,
   settingsContent,
+  newThreadHref: newThreadHrefProp,
+  newThreadLabel = 'New Thread',
+  getThreadHref,
   onRenameThread,
   onDeleteThread,
   children,
@@ -381,9 +389,9 @@ export function ThreadWorkspaceLayout({
     currentThreadLabel && currentThreadLabel.trim()
       ? `${baseThreadScopeLabel} / ${currentThreadLabel.trim()}`
       : baseThreadScopeLabel;
-  const newThreadHref = currentWorkspaceId
+  const newThreadHref = newThreadHrefProp ?? (currentWorkspaceId
     ? `/threads/new?workspaceId=${encodeURIComponent(currentWorkspaceId)}`
-    : '/threads/new';
+    : '/threads/new');
 
   async function handleRenameThread(threadId: string) {
     if (!onRenameThread) {
@@ -416,7 +424,7 @@ export function ThreadWorkspaceLayout({
   }
 
   function openThread(threadId: string) {
-    navigate(`/threads/${threadId}`);
+    navigate(getThreadHref?.(threadId) ?? `/threads/${threadId}`);
     setMobileSidebarOpen(false);
     shellNav?.closeNav();
   }
@@ -441,7 +449,7 @@ export function ThreadWorkspaceLayout({
                 }}
                 className="inline-flex h-7 items-center rounded-full bg-[var(--theme-accent-solid)] px-2.5 text-[10px] font-medium uppercase tracking-[0.16em] text-[var(--theme-accent-solid-fg)] transition hover:bg-[var(--theme-accent-solid-hover)]"
               >
-                New Thread
+                {newThreadLabel}
               </Link>
             </div>
           </div>
