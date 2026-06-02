@@ -67,6 +67,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set image tag
         id: image
@@ -78,6 +80,31 @@ jobs:
             tag="${GITHUB_SHA}"
           fi
           echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Detect changed deployment surfaces
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          control_plane=false
+          deploy_all=false
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            deploy_all=true
+          fi
+          before="${{ github.event.before }}"
+          if [[ -z "${before}" || "${before}" == "0000000000000000000000000000000000000000" ]]; then
+            deploy_all=true
+          fi
+          if [[ "${deploy_all}" == "true" ]]; then
+            control_plane=true
+          else
+            changed_files="$(git diff --name-only "${before}" "${GITHUB_SHA}")"
+            if grep -Eq '^(Dockerfile\.worker|Dockerfile\.control-plane|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.base\.json|apps/supervisor-api/|apps/control-plane-api/|packages/|config/)' <<<"${changed_files}"; then
+              control_plane=true
+            fi
+          fi
+          echo "control_plane=${control_plane}" >> "${GITHUB_OUTPUT}"
+          echo "control_plane=${control_plane}"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -170,7 +197,7 @@ jobs:
           node-version: 22
 
       - name: Update Railway control-plane variables
-        if: env.RAILWAY_TOKEN != ''
+        if: env.RAILWAY_TOKEN != '' && steps.changes.outputs.control_plane == 'true'
         shell: bash
         run: |
           set -euo pipefail
