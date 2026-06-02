@@ -345,6 +345,13 @@ settings.
     Any match must be a test fixture, assertion, or plugin display text, not a
     local renderer implementation.
 
+- [x] Keep frontend-only control-plane sessions off the app-local plugin API.
+  - Acceptance: the control-plane session page uses package-owned built-in
+    plugins and does not call `/api/plugins` from the frontend-only Railway
+    deployment, where that path can return the frontend HTML fallback.
+  - Verification: focused test asserts Terminal and XYZ Molecule Viewer render
+    with no plugin JSON parse error and no `/api/plugins` fetch.
+
 ### Evidence
 
 - Files: `apps/supervisor-web/src/pages/ControlPlaneSessionPage.tsx`,
@@ -354,8 +361,11 @@ settings.
 - Verification:
   - `pnpm --filter @remote-codex/supervisor-web test -- ControlPlaneSessionPage`
   - Focused test asserts Terminal and XYZ Molecule Viewer are visible.
-  - Focused test wraps the page in `PluginProvider` and verifies plugin toggle
-    calls the provider update path.
+  - Control-plane session page owns a scoped `PluginProvider adapter={{}}` so
+    package built-in plugins are available without using the app-level
+    `/api/plugins` adapter.
+  - Focused test asserts no `Unexpected token` plugin parse error appears and
+    no request includes `/api/plugins`.
   - Focused test asserts shell mode shows the unavailable message and does not
     attempt `/ws`.
   - `rg -n 'Xyz|XYZ|molecule' apps/supervisor-web/src/pages/ControlPlaneSessionPage.tsx apps/supervisor-web/src/pages/ControlPlaneSessionPage.test.tsx`
@@ -431,8 +441,8 @@ Goal: prove control-plane behavior survived the package integration.
   - Verification: focused test passes.
 
 - [x] Cover plugin settings.
-  - Acceptance: settings list all registered plugins and plugin toggle calls the
-    plugin provider path.
+  - Acceptance: settings list all package built-in plugins for control-plane
+    sessions without calling the app-local plugin API.
   - Verification: focused test passes.
 
 - [x] Cover remote shell unavailable state.
@@ -460,6 +470,8 @@ Goal: prove control-plane behavior survived the package integration.
   - `pnpm --filter @remote-codex/thread-ui build`
   - `pnpm --filter @remote-codex/supervisor-web typecheck`
   - `pnpm --filter @remote-codex/supervisor-web test -- ControlPlaneSessionPage`
+    passed after asserting the control-plane session page does not fetch
+    `/api/plugins`.
   - `pnpm --filter @remote-codex/supervisor-web test -- ThreadDetailPage ControlPlaneSessionPage`
   - `pnpm --filter @remote-codex/supervisor-web test`
   - `pnpm --filter @remote-codex/supervisor-api typecheck`

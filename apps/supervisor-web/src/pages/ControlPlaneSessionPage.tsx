@@ -9,6 +9,7 @@ import type {
 } from '../../../../packages/shared/src/index';
 import { TERMINAL_PLUGIN_ID } from '../../../../packages/plugin-terminal/src/index';
 import {
+  PluginProvider,
   ThreadDetailSurface,
   formatLongTimestamp,
   threadStatusLabel,
@@ -163,6 +164,14 @@ const remoteShellUnavailableState: ThreadShellControlState = {
 };
 
 export function ControlPlaneSessionPage() {
+  return (
+    <PluginProvider adapter={{}}>
+      <ControlPlaneSessionSurface />
+    </PluginProvider>
+  );
+}
+
+function ControlPlaneSessionSurface() {
   const { sessionId = '' } = useParams();
   const navigate = useNavigate();
   const plugins = usePlugins();
