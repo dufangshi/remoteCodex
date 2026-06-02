@@ -4821,8 +4821,11 @@ function ThreadTimelineComponent({
   const previousBottomSpacerRef = useRef(bottomSpacer);
   const lastObservedScrollHeightRef = useRef(0);
   const tailSentinelRef = useRef<HTMLDivElement | null>(null);
+  const topSentinelRef = useRef<HTMLDivElement | null>(null);
   const isTailVisibleRef = useRef(true);
   const shouldStickToBottomRef = useRef(true);
+  const userScrolledHistoryRef = useRef(false);
+  const autoLoadedEarlierRef = useRef(false);
   const expandedTextRequestIdRef = useRef(0);
   const deferredDetailCacheRef = useRef<Map<string, ThreadHistoryItemDetailDto>>(
     new Map(),
@@ -4986,6 +4989,7 @@ function ThreadTimelineComponent({
   const handleScroll = useCallback(() => {
     const container = scrollContainerRef.current;
     if (container) {
+      userScrolledHistoryRef.current = true;
       shouldStickToBottomRef.current = isNearBottom(container, FOLLOW_TAIL_THRESHOLD_PX);
     }
     recomputeTailVisibility();
@@ -5003,6 +5007,21 @@ function ThreadTimelineComponent({
     setIsTailVisible((current) => (current ? current : true));
     shouldStickToBottomRef.current = true;
   }, []);
+
+  useLayoutEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      scrollToBottom();
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [threadId, scrollToBottom]);
+
+  useEffect(() => {
+    autoLoadedEarlierRef.current = false;
+    userScrolledHistoryRef.current = false;
+  }, [threadId]);
 
   useEffect(() => {
     setVisibleCount((current) => {
@@ -5122,14 +5141,18 @@ function ThreadTimelineComponent({
   }, [isTailVisible, onTailVisibilityChange]);
 
   const effectiveTotalTurnCount = totalTurnCount ?? turns.length;
-  const startIndex = Math.max(0, turns.length - visibleCount);
+  const startIndex = serverManagedHistory
+    ? 0
+    : Math.max(0, turns.length - visibleCount);
   const loadedTurnAbsoluteOffset = serverManagedHistory
     ? Math.max(0, effectiveTotalTurnCount - turns.length)
     : 0;
-  const visibleTurns = turns.slice(startIndex);
+  const visibleTurns = serverManagedHistory ? turns : turns.slice(startIndex);
   const visibleTurnAbsoluteOffset = loadedTurnAbsoluteOffset + startIndex;
   const optimisticAbsoluteIndex = effectiveTotalTurnCount + 1;
-  const loadedHiddenCount = turns.length - visibleTurns.length;
+  const loadedHiddenCount = serverManagedHistory
+    ? 0
+    : turns.length - visibleTurns.length;
   const unloadedHiddenCount = serverManagedHistory
     ? Math.max(0, effectiveTotalTurnCount - turns.length)
     : 0;
@@ -5137,6 +5160,51 @@ function ThreadTimelineComponent({
     ? unloadedHiddenCount + loadedHiddenCount
     : loadedHiddenCount;
   const showLoadAll = !serverManagedHistory && hiddenCount > 0 && loadMoreClicks >= 2;
+  const canLoadEarlierFromServer =
+    serverManagedHistory &&
+    unloadedHiddenCount > 0 &&
+    loadedHiddenCount === 0 &&
+    typeof onLoadEarlier === 'function';
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    const topSentinel = topSentinelRef.current;
+    if (
+      !container ||
+      !topSentinel ||
+      !canLoadEarlierFromServer ||
+      loadingEarlier ||
+      autoLoadedEarlierRef.current ||
+      typeof IntersectionObserver === 'undefined'
+    ) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (
+          !userScrolledHistoryRef.current ||
+          loadingEarlier ||
+          autoLoadedEarlierRef.current ||
+          !entries.some((entry) => entry.isIntersecting)
+        ) {
+          return;
+        }
+
+        autoLoadedEarlierRef.current = true;
+        onLoadEarlier?.();
+      },
+      {
+        root: container,
+        threshold: 0.01,
+      },
+    );
+
+    observer.observe(topSentinel);
+    return () => {
+      observer.disconnect();
+    };
+  }, [canLoadEarlierFromServer, loadingEarlier, onLoadEarlier]);
   const forceLatestTurnActive =
     threadRunning &&
     (
@@ -5398,6 +5466,7 @@ function ThreadTimelineComponent({
           style={bottomSpacer > 0 ? { paddingBottom: bottomSpacer } : undefined}
         >
           <div ref={scrollContentRef}>
+          <div ref={topSentinelRef} aria-hidden="true" className="h-px" />
           {turns.length > 0 && (
             <div className="px-2.5 pb-1 pt-2 sm:px-6 sm:pb-1.5 sm:pt-3">
               <div className="flex flex-wrap items-center gap-2.5 text-xs sm:text-sm">

@@ -131,6 +131,61 @@ vi.mock('@remote-codex/thread-ui', async () => {
 
 import { ThreadDetailPage } from './ThreadDetailPage';
 
+class FakeIntersectionObserver {
+  static instances: FakeIntersectionObserver[] = [];
+
+  private readonly observed = new Set<Element>();
+
+  constructor(
+    private readonly callback: IntersectionObserverCallback,
+    public readonly options?: IntersectionObserverInit,
+  ) {
+    FakeIntersectionObserver.instances.push(this);
+  }
+
+  observe(target: Element) {
+    this.observed.add(target);
+  }
+
+  unobserve(target: Element) {
+    this.observed.delete(target);
+  }
+
+  disconnect() {
+    this.observed.clear();
+  }
+
+  takeRecords() {
+    return [];
+  }
+
+  triggerAll(isIntersecting = true) {
+    const entries = Array.from(this.observed).map((target) => ({
+      isIntersecting,
+      target,
+      boundingClientRect: {} as DOMRectReadOnly,
+      intersectionRatio: isIntersecting ? 1 : 0,
+      intersectionRect: {} as DOMRectReadOnly,
+      rootBounds: null,
+      time: 0,
+    })) as IntersectionObserverEntry[];
+
+    if (entries.length > 0) {
+      this.callback(entries, this as unknown as IntersectionObserver);
+    }
+  }
+
+  static triggerAll(isIntersecting = true) {
+    FakeIntersectionObserver.instances.forEach((instance) =>
+      instance.triggerAll(isIntersecting),
+    );
+  }
+
+  static reset() {
+    FakeIntersectionObserver.instances = [];
+  }
+}
+
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
   listeners = new Map<string, ((event: Event | MessageEvent) => void)[]>();
@@ -370,6 +425,7 @@ describe('ThreadDetailPage', () => {
 
   beforeEach(() => {
     FakeWebSocket.instances = [];
+    FakeIntersectionObserver.reset();
     shellPanelMock.toggleConnection.mockClear();
     shellPanelMock.sendInput.mockClear();
     shellPanelMock.sendCommand.mockClear();
@@ -385,6 +441,10 @@ describe('ThreadDetailPage', () => {
     shellPanelMock.unmounts = 0;
     timelineRenderMock.render.mockClear();
     vi.stubGlobal('WebSocket', FakeWebSocket as any);
+    vi.stubGlobal(
+      'IntersectionObserver',
+      FakeIntersectionObserver as unknown as typeof IntersectionObserver,
+    );
     vi.stubGlobal(
       'fetch',
       withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
@@ -1241,7 +1301,7 @@ describe('ThreadDetailPage', () => {
     expect(screen.queryByText('No threads available in this view.')).not.toBeInTheDocument();
   });
 
-  it('loads a small latest turn page first and only fetches earlier turns on request', async () => {
+  it('loads three latest turns first, auto-loads one earlier page on upward scroll, then requires manual loading', async () => {
     const allTurns = Array.from({ length: 15 }, (_, index) => ({
       id: `turn-${index + 1}`,
       startedAt: new Date(Date.UTC(2026, 3, 10, 0, index, 0)).toISOString(),
@@ -1387,14 +1447,26 @@ describe('ThreadDetailPage', () => {
     expect(screen.getByText('Prompt 15')).toBeInTheDocument();
     expect(detailUrls).toHaveLength(1);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Load 10 earlier' }));
+    FakeIntersectionObserver.triggerAll();
+    expect(detailUrls).toHaveLength(1);
 
+    fireEvent.scroll(screen.getByTestId('thread-scroll-container'));
+    FakeIntersectionObserver.triggerAll();
     expect(detailUrls.some((url) => url.includes('beforeTurnId=turn-13'))).toBe(true);
     await waitFor(() => {
-      expect(screen.getByText('Prompt 6')).toBeInTheDocument();
+      expect(screen.getByText('Prompt 3')).toBeInTheDocument();
     });
-    expect(screen.queryByText('Prompt 5')).not.toBeInTheDocument();
+    expect(screen.queryByText('Prompt 2')).not.toBeInTheDocument();
     expect(detailUrls.some((url) => url.includes('beforeTurnId=turn-3'))).toBe(false);
+
+    FakeIntersectionObserver.triggerAll();
+    expect(detailUrls.some((url) => url.includes('beforeTurnId=turn-3'))).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load 10 earlier' }));
+    await waitFor(() => {
+      expect(screen.getByText('Prompt 1')).toBeInTheDocument();
+    });
+    expect(detailUrls.some((url) => url.includes('beforeTurnId=turn-3'))).toBe(true);
   });
 
   it('surfaces imported thread warnings before resume', async () => {

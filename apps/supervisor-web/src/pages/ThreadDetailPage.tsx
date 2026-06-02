@@ -1251,7 +1251,7 @@ export function ThreadDetailPage() {
       showLoading = true,
       clearError = true,
       reportError = true,
-      limit = DETAIL_TURN_PAGE_SIZE,
+      limit = INITIAL_DETAIL_TURN_PAGE_SIZE,
     }: {
       showLoading?: boolean;
       clearError?: boolean;

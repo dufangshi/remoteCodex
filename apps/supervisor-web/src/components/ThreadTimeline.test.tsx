@@ -236,17 +236,43 @@ describe('ThreadTimeline', () => {
       />,
     );
 
-    expect(screen.getByText(/Showing 10 of 35 turns/)).toBeInTheDocument();
+    expect(screen.getByText(/Showing 20 of 35 turns/)).toBeInTheDocument();
     expect(screen.getByText('Turn 26')).toBeInTheDocument();
     expect(screen.getByText('Turn 35')).toBeInTheDocument();
-    expect(screen.queryByText('Turn 16')).not.toBeInTheDocument();
+    expect(screen.getByText('Turn 16')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Load 10 earlier' }));
 
-    expect(onLoadEarlier).toHaveBeenCalledTimes(1);
+    expect(onLoadEarlier).toHaveBeenCalledTimes(2);
     expect(screen.getByText(/Showing 20 of 35 turns/)).toBeInTheDocument();
     expect(screen.getByText('Turn 16')).toBeInTheDocument();
     expect(screen.queryByText('Turn 15')).not.toBeInTheDocument();
+  });
+
+  it('auto-loads one page of older remote history after the user scrolls to the loaded top', () => {
+    const onLoadEarlier = vi.fn();
+    const latestTurns = Array.from({ length: 3 }, (_, index) => makeTurn(index + 13));
+
+    render(
+      <ThreadTimeline
+        turns={latestTurns}
+        totalTurnCount={15}
+        liveOutput=""
+        onLoadEarlier={onLoadEarlier}
+      />,
+    );
+
+    expect(screen.getByText(/Showing 3 of 15 turns/)).toBeInTheDocument();
+
+    FakeIntersectionObserver.triggerAll();
+    expect(onLoadEarlier).not.toHaveBeenCalled();
+
+    fireEvent.scroll(screen.getByTestId('thread-scroll-container'));
+    FakeIntersectionObserver.triggerAll();
+    expect(onLoadEarlier).toHaveBeenCalledTimes(1);
+
+    FakeIntersectionObserver.triggerAll();
+    expect(onLoadEarlier).toHaveBeenCalledTimes(1);
   });
 
   it('renders user and agent messages without separate title rows', async () => {
@@ -3976,6 +4002,64 @@ describe('ThreadTimeline', () => {
     rerender(<ThreadTimeline turns={turns} liveOutput="next token + more" />);
 
     expect(scrollTop).toBe(100);
+  });
+
+  it('scrolls to the latest turn on initial render', () => {
+    const turns = Array.from({ length: 3 }, (_, index) => makeTurn(index + 1));
+    let scrollTop = 0;
+    const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      'scrollHeight',
+    );
+    const scrollTopDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      'scrollTop',
+    );
+
+    try {
+      Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+        configurable: true,
+        get() {
+          return this instanceof HTMLElement &&
+            this.dataset.testid === 'thread-scroll-container'
+            ? 1000
+            : 0;
+        },
+      });
+      Object.defineProperty(HTMLElement.prototype, 'scrollTop', {
+        configurable: true,
+        get() {
+          return scrollTop;
+        },
+        set(value) {
+          if (
+            this instanceof HTMLElement &&
+            this.dataset.testid === 'thread-scroll-container'
+          ) {
+            scrollTop = value;
+          }
+        },
+      });
+
+      render(<ThreadTimeline turns={turns} liveOutput="" />);
+
+      expect(scrollTop).toBe(1000);
+    } finally {
+      if (scrollHeightDescriptor) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          'scrollHeight',
+          scrollHeightDescriptor,
+        );
+      }
+      if (scrollTopDescriptor) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          'scrollTop',
+          scrollTopDescriptor,
+        );
+      }
+    }
   });
 
   it('keeps following the tail when rendered height grows while pinned', () => {
