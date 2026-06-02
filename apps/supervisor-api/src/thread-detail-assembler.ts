@@ -29,6 +29,7 @@ export interface ThreadDetailCacheEntry {
   turns: ThreadTurnDto[];
   totalTurnCount: number;
   deferredDetails: Map<string, ThreadHistoryItemDetailDto>;
+  isPaged: boolean;
 }
 
 export interface ThreadTurnMetadataRecord {
@@ -126,6 +127,7 @@ export class ThreadDetailAssembler {
     const options = input.options ?? {};
     const shouldCacheFullDetail =
       options.limit === undefined && options.beforeTurnId === undefined;
+    const isPaged = !shouldCacheFullDetail;
     const cached = this.getCache(input.localThreadId);
     if (cached && shouldCacheFullDetail) {
       return cached;
@@ -203,6 +205,7 @@ export class ThreadDetailAssembler {
         ? turns.length
         : remoteSession.totalTurnCount ?? Math.max(cached?.totalTurnCount ?? 0, turns.length),
       deferredDetails,
+      isPaged,
     };
     if (shouldCacheFullDetail) {
       this.setCache(input.localThreadId, entry);
@@ -262,6 +265,7 @@ export class ThreadDetailAssembler {
       turns,
       totalTurnCount: turns.length,
       deferredDetails,
+      isPaged: !input.shouldCacheFullDetail,
     };
     if (input.shouldCacheFullDetail) {
       this.setCache(input.localThreadId, entry);

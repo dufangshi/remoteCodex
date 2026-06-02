@@ -116,23 +116,23 @@ without losing control-plane changes.
 
 ### Tasks
 
-- [ ] Fetch latest origin refs.
+- [x] Fetch latest origin refs.
   - Acceptance: `origin/main` points at or after the `Extract thread UI package`
     commit.
   - Verification: `git log --oneline -3 origin/main` shows the thread UI package
     extraction commit.
 
-- [ ] Merge `origin/main` into `sandbox-worker-control-plane`.
+- [x] Merge `origin/main` into `sandbox-worker-control-plane`.
   - Acceptance: merge completes without unresolved conflicts.
   - Verification: `git status --short --branch` shows the current branch and no
     unmerged paths.
 
-- [ ] Preserve control-plane branch behavior during conflict resolution.
+- [x] Preserve control-plane branch behavior during conflict resolution.
   - Acceptance: control-plane routes, auth pages, sandbox lifecycle UI, router
     direct calls, and staging CI/CD files remain present after the merge.
   - Verification: inspect conflict files and run focused typecheck.
 
-- [ ] Confirm `@remote-codex/thread-ui` package is available.
+- [x] Confirm `@remote-codex/thread-ui` package is available.
   - Acceptance: `packages/thread-ui/package.json` exists and
     `apps/supervisor-web/package.json` depends on
     `@remote-codex/thread-ui: workspace:*`.
@@ -142,7 +142,7 @@ without losing control-plane changes.
     rg -n '"@remote-codex/thread-ui"' apps/supervisor-web/package.json pnpm-lock.yaml
     ```
 
-- [ ] Confirm Tailwind scans the package source.
+- [x] Confirm Tailwind scans the package source.
   - Acceptance: `apps/supervisor-web/src/index.css` includes
     `@source "../../../packages/thread-ui/src/**/*.{ts,tsx}";`.
   - Verification:
@@ -152,9 +152,18 @@ without losing control-plane changes.
 
 ### Evidence
 
-- Files:
+- Files: `packages/thread-ui/**`,
+  `apps/supervisor-web/package.json`,
+  `apps/supervisor-web/src/index.css`,
+  `pnpm-lock.yaml`.
 - Verification:
-- Residual risk:
+  - `git log --oneline -5 origin/main` includes
+    `90b7d2d Extract thread UI package` and
+    `fcf6aa3 Optimize thread history loading`.
+  - `pnpm --filter @remote-codex/thread-ui typecheck`
+  - `pnpm --filter @remote-codex/thread-ui build`
+  - `pnpm --filter @remote-codex/supervisor-web typecheck`
+- Residual risk: merge commit and deployment are tracked in Phase 8.
 
 ## Phase 2: Define Control-Plane Adapter Boundary
 
@@ -163,17 +172,17 @@ DTO mapping.
 
 ### Tasks
 
-- [ ] Keep `ControlPlaneSession.id` as the product navigation id.
+- [x] Keep `ControlPlaneSession.id` as the product navigation id.
   - Acceptance: sidebar rows and control-plane route navigation use
     `/control-plane/sessions/:sessionId`.
   - Verification: tests cover clicking or rendering a sidebar session link.
 
-- [ ] Keep `ControlPlaneSession.workerSessionId` as the worker thread id.
+- [x] Keep `ControlPlaneSession.workerSessionId` as the worker thread id.
   - Acceptance: worker fetch, prompt submit, image assets, and thread detail
     refresh use `workerSessionId`.
   - Verification: tests assert router requests target the worker thread id.
 
-- [ ] Create a typed control-plane thread adapter.
+- [x] Create a typed control-plane thread adapter.
   - Acceptance: adapter satisfies `ThreadDetailUiAdapter`.
   - Required operations:
     - `openThread(threadId)`
@@ -184,7 +193,7 @@ DTO mapping.
     - `shell: null` until remote shell transport exists
   - Verification: TypeScript catches missing or misspelled adapter methods.
 
-- [ ] Keep route-token API calls outside `@remote-codex/thread-ui`.
+- [x] Keep route-token API calls outside `@remote-codex/thread-ui`.
   - Acceptance: `createControlPlaneRouteToken`,
     `fetchControlPlaneWorkerThread`, and
     `sendControlPlaneWorkerThreadPrompt` are called only from the control-plane
@@ -195,16 +204,23 @@ DTO mapping.
     rg -n 'ControlPlane|routeToken|sandbox router|api/sandboxes' packages/thread-ui/src || true
     ```
 
-- [ ] Preserve reconnect behavior for missing worker threads.
+- [x] Preserve reconnect behavior for missing worker threads.
   - Acceptance: `404` or `409` from worker thread fetch/prompt still triggers
     session reconnect and retry where currently supported.
   - Verification: focused tests cover the reconnect path.
 
 ### Evidence
 
-- Files:
+- Files: `apps/supervisor-web/src/pages/ControlPlaneSessionPage.tsx`,
+  `apps/supervisor-web/src/pages/ControlPlaneSessionPage.test.tsx`,
+  `packages/thread-ui/src/adapters.ts`.
 - Verification:
-- Residual risk:
+  - `pnpm --filter @remote-codex/supervisor-web typecheck`
+  - `pnpm --filter @remote-codex/supervisor-web test -- ControlPlaneSessionPage`
+  - `rg -n 'fetchControlPlaneWorkerThread|sendControlPlaneWorkerThreadPrompt|createControlPlaneRouteToken' apps/supervisor-web/src/pages apps/supervisor-web/src/lib`
+  - `rg -n 'ControlPlane|routeToken|sandbox router|api/sandboxes|control-plane' packages/thread-ui/src` produced no matches.
+- Residual risk: none for the adapter boundary; real shell transport remains a
+  Phase 9 follow-up.
 
 ## Phase 3: Replace Manual UI Composition
 
@@ -213,7 +229,7 @@ Goal: replace the custom session page layout/timeline/composer JSX with
 
 ### Tasks
 
-- [ ] Replace local component imports in `ControlPlaneSessionPage`.
+- [x] Replace local component imports in `ControlPlaneSessionPage`.
   - Remove direct imports from:
     - `../components/ThreadComposer`
     - `../components/ThreadTimeline`
@@ -226,7 +242,7 @@ Goal: replace the custom session page layout/timeline/composer JSX with
     rg -n 'ThreadWorkspaceLayout|ThreadTimeline|ThreadComposer|ThreadDetailSurface|@remote-codex/thread-ui' apps/supervisor-web/src/pages/ControlPlaneSessionPage.tsx
     ```
 
-- [ ] Convert current timeline props into `timelineProps`.
+- [x] Convert current timeline props into `timelineProps`.
   - Acceptance: current values are preserved:
     - `scrollRequestKey`
     - `onTailVisibilityChange`
@@ -237,7 +253,7 @@ Goal: replace the custom session page layout/timeline/composer JSX with
   - Verification: rendered timeline still shows existing worker turns and
     follows refresh updates.
 
-- [ ] Convert chat composer props into `composerProps`.
+- [x] Convert chat composer props into `composerProps`.
   - Acceptance: current values are preserved:
     - `busy`
     - `error`
@@ -257,25 +273,25 @@ Goal: replace the custom session page layout/timeline/composer JSX with
     - `onToggleFollow`
   - Verification: prompt submit still clears the draft and calls the router.
 
-- [ ] Convert shell composer props into `shellComposerProps`.
+- [x] Convert shell composer props into `shellComposerProps`.
   - Acceptance: shell mode remains explicitly unavailable until a real
     `ControlPlaneShellAdapter` exists.
   - Verification: tests assert shell view shows the unavailable message and does
     not try to open a local `/ws` connection.
 
-- [ ] Pass control-plane meta and settings slots to `ThreadDetailSurface`.
+- [x] Pass control-plane meta and settings slots to `ThreadDetailSurface`.
   - Acceptance: current session metadata and plugin controls remain visible in
     the surface settings/meta areas.
   - Verification: tests assert Control Session, Worker Thread, Sandbox, Router,
     and plugin controls render after page load.
 
-- [ ] Pass `currentThreadId={session?.id}` into `ThreadDetailSurface`.
+- [x] Pass `currentThreadId={session?.id}` into `ThreadDetailSurface`.
   - Acceptance: sidebar active state uses the control-plane session id, not the
     worker thread id.
   - Verification: active sidebar state remains correct when `session.id` and
     `workerSessionId` differ.
 
-- [ ] Remove manual `ThreadWorkspaceLayout` JSX from
+- [x] Remove manual `ThreadWorkspaceLayout` JSX from
   `ControlPlaneSessionPage`.
   - Acceptance: the page renders exactly one `<ThreadDetailSurface ... />`.
   - Verification:
@@ -285,9 +301,13 @@ Goal: replace the custom session page layout/timeline/composer JSX with
 
 ### Evidence
 
-- Files:
+- Files: `apps/supervisor-web/src/pages/ControlPlaneSessionPage.tsx`,
+  `packages/thread-ui/src/ThreadDetailSurface.tsx`.
 - Verification:
-- Residual risk:
+  - `pnpm --filter @remote-codex/supervisor-web test -- ControlPlaneSessionPage`
+  - `pnpm --filter @remote-codex/supervisor-web test -- ThreadDetailPage ControlPlaneSessionPage`
+  - `rg -n '<ThreadWorkspaceLayout|<ThreadTimeline|<ThreadComposer|ThreadDetailSurface|@remote-codex/thread-ui' apps/supervisor-web/src/pages/ControlPlaneSessionPage.tsx` shows only the package import/type usage and one `<ThreadDetailSurface />`.
+- Residual risk: none for manual composition removal.
 
 ## Phase 4: Preserve Plugins And XYZ Viewer
 
@@ -296,7 +316,7 @@ settings.
 
 ### Tasks
 
-- [ ] Use `usePlugins` from `@remote-codex/thread-ui`.
+- [x] Use `usePlugins` from `@remote-codex/thread-ui`.
   - Acceptance: control-plane session page no longer imports
     `../plugins/usePlugins` directly after the main package is available.
   - Verification:
@@ -304,19 +324,19 @@ settings.
     rg -n "from '../plugins/usePlugins'|from '@remote-codex/thread-ui'" apps/supervisor-web/src/pages/ControlPlaneSessionPage.tsx
     ```
 
-- [ ] Show all registered plugins in settings.
+- [x] Show all registered plugins in settings.
   - Acceptance: Terminal and XYZ Molecule Viewer both appear when registered.
   - Verification: focused test asserts `XYZ Molecule Viewer` is visible in the
     control-plane session settings.
 
-- [ ] Keep Terminal plugin behavior honest.
+- [x] Keep Terminal plugin behavior honest.
   - Acceptance: enabling Terminal exposes shell mode controls, but the shell
     panel clearly says remote shell transport is unavailable while
     `adapter.shell` is null.
   - Verification: focused test covers terminal enabled plus unavailable remote
     shell copy.
 
-- [ ] Keep XYZ artifact and inline rendering package-owned.
+- [x] Keep XYZ artifact and inline rendering package-owned.
   - Acceptance: control-plane does not implement a second XYZ renderer.
   - Verification:
     ```bash
@@ -327,9 +347,21 @@ settings.
 
 ### Evidence
 
-- Files:
+- Files: `apps/supervisor-web/src/pages/ControlPlaneSessionPage.tsx`,
+  `apps/supervisor-web/src/pages/ControlPlaneSessionPage.test.tsx`,
+  `packages/thread-ui/src/plugins/**`,
+  `apps/supervisor-web/src/app.tsx`.
 - Verification:
-- Residual risk:
+  - `pnpm --filter @remote-codex/supervisor-web test -- ControlPlaneSessionPage`
+  - Focused test asserts Terminal and XYZ Molecule Viewer are visible.
+  - Focused test wraps the page in `PluginProvider` and verifies plugin toggle
+    calls the provider update path.
+  - Focused test asserts shell mode shows the unavailable message and does not
+    attempt `/ws`.
+  - `rg -n 'Xyz|XYZ|molecule' apps/supervisor-web/src/pages/ControlPlaneSessionPage.tsx apps/supervisor-web/src/pages/ControlPlaneSessionPage.test.tsx`
+    only matches workspace/test fixture text and the XYZ plugin assertion.
+- Residual risk: none for package-owned plugin display; real shell transport
+  remains out of scope.
 
 ## Phase 5: Worker Assets And Router URLs
 
@@ -338,20 +370,20 @@ assumptions.
 
 ### Tasks
 
-- [ ] Audit image and artifact URLs in worker thread detail.
+- [x] Audit image and artifact URLs in worker thread detail.
   - Acceptance: determine whether worker turns include image attachment paths
     that require `getImageAssetUrl`.
   - Verification: inspect existing worker thread DTO fixtures and router API
     helpers.
 
-- [ ] Add or confirm a control-plane image asset URL builder.
+- [x] Add or confirm a control-plane image asset URL builder.
   - Acceptance: if needed, the builder uses the route token router base URL and
     worker thread id.
   - Verification: test asserts asset URL goes through
     `/api/sandboxes/:sandboxId/...` on the sandbox router, not the control-plane
     API.
 
-- [ ] Pass `getImageAssetUrl` through `ThreadDetailUiAdapter`.
+- [x] Pass `getImageAssetUrl` through `ThreadDetailUiAdapter`.
   - Acceptance: `ThreadTimeline` receives image URLs through the package
     adapter boundary.
   - Verification: focused test covers an image item if a fixture exists; if not,
@@ -359,9 +391,18 @@ assumptions.
 
 ### Evidence
 
-- Files:
+- Files: `apps/supervisor-web/src/pages/ControlPlaneSessionPage.tsx`,
+  `apps/supervisor-web/src/pages/ControlPlaneSessionPage.test.tsx`,
+  `packages/thread-ui/src/ThreadDetailSurface.tsx`,
+  `packages/thread-ui/src/components/ThreadTimeline.tsx`.
 - Verification:
-- Residual risk:
+  - `pnpm --filter @remote-codex/supervisor-web test -- ControlPlaneSessionPage`
+  - Focused test includes a worker image history item and asserts its `src`
+    uses `${routerBaseUrl}/api/sandboxes/sandbox-1/api/threads/worker-session-1/assets/image?...`.
+  - `rg -n 'getImageAssetUrl|assets/image' apps/supervisor-web/src/pages/ControlPlaneSessionPage.tsx apps/supervisor-web/src/lib/api.ts packages/thread-ui/src`
+    shows the adapter-owned URL builder and package adapter usage.
+- Residual risk: artifact-specific remote asset shapes beyond image history
+  items should be covered when new worker DTO fixtures are added.
 
 ## Phase 6: Tests
 
@@ -369,37 +410,37 @@ Goal: prove control-plane behavior survived the package integration.
 
 ### Tasks
 
-- [ ] Update `ControlPlaneSessionPage.test.tsx` imports and mocks.
+- [x] Update `ControlPlaneSessionPage.test.tsx` imports and mocks.
   - Acceptance: tests use the real package where possible and only mock heavy
     browser-only behavior if required.
   - Verification: test file compiles.
 
-- [ ] Cover initial session open.
+- [x] Cover initial session open.
   - Acceptance: session page loads auth, sandbox, project, workspace, session,
     route token, worker thread, and renders the worker turn.
   - Verification: focused test passes.
 
-- [ ] Cover prompt submit through sandbox router.
+- [x] Cover prompt submit through sandbox router.
   - Acceptance: sending a prompt posts to the router worker prompt endpoint and
     clears the draft after success.
   - Verification: focused test passes.
 
-- [ ] Cover reconnect after worker thread not found.
+- [x] Cover reconnect after worker thread not found.
   - Acceptance: `404` or `409` from router fetch/prompt triggers session resume,
     new route token creation, and worker thread refetch.
   - Verification: focused test passes.
 
-- [ ] Cover plugin settings.
+- [x] Cover plugin settings.
   - Acceptance: settings list all registered plugins and plugin toggle calls the
     plugin provider path.
   - Verification: focused test passes.
 
-- [ ] Cover remote shell unavailable state.
+- [x] Cover remote shell unavailable state.
   - Acceptance: shell mode does not attempt local shell sockets and shows the
     remote shell unavailable state.
   - Verification: focused test passes.
 
-- [ ] Run package and supervisor-web checks.
+- [x] Run package and supervisor-web checks.
   - Verification:
     ```bash
     pnpm --filter @remote-codex/thread-ui typecheck
@@ -411,9 +452,19 @@ Goal: prove control-plane behavior survived the package integration.
 
 ### Evidence
 
-- Files:
+- Files: `apps/supervisor-web/src/pages/ControlPlaneSessionPage.test.tsx`,
+  `apps/supervisor-web/src/pages/ThreadDetailPage.test.tsx`,
+  `apps/supervisor-web/src/components/ThreadComposer.test.tsx`.
 - Verification:
-- Residual risk:
+  - `pnpm --filter @remote-codex/thread-ui typecheck`
+  - `pnpm --filter @remote-codex/thread-ui build`
+  - `pnpm --filter @remote-codex/supervisor-web typecheck`
+  - `pnpm --filter @remote-codex/supervisor-web test -- ControlPlaneSessionPage`
+  - `pnpm --filter @remote-codex/supervisor-web test -- ThreadDetailPage ControlPlaneSessionPage`
+  - `pnpm --filter @remote-codex/supervisor-web test`
+  - `pnpm --filter @remote-codex/supervisor-api typecheck`
+  - `pnpm --filter @remote-codex/supervisor-api test`
+- Residual risk: staging browser smoke remains Phase 8.
 
 ## Phase 7: Static Guardrails
 
@@ -421,7 +472,7 @@ Goal: prevent future code drift back to copied main UI.
 
 ### Tasks
 
-- [ ] Add or document a static check for forbidden manual composition in
+- [x] Add or document a static check for forbidden manual composition in
   `ControlPlaneSessionPage`.
   - Acceptance: future regressions are easy to catch with `rg` or a focused
     test.
@@ -432,7 +483,7 @@ Goal: prevent future code drift back to copied main UI.
     Expected result: no matches, except intentionally documented type-only
     imports if unavoidable.
 
-- [ ] Add or document a static check that `packages/thread-ui` remains
+- [x] Add or document a static check that `packages/thread-ui` remains
   control-plane-agnostic.
   - Acceptance: the shared package does not import control-plane APIs, router
     helpers, or route-token types.
@@ -442,7 +493,7 @@ Goal: prevent future code drift back to copied main UI.
     ```
     Any match must be reviewed and justified.
 
-- [ ] Keep app wrappers thin.
+- [x] Keep app wrappers thin.
   - Acceptance: app-local `ThreadComposer`, `ThreadTimeline`,
     `ThreadWorkspaceLayout`, plugin wrappers, and dialog wrappers remain simple
     re-exports from `@remote-codex/thread-ui` after merging main.
@@ -455,9 +506,21 @@ Goal: prevent future code drift back to copied main UI.
 
 ### Evidence
 
-- Files:
+- Files: `docs/thread-ui-control-plane-integration-checklist.md`,
+  `apps/supervisor-web/src/pages/ControlPlaneSessionPage.tsx`,
+  `apps/supervisor-web/src/components/ThreadComposer.tsx`,
+  `apps/supervisor-web/src/components/ThreadTimeline.tsx`,
+  `apps/supervisor-web/src/components/ThreadWorkspaceLayout.tsx`.
 - Verification:
-- Residual risk:
+  - `rg -n '<ThreadWorkspaceLayout|<ThreadTimeline|<ThreadComposer|from "../components/Thread' apps/supervisor-web/src/pages/ControlPlaneSessionPage.tsx`
+    produced no matches.
+  - `rg -n 'ControlPlane|routeToken|sandbox router|api/sandboxes|control-plane' packages/thread-ui/src || true`
+    produced no matches.
+  - `sed -n '1,40p' apps/supervisor-web/src/components/ThreadComposer.tsx`
+  - `sed -n '1,40p' apps/supervisor-web/src/components/ThreadTimeline.tsx`
+  - `sed -n '1,40p' apps/supervisor-web/src/components/ThreadWorkspaceLayout.tsx`
+- Residual risk: keep these `rg` checks in future review until an automated
+  lint/test guard is added.
 
 ## Phase 8: Deployment And Staging Smoke
 
@@ -529,19 +592,19 @@ after the package integration lands.
 
 ## Final Acceptance Criteria
 
-- [ ] `sandbox-worker-control-plane` includes `@remote-codex/thread-ui` from
+- [x] `sandbox-worker-control-plane` includes `@remote-codex/thread-ui` from
   main.
-- [ ] `ControlPlaneSessionPage` renders `ThreadDetailSurface`.
-- [ ] `ControlPlaneSessionPage` no longer manually composes
+- [x] `ControlPlaneSessionPage` renders `ThreadDetailSurface`.
+- [x] `ControlPlaneSessionPage` no longer manually composes
   `ThreadWorkspaceLayout`, `ThreadTimeline`, or `ThreadComposer`.
-- [ ] Control-plane route navigation uses `ControlPlaneSession.id`.
-- [ ] Worker router requests use `ControlPlaneSession.workerSessionId`.
-- [ ] Prompt submit still reaches the sandbox router and receives worker
+- [x] Control-plane route navigation uses `ControlPlaneSession.id`.
+- [x] Worker router requests use `ControlPlaneSession.workerSessionId`.
+- [x] Prompt submit still reaches the sandbox router and receives worker
   updates.
-- [ ] Plugin settings show all registered package plugins, including Terminal
+- [x] Plugin settings show all registered package plugins, including Terminal
   and XYZ Molecule Viewer.
-- [ ] Remote shell remains explicitly unavailable until a real shell adapter is
+- [x] Remote shell remains explicitly unavailable until a real shell adapter is
   implemented.
-- [ ] Focused and broad supervisor-web checks pass.
+- [x] Focused and broad supervisor-web checks pass.
 - [ ] Staging smoke verifies session open, prompt submit, plugins, and shell
   unavailable state.

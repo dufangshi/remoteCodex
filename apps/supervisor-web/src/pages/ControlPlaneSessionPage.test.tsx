@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { PluginProvider } from '@remote-codex/thread-ui';
 
 import { ControlPlaneSessionPage } from './ControlPlaneSessionPage';
 
@@ -45,6 +46,8 @@ const sandbox = {
   createdAt: '2026-05-25T00:00:00.000Z',
   updatedAt: '2026-05-25T00:00:00.000Z',
 };
+
+const pluginUpdateSpy = vi.fn();
 
 const project = {
   id: 'project-1',
@@ -135,6 +138,12 @@ const threadDetail = {
           kind: 'agentMessage',
           text: 'Ready from sandbox',
         },
+        {
+          id: 'item-3',
+          kind: 'image',
+          text: 'Worker screenshot',
+          assetPath: './.temp/threads/worker-session-1/screenshot.png',
+        },
       ],
     },
   ],
@@ -148,8 +157,42 @@ function setPromptValue(element: HTMLElement, value: string) {
   fireEvent.input(element);
 }
 
+function renderControlPlaneSessionPage() {
+  return render(
+    <PluginProvider
+      adapter={{
+        updatePlugin: async (pluginId, input) => {
+          pluginUpdateSpy(pluginId, input);
+          return {
+            id: pluginId,
+            name: pluginId,
+            description: 'Updated plugin',
+            version: '0.0.0',
+            remoteCodex: '^0.1.0',
+            source: 'builtin',
+            enabled: input.enabled ?? true,
+            capabilities: {
+              artifactTypes: [],
+              timelineRenderers: [],
+              threadPanels: [],
+            },
+          };
+        },
+      }}
+    >
+      <MemoryRouter initialEntries={['/control-plane/sessions/session-1']}>
+        <Routes>
+          <Route path="/control-plane/sessions/:sessionId" element={<ControlPlaneSessionPage />} />
+          <Route path="/control-plane/login" element={<div>Login</div>} />
+        </Routes>
+      </MemoryRouter>
+    </PluginProvider>,
+  );
+}
+
 describe('ControlPlaneSessionPage', () => {
   beforeEach(() => {
+    pluginUpdateSpy.mockReset();
     window.localStorage.clear();
     window.localStorage.setItem(
       'remote-codex-control-plane-auth',
@@ -210,14 +253,7 @@ describe('ControlPlaneSessionPage', () => {
   });
 
   it('opens a control-plane session through the router and sends prompts to the worker thread', async () => {
-    render(
-      <MemoryRouter initialEntries={['/control-plane/sessions/session-1']}>
-        <Routes>
-          <Route path="/control-plane/sessions/:sessionId" element={<ControlPlaneSessionPage />} />
-          <Route path="/control-plane/login" element={<div>Login</div>} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderControlPlaneSessionPage();
 
     await waitFor(() => {
       expect(
@@ -227,9 +263,33 @@ describe('ControlPlaneSessionPage', () => {
     expect(screen.getByRole('link', { name: /Plan calculation/ })).toBeInTheDocument();
     expect(screen.getByText('Hello remote worker')).toBeInTheDocument();
     expect(screen.getByText('Ready from sandbox')).toBeInTheDocument();
+    expect(await screen.findByRole('img', { name: 'Worker screenshot' })).toHaveAttribute(
+      'src',
+      `${routerBaseUrl}/api/sandboxes/sandbox-1/api/threads/worker-session-1/assets/image?path=.%2F.temp%2Fthreads%2Fworker-session-1%2Fscreenshot.png`,
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Settings Show' }));
     expect(screen.getByText('Terminal')).toBeInTheDocument();
     expect(screen.getByText('XYZ Molecule Viewer')).toBeInTheDocument();
+    const enabledButtons = screen.getAllByRole('button', { name: 'Enabled' });
+    expect(enabledButtons.length).toBeGreaterThan(0);
+    fireEvent.click(enabledButtons[0]!);
+    await waitFor(() => {
+      expect(pluginUpdateSpy).toHaveBeenCalled();
+    });
+    expect(pluginUpdateSpy.mock.calls[0]?.[1]).toEqual({ enabled: false });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to shell' }));
+    expect(screen.getByText('Remote shell transport unavailable')).toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText('Remote shell transport unavailable.'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Send Shell Input' }),
+    ).not.toBeInTheDocument();
+    expect(
+      vi.mocked(fetch).mock.calls.some(([input]) => String(input).includes('/ws')),
+    ).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to chat' }));
 
     setPromptValue(screen.getByRole('textbox', { name: 'Prompt' }), 'Continue from here');
     fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
@@ -339,14 +399,7 @@ describe('ControlPlaneSessionPage', () => {
       return jsonResponse({ code: 'not_found', message: `Unhandled request: ${url}` }, 404);
     });
 
-    render(
-      <MemoryRouter initialEntries={['/control-plane/sessions/session-1']}>
-        <Routes>
-          <Route path="/control-plane/sessions/:sessionId" element={<ControlPlaneSessionPage />} />
-          <Route path="/control-plane/login" element={<div>Login</div>} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderControlPlaneSessionPage();
 
     await waitFor(() => {
       expect(screen.getByText('Keep going')).toBeInTheDocument();
@@ -446,14 +499,7 @@ describe('ControlPlaneSessionPage', () => {
       return jsonResponse({ code: 'not_found', message: `Unhandled request: ${url}` }, 404);
     });
 
-    render(
-      <MemoryRouter initialEntries={['/control-plane/sessions/session-1']}>
-        <Routes>
-          <Route path="/control-plane/sessions/:sessionId" element={<ControlPlaneSessionPage />} />
-          <Route path="/control-plane/login" element={<div>Login</div>} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderControlPlaneSessionPage();
 
     await waitFor(() => {
       expect(

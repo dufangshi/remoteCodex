@@ -17,9 +17,15 @@ const shellPanelMock = vi.hoisted(() => ({
   mounts: 0,
   unmounts: 0,
 }));
+const timelineRenderMock = vi.hoisted(() => ({
+  render: vi.fn(),
+}));
 
-vi.mock('../components/ThreadShellPanel', async () => {
+vi.mock('@remote-codex/thread-ui', async () => {
   const React = await import('react');
+  const actual = await vi.importActual<typeof import('@remote-codex/thread-ui')>(
+    '@remote-codex/thread-ui',
+  );
 
   const ThreadShellPanel = React.forwardRef(function MockThreadShellPanel(
     props: {
@@ -80,42 +86,105 @@ vi.mock('../components/ThreadShellPanel', async () => {
       return <div data-testid="mock-thread-shell-panel" />;
   });
 
+  type ThreadTimelineProps = React.ComponentProps<typeof actual.ThreadTimeline>;
+
+  const ThreadTimeline = React.memo(function MockThreadTimeline(
+    props: ThreadTimelineProps,
+  ) {
+    timelineRenderMock.render();
+    return <actual.ThreadTimeline {...props} />;
+  });
+
   return {
+    ...actual,
     ThreadShellPanel,
+    ThreadTimeline,
+    usePlugins: () => ({
+      plugins: [
+        {
+          id: 'remote-codex.terminal',
+          enabled: true,
+          capabilities: {
+            artifactTypes: [],
+            timelineRenderers: [],
+            threadPanels: [
+              {
+                id: 'terminal',
+                label: 'Terminal',
+                kind: 'terminal',
+                artifactTypes: [],
+              },
+            ],
+          },
+        },
+      ],
+      getThreadPanels: () => [
+        {
+          id: 'terminal',
+          label: 'Terminal',
+          kind: 'terminal',
+        },
+      ],
+    }),
   };
 });
 
-vi.mock('../plugins/usePlugins', () => ({
-  usePlugins: () => ({
-    plugins: [
-      {
-        id: 'remote-codex.terminal',
-        enabled: true,
-        capabilities: {
-          artifactTypes: [],
-          timelineRenderers: [],
-          threadPanels: [
-            {
-              id: 'terminal',
-              label: 'Terminal',
-              kind: 'terminal',
-              artifactTypes: [],
-            },
-          ],
-        },
-      },
-    ],
-    getThreadPanels: () => [
-      {
-        id: 'terminal',
-        label: 'Terminal',
-        kind: 'terminal',
-      },
-    ],
-  }),
-}));
-
 import { ThreadDetailPage } from './ThreadDetailPage';
+
+class FakeIntersectionObserver {
+  static instances: FakeIntersectionObserver[] = [];
+
+  private readonly observed = new Set<Element>();
+
+  constructor(
+    private readonly callback: IntersectionObserverCallback,
+    public readonly options?: IntersectionObserverInit,
+  ) {
+    FakeIntersectionObserver.instances.push(this);
+  }
+
+  observe(target: Element) {
+    this.observed.add(target);
+  }
+
+  unobserve(target: Element) {
+    this.observed.delete(target);
+  }
+
+  disconnect() {
+    this.observed.clear();
+  }
+
+  takeRecords() {
+    return [];
+  }
+
+  triggerAll(isIntersecting = true) {
+    const entries = Array.from(this.observed).map((target) => ({
+      isIntersecting,
+      target,
+      boundingClientRect: {} as DOMRectReadOnly,
+      intersectionRatio: isIntersecting ? 1 : 0,
+      intersectionRect: {} as DOMRectReadOnly,
+      rootBounds: null,
+      time: 0,
+    })) as IntersectionObserverEntry[];
+
+    if (entries.length > 0) {
+      this.callback(entries, this as unknown as IntersectionObserver);
+    }
+  }
+
+  static triggerAll(isIntersecting = true) {
+    FakeIntersectionObserver.instances.forEach((instance) =>
+      instance.triggerAll(isIntersecting),
+    );
+  }
+
+  static reset() {
+    FakeIntersectionObserver.instances = [];
+  }
+}
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
@@ -356,6 +425,7 @@ describe('ThreadDetailPage', () => {
 
   beforeEach(() => {
     FakeWebSocket.instances = [];
+    FakeIntersectionObserver.reset();
     shellPanelMock.toggleConnection.mockClear();
     shellPanelMock.sendInput.mockClear();
     shellPanelMock.sendCommand.mockClear();
@@ -369,7 +439,12 @@ describe('ThreadDetailPage', () => {
     shellPanelMock.isConnecting = false;
     shellPanelMock.mounts = 0;
     shellPanelMock.unmounts = 0;
+    timelineRenderMock.render.mockClear();
     vi.stubGlobal('WebSocket', FakeWebSocket as any);
+    vi.stubGlobal(
+      'IntersectionObserver',
+      FakeIntersectionObserver as unknown as typeof IntersectionObserver,
+    );
     vi.stubGlobal(
       'fetch',
       withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
@@ -603,6 +678,26 @@ describe('ThreadDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Thread Meta/i }));
 
     expect(screen.queryByText('/tmp/demo')).not.toBeInTheDocument();
+  });
+
+  it('does not re-render the timeline when typing in the chat composer', async () => {
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText('hello');
+    const initialTimelineRenderCount = timelineRenderMock.render.mock.calls.length;
+    expect(initialTimelineRenderCount).toBeGreaterThan(0);
+
+    setPromptValue(screen.getByRole('textbox', { name: 'Prompt' }), 'draft input');
+
+    expect(timelineRenderMock.render.mock.calls.length).toBe(
+      initialTimelineRenderCount,
+    );
   });
 
   it('deletes a sibling thread from the detail sidebar after confirmation', async () => {
@@ -1206,7 +1301,7 @@ describe('ThreadDetailPage', () => {
     expect(screen.queryByText('No threads available in this view.')).not.toBeInTheDocument();
   });
 
-  it('loads a small latest turn page first and fills earlier turns in the background', async () => {
+  it('loads three latest turns first, auto-loads one earlier page on upward scroll, then requires manual loading', async () => {
     const allTurns = Array.from({ length: 15 }, (_, index) => ({
       id: `turn-${index + 1}`,
       startedAt: new Date(Date.UTC(2026, 3, 10, 0, index, 0)).toISOString(),
@@ -1350,15 +1445,28 @@ describe('ThreadDetailPage', () => {
     expect(detailUrls[0]).toContain('/api/threads/thread-1?limit=3');
     expect(screen.queryByText('Prompt 12')).not.toBeInTheDocument();
     expect(screen.getByText('Prompt 15')).toBeInTheDocument();
+    expect(detailUrls).toHaveLength(1);
 
-    await waitFor(() => {
-      expect(screen.getByText('Prompt 5')).toBeInTheDocument();
-    });
+    FakeIntersectionObserver.triggerAll();
+    expect(detailUrls).toHaveLength(1);
 
+    fireEvent.scroll(screen.getByTestId('thread-scroll-container'));
+    FakeIntersectionObserver.triggerAll();
     expect(detailUrls.some((url) => url.includes('beforeTurnId=turn-13'))).toBe(true);
     await waitFor(() => {
-      expect(detailUrls.some((url) => url.includes('beforeTurnId=turn-3'))).toBe(true);
+      expect(screen.getByText('Prompt 3')).toBeInTheDocument();
     });
+    expect(screen.queryByText('Prompt 2')).not.toBeInTheDocument();
+    expect(detailUrls.some((url) => url.includes('beforeTurnId=turn-3'))).toBe(false);
+
+    FakeIntersectionObserver.triggerAll();
+    expect(detailUrls.some((url) => url.includes('beforeTurnId=turn-3'))).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load 10 earlier' }));
+    await waitFor(() => {
+      expect(screen.getByText('Prompt 1')).toBeInTheDocument();
+    });
+    expect(detailUrls.some((url) => url.includes('beforeTurnId=turn-3'))).toBe(true);
   });
 
   it('surfaces imported thread warnings before resume', async () => {
@@ -5447,9 +5555,13 @@ describe('ThreadDetailPage', () => {
 
     const slashMenu = document.querySelector('[data-composer-menu-surface="true"]');
     expect(slashMenu).toBeInTheDocument();
-    expect(slashMenu).toHaveClass('fixed', 'z-[120]');
-    expect(slashMenu?.parentElement).toBe(document.body);
-    expect(composerHost?.contains(slashMenu)).toBe(false);
+    expect(slashMenu).toHaveClass('absolute', 'bottom-full');
+    let composerLayer = slashMenu?.parentElement;
+    while (composerLayer && !composerLayer.classList.contains('z-[80]')) {
+      composerLayer = composerLayer.parentElement;
+    }
+    expect(composerLayer).toHaveClass('z-[80]');
+    expect(composerHost?.contains(slashMenu)).toBe(true);
   });
 
 });

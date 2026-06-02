@@ -7,6 +7,7 @@ import {
   useLocation,
 } from 'react-router-dom';
 import { useEffect, useState } from 'react';
+import { PluginProvider } from '@remote-codex/thread-ui';
 
 import type { AgentBackendIdDto } from '../../../packages/shared/src/index';
 import {
@@ -35,7 +36,7 @@ import { ThreadNewPage } from './pages/ThreadNewPage';
 import { ThreadsPage } from './pages/ThreadsPage';
 import { WorkspaceNewPage } from './pages/WorkspaceNewPage';
 import { WorkspacesPage } from './pages/WorkspacesPage';
-import { PluginProvider } from './plugins/PluginProvider';
+import { deletePlugin, fetchPlugins, importPlugin, updatePlugin } from './lib/api';
 
 const THEME_STORAGE_KEY = 'remote-codex-theme-mode';
 const BACKEND_STORAGE_KEY = 'remote-codex-default-backend';
@@ -238,7 +239,14 @@ export function App() {
 
   return (
     <div className="theme-shell theme-scrollbar">
-      <PluginProvider>
+      <PluginProvider
+        adapter={{
+          fetchPlugins,
+          importPlugin,
+          updatePlugin,
+          deletePlugin,
+        }}
+      >
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<RootPage />} />

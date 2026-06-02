@@ -9,6 +9,16 @@ import type {
 } from '../../../../packages/shared/src/index';
 import { TERMINAL_PLUGIN_ID } from '../../../../packages/plugin-terminal/src/index';
 import {
+  ThreadDetailSurface,
+  formatLongTimestamp,
+  threadStatusLabel,
+  usePlugins,
+  type ThreadComposerProps,
+  type ThreadDetailUiAdapter,
+  type ThreadShellControlState,
+  type ThreadTimelineProps,
+} from '@remote-codex/thread-ui';
+import {
   ApiError,
   createControlPlaneRouteToken,
   fetchControlPlaneMe,
@@ -27,20 +37,17 @@ import {
   type PromptAttachmentUpload,
 } from '../lib/api';
 import {
-  formatLongTimestamp,
-  threadStatusLabel,
-} from '../components/threadPresentation';
-import { ThreadComposer } from '../components/ThreadComposer';
-import { ThreadTimeline } from '../components/ThreadTimeline';
-import { ThreadWorkspaceLayout } from '../components/ThreadWorkspaceLayout';
-import type { ThreadShellControlState } from '../components/ThreadShellPanel';
-import { usePlugins } from '../plugins/usePlugins';
-import {
   clearStoredControlPlaneAuth,
   readStoredControlPlaneAuth,
 } from './controlPlaneAuthStorage';
 
 const REMOTE_THREAD_REFRESH_INTERVAL_MS = 3000;
+
+const EMPTY_ANSWERED_REQUEST_NOTES: NonNullable<
+  ThreadDetailDto['answeredRequestNotes']
+> = [];
+const EMPTY_ACTIVITY_NOTES: NonNullable<ThreadDetailDto['activityNotes']> = [];
+const EMPTY_PENDING_STEERS: NonNullable<ThreadDetailDto['pendingSteers']> = [];
 
 const controlPlaneCapabilities: AgentProviderCapabilitiesDto = {
   sessions: { list: false, read: true, resume: true, importLocal: false },
@@ -123,6 +130,21 @@ function sessionToThread(
     lastTurnCompletedAt: thread?.lastTurnCompletedAt ?? null,
     ...(thread?.contextUsage ? { contextUsage: thread.contextUsage } : {}),
   };
+}
+
+function controlPlaneWorkerAssetUrl(
+  routeToken: ControlPlaneRouteToken,
+  workerSessionId: string,
+  path: string,
+) {
+  const url = new URL(
+    `/api/sandboxes/${encodeURIComponent(
+      routeToken.sandboxId,
+    )}/api/threads/${encodeURIComponent(workerSessionId)}/assets/image`,
+    routeToken.routerBaseUrl,
+  );
+  url.searchParams.set('path', path);
+  return url.toString();
 }
 
 const remoteShellUnavailableState: ThreadShellControlState = {
@@ -350,7 +372,6 @@ export function ControlPlaneSessionPage() {
     }
   }
 
-  const threadRunning = detail?.thread.status === 'running' || Boolean(detail?.thread.activeTurnId);
   const promptDisabledReason = !routeToken
     ? 'Waiting for a router token...'
     : !session?.workerSessionId
@@ -360,8 +381,10 @@ export function ControlPlaneSessionPage() {
   const sidebarThreads = workspace
     ? workspaceSessions.map((item) => sessionToThread(item, workspace, item.id === session?.id ? detail : null))
     : [];
-  const workspaceLabels = workspace ? { [workspace.id]: workspace.name } : {};
   const activeThread = session && workspace ? sessionToThread(session, workspace, detail) : null;
+  const threads = activeThread && sidebarThreads.every((item) => item.id !== activeThread.id)
+    ? [activeThread, ...sidebarThreads]
+    : sidebarThreads;
 
   async function handleTogglePlugin(pluginId: string, enabled: boolean) {
     setPluginBusy(pluginId);
@@ -374,11 +397,6 @@ export function ControlPlaneSessionPage() {
     } finally {
       setPluginBusy(null);
     }
-  }
-
-  async function handleUnsupportedShellSubmit() {
-    setError('Remote sandbox shell routing is not connected yet. Use chat prompts for this session.');
-    return false;
   }
 
   const metaContent = (
@@ -544,136 +562,139 @@ export function ControlPlaneSessionPage() {
     </div>
   );
 
+  const timelineProps = useMemo<Partial<ThreadTimelineProps>>(
+    () => ({
+      scrollRequestKey,
+      className: 'thread-timeline-surface min-h-0 flex-1',
+      onTailVisibilityChange: setFollowTail,
+      answeredRequestNotes:
+        detail?.answeredRequestNotes ?? EMPTY_ANSWERED_REQUEST_NOTES,
+      activityNotes: detail?.activityNotes ?? EMPTY_ACTIVITY_NOTES,
+      pendingSteers: detail?.pendingSteers ?? EMPTY_PENDING_STEERS,
+    }),
+    [
+      detail?.activityNotes,
+      detail?.answeredRequestNotes,
+      detail?.pendingSteers,
+      scrollRequestKey,
+    ],
+  );
+
+  const composerProps = detail
+    ? ({
+        busy: sending,
+        error,
+        model: detail.thread.model,
+        reasoningEffort: detail.thread.reasoningEffort,
+        fastMode: detail.thread.fastMode ?? false,
+        collaborationMode: detail.thread.collaborationMode,
+        contextUsage: detail.thread.contextUsage,
+        capabilities: controlPlaneCapabilities,
+        toolboxItems: [],
+        followTail,
+        threadConnected: detail.thread.isLoaded,
+        shellAvailable: terminalPluginEnabled,
+        disabled: Boolean(promptDisabledReason),
+        ...(promptDisabledReason
+          ? { disabledPlaceholder: promptDisabledReason }
+          : {}),
+        draftPrompt: draft.prompt,
+        draftAttachments: draft.attachments,
+        onDraftChange: setDraft,
+        canInterrupt: false,
+        shellControlState: remoteShellUnavailableState,
+        onToggleView: () => setActiveView('shell'),
+        onToggleFollow: () => setScrollRequestKey((current) => current + 1),
+      } satisfies Omit<ThreadComposerProps, 'activeView' | 'onSubmit'>)
+    : null;
+
+  const surfaceActions = (
+    <span className="rounded-full border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-2 text-xs font-medium text-[var(--theme-fg)] shadow-lg shadow-stone-950/20">
+      {detail?.thread.status ?? session?.status ?? 'loading'}
+    </span>
+  );
+
+  const beforeTimelineContent = message && !error ? (
+    <div className="shrink-0 border-b border-emerald-500/20 bg-emerald-500/10 px-5 py-3 text-sm text-emerald-100 sm:px-6">
+      {message}
+    </div>
+  ) : null;
+
+  const shellUnavailableContent = (
+    <div className="flex min-h-0 flex-1 items-center justify-center p-4 sm:p-6">
+      <div className="thread-empty-surface max-w-md rounded-[1.6rem] border px-6 py-8 text-center">
+        <p className="text-base font-medium text-[var(--theme-fg)]">
+          Remote shell transport unavailable
+        </p>
+        <p className="mt-3 text-sm leading-6 text-[var(--theme-fg-muted)]">
+          The Terminal plugin is enabled, but this control-plane route does not yet provide
+          the remote shell API adapter used by the main supervisor thread page.
+        </p>
+        <button
+          type="button"
+          onClick={() => setActiveView('chat')}
+          className="mt-5 inline-flex h-9 items-center rounded-full border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-4 text-sm font-medium text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--theme-ring)] focus:ring-offset-2 focus:ring-offset-[var(--theme-surface)]"
+        >
+          Switch to chat
+        </button>
+      </div>
+    </div>
+  );
+
+  const getImageAssetUrl = useCallback(
+    (path: string) =>
+      routeToken && session?.workerSessionId
+        ? controlPlaneWorkerAssetUrl(routeToken, session.workerSessionId, path)
+        : '',
+    [routeToken, session?.workerSessionId],
+  );
+
+  const surfaceAdapter = useMemo<ThreadDetailUiAdapter>(
+    () => ({
+      openThread: (threadId: string) => {
+        navigate(`/control-plane/sessions/${threadId}`);
+      },
+      getThreadHref: (threadId: string) => `/control-plane/sessions/${threadId}`,
+      getNewThreadHref: () => '/control-plane',
+      sendPrompt: handlePromptSubmit,
+      getImageAssetUrl,
+      shell: null,
+    }),
+    [getImageAssetUrl, navigate],
+  );
+
   return (
-    <ThreadWorkspaceLayout
-      threads={activeThread && sidebarThreads.every((item) => item.id !== activeThread.id)
-        ? [activeThread, ...sidebarThreads]
-        : sidebarThreads}
+    <ThreadDetailSurface
+      threads={threads}
+      detail={detail}
       status={null}
       loading={loading}
       error={loading ? null : error}
-      viewportConstrained
-      currentThreadId={session?.id}
-      currentThreadLabel={session?.title ?? detail?.thread.title}
+      plugins={plugins}
+      adapter={surfaceAdapter}
       currentWorkspaceId={workspace?.id ?? null}
-      currentWorkspaceLabel={workspace?.name ?? detail?.workspace.label}
-      workspaceLabels={workspaceLabels}
+      currentWorkspaceLabel={workspace?.name ?? detail?.workspace.label ?? null}
       metaContent={metaContent}
       settingsContent={settingsContent}
-      showMobileNewThreadShortcut={false}
-      newThreadHref="/control-plane"
-      newThreadLabel="Control Plane"
-      getThreadHref={(threadId) => `/control-plane/sessions/${threadId}`}
-    >
-      <div className="thread-detail-surface relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-none border-y shadow-2xl shadow-stone-950/20 sm:flex-none sm:rounded-[2rem] sm:border">
-        <div className="pointer-events-none absolute right-4 top-4 z-30 hidden lg:block">
-          <div className="pointer-events-auto flex items-center gap-2">
-            <span className="rounded-full border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-2 text-xs font-medium text-[var(--theme-fg)] shadow-lg shadow-stone-950/20">
-              {detail?.thread.status ?? session?.status ?? 'loading'}
-            </span>
-          </div>
+      surfaceActions={surfaceActions}
+      beforeTimelineContent={beforeTimelineContent}
+      activeView={activeView}
+      timelineProps={timelineProps}
+      shellUnavailableContent={shellUnavailableContent}
+      shellDisconnectedContent={shellUnavailableContent}
+      shellContent={shellUnavailableContent}
+      loadingContent={
+        <div className="flex flex-1 items-center justify-center px-6 py-12 text-center text-[var(--theme-fg-muted)]">
+          Opening worker thread...
         </div>
-        {error && !loading ? (
-          <div className="shrink-0 border-b border-rose-500/20 bg-rose-500/10 px-5 py-4 text-sm text-rose-100 sm:px-6">
-            {error}
-          </div>
-        ) : null}
-        {message && !error ? (
-          <div className="shrink-0 border-b border-emerald-500/20 bg-emerald-500/10 px-5 py-3 text-sm text-emerald-100 sm:px-6">
-            {message}
-          </div>
-        ) : null}
-
-        {loading && !detail ? (
-          <div className="flex flex-1 items-center justify-center px-6 py-12 text-center text-[var(--theme-fg-muted)]">
-            Opening worker thread...
-          </div>
-        ) : detail ? (
-          <>
-            <div
-              aria-hidden={activeView !== 'chat'}
-              className={activeView === 'chat' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
-            >
-              <ThreadTimeline
-                threadId={detail.thread.id}
-                turns={detail.turns}
-                {...(detail.totalTurnCount === undefined
-                  ? {}
-                  : { totalTurnCount: detail.totalTurnCount })}
-                pendingRequests={detail.pendingRequests}
-                activeTurnId={detail.thread.activeTurnId}
-                threadRunning={threadRunning}
-                liveOutput=""
-                scrollRequestKey={scrollRequestKey}
-                className="thread-timeline-surface min-h-0 flex-1"
-                onTailVisibilityChange={setFollowTail}
-                answeredRequestNotes={detail.answeredRequestNotes ?? []}
-                activityNotes={detail.activityNotes ?? []}
-                pendingSteers={detail.pendingSteers ?? []}
-              />
-              <ThreadComposer
-                activeView="chat"
-                busy={sending}
-                error={error}
-                model={detail.thread.model}
-                reasoningEffort={detail.thread.reasoningEffort}
-                fastMode={detail.thread.fastMode ?? false}
-                collaborationMode={detail.thread.collaborationMode}
-                contextUsage={detail.thread.contextUsage}
-                capabilities={controlPlaneCapabilities}
-                toolboxItems={[]}
-                followTail={followTail}
-                threadConnected={detail.thread.isLoaded}
-                shellAvailable={terminalPluginEnabled}
-                disabled={Boolean(promptDisabledReason)}
-                disabledPlaceholder={promptDisabledReason}
-                draftPrompt={draft.prompt}
-                draftAttachments={draft.attachments}
-                onDraftChange={setDraft}
-                onSubmit={handlePromptSubmit}
-                canInterrupt={false}
-                shellControlState={remoteShellUnavailableState}
-                onToggleView={() => setActiveView('shell')}
-                onToggleFollow={() => setScrollRequestKey((current) => current + 1)}
-              />
-            </div>
-            <div
-              aria-hidden={activeView !== 'shell'}
-              className={activeView === 'shell' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
-            >
-              <div className="flex min-h-0 flex-1 items-center justify-center p-4 sm:p-6">
-                <div className="thread-empty-surface max-w-md rounded-[1.6rem] border px-6 py-8 text-center">
-                  <p className="text-base font-medium text-[var(--theme-fg)]">
-                    Remote shell transport unavailable
-                  </p>
-                  <p className="mt-3 text-sm leading-6 text-[var(--theme-fg-muted)]">
-                    The Terminal plugin is enabled, but this control-plane route does not yet provide
-                    the remote shell API adapter used by the main supervisor thread page.
-                  </p>
-                </div>
-              </div>
-              <ThreadComposer
-                activeView={activeView}
-                busy={false}
-                error={remoteShellUnavailableState.error}
-                capabilities={controlPlaneCapabilities}
-                toolboxItems={[]}
-                followTail={false}
-                threadConnected={detail.thread.isLoaded}
-                shellAvailable={terminalPluginEnabled}
-                shellControlState={remoteShellUnavailableState}
-                canInterrupt={false}
-                onSubmit={handleUnsupportedShellSubmit}
-                onToggleView={() => setActiveView('chat')}
-              />
-            </div>
-          </>
-        ) : (
-          <div className="flex flex-1 items-center justify-center px-6 py-12 text-center text-[var(--theme-fg-muted)]">
-            No worker thread is connected yet.
-          </div>
-        )}
-      </div>
-    </ThreadWorkspaceLayout>
+      }
+      emptyContent={
+        <div className="flex flex-1 items-center justify-center px-6 py-12 text-center text-[var(--theme-fg-muted)]">
+          No worker thread is connected yet.
+        </div>
+      }
+      {...(session ? { currentThreadId: session.id } : {})}
+      {...(composerProps ? { composerProps } : {})}
+    />
   );
 }

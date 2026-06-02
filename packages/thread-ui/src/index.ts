@@ -1,0 +1,65 @@
+export type {
+  ShellSocketConnection,
+  ShellSocketHandlers,
+  ThreadDetailUiAdapter,
+  ThreadShellAdapter,
+  ThreadTimelineAdapter,
+} from './adapters';
+export type {
+  PromptAttachmentUpload,
+  SendPromptInput,
+  ThreadShellControlState,
+} from './types';
+
+export {
+  ThreadComposer,
+  type ThreadComposerProps,
+} from './components/ThreadComposer';
+export {
+  ThreadCards,
+  ThreadWorkspaceLayout,
+} from './components/ThreadWorkspaceLayout';
+export {
+  ThreadTimeline,
+  type ThreadTimelineProps,
+} from './components/ThreadTimeline';
+export {
+  ThreadShellPanel,
+  type ThreadShellPanelHandle,
+} from './components/ThreadShellPanel';
+export { ConfirmDialog } from './components/ConfirmDialog';
+export { ExportTranscriptDialog } from './components/ExportTranscriptDialog';
+export { LongTextDialog } from './components/LongTextDialog';
+export {
+  formatLongTimestamp,
+  formatShortTimestamp,
+  historyItemAccentClassName,
+  historyItemLabel,
+  threadStatusClassName,
+  threadStatusLabel,
+  turnStatusLabel,
+} from './components/threadPresentation';
+export { hasLikelyMarkdownSyntax } from './components/markdownHeuristics';
+export {
+  ThreadDetailSurface,
+  type ThreadDetailSurfaceProps,
+} from './ThreadDetailSurface';
+
+export { builtinFrontendPlugins } from './plugins/builtin-plugin-modules';
+export {
+  PluginContext,
+  mergePluginState,
+  type PluginContextValue,
+} from './plugins/plugin-context';
+export { PluginProvider } from './plugins/PluginProvider';
+export { usePlugins } from './plugins/usePlugins';
+export type {
+  ArtifactRenderContext,
+  FrontendPluginModule,
+  InlineCodeRenderContext,
+  ThreadPanelContribution,
+} from './plugins/plugin-types';
+export {
+  InlineXyzRenderer,
+  XyzArtifactRenderer,
+} from './plugins/xyz-plugin-renderers';

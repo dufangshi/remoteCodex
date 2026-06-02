@@ -58,6 +58,7 @@ export class FakeCodexManager extends EventEmitter {
   loadedThreadIds = new Set<string>();
   readThreadErrors = new Map<string, JsonRpcClientError>();
   readThreadCallCount = new Map<string, number>();
+  ignoreReadThreadPaging = false;
   skillsEntries: CodexSkillsListEntry[] = [];
   mcpServers: CodexMcpServerRecord[] = [];
   hooksEntries: CodexHooksListEntry[] = [];
@@ -176,7 +177,7 @@ export class FakeCodexManager extends EventEmitter {
       );
     }
 
-    if (input.limit === undefined && !input.beforeTurnId) {
+    if (this.ignoreReadThreadPaging || (input.limit === undefined && !input.beforeTurnId)) {
       return thread;
     }
 
