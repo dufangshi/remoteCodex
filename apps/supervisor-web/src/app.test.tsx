@@ -61,6 +61,76 @@ describe('App', () => {
     expect(screen.getByText('Loading account session...')).toBeInTheDocument();
   });
 
+  it('does not load app-local plugins on control-plane routes', async () => {
+    vi.stubEnv('VITE_CONTROL_PLANE_BASE_URL', 'http://127.0.0.1:8790');
+    window.localStorage.clear();
+    window.localStorage.setItem(
+      'remote-codex-control-plane-auth',
+      JSON.stringify({
+        baseUrl: 'http://127.0.0.1:8790',
+        token: 'dev:dev-user',
+        email: 'dev@example.com',
+        displayName: 'Developer',
+      }),
+    );
+    window.history.pushState({}, '', '/control-plane/sessions/session-1');
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://127.0.0.1:8790');
+      if (url.pathname === '/api/me') {
+        return Response.json({
+          user: {
+            id: 'user-1',
+            authProvider: 'dev',
+            authSubject: 'dev-user',
+            email: 'dev@example.com',
+            displayName: 'Developer',
+            status: 'active',
+            plan: 'developer',
+            billingCustomerId: null,
+            quotaProfile: 'default',
+            createdAt: '2026-05-25T00:00:00.000Z',
+            updatedAt: '2026-05-25T00:00:00.000Z',
+            lastSeenAt: '2026-05-25T00:00:00.000Z',
+          },
+          sandbox: {
+            id: 'sandbox-1',
+            userId: 'user-1',
+            state: 'stopped',
+            image: 'remote-codex-worker:dev',
+            region: 'local',
+            resourceProfile: 'standard',
+            k8sNamespace: null,
+            k8sPodName: null,
+            routerBaseUrl: null,
+            workerServiceName: null,
+            s3Prefix: 's3://bucket/users/user-1',
+            gatewayKeyId: null,
+            lastStartedAt: null,
+            lastSeenAt: null,
+            idleTimeoutAt: null,
+            statusReason: null,
+            startupProgress: 0,
+            lastFailureCode: null,
+            lastFailureMessage: null,
+            createdAt: '2026-05-25T00:00:00.000Z',
+            updatedAt: '2026-05-25T00:00:00.000Z',
+          },
+          usage: {},
+        });
+      }
+      return Response.json({ code: 'not_found', message: `Unhandled request: ${url.pathname}` }, { status: 404 });
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Sandbox is not running/i)).toBeInTheDocument();
+    });
+    expect(
+      vi.mocked(fetch).mock.calls.some(([input]) => String(input).includes('/api/plugins')),
+    ).toBe(false);
+  });
+
   it('stores local control-plane auth from the login route and enters the panel', async () => {
     window.localStorage.clear();
     window.history.pushState({}, '', '/control-plane/login');

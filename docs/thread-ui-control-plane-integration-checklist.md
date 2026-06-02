@@ -357,15 +357,21 @@ settings.
 - Files: `apps/supervisor-web/src/pages/ControlPlaneSessionPage.tsx`,
   `apps/supervisor-web/src/pages/ControlPlaneSessionPage.test.tsx`,
   `packages/thread-ui/src/plugins/**`,
-  `apps/supervisor-web/src/app.tsx`.
+  `apps/supervisor-web/src/app.tsx`,
+  `apps/supervisor-web/src/app.test.tsx`.
 - Verification:
   - `pnpm --filter @remote-codex/supervisor-web test -- ControlPlaneSessionPage`
   - Focused test asserts Terminal and XYZ Molecule Viewer are visible.
   - Control-plane session page owns a scoped `PluginProvider adapter={{}}` so
     package built-in plugins are available without using the app-level
     `/api/plugins` adapter.
+  - App routing wraps `/control-plane...` routes in a route-aware
+    `PluginProvider` with an empty adapter so the top-level app shell also does
+    not call `/api/plugins`.
   - Focused test asserts no `Unexpected token` plugin parse error appears and
     no request includes `/api/plugins`.
+  - App test asserts opening a protected control-plane session route does not
+    fetch `/api/plugins`.
   - Focused test asserts shell mode shows the unavailable message and does not
     attempt `/ws`.
   - `rg -n 'Xyz|XYZ|molecule' apps/supervisor-web/src/pages/ControlPlaneSessionPage.tsx apps/supervisor-web/src/pages/ControlPlaneSessionPage.test.tsx`
@@ -472,6 +478,9 @@ Goal: prove control-plane behavior survived the package integration.
   - `pnpm --filter @remote-codex/supervisor-web test -- ControlPlaneSessionPage`
     passed after asserting the control-plane session page does not fetch
     `/api/plugins`.
+  - `pnpm --filter @remote-codex/supervisor-web test -- app ControlPlaneSessionPage`
+    passed after adding an App-level regression test that control-plane routes
+    do not fetch `/api/plugins`.
   - `pnpm --filter @remote-codex/supervisor-web test -- ThreadDetailPage ControlPlaneSessionPage`
   - `pnpm --filter @remote-codex/supervisor-web test`
   - `pnpm --filter @remote-codex/supervisor-api typecheck`

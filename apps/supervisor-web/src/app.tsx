@@ -6,7 +6,7 @@ import {
   Routes,
   useLocation,
 } from 'react-router-dom';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { PluginProvider } from '@remote-codex/thread-ui';
 
 import type { AgentBackendIdDto } from '../../../packages/shared/src/index';
@@ -47,6 +47,27 @@ function controlPlaneDefaultEnabled() {
 
 function RootPage() {
   return controlPlaneDefaultEnabled() ? <Navigate to="/control-plane" replace /> : <LandingPage />;
+}
+
+function RoutePluginProvider({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  const isControlPlaneRoute =
+    location.pathname.startsWith('/control-plane') ||
+    (location.pathname === '/' && controlPlaneDefaultEnabled());
+  const adapter = useMemo(
+    () =>
+      isControlPlaneRoute
+        ? {}
+        : {
+            fetchPlugins,
+            importPlugin,
+            updatePlugin,
+            deletePlugin,
+          },
+    [isControlPlaneRoute],
+  );
+
+  return <PluginProvider adapter={adapter}>{children}</PluginProvider>;
 }
 
 function readInitialThemeMode(): ThemeMode {
@@ -239,15 +260,8 @@ export function App() {
 
   return (
     <div className="theme-shell theme-scrollbar">
-      <PluginProvider
-        adapter={{
-          fetchPlugins,
-          importPlugin,
-          updatePlugin,
-          deletePlugin,
-        }}
-      >
-        <BrowserRouter>
+      <BrowserRouter>
+        <RoutePluginProvider>
           <Routes>
             <Route path="/" element={<RootPage />} />
             <Route
@@ -284,8 +298,8 @@ export function App() {
               <Route path="/threads/:id" element={<ThreadDetailPage />} />
             </Route>
           </Routes>
-        </BrowserRouter>
-      </PluginProvider>
+        </RoutePluginProvider>
+      </BrowserRouter>
     </div>
   );
 }
