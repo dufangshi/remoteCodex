@@ -63,3 +63,18 @@ export {
   InlineXyzRenderer,
   XyzArtifactRenderer,
 } from './plugins/xyz-plugin-renderers';
+export {
+  AppShellNavContext,
+  useAppShellNav,
+  type AgentBackendId,
+  type AppShellNavContextValue,
+  type ThemeMode,
+} from './app-shell/AppShellNavContext';
+export {
+  AppShellMenuButton,
+  AppShellNavigationMenu,
+  AppShellSettingsDialog,
+  type AppShellNavigationItem,
+  type AppShellNavigationMenuProps,
+  type AppShellSettingsDialogProps,
+} from './app-shell/AppShellNavigation';
