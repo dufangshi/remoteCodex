@@ -599,15 +599,24 @@ Goal: prove the integrated UI works in the deployed control-plane environment.
 - Verification:
   - `git push origin sandbox-worker-control-plane` pushed
     `c097b0db3c5ad75b4463ee802c67f1b7523ef485`.
+  - Post-smoke plugin isolation commits were pushed:
+    `7cfd02f13f624304518942f1f7e75e11b907ff92`,
+    `c5b05bd1556aef472aac74b82d4c7f74ed4b7a5b`, and
+    `6803de85aee514d0cffbe773f48224b736ad397c`.
   - GitHub Actions run
     `https://github.com/dufangshi/remoteCodex/actions/runs/26851229642`
     completed successfully in 5m37s for `Staging Images`.
+  - GitHub Actions run
+    `https://github.com/dufangshi/remoteCodex/actions/runs/26853381182`
+    completed successfully in 5m4s for final frontend deployment. This run
+    skipped the control-plane Railway deploy for a frontend-only staging
+    surface and deployed the frontend successfully.
   - `curl -fsS https://remote-codex-control-plane-production.up.railway.app/healthz`
     returned
-    `{"ok":true,"service":"control-plane-api","buildSha":"c097b0db3c5ad75b4463ee802c67f1b7523ef485"}`.
+    `{"ok":true,"service":"control-plane-api","buildSha":"c5b05bd1556aef472aac74b82d4c7f74ed4b7a5b"}`.
   - `curl -fsS https://remote-codex-frontend-production.up.railway.app/build.json`
     returned
-    `{"buildSha":"c097b0db3c5ad75b4463ee802c67f1b7523ef485"}`.
+    `{"buildSha":"6803de85aee514d0cffbe773f48224b736ad397c"}`.
   - `curl -fsSI https://remote-codex-frontend-production.up.railway.app/control-plane`
     returned HTTP 200.
   - Local Docker verification:
@@ -628,10 +637,14 @@ Goal: prove the integrated UI works in the deployed control-plane environment.
     shared thread list visible; session title visible; Control Session and
     Worker Thread meta visible; project, workspace, sandbox, and router meta
     visible; existing worker turns visible; Terminal and XYZ Molecule Viewer
-    visible in settings; remote shell unavailable state visible; submitted
-    prompt visible in the timeline.
+    visible in settings; no plugin JSON parse error visible; no app-local
+    `/api/plugins` request observed; remote shell unavailable state visible;
+    submitted prompt visible in the timeline.
   - Prompt submit reached the sandbox router with HTTP 200:
     `https://sandbox-router.lnz.app/api/sandboxes/cced27cb-c543-4425-b0fd-6211e5baf41e/api/threads/e9537e52-2331-4507-be59-b9f0a1e4e4d7/prompt`.
+  - Final browser smoke prompt was
+    `thread-ui-browser-smoke 1780442026090`; the prompt request returned HTTP
+    200 and no failed prompt requests were observed.
 - Residual risk:
   - `https://debug.lnz-study.com/control-plane` still returned Cloudflare
     HTTP 502 during smoke; staging UI verification used the Railway frontend
