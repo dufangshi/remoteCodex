@@ -227,6 +227,9 @@ describe('ControlPlaneSessionPage', () => {
     expect(screen.getByRole('link', { name: /Plan calculation/ })).toBeInTheDocument();
     expect(screen.getByText('Hello remote worker')).toBeInTheDocument();
     expect(screen.getByText('Ready from sandbox')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Settings Show' }));
+    expect(screen.getByText('Terminal')).toBeInTheDocument();
+    expect(screen.getByText('XYZ Molecule Viewer')).toBeInTheDocument();
 
     setPromptValue(screen.getByRole('textbox', { name: 'Prompt' }), 'Continue from here');
     fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
