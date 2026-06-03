@@ -43,6 +43,15 @@ import {
 } from './controlPlaneAuthStorage';
 
 const REMOTE_THREAD_REFRESH_INTERVAL_MS = 3000;
+const ROUTE_TOKEN_REFRESH_SKEW_MS = 60_000;
+const ROUTE_TOKEN_MIN_REFRESH_MS = 5_000;
+const ROUTE_TOKEN_MAX_REFRESH_MS = 2_147_000_000;
+const ROUTE_TOKEN_SCOPES = [
+  'worker:read',
+  'worker:write',
+  'session:prompt',
+  'provider:turn:create',
+];
 
 const EMPTY_ANSWERED_REQUEST_NOTES: NonNullable<
   ThreadDetailDto['answeredRequestNotes']
@@ -163,6 +172,18 @@ const remoteShellUnavailableState: ThreadShellControlState = {
   error: 'Remote sandbox shell routing is not connected yet.',
 };
 
+function isInvalidRouteTokenError(caught: unknown) {
+  return (
+    caught instanceof ApiError &&
+    caught.statusCode === 401 &&
+    caught.payload.code === 'invalid_route_token'
+  );
+}
+
+function isDisconnectedWorkerThreadError(caught: unknown) {
+  return caught instanceof ApiError && (caught.statusCode === 404 || caught.statusCode === 409);
+}
+
 export function ControlPlaneSessionPage() {
   return <ControlPlaneSessionSurface />;
 }
@@ -191,6 +212,35 @@ function ControlPlaneSessionSurface() {
   const [activeView, setActiveView] = useState<'chat' | 'shell'>('chat');
   const [followTail, setFollowTail] = useState(true);
   const reconnectingRef = useRef(false);
+  const routeTokenRefreshTimerRef = useRef<number | null>(null);
+
+  const issueRouteToken = useCallback(async (
+    input: {
+      sandbox: ControlPlaneSandbox;
+      project: ControlPlaneProject;
+      workspace: ControlPlaneWorkspace;
+      session: ControlPlaneSession;
+    },
+  ) => {
+    if (!auth) {
+      return null;
+    }
+    const token = await createControlPlaneRouteToken(auth, input.sandbox.id, {
+      projectId: input.project.id,
+      workspaceId: input.workspace.id,
+      sessionId: input.session.id,
+      scopes: ROUTE_TOKEN_SCOPES,
+    });
+    setRouteToken(token);
+    return token;
+  }, [auth]);
+
+  const refreshRouteToken = useCallback(async () => {
+    if (!sandbox || !project || !workspace || !session || sandbox.state !== 'running') {
+      return null;
+    }
+    return issueRouteToken({ sandbox, project, workspace, session });
+  }, [issueRouteToken, project, sandbox, session, workspace]);
 
   const loadSession = useCallback(async () => {
     if (!auth) {
@@ -224,17 +274,20 @@ function ControlPlaneSessionSurface() {
           const nextSessions = sessionsResult.sessions.map((item) =>
             item.id === resumed.session.id ? resumed.session : item,
           );
-          const token = await createControlPlaneRouteToken(auth, me.sandbox.id, {
-            projectId: candidateProject.id,
-            workspaceId: candidateWorkspace.id,
-            sessionId: resumed.session.id,
-            scopes: ['worker:read', 'worker:write', 'session:prompt', 'provider:turn:create'],
+          const token = await issueRouteToken({
+            sandbox: me.sandbox,
+            project: candidateProject,
+            workspace: candidateWorkspace,
+            session: resumed.session,
           });
+          if (!token) {
+            setError('Unable to issue a router token for this session.');
+            return null;
+          }
           setProject(candidateProject);
           setWorkspace(candidateWorkspace);
           setWorkspaceSessions(nextSessions);
           setSession(resumed.session);
-          setRouteToken(token);
           if (!resumed.session.workerSessionId) {
             setDetail(null);
             setError('Session resumed, but the worker did not return a thread id.');
@@ -260,11 +313,44 @@ function ControlPlaneSessionSurface() {
     } finally {
       setLoading(false);
     }
-  }, [auth, navigate, sessionId]);
+  }, [auth, issueRouteToken, navigate, sessionId]);
 
   useEffect(() => {
     void loadSession();
   }, [loadSession]);
+
+  useEffect(() => {
+    if (routeTokenRefreshTimerRef.current) {
+      window.clearTimeout(routeTokenRefreshTimerRef.current);
+      routeTokenRefreshTimerRef.current = null;
+    }
+    if (!routeToken) {
+      return;
+    }
+    const expiresAtMs = Date.parse(routeToken.expiresAt);
+    if (!Number.isFinite(expiresAtMs)) {
+      return;
+    }
+    const delayMs = Math.max(
+      ROUTE_TOKEN_MIN_REFRESH_MS,
+      Math.min(
+        ROUTE_TOKEN_MAX_REFRESH_MS,
+        expiresAtMs - Date.now() - ROUTE_TOKEN_REFRESH_SKEW_MS,
+      ),
+    );
+    routeTokenRefreshTimerRef.current = window.setTimeout(() => {
+      void refreshRouteToken().catch((caught) => {
+        setError(caught instanceof Error ? caught.message : 'Unable to refresh router token.');
+      });
+    }, delayMs);
+
+    return () => {
+      if (routeTokenRefreshTimerRef.current) {
+        window.clearTimeout(routeTokenRefreshTimerRef.current);
+        routeTokenRefreshTimerRef.current = null;
+      }
+    };
+  }, [refreshRouteToken, routeToken]);
 
   const refreshThread = useCallback(async (input: { silent?: boolean } = {}) => {
     if (!routeToken || !session?.workerSessionId) {
@@ -276,11 +362,19 @@ function ControlPlaneSessionSurface() {
     try {
       setDetail(await fetchControlPlaneWorkerThread(routeToken, session.workerSessionId));
     } catch (caught) {
-      if (
-        caught instanceof ApiError &&
-        (caught.statusCode === 404 || caught.statusCode === 409) &&
-        !reconnectingRef.current
-      ) {
+      if (isInvalidRouteTokenError(caught)) {
+        try {
+          const token = await refreshRouteToken();
+          if (token && session.workerSessionId) {
+            setDetail(await fetchControlPlaneWorkerThread(token, session.workerSessionId));
+            return;
+          }
+        } catch (retryError) {
+          setError(retryError instanceof Error ? retryError.message : 'Unable to refresh worker thread.');
+          return;
+        }
+      }
+      if (isDisconnectedWorkerThreadError(caught) && !reconnectingRef.current) {
         reconnectingRef.current = true;
         try {
           setMessage('Worker thread was not found. Reconnecting this session...');
@@ -292,7 +386,7 @@ function ControlPlaneSessionSurface() {
       }
       setError(caught instanceof Error ? caught.message : 'Unable to refresh worker thread.');
     }
-  }, [loadSession, routeToken, session?.workerSessionId]);
+  }, [loadSession, refreshRouteToken, routeToken, session?.workerSessionId]);
 
   useEffect(() => {
     const active =
@@ -333,11 +427,26 @@ function ControlPlaneSessionSurface() {
       setScrollRequestKey((current) => current + 1);
       return true;
     } catch (caught) {
-      if (
-        caught instanceof ApiError &&
-        (caught.statusCode === 404 || caught.statusCode === 409) &&
-        !reconnectingRef.current
-      ) {
+      if (isInvalidRouteTokenError(caught)) {
+        try {
+          const token = await refreshRouteToken();
+          if (!token || !session.workerSessionId) {
+            throw caught;
+          }
+          await sendControlPlaneWorkerThreadPrompt(token, session.workerSessionId, {
+            prompt: trimmed,
+          });
+          const thread = await fetchControlPlaneWorkerThread(token, session.workerSessionId);
+          setDetail(thread);
+          setDraft({ prompt: '', attachments: [] });
+          setScrollRequestKey((current) => current + 1);
+          return true;
+        } catch (retryError) {
+          setError(retryError instanceof Error ? retryError.message : 'Unable to send prompt.');
+          return false;
+        }
+      }
+      if (isDisconnectedWorkerThreadError(caught) && !reconnectingRef.current) {
         reconnectingRef.current = true;
         try {
           setMessage('Worker thread was not found. Reconnecting this session...');

@@ -22,6 +22,7 @@ export type ApiErrorCode =
   | 'provider_goal_error'
   | 'gateway_unavailable'
   | 'harness_unavailable'
+  | 'invalid_route_token'
   | 'quota_exceeded'
   | 'account_inactive'
   | 'forbidden'

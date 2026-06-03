@@ -426,6 +426,146 @@ describe('ControlPlaneSessionPage', () => {
     expect(threadReads).toBeGreaterThanOrEqual(2);
   });
 
+  it('refreshes the router token before it expires', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-05-25T00:00:00.000Z'));
+    let routeTokenReads = 0;
+
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
+
+      if (path === '/api/me' && !init?.method) {
+        return jsonResponse({ user, sandbox, usage: {} });
+      }
+      if (path === '/api/projects' && !init?.method) {
+        return jsonResponse({ projects: [project] });
+      }
+      if (path === '/api/workspaces?projectId=project-1' && !init?.method) {
+        return jsonResponse({ workspaces: [workspace] });
+      }
+      if (path === '/api/workspaces/workspace-1/sessions' && !init?.method) {
+        return jsonResponse({ sessions: [session] });
+      }
+      if (path === '/api/sessions/session-1/resume' && init?.method === 'POST') {
+        return jsonResponse({ session });
+      }
+      if (path === '/api/sandboxes/sandbox-1/route-token' && init?.method === 'POST') {
+        routeTokenReads += 1;
+        return jsonResponse({
+          sandboxId: 'sandbox-1',
+          routerBaseUrl,
+          wsBaseUrl: 'wss://router.example.test',
+          token: `route-token-${routeTokenReads}`,
+          expiresAt:
+            routeTokenReads === 1
+              ? '2026-05-25T00:02:00.000Z'
+              : '2026-05-25T01:00:00.000Z',
+        });
+      }
+      if (url === `${routerBaseUrl}/api/sandboxes/sandbox-1/api/threads/worker-session-1`) {
+        return jsonResponse(threadDetail);
+      }
+
+      return jsonResponse({ code: 'not_found', message: `Unhandled request: ${url}` }, 404);
+    });
+
+    renderControlPlaneSessionPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Ready from sandbox')).toBeInTheDocument();
+    });
+    expect(routeTokenReads).toBe(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    await waitFor(() => {
+      expect(routeTokenReads).toBe(2);
+    });
+  });
+
+  it('refreshes an expired router token and retries a prompt once', async () => {
+    let routeTokenReads = 0;
+    let promptReads = 0;
+
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
+
+      if (path === '/api/me' && !init?.method) {
+        return jsonResponse({ user, sandbox, usage: {} });
+      }
+      if (path === '/api/projects' && !init?.method) {
+        return jsonResponse({ projects: [project] });
+      }
+      if (path === '/api/workspaces?projectId=project-1' && !init?.method) {
+        return jsonResponse({ workspaces: [workspace] });
+      }
+      if (path === '/api/workspaces/workspace-1/sessions' && !init?.method) {
+        return jsonResponse({ sessions: [session] });
+      }
+      if (path === '/api/sessions/session-1/resume' && init?.method === 'POST') {
+        return jsonResponse({ session });
+      }
+      if (path === '/api/sandboxes/sandbox-1/route-token' && init?.method === 'POST') {
+        routeTokenReads += 1;
+        return jsonResponse({
+          sandboxId: 'sandbox-1',
+          routerBaseUrl,
+          wsBaseUrl: 'wss://router.example.test',
+          token: `route-token-${routeTokenReads}`,
+          expiresAt: '2099-05-25T00:05:00.000Z',
+        });
+      }
+      if (url === `${routerBaseUrl}/api/sandboxes/sandbox-1/api/threads/worker-session-1`) {
+        return jsonResponse(threadDetail);
+      }
+      if (
+        url === `${routerBaseUrl}/api/sandboxes/sandbox-1/api/threads/worker-session-1/prompt` &&
+        init?.method === 'POST'
+      ) {
+        promptReads += 1;
+        if (promptReads === 1) {
+          return jsonResponse(
+            { code: 'invalid_route_token', message: 'Route token is invalid or expired.' },
+            401,
+          );
+        }
+        return jsonResponse({ ...threadDetail.thread, status: 'running' });
+      }
+
+      return jsonResponse({ code: 'not_found', message: `Unhandled request: ${url}` }, 404);
+    });
+
+    renderControlPlaneSessionPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Ready from sandbox')).toBeInTheDocument();
+    });
+
+    setPromptValue(screen.getByRole('textbox', { name: 'Prompt' }), 'Continue after expiry');
+    fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
+
+    await waitFor(() => {
+      expect(promptReads).toBe(2);
+    });
+    expect(routeTokenReads).toBe(2);
+
+    const promptCalls = vi.mocked(fetch).mock.calls.filter(
+      ([input]) =>
+        String(input) ===
+        `${routerBaseUrl}/api/sandboxes/sandbox-1/api/threads/worker-session-1/prompt`,
+    );
+    expect(new Headers(promptCalls[0]?.[1]?.headers).get('Authorization')).toBe(
+      'Bearer route-token-1',
+    );
+    expect(new Headers(promptCalls[1]?.[1]?.headers).get('Authorization')).toBe(
+      'Bearer route-token-2',
+    );
+  });
+
   it('reconnects and retries a prompt when the worker thread disappeared after page load', async () => {
     const rematerializedSession = {
       ...session,

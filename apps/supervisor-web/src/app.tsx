@@ -125,7 +125,8 @@ function AppShell({
     isThreadsRoute || isThreadDetailRoute || isControlPlaneSessionRoute;
   const isWorkspacesRoute = location.pathname === '/workspaces';
   const isControlPlaneRoute = location.pathname.startsWith('/control-plane');
-  const usesInlineTopbar = isWorkspacesRoute || isThreadsRoute || isControlPlaneRoute;
+  const usesInlineTopbar =
+    isWorkspacesRoute || isThreadsRoute || (isControlPlaneRoute && !isControlPlaneSessionRoute);
 
   useEffect(() => {
     setNavOpen(false);
@@ -166,7 +167,7 @@ function AppShell({
         {!usesInlineTopbar && (
           <div
             className={`fixed left-4 top-4 z-50 ${
-              isThreadDetailRoute ? 'hidden sm:block' : ''
+              isThreadDetailRoute || isControlPlaneSessionRoute ? 'hidden sm:block' : ''
             }`}
           >
             <AppShellMenuButton />
