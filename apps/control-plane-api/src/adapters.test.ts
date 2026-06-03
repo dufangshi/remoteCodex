@@ -333,6 +333,13 @@ describe('sandbox manager adapters', () => {
       k8sNamespace: 'remote-codex-sandboxes',
       k8sPodName: 'remote-codex-worker-sbx-test',
     });
+    expect(calls.deletedPods).toEqual([
+      {
+        namespace: 'remote-codex-sandboxes',
+        podName: 'remote-codex-worker-sbx-test',
+        serviceName: 'remote-codex-worker-sbx-test',
+      },
+    ]);
     expect(calls.appliedPods).toHaveLength(1);
     const podSpec = calls.appliedPods[0];
     expect(podSpec).toBeDefined();

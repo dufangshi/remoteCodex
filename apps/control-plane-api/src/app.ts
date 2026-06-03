@@ -92,10 +92,18 @@ export const CONTROL_PLANE_LOG_REDACTION_PATHS = [
 
 function sandboxLifecycleErrorMessage(operation: string, error: unknown) {
   const rawMessage = error instanceof Error ? error.message : String(error);
-  const message = rawMessage
-    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [redacted]')
-    .replace(/sk-[A-Za-z0-9._~+/=-]+/g, 'sk-[redacted]');
+  const message = redactSandboxLifecycleError(rawMessage);
   return `Unable to ${operation} sandbox: ${message}`;
+}
+
+function redactSandboxLifecycleError(rawMessage: string) {
+  return rawMessage
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [redacted]')
+    .replace(/sk-[A-Za-z0-9._~+/=-]+/g, 'sk-[redacted]')
+    .replace(/"Value"\s*:\s*"[^"]*"/g, '"Value":"[redacted]"')
+    .replace(/"value"\s*:\s*"[^"]*"/g, '"value":"[redacted]"')
+    .replace(/"stringData"\s*:\s*\{[^}]*\}/g, '"stringData":{"[redacted]":"[redacted]"}')
+    .replace(/"data"\s*:\s*\{[^}]*\}/g, '"data":{"[redacted]":"[redacted]"}');
 }
 
 async function withSandboxLifecycleError<T>(operation: string, task: () => Promise<T>): Promise<T> {
@@ -411,7 +419,7 @@ function toErrorPayload(error: unknown) {
         statusCode: 503,
         payload: {
           code: 'gateway_unavailable',
-          message: error.message,
+          message: redactSandboxLifecycleError(error.message),
         },
       };
     }
@@ -419,7 +427,7 @@ function toErrorPayload(error: unknown) {
       statusCode: error.code === 'quota' ? 402 : error.code === 'config' ? 400 : 503,
       payload: {
         code: `sandbox_${error.code}`,
-        message: error.message,
+        message: redactSandboxLifecycleError(error.message),
       },
     };
   }

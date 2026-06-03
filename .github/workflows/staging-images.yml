@@ -289,17 +289,35 @@ jobs:
         run: |
           set -euo pipefail
           npm install -g @railway/cli
-          railway variable set \
-            --service "${RAILWAY_FRONTEND_SERVICE}" \
-            --environment "${RAILWAY_ENVIRONMENT}" \
-            "VITE_CONTROL_PLANE_BASE_URL=${STAGING_CONTROL_PLANE_BASE_URL}" \
-            "FRONTEND_BUILD_SHA=${GITHUB_SHA}"
+          for attempt in 1 2 3; do
+            if railway variable set \
+              --service "${RAILWAY_FRONTEND_SERVICE}" \
+              --environment "${RAILWAY_ENVIRONMENT}" \
+              "VITE_CONTROL_PLANE_BASE_URL=${STAGING_CONTROL_PLANE_BASE_URL}" \
+              "FRONTEND_BUILD_SHA=${GITHUB_SHA}"; then
+              break
+            fi
+            if [[ "${attempt}" == "3" ]]; then
+              echo "Railway frontend variables were not updated after ${attempt} attempts." >&2
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
           cp railway.frontend.json railway.json
-          railway up \
-            --service "${RAILWAY_FRONTEND_SERVICE}" \
-            --environment "${RAILWAY_ENVIRONMENT}" \
-            --ci \
-            --message "staging frontend ${GITHUB_SHA}"
+          for attempt in 1 2 3; do
+            if railway up \
+              --service "${RAILWAY_FRONTEND_SERVICE}" \
+              --environment "${RAILWAY_ENVIRONMENT}" \
+              --ci \
+              --message "staging frontend ${GITHUB_SHA}"; then
+              break
+            fi
+            if [[ "${attempt}" == "3" ]]; then
+              echo "Railway frontend deploy did not complete after ${attempt} attempts." >&2
+              exit 1
+            fi
+            sleep $((attempt * 15))
+          done
 
       - name: Skip Railway worker image tag update
         if: env.RAILWAY_TOKEN == ''

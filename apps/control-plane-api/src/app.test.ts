@@ -51,6 +51,7 @@ class RecordingSandboxManager implements SandboxManager {
   runtimeResources: SandboxRuntimeResource[] = [];
   statusResult: SandboxProvisionResult = { state: 'running' };
   stopResult: SandboxProvisionResult = { state: 'stopped' };
+  startError: Error | null = null;
 
   async createSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
     return this.startSandbox(input);
@@ -58,6 +59,9 @@ class RecordingSandboxManager implements SandboxManager {
 
   async startSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
     this.starts.push(input);
+    if (this.startError) {
+      throw this.startError;
+    }
     return {
       state: 'running',
       routerBaseUrl: 'https://sandbox-gateway.test',
@@ -277,6 +281,44 @@ describe('control plane api', () => {
     expect(response.headers['access-control-allow-origin']).toBe(
       'https://frontend.example.test',
     );
+  });
+
+  it('redacts sandbox provider secrets from lifecycle errors', async () => {
+    const sandboxManager = new RecordingSandboxManager();
+    const fakeProviderKey = `sk-${'testsecretvalue1234567890'}`;
+    sandboxManager.startError = new Error(
+      `kubectl apply failed: {"Value":"${fakeProviderKey}","value":"plain-secret","stringData":{"token":"secret-token"}}`,
+    );
+    const app = buildControlPlaneApp({
+      env: testEnv('sandbox-start-redaction'),
+      sandboxManager,
+    });
+    apps.push(app);
+    const auth = { authorization: 'Bearer dev:start-redaction-user' };
+    const bootstrap = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: auth,
+      payload: {
+        email: 'start-redaction@example.com',
+      },
+    });
+    expect(bootstrap.statusCode).toBe(200);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/sandbox/start',
+      headers: auth,
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(503);
+    expect(body.code).toBe('gateway_unavailable');
+    expect(body.message).toContain('Unable to start sandbox');
+    expect(body.message).toContain('[redacted]');
+    expect(body.message).not.toContain(fakeProviderKey);
+    expect(body.message).not.toContain('plain-secret');
+    expect(body.message).not.toContain('secret-token');
   });
 
   it('allows the debug frontend origin to call password auth endpoints by default', async () => {

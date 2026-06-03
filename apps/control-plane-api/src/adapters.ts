@@ -948,7 +948,13 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
 
   async startSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
     const podSpec = await this.buildWorkerPodSpec(input);
-    await this.requireKubernetesClient('start sandboxes').applyWorkerPod(podSpec);
+    const kubernetesClient = this.requireKubernetesClient('start sandboxes');
+    await kubernetesClient.deleteWorkerPod({
+      namespace: this.config.namespace,
+      podName: podSpec.podName,
+      serviceName: podSpec.serviceName,
+    });
+    await kubernetesClient.applyWorkerPod(podSpec);
     return {
       state: 'starting',
       routerBaseUrl: this.config.routerBaseUrl,
