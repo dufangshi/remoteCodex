@@ -8,6 +8,7 @@ import {
 } from 'react-router-dom';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
+  AppShellNavContext as SharedAppShellNavContext,
   AppShellSettingsDialog as SharedAppShellSettingsDialog,
   PluginProvider,
 } from '@remote-codex/thread-ui';
@@ -18,7 +19,7 @@ import {
   normalizeAgentBackendId,
 } from '../../../packages/shared/src/index';
 import {
-  AppShellNavContext,
+  AppShellNavContext as LocalAppShellNavContext,
   type ThemeMode,
 } from './components/AppShellNavContext';
 import {
@@ -139,82 +140,84 @@ function AppShell({
     window.localStorage.setItem(BACKEND_STORAGE_KEY, backend);
   }
 
-  return (
-    <AppShellNavContext.Provider
-      value={{
-        navOpen,
-        openNav: () => setNavOpen(true),
-        toggleNav: () => setNavOpen((current) => !current),
-        closeNav: () => setNavOpen(false),
-        settingsOpen,
-        openSettings: () => {
-          setNavOpen(false);
-          setSettingsOpen(true);
-        },
-        closeSettings: () => setSettingsOpen(false),
-        themeMode,
-        setThemeMode,
-        effectiveTheme,
-        defaultBackend,
-        setDefaultBackend,
-      }}
-    >
-      <div
-        className={`bg-[var(--app-bg)] text-[var(--app-fg)] ${
-          isViewportLockedRoute
-            ? 'fixed inset-0 overflow-hidden overscroll-none'
-            : 'min-h-screen'
-        }`}
-      >
-        {!usesInlineTopbar && (
-          <div
-            className={`fixed left-4 top-4 z-50 ${
-              isThreadDetailRoute ? 'hidden sm:block' : ''
-            }`}
-          >
-            <AppShellMenuButton />
-            <AppShellNavigationMenu className="mt-3 w-[min(22rem,calc(100vw-2rem))]" />
-          </div>
-        )}
+  const shellNavValue = {
+    navOpen,
+    openNav: () => setNavOpen(true),
+    toggleNav: () => setNavOpen((current) => !current),
+    closeNav: () => setNavOpen(false),
+    settingsOpen,
+    openSettings: () => {
+      setNavOpen(false);
+      setSettingsOpen(true);
+    },
+    closeSettings: () => setSettingsOpen(false),
+    themeMode,
+    setThemeMode,
+    effectiveTheme,
+    defaultBackend,
+    setDefaultBackend,
+  };
 
-        <main
-          className={`mx-auto w-full max-w-[1600px] ${
-            isViewportLockedRoute ? 'absolute inset-0 pb-0 sm:pb-4' : 'pb-4'
-          } ${
-            isThreadWorkspaceRoute
-              ? isThreadDetailRoute
-                ? 'pt-[env(safe-area-inset-top)] sm:pt-4'
-                : isThreadsRoute
-                  ? 'pt-[env(safe-area-inset-top)] sm:pt-4'
-                  : 'pt-[calc(env(safe-area-inset-top)+4rem)] sm:pt-4'
-              : isWorkspacesRoute || isControlPlaneRoute
-                ? 'pt-[env(safe-area-inset-top)] sm:pt-4'
-                : 'pt-4'
-          } ${
+  return (
+    <LocalAppShellNavContext.Provider value={shellNavValue}>
+      <SharedAppShellNavContext.Provider value={shellNavValue}>
+        <div
+          className={`bg-[var(--app-bg)] text-[var(--app-fg)] ${
             isViewportLockedRoute
-              ? 'overflow-hidden overscroll-none px-0 sm:px-6'
-              : 'px-4 sm:px-6'
+              ? 'fixed inset-0 overflow-hidden overscroll-none'
+              : 'min-h-screen'
           }`}
         >
-          <section
-            className={`min-w-0 ${
+          {!usesInlineTopbar && (
+            <div
+              className={`fixed left-4 top-4 z-50 ${
+                isThreadDetailRoute ? 'hidden sm:block' : ''
+              }`}
+            >
+              <AppShellMenuButton />
+              <AppShellNavigationMenu className="mt-3 w-[min(22rem,calc(100vw-2rem))]" />
+            </div>
+          )}
+
+          <main
+            className={`mx-auto w-full max-w-[1600px] ${
+              isViewportLockedRoute ? 'absolute inset-0 pb-0 sm:pb-4' : 'pb-4'
+            } ${
+              isThreadWorkspaceRoute
+                ? isThreadDetailRoute
+                  ? 'pt-[env(safe-area-inset-top)] sm:pt-4'
+                  : isThreadsRoute
+                    ? 'pt-[env(safe-area-inset-top)] sm:pt-4'
+                    : 'pt-[calc(env(safe-area-inset-top)+4rem)] sm:pt-4'
+                : isWorkspacesRoute || isControlPlaneRoute
+                  ? 'pt-[env(safe-area-inset-top)] sm:pt-4'
+                  : 'pt-4'
+            } ${
               isViewportLockedRoute
-                ? isThreadDetailRoute || isControlPlaneSessionRoute
-                  ? 'h-full min-h-0 overflow-hidden overscroll-none'
-                  : 'h-full overflow-hidden overscroll-none'
-                : ''
+                ? 'overflow-hidden overscroll-none px-0 sm:px-6'
+                : 'px-4 sm:px-6'
             }`}
           >
-            <Outlet />
-          </section>
-        </main>
-      </div>
-      {isControlPlaneRoute ? (
-        <SharedAppShellSettingsDialog />
-      ) : (
-        <AppShellSettingsDialog />
-      )}
-    </AppShellNavContext.Provider>
+            <section
+              className={`min-w-0 ${
+                isViewportLockedRoute
+                  ? isThreadDetailRoute || isControlPlaneSessionRoute
+                    ? 'h-full min-h-0 overflow-hidden overscroll-none'
+                    : 'h-full overflow-hidden overscroll-none'
+                  : ''
+              }`}
+            >
+              <Outlet />
+            </section>
+          </main>
+        </div>
+        {isControlPlaneRoute ? (
+          <SharedAppShellSettingsDialog />
+        ) : (
+          <AppShellSettingsDialog />
+        )}
+      </SharedAppShellNavContext.Provider>
+    </LocalAppShellNavContext.Provider>
   );
 }
 

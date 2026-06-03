@@ -3551,8 +3551,7 @@ const FileChangeItem = memo(function FileChangeItem({
     48,
   );
   const summarySegments = fileChangeSummarySegments(item);
-  const canOpen = Boolean(detailText || item.hasDeferredDetail);
-  const ContainerTag = canOpen ? 'button' : 'div';
+  const ContainerTag = detailText ? 'button' : 'div';
 
   return (
     <div
@@ -3572,16 +3571,15 @@ const FileChangeItem = memo(function FileChangeItem({
           </span>
         </div>
         <ContainerTag
-          {...(canOpen
+          {...(detailText
             ? {
                 type: 'button' as const,
                 'aria-label': 'Open file change details',
-                onClick: () =>
-                  onOpen('File Change Details', detailText ?? item.text),
+                onClick: () => onOpen('File Change Details', detailText),
               }
             : {})}
           className={`timeline-item-inner timeline-mobile-dense-inner timeline-mobile-bubble-content min-w-0 flex-1 rounded-[0.9rem] border px-2.5 py-2 text-left sm:rounded-xl sm:px-3 ${
-            canOpen ? 'transition hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)]' : ''
+            detailText ? 'transition hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)]' : ''
           }`}
         >
           <div className="timeline-mobile-file-line flex min-w-0 items-center gap-2">
@@ -3918,7 +3916,6 @@ const HistoryItemRow = memo(function HistoryItemRow({
   onOpenExpandedText,
   onOpenCommandDetail,
   onOpenToolCallDetail,
-  onOpenDeferredHistoryItemDetail,
   adapter,
 }: {
   threadId: string | undefined;
@@ -3934,13 +3931,6 @@ const HistoryItemRow = memo(function HistoryItemRow({
       kind: 'toolCall' | 'agentToolCall' | 'skillToolCall';
     },
     title: string,
-  ) => void;
-  onOpenDeferredHistoryItemDetail: (
-    item: ThreadHistoryItemDto,
-    title: string,
-    fallbackText: string,
-    loadingText: string,
-    errorText: string,
   ) => void;
   adapter?: ThreadTimelineAdapter | undefined;
 }) {
@@ -4024,43 +4014,27 @@ const HistoryItemRow = memo(function HistoryItemRow({
   }
 
   if (item.kind === 'webSearch') {
-    const typedItem = item as ThreadHistoryItemDto & {
-      kind: 'webSearch';
-    };
-    const detailText = typedItem.detailText?.trim() || typedItem.text || 'Web search';
     return (
       <WebSearchItem
-        item={typedItem}
-        onOpen={() =>
-          onOpenDeferredHistoryItemDetail(
-            typedItem,
-            'Web Search Details',
-            detailText,
-            'Loading full web search details...',
-            'Unable to load full web search details.',
-          )
+        item={
+          item as ThreadHistoryItemDto & {
+            kind: 'webSearch';
+          }
         }
+        onOpen={onOpenExpandedText}
       />
     );
   }
 
   if (item.kind === 'fileRead') {
-    const typedItem = item as ThreadHistoryItemDto & {
-      kind: 'fileRead';
-    };
-    const detailText = typedItem.detailText?.trim() || typedItem.text || 'File read';
     return (
       <FileReadItem
-        item={typedItem}
-        onOpen={() =>
-          onOpenDeferredHistoryItemDetail(
-            typedItem,
-            'File Read Details',
-            detailText,
-            'Loading full file read details...',
-            'Unable to load full file read details.',
-          )
+        item={
+          item as ThreadHistoryItemDto & {
+            kind: 'fileRead';
+          }
         }
+        onOpen={onOpenExpandedText}
       />
     );
   }
@@ -4094,22 +4068,14 @@ const HistoryItemRow = memo(function HistoryItemRow({
   }
 
   if (item.kind === 'fileChange') {
-    const typedItem = item as ThreadHistoryItemDto & {
-      kind: 'fileChange';
-    };
-    const detailText = typedItem.detailText?.trim() || typedItem.text || 'File change';
     return (
       <FileChangeItem
-        item={typedItem}
-        onOpen={() =>
-          onOpenDeferredHistoryItemDetail(
-            typedItem,
-            'File Change Details',
-            detailText,
-            'Loading full file change details...',
-            'Unable to load full file change details.',
-          )
+        item={
+          item as ThreadHistoryItemDto & {
+            kind: 'fileChange';
+          }
         }
+        onOpen={onOpenExpandedText}
       />
     );
   }
@@ -4540,7 +4506,6 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
   onOpenExpandedText,
   onOpenCommandDetail,
   onOpenToolCallDetail,
-  onOpenDeferredHistoryItemDetail,
   scrollRootRef,
   articleRef,
   isLatestVisibleTurn = false,
@@ -4571,13 +4536,6 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
       kind: 'toolCall' | 'agentToolCall' | 'skillToolCall';
     },
     title: string,
-  ) => void;
-  onOpenDeferredHistoryItemDetail: (
-    item: ThreadHistoryItemDto,
-    title: string,
-    fallbackText: string,
-    loadingText: string,
-    errorText: string,
   ) => void;
   scrollRootRef: RefObject<HTMLDivElement | null>;
   articleRef?: RefCallback<HTMLElement> | undefined;
@@ -4691,7 +4649,6 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
             onOpenExpandedText={onOpenExpandedText}
             onOpenCommandDetail={onOpenCommandDetail}
             onOpenToolCallDetail={onOpenToolCallDetail}
-            onOpenDeferredHistoryItemDetail={onOpenDeferredHistoryItemDetail}
             {...(adapter ? { adapter } : {})}
           />
           {displayedLivePlan && (
@@ -4726,7 +4683,6 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
               onOpenExpandedText={onOpenExpandedText}
               onOpenCommandDetail={onOpenCommandDetail}
               onOpenToolCallDetail={onOpenToolCallDetail}
-              onOpenDeferredHistoryItemDetail={onOpenDeferredHistoryItemDetail}
               {...(adapter ? { adapter } : {})}
             />
           ) : visibleLiveOutput ? (
@@ -4758,7 +4714,6 @@ function TimelineHistoryEntries({
   onOpenExpandedText,
   onOpenCommandDetail,
   onOpenToolCallDetail,
-  onOpenDeferredHistoryItemDetail,
   adapter,
 }: {
   entries: TimelineHistoryEntry[];
@@ -4776,13 +4731,6 @@ function TimelineHistoryEntries({
       kind: 'toolCall' | 'agentToolCall' | 'skillToolCall';
     },
     title: string,
-  ) => void;
-  onOpenDeferredHistoryItemDetail: (
-    item: ThreadHistoryItemDto,
-    title: string,
-    fallbackText: string,
-    loadingText: string,
-    errorText: string,
   ) => void;
   adapter?: ThreadTimelineAdapter | undefined;
 }) {
@@ -4830,7 +4778,6 @@ function TimelineHistoryEntries({
             onOpenExpandedText={onOpenExpandedText}
             onOpenCommandDetail={onOpenCommandDetail}
             onOpenToolCallDetail={onOpenToolCallDetail}
-            onOpenDeferredHistoryItemDetail={onOpenDeferredHistoryItemDetail}
             {...(adapter ? { adapter } : {})}
           />
         ),
@@ -5016,49 +4963,6 @@ function ThreadTimelineComponent({
             caught instanceof Error
               ? caught.message
               : 'Unable to load full tool call details.',
-        });
-      }
-    },
-    [loadHistoryItemDetail],
-  );
-
-  const handleOpenDeferredHistoryItemDetail = useCallback(
-    async (
-      item: ThreadHistoryItemDto,
-      fallbackTitle: string,
-      fallbackText: string,
-      loadingText: string,
-      errorText: string,
-    ) => {
-      if (!item.hasDeferredDetail || !loadHistoryItemDetail) {
-        setExpandedText({ title: fallbackTitle, text: fallbackText });
-        return;
-      }
-
-      const cached = deferredDetailCacheRef.current.get(item.id);
-      if (cached) {
-        setExpandedText({ title: cached.title, text: cached.text });
-        return;
-      }
-
-      const requestId = expandedTextRequestIdRef.current + 1;
-      expandedTextRequestIdRef.current = requestId;
-      setExpandedText({ title: fallbackTitle, text: loadingText });
-
-      try {
-        const detail = await loadHistoryItemDetail(item.id);
-        deferredDetailCacheRef.current.set(item.id, detail);
-        if (expandedTextRequestIdRef.current !== requestId) {
-          return;
-        }
-        setExpandedText({ title: detail.title, text: detail.text });
-      } catch (caught) {
-        if (expandedTextRequestIdRef.current !== requestId) {
-          return;
-        }
-        setExpandedText({
-          title: fallbackTitle,
-          text: caught instanceof Error ? caught.message : errorText,
         });
       }
     },
@@ -5672,7 +5576,6 @@ function ThreadTimelineComponent({
                     onOpenExpandedText={handleOpenExpandedText}
                     onOpenCommandDetail={handleOpenCommandDetail}
                     onOpenToolCallDetail={handleOpenToolCallDetail}
-                    onOpenDeferredHistoryItemDetail={handleOpenDeferredHistoryItemDetail}
                     scrollRootRef={scrollContainerRef}
                     articleRef={undefined}
                   />
@@ -5766,7 +5669,6 @@ function ThreadTimelineComponent({
                     onOpenExpandedText={handleOpenExpandedText}
                     onOpenCommandDetail={handleOpenCommandDetail}
                     onOpenToolCallDetail={handleOpenToolCallDetail}
-                    onOpenDeferredHistoryItemDetail={handleOpenDeferredHistoryItemDetail}
                     scrollRootRef={scrollContainerRef}
                   />
                   {(activityNoteAnchors.afterTurnId.get(optimisticTurn.id)?.length ?? 0) > 0 ? (
@@ -5857,7 +5759,6 @@ function ThreadTimelineComponent({
                 onOpenExpandedText={handleOpenExpandedText}
                 onOpenCommandDetail={handleOpenCommandDetail}
                 onOpenToolCallDetail={handleOpenToolCallDetail}
-                onOpenDeferredHistoryItemDetail={handleOpenDeferredHistoryItemDetail}
                 {...(adapter ? { adapter } : {})}
               />
             </div>
@@ -5876,7 +5777,6 @@ function ThreadTimelineComponent({
                   onOpenExpandedText={handleOpenExpandedText}
                   onOpenCommandDetail={handleOpenCommandDetail}
                   onOpenToolCallDetail={handleOpenToolCallDetail}
-                  onOpenDeferredHistoryItemDetail={handleOpenDeferredHistoryItemDetail}
                   {...(adapter ? { adapter } : {})}
                 />
               ) : (

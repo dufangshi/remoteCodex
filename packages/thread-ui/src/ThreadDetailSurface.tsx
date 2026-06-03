@@ -229,7 +229,7 @@ export function ThreadDetailSurface({
             >
               <ThreadComposer
                 {...composerProps}
-                activeView="chat"
+                activeView={activeView}
                 edgeToEdgeMobile
                 onSubmit={adapter.sendPrompt}
               />
@@ -238,7 +238,7 @@ export function ThreadDetailSurface({
             <div ref={composerHostRef}>
               <ThreadComposer
                 {...composerProps}
-                activeView="chat"
+                activeView={activeView}
                 onSubmit={adapter.sendPrompt}
               />
             </div>
@@ -293,7 +293,7 @@ export function ThreadDetailSurface({
               </div>
             )
           ))}
-        {activeView === 'shell' && shellComposerProps && !shellContent ? (
+        {activeView === 'shell' && shellComposerProps ? (
           <ThreadComposer
             {...shellComposerProps}
             activeView="shell"
