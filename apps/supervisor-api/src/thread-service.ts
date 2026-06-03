@@ -9,6 +9,7 @@ import {
   AgentSessionDetail,
   AgentTurn,
 } from '../../../packages/agent-runtime/src/index';
+import type { RuntimeConfig } from '../../../packages/config/src/index';
 import {
   createThreadRecord,
   DatabaseClient,
@@ -109,6 +110,10 @@ import {
   ProviderFeatureCoordinator,
   type ProviderGoalFeatureAdapter,
 } from './provider-feature-coordinator';
+import {
+  combineDeveloperInstructions,
+  harnessDeveloperInstructions,
+} from './harness-developer-instructions';
 import type { PluginService } from './plugins/plugin-service';
 
 const DEFAULT_THREAD_TITLE = 'Untitled thread';
@@ -179,6 +184,7 @@ export class ThreadService {
       ProviderGoalFeatureAdapter &
       ThreadPerformanceModeSettings,
     private readonly pluginService?: PluginService,
+    private readonly config?: RuntimeConfig,
   ) {
     this.providerRuntime = new ThreadProviderRuntimeCoordinator(agentRuntimes);
     this.historyPersistence = new ThreadHistoryPersistenceCoordinator(db, this.liveState);
@@ -900,7 +906,10 @@ export class ThreadService {
     }
 
     this.clearPendingPlanDecisionRequests(localThreadId, true);
-    const developerInstructions = pluginDeveloperInstructions(this.pluginService);
+    const developerInstructions = combineDeveloperInstructions([
+      pluginDeveloperInstructions(this.pluginService),
+      this.config ? harnessDeveloperInstructions(this.config) : null,
+    ]);
 
     const workspace = getWorkspaceRecordById(this.db, record.workspaceId);
     if (!workspace) {

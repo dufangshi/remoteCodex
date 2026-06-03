@@ -974,6 +974,108 @@ describe('supervisor api', () => {
     }
   });
 
+  it('injects compact Harness API guidance into worker Codex turns without leaking the app key', async () => {
+    await app.close();
+    app = buildTestApp(fakeCodexManager, {
+      env: {
+        REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+        REMOTE_CODEX_SANDBOX_ID: 'sbx_test',
+        REMOTE_CODEX_USER_ID: 'user_test',
+        ELAGENTE_HARNESS_BASE_URL: 'https://elagenteharness-production.up.railway.app/',
+        INACT_X_APP_KEY: 'must-not-leak-harness-key',
+        REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
+      },
+    });
+    await app.ready();
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Harness guidance thread',
+      },
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'use harness',
+      },
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    const developerInstructions = fakeCodexManager.startTurnCalls.at(-1)?.developerInstructions;
+    expect(developerInstructions).toContain('https://elagenteharness-production.up.railway.app');
+    expect(developerInstructions).toContain('INACT_X_APP_KEY');
+    expect(developerInstructions).toContain('x-api-key');
+    expect(developerInstructions).toContain('/farmaco/tools');
+    expect(developerInstructions).toContain('POST /{module}/tools/{tool}');
+    expect(developerInstructions).toContain('remote_codex_render_molecule');
+    expect(developerInstructions).not.toContain('must-not-leak-harness-key');
+  });
+
+  it('does not inject Harness guidance when the worker Harness path is not fully enabled', async () => {
+    await app.close();
+    app = buildTestApp(fakeCodexManager, {
+      env: {
+        REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+        REMOTE_CODEX_SANDBOX_ID: 'sbx_test',
+        REMOTE_CODEX_USER_ID: 'user_test',
+        ELAGENTE_HARNESS_BASE_URL: 'https://elagenteharness-production.up.railway.app',
+        INACT_X_APP_KEY: 'must-not-leak-harness-key',
+        REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'false',
+      },
+    });
+    await app.ready();
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Harness disabled guidance thread',
+      },
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'use harness',
+      },
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    const developerInstructions = fakeCodexManager.startTurnCalls.at(-1)?.developerInstructions;
+    expect(developerInstructions).toContain('remote_codex_render_molecule');
+    expect(developerInstructions).not.toContain('elagenteharness-production');
+    expect(developerInstructions).not.toContain('must-not-leak-harness-key');
+  });
+
   it('redacts the Harness key from worker Harness errors', async () => {
     await app.close();
     const originalFetch = globalThis.fetch;

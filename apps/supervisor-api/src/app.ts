@@ -192,6 +192,7 @@ export function buildApp(
     config.workspaceRoot,
     runtimeBootstrap.codexManagement,
     pluginService,
+    config,
   );
   const shellService =
     options.shellService ??
