@@ -17,6 +17,7 @@ import type {
 } from '@remote-codex/shared';
 import type { ThreadDetailUiAdapter } from './adapters';
 import type { PluginContextValue } from './plugins/plugin-context';
+import { usePlugins } from './plugins/usePlugins';
 import { ThreadWorkspaceLayout } from './components/ThreadWorkspaceLayout';
 import {
   ThreadTimeline,
@@ -40,7 +41,7 @@ export interface ThreadDetailSurfaceProps {
   status?: AgentRuntimeStatusDto | null;
   capabilities?: AgentProviderCapabilitiesDto | null;
   managementSchema?: AgentBackendManagementSchemaDto | null;
-  plugins: PluginContextValue;
+  plugins?: PluginContextValue;
   adapter: ThreadDetailUiAdapter;
   metaContent?: ReactNode;
   settingsContent?: ReactNode;
@@ -96,7 +97,7 @@ export function ThreadDetailSurface({
   loading,
   error,
   status = null,
-  plugins,
+  plugins: providedPlugins,
   adapter,
   metaContent,
   settingsContent,
@@ -133,6 +134,8 @@ export function ThreadDetailSurface({
   loadingContent,
   emptyContent,
 }: ThreadDetailSurfaceProps) {
+  const contextPlugins = usePlugins();
+  const plugins = providedPlugins ?? contextPlugins;
   const timelineAdapter = useMemo(
     () => ({
       ...(adapter.getImageAssetUrl
