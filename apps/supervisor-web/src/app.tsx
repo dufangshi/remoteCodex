@@ -7,7 +7,10 @@ import {
   useLocation,
 } from 'react-router-dom';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { PluginProvider } from '@remote-codex/thread-ui';
+import {
+  AppShellSettingsDialog as SharedAppShellSettingsDialog,
+  PluginProvider,
+} from '@remote-codex/thread-ui';
 
 import type { AgentBackendIdDto } from '../../../packages/shared/src/index';
 import {
@@ -206,7 +209,11 @@ function AppShell({
           </section>
         </main>
       </div>
-      <AppShellSettingsDialog />
+      {isControlPlaneRoute ? (
+        <SharedAppShellSettingsDialog />
+      ) : (
+        <AppShellSettingsDialog />
+      )}
     </AppShellNavContext.Provider>
   );
 }

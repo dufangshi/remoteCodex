@@ -1,7 +1,14 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  AppShellNavContext,
+  AppShellSettingsDialog,
+  type AppShellNavContextValue,
+  type ThemeMode,
+} from '@remote-codex/thread-ui';
 import { ControlPlaneSessionPage } from './ControlPlaneSessionPage';
 
 const baseUrl = 'http://127.0.0.1:8790';
@@ -155,12 +162,42 @@ function setPromptValue(element: HTMLElement, value: string) {
 }
 
 function renderControlPlaneSessionPage() {
+  function TestShell() {
+    const [navOpen, setNavOpen] = useState(false);
+    const [settingsOpen, setSettingsOpen] = useState(false);
+    const [themeMode, setThemeMode] = useState<ThemeMode>('system');
+    const value: AppShellNavContextValue = {
+      navOpen,
+      openNav: () => setNavOpen(true),
+      toggleNav: () => setNavOpen((current) => !current),
+      closeNav: () => setNavOpen(false),
+      settingsOpen,
+      openSettings: () => {
+        setNavOpen(false);
+        setSettingsOpen(true);
+      },
+      closeSettings: () => setSettingsOpen(false),
+      themeMode,
+      setThemeMode,
+      effectiveTheme: themeMode === 'system' ? 'dark' : themeMode,
+      defaultBackend: 'codex',
+      setDefaultBackend: () => {},
+    };
+
+    return (
+      <AppShellNavContext.Provider value={value}>
+        <Routes>
+          <Route path="/control-plane/sessions/:sessionId" element={<ControlPlaneSessionPage />} />
+          <Route path="/control-plane/login" element={<div>Login</div>} />
+        </Routes>
+        <AppShellSettingsDialog />
+      </AppShellNavContext.Provider>
+    );
+  }
+
   return render(
     <MemoryRouter initialEntries={['/control-plane/sessions/session-1']}>
-      <Routes>
-        <Route path="/control-plane/sessions/:sessionId" element={<ControlPlaneSessionPage />} />
-        <Route path="/control-plane/login" element={<div>Login</div>} />
-      </Routes>
+      <TestShell />
     </MemoryRouter>,
   );
 }
@@ -241,7 +278,8 @@ describe('ControlPlaneSessionPage', () => {
       'src',
       `${routerBaseUrl}/api/sandboxes/sandbox-1/api/threads/worker-session-1/assets/image?path=.%2F.temp%2Fthreads%2Fworker-session-1%2Fscreenshot.png`,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Settings Show' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open Navigation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
     expect(screen.getByText('Terminal')).toBeInTheDocument();
     expect(screen.getByText('XYZ Molecule Viewer')).toBeInTheDocument();
     expect(screen.queryByText(/Unexpected token/)).not.toBeInTheDocument();

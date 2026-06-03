@@ -7,13 +7,14 @@ import type {
   ThreadDto,
   ThreadStatusDto,
 } from '../../../../packages/shared/src/index';
-import { TERMINAL_PLUGIN_ID } from '../../../../packages/plugin-terminal/src/index';
 import {
-  PluginProvider,
+  AppShellMenuButton,
+  AppShellNavigationMenu,
   ThreadDetailSurface,
   formatLongTimestamp,
   threadStatusLabel,
   usePlugins,
+  useAppShellNav,
   type ThreadComposerProps,
   type ThreadDetailUiAdapter,
   type ThreadShellControlState,
@@ -164,16 +165,13 @@ const remoteShellUnavailableState: ThreadShellControlState = {
 };
 
 export function ControlPlaneSessionPage() {
-  return (
-    <PluginProvider adapter={{}}>
-      <ControlPlaneSessionSurface />
-    </PluginProvider>
-  );
+  return <ControlPlaneSessionSurface />;
 }
 
 function ControlPlaneSessionSurface() {
   const { sessionId = '' } = useParams();
   const navigate = useNavigate();
+  const shellNav = useAppShellNav();
   const plugins = usePlugins();
   const auth = useMemo(storedAuth, []);
   const [sandbox, setSandbox] = useState<ControlPlaneSandbox | null>(null);
@@ -194,7 +192,6 @@ function ControlPlaneSessionSurface() {
   const [scrollRequestKey, setScrollRequestKey] = useState(0);
   const [activeView, setActiveView] = useState<'chat' | 'shell'>('chat');
   const [followTail, setFollowTail] = useState(true);
-  const [pluginBusy, setPluginBusy] = useState<string | null>(null);
   const reconnectingRef = useRef(false);
 
   const loadSession = useCallback(async () => {
@@ -395,19 +392,6 @@ function ControlPlaneSessionSurface() {
     ? [activeThread, ...sidebarThreads]
     : sidebarThreads;
 
-  async function handleTogglePlugin(pluginId: string, enabled: boolean) {
-    setPluginBusy(pluginId);
-    setError(null);
-    try {
-      await plugins.setPluginEnabled(pluginId, enabled);
-      await plugins.refresh();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to update plugin.');
-    } finally {
-      setPluginBusy(null);
-    }
-  }
-
   const metaContent = (
     <dl className="space-y-4 text-sm">
       <div>
@@ -467,86 +451,6 @@ function ControlPlaneSessionSurface() {
 
   const settingsContent = (
     <div className="space-y-4 text-sm">
-      <section className="space-y-2">
-        <p className="text-xs uppercase tracking-[0.2em] text-[var(--theme-fg-muted)]">
-          Plugins
-        </p>
-        <div className="rounded-xl border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="font-medium text-[var(--theme-fg)]">Session Plugins</p>
-              <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                Enable renderers and thread extensions loaded by the remote worker UI.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => void plugins.refresh()}
-              disabled={plugins.loading}
-              className="inline-flex h-8 shrink-0 items-center rounded-full border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 text-xs font-medium text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {plugins.loading ? 'Loading' : 'Refresh'}
-            </button>
-          </div>
-          <div className="mt-3 grid gap-2">
-            {plugins.plugins.map((plugin) => {
-              const capabilitySummary = [
-                ...plugin.capabilities.artifactTypes.map((type) => type.type),
-                ...plugin.capabilities.threadPanels.map((panel) => panel.kind ?? panel.id),
-              ].join(', ') || 'utility';
-              const saving = pluginBusy === plugin.id;
-              return (
-                <div
-                  key={plugin.id}
-                  className="rounded-[1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-2.5"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-[var(--theme-fg)]">
-                        {plugin.name}
-                      </p>
-                      <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                        {plugin.description}
-                      </p>
-                      {plugin.id === TERMINAL_PLUGIN_ID && plugin.enabled ? (
-                        <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                          Terminal appears in the composer, but remote shell transport still needs a router adapter.
-                        </p>
-                      ) : null}
-                    </div>
-                    <button
-                      type="button"
-                      disabled={saving || plugins.loading}
-                      onClick={() => void handleTogglePlugin(plugin.id, !plugin.enabled)}
-                      className={`inline-flex h-8 shrink-0 items-center rounded-full border px-3 text-xs font-medium transition ${
-                        plugin.enabled
-                          ? 'ui-status-success'
-                          : 'border-[var(--theme-border)] bg-[var(--theme-surface)] text-[var(--theme-fg)] hover:bg-[var(--theme-hover)]'
-                      } disabled:cursor-not-allowed disabled:opacity-60`}
-                    >
-                      {saving ? 'Saving' : plugin.enabled ? 'Enabled' : 'Enable'}
-                    </button>
-                  </div>
-                  <p className="mt-2 text-[10px] uppercase tracking-[0.16em] text-[var(--theme-fg-muted)]">
-                    {capabilitySummary}
-                  </p>
-                  <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-[var(--theme-fg-muted)]">
-                    {plugin.source === 'imported' ? 'Imported manifest' : 'Built-in module'} · {plugin.id} {plugin.version}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-          {plugins.plugins.length === 0 ? (
-            <p className="mt-3 rounded-[1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-3 text-xs text-[var(--theme-fg-muted)]">
-              No plugins are registered.
-            </p>
-          ) : null}
-        </div>
-        {plugins.error ? (
-          <p className="text-xs leading-5 text-rose-200">{plugins.error}</p>
-        ) : null}
-      </section>
       <section className="space-y-2">
         <p className="text-xs uppercase tracking-[0.2em] text-[var(--theme-fg-muted)]">
           Remote Session
@@ -687,6 +591,18 @@ function ControlPlaneSessionSurface() {
       settingsContent={settingsContent}
       surfaceActions={surfaceActions}
       beforeTimelineContent={beforeTimelineContent}
+      appMenuButton={<AppShellMenuButton />}
+      appNavigationMenu={
+        <AppShellNavigationMenu
+          currentPath={`/control-plane/sessions/${sessionId}`}
+          items={[
+            { label: 'Control Plane', href: '/control-plane' },
+            { label: 'Workspaces', href: '/workspaces' },
+          ]}
+          onNavigate={navigate}
+        />
+      }
+      onCloseAppNavigation={shellNav?.closeNav ?? (() => {})}
       activeView={activeView}
       timelineProps={timelineProps}
       shellUnavailableContent={shellUnavailableContent}
