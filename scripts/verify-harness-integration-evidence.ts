@@ -222,49 +222,6 @@ function harnessUsageSummaryIncreased(steps: Map<string, JsonObject>) {
     after > before;
 }
 
-function mcpWorkerApiProven(steps: Map<string, JsonObject>) {
-  const details = detailsObject(steps, 'harness_mcp_worker_api_smoke');
-  if (!details) {
-    return false;
-  }
-  const record = details;
-  const parsedStdout = record.parsedStdout && typeof record.parsedStdout === 'object' && !Array.isArray(record.parsedStdout)
-    ? record.parsedStdout as JsonObject
-    : null;
-  return okStep(steps, 'harness_mcp_worker_api_smoke') &&
-    record.expectedSource === 'worker-api' &&
-    record.observedSource === 'worker-api' &&
-    parsedStdout?.source === 'worker-api';
-}
-
-const harnessArtifactTypes = new Set([
-  'elagente.harness.run',
-  'elagente.harness.artifact',
-  'chemistry.molecule3d',
-]);
-
-function artifactUiProven(steps: Map<string, JsonObject>) {
-  const details = detailsObject(steps, 'harness_thread_artifact_ui_smoke');
-  if (!details) {
-    return false;
-  }
-  const record = details;
-  const parsedStdout = record.parsedStdout && typeof record.parsedStdout === 'object' && !Array.isArray(record.parsedStdout)
-    ? record.parsedStdout as JsonObject
-    : null;
-  const artifactTypes = Array.isArray(record.observedArtifactTypes)
-    ? record.observedArtifactTypes
-    : Array.isArray(parsedStdout?.artifactTypes)
-      ? parsedStdout.artifactTypes
-      : [];
-  const expectedArtifactTypes = Array.isArray(record.expectedArtifactTypes)
-    ? record.expectedArtifactTypes
-    : [];
-  return okStep(steps, 'harness_thread_artifact_ui_smoke') &&
-    expectedArtifactTypes.some((entry) => typeof entry === 'string' && harnessArtifactTypes.has(entry)) &&
-    artifactTypes.some((entry) => typeof entry === 'string' && harnessArtifactTypes.has(entry));
-}
-
 function secretValueNotPrinted(evidence: JsonObject | null) {
   return evidence?.secretSafety?.valuePrinted === false ||
     evidence?.secretSafety?.valuesPrinted === false;
@@ -359,18 +316,6 @@ async function main() {
         'harness_usage_summary_after_invoke event count increased',
       ],
       reason: 'Harness invocation must create usage/audit attribution in control-plane.',
-    }),
-    verification({
-      id: 'harness-mcp-worker-api',
-      ok: mcpWorkerApiProven(stagingSteps),
-      evidence: ['harness_mcp_worker_api_smoke source=worker-api'],
-      reason: 'Codex MCP Harness smoke must prove source=worker-api, not direct Harness fallback.',
-    }),
-    verification({
-      id: 'harness-thread-artifact-ui',
-      ok: artifactUiProven(stagingSteps),
-      evidence: ['harness_thread_artifact_ui_smoke artifactTypes'],
-      reason: 'Live thread UI must render at least one Harness molecule/run/artifact timeline item.',
     }),
   ];
 

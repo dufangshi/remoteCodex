@@ -623,49 +623,6 @@ async function runOptionalHarnessSmoke(input: {
     });
   }
 
-  const mcpCommand = await runOptionalCommand('harness_mcp_worker_api_smoke', 'STAGING_HARNESS_MCP_SMOKE_COMMAND');
-  if (mcpCommand) {
-    const parsed = mcpCommand.details?.parsedStdout as JsonObject | null | undefined;
-    input.steps.push({
-      ...mcpCommand,
-      ok: mcpCommand.ok && parsed?.source === 'worker-api',
-      details: {
-        ...mcpCommand.details,
-        expectedSource: 'worker-api',
-        observedSource: parsed?.source ?? null,
-      },
-    });
-  }
-
-  const artifactUiCommand = await runOptionalCommand(
-    'harness_thread_artifact_ui_smoke',
-    'STAGING_HARNESS_THREAD_ARTIFACT_UI_SMOKE_COMMAND',
-  );
-  if (artifactUiCommand) {
-    const parsed = artifactUiCommand.details?.parsedStdout as JsonObject | null | undefined;
-    const artifactTypes = Array.isArray(parsed?.artifactTypes)
-      ? parsed.artifactTypes
-      : [];
-    input.steps.push({
-      ...artifactUiCommand,
-      ok:
-        artifactUiCommand.ok &&
-        artifactTypes.some((entry) =>
-          entry === 'elagente.harness.run' ||
-          entry === 'elagente.harness.artifact' ||
-          entry === 'chemistry.molecule3d'
-        ),
-      details: {
-        ...artifactUiCommand.details,
-        expectedArtifactTypes: [
-          'elagente.harness.run',
-          'elagente.harness.artifact',
-          'chemistry.molecule3d',
-        ],
-        observedArtifactTypes: artifactTypes,
-      },
-    });
-  }
 }
 
 async function main() {

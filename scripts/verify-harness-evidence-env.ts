@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 
 interface Requirement {
-  group: 'admin' | 'staging' | 'invoke' | 'agent-ui' | 'k8s' | 'optional' | 'review';
+  group: 'admin' | 'staging' | 'invoke' | 'k8s' | 'optional' | 'review';
   name: string;
   required: boolean;
   description: string;
@@ -85,20 +85,6 @@ const requirements: Requirement[] = [
     required: false,
     description: 'JSON object input for release invoke evidence. Basic worker smoke can omit it.',
     placeholder: '<json object>',
-  },
-  {
-    group: 'agent-ui',
-    name: 'STAGING_HARNESS_MCP_SMOKE_COMMAND',
-    required: false,
-    description: 'Optional release proof for Codex plugin/MCP path. Command must emit top-level JSON source=\"worker-api\".',
-    placeholder: '<command>',
-  },
-  {
-    group: 'agent-ui',
-    name: 'STAGING_HARNESS_THREAD_ARTIFACT_UI_SMOKE_COMMAND',
-    required: false,
-    description: 'Optional release proof for thread UI artifact rendering. Command must emit live thread artifactTypes JSON.',
-    placeholder: '<command>',
   },
   {
     group: 'k8s',
@@ -189,7 +175,7 @@ function buildEnvTemplate(generatedAt: string) {
 }
 
 function buildReport() {
-  const groups = ['admin', 'staging', 'invoke', 'agent-ui', 'k8s', 'optional', 'review'] as const;
+  const groups = ['admin', 'staging', 'invoke', 'k8s', 'optional', 'review'] as const;
   return {
     ok: requirements.filter((entry) => entry.required).every((entry) => requirementPresent(entry)),
     generatedAt: new Date().toISOString(),

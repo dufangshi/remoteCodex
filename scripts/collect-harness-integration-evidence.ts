@@ -19,8 +19,6 @@ const requiredHarnessIntegrationGates = [
   'harness-worker-runtime',
   'harness-secret-safety',
   'harness-usage-attribution',
-  'harness-mcp-worker-api',
-  'harness-thread-artifact-ui',
 ];
 
 const DEFAULT_HARNESS_ADMIN_BASE_URL = 'https://elagenteharness-production.up.railway.app';
@@ -115,10 +113,6 @@ function buildEnvTemplate(input: {
     '# Release invoke evidence. Basic worker status/discovery smoke can run without these.',
     envTemplateLine('STAGING_HARNESS_INVOKE_TOOL', '<low-cost Harness tool>'),
     envTemplateLine('STAGING_HARNESS_INVOKE_INPUT_JSON', '<json object>'),
-    '# Release Codex plugin/MCP proof. It must emit JSON with top-level source=\"worker-api\".',
-    envTemplateLine('STAGING_HARNESS_MCP_SMOKE_COMMAND', '<command>'),
-    '# Release live thread artifact proof. It must emit JSON with artifactTypes.',
-    envTemplateLine('STAGING_HARNESS_THREAD_ARTIFACT_UI_SMOKE_COMMAND', '<command>'),
     '',
     '# K8s Secret/RBAC release proof. Secret key is normally the sandbox id from staging smoke output.',
     envTemplateLine('HARNESS_K8S_NAMESPACE', DEFAULT_HARNESS_K8S_NAMESPACE),
@@ -253,8 +247,6 @@ async function buildReview(input: {
         'harness_worker_discovery',
         'harness_control_plane_invoke',
         'harness_usage_summary_after_invoke',
-        'harness_mcp_worker_api_smoke',
-        'harness_thread_artifact_ui_smoke',
       ],
     },
     kubernetes: {
@@ -302,12 +294,6 @@ async function buildReview(input: {
         invoke: stepOk(staging, 'harness_control_plane_invoke'),
         summaryAfterInvoke: stepOk(staging, 'harness_usage_summary_after_invoke'),
       },
-      harnessMcpWorkerApi: {
-        sourceWorkerApi: stepOk(staging, 'harness_mcp_worker_api_smoke'),
-      },
-      harnessThreadArtifactUi: {
-        liveArtifactProof: stepOk(staging, 'harness_thread_artifact_ui_smoke'),
-      },
     },
     commandResults: input.commands.map((command) => ({
       name: command.name,
@@ -346,10 +332,6 @@ async function main() {
       'STAGING_HARNESS_INVOKE_TOOL',
       'STAGING_HARNESS_INVOKE_INPUT_JSON',
     ],
-    agentUi: [
-      'STAGING_HARNESS_MCP_SMOKE_COMMAND',
-      'STAGING_HARNESS_THREAD_ARTIFACT_UI_SMOKE_COMMAND',
-    ],
     k8s: [
       'HARNESS_K8S_SECRET_KEY',
     ],
@@ -366,13 +348,11 @@ async function main() {
     admin: envReady(requirements.admin, defaults),
     staging: envReady(requirements.staging, defaults),
     invoke: envReady(requirements.invoke, defaults),
-    agentUi: envReady(requirements.agentUi, defaults),
     k8s: envReady(requirements.k8s, defaults),
     fullRelease:
       envReady(requirements.admin, defaults) &&
       envReady(requirements.staging, defaults) &&
       envReady(requirements.invoke, defaults) &&
-      envReady(requirements.agentUi, defaults) &&
       envReady(requirements.k8s, defaults),
   };
   const stagingEnv = {

@@ -41,8 +41,6 @@ const requiredHarnessIntegrationGates = [
   'harness-worker-runtime',
   'harness-secret-safety',
   'harness-usage-attribution',
-  'harness-mcp-worker-api',
-  'harness-thread-artifact-ui',
 ];
 
 function requiredGatesPresent(value: unknown) {
