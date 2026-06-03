@@ -20,6 +20,7 @@ export interface PluginContextValue {
   refresh: () => Promise<void>;
   importPluginManifest: (input: ImportPluginInput) => Promise<void>;
   setPluginEnabled: (pluginId: string, enabled: boolean) => Promise<void>;
+  uninstallPlugin: (pluginId: string) => Promise<void>;
   renderArtifact: (context: ArtifactRenderContext) => ReactNode | null;
   renderInlineCode: (context: InlineCodeRenderContext) => ReactNode | null;
   hasRendererForArtifact: (artifact: ThreadArtifactDto) => boolean;
@@ -55,6 +56,7 @@ function createDefaultPluginContext(): PluginContextValue {
     async refresh() {},
     async importPluginManifest() {},
     async setPluginEnabled() {},
+    async uninstallPlugin() {},
     renderArtifact: () => null,
     renderInlineCode: () => null,
     hasRendererForArtifact: () => false,

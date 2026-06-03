@@ -28,6 +28,7 @@ export interface PluginProviderAdapter {
     pluginId: string,
     input: UpdatePluginInput,
   ) => Promise<PluginDto> | PluginDto;
+  deletePlugin?: (pluginId: string) => Promise<PluginDto> | PluginDto;
 }
 
 export function PluginProvider({
@@ -92,6 +93,20 @@ export function PluginProvider({
         const next = current.filter((plugin) => plugin.id !== imported.id);
         return [...next, imported];
       });
+    },
+    [adapter],
+  );
+
+  const uninstallPlugin = useCallback(
+    async (pluginId: string) => {
+      if (!adapter.deletePlugin) {
+        throw new Error('Plugin uninstall is not available.');
+      }
+
+      const removed = await adapter.deletePlugin(pluginId);
+      setPlugins((current) =>
+        current.filter((plugin) => plugin.id !== removed.id),
+      );
     },
     [adapter],
   );
@@ -162,6 +177,7 @@ export function PluginProvider({
       refresh,
       importPluginManifest,
       setPluginEnabled,
+      uninstallPlugin,
       renderArtifact,
       renderInlineCode,
       hasRendererForArtifact,
@@ -178,6 +194,7 @@ export function PluginProvider({
       renderArtifact,
       renderInlineCode,
       setPluginEnabled,
+      uninstallPlugin,
     ],
   );
 

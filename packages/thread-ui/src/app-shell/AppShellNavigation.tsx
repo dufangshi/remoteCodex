@@ -185,9 +185,18 @@ export interface AppShellSettingsDialogProps {
   importPluginInput?: (draft: string) => ImportPluginInput;
 }
 
+function defaultImportPluginInput(draft: string): ImportPluginInput {
+  const trimmed = draft.trim();
+  const isManifestJson = trimmed.startsWith('{') || trimmed.startsWith('[');
+  return {
+    ...(isManifestJson ? { manifestJson: trimmed } : { manifestUrl: trimmed }),
+    enabled: true,
+  };
+}
+
 export function AppShellSettingsDialog({
   extraContent,
-  importPluginInput = (draft) => ({ manifestJson: draft, enabled: true }),
+  importPluginInput = defaultImportPluginInput,
 }: AppShellSettingsDialogProps = {}) {
   const shellNav = useAppShellNav();
   const plugins = usePlugins();
@@ -247,6 +256,23 @@ export function AppShellSettingsDialog({
         busy: false,
         message: null,
         error: error instanceof Error ? error.message : 'Unable to import plugin.',
+      });
+    }
+  }
+
+  async function handleUninstallPlugin(pluginId: string, pluginName: string) {
+    const confirmed = window.confirm(`Uninstall ${pluginName}?`);
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await plugins.uninstallPlugin(pluginId);
+    } catch (error) {
+      setPluginImportState({
+        busy: false,
+        message: null,
+        error: error instanceof Error ? error.message : 'Unable to uninstall plugin.',
       });
     }
   }
@@ -355,7 +381,7 @@ export function AppShellSettingsDialog({
               </div>
               <div className="mt-3 grid gap-2">
                 {plugins.plugins.map((plugin) => (
-                  <label
+                  <div
                     key={plugin.id}
                     className="flex items-start justify-between gap-3 rounded-[1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-2.5"
                   >
@@ -376,15 +402,30 @@ export function AppShellSettingsDialog({
                         {plugin.source === 'imported' ? 'Imported manifest' : 'Built-in module'}
                       </span>
                     </span>
-                    <input
-                      type="checkbox"
-                      checked={plugin.enabled}
-                      onChange={(event) =>
-                        void plugins.setPluginEnabled(plugin.id, event.currentTarget.checked)
-                      }
-                      className="mt-1 h-4 w-4 shrink-0 accent-[var(--theme-accent-solid)]"
-                    />
-                  </label>
+                    <span className="flex shrink-0 items-center gap-2">
+                      {plugin.source === 'imported' ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleUninstallPlugin(plugin.id, plugin.name)}
+                          className="rounded-full border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-1.5 text-xs font-medium text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)]"
+                        >
+                          Uninstall
+                        </button>
+                      ) : null}
+                      <label className="sr-only" htmlFor={`plugin-toggle-${plugin.id}`}>
+                        Toggle {plugin.name}
+                      </label>
+                      <input
+                        id={`plugin-toggle-${plugin.id}`}
+                        type="checkbox"
+                        checked={plugin.enabled}
+                        onChange={(event) =>
+                          void plugins.setPluginEnabled(plugin.id, event.currentTarget.checked)
+                        }
+                        className="h-4 w-4 accent-[var(--theme-accent-solid)]"
+                      />
+                    </span>
+                  </div>
                 ))}
                 {plugins.plugins.length === 0 && (
                   <p className="rounded-[1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-3 text-xs text-[var(--theme-fg-muted)]">
