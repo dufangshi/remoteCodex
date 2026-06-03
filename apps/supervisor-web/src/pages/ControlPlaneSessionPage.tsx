@@ -13,7 +13,6 @@ import {
   ThreadDetailSurface,
   formatLongTimestamp,
   threadStatusLabel,
-  usePlugins,
   useAppShellNav,
   type ThreadComposerProps,
   type ThreadDetailUiAdapter,
@@ -172,7 +171,6 @@ function ControlPlaneSessionSurface() {
   const { sessionId = '' } = useParams();
   const navigate = useNavigate();
   const shellNav = useAppShellNav();
-  const plugins = usePlugins();
   const auth = useMemo(storedAuth, []);
   const [sandbox, setSandbox] = useState<ControlPlaneSandbox | null>(null);
   const [project, setProject] = useState<ControlPlaneProject | null>(null);
@@ -383,7 +381,6 @@ function ControlPlaneSessionSurface() {
     : !session?.workerSessionId
       ? 'Reconnect this session before sending a prompt.'
       : undefined;
-  const terminalPluginEnabled = plugins.getThreadPanels().some((panel) => panel.kind === 'terminal');
   const sidebarThreads = workspace
     ? workspaceSessions.map((item) => sessionToThread(item, workspace, item.id === session?.id ? detail : null))
     : [];
@@ -506,7 +503,6 @@ function ControlPlaneSessionSurface() {
         toolboxItems: [],
         followTail,
         threadConnected: detail.thread.isLoaded,
-        shellAvailable: terminalPluginEnabled,
         disabled: Boolean(promptDisabledReason),
         ...(promptDisabledReason
           ? { disabledPlaceholder: promptDisabledReason }
@@ -583,7 +579,6 @@ function ControlPlaneSessionSurface() {
       status={null}
       loading={loading}
       error={loading ? null : error}
-      plugins={plugins}
       adapter={surfaceAdapter}
       currentWorkspaceId={workspace?.id ?? null}
       currentWorkspaceLabel={workspace?.name ?? detail?.workspace.label ?? null}
