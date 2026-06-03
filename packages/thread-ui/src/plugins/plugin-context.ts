@@ -46,7 +46,7 @@ export function mergePluginState(
   return merged;
 }
 
-function createDefaultPluginContext(): PluginContextValue {
+export function createDefaultPluginContextValue(): PluginContextValue {
   const plugins = mergePluginState(builtinFrontendPlugins, []);
   const enabledModules = builtinFrontendPlugins;
   return {
@@ -65,4 +65,4 @@ function createDefaultPluginContext(): PluginContextValue {
   };
 }
 
-export const PluginContext = createContext<PluginContextValue>(createDefaultPluginContext());
+export const PluginContext = createContext<PluginContextValue>(createDefaultPluginContextValue());
