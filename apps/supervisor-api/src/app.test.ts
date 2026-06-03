@@ -1789,7 +1789,7 @@ describe('supervisor api', () => {
     const codexConfig = await fs.readFile(path.join(codexHome, 'config.toml'), 'utf8');
     expect(codexConfig.match(/\[mcp_servers\.remote_codex_plugins\]/g)).toHaveLength(1);
     expect(codexConfig).toContain(
-      'REMOTE_CODEX_ENABLED_PLUGIN_IDS = "remote-codex.elagente-harness,remote-codex.xyz-viewer"',
+      'REMOTE_CODEX_ENABLED_PLUGIN_IDS = "remote-codex.xyz-viewer"',
     );
     expect(codexConfig).not.toContain('INACT_X_APP_KEY');
     const codexAuth = JSON.parse(await fs.readFile(path.join(codexHome, 'auth.json'), 'utf8'));
@@ -2193,11 +2193,6 @@ describe('supervisor api', () => {
           enabled: true,
           source: 'builtin',
         }),
-        expect.objectContaining({
-          id: 'remote-codex.elagente-harness',
-          enabled: true,
-          source: 'builtin',
-        }),
       ]),
     );
 
@@ -2315,13 +2310,13 @@ describe('supervisor api', () => {
   it('rejects uninstalling built-in plugins', async () => {
     const response = await app.inject({
       method: 'DELETE',
-      url: '/api/plugins/remote-codex.elagente-harness',
+      url: '/api/plugins/remote-codex.xyz-viewer',
     });
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toMatchObject({
       code: 'bad_request',
-      message: 'Built-in plugin cannot be uninstalled: remote-codex.elagente-harness',
+      message: 'Built-in plugin cannot be uninstalled: remote-codex.xyz-viewer',
     });
   });
 
