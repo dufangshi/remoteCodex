@@ -299,7 +299,7 @@ export function ThreadDetailSurface({
               </div>
             )
           ))}
-        {activeView === 'shell' && shellComposerProps ? (
+        {activeView === 'shell' && shellComposerProps && !shellContent ? (
           <ThreadComposer
             {...shellComposerProps}
             activeView="shell"
