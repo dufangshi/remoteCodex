@@ -16,7 +16,10 @@ import type {
   ThreadDto,
 } from '@remote-codex/shared';
 import type { ThreadDetailUiAdapter } from './adapters';
-import type { PluginContextValue } from './plugins/plugin-context';
+import {
+  createDefaultPluginContextValue,
+  type PluginContextValue,
+} from './plugins/plugin-context';
 import { usePlugins } from './plugins/usePlugins';
 import { ThreadWorkspaceLayout } from './components/ThreadWorkspaceLayout';
 import {
@@ -135,7 +138,7 @@ export function ThreadDetailSurface({
   emptyContent,
 }: ThreadDetailSurfaceProps) {
   const contextPlugins = usePlugins();
-  const plugins = providedPlugins ?? contextPlugins;
+  const plugins = providedPlugins ?? contextPlugins ?? createDefaultPluginContextValue();
   const timelineAdapter = useMemo(
     () => ({
       ...(adapter.getImageAssetUrl
