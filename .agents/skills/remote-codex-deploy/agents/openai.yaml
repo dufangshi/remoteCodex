@@ -1,0 +1,4 @@
+interface:
+  display_name: "Remote Codex Deploy"
+  short_description: "Deploy and verify staging builds"
+  default_prompt: "Use $remote-codex-deploy to push the current branch, wait for staging deployment, and verify the live build."
