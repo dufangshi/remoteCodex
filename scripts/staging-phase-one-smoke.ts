@@ -710,19 +710,20 @@ async function main() {
     token: productJwt.token,
     expectedStatus: 200,
   });
+  const activeSandbox = start.json.sandbox;
   steps.push({
     name: 'start_sandbox',
-    ok: ['starting', 'running'].includes(start.json.sandbox.state),
+    ok: ['starting', 'running'].includes(activeSandbox.state),
     details: {
-      sandboxId: start.json.sandbox.id,
-      state: start.json.sandbox.state,
-      image: start.json.sandbox.image,
-      resourceProfile: start.json.sandbox.resourceProfile,
-      routerBaseUrl: start.json.sandbox.routerBaseUrl,
-      workerServiceName: start.json.sandbox.workerServiceName,
-      k8sNamespace: start.json.sandbox.k8sNamespace,
-      k8sPodName: start.json.sandbox.k8sPodName,
-      startupProgress: start.json.sandbox.startupProgress,
+      sandboxId: activeSandbox.id,
+      state: activeSandbox.state,
+      image: activeSandbox.image,
+      resourceProfile: activeSandbox.resourceProfile,
+      routerBaseUrl: activeSandbox.routerBaseUrl,
+      workerServiceName: activeSandbox.workerServiceName,
+      k8sNamespace: activeSandbox.k8sNamespace,
+      k8sPodName: activeSandbox.k8sPodName,
+      startupProgress: activeSandbox.startupProgress,
     },
   });
 
@@ -741,9 +742,9 @@ async function main() {
       statusReason: health.json.sandbox.statusReason,
     },
   });
-  await waitForSandboxRunning({ productJwt: productJwt.token, sandboxId: sandbox.id, steps });
-  await optionalAdminSandboxDetail({ sandboxId: sandbox.id, steps });
-  await runOptionalIdempotentLifecycleSmoke({ productJwt: productJwt.token, sandboxId: sandbox.id, steps });
+  await waitForSandboxRunning({ productJwt: productJwt.token, sandboxId: activeSandbox.id, steps });
+  await optionalAdminSandboxDetail({ sandboxId: activeSandbox.id, steps });
+  await runOptionalIdempotentLifecycleSmoke({ productJwt: productJwt.token, sandboxId: activeSandbox.id, steps });
 
   const project = await requestJson({
     path: '/api/projects',
@@ -792,7 +793,7 @@ async function main() {
   });
 
   const routeToken = await requestJson({
-    path: `/api/sandboxes/${sandbox.id}/route-token`,
+    path: `/api/sandboxes/${activeSandbox.id}/route-token`,
     method: 'POST',
     token: productJwt.token,
     body: {
@@ -831,7 +832,7 @@ async function main() {
 
   const proxiedMetadata = await requestJson({
     baseUrl: routerBaseUrl,
-    path: `/api/sandboxes/${sandbox.id}/api/worker/metadata?token=${encodeURIComponent(routeToken.json.token)}`,
+    path: `/api/sandboxes/${activeSandbox.id}/api/worker/metadata?token=${encodeURIComponent(routeToken.json.token)}`,
     token: productJwt.token,
     expectedStatus: 200,
   });
@@ -853,7 +854,7 @@ async function main() {
 
   const workerReady = await requestJson({
     baseUrl: routerBaseUrl,
-    path: `/api/sandboxes/${sandbox.id}/readyz?token=${encodeURIComponent(routeToken.json.token)}`,
+    path: `/api/sandboxes/${activeSandbox.id}/readyz?token=${encodeURIComponent(routeToken.json.token)}`,
     token: productJwt.token,
     expectedStatus: 200,
   });
@@ -868,7 +869,7 @@ async function main() {
       !runtimeProviders.includes('claude') &&
       !runtimeProviders.includes('opencode'),
     details: {
-      sandboxId: sandbox.id,
+      sandboxId: activeSandbox.id,
       providers: runtimeProviders,
       runtimes: workerReady.json.runtimes,
     },
@@ -876,7 +877,7 @@ async function main() {
 
   await runOptionalHarnessSmoke({
     productJwt: productJwt.token,
-    sandboxId: sandbox.id,
+    sandboxId: activeSandbox.id,
     routerBaseUrl,
     routeToken: routeToken.json.token as string,
     sessionId: session.json.session.id as string,
@@ -959,7 +960,7 @@ async function main() {
       token: productJwt.token,
       expectedStatus: 200,
     });
-    const final = await waitForSandboxStopped({ productJwt: productJwt.token, sandboxId: sandbox.id });
+    const final = await waitForSandboxStopped({ productJwt: productJwt.token, sandboxId: activeSandbox.id });
     const finalSandbox = final.health?.json?.sandbox;
     steps.push({
       name: 'stop_sandbox',

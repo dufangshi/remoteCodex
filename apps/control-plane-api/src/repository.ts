@@ -435,11 +435,7 @@ export class ControlPlaneRepository {
   }
 
   ensureSandboxForUser(userId: string, defaults: SandboxDefaults) {
-    const existing = this.db
-      .select()
-      .from(controlSandboxes)
-      .where(eq(controlSandboxes.userId, userId))
-      .get();
+    const existing = this.getSandboxByUserId(userId);
     if (existing) {
       return existing;
     }
@@ -483,6 +479,11 @@ export class ControlPlaneRepository {
       .select()
       .from(controlSandboxes)
       .where(eq(controlSandboxes.userId, userId))
+      .orderBy(
+        sql`case when ${controlSandboxes.state} = 'deleted' then 1 else 0 end`,
+        desc(controlSandboxes.updatedAt),
+        desc(controlSandboxes.createdAt),
+      )
       .get();
   }
 
