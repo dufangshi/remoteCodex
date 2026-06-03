@@ -249,7 +249,7 @@ describe('App', () => {
     expect(passwordInput).toHaveValue('password123');
     fireEvent.submit(passwordInput.closest('form')!);
     await waitFor(() => {
-      expect(screen.getAllByText('dev@example.com').length).toBeGreaterThan(0);
+      expect(screen.getByRole('button', { name: 'Open account menu' })).toBeInTheDocument();
     });
   });
 });

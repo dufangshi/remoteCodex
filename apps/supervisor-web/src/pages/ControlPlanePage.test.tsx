@@ -281,6 +281,26 @@ async function selectExistingHierarchy() {
   fireEvent.click(screen.getByRole('button', { name: /Plan calculation/i }));
 }
 
+async function openAccountMenu() {
+  await waitFor(() => {
+    expect(screen.getByRole('button', { name: 'Open account menu' })).toBeInTheDocument();
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Open account menu' }));
+}
+
+async function openCreatePanel(label: 'project' | 'workspace' | 'session') {
+  fireEvent.click(screen.getByRole('button', { name: `Open create panel for ${label}` }));
+  await waitFor(() => {
+    expect(screen.getByRole('heading', { name: new RegExp(`Create ${label}`, 'i') })).toBeInTheDocument();
+  });
+}
+
+function submitCreatePanel(label: 'project' | 'workspace' | 'session') {
+  const fieldLabel =
+    label === 'project' ? 'Project name' : label === 'workspace' ? 'Workspace name' : 'Session title';
+  fireEvent.submit(screen.getByLabelText(fieldLabel).closest('form')!);
+}
+
 describe('ControlPlanePage', () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -410,19 +430,20 @@ describe('ControlPlanePage', () => {
     render(<ControlPlanePage />);
 
     await waitFor(() => {
-      expect(screen.getAllByText('dev@example.com').length).toBeGreaterThan(0);
+      expect(screen.getByRole('button', { name: 'Open account menu' })).toBeInTheDocument();
     });
     expect(screen.getByText('remote-codex-worker:dev')).toBeInTheDocument();
     expect(screen.getByText('No projects yet.')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create project' }));
+    await openCreatePanel('project');
+    submitCreatePanel('project');
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Computational chemistry/i })).toBeInTheDocument();
     });
     expect(screen.getAllByText('computational-chemistry').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Project "Computational chemistry" created. Select it before creating a workspace.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Create workspace' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Open create panel for workspace' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Computational chemistry/i }));
 
@@ -430,13 +451,14 @@ describe('ControlPlanePage', () => {
       expect(screen.getByText('Selected project')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create workspace' }));
+    await openCreatePanel('workspace');
+    submitCreatePanel('workspace');
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Molecule study/i })).toBeInTheDocument();
     });
     expect(screen.getByText('Workspace "Molecule study" created. Select it before creating a session.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Create session' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Open create panel for session' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Molecule study/i }));
 
@@ -446,7 +468,8 @@ describe('ControlPlanePage', () => {
       expect(screen.getByText('https://router.example.test')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
+    await openCreatePanel('session');
+    submitCreatePanel('session');
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Plan calculation/i })).toBeInTheDocument();
@@ -604,32 +627,31 @@ describe('ControlPlanePage', () => {
     render(<ControlPlanePage />);
 
     await waitFor(() => {
-      expect(screen.getAllByText('dev@example.com').length).toBeGreaterThan(0);
+      expect(screen.getByRole('button', { name: 'Open account menu' })).toBeInTheDocument();
     });
 
-    expect(screen.getByRole('button', { name: 'Create workspace' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Create session' })).toBeDisabled();
-    expect(screen.getByText('Select a project before creating a workspace.')).toBeInTheDocument();
-    expect(screen.getByText('Select a workspace before creating a session.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open create panel for workspace' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open create panel for session' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create project' }));
+    await openCreatePanel('project');
+    submitCreatePanel('project');
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Computational chemistry/i })).toBeInTheDocument();
     });
-    expect(screen.getByRole('button', { name: 'Create workspace' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Create session' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Open create panel for workspace' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open create panel for session' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Computational chemistry/i }));
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Create workspace' })).not.toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Open create panel for workspace' })).not.toBeDisabled();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create workspace' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open create panel for workspace' }));
+    submitCreatePanel('workspace');
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Molecule study/i })).toBeInTheDocument();
     });
-    expect(screen.getByRole('button', { name: 'Create session' })).toBeDisabled();
-    expect(screen.getByText('Select a workspace before creating a session.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open create panel for session' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Molecule study/i }));
     await waitFor(() => {
@@ -638,7 +660,7 @@ describe('ControlPlanePage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Create session' })).not.toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Open create panel for session' })).not.toBeDisabled();
     });
   });
 
@@ -910,7 +932,7 @@ describe('ControlPlanePage', () => {
     render(<ControlPlanePage />);
 
     await waitFor(() => {
-      expect(screen.getAllByText('dev@example.com').length).toBeGreaterThan(0);
+      expect(screen.getByRole('button', { name: 'Open account menu' })).toBeInTheDocument();
     });
 
     const storedAuth = JSON.parse(
@@ -954,15 +976,14 @@ describe('ControlPlanePage', () => {
 
     render(<ControlPlanePage />);
 
-    await waitFor(() => {
-      expect(screen.getAllByText('dev@example.com').length).toBeGreaterThan(0);
-    });
+    await openAccountMenu();
     expect(screen.getByText('Quota')).toBeInTheDocument();
     expect(screen.getByText('default')).toBeInTheDocument();
-    expect(screen.getByText('3 requests')).toBeInTheDocument();
+    expect(screen.getByText('Requests')).toBeInTheDocument();
+    expect(screen.getByText('3')).toBeInTheDocument();
     expect(screen.getByText('Tokens')).toBeInTheDocument();
     expect(screen.getAllByText('1500').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('LLM cost')).toBeInTheDocument();
+    expect(screen.getByText('Cost')).toBeInTheDocument();
     expect(screen.getAllByText('$1.25').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('gpt-5.1-codex')).toBeInTheDocument();
     expect(screen.getByText(/sub2api/)).toBeInTheDocument();
@@ -972,136 +993,9 @@ describe('ControlPlanePage', () => {
   it('shows an empty LLM usage detail state', async () => {
     render(<ControlPlanePage />);
 
+    await openAccountMenu();
     await waitFor(() => {
       expect(screen.getByText('No LLM usage events yet.')).toBeInTheDocument();
-    });
-  });
-
-  it('loads admin users and updates user status and quota profile', async () => {
-    let currentAdminUser = adminUser;
-    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
-
-      if (path === '/api/me' && !init?.method) {
-        return jsonResponse({ user, sandbox: stoppedSandbox, usage });
-      }
-
-      if (path === '/api/projects' && !init?.method) {
-        return jsonResponse({ projects: [] });
-      }
-
-      if (path === '/api/workspaces' && !init?.method) {
-        return jsonResponse({ workspaces: [] });
-      }
-
-      if (path === '/api/admin/users' && !init?.method) {
-        return jsonResponse({ users: [currentAdminUser] });
-      }
-
-      if (path === '/api/admin/users/user-admin-target' && init?.method === 'PATCH') {
-        currentAdminUser = {
-          ...currentAdminUser,
-          ...JSON.parse(String(init.body)),
-        };
-        return jsonResponse({ user: currentAdminUser });
-      }
-
-      const usageEvents = usageEventsResponse(path);
-      if (usageEvents) {
-        return usageEvents;
-      }
-
-      return jsonResponse({
-        code: 'not_found',
-        message: `Unhandled request: ${path}`,
-      }, 404);
-    });
-
-    render(<ControlPlanePage />);
-
-    await waitFor(() => {
-      expect(screen.getAllByText('dev@example.com').length).toBeGreaterThan(0);
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Load users' }));
-    await waitFor(() => {
-      expect(screen.getByText('admin-target@example.com')).toBeInTheDocument();
-    });
-
-    fireEvent.change(screen.getByDisplayValue('active'), {
-      target: { value: 'suspended' },
-    });
-    await waitFor(() => {
-      expect(screen.getByText('Updated admin-target@example.com.')).toBeInTheDocument();
-    });
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith(
-      `${baseUrl}/api/admin/users/user-admin-target`,
-      expect.objectContaining({
-        method: 'PATCH',
-        body: JSON.stringify({ status: 'suspended' }),
-      }),
-    );
-
-    const quotaInput = screen.getByLabelText('Quota profile for admin-target@example.com');
-    fireEvent.change(quotaInput, { target: { value: 'pro' } });
-    fireEvent.blur(quotaInput);
-    await waitFor(() => {
-      const quotaUpdateCall = vi.mocked(fetch).mock.calls.find(
-        ([input, init]) =>
-          String(input) === `${baseUrl}/api/admin/users/user-admin-target` &&
-          String(init?.body) === JSON.stringify({ quotaProfile: 'pro' }),
-      );
-      expect(quotaUpdateCall).toBeDefined();
-    });
-  });
-
-  it('shows non-admin denial UI when admin users cannot be loaded', async () => {
-    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
-
-      if (path === '/api/me' && !init?.method) {
-        return jsonResponse({ user, sandbox: stoppedSandbox, usage });
-      }
-
-      if (path === '/api/projects' && !init?.method) {
-        return jsonResponse({ projects: [] });
-      }
-
-      if (path === '/api/workspaces' && !init?.method) {
-        return jsonResponse({ workspaces: [] });
-      }
-
-      if (path === '/api/admin/users' && !init?.method) {
-        return jsonResponse({
-          code: 'forbidden',
-          message: 'Administrator access is required.',
-        }, 403);
-      }
-
-      const usageEvents = usageEventsResponse(path);
-      if (usageEvents) {
-        return usageEvents;
-      }
-
-      return jsonResponse({
-        code: 'not_found',
-        message: `Unhandled request: ${path}`,
-      }, 404);
-    });
-
-    render(<ControlPlanePage />);
-
-    await waitFor(() => {
-      expect(screen.getAllByText('dev@example.com').length).toBeGreaterThan(0);
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Load users' }));
-    await waitFor(() => {
-      expect(
-        screen.getByText('Admin access denied: Administrator access is required.'),
-      ).toBeInTheDocument();
     });
   });
 
@@ -1143,10 +1037,11 @@ describe('ControlPlanePage', () => {
     render(<ControlPlanePage />);
 
     await waitFor(() => {
-      expect(screen.getAllByText('dev@example.com').length).toBeGreaterThan(0);
+      expect(screen.getByRole('button', { name: 'Open account menu' })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create project' }));
+    await openCreatePanel('project');
+    submitCreatePanel('project');
 
     await waitFor(() => {
       expect(screen.getByText('Project slug is already in use.')).toBeInTheDocument();
@@ -1462,9 +1357,6 @@ describe('ControlPlanePage', () => {
 
     render(<ControlPlanePage />);
     expect(await screen.findByText('Loading projects...')).toBeInTheDocument();
-    await waitFor(() => {
-      expect(screen.getByText('Loading LLM usage...')).toBeInTheDocument();
-    });
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Computational chemistry/i })).toBeInTheDocument();
     });

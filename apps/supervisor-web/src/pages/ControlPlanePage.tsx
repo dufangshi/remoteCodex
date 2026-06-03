@@ -8,7 +8,6 @@ import {
   createControlPlaneRouteToken,
   createControlPlaneSession,
   createControlPlaneWorkspace,
-  fetchControlPlaneAdminUsers,
   fetchControlPlaneMe,
   fetchControlPlaneAdminSandboxDetail,
   fetchControlPlaneProjects,
@@ -21,10 +20,8 @@ import {
   startControlPlaneSandbox,
   stopControlPlaneSandbox,
   updateControlPlaneMe,
-  updateControlPlaneAdminUser,
   ApiError,
   type ControlPlaneAuth,
-  type ControlPlaneAdminUserUpdate,
   type ControlPlaneSandboxDetail,
   type ControlPlaneProject,
   type ControlPlaneRouteToken,
@@ -44,6 +41,7 @@ import {
 const ROUTE_TOKEN_REFRESH_SKEW_MS = 60_000;
 const ROUTE_TOKEN_MIN_REFRESH_MS = 5_000;
 const SANDBOX_HEALTH_POLL_MS = 3_000;
+type CreatePanelKind = 'project' | 'workspace' | 'session';
 
 function slugFromName(value: string) {
   return value
@@ -159,8 +157,6 @@ function ActionButton({
   );
 }
 
-const USER_STATUSES = ['active', 'suspended', 'deleted'] as const;
-
 export function ControlPlanePage() {
   const navigate = useNavigate();
   const [auth, setAuth] = useState<ControlPlaneAuth | null>(() => {
@@ -172,7 +168,6 @@ export function ControlPlanePage() {
   const [adminSandboxDetail, setAdminSandboxDetail] = useState<ControlPlaneSandboxDetail | null>(null);
   const [usage, setUsage] = useState<ControlPlaneUsageSummary | null>(null);
   const [usageEvents, setUsageEvents] = useState<ControlPlaneUsageEvent[]>([]);
-  const [adminUsers, setAdminUsers] = useState<ControlPlaneUser[]>([]);
   const [projects, setProjects] = useState<ControlPlaneProject[]>([]);
   const [workspaces, setWorkspaces] = useState<ControlPlaneWorkspace[]>([]);
   const [sessions, setSessions] = useState<ControlPlaneSession[]>([]);
@@ -188,6 +183,8 @@ export function ControlPlanePage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [createPanelOpen, setCreatePanelOpen] = useState<CreatePanelKind | null>(null);
   const [profileName, setProfileName] = useState(() => readStoredControlPlaneAuth()?.displayName ?? '');
   const [gatewayUnavailable, setGatewayUnavailable] = useState<string | null>(null);
   const [quotaExceeded, setQuotaExceeded] = useState<string | null>(null);
@@ -200,13 +197,11 @@ export function ControlPlanePage() {
     workspaces: boolean;
     sessions: boolean;
     usageEvents: boolean;
-    adminUsers: boolean;
   }>({
     projects: false,
     workspaces: false,
     sessions: false,
     usageEvents: false,
-    adminUsers: false,
   });
   const [workerConnectionState, setWorkerConnectionState] = useState<'idle' | 'connecting' | 'ready' | 'reconnecting'>('idle');
   const routeTokenRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -254,6 +249,32 @@ export function ControlPlanePage() {
     : !sandboxReady
       ? 'Start the sandbox before connecting a session.'
       : undefined;
+  const createTarget: CreatePanelKind = selectedWorkspace ? 'session' : selectedProject ? 'workspace' : 'project';
+  const createTargetLabel =
+    createTarget === 'project' ? 'Project' : createTarget === 'workspace' ? 'Workspace' : 'Session';
+  const createPanelTitle =
+    createPanelOpen === 'project'
+      ? 'Create project'
+      : createPanelOpen === 'workspace'
+        ? `Create workspace in ${selectedProject?.name ?? 'project'}`
+        : createPanelOpen === 'session'
+          ? `Create session in ${selectedWorkspace?.name ?? 'workspace'}`
+          : '';
+  const createPanelBlocker =
+    createPanelOpen === 'workspace'
+      ? workspaceCreateBlocker
+      : createPanelOpen === 'session'
+        ? sessionCreateBlocker
+        : undefined;
+  const selectedPath = [
+    selectedProject?.name,
+    selectedWorkspace?.name,
+    selectedSession?.title,
+  ].filter(Boolean).join(' / ');
+  const accountInitial = (user?.displayName ?? user?.email ?? 'U').trim().charAt(0).toUpperCase() || 'U';
+  const totalTokens = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
+  const activeSessions = sessions.filter((session) => session.status === 'active').length;
+  const controlPlaneBaseUrl = auth?.baseUrl ?? readStoredControlPlaneAuth()?.baseUrl ?? 'not connected';
 
   async function run<T>(label: string, action: () => Promise<T>) {
     setBusy(label);
@@ -490,12 +511,13 @@ export function ControlPlanePage() {
     setAdminSandboxDetail(null);
     setUsage(null);
     setUsageEvents([]);
-    setAdminUsers([]);
     setAdminUsersForbidden(null);
     setProjects([]);
     setWorkspaces([]);
     setSessions([]);
     setRouteToken(null);
+    setAccountMenuOpen(false);
+    setCreatePanelOpen(null);
     clearRouteTokenRefreshTimer();
     setWorkerConnectionState('idle');
     setMessage('Signed out locally.');
@@ -534,6 +556,7 @@ export function ControlPlanePage() {
         slug: slugFromName(projectName),
       });
       await refresh(auth);
+      setCreatePanelOpen(null);
       setMessage(`Project "${created.project.name}" created. Select it before creating a workspace.`);
     });
   }
@@ -554,6 +577,7 @@ export function ControlPlanePage() {
       setSelectedWorkspaceId('');
       setSessions([]);
       setSelectedSessionId('');
+      setCreatePanelOpen(null);
       setMessage(`Workspace "${created.workspace.name}" created. Select it before creating a session.`);
     });
   }
@@ -571,6 +595,7 @@ export function ControlPlanePage() {
       const result = await fetchControlPlaneSessions(auth, selectedWorkspace.id);
       setSessions(result.sessions);
       setSelectedSessionId('');
+      setCreatePanelOpen(null);
       setMessage(`Session "${created.session.title}" created. Select it before connecting.`);
     });
   }
@@ -613,44 +638,6 @@ export function ControlPlanePage() {
       setAdminSandboxDetail(detail);
       setMessage('Sandbox detail loaded.');
     });
-  }
-
-  async function handleLoadAdminUsers() {
-    if (!auth) {
-      return;
-    }
-    setAdminUsersForbidden(null);
-    setMetadataLoading((current) => ({ ...current, adminUsers: true }));
-    const result = await run('Load admin users', async () => fetchControlPlaneAdminUsers(auth));
-    if (result) {
-      setAdminUsers(result.users);
-      setMessage('Admin users loaded.');
-    }
-    setMetadataLoading((current) => ({ ...current, adminUsers: false }));
-  }
-
-  async function handleAdminUserUpdate(
-    targetUser: ControlPlaneUser,
-    input: ControlPlaneAdminUserUpdate,
-  ) {
-    if (!auth) {
-      return;
-    }
-    setAdminUsersForbidden(null);
-    const result = await run('Update admin user', async () =>
-      updateControlPlaneAdminUser(auth, targetUser.id, input),
-    );
-    if (result) {
-      setAdminUsers((current) =>
-        current.map((adminUser) =>
-          adminUser.id === result.user.id ? result.user : adminUser,
-        ),
-      );
-      if (user?.id === result.user.id) {
-        setUser(result.user);
-      }
-      setMessage(`Updated ${result.user.email}.`);
-    }
   }
 
   async function handleRouteToken(
@@ -741,33 +728,81 @@ export function ControlPlanePage() {
       navigate(`/control-plane/sessions/${encodeURIComponent(result.session.id)}`);
     });
   }
-  const totalTokens = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
-  const activeSessions = sessions.filter((session) => session.status === 'active').length;
-  const controlPlaneBaseUrl = auth?.baseUrl ?? readStoredControlPlaneAuth()?.baseUrl ?? 'not connected';
 
   return (
     <div className="control-plane-console">
       <header className="control-console-header">
-        <div>
-          <p className="control-kicker">Control plane</p>
-          <h1>Product account and sandbox registry</h1>
-          <p>
-            Account, sandbox lifecycle, workspace inventory, sessions, and route-token access in
-            one operator surface.
-          </p>
+        <div className="control-titlebar-copy">
+          <h1>Control Plane</h1>
+          <span>{selectedPath || 'Select a project, workspace, or session'}</span>
         </div>
         <div className="control-header-actions">
           {sandbox ? (
-            <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${statusTone(sandbox.state)}`}>
+            <span className={`control-status-pill ${statusTone(sandbox.state)}`}>
               {sandbox.state}
             </span>
           ) : null}
           <ActionButton onClick={() => void refresh(auth)} disabled={!auth || busy === 'Load control plane'}>
             Refresh
           </ActionButton>
-          <ActionButton onClick={handleLogout}>
-            Sign out
-          </ActionButton>
+          <div className="control-account-menu">
+            <button
+              type="button"
+              className="control-avatar-button"
+              onClick={() => setAccountMenuOpen((open) => !open)}
+              aria-haspopup="menu"
+              aria-expanded={accountMenuOpen}
+              aria-label="Open account menu"
+            >
+              {accountInitial}
+            </button>
+            {accountMenuOpen ? (
+              <div className="control-account-popover" role="menu">
+                <div className="control-account-identity">
+                  <span className="control-avatar-badge">{accountInitial}</span>
+                  <div>
+                    <strong>{user?.displayName || user?.email || 'Account'}</strong>
+                    <span>{user?.email ?? 'Loading account'}</span>
+                  </div>
+                </div>
+                <dl className="control-detail-list compact two">
+                  <div><dt>Status</dt><dd>{user?.status ?? 'loading'}</dd></div>
+                  <div><dt>Plan</dt><dd>{user?.plan ?? 'developer'}</dd></div>
+                  <div><dt>Quota</dt><dd>{user?.quotaProfile ?? 'default'}</dd></div>
+                  <div><dt>API</dt><dd>{controlPlaneBaseUrl}</dd></div>
+                </dl>
+                <form onSubmit={handleProfileSave} className="control-inline-form">
+                  <Field label="Display name" value={profileName} onChange={setProfileName} />
+                  <ActionButton type="submit" disabled={!auth || busy === 'Update profile'}>
+                    Save
+                  </ActionButton>
+                </form>
+                <div className="control-usage-grid compact">
+                  <div><span>Requests</span><strong>{usage?.requestCount ?? 0}</strong></div>
+                  <div><span>Tokens</span><strong>{totalTokens}</strong></div>
+                  <div><span>Cost</span><strong>${Number(usage?.costUsd ?? 0).toFixed(2)}</strong></div>
+                </div>
+                <div className="control-usage-events compact">
+                  {metadataLoading.usageEvents ? (
+                    <p className="control-empty">Loading LLM usage...</p>
+                  ) : usageEvents.length === 0 ? (
+                    <p className="control-empty">No LLM usage events yet.</p>
+                  ) : (
+                    usageEvents.slice(0, 4).map((event) => (
+                      <div key={event.id}>
+                        <strong>{event.model}</strong>
+                        <span>{event.provider}, {event.inputTokens + event.outputTokens} tokens, ${Number(event.costUsd).toFixed(2)}</span>
+                        <small>{event.occurredAt}</small>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <ActionButton onClick={handleLogout}>
+                  Sign out
+                </ActionButton>
+              </div>
+            ) : null}
+          </div>
         </div>
       </header>
 
@@ -785,51 +820,282 @@ export function ControlPlanePage() {
         {sandboxNotice ? <div className={`control-alert ${sandboxNotice.tone}`}>{sandboxNotice.text}</div> : null}
       </div>
 
-      <section className="control-summary-strip" aria-label="Control plane summary">
-        <div>
-          <span>Account</span>
-          <strong>{user?.email ?? 'Loading'}</strong>
-        </div>
-        <div>
-          <span>Sandbox</span>
-          <strong>{sandbox?.state ?? 'unknown'}</strong>
-        </div>
-        <div>
-          <span>Projects</span>
-          <strong>{projects.length}</strong>
-        </div>
-        <div>
-          <span>Active sessions</span>
-          <strong>{activeSessions}</strong>
-        </div>
-        <div>
-          <span>LLM cost</span>
-          <strong>${Number(usage?.costUsd ?? 0).toFixed(2)}</strong>
-        </div>
-      </section>
-
       <div className="control-console-grid">
-        <aside className="control-sidebar-column">
-          <section className="control-panel">
-            <div className="control-panel-heading">
-              <h2>Account</h2>
-              <span>{user?.status ?? 'loading'}</span>
+        <aside className="control-explorer-panel">
+          <div className="control-explorer-toolbar">
+            <div>
+              <h2>Workspace Flow</h2>
+              <span>{projects.length} projects, {activeSessions} active sessions</span>
             </div>
-            <dl className="control-detail-list">
-              <div><dt>User</dt><dd>{user?.email ?? 'Loading account'}</dd></div>
-              <div><dt>Name</dt><dd>{user?.displayName ?? 'No display name'}</dd></div>
-              <div><dt>Plan</dt><dd>{user?.plan ?? 'developer'}</dd></div>
-              <div><dt>Quota</dt><dd>{user?.quotaProfile ?? 'default'}</dd></div>
-              <div><dt>API</dt><dd>{controlPlaneBaseUrl}</dd></div>
-            </dl>
-            <form onSubmit={handleProfileSave} className="control-inline-form">
-              <Field label="Display name" value={profileName} onChange={setProfileName} />
-              <ActionButton type="submit" disabled={!auth || busy === 'Update profile'}>
-                Save profile
-              </ActionButton>
-            </form>
+            <button
+              type="button"
+              className="control-icon-button"
+              onClick={() => setCreatePanelOpen(createTarget)}
+              aria-label={`Open create panel for ${createTargetLabel.toLowerCase()}`}
+              title={`Create ${createTargetLabel.toLowerCase()}`}
+            >
+              +
+            </button>
+          </div>
+
+          {createPanelOpen ? (
+            <div className="control-create-popover">
+              <div className="control-panel-heading">
+                <h2>{createPanelTitle}</h2>
+                <button
+                  type="button"
+                  className="control-icon-button quiet"
+                  onClick={() => setCreatePanelOpen(null)}
+                  aria-label="Close create panel"
+                >
+                  x
+                </button>
+              </div>
+              {createPanelOpen === 'project' ? (
+                <form onSubmit={handleCreateProject} className="control-create-form">
+                  <Field label="Project name" value={projectName} onChange={setProjectName} />
+                  <ActionButton type="submit" disabled={!canUseControlPlane}>
+                    Create project
+                  </ActionButton>
+                </form>
+              ) : createPanelOpen === 'workspace' ? (
+                <form onSubmit={handleCreateWorkspace} className="control-create-form">
+                  <Field label="Workspace name" value={workspaceName} onChange={setWorkspaceName} />
+                  {createPanelBlocker ? <p className="control-rule-note">{createPanelBlocker}</p> : null}
+                  <ActionButton type="submit" disabled={!canCreateWorkspace} title={workspaceCreateBlocker}>
+                    Create workspace
+                  </ActionButton>
+                </form>
+              ) : (
+                <form onSubmit={handleCreateSession} className="control-create-form">
+                  <Field label="Session title" value={sessionTitle} onChange={setSessionTitle} />
+                  <label className="control-field">
+                    <span>Provider</span>
+                    <select
+                      value={sessionProvider}
+                      onChange={(event) => setSessionProvider(event.currentTarget.value as AgentBackendIdDto)}
+                      disabled={!canCreateSession}
+                    >
+                      <option value="codex">Codex</option>
+                      <option value="claude">Claude</option>
+                      <option value="opencode">OpenCode</option>
+                    </select>
+                  </label>
+                  {createPanelBlocker ? <p className="control-rule-note">{createPanelBlocker}</p> : null}
+                  <ActionButton type="submit" disabled={!canCreateSession} title={sessionCreateBlocker}>
+                    Create session
+                  </ActionButton>
+                </form>
+              )}
+            </div>
+          ) : null}
+
+          <div className="control-explorer-tree">
+            {metadataLoading.projects ? (
+              <p className="control-empty">Loading projects...</p>
+            ) : projects.length === 0 ? (
+              <p className="control-empty">No projects yet.</p>
+            ) : (
+              projects.map((project) => (
+                <div key={project.id} className="control-tree-group">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedProjectId(project.id);
+                      setSelectedWorkspaceId('');
+                      setSessions([]);
+                      setSelectedSessionId('');
+                      setRouteToken(null);
+                      setWorkerSocketUrl(null);
+                      closeWorkerSocket();
+                      clearRouteTokenRefreshTimer();
+                      setWorkerConnectionState('idle');
+                    }}
+                    className={`control-tree-row project ${selectedProjectId === project.id ? 'selected' : ''}`}
+                  >
+                    <span className="control-tree-caret">{selectedProjectId === project.id ? 'v' : '>'}</span>
+                    <span className="control-tree-icon">P</span>
+                    <strong>{project.name}</strong>
+                    <small>{project.slug}</small>
+                  </button>
+
+                  {selectedProjectId === project.id ? (
+                    <div className="control-tree-children">
+                      {metadataLoading.workspaces ? (
+                        <p className="control-empty">Loading workspaces...</p>
+                      ) : workspaces.length === 0 ? (
+                        <p className="control-empty">No workspaces in this project.</p>
+                      ) : (
+                        workspaces.map((workspace) => (
+                          <div key={workspace.id} className="control-tree-group">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedWorkspaceId(workspace.id);
+                                setSelectedSessionId('');
+                                setRouteToken(null);
+                                setWorkerSocketUrl(null);
+                                closeWorkerSocket();
+                                clearRouteTokenRefreshTimer();
+                                setWorkerConnectionState('idle');
+                              }}
+                              className={`control-tree-row workspace ${selectedWorkspaceId === workspace.id ? 'selected' : ''}`}
+                            >
+                              <span className="control-tree-caret">{selectedWorkspaceId === workspace.id ? 'v' : '>'}</span>
+                              <span className="control-tree-icon">W</span>
+                              <strong>{workspace.name}</strong>
+                              <small>{workspace.path}</small>
+                            </button>
+
+                            {selectedWorkspaceId === workspace.id ? (
+                              <div className="control-tree-children sessions">
+                                {metadataLoading.sessions ? (
+                                  <p className="control-empty">Loading sessions...</p>
+                                ) : sessions.length === 0 ? (
+                                  <p className="control-empty">No sessions for this workspace.</p>
+                                ) : (
+                                  sessions.map((session) => (
+                                    <button
+                                      key={session.id}
+                                      type="button"
+                                      onClick={() => void handleOpenSession(session)}
+                                      className={`control-tree-row session ${selectedSessionId === session.id ? 'selected' : ''}`}
+                                    >
+                                      <span className="control-tree-caret" />
+                                      <span className="control-tree-icon">S</span>
+                                      <strong>{session.title}</strong>
+                                      <small>
+                                        {session.provider} / {session.status}
+                                        {session.workerSessionId ? '' : ' / not started in sandbox'}
+                                      </small>
+                                    </button>
+                                  ))
+                                )}
+                              </div>
+                            ) : null}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              ))
+            )}
+          </div>
+        </aside>
+
+        <main className="control-main-column">
+          <section className="control-panel control-selected-panel">
+            <div className="control-panel-heading">
+              <h2>{selectedSession ? 'Session' : selectedWorkspace ? 'Workspace' : selectedProject ? 'Project' : 'Selection'}</h2>
+              <span>{selectedSession?.status ?? selectedWorkspace?.sourceType ?? selectedProject?.status ?? 'root'}</span>
+            </div>
+
+            {selectedSession ? (
+              <>
+                <dl className="control-detail-list compact">
+                  <div><dt>Title</dt><dd>{selectedSession.title}</dd></div>
+                  <div><dt>Provider</dt><dd>{selectedSession.provider}</dd></div>
+                  <div><dt>Status</dt><dd>{selectedSession.status}</dd></div>
+                  <div><dt>Worker session</dt><dd>{selectedSession.workerSessionId ?? 'not started in sandbox'}</dd></div>
+                  <div><dt>Created</dt><dd>{selectedSession.createdAt}</dd></div>
+                  <div><dt>Updated</dt><dd>{selectedSession.updatedAt}</dd></div>
+                </dl>
+                <div className="control-action-row start">
+                  <ActionButton
+                    onClick={() => void handleResumeSession(selectedSession)}
+                    disabled={!auth || !sandboxReady}
+                    title={!sandboxReady ? 'Start the sandbox before opening this session.' : undefined}
+                  >
+                    {selectedSession.workerSessionId ? 'Resume' : 'Start in sandbox'}
+                  </ActionButton>
+                  <ActionButton
+                    onClick={() => void handleCloseSession(selectedSession)}
+                    disabled={!auth || !selectedSession.workerSessionId || !sandboxReady}
+                    title={!selectedSession.workerSessionId ? 'Session has not been started in the sandbox yet.' : undefined}
+                  >
+                    Close
+                  </ActionButton>
+                </div>
+              </>
+            ) : selectedWorkspace ? (
+              <>
+                <dl className="control-detail-list compact">
+                  <div><dt>Workspace</dt><dd>{selectedWorkspace.name}</dd></div>
+                  <div><dt>Project</dt><dd>{selectedProject?.name ?? selectedWorkspace.projectId}</dd></div>
+                  <div><dt>Path</dt><dd>{selectedWorkspace.path}</dd></div>
+                  <div><dt>Source</dt><dd>{selectedWorkspace.sourceType}</dd></div>
+                  <div><dt>Sessions</dt><dd>{sessions.length}</dd></div>
+                  <div><dt>Sandbox</dt><dd>{sandbox?.state ?? 'unknown'}</dd></div>
+                </dl>
+                {sessionCreateBlocker ? <p className="control-rule-note">{sessionCreateBlocker}</p> : null}
+                <div className="control-action-row start">
+                  <ActionButton
+                    onClick={() => setCreatePanelOpen('session')}
+                    disabled={!canCreateSession}
+                    title={sessionCreateBlocker}
+                  >
+                    Create session
+                  </ActionButton>
+                </div>
+              </>
+            ) : selectedProject ? (
+              <>
+                <dl className="control-detail-list compact">
+                  <div><dt>Selected project</dt><dd>{selectedProject.name}</dd></div>
+                  <div><dt>Slug</dt><dd>{selectedProject.slug}</dd></div>
+                  <div><dt>Status</dt><dd>{selectedProject.status}</dd></div>
+                  <div><dt>Workspaces</dt><dd>{workspaces.length}</dd></div>
+                  <div><dt>Created</dt><dd>{selectedProject.createdAt}</dd></div>
+                  <div><dt>Updated</dt><dd>{selectedProject.updatedAt}</dd></div>
+                </dl>
+                <div className="control-action-row start">
+                  <ActionButton
+                    onClick={() => setCreatePanelOpen('workspace')}
+                    disabled={!canCreateWorkspace}
+                    title={workspaceCreateBlocker}
+                  >
+                    Create workspace
+                  </ActionButton>
+                </div>
+              </>
+            ) : (
+              <p className="control-empty">Select a project to open the workspace hierarchy.</p>
+            )}
           </section>
 
+          <section className="control-panel">
+            <div className="control-panel-heading">
+              <h2>Connection</h2>
+              <ActionButton
+                onClick={() => void handleRouteToken('connecting', selectedSessionId)}
+                disabled={!sandboxReady || !selectedSession}
+                title={sessionConnectBlocker}
+              >
+                Create route token
+              </ActionButton>
+            </div>
+            {routeToken ? (
+              <dl className="control-detail-list compact route-token">
+                <div><dt>Session</dt><dd>{selectedSession?.title ?? selectedSessionId}</dd></div>
+                <div><dt>Router</dt><dd>{routeToken.routerBaseUrl}</dd></div>
+                <div><dt>WebSocket</dt><dd>{routeToken.wsBaseUrl}</dd></div>
+                <div><dt>Connection</dt><dd>{workerConnectionState}</dd></div>
+                <div><dt>Worker socket</dt><dd>{workerSocketUrl ?? 'not connected'}</dd></div>
+                <div><dt>Expires</dt><dd>{routeToken.expiresAt}</dd></div>
+              </dl>
+            ) : selectedSession ? (
+              <p className="control-empty">
+                Selected session: {selectedSession.title}. Use Resume or Create route token after the
+                sandbox is running.
+              </p>
+            ) : (
+              <p className="control-empty">Select a session before opening a worker route.</p>
+            )}
+          </section>
+        </main>
+
+        <aside className="control-right-column">
           <section className="control-panel">
             <div className="control-panel-heading">
               <h2>Sandbox</h2>
@@ -885,314 +1151,6 @@ export function ControlPlanePage() {
               </>
             ) : (
               <p className="control-empty">Loading sandbox registry.</p>
-            )}
-          </section>
-        </aside>
-
-        <main className="control-main-column">
-          <section className="control-panel control-flow-panel">
-            <div className="control-panel-heading">
-              <h2>Workspace flow</h2>
-              <span>Project to workspace to session</span>
-            </div>
-
-            <div className="control-flow-stack">
-              <section className="control-flow-step">
-                <div className="control-step-heading">
-                  <span className="control-step-index">1</span>
-                  <div>
-                    <h3>Project</h3>
-                    <p>{selectedProject ? `Selected: ${selectedProject.name}` : 'Create or select a project first.'}</p>
-                  </div>
-                  <span className="control-count-pill">{projects.length} total</span>
-                </div>
-                <form onSubmit={handleCreateProject} className="control-compose-row">
-                  <Field label="Project name" value={projectName} onChange={setProjectName} />
-                  <ActionButton type="submit" disabled={!canUseControlPlane}>
-                    Create project
-                  </ActionButton>
-                </form>
-                <div className="control-list">
-                  {metadataLoading.projects ? (
-                    <p className="control-empty">Loading projects...</p>
-                  ) : projects.length === 0 ? (
-                    <p className="control-empty">No projects yet.</p>
-                  ) : (
-                    projects.map((project) => (
-                      <button
-                        key={project.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedProjectId(project.id);
-                          setSelectedWorkspaceId('');
-                          setSessions([]);
-                          setSelectedSessionId('');
-                          setRouteToken(null);
-                          setWorkerSocketUrl(null);
-                          closeWorkerSocket();
-                          clearRouteTokenRefreshTimer();
-                          setWorkerConnectionState('idle');
-                        }}
-                        className={selectedProjectId === project.id ? 'selected' : ''}
-                      >
-                        <strong>{project.name}</strong>
-                        <span>{project.slug}</span>
-                      </button>
-                    ))
-                  )}
-                </div>
-                {selectedProject ? (
-                  <dl className="control-detail-list compact">
-                    <div><dt>Selected project</dt><dd>{selectedProject.name}</dd></div>
-                    <div><dt>Status</dt><dd>{selectedProject.status}</dd></div>
-                    <div><dt>Workspaces</dt><dd>{workspaces.length}</dd></div>
-                  </dl>
-                ) : null}
-              </section>
-
-              <section className={`control-flow-step ${!selectedProject ? 'disabled' : ''}`}>
-                <div className="control-step-heading">
-                  <span className="control-step-index">2</span>
-                  <div>
-                    <h3>Workspace</h3>
-                    <p>
-                      {selectedWorkspace
-                        ? `Selected: ${selectedWorkspace.name} in ${selectedProject?.name ?? 'project'}`
-                        : selectedProject
-                          ? `Scoped to ${selectedProject.name}.`
-                          : 'Select a project before workspaces are available.'}
-                    </p>
-                  </div>
-                  <span className="control-count-pill">{workspaces.length} in project</span>
-                </div>
-                <form onSubmit={handleCreateWorkspace} className="control-compose-row">
-                  <Field label="Workspace name" value={workspaceName} onChange={setWorkspaceName} />
-                  <ActionButton
-                    type="submit"
-                    disabled={!canCreateWorkspace}
-                    title={workspaceCreateBlocker}
-                  >
-                    Create workspace
-                  </ActionButton>
-                </form>
-                {workspaceCreateBlocker ? <p className="control-rule-note">{workspaceCreateBlocker}</p> : null}
-                <div className="control-list">
-                  {!selectedProject ? (
-                    <p className="control-empty">Select a project to load its workspaces.</p>
-                  ) : metadataLoading.workspaces ? (
-                    <p className="control-empty">Loading workspaces...</p>
-                  ) : workspaces.length === 0 ? (
-                    <p className="control-empty">No workspaces in this project.</p>
-                  ) : (
-                    workspaces.map((workspace) => (
-                      <button
-                        key={workspace.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedWorkspaceId(workspace.id);
-                          setSelectedSessionId('');
-                          setRouteToken(null);
-                          setWorkerSocketUrl(null);
-                          closeWorkerSocket();
-                          clearRouteTokenRefreshTimer();
-                          setWorkerConnectionState('idle');
-                        }}
-                        className={selectedWorkspaceId === workspace.id ? 'selected' : ''}
-                      >
-                        <strong>{workspace.name}</strong>
-                        <span>{workspace.path}</span>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </section>
-
-              <section className={`control-flow-step ${!selectedWorkspace ? 'disabled' : ''}`}>
-                <div className="control-step-heading">
-                  <span className="control-step-index">3</span>
-                  <div>
-                    <h3>Session</h3>
-                    <p>
-                      {selectedSession
-                        ? `Selected: ${selectedSession.title} (${selectedSession.status})`
-                        : selectedWorkspace
-                          ? `Scoped to ${selectedWorkspace.name}. Sandbox must be running.`
-                          : 'Select a workspace before sessions are available.'}
-                    </p>
-                  </div>
-                  <span className={`control-count-pill ${sandboxReady ? 'ready' : 'blocked'}`}>
-                    sandbox {sandbox?.state ?? 'unknown'}
-                  </span>
-                </div>
-                <form onSubmit={handleCreateSession} className="control-compose-row session">
-                  <Field label="Session title" value={sessionTitle} onChange={setSessionTitle} />
-                  <label className="control-field">
-                    <span>Provider</span>
-                    <select
-                      value={sessionProvider}
-                      onChange={(event) => setSessionProvider(event.currentTarget.value as AgentBackendIdDto)}
-                      disabled={!canCreateSession}
-                    >
-                      <option value="codex">Codex</option>
-                      <option value="claude">Claude</option>
-                      <option value="opencode">OpenCode</option>
-                    </select>
-                  </label>
-                  <ActionButton
-                    type="submit"
-                    disabled={!canCreateSession}
-                    title={sessionCreateBlocker}
-                  >
-                    Create session
-                  </ActionButton>
-                </form>
-                {sessionCreateBlocker ? <p className="control-rule-note">{sessionCreateBlocker}</p> : null}
-                <div className="control-session-list">
-                  {!selectedWorkspace ? (
-                    <p className="control-empty">Select a workspace to load its sessions.</p>
-                  ) : metadataLoading.sessions ? (
-                    <p className="control-empty">Loading sessions...</p>
-                  ) : sessions.length === 0 ? (
-                    <p className="control-empty">No sessions for this workspace.</p>
-                  ) : (
-                    sessions.map((session) => (
-                      <div key={session.id} className={selectedSessionId === session.id ? 'selected' : ''}>
-                        <button type="button" onClick={() => void handleOpenSession(session)}>
-                          <strong>{session.title}</strong>
-                          <span>
-                            {session.provider} / {session.status}
-                            {session.workerSessionId ? '' : ' / not started in sandbox'}
-                          </span>
-                        </button>
-                        <div>
-                          <ActionButton
-                            onClick={() => void handleResumeSession(session)}
-                            disabled={!auth || !sandboxReady}
-                            title={!sandboxReady ? 'Start the sandbox before opening this session.' : undefined}
-                          >
-                            {session.workerSessionId ? 'Resume' : 'Start in sandbox'}
-                          </ActionButton>
-                          <ActionButton
-                            onClick={() => void handleCloseSession(session)}
-                            disabled={!auth || !session.workerSessionId || !sandboxReady}
-                            title={!session.workerSessionId ? 'Session has not been started in the sandbox yet.' : undefined}
-                          >
-                            Close
-                          </ActionButton>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </section>
-            </div>
-          </section>
-
-          <section className="control-panel">
-            <div className="control-panel-heading">
-              <h2>Connection</h2>
-              <ActionButton
-                onClick={() => void handleRouteToken('connecting', selectedSessionId)}
-                disabled={!sandboxReady || !selectedSession}
-                title={sessionConnectBlocker}
-              >
-                Create route token
-              </ActionButton>
-            </div>
-            {routeToken ? (
-              <dl className="control-detail-list compact route-token">
-                <div><dt>Session</dt><dd>{selectedSession?.title ?? selectedSessionId}</dd></div>
-                <div><dt>Router</dt><dd>{routeToken.routerBaseUrl}</dd></div>
-                <div><dt>WebSocket</dt><dd>{routeToken.wsBaseUrl}</dd></div>
-                <div><dt>Connection</dt><dd>{workerConnectionState}</dd></div>
-                <div><dt>Worker socket</dt><dd>{workerSocketUrl ?? 'not connected'}</dd></div>
-                <div><dt>Expires</dt><dd>{routeToken.expiresAt}</dd></div>
-              </dl>
-            ) : selectedSession ? (
-              <p className="control-empty">
-                Selected session: {selectedSession.title}. Use Resume or Create route token after the
-                sandbox is running.
-              </p>
-            ) : (
-              <p className="control-empty">Select a session before opening a worker route.</p>
-            )}
-          </section>
-        </main>
-
-        <aside className="control-right-column">
-          <section className="control-panel">
-            <div className="control-panel-heading">
-              <h2>LLM usage</h2>
-              <span>{usage?.requestCount ?? 0} requests</span>
-            </div>
-            <div className="control-usage-grid">
-              <div><span>Tokens</span><strong>{totalTokens}</strong></div>
-              <div><span>Cached</span><strong>{usage?.cachedTokens ?? 0}</strong></div>
-              <div><span>Cost</span><strong>${Number(usage?.costUsd ?? 0).toFixed(2)}</strong></div>
-            </div>
-            <div className="control-usage-events">
-              {metadataLoading.usageEvents ? (
-                <p className="control-empty">Loading LLM usage...</p>
-              ) : usageEvents.length === 0 ? (
-                <p className="control-empty">No LLM usage events yet.</p>
-              ) : (
-                usageEvents.map((event) => (
-                  <div key={event.id}>
-                    <strong>{event.model}</strong>
-                    <span>{event.provider}, {event.inputTokens + event.outputTokens} tokens, ${Number(event.costUsd).toFixed(2)}</span>
-                    <small>{event.occurredAt}</small>
-                  </div>
-                ))
-              )}
-            </div>
-          </section>
-
-          <section className="control-panel">
-            <div className="control-panel-heading">
-              <h2>Admin users</h2>
-              <ActionButton
-                onClick={() => void handleLoadAdminUsers()}
-                disabled={!canUseControlPlane || metadataLoading.adminUsers}
-              >
-                Load users
-              </ActionButton>
-            </div>
-            {metadataLoading.adminUsers ? (
-              <p className="control-empty">Loading admin users...</p>
-            ) : adminUsers.length === 0 ? (
-              <p className="control-empty">No admin users loaded.</p>
-            ) : (
-              <div className="control-admin-list">
-                {adminUsers.map((adminUser) => (
-                  <div key={adminUser.id}>
-                    <strong>{adminUser.email}</strong>
-                    <span>{adminUser.displayName ?? 'No display name'}</span>
-                    <select
-                      value={adminUser.status}
-                      onChange={(event) => {
-                        const status = event.currentTarget.value as (typeof USER_STATUSES)[number];
-                        void handleAdminUserUpdate(adminUser, { status });
-                      }}
-                    >
-                      {USER_STATUSES.map((status) => (
-                        <option key={status} value={status}>
-                          {status}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      aria-label={`Quota profile for ${adminUser.email}`}
-                      defaultValue={adminUser.quotaProfile ?? 'default'}
-                      onBlur={(event) => {
-                        const quotaProfile = event.currentTarget.value.trim();
-                        if (quotaProfile && quotaProfile !== adminUser.quotaProfile) {
-                          void handleAdminUserUpdate(adminUser, { quotaProfile });
-                        }
-                      }}
-                    />
-                  </div>
-                ))}
-              </div>
             )}
           </section>
 
