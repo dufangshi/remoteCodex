@@ -16,6 +16,14 @@ import { redactSecretText } from './secret-redaction.js';
 
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const requiredHarnessIntegrationGatesForReview = [
+  'harness-admin-contract',
+  'harness-worker-runtime',
+  'harness-secret-safety',
+  'harness-usage-attribution',
+  'harness-mcp-worker-api',
+  'harness-thread-artifact-ui',
+];
 
 async function runScript(script: string, args: string[] = []) {
   return runScriptWithEnv(script, args);
@@ -110,12 +118,115 @@ async function fakeAwsKubectlBin(root: string) {
   return binDir;
 }
 
+async function fakeHarnessKubectlBin(root: string) {
+  const binDir = path.join(root, 'bin-harness-kubectl');
+  await mkdir(binDir, { recursive: true });
+  const kubectlPath = path.join(binDir, 'kubectl');
+  await writeFile(
+    kubectlPath,
+    [
+      '#!/usr/bin/env node',
+      'const args = process.argv.slice(2);',
+      "if (args[0] === 'auth' && args[1] === 'can-i' && args[3] === 'secrets') {",
+      "  console.log('yes');",
+      '  process.exit(0);',
+      '}',
+      "if (args[0] === 'get' && args[1] === 'secret') {",
+      '  console.log(JSON.stringify({ data: { "sandbox-smoke": "cmVkYWN0ZWQ=" } }));',
+      '  process.exit(0);',
+      '}',
+      'console.error(`unexpected kubectl args: ${args.join(" ")}`);',
+      'process.exit(2);',
+      '',
+    ].join('\n'),
+  );
+  await chmod(kubectlPath, 0o755);
+  return binDir;
+}
+
+async function fakeHarnessEvidencePnpmBin(root: string) {
+  const binDir = path.join(root, 'bin-harness-evidence-pnpm');
+  await mkdir(binDir, { recursive: true });
+  const pnpmPath = path.join(binDir, 'pnpm');
+  await writeFile(
+    pnpmPath,
+    [
+      '#!/usr/bin/env node',
+      'const args = process.argv.slice(2);',
+      'const command = args[0];',
+      "if (command === 'smoke:harness-admin-contract') {",
+      '  console.log(JSON.stringify({ ok: true, steps: [',
+      '    "unauthenticated POST /admin/members/ensure",',
+      '    "unauthenticated GET /admin/usage/export?limit=1",',
+      '    "authenticated ensure creates or returns member",',
+      '    "authenticated ensure is idempotent",',
+      '    "authenticated reconcile returns existing external key",',
+      '    "authenticated rekey returns a new key",',
+      '    "authenticated usage export returns Remote Codex shape",',
+      '    "authenticated revoke marks key revoked"',
+      '  ].map((name) => ({ name, ok: true })) }));',
+      '  process.exit(0);',
+      '}',
+      "if (command === 'smoke:staging-phase-one') {",
+      '  console.log(JSON.stringify({ ok: true, steps: [',
+      '    "sandbox_ready",',
+      '    "browser_to_router_to_worker",',
+      '    "harness_worker_status",',
+      '    "harness_worker_home",',
+      '    "harness_worker_discovery",',
+      '    "harness_control_plane_invoke",',
+      '    "harness_usage_summary_after_invoke",',
+      '    "harness_mcp_worker_api_smoke",',
+      '    "harness_thread_artifact_ui_smoke"',
+      '  ].map((name) => ({ name, ok: true })) }));',
+      '  process.exit(0);',
+      '}',
+      "if (command === 'smoke:harness-k8s-secret') {",
+      '  console.log(JSON.stringify({ ok: true, secretSafety: { valuePrinted: false }, steps: [',
+      '    "harness_k8s_secret_rbac_get",',
+      '    "harness_k8s_secret_rbac_patch",',
+      '    "harness_k8s_secret_key_present"',
+      '  ].map((name) => ({ name, ok: true })) }));',
+      '  process.exit(0);',
+      '}',
+      "if (command === 'verify:harness-integration-evidence') {",
+      '  console.log(JSON.stringify({ ok: true, verifications: [',
+      '    "harness-admin-contract",',
+      '    "harness-worker-runtime",',
+      '    "harness-secret-safety",',
+      '    "harness-usage-attribution",',
+      '    "harness-mcp-worker-api",',
+      '    "harness-thread-artifact-ui"',
+      '  ].map((id) => ({ id, ok: true })) }));',
+      '  process.exit(0);',
+      '}',
+      "if (command === 'verify:harness-evidence-review') {",
+      '  console.log(JSON.stringify({ ok: true, checks: [',
+      '    "review_metadata_present",',
+      '    "admin_smoke_reviewed",',
+      '    "staging_smoke_reviewed",',
+      '    "k8s_secret_smoke_reviewed",',
+      '    "combined_verifier_reviewed",',
+      '    "secret_safety_reviewed"',
+      '  ].map((name) => ({ name, ok: true })) }));',
+      '  process.exit(0);',
+      '}',
+      'console.error(`unexpected pnpm args: ${args.join(" ")}`);',
+      'process.exit(2);',
+      '',
+    ].join('\n'),
+  );
+  await chmod(pnpmPath, 0o755);
+  return pnpmPath;
+}
+
 async function withFakeStagingServers(
   handler: (input: { controlPlaneBaseUrl: string; directWorkerBaseUrl: string }) => Promise<void>,
 ) {
   const state = {
     sandboxStarted: false,
     sandboxStopped: false,
+    harnessUsageEvents: 0,
   };
   const directWorker = http.createServer((request, response) => {
     if (request.url === '/api/worker/metadata') {
@@ -222,6 +333,49 @@ async function withFakeStagingServers(
       });
       return;
     }
+    if (
+      request.method === 'GET' &&
+      url.pathname === '/api/sandboxes/sandbox-smoke/api/harness/status'
+    ) {
+      json({
+        harness: {
+          enabled: true,
+          baseUrl: 'https://elagenteharness.example.test',
+          keyPresent: true,
+          chemistryToolsEnabled: true,
+          modules: ['estructural', 'quntur', 'farmaco'],
+        },
+        health: { status: 'ok' },
+      });
+      return;
+    }
+    if (
+      request.method === 'GET' &&
+      url.pathname === '/api/sandboxes/sandbox-smoke/api/harness/home'
+    ) {
+      json({
+        payload: {
+          service: 'ElAgenteHarness',
+          modules: ['estructural', 'quntur', 'farmaco'],
+        },
+      });
+      return;
+    }
+    if (
+      request.method === 'GET' &&
+      url.pathname === '/api/sandboxes/sandbox-smoke/api/harness/modules/farmaco/tools'
+    ) {
+      json({
+        payload: {
+          tools: [
+            {
+              name: 'generate_ligand_xyz',
+            },
+          ],
+        },
+      });
+      return;
+    }
     if (request.method === 'GET' && url.pathname === '/api/sandboxes/sandbox-smoke/readyz') {
       json({
         status: 'ready',
@@ -231,6 +385,40 @@ async function withFakeStagingServers(
             status: 'ready',
           },
         ],
+      });
+      return;
+    }
+    if (request.method === 'GET' && url.pathname === '/api/usage/harness/summary') {
+      json({
+        usage: {
+          eventCount: state.harnessUsageEvents,
+          costUsd: 0,
+        },
+      });
+      return;
+    }
+    if (
+      request.method === 'POST' &&
+      url.pathname === '/api/sandbox/harness/modules/farmaco/tools/generate_ligand_xyz/invoke'
+    ) {
+      state.harnessUsageEvents += 1;
+      json({
+        result: {
+          payload: {
+            run_id: 'run-harness-smoke',
+            status: 'completed',
+          },
+        },
+        harnessUsageEvent: {
+          id: 'harness-usage-smoke',
+          workspaceId: 'workspace-smoke',
+          sessionId: 'session-smoke',
+          module: 'farmaco',
+          tool: 'generate_ligand_xyz',
+          runId: 'run-harness-smoke',
+          jobId: null,
+          status: 'completed',
+        },
       });
       return;
     }
@@ -558,13 +746,227 @@ function completeStagingSmokeEvidence() {
   };
 }
 
+function completeHarnessStagingSteps(options: {
+  includeHome?: boolean;
+  includeMcp?: boolean;
+  includeArtifact?: boolean;
+  includeUsageDetails?: boolean;
+} = {}) {
+  const includeHome = options.includeHome ?? true;
+  const includeMcp = options.includeMcp ?? true;
+  const includeArtifact = options.includeArtifact ?? true;
+  const includeUsageDetails = options.includeUsageDetails ?? true;
+  return [
+    { name: 'sandbox_ready', ok: true },
+    { name: 'browser_to_router_to_worker', ok: true },
+    {
+      name: 'harness_worker_status',
+      ok: true,
+      details: {
+        enabled: true,
+        baseUrl: 'https://elagenteharness.example.test',
+        keyPresent: true,
+        chemistryToolsEnabled: true,
+        modules: ['estructural', 'quntur', 'farmaco'],
+        health: { status: 'ok' },
+      },
+    },
+    ...(includeHome
+      ? [
+          {
+            name: 'harness_worker_home',
+            ok: true,
+            details: {
+              responseKeys: ['payload'],
+              textLength: 128,
+            },
+          },
+        ]
+      : []),
+    {
+      name: 'harness_worker_discovery',
+      ok: true,
+      details: {
+        module: 'farmaco',
+        mode: 'tools',
+        responseKeys: ['payload'],
+        textLength: 256,
+      },
+    },
+    {
+      name: 'harness_control_plane_invoke',
+      ok: true,
+      ...(includeUsageDetails
+        ? {
+            details: {
+              module: 'farmaco',
+              tool: 'generate_ligand_xyz',
+              expectedWorkspaceId: 'workspace-smoke',
+              expectedSessionId: 'session-smoke',
+              usageEventId: 'harness-usage-smoke',
+              workspaceId: 'workspace-smoke',
+              sessionId: 'session-smoke',
+              runId: 'run-harness-smoke',
+              externalEventId: 'event-harness-smoke',
+              status: 'completed',
+            },
+          }
+        : {}),
+    },
+    {
+      name: 'harness_usage_summary_after_invoke',
+      ok: true,
+      ...(includeUsageDetails
+        ? {
+            details: {
+              beforeEventCount: 0,
+              afterEventCount: 1,
+            },
+          }
+        : {}),
+    },
+    ...(includeMcp
+      ? [
+          {
+            name: 'harness_mcp_worker_api_smoke',
+            ok: true,
+            details: {
+              expectedSource: 'worker-api',
+              observedSource: 'worker-api',
+              parsedStdout: { source: 'worker-api' },
+            },
+          },
+        ]
+      : []),
+    ...(includeArtifact
+      ? [
+          {
+            name: 'harness_thread_artifact_ui_smoke',
+            ok: true,
+            details: {
+              expectedArtifactTypes: [
+                'elagente.harness.run',
+                'elagente.harness.artifact',
+                'chemistry.molecule3d',
+              ],
+              observedArtifactTypes: ['elagente.harness.run'],
+              parsedStdout: { artifactTypes: ['elagente.harness.run'] },
+            },
+          },
+        ]
+      : []),
+  ];
+}
+
+function completeHarnessAdminSteps() {
+  return [
+    {
+      name: 'unauthenticated POST /admin/members/ensure',
+      ok: true,
+      status: 401,
+      details: {
+        expectedStatus: 401,
+        message: 'ERROR 401: X-Admin-Key required',
+      },
+    },
+    {
+      name: 'unauthenticated GET /admin/usage/export?limit=1',
+      ok: true,
+      status: 401,
+      details: {
+        expectedStatus: 401,
+        message: 'ERROR 401: X-Admin-Key required',
+      },
+    },
+    {
+      name: 'authenticated ensure creates or returns member',
+      ok: true,
+      status: 200,
+      details: {
+        created: true,
+        externalKeyId: 'remote-codex:smoke:harness-admin',
+        externalUserId: 'remote-codex:user:harness-admin-smoke',
+        apiKeyPresent: true,
+        body: {
+          externalKeyId: 'remote-codex:smoke:harness-admin',
+          externalUserId: 'remote-codex:user:harness-admin-smoke',
+          apiKey: '[redacted]',
+          api_key: '[redacted]',
+          created: true,
+        },
+      },
+    },
+    {
+      name: 'authenticated ensure is idempotent',
+      ok: true,
+      status: 200,
+      details: {
+        created: false,
+        externalKeyId: 'remote-codex:smoke:harness-admin',
+        apiKeyPresent: true,
+        body: {
+          externalKeyId: 'remote-codex:smoke:harness-admin',
+          apiKey: '[redacted]',
+          created: false,
+        },
+      },
+    },
+    {
+      name: 'authenticated reconcile returns existing external key',
+      ok: true,
+      status: 200,
+      details: {
+        externalKeyId: 'remote-codex:smoke:harness-admin',
+        apiKey: '[redacted]',
+      },
+    },
+    {
+      name: 'authenticated rekey returns a new key',
+      ok: true,
+      status: 200,
+      details: {
+        externalKeyId: 'remote-codex:smoke:harness-admin',
+        apiKeyPresent: true,
+        keyChanged: true,
+        body: {
+          externalKeyId: 'remote-codex:smoke:harness-admin',
+          apiKey: '[redacted]',
+        },
+      },
+    },
+    {
+      name: 'authenticated usage export returns Remote Codex shape',
+      ok: true,
+      status: 200,
+      details: {
+        eventCount: 0,
+        nextCursorPresent: true,
+        body: {
+          events: [],
+          nextCursor: null,
+        },
+      },
+    },
+    {
+      name: 'authenticated revoke marks key revoked',
+      ok: true,
+      status: 200,
+      details: {
+        externalKeyId: 'remote-codex:smoke:harness-admin',
+        status: 'revoked',
+      },
+    },
+  ];
+}
+
 describe('phase zero-six evidence tooling', () => {
   it('redacts obvious secrets before evidence stdout is stored', () => {
+    const fakeAwsAccessKey = `AKIA${'ABCDEFGHIJKLMNOP'}`;
     const raw = [
       'Authorization: Bearer eyJaaaaaaaaaaaaaaaa.eyJbbbbbbbbbbbbbbbb.cccccccccccccccccc',
       'openai sk-testsecretvalue1234567890',
       'anthropic sk-ant-testsecretvalue1234567890',
-      'aws AKIAABCDEFGHIJKLMNOP',
+      `aws ${fakeAwsAccessKey}`,
       'github ghp_abcdefghijklmnopqrstuvwxyz',
     ].join('\n');
     const redacted = redactSecretText(raw);
@@ -577,7 +979,7 @@ describe('phase zero-six evidence tooling', () => {
     expect(redacted).not.toContain('eyJaaaaaaaaaaaaaaaa');
     expect(redacted).not.toContain('sk-testsecretvalue1234567890');
     expect(redacted).not.toContain('sk-ant-testsecretvalue1234567890');
-    expect(redacted).not.toContain('AKIAABCDEFGHIJKLMNOP');
+    expect(redacted).not.toContain(fakeAwsAccessKey);
     expect(redacted).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz');
   });
 
@@ -1961,6 +2363,1063 @@ describe('phase zero-six evidence tooling', () => {
     });
   });
 
+  it('records optional Harness staging smoke steps through router and control-plane APIs', async () => {
+    await withFakeStagingServers(async ({ controlPlaneBaseUrl }) => {
+      const result = await runScriptWithEnv(
+        'scripts/staging-phase-one-smoke.ts',
+        [],
+        {
+          STAGING_CONTROL_PLANE_BASE_URL: controlPlaneBaseUrl,
+          STAGING_PRODUCT_JWT: 'secret-product-jwt-value',
+          STAGING_HARNESS_SMOKE: '1',
+          STAGING_HARNESS_MODULE: 'farmaco',
+          STAGING_HARNESS_INVOKE_TOOL: 'generate_ligand_xyz',
+          STAGING_HARNESS_INVOKE_INPUT_JSON: '{"smiles":"CCO"}',
+        },
+      );
+      const parsed = JSON.parse(result.stdout);
+      const steps = new Map(
+        parsed.steps.map((step: { name: string }) => [step.name, step]),
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(steps.get('harness_worker_status')).toMatchObject({
+        name: 'harness_worker_status',
+        ok: true,
+        details: {
+          enabled: true,
+          keyPresent: true,
+          chemistryToolsEnabled: true,
+        },
+      });
+      expect(steps.get('harness_worker_home')).toMatchObject({
+        name: 'harness_worker_home',
+        ok: true,
+        details: {
+          responseKeys: ['payload'],
+        },
+      });
+      expect(steps.get('harness_worker_discovery')).toMatchObject({
+        name: 'harness_worker_discovery',
+        ok: true,
+        details: {
+          module: 'farmaco',
+          mode: 'tools',
+        },
+      });
+      expect(steps.get('harness_control_plane_invoke')).toMatchObject({
+        name: 'harness_control_plane_invoke',
+        ok: true,
+        details: {
+          module: 'farmaco',
+          tool: 'generate_ligand_xyz',
+          expectedWorkspaceId: 'workspace-smoke',
+          expectedSessionId: 'session-smoke',
+          usageEventId: 'harness-usage-smoke',
+          workspaceId: 'workspace-smoke',
+          sessionId: 'session-smoke',
+          runId: 'run-harness-smoke',
+          status: 'completed',
+        },
+      });
+      expect(steps.get('harness_usage_summary_after_invoke')).toMatchObject({
+        name: 'harness_usage_summary_after_invoke',
+        ok: true,
+        details: {
+          beforeEventCount: 0,
+          afterEventCount: 1,
+        },
+      });
+      expect(result.stdout).not.toContain('secret-product-jwt-value');
+    });
+  });
+
+  it('verifies complete Harness integration evidence bundles', async () => {
+    const dir = await tempDir();
+    const adminPath = path.join(dir, 'harness-admin.json');
+    const stagingPath = path.join(dir, 'harness-staging.json');
+    const k8sPath = path.join(dir, 'harness-k8s.json');
+    await writeFile(adminPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessAdminSteps(),
+    }));
+    await writeFile(stagingPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessStagingSteps(),
+    }));
+    await writeFile(k8sPath, JSON.stringify({
+      ok: true,
+      secretSafety: { valuePrinted: false },
+      steps: [
+        'harness_k8s_secret_rbac_get',
+        'harness_k8s_secret_rbac_patch',
+        'harness_k8s_secret_key_present',
+      ].map((name) => ({ name, ok: true })),
+    }));
+
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-integration-evidence.ts',
+      ['--admin-smoke', adminPath, '--staging-smoke', stagingPath, '--k8s-secret-smoke', k8sPath],
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.verifications).toHaveLength(6);
+    expect(parsed.verifications.every((entry: { ok: boolean }) => entry.ok)).toBe(true);
+  });
+
+  it('fails Harness integration evidence when admin smoke details do not prove key shape', async () => {
+    const dir = await tempDir();
+    const adminPath = path.join(dir, 'harness-admin.json');
+    const stagingPath = path.join(dir, 'harness-staging.json');
+    const k8sPath = path.join(dir, 'harness-k8s.json');
+    const adminSteps = completeHarnessAdminSteps();
+    const ensureStep = adminSteps.find((step) => step.name === 'authenticated ensure creates or returns member');
+    const rekeyStep = adminSteps.find((step) => step.name === 'authenticated rekey returns a new key');
+    if (ensureStep) {
+      ensureStep.details = {
+        ...ensureStep.details,
+        apiKeyPresent: false,
+      };
+    }
+    if (rekeyStep) {
+      rekeyStep.details = {
+        ...rekeyStep.details,
+        keyChanged: false,
+      };
+    }
+    await writeFile(adminPath, JSON.stringify({
+      ok: true,
+      steps: adminSteps,
+    }));
+    await writeFile(stagingPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessStagingSteps(),
+    }));
+    await writeFile(k8sPath, JSON.stringify({
+      ok: true,
+      secretSafety: { valuePrinted: false },
+      steps: [
+        'harness_k8s_secret_rbac_get',
+        'harness_k8s_secret_rbac_patch',
+        'harness_k8s_secret_key_present',
+      ].map((name) => ({ name, ok: true })),
+    }));
+
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-integration-evidence.ts',
+      ['--admin-smoke', adminPath, '--staging-smoke', stagingPath, '--k8s-secret-smoke', k8sPath],
+    );
+    const parsed = JSON.parse(result.stdout);
+    const failedIds = parsed.verifications
+      .filter((entry: { ok: boolean }) => !entry.ok)
+      .map((entry: { id: string }) => entry.id);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(failedIds).toEqual(['harness-admin-contract']);
+  });
+
+  it('fails Harness integration evidence when admin smoke body contains a non-redacted key', async () => {
+    const dir = await tempDir();
+    const adminPath = path.join(dir, 'harness-admin.json');
+    const stagingPath = path.join(dir, 'harness-staging.json');
+    const k8sPath = path.join(dir, 'harness-k8s.json');
+    const adminSteps = completeHarnessAdminSteps();
+    const ensureStep = adminSteps.find((step) => step.name === 'authenticated ensure creates or returns member');
+    if (ensureStep?.details?.body && typeof ensureStep.details.body === 'object') {
+      ensureStep.details.body = {
+        ...ensureStep.details.body,
+        apiKey: 'sk-raw-harness-key-should-fail',
+      };
+    }
+    await writeFile(adminPath, JSON.stringify({
+      ok: true,
+      steps: adminSteps,
+    }));
+    await writeFile(stagingPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessStagingSteps(),
+    }));
+    await writeFile(k8sPath, JSON.stringify({
+      ok: true,
+      secretSafety: { valuePrinted: false },
+      steps: [
+        'harness_k8s_secret_rbac_get',
+        'harness_k8s_secret_rbac_patch',
+        'harness_k8s_secret_key_present',
+      ].map((name) => ({ name, ok: true })),
+    }));
+
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-integration-evidence.ts',
+      ['--admin-smoke', adminPath, '--staging-smoke', stagingPath, '--k8s-secret-smoke', k8sPath],
+    );
+    const parsed = JSON.parse(result.stdout);
+    const failedIds = parsed.verifications
+      .filter((entry: { ok: boolean }) => !entry.ok)
+      .map((entry: { id: string }) => entry.id);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(failedIds).toEqual([
+      'harness-admin-contract',
+      'harness-secret-safety',
+    ]);
+  });
+
+  it('collects Harness K8s Secret key presence without printing Secret values', async () => {
+    const dir = await tempDir();
+    const binDir = await fakeHarnessKubectlBin(dir);
+    const result = await runScriptWithEnv(
+      'scripts/harness-k8s-secret-smoke.ts',
+      [],
+      {
+        PATH: `${binDir}:${process.env.PATH ?? ''}`,
+        HARNESS_K8S_NAMESPACE: 'remote-codex-sandboxes',
+        ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: 'remote-codex-harness-app-keys',
+        HARNESS_K8S_SECRET_KEY: 'sandbox-smoke',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.secretSafety.valuePrinted).toBe(false);
+    expect(parsed.steps).toEqual([
+      expect.objectContaining({ name: 'harness_k8s_secret_rbac_get', ok: true }),
+      expect.objectContaining({ name: 'harness_k8s_secret_rbac_patch', ok: true }),
+      expect.objectContaining({
+        name: 'harness_k8s_secret_key_present',
+        ok: true,
+        details: expect.objectContaining({
+          secretName: 'remote-codex-harness-app-keys',
+          secretKey: 'sandbox-smoke',
+          keyPresent: true,
+        }),
+      }),
+    ]);
+    expect(result.stdout).not.toContain('cmVkYWN0ZWQ=');
+  });
+
+  it('requires Harness evidence review to include live smoke paths and secret-safety signoff', async () => {
+    const dir = await tempDir();
+    const reviewPath = path.join(dir, 'harness-evidence-review.json');
+    await writeFile(
+      reviewPath,
+      JSON.stringify(
+        {
+          generatedAt: new Date().toISOString(),
+          reviewedBy: 'operator@example.com',
+          reviewSource: 'staging-smoke-run',
+          harness: {
+            adminSmokePath: './.temp/harness-evidence/harness-admin-smoke.json',
+            adminSmokeOk: true,
+          },
+          remoteCodex: {
+            stagingSmokePath: './.temp/harness-evidence/staging-phase-one-smoke.json',
+            stagingSmokeOk: true,
+          },
+          kubernetes: {
+            k8sSecretSmokePath: './.temp/harness-evidence/harness-k8s-secret-smoke.json',
+            k8sSecretSmokeOk: true,
+            secretDataValuesPrinted: false,
+          },
+          combinedVerifier: {
+            path: './.temp/harness-evidence/harness-integration-verification.json',
+            ok: true,
+            requiredGates: requiredHarnessIntegrationGatesForReview,
+          },
+          secretSafety: {
+            valuesPrinted: false,
+            frontendBundleContainsHarnessKey: false,
+            apiResponseContainsHarnessKey: false,
+            threadMessageContainsHarnessKey: false,
+            logsContainHarnessKey: false,
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    const result = await runScript('scripts/verify-harness-evidence-review.ts', [
+      '--review',
+      reviewPath,
+    ]);
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.checks.map((entry: { name: string; ok: boolean }) => [entry.name, entry.ok])).toEqual([
+      ['review_metadata_present', true],
+      ['admin_smoke_reviewed', true],
+      ['staging_smoke_reviewed', true],
+      ['k8s_secret_smoke_reviewed', true],
+      ['combined_verifier_reviewed', true],
+      ['secret_safety_reviewed', true],
+    ]);
+  });
+
+  it('rejects Harness evidence review when secret safety is not signed off', async () => {
+    const dir = await tempDir();
+    const reviewPath = path.join(dir, 'harness-evidence-review-unsafe.json');
+    await writeFile(
+      reviewPath,
+      JSON.stringify(
+        {
+          generatedAt: new Date().toISOString(),
+          reviewedBy: 'operator@example.com',
+          reviewSource: 'staging-smoke-run',
+          harness: {
+            adminSmokePath: './.temp/harness-evidence/harness-admin-smoke.json',
+            adminSmokeOk: true,
+          },
+          remoteCodex: {
+            stagingSmokePath: './.temp/harness-evidence/staging-phase-one-smoke.json',
+            stagingSmokeOk: true,
+          },
+          kubernetes: {
+            k8sSecretSmokePath: './.temp/harness-evidence/harness-k8s-secret-smoke.json',
+            k8sSecretSmokeOk: true,
+            secretDataValuesPrinted: false,
+          },
+          combinedVerifier: {
+            path: './.temp/harness-evidence/harness-integration-verification.json',
+            ok: true,
+            requiredGates: requiredHarnessIntegrationGatesForReview,
+          },
+          secretSafety: {
+            valuesPrinted: true,
+            frontendBundleContainsHarnessKey: false,
+            apiResponseContainsHarnessKey: false,
+            threadMessageContainsHarnessKey: false,
+            logsContainHarnessKey: false,
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    const result = await runScript('scripts/verify-harness-evidence-review.ts', [
+      '--review',
+      reviewPath,
+    ]);
+    expect(result.exitCode).toBe(1);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.checks.find((entry: { name: string }) => entry.name === 'secret_safety_reviewed')?.ok).toBe(false);
+  });
+
+  it('rejects Harness evidence review when combined verifier gate list is incomplete', async () => {
+    const dir = await tempDir();
+    const reviewPath = path.join(dir, 'harness-evidence-review-missing-gate.json');
+    await writeFile(
+      reviewPath,
+      JSON.stringify(
+        {
+          generatedAt: new Date().toISOString(),
+          reviewedBy: 'operator@example.com',
+          reviewSource: 'staging-smoke-run',
+          harness: {
+            adminSmokePath: './.temp/harness-evidence/harness-admin-smoke.json',
+            adminSmokeOk: true,
+          },
+          remoteCodex: {
+            stagingSmokePath: './.temp/harness-evidence/staging-phase-one-smoke.json',
+            stagingSmokeOk: true,
+          },
+          kubernetes: {
+            k8sSecretSmokePath: './.temp/harness-evidence/harness-k8s-secret-smoke.json',
+            k8sSecretSmokeOk: true,
+            secretDataValuesPrinted: false,
+          },
+          combinedVerifier: {
+            path: './.temp/harness-evidence/harness-integration-verification.json',
+            ok: true,
+            requiredGates: requiredHarnessIntegrationGatesForReview.filter(
+              (gate) => gate !== 'harness-secret-safety',
+            ),
+          },
+          secretSafety: {
+            valuesPrinted: false,
+            frontendBundleContainsHarnessKey: false,
+            apiResponseContainsHarnessKey: false,
+            threadMessageContainsHarnessKey: false,
+            logsContainHarnessKey: false,
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    const result = await runScript('scripts/verify-harness-evidence-review.ts', [
+      '--review',
+      reviewPath,
+    ]);
+    expect(result.exitCode).toBe(1);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.checks.find((entry: { name: string }) => entry.name === 'combined_verifier_reviewed')?.ok).toBe(false);
+  });
+
+  it('collects a complete Harness evidence bundle when live env is present', async () => {
+    const dir = await tempDir();
+    const pnpmPath = await fakeHarnessEvidencePnpmBin(dir);
+    const outputDir = path.join(dir, 'harness-evidence');
+    const result = await runScriptWithEnv(
+      'scripts/collect-harness-integration-evidence.ts',
+      ['--output-dir', outputDir],
+      {
+        HARNESS_EVIDENCE_PNPM_BIN: pnpmPath,
+        ELAGENTE_HARNESS_ADMIN_BASE_URL: 'https://elagenteharness.example.test',
+        ELAGENTE_HARNESS_ADMIN_KEY: 'secret-admin-key',
+        STAGING_CONTROL_PLANE_BASE_URL: 'https://remote-codex.example.test',
+        STAGING_PRODUCT_JWT: 'secret-product-jwt',
+        STAGING_HARNESS_SMOKE: '1',
+        STAGING_HARNESS_MODULE: 'farmaco',
+        STAGING_HARNESS_INVOKE_TOOL: 'generate_ligand_xyz',
+        STAGING_HARNESS_INVOKE_INPUT_JSON: '{"smiles":"CCO"}',
+        STAGING_HARNESS_MCP_SMOKE_COMMAND: 'node scripts/fake-harness-mcp-smoke.mjs',
+        STAGING_HARNESS_THREAD_ARTIFACT_UI_SMOKE_COMMAND: 'node scripts/fake-harness-artifact-ui-smoke.mjs',
+        HARNESS_K8S_NAMESPACE: 'remote-codex-sandboxes',
+        ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: 'remote-codex-harness-app-keys',
+        HARNESS_K8S_SECRET_KEY: 'sandbox-smoke',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+    const review = JSON.parse(await readFile(path.join(outputDir, 'evidence-review.json'), 'utf8'));
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.missingEnv).toEqual([]);
+    expect(parsed.commandResults.map((entry: { name: string; ok: boolean }) => [entry.name, entry.ok])).toEqual([
+      ['harness_admin_contract_smoke', true],
+      ['staging_phase_one_harness_smoke', true],
+      ['harness_k8s_secret_smoke', true],
+      ['harness_integration_verifier', true],
+      ['harness_evidence_review_verifier', true],
+    ]);
+    expect(review.combinedVerifier.ok).toBe(true);
+    expect(review.combinedVerifier.requiredGates).toEqual(requiredHarnessIntegrationGatesForReview);
+    expect(review.secretSafety.valuesPrinted).toBe(false);
+    expect(result.stdout).not.toContain('secret-admin-key');
+    expect(result.stdout).not.toContain('secret-product-jwt');
+  });
+
+  it('reports missing Harness evidence env without printing secret values', async () => {
+    const dir = await tempDir();
+    const outputDir = path.join(dir, 'harness-evidence-missing');
+    const result = await runScriptWithEnv(
+      'scripts/collect-harness-integration-evidence.ts',
+      ['--output-dir', outputDir],
+      {
+        ELAGENTE_HARNESS_ADMIN_KEY: '',
+        STAGING_PRODUCT_JWT: '',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.commandResults).toEqual([]);
+    expect(parsed.missingEnv.map((entry: { name: string }) => entry.name)).toEqual([
+      'ELAGENTE_HARNESS_ADMIN_KEY',
+      'STAGING_HARNESS_INVOKE_TOOL',
+      'STAGING_HARNESS_INVOKE_INPUT_JSON',
+      'STAGING_HARNESS_MCP_SMOKE_COMMAND',
+      'STAGING_HARNESS_THREAD_ARTIFACT_UI_SMOKE_COMMAND',
+      'HARNESS_K8S_SECRET_KEY',
+    ]);
+    expect(parsed.nextSteps.rerun).toContain(`--output-dir ${outputDir}`);
+  });
+
+  it('writes a Harness evidence env template without leaking current secret values', async () => {
+    const dir = await tempDir();
+    const outputDir = path.join(dir, 'harness-evidence-template');
+    const envTemplatePath = path.join(dir, 'harness.env.sh');
+    const result = await runScriptWithEnv(
+      'scripts/collect-harness-integration-evidence.ts',
+      ['--output-dir', outputDir, '--write-env-template', envTemplatePath],
+      {
+        ELAGENTE_HARNESS_ADMIN_KEY: 'secret-admin-key',
+        STAGING_PRODUCT_JWT: 'secret-product-jwt',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+    const envTemplate = await readFile(envTemplatePath, 'utf8');
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.envTemplatePath).toBe(envTemplatePath);
+    expect(envTemplate).toContain('ELAGENTE_HARNESS_ADMIN_KEY');
+    expect(envTemplate).toContain('STAGING_PRODUCT_JWT');
+    expect(envTemplate).toContain('STAGING_HARNESS_SMOKE');
+    expect(envTemplate).toContain('STAGING_HARNESS_MCP_SMOKE_COMMAND');
+    expect(envTemplate).toContain('STAGING_HARNESS_THREAD_ARTIFACT_UI_SMOKE_COMMAND');
+    expect(envTemplate).toContain('<actual Harness ADMIN_KEY>');
+    expect(envTemplate).toContain('STAGING_LOGIN_EMAIL');
+    expect(envTemplate).toContain('STAGING_LOGIN_PASSWORD');
+    expect(envTemplate).toContain('<low-cost Harness tool>');
+    expect(envTemplate).toContain('<command>');
+    expect(envTemplate).not.toContain('secret-admin-key');
+    expect(envTemplate).not.toContain('secret-product-jwt');
+    expect(result.stdout).not.toContain('secret-admin-key');
+    expect(result.stdout).not.toContain('secret-product-jwt');
+  });
+
+  it('reports Harness evidence env readiness without printing secret values', async () => {
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-evidence-env.ts',
+      [],
+      {
+        ELAGENTE_HARNESS_ADMIN_KEY: 'secret-admin-key',
+        STAGING_PRODUCT_JWT: 'secret-product-jwt',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.missingRequired).toEqual([]);
+    expect(parsed.defaults.STAGING_CONTROL_PLANE_BASE_URL)
+      .toBe('https://remote-codex-control-plane-production.up.railway.app');
+    expect(result.stdout).not.toContain('secret-admin-key');
+    expect(result.stdout).not.toContain('secret-product-jwt');
+  });
+
+  it('writes a Harness evidence env readiness template without leaking current values', async () => {
+    const dir = await tempDir();
+    const templatePath = path.join(dir, 'harness-readiness.env.sh');
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-evidence-env.ts',
+      ['--write-env-template', templatePath],
+      {
+        ELAGENTE_HARNESS_ADMIN_KEY: 'secret-admin-key',
+        STAGING_PRODUCT_JWT: 'secret-product-jwt',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+    const template = await readFile(templatePath, 'utf8');
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.envTemplatePath).toBe(templatePath);
+    expect(template).toContain('ELAGENTE_HARNESS_ADMIN_KEY');
+    expect(template).toContain('STAGING_LOGIN_EMAIL');
+    expect(template).toContain('STAGING_LOGIN_PASSWORD');
+    expect(template).toContain('STAGING_HARNESS_SMOKE');
+    expect(template).toContain('STAGING_HARNESS_MCP_SMOKE_COMMAND');
+    expect(template).toContain('STAGING_HARNESS_THREAD_ARTIFACT_UI_SMOKE_COMMAND');
+    expect(template).toContain('<actual Harness ADMIN_KEY>');
+    expect(template).toContain('<low-cost Harness tool>');
+    expect(template).toContain('<command>');
+    expect(template).not.toContain('secret-admin-key');
+    expect(template).not.toContain('secret-product-jwt');
+  });
+
+  it('marks Harness evidence env ready when required env names are set', async () => {
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-evidence-env.ts',
+      [],
+      {
+        ELAGENTE_HARNESS_ADMIN_BASE_URL: 'https://elagenteharness.example.test',
+        ELAGENTE_HARNESS_ADMIN_KEY: 'secret-admin-key',
+        STAGING_CONTROL_PLANE_BASE_URL: 'https://remote-codex.example.test',
+        STAGING_PRODUCT_JWT: 'secret-product-jwt',
+        STAGING_HARNESS_SMOKE: '1',
+        STAGING_HARNESS_MODULE: 'farmaco',
+        STAGING_HARNESS_INVOKE_TOOL: 'generate_ligand_xyz',
+        STAGING_HARNESS_INVOKE_INPUT_JSON: '{"smiles":"CCO"}',
+        STAGING_HARNESS_MCP_SMOKE_COMMAND: 'node scripts/fake-harness-mcp-smoke.mjs',
+        STAGING_HARNESS_THREAD_ARTIFACT_UI_SMOKE_COMMAND: 'node scripts/fake-harness-artifact-ui-smoke.mjs',
+        HARNESS_K8S_NAMESPACE: 'remote-codex-sandboxes',
+        ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: 'remote-codex-harness-app-keys',
+        HARNESS_K8S_SECRET_KEY: 'sandbox-smoke',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.missingRequired).toEqual([]);
+    expect(result.stdout).not.toContain('secret-admin-key');
+    expect(result.stdout).not.toContain('secret-product-jwt');
+  });
+
+  it('fails Harness integration evidence when MCP worker-api or UI artifact proof is missing', async () => {
+    const dir = await tempDir();
+    const adminPath = path.join(dir, 'harness-admin.json');
+    const stagingPath = path.join(dir, 'harness-staging.json');
+    const k8sPath = path.join(dir, 'harness-k8s.json');
+    await writeFile(adminPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessAdminSteps(),
+    }));
+    await writeFile(stagingPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessStagingSteps({
+        includeMcp: false,
+        includeArtifact: false,
+      }),
+    }));
+    await writeFile(k8sPath, JSON.stringify({
+      ok: true,
+      secretSafety: { valuePrinted: false },
+      steps: [
+        'harness_k8s_secret_rbac_get',
+        'harness_k8s_secret_rbac_patch',
+        'harness_k8s_secret_key_present',
+      ].map((name) => ({ name, ok: true })),
+    }));
+
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-integration-evidence.ts',
+      ['--admin-smoke', adminPath, '--staging-smoke', stagingPath, '--k8s-secret-smoke', k8sPath],
+    );
+    const parsed = JSON.parse(result.stdout);
+    const failedIds = parsed.verifications
+      .filter((entry: { ok: boolean }) => !entry.ok)
+      .map((entry: { id: string }) => entry.id);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(failedIds).toEqual([
+      'harness-mcp-worker-api',
+      'harness-thread-artifact-ui',
+    ]);
+  });
+
+  it('fails Harness integration evidence when worker root discovery proof is missing', async () => {
+    const dir = await tempDir();
+    const adminPath = path.join(dir, 'harness-admin.json');
+    const stagingPath = path.join(dir, 'harness-staging.json');
+    const k8sPath = path.join(dir, 'harness-k8s.json');
+    await writeFile(adminPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessAdminSteps(),
+    }));
+    await writeFile(stagingPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessStagingSteps({
+        includeHome: false,
+      }),
+    }));
+    await writeFile(k8sPath, JSON.stringify({
+      ok: true,
+      secretSafety: { valuePrinted: false },
+      steps: [
+        'harness_k8s_secret_rbac_get',
+        'harness_k8s_secret_rbac_patch',
+        'harness_k8s_secret_key_present',
+      ].map((name) => ({ name, ok: true })),
+    }));
+
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-integration-evidence.ts',
+      ['--admin-smoke', adminPath, '--staging-smoke', stagingPath, '--k8s-secret-smoke', k8sPath],
+    );
+    const parsed = JSON.parse(result.stdout);
+    const failedIds = parsed.verifications
+      .filter((entry: { ok: boolean }) => !entry.ok)
+      .map((entry: { id: string }) => entry.id);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(failedIds).toEqual(['harness-worker-runtime']);
+  });
+
+  it('fails Harness integration evidence when worker status does not prove injected Harness key readiness', async () => {
+    const dir = await tempDir();
+    const adminPath = path.join(dir, 'harness-admin.json');
+    const stagingPath = path.join(dir, 'harness-staging.json');
+    const k8sPath = path.join(dir, 'harness-k8s.json');
+    await writeFile(adminPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessAdminSteps(),
+    }));
+    const stagingSteps = completeHarnessStagingSteps();
+    const statusStep = stagingSteps.find((step) => step.name === 'harness_worker_status');
+    if (statusStep) {
+      statusStep.details = {
+        ...statusStep.details,
+        keyPresent: false,
+      };
+    }
+    await writeFile(stagingPath, JSON.stringify({
+      ok: true,
+      steps: stagingSteps,
+    }));
+    await writeFile(k8sPath, JSON.stringify({
+      ok: true,
+      secretSafety: { valuePrinted: false },
+      steps: [
+        'harness_k8s_secret_rbac_get',
+        'harness_k8s_secret_rbac_patch',
+        'harness_k8s_secret_key_present',
+      ].map((name) => ({ name, ok: true })),
+    }));
+
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-integration-evidence.ts',
+      ['--admin-smoke', adminPath, '--staging-smoke', stagingPath, '--k8s-secret-smoke', k8sPath],
+    );
+    const parsed = JSON.parse(result.stdout);
+    const failedIds = parsed.verifications
+      .filter((entry: { ok: boolean }) => !entry.ok)
+      .map((entry: { id: string }) => entry.id);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(failedIds).toEqual(['harness-worker-runtime']);
+  });
+
+  it('fails Harness integration evidence when K8s Secret smoke does not prove secret values stayed hidden', async () => {
+    const dir = await tempDir();
+    const adminPath = path.join(dir, 'harness-admin.json');
+    const stagingPath = path.join(dir, 'harness-staging.json');
+    const k8sPath = path.join(dir, 'harness-k8s.json');
+    await writeFile(adminPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessAdminSteps(),
+    }));
+    await writeFile(stagingPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessStagingSteps(),
+    }));
+    await writeFile(k8sPath, JSON.stringify({
+      ok: true,
+      secretSafety: { valuePrinted: true },
+      steps: [
+        'harness_k8s_secret_rbac_get',
+        'harness_k8s_secret_rbac_patch',
+        'harness_k8s_secret_key_present',
+      ].map((name) => ({ name, ok: true })),
+    }));
+
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-integration-evidence.ts',
+      ['--admin-smoke', adminPath, '--staging-smoke', stagingPath, '--k8s-secret-smoke', k8sPath],
+    );
+    const parsed = JSON.parse(result.stdout);
+    const failedIds = parsed.verifications
+      .filter((entry: { ok: boolean }) => !entry.ok)
+      .map((entry: { id: string }) => entry.id);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(failedIds).toEqual(['harness-secret-safety']);
+  });
+
+  it('fails Harness integration evidence when any evidence file contains obvious raw secrets', async () => {
+    const dir = await tempDir();
+    const adminPath = path.join(dir, 'harness-admin.json');
+    const stagingPath = path.join(dir, 'harness-staging.json');
+    const k8sPath = path.join(dir, 'harness-k8s.json');
+    const stagingSteps = completeHarnessStagingSteps();
+    stagingSteps.push({
+      name: 'accidental_raw_secret_debug',
+      ok: true,
+      details: {
+        note: 'INACT_X_APP_KEY=raw-harness-key-should-not-be-in-evidence',
+        bearer: 'Bearer eyJaaaaaaaaaaaaaaaa.eyJbbbbbbbbbbbbbbbb.cccccccccccccccccc',
+      },
+    });
+    await writeFile(adminPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessAdminSteps(),
+    }));
+    await writeFile(stagingPath, JSON.stringify({
+      ok: true,
+      steps: stagingSteps,
+    }));
+    await writeFile(k8sPath, JSON.stringify({
+      ok: true,
+      secretSafety: { valuePrinted: false },
+      steps: [
+        'harness_k8s_secret_rbac_get',
+        'harness_k8s_secret_rbac_patch',
+        'harness_k8s_secret_key_present',
+      ].map((name) => ({ name, ok: true })),
+    }));
+
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-integration-evidence.ts',
+      ['--admin-smoke', adminPath, '--staging-smoke', stagingPath, '--k8s-secret-smoke', k8sPath],
+    );
+    const parsed = JSON.parse(result.stdout);
+    const failedIds = parsed.verifications
+      .filter((entry: { ok: boolean }) => !entry.ok)
+      .map((entry: { id: string }) => entry.id);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(failedIds).toEqual(['harness-secret-safety']);
+  });
+
+  it('fails Harness integration evidence when usage attribution details are missing', async () => {
+    const dir = await tempDir();
+    const adminPath = path.join(dir, 'harness-admin.json');
+    const stagingPath = path.join(dir, 'harness-staging.json');
+    const k8sPath = path.join(dir, 'harness-k8s.json');
+    await writeFile(adminPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessAdminSteps(),
+    }));
+    await writeFile(stagingPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessStagingSteps({
+        includeUsageDetails: false,
+      }),
+    }));
+    await writeFile(k8sPath, JSON.stringify({
+      ok: true,
+      secretSafety: { valuePrinted: false },
+      steps: [
+        'harness_k8s_secret_rbac_get',
+        'harness_k8s_secret_rbac_patch',
+        'harness_k8s_secret_key_present',
+      ].map((name) => ({ name, ok: true })),
+    }));
+
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-integration-evidence.ts',
+      ['--admin-smoke', adminPath, '--staging-smoke', stagingPath, '--k8s-secret-smoke', k8sPath],
+    );
+    const parsed = JSON.parse(result.stdout);
+    const failedIds = parsed.verifications
+      .filter((entry: { ok: boolean }) => !entry.ok)
+      .map((entry: { id: string }) => entry.id);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(failedIds).toEqual(['harness-usage-attribution']);
+  });
+
+  it('fails Harness integration evidence when usage event lacks run job or external event identity', async () => {
+    const dir = await tempDir();
+    const adminPath = path.join(dir, 'harness-admin.json');
+    const stagingPath = path.join(dir, 'harness-staging.json');
+    const k8sPath = path.join(dir, 'harness-k8s.json');
+    const stagingSteps = completeHarnessStagingSteps();
+    const invokeStep = stagingSteps.find((step) => step.name === 'harness_control_plane_invoke');
+    if (invokeStep) {
+      invokeStep.details = {
+        ...invokeStep.details,
+        runId: null,
+        jobId: null,
+        externalEventId: null,
+      };
+    }
+    await writeFile(adminPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessAdminSteps(),
+    }));
+    await writeFile(stagingPath, JSON.stringify({
+      ok: true,
+      steps: stagingSteps,
+    }));
+    await writeFile(k8sPath, JSON.stringify({
+      ok: true,
+      secretSafety: { valuePrinted: false },
+      steps: [
+        'harness_k8s_secret_rbac_get',
+        'harness_k8s_secret_rbac_patch',
+        'harness_k8s_secret_key_present',
+      ].map((name) => ({ name, ok: true })),
+    }));
+
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-integration-evidence.ts',
+      ['--admin-smoke', adminPath, '--staging-smoke', stagingPath, '--k8s-secret-smoke', k8sPath],
+    );
+    const parsed = JSON.parse(result.stdout);
+    const failedIds = parsed.verifications
+      .filter((entry: { ok: boolean }) => !entry.ok)
+      .map((entry: { id: string }) => entry.id);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(failedIds).toEqual(['harness-usage-attribution']);
+  });
+
+  it('fails Harness integration evidence when MCP smoke does not prove worker-api source', async () => {
+    const dir = await tempDir();
+    const adminPath = path.join(dir, 'harness-admin.json');
+    const stagingPath = path.join(dir, 'harness-staging.json');
+    const k8sPath = path.join(dir, 'harness-k8s.json');
+    await writeFile(adminPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessAdminSteps(),
+    }));
+    const stagingSteps = completeHarnessStagingSteps();
+    const mcpStep = stagingSteps.find((step) => step.name === 'harness_mcp_worker_api_smoke');
+    if (mcpStep) {
+      mcpStep.details = {
+        observedSource: 'direct-harness',
+        parsedStdout: { source: 'direct-harness' },
+      };
+    }
+    await writeFile(stagingPath, JSON.stringify({
+      ok: true,
+      steps: stagingSteps,
+    }));
+    await writeFile(k8sPath, JSON.stringify({
+      ok: true,
+      secretSafety: { valuePrinted: false },
+      steps: [
+        'harness_k8s_secret_rbac_get',
+        'harness_k8s_secret_rbac_patch',
+        'harness_k8s_secret_key_present',
+      ].map((name) => ({ name, ok: true })),
+    }));
+
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-integration-evidence.ts',
+      ['--admin-smoke', adminPath, '--staging-smoke', stagingPath, '--k8s-secret-smoke', k8sPath],
+    );
+    const parsed = JSON.parse(result.stdout);
+    const failedIds = parsed.verifications
+      .filter((entry: { ok: boolean }) => !entry.ok)
+      .map((entry: { id: string }) => entry.id);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(failedIds).toEqual(['harness-mcp-worker-api']);
+  });
+
+  it('fails Harness integration evidence when MCP smoke omits expected worker-api source contract', async () => {
+    const dir = await tempDir();
+    const adminPath = path.join(dir, 'harness-admin.json');
+    const stagingPath = path.join(dir, 'harness-staging.json');
+    const k8sPath = path.join(dir, 'harness-k8s.json');
+    await writeFile(adminPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessAdminSteps(),
+    }));
+    const stagingSteps = completeHarnessStagingSteps();
+    const mcpStep = stagingSteps.find((step) => step.name === 'harness_mcp_worker_api_smoke');
+    if (mcpStep) {
+      mcpStep.details = {
+        observedSource: 'worker-api',
+        parsedStdout: { source: 'worker-api' },
+      };
+    }
+    await writeFile(stagingPath, JSON.stringify({
+      ok: true,
+      steps: stagingSteps,
+    }));
+    await writeFile(k8sPath, JSON.stringify({
+      ok: true,
+      secretSafety: { valuePrinted: false },
+      steps: [
+        'harness_k8s_secret_rbac_get',
+        'harness_k8s_secret_rbac_patch',
+        'harness_k8s_secret_key_present',
+      ].map((name) => ({ name, ok: true })),
+    }));
+
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-integration-evidence.ts',
+      ['--admin-smoke', adminPath, '--staging-smoke', stagingPath, '--k8s-secret-smoke', k8sPath],
+    );
+    const parsed = JSON.parse(result.stdout);
+    const failedIds = parsed.verifications
+      .filter((entry: { ok: boolean }) => !entry.ok)
+      .map((entry: { id: string }) => entry.id);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(failedIds).toEqual(['harness-mcp-worker-api']);
+  });
+
+  it('fails Harness integration evidence when artifact UI smoke has no Harness artifact type', async () => {
+    const dir = await tempDir();
+    const adminPath = path.join(dir, 'harness-admin.json');
+    const stagingPath = path.join(dir, 'harness-staging.json');
+    const k8sPath = path.join(dir, 'harness-k8s.json');
+    await writeFile(adminPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessAdminSteps(),
+    }));
+    const stagingSteps = completeHarnessStagingSteps();
+    const artifactStep = stagingSteps.find((step) => step.name === 'harness_thread_artifact_ui_smoke');
+    if (artifactStep) {
+      artifactStep.details = {
+        observedArtifactTypes: ['text/plain'],
+        parsedStdout: { artifactTypes: ['text/plain'] },
+      };
+    }
+    await writeFile(stagingPath, JSON.stringify({
+      ok: true,
+      steps: stagingSteps,
+    }));
+    await writeFile(k8sPath, JSON.stringify({
+      ok: true,
+      secretSafety: { valuePrinted: false },
+      steps: [
+        'harness_k8s_secret_rbac_get',
+        'harness_k8s_secret_rbac_patch',
+        'harness_k8s_secret_key_present',
+      ].map((name) => ({ name, ok: true })),
+    }));
+
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-integration-evidence.ts',
+      ['--admin-smoke', adminPath, '--staging-smoke', stagingPath, '--k8s-secret-smoke', k8sPath],
+    );
+    const parsed = JSON.parse(result.stdout);
+    const failedIds = parsed.verifications
+      .filter((entry: { ok: boolean }) => !entry.ok)
+      .map((entry: { id: string }) => entry.id);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(failedIds).toEqual(['harness-thread-artifact-ui']);
+  });
+
+  it('fails Harness integration evidence when artifact UI smoke omits expected Harness artifact contract', async () => {
+    const dir = await tempDir();
+    const adminPath = path.join(dir, 'harness-admin.json');
+    const stagingPath = path.join(dir, 'harness-staging.json');
+    const k8sPath = path.join(dir, 'harness-k8s.json');
+    await writeFile(adminPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessAdminSteps(),
+    }));
+    const stagingSteps = completeHarnessStagingSteps();
+    const artifactStep = stagingSteps.find((step) => step.name === 'harness_thread_artifact_ui_smoke');
+    if (artifactStep) {
+      artifactStep.details = {
+        observedArtifactTypes: ['elagente.harness.run'],
+        parsedStdout: { artifactTypes: ['elagente.harness.run'] },
+      };
+    }
+    await writeFile(stagingPath, JSON.stringify({
+      ok: true,
+      steps: stagingSteps,
+    }));
+    await writeFile(k8sPath, JSON.stringify({
+      ok: true,
+      secretSafety: { valuePrinted: false },
+      steps: [
+        'harness_k8s_secret_rbac_get',
+        'harness_k8s_secret_rbac_patch',
+        'harness_k8s_secret_key_present',
+      ].map((name) => ({ name, ok: true })),
+    }));
+
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-integration-evidence.ts',
+      ['--admin-smoke', adminPath, '--staging-smoke', stagingPath, '--k8s-secret-smoke', k8sPath],
+    );
+    const parsed = JSON.parse(result.stdout);
+    const failedIds = parsed.verifications
+      .filter((entry: { ok: boolean }) => !entry.ok)
+      .map((entry: { id: string }) => entry.id);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(failedIds).toEqual(['harness-thread-artifact-ui']);
+  });
+
   it('treats placeholder staging smoke env values as missing without echoing them', async () => {
     const result = await runScriptWithEnv(
       'scripts/staging-phase-one-smoke.ts',
@@ -1975,7 +3434,7 @@ describe('phase zero-six evidence tooling', () => {
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toBe('');
     expect(parsed.ok).toBe(false);
-    expect(parsed.error).toBe('STAGING_CONTROL_PLANE_BASE_URL is required.');
+    expect(parsed.error).toBe('STAGING_CONTROL_PLANE_BASE_URL contains a placeholder.');
     expect(parsed.controlPlaneBaseUrl).toBeNull();
     expect(result.stderr).not.toContain('<staging-control-plane-base-url>');
     expect(result.stderr).not.toContain('<staging-product-jwt>');
@@ -1999,6 +3458,7 @@ describe('phase zero-six evidence tooling', () => {
       expect(parsed.error).toContain('expected 200, got 500');
       expect(parsed.controlPlaneBaseUrl).toBe(controlPlaneBaseUrl);
       expect(parsed.steps.map((step: { name: string }) => step.name)).toEqual([
+        'resolve_product_jwt',
         'bootstrap_user_and_sandbox',
         'start_sandbox',
         'sandbox_health',

@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   AwsEksFargateSandboxManager,
+  AwsSandboxSecretWriter,
   AwsSandboxKubernetesClient,
   AwsWorkerPodSpec,
   AwsWorkerPodStatus,
+  HttpHarnessAdmin,
   HttpLlmGatewayAdmin,
   LocalWorkerProcessSandboxManager,
   NoopSandboxManager,
@@ -44,16 +46,32 @@ function mockKubernetesClient(
 ) {
   const calls: {
     appliedPods: AwsWorkerPodSpec[];
+    secretWrites: Array<{ namespace: string; secretName: string; key: string; value: string }>;
+    secretReads: Array<{ namespace: string; secretName: string; key: string }>;
     deletedPods: Array<{ namespace: string; podName: string; serviceName: string }>;
     endpointRequests: Array<{ namespace: string; serviceName: string }>;
   } = {
     appliedPods: [],
+    secretWrites: [],
+    secretReads: [],
     deletedPods: [],
     endpointRequests: [],
   };
   const client: AwsSandboxKubernetesClient = {
     async applyWorkerPod(spec) {
       calls.appliedPods.push(spec);
+    },
+    async upsertSecretKey(request) {
+      calls.secretWrites.push(request);
+    },
+    async hasSecretKey(request) {
+      calls.secretReads.push(request);
+      return calls.secretWrites.some(
+        (write) =>
+          write.namespace === request.namespace &&
+          write.secretName === request.secretName &&
+          write.key === request.key,
+      );
     },
     async deleteWorkerPod(request) {
       calls.deletedPods.push(request);
@@ -501,12 +519,522 @@ describe('sandbox manager adapters', () => {
     ]);
   });
 
+  it('writes sandbox secret values through the AWS Kubernetes client', async () => {
+    const { client, calls } = mockKubernetesClient();
+    const writer = new AwsSandboxSecretWriter({
+      namespace: 'remote-codex-sandboxes',
+      kubernetesClient: client,
+    });
+
+    await writer.putSecretValue({
+      secretName: 'remote-codex-harness-app-keys',
+      key: 'sbx_test',
+      value: 'harness-api-key',
+    });
+
+    expect(calls.secretWrites).toEqual([
+      {
+        namespace: 'remote-codex-sandboxes',
+        secretName: 'remote-codex-harness-app-keys',
+        key: 'sbx_test',
+        value: 'harness-api-key',
+      },
+    ]);
+    await expect(
+      writer.hasSecretValue({
+        secretName: 'remote-codex-harness-app-keys',
+        key: 'sbx_test',
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      writer.hasSecretValue({
+        secretName: 'remote-codex-harness-app-keys',
+        key: 'missing',
+      }),
+    ).resolves.toBe(false);
+    expect(calls.secretReads).toEqual([
+      {
+        namespace: 'remote-codex-sandboxes',
+        secretName: 'remote-codex-harness-app-keys',
+        key: 'sbx_test',
+      },
+      {
+        namespace: 'remote-codex-sandboxes',
+        secretName: 'remote-codex-harness-app-keys',
+        key: 'missing',
+      },
+    ]);
+  });
+
   it('fails closed when AWS lifecycle operations have no Kubernetes client', async () => {
     const manager = new AwsEksFargateSandboxManager(awsConfig());
 
     await expect(manager.startSandbox(sandboxInput)).rejects.toMatchObject({
       code: 'config',
       message: 'AWS Kubernetes client is required to start sandboxes.',
+    });
+  });
+});
+
+describe('HTTP ElAgenteHarness admin', () => {
+  it('ensures a sandbox key through the planned admin ensure API', async () => {
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      return Response.json({
+        externalUserId: 'remote-codex:user:user-123',
+        externalKeyId: 'harness-key-123',
+        apiKey: 'harness-api-key-123',
+      });
+    };
+    const admin = new HttpHarnessAdmin({
+      baseUrl: 'https://harness.example.test/',
+      adminKey: 'admin-key',
+      fetchImpl,
+    });
+
+    await expect(
+      admin.ensureSandboxKey({
+        userId: 'user-123',
+        sandboxId: 'sbx-123',
+        externalUserId: 'remote-codex:user:user-123',
+        email: 'user@example.test',
+      }),
+    ).resolves.toEqual({
+      externalKeyId: 'harness-key-123',
+      apiKey: 'harness-api-key-123',
+      keyCiphertext: null,
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      url: 'https://harness.example.test/admin/members/ensure',
+      init: {
+        method: 'POST',
+        headers: {
+          'x-admin-key': 'admin-key',
+          'content-type': 'application/json',
+        },
+      },
+    });
+    expect(JSON.parse(String(requests[0]!.init!.body))).toMatchObject({
+      externalId: 'remote-codex:sandbox:sbx-123',
+      userId: 'user-123',
+      sandboxId: 'sbx-123',
+      externalUserId: 'remote-codex:user:user-123',
+      kind: 'agent',
+    });
+  });
+
+  it('rotates a sandbox key through the planned Harness admin API', async () => {
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      return Response.json({
+        externalKeyId: 'remote-codex:sandbox:sbx-123',
+        apiKey: 'harness-api-key-rotated',
+      });
+    };
+    const admin = new HttpHarnessAdmin({
+      baseUrl: 'https://harness.example.test',
+      adminKey: 'admin-key',
+      fetchImpl,
+    });
+
+    await expect(
+      admin.rotateSandboxKey({
+        userId: 'user-123',
+        sandboxId: 'sbx-123',
+        externalUserId: 'remote-codex:user:user-123',
+        externalKeyId: 'remote-codex:sandbox:sbx-123',
+      }),
+    ).resolves.toEqual({
+      externalKeyId: 'remote-codex:sandbox:sbx-123',
+      apiKey: 'harness-api-key-rotated',
+      keyCiphertext: null,
+    });
+    expect(requests[0]).toMatchObject({
+      url: 'https://harness.example.test/admin/members/remote-codex%3Asandbox%3Asbx-123/rekey',
+      init: {
+        method: 'POST',
+        headers: {
+          'x-admin-key': 'admin-key',
+          'content-type': 'application/json',
+        },
+      },
+    });
+    expect(JSON.parse(String(requests[0]!.init!.body))).toEqual({
+      userId: 'user-123',
+      sandboxId: 'sbx-123',
+      externalUserId: 'remote-codex:user:user-123',
+    });
+  });
+
+  it('falls back to the current Harness rekey API when planned rotate is unavailable', async () => {
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      if (String(url).endsWith('/admin/members/harness-key-42/rekey')) {
+        return new Response('not found', { status: 404 });
+      }
+      return new Response('OK\napi_key = "harness-api-key-rotated"\n');
+    };
+    const admin = new HttpHarnessAdmin({
+      baseUrl: 'https://harness.example.test',
+      adminKey: 'admin-key',
+      fetchImpl,
+    });
+
+    await expect(
+      admin.rotateSandboxKey({
+        userId: 'user-123',
+        sandboxId: 'sbx-123',
+        externalUserId: 'remote-codex:user:user-123',
+        externalKeyId: 'harness-key-42',
+      }),
+    ).resolves.toEqual({
+      externalKeyId: 'harness-key-42',
+      apiKey: 'harness-api-key-rotated',
+      keyCiphertext: null,
+    });
+    expect(requests.map((request) => request.url)).toEqual([
+      'https://harness.example.test/admin/members/harness-key-42/rekey',
+      'https://harness.example.test/admin/harness-key-42/rekey',
+    ]);
+  });
+
+  it('revokes a sandbox key through the planned Harness admin API', async () => {
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      return Response.json({ status: 'revoked' });
+    };
+    const admin = new HttpHarnessAdmin({
+      baseUrl: 'https://harness.example.test',
+      adminKey: 'admin-key',
+      fetchImpl,
+    });
+
+    await expect(
+      admin.revokeSandboxKey({
+        userId: 'user-123',
+        sandboxId: 'sbx-123',
+        externalUserId: 'remote-codex:user:user-123',
+        externalKeyId: 'remote-codex:sandbox:sbx-123',
+      }),
+    ).resolves.toBeUndefined();
+    expect(requests[0]).toMatchObject({
+      url: 'https://harness.example.test/admin/members/remote-codex%3Asandbox%3Asbx-123/revoke',
+      init: {
+        method: 'POST',
+        headers: {
+          'x-admin-key': 'admin-key',
+          'content-type': 'application/json',
+        },
+      },
+    });
+  });
+
+  it('falls back to the current Harness delete API when planned revoke is unavailable', async () => {
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      if (String(url).endsWith('/admin/members/harness-key-42/revoke')) {
+        return new Response('not found', { status: 404 });
+      }
+      return new Response('OK\n');
+    };
+    const admin = new HttpHarnessAdmin({
+      baseUrl: 'https://harness.example.test',
+      adminKey: 'admin-key',
+      fetchImpl,
+    });
+
+    await expect(
+      admin.revokeSandboxKey({
+        userId: 'user-123',
+        sandboxId: 'sbx-123',
+        externalUserId: 'remote-codex:user:user-123',
+        externalKeyId: 'harness-key-42',
+      }),
+    ).resolves.toBeUndefined();
+    expect(requests.map((request) => request.url)).toEqual([
+      'https://harness.example.test/admin/members/harness-key-42/revoke',
+      'https://harness.example.test/admin/harness-key-42/delete',
+    ]);
+  });
+
+  it('reconciles a sandbox key through the planned Harness admin API', async () => {
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      return Response.json({
+        externalKeyId: 'remote-codex:sandbox:sbx-123',
+        apiKey: 'harness-api-key-reconciled',
+      });
+    };
+    const admin = new HttpHarnessAdmin({
+      baseUrl: 'https://harness.example.test',
+      adminKey: 'admin-key',
+      fetchImpl,
+    });
+
+    await expect(
+      admin.reconcileSandboxKey({
+        userId: 'user-123',
+        sandboxId: 'sbx-123',
+        externalUserId: 'remote-codex:user:user-123',
+        externalKeyId: 'remote-codex:sandbox:sbx-old',
+      }),
+    ).resolves.toEqual({
+      externalKeyId: 'remote-codex:sandbox:sbx-123',
+      apiKey: 'harness-api-key-reconciled',
+      keyCiphertext: null,
+    });
+    expect(requests[0]).toMatchObject({
+      url: 'https://harness.example.test/admin/members/reconcile',
+      init: {
+        method: 'POST',
+        headers: {
+          'x-admin-key': 'admin-key',
+          'content-type': 'application/json',
+        },
+      },
+    });
+    expect(JSON.parse(String(requests[0]!.init!.body))).toMatchObject({
+      externalId: 'remote-codex:sandbox:sbx-123',
+      externalKeyId: 'remote-codex:sandbox:sbx-old',
+      userId: 'user-123',
+      sandboxId: 'sbx-123',
+      externalUserId: 'remote-codex:user:user-123',
+    });
+  });
+
+  it('falls back to metadata-only reconcile when the planned Harness reconcile API is unavailable', async () => {
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      return new Response('not found', { status: 404 });
+    };
+    const admin = new HttpHarnessAdmin({
+      baseUrl: 'https://harness.example.test',
+      adminKey: 'admin-key',
+      fetchImpl,
+    });
+
+    await expect(
+      admin.reconcileSandboxKey({
+        userId: 'user-123',
+        sandboxId: 'sbx-123',
+        externalUserId: 'remote-codex:user:user-123',
+        externalKeyId: 'harness-key-42',
+      }),
+    ).resolves.toEqual({
+      externalKeyId: 'harness-key-42',
+      apiKey: null,
+      keyCiphertext: null,
+    });
+    expect(requests.map((request) => request.url)).toEqual([
+      'https://harness.example.test/admin/members/reconcile',
+    ]);
+  });
+
+  it('falls back to the current Harness admin create API', async () => {
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      if (String(url).endsWith('/admin/members/ensure')) {
+        return new Response('not found', { status: 404 });
+      }
+      return new Response('OK\nid      = 42\nkind    = "agent"\napi_key = "harness-api-key-42"\n');
+    };
+    const admin = new HttpHarnessAdmin({
+      baseUrl: 'https://harness.example.test',
+      adminKey: 'admin-key',
+      fetchImpl,
+    });
+
+    await expect(
+      admin.ensureSandboxKey({
+        userId: 'user-123',
+        sandboxId: 'sbx-123',
+        externalUserId: 'remote-codex:user:user-123',
+      }),
+    ).resolves.toEqual({
+      externalKeyId: '42',
+      apiKey: 'harness-api-key-42',
+      keyCiphertext: null,
+    });
+    expect(requests.map((request) => request.url)).toEqual([
+      'https://harness.example.test/admin/members/ensure',
+      'https://harness.example.test/admin/create',
+    ]);
+  });
+
+  it('does not fall back to the current Harness admin create API when legacy fallback is disabled', async () => {
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      return new Response('not found', { status: 404 });
+    };
+    const admin = new HttpHarnessAdmin({
+      baseUrl: 'https://harness.example.test',
+      adminKey: 'admin-key',
+      fetchImpl,
+      legacyFallback: false,
+    });
+
+    await expect(
+      admin.ensureSandboxKey({
+        userId: 'user-123',
+        sandboxId: 'sbx-123',
+        externalUserId: 'remote-codex:user:user-123',
+      }),
+    ).rejects.toMatchObject({
+      code: 'provider',
+      message: 'not found',
+    });
+    expect(requests.map((request) => request.url)).toEqual([
+      'https://harness.example.test/admin/members/ensure',
+    ]);
+  });
+
+  it('does not fall back to legacy Harness rotate, revoke, or reconcile paths when legacy fallback is disabled', async () => {
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      return new Response('not found', { status: 404 });
+    };
+    const admin = new HttpHarnessAdmin({
+      baseUrl: 'https://harness.example.test',
+      adminKey: 'admin-key',
+      fetchImpl,
+      legacyFallback: false,
+    });
+
+    await expect(
+      admin.rotateSandboxKey({
+        userId: 'user-123',
+        sandboxId: 'sbx-123',
+        externalUserId: 'remote-codex:user:user-123',
+        externalKeyId: 'harness-key-42',
+      }),
+    ).rejects.toMatchObject({
+      code: 'provider',
+      message: 'not found',
+    });
+    await expect(
+      admin.revokeSandboxKey({
+        userId: 'user-123',
+        sandboxId: 'sbx-123',
+        externalUserId: 'remote-codex:user:user-123',
+        externalKeyId: 'harness-key-42',
+      }),
+    ).rejects.toMatchObject({
+      code: 'provider',
+      message: 'not found',
+    });
+    await expect(
+      admin.reconcileSandboxKey({
+        userId: 'user-123',
+        sandboxId: 'sbx-123',
+        externalUserId: 'remote-codex:user:user-123',
+        externalKeyId: 'harness-key-42',
+      }),
+    ).rejects.toMatchObject({
+      code: 'provider',
+      message: 'not found',
+    });
+    expect(requests.map((request) => request.url)).toEqual([
+      'https://harness.example.test/admin/members/harness-key-42/rekey',
+      'https://harness.example.test/admin/members/harness-key-42/revoke',
+      'https://harness.example.test/admin/members/reconcile',
+    ]);
+  });
+
+  it('maps Harness admin errors to provider sandbox manager errors', async () => {
+    const fetchImpl = async () =>
+      Response.json({ message: 'harness unavailable' }, { status: 503 });
+    const admin = new HttpHarnessAdmin({
+      baseUrl: 'https://harness.example.test',
+      adminKey: 'admin-key',
+      fetchImpl,
+    });
+
+    await expect(
+      admin.ensureSandboxKey({
+        userId: 'user-123',
+        sandboxId: 'sbx-123',
+        externalUserId: 'remote-codex:user:user-123',
+      }),
+    ).rejects.toMatchObject({
+      code: 'provider',
+      message: 'harness unavailable',
+    });
+  });
+
+  it('exports Harness usage through the admin API', async () => {
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      return Response.json({
+        events: [
+          {
+            eventId: 'harness-event-1',
+            externalKeyId: 'harness-key-123',
+            module: 'farmaco',
+            tool: 'generate_ligand_xyz',
+            runId: 'run-1',
+            jobId: 'job-1',
+            computeUnits: '12.5',
+            costUsd: 0.0312,
+            status: 'ok',
+            metadata: {
+              resultStatus: 'ok',
+            },
+            occurredAt: '2026-06-03T01:00:00.000Z',
+          },
+        ],
+        nextCursor: 'cursor-2',
+      });
+    };
+    const admin = new HttpHarnessAdmin({
+      baseUrl: 'https://harness.example.test',
+      adminKey: 'admin-key',
+      fetchImpl,
+    });
+
+    await expect(admin.exportUsage({ cursor: 'cursor-1', limit: 25 })).resolves.toEqual({
+      events: [
+        {
+          eventId: 'harness-event-1',
+          externalKeyId: 'harness-key-123',
+          userId: null,
+          sandboxId: null,
+          workspaceId: null,
+          sessionId: null,
+          module: 'farmaco',
+          tool: 'generate_ligand_xyz',
+          runId: 'run-1',
+          jobId: 'job-1',
+          computeUnits: 12.5,
+          costUsd: 0.0312,
+          status: 'ok',
+          metadata: {
+            resultStatus: 'ok',
+          },
+          occurredAt: '2026-06-03T01:00:00.000Z',
+        },
+      ],
+      nextCursor: 'cursor-2',
+    });
+    expect(requests[0]).toMatchObject({
+      url: 'https://harness.example.test/admin/usage/export?cursor=cursor-1&limit=25',
+      init: {
+        method: 'GET',
+        headers: {
+          'x-admin-key': 'admin-key',
+        },
+      },
     });
   });
 });

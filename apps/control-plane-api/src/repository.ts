@@ -8,6 +8,9 @@ import {
   controlAuditLogs,
   controlGatewayKeys,
   controlGatewayUsers,
+  controlHarnessKeys,
+  controlHarnessUsageEvents,
+  controlHarnessUsers,
   controlPasswordCredentials,
   controlProjects,
   controlSandboxes,
@@ -54,6 +57,24 @@ export interface UsageImportMetricsInput {
   duplicateCount: number;
   failureCount: number;
   failureMessage?: string | null | undefined;
+}
+
+export interface HarnessUsageEventInput {
+  userId: string;
+  sandboxId: string;
+  workspaceId?: string | null | undefined;
+  sessionId?: string | null | undefined;
+  provider: string;
+  module: string;
+  tool?: string | null | undefined;
+  runId?: string | null | undefined;
+  jobId?: string | null | undefined;
+  externalEventId?: string | null | undefined;
+  computeUnits?: number | undefined;
+  costUsd?: number | undefined;
+  status?: string | undefined;
+  metadata?: Record<string, unknown> | undefined;
+  occurredAt?: string | undefined;
 }
 
 export interface SandboxDefaults {
@@ -958,6 +979,173 @@ export class ControlPlaneRepository {
       .get();
   }
 
+  upsertHarnessUser(input: { userId: string; provider: string; externalUserId: string }) {
+    const existing = this.db
+      .select()
+      .from(controlHarnessUsers)
+      .where(
+        and(
+          eq(controlHarnessUsers.userId, input.userId),
+          eq(controlHarnessUsers.provider, input.provider),
+        ),
+      )
+      .get();
+    if (existing) {
+      return existing;
+    }
+    const record = {
+      id: randomUUID(),
+      userId: input.userId,
+      provider: input.provider,
+      externalUserId: input.externalUserId,
+      createdAt: new Date().toISOString(),
+    };
+    this.db.insert(controlHarnessUsers).values(record).run();
+    return record;
+  }
+
+  upsertHarnessKey(input: {
+    userId: string;
+    sandboxId: string;
+    provider: string;
+    externalKeyId: string;
+    keyCiphertext?: string | null;
+    secretName?: string | null;
+    secretKey?: string | null;
+  }) {
+    const existing = this.db
+      .select()
+      .from(controlHarnessKeys)
+      .where(
+        and(
+          eq(controlHarnessKeys.sandboxId, input.sandboxId),
+          eq(controlHarnessKeys.provider, input.provider),
+        ),
+      )
+      .get();
+    if (existing) {
+      return existing;
+    }
+    const record = {
+      id: randomUUID(),
+      userId: input.userId,
+      sandboxId: input.sandboxId,
+      provider: input.provider,
+      externalKeyId: input.externalKeyId,
+      keyCiphertext: input.keyCiphertext ?? null,
+      secretName: input.secretName ?? null,
+      secretKey: input.secretKey ?? null,
+      status: 'active',
+      createdAt: new Date().toISOString(),
+      rotatedAt: null,
+      revokedAt: null,
+    };
+    this.db.insert(controlHarnessKeys).values(record).run();
+    this.audit(input.userId, 'harness_key.created', 'harness_key', record.id, {
+      provider: input.provider,
+      externalKeyId: input.externalKeyId,
+      sandboxId: input.sandboxId,
+      secretName: input.secretName ?? null,
+      secretKey: input.secretKey ?? null,
+    });
+    return record;
+  }
+
+  updateHarnessKeyRotation(input: {
+    sandboxId: string;
+    provider: string;
+    externalKeyId: string;
+    keyCiphertext?: string | null;
+    secretName?: string | null;
+    secretKey?: string | null;
+  }) {
+    const now = new Date().toISOString();
+    this.db
+      .update(controlHarnessKeys)
+      .set({
+        externalKeyId: input.externalKeyId,
+        keyCiphertext: input.keyCiphertext ?? null,
+        secretName: input.secretName ?? null,
+        secretKey: input.secretKey ?? null,
+        status: 'active',
+        rotatedAt: now,
+        revokedAt: null,
+      })
+      .where(
+        and(
+          eq(controlHarnessKeys.sandboxId, input.sandboxId),
+          eq(controlHarnessKeys.provider, input.provider),
+        ),
+      )
+      .run();
+    const key = this.getHarnessKeyForSandbox(input.sandboxId);
+    if (key) {
+      this.audit(key.userId, 'harness_key.rotated', 'harness_key', key.id, {
+        provider: input.provider,
+        externalKeyId: input.externalKeyId,
+        secretName: input.secretName ?? null,
+        secretKey: input.secretKey ?? null,
+      });
+    }
+    return key;
+  }
+
+  revokeHarnessKey(input: { sandboxId: string; provider: string }) {
+    const existing = this.getHarnessKeyForSandbox(input.sandboxId);
+    if (!existing) {
+      return null;
+    }
+    const now = new Date().toISOString();
+    this.db
+      .update(controlHarnessKeys)
+      .set({
+        status: 'revoked',
+        revokedAt: now,
+      })
+      .where(eq(controlHarnessKeys.id, existing.id))
+      .run();
+    const key = this.getHarnessKeyForSandbox(input.sandboxId);
+    this.audit(existing.userId, 'harness_key.revoked', 'harness_key', existing.id, {
+      provider: input.provider,
+      externalKeyId: existing.externalKeyId,
+    });
+    return key;
+  }
+
+  getHarnessKeyForSandbox(sandboxId: string) {
+    return this.db
+      .select()
+      .from(controlHarnessKeys)
+      .where(eq(controlHarnessKeys.sandboxId, sandboxId))
+      .get();
+  }
+
+  getHarnessKeyByExternalId(input: { provider: string; externalKeyId: string }) {
+    return this.db
+      .select()
+      .from(controlHarnessKeys)
+      .where(
+        and(
+          eq(controlHarnessKeys.provider, input.provider),
+          eq(controlHarnessKeys.externalKeyId, input.externalKeyId),
+        ),
+      )
+      .get();
+  }
+
+  getHarnessUserForUser(input: { userId: string; provider: string }) {
+    return this.db
+      .select()
+      .from(controlHarnessUsers)
+      .where(
+        and(
+          eq(controlHarnessUsers.userId, input.userId),
+          eq(controlHarnessUsers.provider, input.provider),
+        ),
+      )
+      .get();
+  }
+
   usageSummaryForUser(userId: string) {
     return (
       this.db
@@ -1094,6 +1282,87 @@ export class ControlPlaneRepository {
     };
     this.db.insert(controlUsageEvents).values(record).run();
     return record;
+  }
+
+  recordHarnessUsageEvent(input: HarnessUsageEventInput) {
+    if (input.externalEventId) {
+      const existing = this.db
+        .select()
+        .from(controlHarnessUsageEvents)
+        .where(
+          and(
+            eq(controlHarnessUsageEvents.provider, input.provider),
+            eq(controlHarnessUsageEvents.externalEventId, input.externalEventId),
+          ),
+        )
+        .get();
+      if (existing) {
+        return existing;
+      }
+    }
+    const record = {
+      id: randomUUID(),
+      userId: input.userId,
+      sandboxId: input.sandboxId,
+      workspaceId: input.workspaceId ?? null,
+      sessionId: input.sessionId ?? null,
+      provider: input.provider,
+      module: input.module,
+      tool: input.tool ?? null,
+      runId: input.runId ?? null,
+      jobId: input.jobId ?? null,
+      externalEventId: input.externalEventId ?? null,
+      computeUnits: input.computeUnits ?? 0,
+      costUsd: input.costUsd ?? 0,
+      status: input.status ?? 'unknown',
+      metadataJson: JSON.stringify(input.metadata ?? {}),
+      occurredAt: input.occurredAt ?? new Date().toISOString(),
+      importedAt: new Date().toISOString(),
+    };
+    this.db.insert(controlHarnessUsageEvents).values(record).run();
+    this.audit(input.userId, 'harness.usage_recorded', 'harness_usage', record.id, {
+      sandboxId: input.sandboxId,
+      workspaceId: input.workspaceId ?? null,
+      sessionId: input.sessionId ?? null,
+      provider: input.provider,
+      module: input.module,
+      tool: input.tool ?? null,
+      runId: input.runId ?? null,
+      jobId: input.jobId ?? null,
+      externalEventId: input.externalEventId ?? null,
+      computeUnits: input.computeUnits ?? 0,
+      costUsd: input.costUsd ?? 0,
+      status: input.status ?? 'unknown',
+    });
+    return record;
+  }
+
+  listHarnessUsageEventsForUser(userId: string, limit = 100) {
+    return this.db
+      .select()
+      .from(controlHarnessUsageEvents)
+      .where(eq(controlHarnessUsageEvents.userId, userId))
+      .orderBy(desc(controlHarnessUsageEvents.occurredAt))
+      .limit(limit)
+      .all();
+  }
+
+  harnessUsageSummaryForUser(userId: string) {
+    return (
+      this.db
+        .select({
+          eventCount: sql<number>`count(*)`,
+          computeUnits: sql<number>`coalesce(sum(${controlHarnessUsageEvents.computeUnits}), 0)`,
+          costUsd: sql<number>`coalesce(sum(${controlHarnessUsageEvents.costUsd}), 0)`,
+        })
+        .from(controlHarnessUsageEvents)
+        .where(eq(controlHarnessUsageEvents.userId, userId))
+        .get() ?? {
+        eventCount: 0,
+        computeUnits: 0,
+        costUsd: 0,
+      }
+    );
   }
 
   audit(

@@ -291,6 +291,32 @@ export interface ControlPlaneUsageEvent {
   importedAt: string;
 }
 
+export interface ControlPlaneHarnessUsageSummary {
+  eventCount: number;
+  computeUnits: number;
+  costUsd: number;
+}
+
+export interface ControlPlaneHarnessUsageEvent {
+  id: string;
+  userId: string;
+  sandboxId: string;
+  workspaceId: string | null;
+  sessionId: string | null;
+  provider: string;
+  module: string;
+  tool: string | null;
+  runId: string | null;
+  jobId: string | null;
+  externalEventId: string | null;
+  computeUnits: number;
+  costUsd: number;
+  status: string;
+  metadataJson: string;
+  occurredAt: string;
+  importedAt: string;
+}
+
 export interface ControlPlaneAuditLog {
   id: string;
   userId: string | null;
@@ -317,6 +343,22 @@ export interface ControlPlaneSandboxDetail {
   endpoint: { routerBaseUrl: string | null };
   workerBaseUrl: string | null;
   recentLifecycleErrors: ControlPlaneAuditLog[];
+}
+
+export type ControlPlaneHarnessModule = 'estructural' | 'quntur' | 'farmaco';
+
+export interface ControlPlaneHarnessStatus {
+  enabled: boolean;
+  baseUrl: string | null;
+  keyPresent: boolean;
+  chemistryToolsEnabled: boolean;
+  modules: ControlPlaneHarnessModule[];
+  health: unknown | null;
+}
+
+export interface ControlPlaneHarnessPayload {
+  payload?: unknown;
+  text?: string;
 }
 
 function controlPlaneUrl(auth: ControlPlaneAuth, path: string) {
@@ -414,6 +456,23 @@ export function fetchControlPlaneUsageEvents(auth: ControlPlaneAuth, limit = 10)
     {
       cache: 'no-store',
     },
+  );
+}
+
+export function fetchControlPlaneHarnessUsageSummary(auth: ControlPlaneAuth) {
+  return controlPlaneRequest<{ usage: ControlPlaneHarnessUsageSummary }>(
+    auth,
+    '/api/usage/harness/summary',
+    { cache: 'no-store' },
+  );
+}
+
+export function fetchControlPlaneHarnessUsageEvents(auth: ControlPlaneAuth, limit = 10) {
+  const search = new URLSearchParams({ limit: String(limit) });
+  return controlPlaneRequest<{ events: ControlPlaneHarnessUsageEvent[] }>(
+    auth,
+    `/api/usage/harness/events?${search.toString()}`,
+    { cache: 'no-store' },
   );
 }
 
@@ -537,6 +596,45 @@ export function fetchControlPlaneSandboxHealth(auth: ControlPlaneAuth) {
   }>(auth, '/api/sandbox/health', {
     cache: 'no-store',
   });
+}
+
+export function fetchControlPlaneHarnessStatus(auth: ControlPlaneAuth) {
+  return controlPlaneRequest<ControlPlaneHarnessStatus>(auth, '/api/sandbox/harness/status', {
+    cache: 'no-store',
+  });
+}
+
+export function fetchControlPlaneHarnessModuleHelp(
+  auth: ControlPlaneAuth,
+  module: ControlPlaneHarnessModule,
+) {
+  return controlPlaneRequest<ControlPlaneHarnessPayload>(
+    auth,
+    `/api/sandbox/harness/modules/${encodeURIComponent(module)}/help`,
+    { cache: 'no-store' },
+  );
+}
+
+export function fetchControlPlaneHarnessModuleTools(
+  auth: ControlPlaneAuth,
+  module: ControlPlaneHarnessModule,
+) {
+  return controlPlaneRequest<ControlPlaneHarnessPayload>(
+    auth,
+    `/api/sandbox/harness/modules/${encodeURIComponent(module)}/tools`,
+    { cache: 'no-store' },
+  );
+}
+
+export function fetchControlPlaneHarnessModuleRuns(
+  auth: ControlPlaneAuth,
+  module: ControlPlaneHarnessModule,
+) {
+  return controlPlaneRequest<ControlPlaneHarnessPayload>(
+    auth,
+    `/api/sandbox/harness/modules/${encodeURIComponent(module)}/runs`,
+    { cache: 'no-store' },
+  );
 }
 
 export function fetchControlPlaneAdminSandboxDetail(

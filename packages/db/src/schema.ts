@@ -358,6 +358,55 @@ export const controlGatewayKeys = sqliteTable(
   }),
 );
 
+export const controlHarnessUsers = sqliteTable(
+  'control_harness_users',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull(),
+    provider: text('provider').notNull(),
+    externalUserId: text('external_user_id').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => ({
+    userProviderUnique: uniqueIndex('control_harness_users_user_provider_idx').on(
+      table.userId,
+      table.provider,
+    ),
+    providerExternalUnique: uniqueIndex('control_harness_users_provider_external_idx').on(
+      table.provider,
+      table.externalUserId,
+    ),
+  }),
+);
+
+export const controlHarnessKeys = sqliteTable(
+  'control_harness_keys',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull(),
+    sandboxId: text('sandbox_id').notNull(),
+    provider: text('provider').notNull(),
+    externalKeyId: text('external_key_id').notNull(),
+    keyCiphertext: text('key_ciphertext'),
+    secretName: text('secret_name'),
+    secretKey: text('secret_key'),
+    status: text('status').notNull(),
+    createdAt: text('created_at').notNull(),
+    rotatedAt: text('rotated_at'),
+    revokedAt: text('revoked_at'),
+  },
+  (table) => ({
+    sandboxProviderUnique: uniqueIndex('control_harness_keys_sandbox_provider_idx').on(
+      table.sandboxId,
+      table.provider,
+    ),
+    providerExternalUnique: uniqueIndex('control_harness_keys_provider_external_idx').on(
+      table.provider,
+      table.externalKeyId,
+    ),
+  }),
+);
+
 export const controlUsageEvents = sqliteTable('control_usage_events', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull(),
@@ -375,6 +424,33 @@ export const controlUsageEvents = sqliteTable('control_usage_events', {
   occurredAt: text('occurred_at').notNull(),
   importedAt: text('imported_at').notNull(),
 });
+
+export const controlHarnessUsageEvents = sqliteTable(
+  'control_harness_usage_events',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull(),
+    sandboxId: text('sandbox_id').notNull(),
+    workspaceId: text('workspace_id'),
+    sessionId: text('session_id'),
+    provider: text('provider').notNull(),
+    module: text('module').notNull(),
+    tool: text('tool'),
+    runId: text('run_id'),
+    jobId: text('job_id'),
+    externalEventId: text('external_event_id'),
+    computeUnits: real('compute_units').notNull().default(0),
+    costUsd: real('cost_usd').notNull().default(0),
+    status: text('status').notNull().default('unknown'),
+    metadataJson: text('metadata_json').notNull().default('{}'),
+    occurredAt: text('occurred_at').notNull(),
+    importedAt: text('imported_at').notNull(),
+  },
+  (table) => ({
+    providerExternalEventUnique: uniqueIndex('control_harness_usage_provider_event_idx')
+      .on(table.provider, table.externalEventId),
+  }),
+);
 
 export const controlUsageImportState = sqliteTable('control_usage_import_state', {
   id: text('id').primaryKey(),

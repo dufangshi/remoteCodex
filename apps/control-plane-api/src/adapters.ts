@@ -58,6 +58,20 @@ export interface SandboxEnvironmentSpec extends SandboxEnvironment {
   secretEnv?: Record<string, SandboxSecretEnvRef>;
 }
 
+export interface SandboxSecretWriter {
+  putSecretValue(input: {
+    namespace?: string;
+    secretName: string;
+    key: string;
+    value: string;
+  }): Promise<void>;
+  hasSecretValue?(input: {
+    namespace?: string;
+    secretName: string;
+    key: string;
+  }): Promise<boolean>;
+}
+
 export type SandboxManagerErrorCode = 'quota' | 'capacity' | 'config' | 'provider';
 
 export class SandboxManagerError extends Error {
@@ -354,6 +368,17 @@ export interface AwsWorkerRuntimeResource extends SandboxRuntimeResource {
 
 export interface AwsSandboxKubernetesClient {
   applyWorkerPod(spec: AwsWorkerPodSpec): Promise<void>;
+  upsertSecretKey?(input: {
+    namespace: string;
+    secretName: string;
+    key: string;
+    value: string;
+  }): Promise<void>;
+  hasSecretKey?(input: {
+    namespace: string;
+    secretName: string;
+    key: string;
+  }): Promise<boolean>;
   deleteWorkerPod(input: {
     namespace: string;
     podName: string;
@@ -530,6 +555,49 @@ export class KubectlAwsSandboxKubernetesClient implements AwsSandboxKubernetesCl
     ], `${shellJson(workerServiceManifest(spec))}\n---\n${shellJson(workerPodManifest(spec))}\n`);
   }
 
+  async upsertSecretKey(input: {
+    namespace: string;
+    secretName: string;
+    key: string;
+    value: string;
+  }): Promise<void> {
+    const manifest = {
+      apiVersion: 'v1',
+      kind: 'Secret',
+      metadata: {
+        name: input.secretName,
+        namespace: input.namespace,
+      },
+      type: 'Opaque',
+      stringData: {
+        [input.key]: input.value,
+      },
+    };
+    await this.kubectl(['apply', '-f', '-'], `${shellJson(manifest)}\n`);
+  }
+
+  async hasSecretKey(input: {
+    namespace: string;
+    secretName: string;
+    key: string;
+  }): Promise<boolean> {
+    try {
+      const result = await this.kubectl([
+        'get',
+        'secret',
+        input.secretName,
+        '-n',
+        input.namespace,
+        '-o',
+        'json',
+      ]);
+      const secret = JSON.parse(result.stdout) as { data?: Record<string, unknown> };
+      return typeof secret.data?.[input.key] === 'string';
+    } catch {
+      return false;
+    }
+  }
+
   async deleteWorkerPod(input: {
     namespace: string;
     podName: string;
@@ -695,6 +763,50 @@ export class KubectlAwsSandboxKubernetesClient implements AwsSandboxKubernetesCl
         reject(new Error(stderr || `kubectl ${args.join(' ')} exited with code ${code}.`));
       });
       child.stdin.end(stdin);
+    });
+  }
+}
+
+export class AwsSandboxSecretWriter implements SandboxSecretWriter {
+  constructor(
+    private readonly input: {
+      namespace: string;
+      kubernetesClient: AwsSandboxKubernetesClient;
+    },
+  ) {}
+
+  async putSecretValue(input: {
+    namespace?: string;
+    secretName: string;
+    key: string;
+    value: string;
+  }): Promise<void> {
+    if (!this.input.kubernetesClient.upsertSecretKey) {
+      throw new SandboxManagerError(
+        'provider',
+        'AWS Kubernetes client cannot write sandbox secrets.',
+      );
+    }
+    await this.input.kubernetesClient.upsertSecretKey({
+      namespace: input.namespace ?? this.input.namespace,
+      secretName: input.secretName,
+      key: input.key,
+      value: input.value,
+    });
+  }
+
+  async hasSecretValue(input: {
+    namespace?: string;
+    secretName: string;
+    key: string;
+  }): Promise<boolean> {
+    if (!this.input.kubernetesClient.hasSecretKey) {
+      return false;
+    }
+    return this.input.kubernetesClient.hasSecretKey({
+      namespace: input.namespace ?? this.input.namespace,
+      secretName: input.secretName,
+      key: input.key,
     });
   }
 }
@@ -1535,6 +1647,526 @@ export class NoopLlmGatewayAdmin implements LlmGatewayAdmin {
   }
 
   async exportUsage(): Promise<GatewayUsageExportResult> {
+    return {
+      events: [],
+      nextCursor: null,
+    };
+  }
+}
+
+export interface HarnessUserResult {
+  externalUserId: string;
+}
+
+export interface HarnessKeyResult {
+  externalKeyId: string;
+  apiKey: string | null;
+  keyCiphertext?: string | null;
+}
+
+export interface HarnessUsageExportEvent {
+  eventId: string;
+  externalKeyId?: string | null;
+  userId?: string | null;
+  sandboxId?: string | null;
+  workspaceId?: string | null;
+  sessionId?: string | null;
+  module: 'estructural' | 'quntur' | 'farmaco';
+  tool?: string | null;
+  runId?: string | null;
+  jobId?: string | null;
+  computeUnits?: number | undefined;
+  costUsd?: number | undefined;
+  status?: string | undefined;
+  metadata?: Record<string, unknown> | undefined;
+  occurredAt?: string | undefined;
+}
+
+export interface HarnessUsageExportResult {
+  events: HarnessUsageExportEvent[];
+  nextCursor?: string | null;
+}
+
+export interface HarnessAdmin {
+  ensureUser(input: {
+    userId: string;
+    email: string;
+    displayName?: string | null;
+  }): Promise<HarnessUserResult>;
+  ensureSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    email?: string | null;
+    displayName?: string | null;
+  }): Promise<HarnessKeyResult>;
+  rotateSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId: string;
+  }): Promise<HarnessKeyResult>;
+  revokeSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId: string;
+  }): Promise<void>;
+  reconcileSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId?: string | null;
+  }): Promise<HarnessKeyResult>;
+  exportUsage(input?: {
+    cursor?: string | null;
+    limit?: number;
+  }): Promise<HarnessUsageExportResult>;
+}
+
+function textFieldFromHarnessResponse(text: string, name: string) {
+  const match = text.match(new RegExp(`^${name}\\s*=\\s*(?:"([^"]*)"|([^\\n\\r]+))\\s*$`, 'm'));
+  return match?.[1] ?? match?.[2]?.trim() ?? null;
+}
+
+async function parseHarnessResponse(response: Response): Promise<unknown> {
+  const text = await response.text();
+  let payload: unknown = null;
+  if (text.trim()) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = text;
+    }
+  }
+  if (!response.ok) {
+    const message =
+      payload &&
+      typeof payload === 'object' &&
+      'message' in payload &&
+      typeof payload.message === 'string'
+        ? payload.message
+        : typeof payload === 'string' && payload.trim()
+          ? payload.trim().split('\n')[0]!
+          : `Harness admin request failed with status ${response.status}.`;
+    throw new SandboxManagerError('provider', message);
+  }
+  return payload;
+}
+
+function harnessExternalIdFromPayload(payload: unknown, fallbackName: string) {
+  if (payload && typeof payload === 'object') {
+    const candidate =
+      'externalKeyId' in payload
+        ? payload.externalKeyId
+        : 'id' in payload
+          ? payload.id
+          : 'externalUserId' in payload
+            ? payload.externalUserId
+            : null;
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate;
+    }
+    if (typeof candidate === 'number') {
+      return String(candidate);
+    }
+  }
+  if (typeof payload === 'string') {
+    const id = textFieldFromHarnessResponse(payload, 'id');
+    if (id) {
+      return id;
+    }
+  }
+  throw new SandboxManagerError('provider', `Harness admin response missing ${fallbackName}.`);
+}
+
+function harnessApiKeyFromPayload(payload: unknown) {
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    'apiKey' in payload &&
+    typeof payload.apiKey === 'string' &&
+    payload.apiKey.trim()
+  ) {
+    return payload.apiKey;
+  }
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    'api_key' in payload &&
+    typeof payload.api_key === 'string' &&
+    payload.api_key.trim()
+  ) {
+    return payload.api_key;
+  }
+  if (typeof payload === 'string') {
+    return textFieldFromHarnessResponse(payload, 'api_key');
+  }
+  return null;
+}
+
+function harnessKeyCiphertextFromPayload(payload: unknown) {
+  return payload &&
+    typeof payload === 'object' &&
+    'keyCiphertext' in payload &&
+    typeof payload.keyCiphertext === 'string'
+    ? payload.keyCiphertext
+    : null;
+}
+
+function harnessStringField(entry: Record<string, unknown>, fields: string[]) {
+  for (const field of fields) {
+    const value = entry[field];
+    if (typeof value === 'string' && value.trim()) {
+      return value;
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value);
+    }
+  }
+  return null;
+}
+
+function harnessNumberField(entry: Record<string, unknown>, fields: string[]) {
+  for (const field of fields) {
+    const value = entry[field];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) {
+      return Number(value);
+    }
+  }
+  return undefined;
+}
+
+function harnessUsageEventsFromPayload(payload: unknown): HarnessUsageExportResult {
+  if (!payload || typeof payload !== 'object' || !('events' in payload) || !Array.isArray(payload.events)) {
+    throw new SandboxManagerError('provider', 'Harness usage export response missing events.');
+  }
+  const nextCursor =
+    'nextCursor' in payload && typeof payload.nextCursor === 'string'
+      ? payload.nextCursor
+      : null;
+  return {
+    events: payload.events.map((entry) => {
+      if (!entry || typeof entry !== 'object') {
+        throw new SandboxManagerError('provider', 'Harness usage export event is invalid.');
+      }
+      const record = entry as Record<string, unknown>;
+      const eventId = harnessStringField(record, ['eventId', 'event_id', 'externalEventId', 'external_event_id', 'requestId', 'request_id']);
+      const module = harnessStringField(record, ['module']);
+      if (!eventId) {
+        throw new SandboxManagerError('provider', 'Harness usage export event missing event id.');
+      }
+      if (module !== 'estructural' && module !== 'quntur' && module !== 'farmaco') {
+        throw new SandboxManagerError('provider', 'Harness usage export event missing approved module.');
+      }
+      const metadata =
+        'metadata' in record && record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata)
+          ? record.metadata as Record<string, unknown>
+          : undefined;
+      return {
+        eventId,
+        externalKeyId: harnessStringField(record, ['externalKeyId', 'external_key_id', 'keyId', 'key_id']),
+        userId: harnessStringField(record, ['userId', 'user_id']),
+        sandboxId: harnessStringField(record, ['sandboxId', 'sandbox_id']),
+        workspaceId: harnessStringField(record, ['workspaceId', 'workspace_id']),
+        sessionId: harnessStringField(record, ['sessionId', 'session_id']),
+        module,
+        tool: harnessStringField(record, ['tool', 'toolName', 'tool_name']),
+        runId: harnessStringField(record, ['runId', 'run_id']),
+        jobId: harnessStringField(record, ['jobId', 'job_id', 'computeJobId', 'compute_job_id']),
+        computeUnits: harnessNumberField(record, ['computeUnits', 'compute_units', 'workerObservedSeconds', 'worker_observed_seconds']),
+        costUsd: harnessNumberField(record, ['costUsd', 'cost_usd', 'estimatedCostUsd', 'estimated_cost_usd']),
+        status: harnessStringField(record, ['status', 'state']) ?? undefined,
+        metadata,
+        occurredAt: harnessStringField(record, ['occurredAt', 'occurred_at']) ?? undefined,
+      };
+    }),
+    nextCursor,
+  };
+}
+
+export class HttpHarnessAdmin implements HarnessAdmin {
+  private readonly baseUrl: string;
+  private readonly adminKey: string;
+  private readonly fetchImpl: GatewayFetch;
+  private readonly legacyFallback: boolean;
+
+  constructor(
+    input: {
+      baseUrl: string;
+      adminKey: string;
+      fetchImpl?: GatewayFetch;
+      legacyFallback?: boolean;
+    },
+  ) {
+    this.baseUrl = trimTrailingSlash(input.baseUrl);
+    this.adminKey = input.adminKey;
+    this.fetchImpl = input.fetchImpl ?? fetch;
+    this.legacyFallback = input.legacyFallback ?? true;
+  }
+
+  async ensureUser(input: {
+    userId: string;
+  }): Promise<HarnessUserResult> {
+    return {
+      externalUserId: `remote-codex:user:${input.userId}`,
+    };
+  }
+
+  async ensureSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    email?: string | null;
+    displayName?: string | null;
+  }): Promise<HarnessKeyResult> {
+    const ensureResponse = await this.fetchImpl(`${this.baseUrl}/admin/members/ensure`, {
+      method: 'POST',
+      headers: {
+        'x-admin-key': this.adminKey,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        externalId: `remote-codex:sandbox:${input.sandboxId}`,
+        userId: input.userId,
+        sandboxId: input.sandboxId,
+        externalUserId: input.externalUserId,
+        name: `remote-codex-sandbox-${input.sandboxId.slice(0, 8)}`,
+        kind: 'agent',
+        email: input.email ?? '',
+        description: `Remote Codex sandbox ${input.sandboxId} for user ${input.userId}`,
+      }),
+    });
+    if (ensureResponse.status !== 404) {
+      const payload = await parseHarnessResponse(ensureResponse);
+      return {
+        externalKeyId: harnessExternalIdFromPayload(payload, 'external key id'),
+        apiKey: harnessApiKeyFromPayload(payload),
+        keyCiphertext: harnessKeyCiphertextFromPayload(payload),
+      };
+    }
+    if (!this.legacyFallback) {
+      await parseHarnessResponse(ensureResponse);
+    }
+
+    const createResponse = await this.fetchImpl(`${this.baseUrl}/admin/create`, {
+      method: 'POST',
+      headers: {
+        'x-admin-key': this.adminKey,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: `remote-codex-sandbox-${input.sandboxId.slice(0, 8)}`,
+        kind: 'agent',
+        email: input.email ?? '',
+        description: `Remote Codex sandbox ${input.sandboxId} for user ${input.userId}`,
+      }),
+    });
+    const payload = await parseHarnessResponse(createResponse);
+    return {
+      externalKeyId: harnessExternalIdFromPayload(payload, 'external key id'),
+      apiKey: harnessApiKeyFromPayload(payload),
+      keyCiphertext: harnessKeyCiphertextFromPayload(payload),
+    };
+  }
+
+  async rotateSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId: string;
+  }): Promise<HarnessKeyResult> {
+    const plannedResponse = await this.fetchImpl(
+      `${this.baseUrl}/admin/members/${encodeURIComponent(input.externalKeyId)}/rekey`,
+      {
+        method: 'POST',
+        headers: {
+          'x-admin-key': this.adminKey,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: input.userId,
+          sandboxId: input.sandboxId,
+          externalUserId: input.externalUserId,
+        }),
+      },
+    );
+    if (plannedResponse.status !== 404) {
+      const payload = await parseHarnessResponse(plannedResponse);
+      return {
+        externalKeyId: harnessExternalIdFromPayload(payload, 'external key id'),
+        apiKey: harnessApiKeyFromPayload(payload),
+        keyCiphertext: harnessKeyCiphertextFromPayload(payload),
+      };
+    }
+    if (!this.legacyFallback) {
+      await parseHarnessResponse(plannedResponse);
+    }
+
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/admin/${encodeURIComponent(input.externalKeyId)}/rekey`,
+      {
+        method: 'POST',
+        headers: {
+          'x-admin-key': this.adminKey,
+        },
+      },
+    );
+    const payload = await parseHarnessResponse(response);
+    return {
+      externalKeyId: input.externalKeyId,
+      apiKey: harnessApiKeyFromPayload(payload),
+      keyCiphertext: harnessKeyCiphertextFromPayload(payload),
+    };
+  }
+
+  async revokeSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId: string;
+  }): Promise<void> {
+    const plannedResponse = await this.fetchImpl(
+      `${this.baseUrl}/admin/members/${encodeURIComponent(input.externalKeyId)}/revoke`,
+      {
+        method: 'POST',
+        headers: {
+          'x-admin-key': this.adminKey,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: input.userId,
+          sandboxId: input.sandboxId,
+          externalUserId: input.externalUserId,
+        }),
+      },
+    );
+    if (plannedResponse.status !== 404) {
+      await parseHarnessResponse(plannedResponse);
+      return;
+    }
+    if (!this.legacyFallback) {
+      await parseHarnessResponse(plannedResponse);
+    }
+
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/admin/${encodeURIComponent(input.externalKeyId)}/delete`,
+      {
+        method: 'POST',
+        headers: {
+          'x-admin-key': this.adminKey,
+        },
+      },
+    );
+    await parseHarnessResponse(response);
+  }
+
+  async reconcileSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId?: string | null;
+  }): Promise<HarnessKeyResult> {
+    const response = await this.fetchImpl(`${this.baseUrl}/admin/members/reconcile`, {
+      method: 'POST',
+      headers: {
+        'x-admin-key': this.adminKey,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        externalId: `remote-codex:sandbox:${input.sandboxId}`,
+        externalKeyId: input.externalKeyId ?? null,
+        userId: input.userId,
+        sandboxId: input.sandboxId,
+        externalUserId: input.externalUserId,
+        name: `remote-codex-sandbox-${input.sandboxId.slice(0, 8)}`,
+        kind: 'agent',
+        description: `Remote Codex sandbox ${input.sandboxId} for user ${input.userId}`,
+      }),
+    });
+    if (response.status !== 404) {
+      const payload = await parseHarnessResponse(response);
+      return {
+        externalKeyId: harnessExternalIdFromPayload(payload, 'external key id'),
+        apiKey: harnessApiKeyFromPayload(payload),
+        keyCiphertext: harnessKeyCiphertextFromPayload(payload),
+      };
+    }
+    if (!this.legacyFallback) {
+      await parseHarnessResponse(response);
+    }
+
+    if (input.externalKeyId) {
+      return {
+        externalKeyId: input.externalKeyId,
+        apiKey: null,
+        keyCiphertext: null,
+      };
+    }
+    return this.ensureSandboxKey(input);
+  }
+
+  async exportUsage(input: {
+    cursor?: string | null;
+    limit?: number;
+  } = {}): Promise<HarnessUsageExportResult> {
+    const search = new URLSearchParams();
+    if (input.cursor) {
+      search.set('cursor', input.cursor);
+    }
+    if (input.limit) {
+      search.set('limit', String(input.limit));
+    }
+    const query = search.toString();
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/admin/usage/export${query ? `?${query}` : ''}`,
+      {
+        method: 'GET',
+        headers: {
+          'x-admin-key': this.adminKey,
+        },
+      },
+    );
+    const payload = await parseHarnessResponse(response);
+    return harnessUsageEventsFromPayload(payload);
+  }
+}
+
+export class NoopHarnessAdmin implements HarnessAdmin {
+  async ensureUser(input: { userId: string }): Promise<HarnessUserResult> {
+    return { externalUserId: `harness-user-${input.userId}` };
+  }
+
+  async ensureSandboxKey(input: { sandboxId: string }): Promise<HarnessKeyResult> {
+    return {
+      externalKeyId: `harness-key-${input.sandboxId}`,
+      apiKey: `harness-api-key-${input.sandboxId}`,
+      keyCiphertext: null,
+    };
+  }
+
+  async rotateSandboxKey(input: { sandboxId: string; externalKeyId: string }): Promise<HarnessKeyResult> {
+    return {
+      externalKeyId: input.externalKeyId,
+      apiKey: `harness-api-key-${input.sandboxId}-rotated`,
+      keyCiphertext: null,
+    };
+  }
+
+  async revokeSandboxKey(): Promise<void> {}
+
+  async reconcileSandboxKey(input: { sandboxId: string; externalKeyId?: string | null }): Promise<HarnessKeyResult> {
+    return {
+      externalKeyId: input.externalKeyId ?? `harness-key-${input.sandboxId}`,
+      apiKey: null,
+      keyCiphertext: null,
+    };
+  }
+
+  async exportUsage(): Promise<HarnessUsageExportResult> {
     return {
       events: [],
       nextCursor: null,

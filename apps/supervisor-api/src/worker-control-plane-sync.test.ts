@@ -113,4 +113,116 @@ describe('WorkerControlPlaneSyncClient', () => {
     } satisfies Partial<WorkerControlPlaneSyncError>);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
+
+  it('records worker-local Harness usage events with worker identity', async () => {
+    const fetchImpl = vi.fn(async () =>
+      Response.json({
+        harnessUsageEvent: {
+          id: 'usage-1',
+          userId: '00000000-0000-4000-8000-000000000001',
+          sandboxId: '00000000-0000-4000-8000-000000000002',
+          workspaceId: '00000000-0000-4000-8000-000000000004',
+          sessionId: '00000000-0000-4000-8000-000000000005',
+          provider: 'elagente-harness',
+          module: 'farmaco',
+          tool: 'dock',
+          runId: 'run-1',
+          jobId: 'job-1',
+          externalEventId: 'run-1',
+          computeUnits: 2,
+          costUsd: 0.25,
+          status: 'ok',
+          metadataJson: '{}',
+          occurredAt: '2026-06-03T00:00:00.000Z',
+          importedAt: '2026-06-03T00:00:00.000Z',
+        },
+      }),
+    );
+    const client = new WorkerControlPlaneSyncClient(workerConfig(), { fetchImpl });
+
+    const result = await client.recordHarnessUsageEvent({
+      workspaceId: '00000000-0000-4000-8000-000000000004',
+      sessionId: '00000000-0000-4000-8000-000000000005',
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      module: 'farmaco',
+      tool: 'dock',
+      runId: 'run-1',
+      jobId: 'job-1',
+      externalEventId: 'run-1',
+      computeUnits: 2,
+      costUsd: 0.25,
+      status: 'ok',
+      metadata: { resultStatus: 'ok' },
+    });
+
+    expect(result.harnessUsageEvent.externalEventId).toBe('run-1');
+    expect(fetchImpl).toHaveBeenCalledWith(
+      new URL('/api/internal/harness/usage-events', 'https://control-plane.example.com'),
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-remote-codex-service-token': 'control-plane-service-token',
+        },
+        body: JSON.stringify({
+          workspaceId: '00000000-0000-4000-8000-000000000004',
+          sessionId: '00000000-0000-4000-8000-000000000005',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          module: 'farmaco',
+          tool: 'dock',
+          runId: 'run-1',
+          jobId: 'job-1',
+          externalEventId: 'run-1',
+          computeUnits: 2,
+          costUsd: 0.25,
+          status: 'ok',
+          metadata: { resultStatus: 'ok' },
+          userId: '00000000-0000-4000-8000-000000000001',
+          sandboxId: '00000000-0000-4000-8000-000000000002',
+        }),
+      }),
+    );
+  });
+
+  it('checks Harness quota with worker identity before invocation', async () => {
+    const fetchImpl = vi.fn(async () =>
+      Response.json({
+        allowed: false,
+        denial: {
+          reason: 'harness_spend_quota_exceeded',
+          quotaProfile: 'developer',
+          limit: 50,
+          used: 49,
+        },
+      }),
+    );
+    const client = new WorkerControlPlaneSyncClient(workerConfig(), { fetchImpl });
+
+    const result = await client.checkHarnessQuota({
+      workspaceId: '00000000-0000-4000-8000-000000000004',
+      sessionId: '00000000-0000-4000-8000-000000000005',
+      module: 'farmaco',
+      tool: 'dock',
+      estimatedCostUsd: 2,
+    });
+
+    expect(result.allowed).toBe(false);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      new URL('/api/internal/harness/quota/check', 'https://control-plane.example.com'),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          workspaceId: '00000000-0000-4000-8000-000000000004',
+          sessionId: '00000000-0000-4000-8000-000000000005',
+          module: 'farmaco',
+          tool: 'dock',
+          estimatedCostUsd: 2,
+          userId: '00000000-0000-4000-8000-000000000001',
+          sandboxId: '00000000-0000-4000-8000-000000000002',
+        }),
+      }),
+    );
+  });
 });

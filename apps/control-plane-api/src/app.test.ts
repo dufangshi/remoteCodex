@@ -5,9 +5,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createSignedToken } from '../../../packages/shared/src/tokens';
 import type {
+  HarnessAdmin,
+  HarnessKeyResult,
   SandboxManager,
   SandboxProvisionResult,
   SandboxRuntimeResource,
+  SandboxSecretWriter,
   SandboxStartInput,
 } from './adapters';
 import { CONTROL_PLANE_LOG_REDACTION_PATHS, buildControlPlaneApp } from './app';
@@ -105,6 +108,101 @@ class RecordingSandboxManager implements SandboxManager {
   }
 }
 
+class RecordingHarnessAdmin implements HarnessAdmin {
+  readonly ensureUsers: Array<{ userId: string; email: string; displayName?: string | null }> = [];
+  readonly ensureKeys: Array<{ userId: string; sandboxId: string; externalUserId: string }> = [];
+  readonly rotations: Array<{ userId: string; sandboxId: string; externalUserId: string; externalKeyId: string }> = [];
+  readonly revocations: Array<{ userId: string; sandboxId: string; externalUserId: string; externalKeyId: string }> = [];
+  readonly exportCalls: Array<{ cursor?: string | null; limit?: number }> = [];
+  nextKey: HarnessKeyResult | null = null;
+  usageExport = {
+    events: [],
+    nextCursor: null,
+  } as Awaited<ReturnType<HarnessAdmin['exportUsage']>>;
+
+  async ensureUser(input: { userId: string; email: string; displayName?: string | null }) {
+    this.ensureUsers.push(input);
+    return { externalUserId: `harness-user-${input.userId}` };
+  }
+
+  async ensureSandboxKey(input: { userId: string; sandboxId: string; externalUserId: string }) {
+    this.ensureKeys.push(input);
+    return this.nextKey ?? {
+      externalKeyId: `harness-key-${input.sandboxId}`,
+      apiKey: `harness-api-key-${input.sandboxId}`,
+      keyCiphertext: null,
+    };
+  }
+
+  async rotateSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId: string;
+  }) {
+    this.rotations.push(input);
+    return this.nextKey ?? {
+      externalKeyId: input.externalKeyId,
+      apiKey: `harness-api-key-${input.sandboxId}-rotated`,
+      keyCiphertext: null,
+    };
+  }
+
+  async revokeSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId: string;
+  }) {
+    this.revocations.push(input);
+  }
+
+  async reconcileSandboxKey(input: {
+    sandboxId: string;
+    externalKeyId?: string | null;
+  }) {
+    return {
+      externalKeyId: input.externalKeyId ?? `harness-key-${input.sandboxId}`,
+      apiKey: null,
+      keyCiphertext: null,
+    };
+  }
+
+  async exportUsage(input = {}) {
+    this.exportCalls.push(input);
+    return this.usageExport;
+  }
+}
+
+class RecordingSandboxSecretWriter implements SandboxSecretWriter {
+  readonly writes: Array<{ namespace?: string; secretName: string; key: string; value: string }> = [];
+  readonly reads: Array<{ namespace?: string; secretName: string; key: string }> = [];
+  readonly values = new Set<string>();
+
+  private valueKey(input: { secretName: string; key: string }) {
+    return `${input.secretName}:${input.key}`;
+  }
+
+  async putSecretValue(input: {
+    namespace?: string;
+    secretName: string;
+    key: string;
+    value: string;
+  }) {
+    this.writes.push(input);
+    this.values.add(this.valueKey(input));
+  }
+
+  async hasSecretValue(input: {
+    namespace?: string;
+    secretName: string;
+    key: string;
+  }) {
+    this.reads.push(input);
+    return this.values.has(this.valueKey(input));
+  }
+}
+
 describe('control plane api', () => {
   const apps: ReturnType<typeof buildControlPlaneApp>[] = [];
 
@@ -125,8 +223,12 @@ describe('control plane api', () => {
         'llmGatewayAdminToken',
         'LLM_GATEWAY_STATIC_TOKEN',
         'llmGatewayStaticToken',
+        'ELAGENTE_HARNESS_ADMIN_KEY',
+        'harnessAdminKey',
         'gatewayKey.keyCiphertext',
         '*.gatewayKey.keyCiphertext',
+        'harnessKey.keyCiphertext',
+        '*.harnessKey.keyCiphertext',
         '*.keyCiphertext',
       ]),
     );
@@ -508,6 +610,8 @@ describe('control plane api', () => {
 
   it('attaches gateway credential metadata when starting a sandbox', async () => {
     const sandboxManager = new RecordingSandboxManager();
+    const harnessAdmin = new RecordingHarnessAdmin();
+    const sandboxSecretWriter = new RecordingSandboxSecretWriter();
     const app = buildControlPlaneApp({
       env: {
         ...testEnv('gateway-start'),
@@ -516,9 +620,12 @@ describe('control plane api', () => {
         LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY: 'sub2api-api-key',
         ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
         ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: 'remote-codex-harness-app-keys',
+        ELAGENTE_HARNESS_ADMIN_KEY: 'harness-admin-key',
         REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
       },
       sandboxManager,
+      harnessAdmin,
+      sandboxSecretWriter,
     });
     apps.push(app);
 
@@ -532,6 +639,21 @@ describe('control plane api', () => {
       },
     });
     expect(bootstrap.statusCode).toBe(200);
+    expect(bootstrap.json().harnessKey).toMatchObject({
+      externalKeyId: `harness-key-${bootstrap.json().sandbox.id}`,
+      keyCiphertext: null,
+      hasEncryptedKey: false,
+      status: 'active',
+      secretName: 'remote-codex-harness-app-keys',
+      secretKey: bootstrap.json().sandbox.id,
+    });
+    expect(sandboxSecretWriter.writes).toEqual([
+      {
+        secretName: 'remote-codex-harness-app-keys',
+        key: bootstrap.json().sandbox.id,
+        value: `harness-api-key-${bootstrap.json().sandbox.id}`,
+      },
+    ]);
 
     const started = await app.inject({
       method: 'POST',
@@ -553,6 +675,123 @@ describe('control plane api', () => {
         appKeySecretName: 'remote-codex-harness-app-keys',
         chemistryToolsEnabled: true,
       },
+    });
+  });
+
+  it('skips Harness key rotation when an active sandbox Secret is still present', async () => {
+    const sandboxManager = new RecordingSandboxManager();
+    const harnessAdmin = new RecordingHarnessAdmin();
+    const sandboxSecretWriter = new RecordingSandboxSecretWriter();
+    const app = buildControlPlaneApp({
+      env: {
+        ...testEnv('harness-secret-present'),
+        ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
+        ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: 'remote-codex-harness-app-keys',
+        ELAGENTE_HARNESS_ADMIN_KEY: 'harness-admin-key',
+        REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
+      },
+      sandboxManager,
+      harnessAdmin,
+      sandboxSecretWriter,
+    });
+    apps.push(app);
+
+    const auth = { authorization: 'Bearer dev:harness-secret-present-user' };
+    const bootstrap = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: auth,
+      payload: {
+        email: 'harness-secret-present@example.com',
+      },
+    });
+    expect(bootstrap.statusCode).toBe(200);
+    expect(harnessAdmin.ensureKeys).toHaveLength(1);
+    expect(sandboxSecretWriter.writes).toHaveLength(1);
+
+    const started = await app.inject({
+      method: 'POST',
+      url: '/api/sandbox/start',
+      headers: auth,
+    });
+    expect(started.statusCode).toBe(200);
+    expect(sandboxSecretWriter.reads).toEqual([
+      {
+        secretName: 'remote-codex-harness-app-keys',
+        key: bootstrap.json().sandbox.id,
+      },
+    ]);
+    expect(harnessAdmin.rotations).toHaveLength(0);
+    expect(sandboxSecretWriter.writes).toHaveLength(1);
+  });
+
+  it('rotates and rewrites the Harness key when an active sandbox Secret is missing', async () => {
+    const sandboxManager = new RecordingSandboxManager();
+    const harnessAdmin = new RecordingHarnessAdmin();
+    const sandboxSecretWriter = new RecordingSandboxSecretWriter();
+    const app = buildControlPlaneApp({
+      env: {
+        ...testEnv('harness-secret-missing'),
+        ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
+        ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: 'remote-codex-harness-app-keys',
+        ELAGENTE_HARNESS_ADMIN_KEY: 'harness-admin-key',
+        REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
+      },
+      sandboxManager,
+      harnessAdmin,
+      sandboxSecretWriter,
+    });
+    apps.push(app);
+
+    const auth = { authorization: 'Bearer dev:harness-secret-missing-user' };
+    const bootstrap = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: auth,
+      payload: {
+        email: 'harness-secret-missing@example.com',
+      },
+    });
+    expect(bootstrap.statusCode).toBe(200);
+    sandboxSecretWriter.values.clear();
+
+    const started = await app.inject({
+      method: 'POST',
+      url: '/api/sandbox/start',
+      headers: auth,
+    });
+    expect(started.statusCode).toBe(200);
+    expect(sandboxSecretWriter.reads).toEqual([
+      {
+        secretName: 'remote-codex-harness-app-keys',
+        key: bootstrap.json().sandbox.id,
+      },
+    ]);
+    expect(harnessAdmin.rotations).toEqual([
+      {
+        userId: bootstrap.json().user.id,
+        sandboxId: bootstrap.json().sandbox.id,
+        externalUserId: `harness-user-${bootstrap.json().user.id}`,
+        externalKeyId: `harness-key-${bootstrap.json().sandbox.id}`,
+      },
+    ]);
+    expect(sandboxSecretWriter.writes).toEqual([
+      {
+        secretName: 'remote-codex-harness-app-keys',
+        key: bootstrap.json().sandbox.id,
+        value: `harness-api-key-${bootstrap.json().sandbox.id}`,
+      },
+      {
+        secretName: 'remote-codex-harness-app-keys',
+        key: bootstrap.json().sandbox.id,
+        value: `harness-api-key-${bootstrap.json().sandbox.id}-rotated`,
+      },
+    ]);
+    expect(app.services.repository.getHarnessKeyForSandbox(bootstrap.json().sandbox.id)).toMatchObject({
+      status: 'active',
+      rotatedAt: expect.any(String),
+      secretName: 'remote-codex-harness-app-keys',
+      secretKey: bootstrap.json().sandbox.id,
     });
   });
 
@@ -590,6 +829,8 @@ describe('control plane api', () => {
 
   it('attaches gateway and harness metadata when restarting a sandbox', async () => {
     const sandboxManager = new RecordingSandboxManager();
+    const harnessAdmin = new RecordingHarnessAdmin();
+    const sandboxSecretWriter = new RecordingSandboxSecretWriter();
     const app = buildControlPlaneApp({
       env: {
         ...testEnv('gateway-restart'),
@@ -598,9 +839,12 @@ describe('control plane api', () => {
         LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY: 'sub2api-api-key',
         ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
         ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: 'remote-codex-harness-app-keys',
+        ELAGENTE_HARNESS_ADMIN_KEY: 'harness-admin-key',
         REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
       },
       sandboxManager,
+      harnessAdmin,
+      sandboxSecretWriter,
     });
     apps.push(app);
 
@@ -1289,6 +1533,430 @@ describe('control plane api', () => {
       expect(workerRequests[3]!.body).toMatchObject({
         prompt: 'Reply with ok.',
       });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('proxies sandbox Harness status and tools through the worker without exposing the app key', async () => {
+    const workerRequests: Array<{
+      url: string;
+      method: string;
+      workerToken: string | null;
+    }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      workerRequests.push({
+        url: String(url),
+        method: init?.method ?? 'GET',
+        workerToken:
+          headers.get('x-remote-codex-worker-token') ??
+          headers.get('authorization'),
+      });
+      if (String(url).endsWith('/api/harness/status')) {
+        return Response.json({
+          enabled: true,
+          baseUrl: 'https://harness.example.test',
+          keyPresent: true,
+          chemistryToolsEnabled: true,
+          modules: ['estructural', 'quntur', 'farmaco'],
+          health: { status: 'ok' },
+        });
+      }
+      if (String(url).endsWith('/api/harness/modules/farmaco/tools')) {
+        return Response.json({
+          payload: [{ name: 'generate_ligand_xyz' }],
+        });
+      }
+      if (String(url).endsWith('/api/harness/modules/farmaco/help')) {
+        return Response.json({ text: 'Farmaco help' });
+      }
+      if (String(url).endsWith('/api/harness/modules/farmaco/runs')) {
+        return Response.json({
+          payload: [{ run_id: 'run-1', status: 'ok' }],
+          normalized: {
+            runs: [{ module: 'farmaco', runId: 'run-1', status: 'ok' }],
+          },
+        });
+      }
+      if (String(url).endsWith('/api/harness/modules/farmaco/runs/run-1')) {
+        return Response.json({
+          payload: { run_id: 'run-1', status: 'ok' },
+          normalized: {
+            run: { module: 'farmaco', runId: 'run-1', status: 'ok' },
+          },
+        });
+      }
+      if (String(url).endsWith('/api/harness/modules/farmaco/runs/run-1/artifacts')) {
+        return Response.json({
+          payload: [{ path: 'result.xyz', type: 'xyz' }],
+          normalized: {
+            artifacts: [{ module: 'farmaco', runId: 'run-1', path: 'result.xyz', type: 'xyz', previewKind: 'molecule' }],
+          },
+        });
+      }
+      if (String(url).endsWith('/api/harness/modules/farmaco/runs/run-1/download.zip')) {
+        return new Response(Buffer.from('zip-bytes'), {
+          headers: {
+            'content-type': 'application/zip',
+            'content-disposition': 'attachment; filename="farmaco-run-1.zip"',
+          },
+        });
+      }
+      return Response.json({ message: 'unexpected worker request' }, { status: 404 });
+    }) as typeof fetch;
+
+    try {
+      const app = buildControlPlaneApp({
+        env: {
+          ...testEnv('worker-harness-proxy'),
+          SANDBOX_WORKER_AUTH_TOKEN: 'internal-worker-token',
+        },
+      });
+      apps.push(app);
+
+      const auth = { authorization: 'Bearer dev:worker-harness-user' };
+      const bootstrap = await app.inject({
+        method: 'POST',
+        url: '/api/me/bootstrap',
+        headers: auth,
+        payload: {
+          email: 'worker-harness@example.com',
+        },
+      });
+      const sandbox = bootstrap.json().sandbox;
+      await app.inject({
+        method: 'POST',
+        url: '/api/sandbox/start',
+        headers: auth,
+      });
+
+      const status = await app.inject({
+        method: 'GET',
+        url: '/api/sandbox/harness/status',
+        headers: auth,
+      });
+      expect(status.statusCode).toBe(200);
+      expect(status.json()).toMatchObject({
+        enabled: true,
+        baseUrl: 'https://harness.example.test',
+        keyPresent: true,
+        chemistryToolsEnabled: true,
+        health: { status: 'ok' },
+      });
+      expect(JSON.stringify(status.json())).not.toContain('harness-api-key');
+
+      const tools = await app.inject({
+        method: 'GET',
+        url: '/api/sandbox/harness/modules/farmaco/tools',
+        headers: auth,
+      });
+      expect(tools.statusCode).toBe(200);
+      expect(tools.json()).toEqual({ payload: [{ name: 'generate_ligand_xyz' }] });
+
+      const help = await app.inject({
+        method: 'GET',
+        url: '/api/sandbox/harness/modules/farmaco/help',
+        headers: auth,
+      });
+      expect(help.statusCode).toBe(200);
+      expect(help.json()).toEqual({ text: 'Farmaco help' });
+
+      const runs = await app.inject({
+        method: 'GET',
+        url: '/api/sandbox/harness/modules/farmaco/runs',
+        headers: auth,
+      });
+      expect(runs.statusCode).toBe(200);
+      expect(runs.json()).toEqual({
+        payload: [{ run_id: 'run-1', status: 'ok' }],
+        normalized: {
+          runs: [{ module: 'farmaco', runId: 'run-1', status: 'ok' }],
+        },
+      });
+
+      const runDetail = await app.inject({
+        method: 'GET',
+        url: '/api/sandbox/harness/modules/farmaco/runs/run-1',
+        headers: auth,
+      });
+      expect(runDetail.statusCode).toBe(200);
+      expect(runDetail.json()).toEqual({
+        payload: { run_id: 'run-1', status: 'ok' },
+        normalized: {
+          run: { module: 'farmaco', runId: 'run-1', status: 'ok' },
+        },
+      });
+
+      const artifacts = await app.inject({
+        method: 'GET',
+        url: '/api/sandbox/harness/modules/farmaco/runs/run-1/artifacts',
+        headers: auth,
+      });
+      expect(artifacts.statusCode).toBe(200);
+      expect(artifacts.json()).toEqual({
+        payload: [{ path: 'result.xyz', type: 'xyz' }],
+        normalized: {
+          artifacts: [{ module: 'farmaco', runId: 'run-1', path: 'result.xyz', type: 'xyz', previewKind: 'molecule' }],
+        },
+      });
+
+      const download = await app.inject({
+        method: 'GET',
+        url: '/api/sandbox/harness/modules/farmaco/runs/run-1/download.zip',
+        headers: auth,
+      });
+      expect(download.statusCode).toBe(200);
+      expect(download.headers['content-type']).toContain('application/zip');
+      expect(download.headers['content-disposition']).toBe('attachment; filename="farmaco-run-1.zip"');
+      expect(download.body).toBe('zip-bytes');
+
+      expect(workerRequests.map((request) => request.url)).toEqual([
+        `https://sandbox-gateway.test/api/sandboxes/${sandbox.id}/api/harness/status`,
+        `https://sandbox-gateway.test/api/sandboxes/${sandbox.id}/api/harness/modules/farmaco/tools`,
+        `https://sandbox-gateway.test/api/sandboxes/${sandbox.id}/api/harness/modules/farmaco/help`,
+        `https://sandbox-gateway.test/api/sandboxes/${sandbox.id}/api/harness/modules/farmaco/runs`,
+        `https://sandbox-gateway.test/api/sandboxes/${sandbox.id}/api/harness/modules/farmaco/runs/run-1`,
+        `https://sandbox-gateway.test/api/sandboxes/${sandbox.id}/api/harness/modules/farmaco/runs/run-1/artifacts`,
+        `https://sandbox-gateway.test/api/sandboxes/${sandbox.id}/api/harness/modules/farmaco/runs/run-1/download.zip`,
+      ]);
+      expect(workerRequests.map((request) => request.workerToken?.startsWith('Bearer '))).toEqual([
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('records normalized Harness usage events for control-plane tool invocations', async () => {
+    const workerRequests: Array<{
+      url: string;
+      method: string;
+      body: unknown;
+      workerToken: string | null;
+    }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      workerRequests.push({
+        url: String(url),
+        method: init?.method ?? 'GET',
+        body: init?.body ? JSON.parse(String(init.body)) : null,
+        workerToken:
+          headers.get('x-remote-codex-worker-token') ??
+          headers.get('authorization'),
+      });
+      if (String(url).endsWith('/api/harness/modules/farmaco/tools/generate_ligand_xyz/invoke')) {
+        return Response.json({
+          payload: {
+            event_id: 'harness-event-1',
+            run_id: 'run-usage-1',
+            compute_job_id: '42',
+            status: 'ok',
+            estimated_cost_usd: '0.0312',
+            worker_observed_seconds: 12.5,
+            artifacts_url: '/farmaco/runs/run-usage-1/artifacts',
+            download_url: '/farmaco/runs/run-usage-1/download.zip',
+          },
+        });
+      }
+      if (String(url).includes('/api/workspaces')) {
+        const body = init?.body ? JSON.parse(String(init.body)) : {};
+        return Response.json({
+          id: 'worker-harness-workspace',
+          absPath: body.absPath,
+          label: body.label,
+        });
+      }
+      if (String(url).includes('/api/threads/start')) {
+        const body = init?.body ? JSON.parse(String(init.body)) : {};
+        return Response.json({
+          id: 'worker-harness-thread',
+          provider: body.provider,
+          providerSessionId: 'codex-harness-session',
+        });
+      }
+      return Response.json({ message: 'unexpected worker request' }, { status: 404 });
+    }) as typeof fetch;
+
+    try {
+      const app = buildControlPlaneApp({
+        env: {
+          ...testEnv('worker-harness-usage'),
+          SANDBOX_WORKER_AUTH_TOKEN: 'internal-worker-token',
+          ELAGENTE_HARNESS_PROVIDER: 'elagente-harness',
+        },
+        sandboxManager: new RecordingSandboxManager(),
+      });
+      apps.push(app);
+
+      const auth = { authorization: 'Bearer dev:worker-harness-usage-user' };
+      const bootstrap = await app.inject({
+        method: 'POST',
+        url: '/api/me/bootstrap',
+        headers: auth,
+        payload: {
+          email: 'worker-harness-usage@example.com',
+        },
+      });
+      const sandbox = bootstrap.json().sandbox;
+      await app.inject({
+        method: 'POST',
+        url: '/api/sandbox/start',
+        headers: auth,
+      });
+      const project = await app.inject({
+        method: 'POST',
+        url: '/api/projects',
+        headers: auth,
+        payload: { name: 'Harness Usage', slug: 'harness-usage' },
+      });
+      expect(project.statusCode).toBe(200);
+      const workspace = await app.inject({
+        method: 'POST',
+        url: `/api/projects/${project.json().project.id}/workspaces`,
+        headers: auth,
+        payload: { name: 'Harness Workspace', slug: 'harness-workspace' },
+      });
+      expect(workspace.statusCode).toBe(200);
+      const session = await app.inject({
+        method: 'POST',
+        url: `/api/workspaces/${workspace.json().workspace.id}/sessions`,
+        headers: auth,
+        payload: { provider: 'codex', title: 'Harness Session' },
+      });
+      expect(session.statusCode).toBe(200);
+
+      const invokePayload = {
+        workspaceId: workspace.json().workspace.id,
+        sessionId: session.json().session.id,
+        externalEventId: 'harness-event-1',
+        input: { smiles: 'CCO' },
+      };
+      const invoke = await app.inject({
+        method: 'POST',
+        url: '/api/sandbox/harness/modules/farmaco/tools/generate_ligand_xyz/invoke',
+        headers: auth,
+        payload: invokePayload,
+      });
+      expect(invoke.statusCode).toBe(200);
+      expect(invoke.json().harnessUsageEvent).toMatchObject({
+        userId: bootstrap.json().user.id,
+        sandboxId: sandbox.id,
+        workspaceId: workspace.json().workspace.id,
+        sessionId: session.json().session.id,
+        provider: 'elagente-harness',
+        module: 'farmaco',
+        tool: 'generate_ligand_xyz',
+        runId: 'run-usage-1',
+        jobId: '42',
+        externalEventId: 'harness-event-1',
+        computeUnits: 12.5,
+        costUsd: 0.0312,
+        status: 'ok',
+      });
+
+      const duplicate = await app.inject({
+        method: 'POST',
+        url: '/api/sandbox/harness/modules/farmaco/tools/generate_ligand_xyz/invoke',
+        headers: auth,
+        payload: invokePayload,
+      });
+      expect(duplicate.statusCode).toBe(200);
+      expect(duplicate.json().harnessUsageEvent.id).toBe(invoke.json().harnessUsageEvent.id);
+
+      const summary = await app.inject({
+        method: 'GET',
+        url: '/api/usage/harness/summary',
+        headers: auth,
+      });
+      expect(summary.statusCode).toBe(200);
+      expect(summary.json().usage).toMatchObject({
+        eventCount: 1,
+        computeUnits: 12.5,
+        costUsd: 0.0312,
+      });
+
+      const events = await app.inject({
+        method: 'GET',
+        url: '/api/usage/harness/events?limit=5',
+        headers: auth,
+      });
+      expect(events.statusCode).toBe(200);
+      expect(events.json().events).toHaveLength(1);
+      expect(events.json().events[0]).toMatchObject({
+        module: 'farmaco',
+        tool: 'generate_ligand_xyz',
+        externalEventId: 'harness-event-1',
+      });
+
+      const audits = app.services.repository.listAuditLogs({
+        action: 'harness.usage_recorded',
+      });
+      expect(audits).toHaveLength(1);
+      expect(JSON.stringify({ invoke: invoke.json(), events: events.json(), audits })).not.toContain('harness-api-key');
+      const harnessRequests = workerRequests.filter((request) =>
+        request.url.endsWith('/api/harness/modules/farmaco/tools/generate_ligand_xyz/invoke'),
+      );
+      expect(harnessRequests.map((request) => request.url)).toEqual([
+        `https://sandbox-gateway.test/api/sandboxes/${sandbox.id}/api/harness/modules/farmaco/tools/generate_ligand_xyz/invoke`,
+        `https://sandbox-gateway.test/api/sandboxes/${sandbox.id}/api/harness/modules/farmaco/tools/generate_ligand_xyz/invoke`,
+      ]);
+      expect(harnessRequests.map((request) => request.method)).toEqual(['POST', 'POST']);
+      expect(harnessRequests.map((request) => request.body)).toEqual([
+        {
+          smiles: 'CCO',
+          _remoteCodexContext: {
+            workspaceId: workspace.json().workspace.id,
+            sessionId: session.json().session.id,
+            recordUsage: false,
+            estimatedComputeUnits: null,
+            estimatedCostUsd: null,
+          },
+        },
+        {
+          smiles: 'CCO',
+          _remoteCodexContext: {
+            workspaceId: workspace.json().workspace.id,
+            sessionId: session.json().session.id,
+            recordUsage: false,
+            estimatedComputeUnits: null,
+            estimatedCostUsd: null,
+          },
+        },
+      ]);
+      expect(harnessRequests.map((request) => request.workerToken?.startsWith('Bearer '))).toEqual([true, true]);
+
+      const expensive = await app.inject({
+        method: 'POST',
+        url: '/api/sandbox/harness/modules/farmaco/tools/generate_ligand_xyz/invoke',
+        headers: auth,
+        payload: {
+          workspaceId: workspace.json().workspace.id,
+          sessionId: session.json().session.id,
+          estimatedCostUsd: 100,
+          input: { smiles: 'CCO' },
+        },
+      });
+      expect(expensive.statusCode).toBe(402);
+      expect(expensive.json()).toMatchObject({
+        code: 'quota_exceeded',
+        details: {
+          reason: 'harness_spend_quota_exceeded',
+          quotaProfile: 'developer',
+          limit: 50,
+        },
+      });
+      expect(workerRequests.filter((request) =>
+        request.url.endsWith('/api/harness/modules/farmaco/tools/generate_ligand_xyz/invoke'),
+      )).toHaveLength(2);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -2515,6 +3183,182 @@ describe('control plane api', () => {
     ]);
   });
 
+  it('accepts internal worker Harness usage events and validates ownership', async () => {
+    const app = buildControlPlaneApp({ env: testEnvWithInternalService('harness-usage-internal') });
+    apps.push(app);
+
+    const auth = { authorization: 'Bearer dev:harness-usage-internal-user' };
+    const bootstrap = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: auth,
+      payload: {
+        email: 'harness-usage-internal@example.com',
+      },
+    });
+    expect(bootstrap.statusCode).toBe(200);
+    const { user, sandbox } = bootstrap.json();
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      headers: auth,
+      payload: {
+        name: 'Harness Internal Workspace',
+        slug: 'harness-internal-workspace',
+      },
+    });
+    expect(workspaceResponse.statusCode).toBe(200);
+    const workspace = workspaceResponse.json().workspace;
+
+    const sessionResponse = await app.inject({
+      method: 'POST',
+      url: `/api/workspaces/${workspace.id}/sessions`,
+      headers: auth,
+      payload: {
+        provider: 'codex',
+        title: 'Harness Internal Session',
+      },
+    });
+    expect(sessionResponse.statusCode).toBe(200);
+    const session = sessionResponse.json().session;
+
+    const wrongToken = await app.inject({
+      method: 'POST',
+      url: '/api/internal/harness/usage-events',
+      headers: {
+        'x-remote-codex-service-token': 'wrong-token',
+      },
+      payload: {
+        userId: user.id,
+        sandboxId: sandbox.id,
+        module: 'farmaco',
+      },
+    });
+    expect(wrongToken.statusCode).toBe(403);
+
+    const wrongUser = await app.inject({
+      method: 'POST',
+      url: '/api/internal/harness/usage-events',
+      headers: {
+        'x-remote-codex-service-token': 'test-internal-service-token',
+      },
+      payload: {
+        userId: '00000000-0000-4000-8000-000000000001',
+        sandboxId: sandbox.id,
+        module: 'farmaco',
+      },
+    });
+    expect(wrongUser.statusCode).toBe(403);
+    expect(wrongUser.json().code).toBe('wrong_user');
+
+    const recorded = await app.inject({
+      method: 'POST',
+      url: '/api/internal/harness/usage-events',
+      headers: {
+        'x-remote-codex-service-token': 'test-internal-service-token',
+      },
+      payload: {
+        userId: user.id,
+        sandboxId: sandbox.id,
+        workspaceId: workspace.id,
+        sessionId: session.id,
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        module: 'farmaco',
+        tool: 'generate_ligand_xyz',
+        runId: 'run-internal-1',
+        jobId: 'job-internal-1',
+        externalEventId: 'event-internal-1',
+        computeUnits: 3.5,
+        costUsd: 0.012,
+        status: 'ok',
+        metadata: {
+          resultStatus: 'ok',
+        },
+      },
+    });
+    expect(recorded.statusCode).toBe(200);
+    expect(recorded.json().harnessUsageEvent).toMatchObject({
+      userId: user.id,
+      sandboxId: sandbox.id,
+      workspaceId: workspace.id,
+      sessionId: session.id,
+      provider: 'elagente-harness',
+      module: 'farmaco',
+      tool: 'generate_ligand_xyz',
+      runId: 'run-internal-1',
+      jobId: 'job-internal-1',
+      externalEventId: 'event-internal-1',
+      computeUnits: 3.5,
+      costUsd: 0.012,
+      status: 'ok',
+    });
+    expect(JSON.parse(recorded.json().harnessUsageEvent.metadataJson)).toMatchObject({
+      resultStatus: 'ok',
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      source: 'worker-local-harness-api',
+    });
+
+    const duplicate = await app.inject({
+      method: 'POST',
+      url: '/api/internal/harness/usage-events',
+      headers: {
+        'x-remote-codex-service-token': 'test-internal-service-token',
+      },
+      payload: {
+        userId: user.id,
+        sandboxId: sandbox.id,
+        workspaceId: workspace.id,
+        sessionId: session.id,
+        module: 'farmaco',
+        tool: 'generate_ligand_xyz',
+        externalEventId: 'event-internal-1',
+      },
+    });
+    expect(duplicate.statusCode).toBe(200);
+    expect(duplicate.json().harnessUsageEvent.id).toBe(recorded.json().harnessUsageEvent.id);
+
+    const summary = await app.inject({
+      method: 'GET',
+      url: '/api/usage/harness/summary',
+      headers: auth,
+    });
+    expect(summary.statusCode).toBe(200);
+    expect(summary.json().usage).toMatchObject({
+      eventCount: 1,
+      computeUnits: 3.5,
+      costUsd: 0.012,
+    });
+
+    const quota = await app.inject({
+      method: 'POST',
+      url: '/api/internal/harness/quota/check',
+      headers: {
+        'x-remote-codex-service-token': 'test-internal-service-token',
+      },
+      payload: {
+        userId: user.id,
+        sandboxId: sandbox.id,
+        workspaceId: workspace.id,
+        sessionId: session.id,
+        module: 'farmaco',
+        tool: 'generate_ligand_xyz',
+        estimatedCostUsd: 100,
+      },
+    });
+    expect(quota.statusCode).toBe(200);
+    expect(quota.json()).toMatchObject({
+      allowed: false,
+      denial: {
+        reason: 'harness_spend_quota_exceeded',
+        quotaProfile: 'developer',
+        limit: 50,
+      },
+    });
+  });
+
   it('supports jwt auth mode and rejects invalid production tokens', async () => {
     const env = {
       ...testEnv('jwt-auth'),
@@ -3307,6 +4151,108 @@ describe('control plane api', () => {
       outputTokens: 75,
       cachedTokens: 30,
       costUsd: 0.55,
+    });
+  });
+
+  it('imports Harness usage pulled from the configured Harness export adapter', async () => {
+    const harnessAdmin = new RecordingHarnessAdmin();
+    const app = buildControlPlaneApp({
+      env: {
+        ...testEnv('harness-export-usage-import'),
+        ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
+        ELAGENTE_HARNESS_ADMIN_KEY: 'harness-admin-key',
+        REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
+      },
+      harnessAdmin,
+    });
+    apps.push(app);
+
+    const auth = { authorization: 'Bearer dev:harness-export-user' };
+    const bootstrap = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: auth,
+      payload: {
+        email: 'harness-export@example.com',
+      },
+    });
+    expect(bootstrap.statusCode).toBe(200);
+    const { harnessKey } = bootstrap.json();
+
+    harnessAdmin.usageExport = {
+      events: [
+        {
+          eventId: 'harness-export-event-1',
+          externalKeyId: harnessKey.externalKeyId,
+          module: 'farmaco',
+          tool: 'generate_ligand_xyz',
+          runId: 'run-export-1',
+          jobId: 'job-export-1',
+          computeUnits: 7.5,
+          costUsd: 0.075,
+          status: 'ok',
+          metadata: {
+            resultStatus: 'ok',
+          },
+          occurredAt: '2026-06-03T02:00:00.000Z',
+        },
+        {
+          eventId: 'harness-export-event-1',
+          externalKeyId: harnessKey.externalKeyId,
+          module: 'farmaco',
+          tool: 'generate_ligand_xyz',
+          computeUnits: 7.5,
+          costUsd: 0.075,
+        },
+      ],
+      nextCursor: 'harness-cursor-next',
+    };
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: {
+        authorization: 'Bearer dev:admin',
+      },
+      payload: {
+        email: 'admin-harness-export@example.com',
+      },
+    });
+
+    const imported = await app.inject({
+      method: 'POST',
+      url: '/api/admin/usage/harness/import',
+      headers: {
+        authorization: 'Bearer dev:admin',
+      },
+      payload: {
+        cursor: 'harness-cursor-current',
+        limit: 50,
+      },
+    });
+    expect(imported.statusCode).toBe(200);
+    expect(harnessAdmin.exportCalls).toEqual([{ cursor: 'harness-cursor-current', limit: 50 }]);
+    expect(imported.json().events).toHaveLength(2);
+    expect(imported.json().events[1].id).toBe(imported.json().events[0].id);
+    expect(imported.json().import).toEqual({
+      source: 'harness',
+      sourceCount: 2,
+      importedCount: 2,
+      duplicateCount: 1,
+      failureCount: 0,
+      nextCursor: 'harness-cursor-next',
+    });
+
+    const summary = await app.inject({
+      method: 'GET',
+      url: '/api/usage/harness/summary',
+      headers: auth,
+    });
+    expect(summary.statusCode).toBe(200);
+    expect(summary.json().usage).toMatchObject({
+      eventCount: 1,
+      computeUnits: 7.5,
+      costUsd: 0.075,
     });
   });
 

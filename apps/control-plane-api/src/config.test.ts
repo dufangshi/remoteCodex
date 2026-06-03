@@ -32,7 +32,11 @@ describe('control plane config', () => {
       SANDBOX_WORKER_ENABLED_AGENT_PROVIDERS: 'codex',
       CONTROL_PLANE_BUILD_SHA: 'abc123',
       ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
+      ELAGENTE_HARNESS_PROVIDER: 'custom-harness',
       ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: 'remote-codex-harness-app-keys',
+      ELAGENTE_HARNESS_ADMIN_BASE_URL: 'https://harness-admin.example.test',
+      ELAGENTE_HARNESS_ADMIN_KEY: 'harness-admin-key',
+      ELAGENTE_HARNESS_LEGACY_ADMIN_FALLBACK: 'false',
       REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
     });
 
@@ -61,7 +65,11 @@ describe('control plane config', () => {
     expect(config.sandboxWorkerEnabledAgentProviders).toBe('codex');
     expect(config.buildSha).toBe('abc123');
     expect(config.harnessBaseUrl).toBe('https://harness.example.test');
+    expect(config.harnessProvider).toBe('custom-harness');
     expect(config.harnessAppKeySecretName).toBe('remote-codex-harness-app-keys');
+    expect(config.harnessAdminBaseUrl).toBe('https://harness-admin.example.test');
+    expect(config.harnessAdminKey).toBe('harness-admin-key');
+    expect(config.harnessLegacyAdminFallback).toBe(false);
     expect(config.chemistryToolsEnabled).toBe(true);
   });
 
@@ -73,6 +81,17 @@ describe('control plane config', () => {
 
     expect(config.llmGatewayProvider).toBe('sub2api');
     expect(config.sandboxWorkerEnabledAgentProviders).toBe('codex');
+    expect(config.harnessLegacyAdminFallback).toBe(true);
+  });
+
+  it('parses Harness legacy admin fallback truthy values', () => {
+    const config = loadControlPlaneConfig({
+      NODE_ENV: 'test',
+      CONTROL_PLANE_DATABASE_URL: ':memory:',
+      ELAGENTE_HARNESS_LEGACY_ADMIN_FALLBACK: 'yes',
+    });
+
+    expect(config.harnessLegacyAdminFallback).toBe(true);
   });
 
   it('allows local supervisor web dev and debug origins by default', () => {

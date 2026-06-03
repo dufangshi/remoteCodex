@@ -329,7 +329,6 @@ function ControlPlaneSessionSurface() {
         prompt: trimmed,
       });
       setDraft({ prompt: '', attachments: [] });
-      setMessage('Prompt sent. Waiting for worker updates...');
       await refreshThread();
       setScrollRequestKey((current) => current + 1);
       return true;
@@ -359,7 +358,6 @@ function ControlPlaneSessionSurface() {
           );
           setDetail(thread);
           setDraft({ prompt: '', attachments: [] });
-          setMessage('Prompt sent after reconnect. Waiting for worker updates...');
           setScrollRequestKey((current) => current + 1);
           return true;
         } catch (retryError) {

@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { promisify } from 'node:util';
 import { redactedSlice, redactSecretText } from './secret-redaction.js';
 
@@ -82,6 +82,14 @@ function parseJsonObjectEnv(name: string) {
 }
 
 async function readProviderConfig(provider: Provider) {
+  const explicitPath = process.env.PROVIDER_GATEWAY_SMOKE_CONFIG_PATH;
+  if (explicitPath !== undefined && !envValue('PROVIDER_GATEWAY_SMOKE_CONFIG_PATH')) {
+    return {
+      filePath: null,
+      content: '',
+      readError: 'PROVIDER_GATEWAY_SMOKE_CONFIG_PATH is not configured.',
+    };
+  }
   const filePath = envValue('PROVIDER_GATEWAY_SMOKE_CONFIG_PATH') ?? configPaths[provider](process.env);
   try {
     return {

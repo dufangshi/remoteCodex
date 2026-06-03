@@ -164,14 +164,34 @@ export class PluginService {
   }
 
   enabledMcpServers(): PluginMcpServerDto[] {
-    const servers = this.registry.enabledManifests().flatMap(
-      (manifest) => manifest.capabilities.mcpServers ?? [],
-    );
-    const byName = new Map<string, PluginMcpServerDto>();
-    for (const server of servers) {
-      byName.set(server.name, server);
+    const byName = new Map<string, PluginMcpServerDto & { pluginIds: string[] }>();
+    for (const manifest of this.registry.enabledManifests()) {
+      for (const server of manifest.capabilities.mcpServers ?? []) {
+        const existing = byName.get(server.name);
+        if (existing) {
+          existing.pluginIds.push(manifest.id);
+          byName.set(server.name, {
+            ...existing,
+            env: {
+              ...(existing.env ?? {}),
+              ...(server.env ?? {}),
+            },
+          });
+        } else {
+          byName.set(server.name, {
+            ...server,
+            pluginIds: [manifest.id],
+          });
+        }
+      }
     }
-    return [...byName.values()];
+    return [...byName.values()].map(({ pluginIds, ...server }) => ({
+      ...server,
+      env: {
+        ...(server.env ?? {}),
+        REMOTE_CODEX_ENABLED_PLUGIN_IDS: [...new Set(pluginIds)].sort().join(','),
+      },
+    }));
   }
 
   async syncManagedCodexMcpConfig(input: {

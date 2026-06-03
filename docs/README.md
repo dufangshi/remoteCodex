@@ -21,6 +21,14 @@ Recommended reading order:
 14. [Remote Codex Side Detailed Checklist](./remote-codex-side-detailed-checklist.md)
 15. [Remote Codex Side Action Checklist](./remote-codex-side-action-checklist.zh.md)
 16. [Remote Codex Side Work Breakdown And Checklist](./remote-codex-side-work-breakdown.md)
+17. [ElAgenteHarness Clean Integration Plan](./elagente-harness-clean-integration-plan.zh.md)
+18. [ElAgenteHarness Control Plane Integration Decision](./elagente-harness-control-plane-integration-decision.zh.md)
+19. [ElAgenteHarness Evidence Runbook](./elagente-harness-evidence-runbook.zh.md)
+20. [ElAgenteHarness Goal Checklist](./elagente-harness-goal-checklist.zh.md)
+21. [ElAgenteHarness Control Plane Integration Plan](./elagente-harness-control-plane-integration-plan.zh.md)
+22. [ElAgenteHarness Optimal Integration Plan](./elagente-harness-optimal-integration-plan.zh.md)
+23. [ElAgenteHarness Integration Architecture Plan](./elagente-harness-integration-architecture-plan.zh.md)
+24. [ElAgenteHarness Code Review And Integration Plan](./elagente-harness-code-review-and-integration-plan.zh.md)
 
 Use the Chinese implementation task checklist as the primary step-by-step task
 board for new Remote Codex side work. Pick one unchecked item, satisfy its
@@ -41,3 +49,10 @@ The control plane owns users, projects, sandbox lifecycle, routing, secrets,
 policy, and durable indexes. The worker runs inside each sandbox and owns the
 workspace, agent runtime, shell, MCP servers, live thread events, and local
 provider state.
+
+For ElAgenteHarness work, use the Clean Integration Plan as the current entry
+point for architecture, sequencing, and package-boundary decisions. The Control
+Plane Integration Decision and Goal Checklist remain the detailed companion
+references for implementation state and live evidence gates. Older Harness
+architecture/code-review/optimal-plan documents remain useful history, but may
+contain statements superseded by newer implementation and verification notes.

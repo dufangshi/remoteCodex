@@ -1029,6 +1029,46 @@ body.thread-detail-scroll-locked {
   overflow: auto;
 }
 
+.control-segment-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.35rem;
+  border: 1px solid var(--theme-border);
+  border-radius: 0.75rem;
+  padding: 0.25rem;
+  background: var(--theme-surface);
+}
+
+.control-segment-row button {
+  min-width: 0;
+  height: 2rem;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0.58rem;
+  background: transparent;
+  color: var(--theme-fg-muted);
+  font-size: 0.76rem;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.control-segment-row button:hover {
+  background: var(--theme-hover);
+  color: var(--theme-fg);
+}
+
+.control-segment-row button.selected {
+  background: var(--theme-surface-strong);
+  color: var(--theme-fg);
+  box-shadow: inset 0 0 0 1px var(--theme-border-strong);
+}
+
+.control-segment-row button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .control-progress {
   display: grid;
   grid-template-columns: 1fr auto;

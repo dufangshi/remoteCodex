@@ -35,7 +35,11 @@ const envSchema = z.object({
   LLM_GATEWAY_ADMIN_BASE_URL: z.string().url().optional(),
   LLM_GATEWAY_ADMIN_TOKEN: z.string().min(1).optional(),
   ELAGENTE_HARNESS_BASE_URL: z.string().url().optional(),
+  ELAGENTE_HARNESS_PROVIDER: z.string().trim().min(1).optional(),
   ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: z.string().min(1).optional(),
+  ELAGENTE_HARNESS_ADMIN_BASE_URL: z.string().url().optional(),
+  ELAGENTE_HARNESS_ADMIN_KEY: z.string().min(1).optional(),
+  ELAGENTE_HARNESS_LEGACY_ADMIN_FALLBACK: z.string().optional(),
   REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: z.string().optional(),
   CONTROL_PLANE_ADMIN_IDENTITIES: z.string().optional(),
   CONTROL_PLANE_AUTH_MODE: z.enum(['dev', 'jwt']).optional(),
@@ -92,7 +96,11 @@ export interface ControlPlaneConfig {
   llmGatewayAdminBaseUrl: string | null;
   llmGatewayAdminToken: string | null;
   harnessBaseUrl: string | null;
+  harnessProvider: string;
   harnessAppKeySecretName: string | null;
+  harnessAdminBaseUrl: string | null;
+  harnessAdminKey: string | null;
+  harnessLegacyAdminFallback: boolean;
   chemistryToolsEnabled: boolean;
   adminIdentities: Set<string>;
   authMode: 'dev' | 'jwt';
@@ -213,7 +221,16 @@ export function loadControlPlaneConfig(
     llmGatewayAdminBaseUrl: parsed.LLM_GATEWAY_ADMIN_BASE_URL ?? null,
     llmGatewayAdminToken: parsed.LLM_GATEWAY_ADMIN_TOKEN ?? null,
     harnessBaseUrl: parsed.ELAGENTE_HARNESS_BASE_URL ?? null,
+    harnessProvider: parsed.ELAGENTE_HARNESS_PROVIDER ?? 'elagente-harness',
     harnessAppKeySecretName: parsed.ELAGENTE_HARNESS_APP_KEY_SECRET_NAME ?? null,
+    harnessAdminBaseUrl: parsed.ELAGENTE_HARNESS_ADMIN_BASE_URL ?? parsed.ELAGENTE_HARNESS_BASE_URL ?? null,
+    harnessAdminKey: parsed.ELAGENTE_HARNESS_ADMIN_KEY ?? null,
+    harnessLegacyAdminFallback:
+      parsed.ELAGENTE_HARNESS_LEGACY_ADMIN_FALLBACK === undefined
+        ? true
+        : ['1', 'true', 'yes', 'on'].includes(
+            parsed.ELAGENTE_HARNESS_LEGACY_ADMIN_FALLBACK.toLowerCase(),
+          ),
     chemistryToolsEnabled,
     adminIdentities: new Set(
       (parsed.CONTROL_PLANE_ADMIN_IDENTITIES ?? '')

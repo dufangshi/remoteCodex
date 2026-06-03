@@ -27,6 +27,12 @@ import {
   signWorkerIdentityEnvelope,
   type WorkerIdentityEnvelope,
 } from './worker-identity';
+import {
+  createThreadRecord,
+  createWorkspaceRecord,
+  updateThreadRecord,
+  upsertThreadTurnMetadata,
+} from '../../../packages/db/src/repositories';
 
 vi.mock('puppeteer-core', () => ({
   default: {
@@ -36,6 +42,7 @@ vi.mock('puppeteer-core', () => ({
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const workerIdentitySecret = 'worker-identity-secret';
+type BuildAppOptions = NonNullable<Parameters<typeof buildApp>[0]>;
 
 function makeWorkerIdentityHeaders(
   input: Partial<WorkerIdentityEnvelope> = {},
@@ -403,6 +410,7 @@ describe('supervisor api', () => {
     options: {
       claudeRuntime?: FakeClaudeRuntime;
       env?: Record<string, string>;
+      controlPlaneSyncClient?: BuildAppOptions['controlPlaneSyncClient'];
     } = {},
   ) {
     const runtimes: AgentRuntime[] = [
@@ -411,7 +419,7 @@ describe('supervisor api', () => {
     if (options.claudeRuntime) {
       runtimes.push(options.claudeRuntime);
     }
-    return buildApp({
+    const buildOptions: BuildAppOptions = {
       env: {
         NODE_ENV: 'test',
         APP_NAME: 'Test Supervisor',
@@ -437,7 +445,11 @@ describe('supervisor api', () => {
           return { pid: 12345 };
         },
       },
-    });
+    };
+    if (options.controlPlaneSyncClient) {
+      buildOptions.controlPlaneSyncClient = options.controlPlaneSyncClient;
+    }
+    return buildApp(buildOptions);
   }
 
   it('configures log redaction for worker gateway credentials', () => {
@@ -675,6 +687,8 @@ describe('supervisor api', () => {
       harness: {
         enabled: true,
         baseUrl: 'https://harness.example.test',
+        keyPresent: true,
+        chemistryToolsEnabled: false,
       },
       requestDiagnostics: {
         authorizationHeaderPresent: false,
@@ -694,6 +708,503 @@ describe('supervisor api', () => {
     });
     expect(JSON.stringify(metadata.json())).not.toContain('must-not-leak');
     expect(JSON.stringify(metadata.json())).not.toContain('must-not-leak-harness-key');
+  });
+
+  it('proxies worker Harness discovery calls with the injected app key', async () => {
+    await app.close();
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      if (String(url).endsWith('/health')) {
+        return new Response('ok');
+      }
+      if (String(url) === 'https://harness.example.test/') {
+        return Response.json({
+          service: 'ElAgenteHarness',
+          links: ['/members/.help', '/farmaco/.help'],
+        });
+      }
+      if (String(url).endsWith('/members/.me')) {
+        return new Response('id = 7\nname = "worker"\n');
+      }
+      if (String(url).endsWith('/farmaco/.help')) {
+        return new Response('Farmaco help');
+      }
+      if (String(url).endsWith('/farmaco/tools')) {
+        return Response.json([{ name: 'ligand_prepare' }]);
+      }
+      if (String(url).endsWith('/farmaco/runs')) {
+        return Response.json([
+          {
+            run_id: 'run-1',
+            status: 'ok',
+            tool: 'generate_ligand_xyz',
+            job_id: 'job-1',
+            created_at: '2026-06-03T00:00:00Z',
+            artifacts: [{ path: 'result.xyz', type: 'xyz' }],
+          },
+        ]);
+      }
+      if (String(url).endsWith('/farmaco/runs/run-1')) {
+        return Response.json({
+          run_id: 'run-1',
+          status: 'ok',
+          tool: 'generate_ligand_xyz',
+          job_id: 'job-1',
+          updated_at: '2026-06-03T00:01:00Z',
+          artifacts: [{ path: 'result.xyz', type: 'xyz' }],
+        });
+      }
+      if (String(url).endsWith('/farmaco/runs/run-1/artifacts')) {
+        return Response.json([{ path: 'result.xyz', type: 'xyz', size_bytes: 128 }]);
+      }
+      if (String(url).endsWith('/farmaco/runs/run-1/download.zip')) {
+        return new Response(Buffer.from('zip-bytes'), {
+          headers: {
+            'content-type': 'application/zip',
+            'content-disposition': 'attachment; filename="farmaco-run-1.zip"',
+          },
+        });
+      }
+      if (String(url).endsWith('/farmaco/tools/generate_ligand_xyz')) {
+        return Response.json({
+          status: 'ok',
+          xyz: '3\nethanol\nC 0 0 0\nH 0 0 1\nH 1 0 0\n',
+          input: JSON.parse(String(init?.body ?? '{}')),
+        });
+      }
+      return new Response('missing harness-key-secret', { status: 503 });
+    }) as typeof fetch;
+    const usageEvents: unknown[] = [];
+    try {
+      app = buildTestApp(fakeCodexManager, {
+        env: {
+          REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+          REMOTE_CODEX_SANDBOX_ID: 'sbx_test',
+          REMOTE_CODEX_USER_ID: 'user_test',
+          ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
+          INACT_X_APP_KEY: 'harness-key-secret',
+          REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
+        },
+        controlPlaneSyncClient: {
+          async checkpointSession() {
+            throw new Error('not used');
+          },
+          async recordHarnessUsageEvent(input: Parameters<NonNullable<BuildAppOptions['controlPlaneSyncClient']>['recordHarnessUsageEvent']>[0]) {
+            usageEvents.push(input);
+            return {
+              harnessUsageEvent: {
+                id: 'usage-1',
+                userId: 'user_test',
+                sandboxId: 'sbx_test',
+                workspaceId: null,
+                sessionId: null,
+                provider: 'elagente-harness',
+                module: input.module,
+                tool: input.tool ?? null,
+                runId: input.runId ?? null,
+                jobId: input.jobId ?? null,
+                externalEventId: input.externalEventId ?? null,
+                computeUnits: input.computeUnits ?? 0,
+                costUsd: input.costUsd ?? 0,
+                status: input.status ?? 'unknown',
+                metadataJson: JSON.stringify(input.metadata ?? {}),
+                occurredAt: '2026-06-03T00:00:00.000Z',
+                importedAt: '2026-06-03T00:00:00.000Z',
+              },
+            };
+          },
+        },
+      });
+      await app.ready();
+
+      const status = await app.inject({ method: 'GET', url: '/api/harness/status' });
+      expect(status.statusCode).toBe(200);
+      expect(status.json()).toMatchObject({
+        enabled: true,
+        baseUrl: 'https://harness.example.test',
+        keyPresent: true,
+        chemistryToolsEnabled: true,
+        health: { status: 'ok' },
+      });
+
+      const me = await app.inject({ method: 'GET', url: '/api/harness/me' });
+      expect(me.statusCode).toBe(200);
+      expect(me.json()).toEqual({ text: 'id = 7\nname = "worker"\n' });
+
+      const home = await app.inject({ method: 'GET', url: '/api/harness/home' });
+      expect(home.statusCode).toBe(200);
+      expect(home.json()).toEqual({
+        payload: {
+          service: 'ElAgenteHarness',
+          links: ['/members/.help', '/farmaco/.help'],
+        },
+      });
+
+      const help = await app.inject({ method: 'GET', url: '/api/harness/modules/farmaco/help' });
+      expect(help.statusCode).toBe(200);
+      expect(help.json()).toEqual({ text: 'Farmaco help' });
+
+      const tools = await app.inject({ method: 'GET', url: '/api/harness/modules/farmaco/tools' });
+      expect(tools.statusCode).toBe(200);
+      expect(tools.json()).toEqual({ payload: [{ name: 'ligand_prepare' }] });
+
+      const runs = await app.inject({ method: 'GET', url: '/api/harness/modules/farmaco/runs' });
+      expect(runs.statusCode).toBe(200);
+      expect(runs.json()).toMatchObject({
+        payload: [
+          {
+            run_id: 'run-1',
+            status: 'ok',
+          },
+        ],
+        normalized: {
+          runs: [
+            {
+              module: 'farmaco',
+              runId: 'run-1',
+              status: 'ok',
+              tool: 'generate_ligand_xyz',
+              jobId: 'job-1',
+              artifactCount: 1,
+              artifactRefs: [{ path: 'result.xyz', type: 'xyz' }],
+            },
+          ],
+        },
+      });
+
+      const runDetail = await app.inject({ method: 'GET', url: '/api/harness/modules/farmaco/runs/run-1' });
+      expect(runDetail.statusCode).toBe(200);
+      expect(runDetail.json()).toMatchObject({
+        payload: { run_id: 'run-1', status: 'ok' },
+        normalized: {
+          run: {
+            module: 'farmaco',
+            runId: 'run-1',
+            status: 'ok',
+            tool: 'generate_ligand_xyz',
+            jobId: 'job-1',
+            artifactCount: 1,
+          },
+        },
+      });
+
+      const artifacts = await app.inject({ method: 'GET', url: '/api/harness/modules/farmaco/runs/run-1/artifacts' });
+      expect(artifacts.statusCode).toBe(200);
+      expect(artifacts.json()).toEqual({
+        payload: [{ path: 'result.xyz', type: 'xyz', size_bytes: 128 }],
+        normalized: {
+          artifacts: [
+            {
+              module: 'farmaco',
+              runId: 'run-1',
+              title: 'result.xyz',
+              path: 'result.xyz',
+              type: 'xyz',
+              format: 'xyz',
+              mimeType: null,
+              sizeBytes: 128,
+              downloadUrl: null,
+              previewKind: 'molecule',
+            },
+          ],
+        },
+      });
+
+      const download = await app.inject({ method: 'GET', url: '/api/harness/modules/farmaco/runs/run-1/download.zip' });
+      expect(download.statusCode).toBe(200);
+      expect(download.headers['content-type']).toContain('application/zip');
+      expect(download.headers['content-disposition']).toBe('attachment; filename="farmaco-run-1.zip"');
+      expect(download.body).toBe('zip-bytes');
+
+      const invoke = await app.inject({
+        method: 'POST',
+        url: '/api/harness/modules/farmaco/tools/generate_ligand_xyz/invoke',
+        payload: {
+          smiles: 'CCO',
+          _remoteCodexContext: {
+            workspaceId: '00000000-0000-4000-8000-000000000010',
+            sessionId: '00000000-0000-4000-8000-000000000011',
+            threadId: 'thread-1',
+            turnId: 'turn-1',
+          },
+        },
+      });
+      expect(invoke.statusCode).toBe(200);
+      expect(invoke.json()).toEqual({
+        payload: {
+          status: 'ok',
+          xyz: '3\nethanol\nC 0 0 0\nH 0 0 1\nH 1 0 0\n',
+          input: { smiles: 'CCO' },
+        },
+      });
+      expect(usageEvents).toEqual([
+        expect.objectContaining({
+          workspaceId: '00000000-0000-4000-8000-000000000010',
+          sessionId: '00000000-0000-4000-8000-000000000011',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          module: 'farmaco',
+          tool: 'generate_ligand_xyz',
+          status: 'ok',
+          metadata: expect.objectContaining({
+            attributionSource: 'request-context',
+            resultStatus: 'ok',
+          }),
+        }),
+      ]);
+
+      const authHeaders = requests
+        .filter((request) => !request.url.endsWith('/health'))
+        .map((request) => new Headers(request.init?.headers).get('x-api-key'));
+      expect(authHeaders).toEqual([
+        'harness-key-secret',
+        'harness-key-secret',
+        'harness-key-secret',
+        'harness-key-secret',
+        'harness-key-secret',
+        'harness-key-secret',
+        'harness-key-secret',
+        'harness-key-secret',
+        'harness-key-secret',
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('redacts the Harness key from worker Harness errors', async () => {
+    await app.close();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response('invalid key harness-key-secret', { status: 403 })) as typeof fetch;
+    try {
+      app = buildTestApp(fakeCodexManager, {
+        env: {
+          REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+          REMOTE_CODEX_SANDBOX_ID: 'sbx_test',
+          REMOTE_CODEX_USER_ID: 'user_test',
+          ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
+          INACT_X_APP_KEY: 'harness-key-secret',
+        },
+      });
+      await app.ready();
+
+      const response = await app.inject({ method: 'GET', url: '/api/harness/me' });
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toMatchObject({
+        code: 'harness_unavailable',
+        message: 'ElAgenteHarness request failed with status 403: invalid key [redacted]',
+      });
+      expect(JSON.stringify(response.json())).not.toContain('harness-key-secret');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('infers Harness usage thread context from the single running worker thread', async () => {
+    await app.close();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          status: 'ok',
+          run_id: 'run-inferred',
+          job_id: 'job-inferred',
+          request_id: 'request-inferred',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )) as typeof fetch;
+    const usageEvents: unknown[] = [];
+    try {
+      app = buildTestApp(fakeCodexManager, {
+        env: {
+          REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+          REMOTE_CODEX_SANDBOX_ID: 'sbx_test',
+          REMOTE_CODEX_USER_ID: 'user_test',
+          ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
+          INACT_X_APP_KEY: 'harness-key-secret',
+          REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
+        },
+        controlPlaneSyncClient: {
+          async checkpointSession() {
+            throw new Error('not used');
+          },
+          async recordHarnessUsageEvent(input: Parameters<NonNullable<BuildAppOptions['controlPlaneSyncClient']>['recordHarnessUsageEvent']>[0]) {
+            usageEvents.push(input);
+            return {
+              harnessUsageEvent: {
+                id: 'usage-inferred',
+                userId: 'user_test',
+                sandboxId: 'sbx_test',
+                workspaceId: input.workspaceId ?? null,
+                sessionId: input.sessionId ?? null,
+                provider: 'elagente-harness',
+                module: input.module,
+                tool: input.tool ?? null,
+                runId: input.runId ?? null,
+                jobId: input.jobId ?? null,
+                externalEventId: input.externalEventId ?? null,
+                computeUnits: input.computeUnits ?? 0,
+                costUsd: input.costUsd ?? 0,
+                status: input.status ?? 'unknown',
+                metadataJson: JSON.stringify(input.metadata ?? {}),
+                occurredAt: '2026-06-03T00:00:00.000Z',
+                importedAt: '2026-06-03T00:00:00.000Z',
+              },
+            };
+          },
+        },
+      });
+      await app.ready();
+      const workspace = createWorkspaceRecord(app.services.database.db, {
+        absPath: path.join(tempDir, 'inferred-workspace'),
+        label: 'Inferred Workspace',
+      });
+      const thread = createThreadRecord(app.services.database.db, {
+        workspaceId: workspace.id,
+        title: 'Running Harness Thread',
+        providerSessionId: 'provider-session-inferred',
+        providerTurnId: 'runtime-turn-inferred',
+        approvalMode: 'yolo',
+      });
+      updateThreadRecord(app.services.database.db, thread.id, {
+        status: 'running',
+        providerTurnId: 'runtime-turn-inferred',
+      });
+      upsertThreadTurnMetadata(app.services.database.db, {
+        threadId: thread.id,
+        turnId: 'display-turn-inferred',
+      });
+
+      const invoke = await app.inject({
+        method: 'POST',
+        url: '/api/harness/modules/farmaco/tools/generate_ligand_xyz/invoke',
+        payload: {
+          smiles: 'CCO',
+        },
+      });
+
+      expect(invoke.statusCode).toBe(200);
+      expect(usageEvents).toEqual([
+        expect.objectContaining({
+          workspaceId: workspace.id,
+          sessionId: null,
+          threadId: thread.id,
+          turnId: 'display-turn-inferred',
+          module: 'farmaco',
+          tool: 'generate_ligand_xyz',
+          runId: 'run-inferred',
+          jobId: 'job-inferred',
+          externalEventId: 'request-inferred',
+          metadata: expect.objectContaining({
+            attributionSource: 'worker-inferred',
+          }),
+        }),
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('does not infer Harness usage thread context when multiple threads are running', async () => {
+    await app.close();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ status: 'ok' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })) as typeof fetch;
+    const usageEvents: unknown[] = [];
+    try {
+      app = buildTestApp(fakeCodexManager, {
+        env: {
+          REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+          REMOTE_CODEX_SANDBOX_ID: 'sbx_test',
+          REMOTE_CODEX_USER_ID: 'user_test',
+          ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
+          INACT_X_APP_KEY: 'harness-key-secret',
+          REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
+        },
+        controlPlaneSyncClient: {
+          async checkpointSession() {
+            throw new Error('not used');
+          },
+          async recordHarnessUsageEvent(input: Parameters<NonNullable<BuildAppOptions['controlPlaneSyncClient']>['recordHarnessUsageEvent']>[0]) {
+            usageEvents.push(input);
+            return {
+              harnessUsageEvent: {
+                id: 'usage-no-inference',
+                userId: 'user_test',
+                sandboxId: 'sbx_test',
+                workspaceId: input.workspaceId ?? null,
+                sessionId: input.sessionId ?? null,
+                provider: 'elagente-harness',
+                module: input.module,
+                tool: input.tool ?? null,
+                runId: input.runId ?? null,
+                jobId: input.jobId ?? null,
+                externalEventId: input.externalEventId ?? null,
+                computeUnits: input.computeUnits ?? 0,
+                costUsd: input.costUsd ?? 0,
+                status: input.status ?? 'unknown',
+                metadataJson: JSON.stringify(input.metadata ?? {}),
+                occurredAt: '2026-06-03T00:00:00.000Z',
+                importedAt: '2026-06-03T00:00:00.000Z',
+              },
+            };
+          },
+        },
+      });
+      await app.ready();
+      const firstWorkspace = createWorkspaceRecord(app.services.database.db, {
+        absPath: path.join(tempDir, 'first-running-workspace'),
+        label: 'First Running Workspace',
+      });
+      const secondWorkspace = createWorkspaceRecord(app.services.database.db, {
+        absPath: path.join(tempDir, 'second-running-workspace'),
+        label: 'Second Running Workspace',
+      });
+      for (const [workspace, suffix] of [[firstWorkspace, 'one'], [secondWorkspace, 'two']] as const) {
+        const thread = createThreadRecord(app.services.database.db, {
+          workspaceId: workspace.id,
+          title: `Running Harness Thread ${suffix}`,
+          providerSessionId: `provider-session-${suffix}`,
+          providerTurnId: `runtime-turn-${suffix}`,
+          approvalMode: 'yolo',
+        });
+        updateThreadRecord(app.services.database.db, thread.id, {
+          status: 'running',
+          providerTurnId: `runtime-turn-${suffix}`,
+        });
+      }
+
+      const invoke = await app.inject({
+        method: 'POST',
+        url: '/api/harness/modules/farmaco/tools/generate_ligand_xyz/invoke',
+        payload: {
+          smiles: 'CCO',
+        },
+      });
+
+      expect(invoke.statusCode).toBe(200);
+      expect(usageEvents).toEqual([
+        expect.objectContaining({
+          workspaceId: null,
+          sessionId: null,
+          threadId: null,
+          turnId: null,
+          module: 'farmaco',
+          tool: 'generate_ligand_xyz',
+          metadata: expect.objectContaining({
+            attributionSource: 'worker-runtime',
+          }),
+        }),
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it('requires the router token for worker API access when configured', async () => {
@@ -1276,6 +1787,11 @@ describe('supervisor api', () => {
       'base_url = "https://llm-gateway.example.com"',
     );
     const codexConfig = await fs.readFile(path.join(codexHome, 'config.toml'), 'utf8');
+    expect(codexConfig.match(/\[mcp_servers\.remote_codex_plugins\]/g)).toHaveLength(1);
+    expect(codexConfig).toContain(
+      'REMOTE_CODEX_ENABLED_PLUGIN_IDS = "remote-codex.elagente-harness,remote-codex.xyz-viewer"',
+    );
+    expect(codexConfig).not.toContain('INACT_X_APP_KEY');
     const codexAuth = JSON.parse(await fs.readFile(path.join(codexHome, 'auth.json'), 'utf8'));
     const claudeConfig = await fs.readFile(path.join(claudeHome, 'settings.json'), 'utf8');
     const opencodeConfig = await fs.readFile(path.join(opencodeHome, 'opencode.json'), 'utf8');
@@ -1677,6 +2193,11 @@ describe('supervisor api', () => {
           enabled: true,
           source: 'builtin',
         }),
+        expect.objectContaining({
+          id: 'remote-codex.elagente-harness',
+          enabled: true,
+          source: 'builtin',
+        }),
       ]),
     );
 
@@ -1794,13 +2315,13 @@ describe('supervisor api', () => {
   it('rejects uninstalling built-in plugins', async () => {
     const response = await app.inject({
       method: 'DELETE',
-      url: '/api/plugins/remote-codex.xyz-viewer',
+      url: '/api/plugins/remote-codex.elagente-harness',
     });
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toMatchObject({
       code: 'bad_request',
-      message: 'Built-in plugin cannot be uninstalled: remote-codex.xyz-viewer',
+      message: 'Built-in plugin cannot be uninstalled: remote-codex.elagente-harness',
     });
   });
 

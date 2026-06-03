@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ControlPlaneSandbox, ControlPlaneSession } from '../lib/api';
@@ -209,6 +209,32 @@ const usageEvent = {
   importedAt: '2026-05-25T00:03:00.000Z',
 };
 
+const harnessUsage = {
+  eventCount: 1,
+  computeUnits: 12.5,
+  costUsd: 0.0312,
+};
+
+const harnessUsageEvent = {
+  id: 'harness-usage-1',
+  userId: 'user-1',
+  sandboxId: 'sandbox-1',
+  workspaceId: 'workspace-1',
+  sessionId: 'session-1',
+  provider: 'elagente-harness',
+  module: 'farmaco',
+  tool: 'generate_ligand_xyz',
+  runId: 'farmaco-run-1',
+  jobId: '42',
+  externalEventId: 'harness-event-1',
+  computeUnits: 12.5,
+  costUsd: 0.0312,
+  status: 'ok',
+  metadataJson: '{}',
+  occurredAt: '2026-05-25T00:04:00.000Z',
+  importedAt: '2026-05-25T00:05:00.000Z',
+};
+
 const adminUser = {
   ...user,
   id: 'user-admin-target',
@@ -262,8 +288,21 @@ function jsonResponse(body: unknown, status = 200) {
   } as Response;
 }
 
-function usageEventsResponse(path: string, events: unknown[] = []) {
-  return path === '/api/usage/events?limit=10' ? jsonResponse({ events }) : null;
+function usageEventsResponse(
+  path: string,
+  events: unknown[] = [],
+  harnessInput: { usage?: unknown; events?: unknown[] } = {},
+) {
+  if (path === '/api/usage/events?limit=10') {
+    return jsonResponse({ events });
+  }
+  if (path === '/api/usage/harness/summary') {
+    return jsonResponse({ usage: harnessInput.usage ?? { eventCount: 0, computeUnits: 0, costUsd: 0 } });
+  }
+  if (path === '/api/usage/harness/events?limit=10') {
+    return jsonResponse({ events: harnessInput.events ?? [] });
+  }
+  return null;
 }
 
 async function selectExistingHierarchy() {
@@ -347,6 +386,14 @@ describe('ControlPlanePage', () => {
           return jsonResponse({ events: [] });
         }
 
+        if (path === '/api/usage/harness/summary' && !init?.method) {
+          return jsonResponse({ usage: { eventCount: 0, computeUnits: 0, costUsd: 0 } });
+        }
+
+        if (path === '/api/usage/harness/events?limit=10' && !init?.method) {
+          return jsonResponse({ events: [] });
+        }
+
         if (path === '/api/projects' && init?.method === 'POST') {
           projectCreated = true;
           return jsonResponse({ project });
@@ -367,6 +414,34 @@ describe('ControlPlanePage', () => {
         if (path === '/api/sandbox/start' && init?.method === 'POST') {
           sandboxRunning = true;
           return jsonResponse({ sandbox: runningSandbox });
+        }
+
+        if (path === '/api/sandbox/harness/status' && !init?.method) {
+          return jsonResponse({
+            enabled: true,
+            baseUrl: 'https://elagenteharness.example.test',
+            keyPresent: true,
+            chemistryToolsEnabled: true,
+            modules: ['farmaco', 'quntur', 'estructural'],
+            health: { status: 'ok' },
+          });
+        }
+
+        if (path === '/api/sandbox/harness/modules/farmaco/tools' && !init?.method) {
+          return jsonResponse({
+            payload: [
+              { name: 'generate_ligand_xyz', execution_mode: 'inprocess' },
+              { name: 'pocket_detect', execution_mode: 'async_required' },
+            ],
+          });
+        }
+
+        if (path === '/api/sandbox/harness/modules/farmaco/runs' && !init?.method) {
+          return jsonResponse({
+            payload: [
+              { run_id: 'farmaco-run-1', status: 'ok', module: 'farmaco' },
+            ],
+          });
         }
 
         if (path === '/api/sandbox/stop' && init?.method === 'POST') {
@@ -467,6 +542,12 @@ describe('ControlPlanePage', () => {
     await waitFor(() => {
       expect(screen.getByText('https://router.example.test')).toBeInTheDocument();
     });
+    await waitFor(() => {
+      expect(screen.getByText('https://elagenteharness.example.test')).toBeInTheDocument();
+    });
+    expect(screen.getByText('generate_ligand_xyz')).toBeInTheDocument();
+    expect(screen.getByText('farmaco-run-1')).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('harness-key-secret');
 
     await openCreatePanel('session');
     submitCreatePanel('session');
@@ -946,7 +1027,7 @@ describe('ControlPlanePage', () => {
     });
   });
 
-  it('shows LLM usage summary after account bootstrap', async () => {
+  it('shows LLM and Harness usage summary after account bootstrap', async () => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
@@ -963,7 +1044,10 @@ describe('ControlPlanePage', () => {
         return jsonResponse({ workspaces: [] });
       }
 
-      const usageEvents = usageEventsResponse(path, [usageEvent]);
+      const usageEvents = usageEventsResponse(path, [usageEvent], {
+        usage: harnessUsage,
+        events: [harnessUsageEvent],
+      });
       if (usageEvents) {
         return usageEvents;
       }
@@ -985,9 +1069,37 @@ describe('ControlPlanePage', () => {
     expect(screen.getAllByText('1500').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Cost')).toBeInTheDocument();
     expect(screen.getAllByText('$1.25').length).toBeGreaterThanOrEqual(1);
+    const accountMenu = screen.getByRole('menu');
+    expect(within(accountMenu).getByText('Harness')).toBeInTheDocument();
+    expect(within(accountMenu).getByText('Compute')).toBeInTheDocument();
+    expect(within(accountMenu).getByText('12.5')).toBeInTheDocument();
+    expect(within(accountMenu).getByText('Harness cost')).toBeInTheDocument();
     expect(screen.getByText('gpt-5.1-codex')).toBeInTheDocument();
     expect(screen.getByText(/sub2api/)).toBeInTheDocument();
     expect(screen.getByText('2026-05-25T00:02:00.000Z')).toBeInTheDocument();
+    expect(screen.getByText('generate_ligand_xyz')).toBeInTheDocument();
+    expect(screen.getByText(/farmaco, ok/)).toBeInTheDocument();
+    expect(screen.getByText('2026-05-25T00:04:00.000Z')).toBeInTheDocument();
+  });
+
+  it('keeps Harness overview read-only and disabled until the sandbox is running', async () => {
+    render(<ControlPlanePage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Start the sandbox to inspect Harness tools.')).toBeInTheDocument();
+    });
+
+    const requestedPaths = vi.mocked(fetch).mock.calls.map(([input]) => {
+      const url = String(input);
+      return url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
+    });
+    expect(requestedPaths.some((path) => path.startsWith('/api/sandbox/harness'))).toBe(false);
+    expect(screen.queryByText('https://elagenteharness.example.test')).not.toBeInTheDocument();
+    expect(screen.queryByText('generate_ligand_xyz')).not.toBeInTheDocument();
+    expect(screen.queryByText('farmaco-run-1')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /invoke|execute|run tool/i })).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('harness-key-secret');
+    expect(document.body.textContent).not.toContain('INACT_X_APP_KEY');
   });
 
   it('shows an empty LLM usage detail state', async () => {
@@ -1346,6 +1458,18 @@ describe('ControlPlanePage', () => {
       if (path === '/api/usage/events?limit=10' && !init?.method) {
         return new Promise<Response>((resolve) => {
           setTimeout(() => resolve(jsonResponse({ events: [usageEvent] })), 25);
+        });
+      }
+
+      if (path === '/api/usage/harness/summary' && !init?.method) {
+        return new Promise<Response>((resolve) => {
+          setTimeout(() => resolve(jsonResponse({ usage: harnessUsage })), 25);
+        });
+      }
+
+      if (path === '/api/usage/harness/events?limit=10' && !init?.method) {
+        return new Promise<Response>((resolve) => {
+          setTimeout(() => resolve(jsonResponse({ events: [harnessUsageEvent] })), 25);
         });
       }
 

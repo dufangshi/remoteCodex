@@ -48,6 +48,8 @@ import {
   createTerminalPluginBackendContribution,
 } from './plugins/terminal-plugin-backend';
 import { WorkerIdentityError } from './worker-identity';
+import { WorkerHarnessClient } from './worker-harness-client';
+import { WorkerControlPlaneSyncClient } from './worker-control-plane-sync';
 
 const MAX_PROMPT_ATTACHMENTS = 10;
 const MAX_PROMPT_ATTACHMENT_BYTES = 25 * 1024 * 1024;
@@ -93,6 +95,9 @@ export interface AppServices {
   providerHostConfigService: ProviderHostConfigService;
   pluginRegistry: PluginRegistry;
   pluginService: PluginService;
+  harnessClient: WorkerHarnessClient;
+  controlPlaneSyncClient: Pick<WorkerControlPlaneSyncClient, 'checkpointSession' | 'recordHarnessUsageEvent'> &
+    Partial<Pick<WorkerControlPlaneSyncClient, 'checkHarnessQuota'>>;
   repoRoot: string;
 }
 
@@ -164,6 +169,7 @@ export function buildApp(
     runtimeBootstrap?: AgentRuntimeBootstrap;
     shellService?: ShellSessionService;
     serviceLifecycle?: AppServices['serviceLifecycle'];
+    controlPlaneSyncClient?: AppServices['controlPlaneSyncClient'];
   } = {}
 ): FastifyInstance {
   const config = loadRuntimeConfig(options.env);
@@ -198,6 +204,11 @@ export function buildApp(
     agentRuntimes,
     runtimeBootstrap.providerHostHomes,
   );
+  const harnessClient = new WorkerHarnessClient(config, {
+    env: options.env ?? process.env,
+  });
+  const controlPlaneSyncClient =
+    options.controlPlaneSyncClient ?? new WorkerControlPlaneSyncClient(config);
 
   const app = Fastify({
     logger:
@@ -252,6 +263,8 @@ export function buildApp(
     providerHostConfigService,
     pluginRegistry,
     pluginService,
+    harnessClient,
+    controlPlaneSyncClient,
     repoRoot
   });
 

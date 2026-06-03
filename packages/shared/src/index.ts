@@ -21,6 +21,7 @@ export type ApiErrorCode =
   | 'conflict'
   | 'provider_goal_error'
   | 'gateway_unavailable'
+  | 'harness_unavailable'
   | 'quota_exceeded'
   | 'account_inactive'
   | 'forbidden'

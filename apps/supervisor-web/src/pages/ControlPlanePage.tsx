@@ -10,6 +10,11 @@ import {
   createControlPlaneWorkspace,
   fetchControlPlaneMe,
   fetchControlPlaneAdminSandboxDetail,
+  fetchControlPlaneHarnessModuleRuns,
+  fetchControlPlaneHarnessModuleTools,
+  fetchControlPlaneHarnessStatus,
+  fetchControlPlaneHarnessUsageEvents,
+  fetchControlPlaneHarnessUsageSummary,
   fetchControlPlaneProjects,
   fetchControlPlaneUsageEvents,
   fetchControlPlaneSandboxHealth,
@@ -22,6 +27,11 @@ import {
   updateControlPlaneMe,
   ApiError,
   type ControlPlaneAuth,
+  type ControlPlaneHarnessModule,
+  type ControlPlaneHarnessPayload,
+  type ControlPlaneHarnessStatus,
+  type ControlPlaneHarnessUsageEvent,
+  type ControlPlaneHarnessUsageSummary,
   type ControlPlaneSandboxDetail,
   type ControlPlaneProject,
   type ControlPlaneRouteToken,
@@ -41,6 +51,11 @@ import {
 const ROUTE_TOKEN_REFRESH_SKEW_MS = 60_000;
 const ROUTE_TOKEN_MIN_REFRESH_MS = 5_000;
 const SANDBOX_HEALTH_POLL_MS = 3_000;
+const HARNESS_MODULE_LABELS: Record<ControlPlaneHarnessModule, string> = {
+  estructural: 'Estructural',
+  quntur: 'Quntur',
+  farmaco: 'Farmaco',
+};
 type CreatePanelKind = 'project' | 'workspace' | 'session';
 
 function slugFromName(value: string) {
@@ -107,6 +122,94 @@ function sandboxBanner(sandbox: ControlPlaneSandbox | null) {
   return null;
 }
 
+function harnessState(status: ControlPlaneHarnessStatus | null, error: string | null) {
+  if (error) {
+    return 'unavailable';
+  }
+  if (!status) {
+    return 'idle';
+  }
+  if (!status.enabled || !status.chemistryToolsEnabled) {
+    return 'not configured';
+  }
+  if (!status.keyPresent) {
+    return 'missing key';
+  }
+  return status.health ? 'ready' : 'degraded';
+}
+
+function harnessTone(state: string) {
+  switch (state) {
+    case 'ready':
+      return statusTone('running');
+    case 'unavailable':
+    case 'missing key':
+      return statusTone('failed');
+    case 'not configured':
+    case 'idle':
+      return statusTone('stopped');
+    default:
+      return statusTone('starting');
+  }
+}
+
+function payloadPreview(value: ControlPlaneHarnessPayload | null) {
+  if (!value) {
+    return '';
+  }
+  if (typeof value.text === 'string') {
+    return value.text.trim();
+  }
+  if (value.payload === undefined) {
+    return '';
+  }
+  return JSON.stringify(value.payload, null, 2);
+}
+
+function payloadItems(value: ControlPlaneHarnessPayload | null) {
+  const payload = value?.payload;
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+  if (payload && typeof payload === 'object') {
+    for (const key of ['tools', 'runs', 'items', 'artifacts']) {
+      const candidate = (payload as Record<string, unknown>)[key];
+      if (Array.isArray(candidate)) {
+        return candidate;
+      }
+    }
+  }
+  return [];
+}
+
+function payloadItemLabel(item: unknown, fallback: string) {
+  if (!item || typeof item !== 'object') {
+    return String(item ?? fallback);
+  }
+  const record = item as Record<string, unknown>;
+  for (const key of ['name', 'tool', 'run_id', 'id', 'title', 'path']) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value;
+    }
+  }
+  return fallback;
+}
+
+function payloadItemMeta(item: unknown) {
+  if (!item || typeof item !== 'object') {
+    return '';
+  }
+  const record = item as Record<string, unknown>;
+  return ['status', 'type', 'module', 'execution_mode']
+    .map((key) => {
+      const value = record[key];
+      return typeof value === 'string' && value.trim() ? value : null;
+    })
+    .filter(Boolean)
+    .join(' / ');
+}
+
 function Field({
   label,
   value,
@@ -168,6 +271,8 @@ export function ControlPlanePage() {
   const [adminSandboxDetail, setAdminSandboxDetail] = useState<ControlPlaneSandboxDetail | null>(null);
   const [usage, setUsage] = useState<ControlPlaneUsageSummary | null>(null);
   const [usageEvents, setUsageEvents] = useState<ControlPlaneUsageEvent[]>([]);
+  const [harnessUsage, setHarnessUsage] = useState<ControlPlaneHarnessUsageSummary | null>(null);
+  const [harnessUsageEvents, setHarnessUsageEvents] = useState<ControlPlaneHarnessUsageEvent[]>([]);
   const [projects, setProjects] = useState<ControlPlaneProject[]>([]);
   const [workspaces, setWorkspaces] = useState<ControlPlaneWorkspace[]>([]);
   const [sessions, setSessions] = useState<ControlPlaneSession[]>([]);
@@ -176,6 +281,11 @@ export function ControlPlanePage() {
   const [selectedSessionId, setSelectedSessionId] = useState('');
   const [routeToken, setRouteToken] = useState<ControlPlaneRouteToken | null>(null);
   const [workerSocketUrl, setWorkerSocketUrl] = useState<string | null>(null);
+  const [harnessStatus, setHarnessStatus] = useState<ControlPlaneHarnessStatus | null>(null);
+  const [selectedHarnessModule, setSelectedHarnessModule] = useState<ControlPlaneHarnessModule>('farmaco');
+  const [harnessTools, setHarnessTools] = useState<ControlPlaneHarnessPayload | null>(null);
+  const [harnessRuns, setHarnessRuns] = useState<ControlPlaneHarnessPayload | null>(null);
+  const [harnessError, setHarnessError] = useState<string | null>(null);
   const [projectName, setProjectName] = useState('Computational chemistry');
   const [workspaceName, setWorkspaceName] = useState('Molecule study');
   const [sessionTitle, setSessionTitle] = useState('Plan calculation');
@@ -197,11 +307,13 @@ export function ControlPlanePage() {
     workspaces: boolean;
     sessions: boolean;
     usageEvents: boolean;
+    harness: boolean;
   }>({
     projects: false,
     workspaces: false,
     sessions: false,
     usageEvents: false,
+    harness: false,
   });
   const [workerConnectionState, setWorkerConnectionState] = useState<'idle' | 'connecting' | 'ready' | 'reconnecting'>('idle');
   const routeTokenRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -271,6 +383,12 @@ export function ControlPlanePage() {
     selectedWorkspace?.name,
     selectedSession?.title,
   ].filter(Boolean).join(' / ');
+  const harnessStatusText = harnessState(harnessStatus, harnessError);
+  const harnessModules = harnessStatus?.modules.length ? harnessStatus.modules : (['farmaco', 'quntur', 'estructural'] as ControlPlaneHarnessModule[]);
+  const harnessToolItems = payloadItems(harnessTools);
+  const harnessRunItems = payloadItems(harnessRuns);
+  const harnessToolsPreview = payloadPreview(harnessTools);
+  const harnessRunsPreview = payloadPreview(harnessRuns);
   const accountInitial = (user?.displayName ?? user?.email ?? 'U').trim().charAt(0).toUpperCase() || 'U';
   const totalTokens = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
   const activeSessions = sessions.filter((session) => session.status === 'active').length;
@@ -332,14 +450,18 @@ export function ControlPlanePage() {
     setMetadataLoading((current) => ({ ...current, projects: true, usageEvents: true }));
     try {
       const me = await fetchControlPlaneMe(nextAuth);
-      const [projectResult, usageEventResult] = await Promise.all([
+      const [projectResult, usageEventResult, harnessUsageResult, harnessUsageEventResult] = await Promise.all([
         fetchControlPlaneProjects(nextAuth),
         fetchControlPlaneUsageEvents(nextAuth, 10),
+        fetchControlPlaneHarnessUsageSummary(nextAuth),
+        fetchControlPlaneHarnessUsageEvents(nextAuth, 10),
       ]);
       setUser(me.user);
       setSandbox(me.sandbox);
       setUsage(me.usage);
       setUsageEvents(usageEventResult.events);
+      setHarnessUsage(harnessUsageResult.usage);
+      setHarnessUsageEvents(harnessUsageEventResult.events);
       setProjects(projectResult.projects);
       setProfileName(me.user.displayName ?? '');
       setSelectedProjectId((current) =>
@@ -347,6 +469,44 @@ export function ControlPlanePage() {
       );
     } finally {
       setMetadataLoading((current) => ({ ...current, projects: false, usageEvents: false }));
+    }
+  }
+
+  async function refreshHarness(nextAuth = auth, module = selectedHarnessModule) {
+    if (!nextAuth || !sandboxReady) {
+      setHarnessStatus(null);
+      setHarnessTools(null);
+      setHarnessRuns(null);
+      setHarnessError(null);
+      return;
+    }
+    setMetadataLoading((current) => ({ ...current, harness: true }));
+    setHarnessError(null);
+    try {
+      const status = await fetchControlPlaneHarnessStatus(nextAuth);
+      setHarnessStatus(status);
+      const nextModule = status.modules.includes(module)
+        ? module
+        : status.modules[0] ?? module;
+      setSelectedHarnessModule(nextModule);
+      if (status.enabled && status.keyPresent && status.chemistryToolsEnabled) {
+        const [tools, runs] = await Promise.all([
+          fetchControlPlaneHarnessModuleTools(nextAuth, nextModule),
+          fetchControlPlaneHarnessModuleRuns(nextAuth, nextModule),
+        ]);
+        setHarnessTools(tools);
+        setHarnessRuns(runs);
+      } else {
+        setHarnessTools(null);
+        setHarnessRuns(null);
+      }
+    } catch (caught) {
+      setHarnessStatus(null);
+      setHarnessTools(null);
+      setHarnessRuns(null);
+      setHarnessError(caught instanceof Error ? caught.message : 'Harness status refresh failed.');
+    } finally {
+      setMetadataLoading((current) => ({ ...current, harness: false }));
     }
   }
 
@@ -402,6 +562,17 @@ export function ControlPlanePage() {
       clearTimeout(timer);
     };
   }, [auth, sandbox?.state, sandbox?.startupProgress, sandbox?.updatedAt, sandboxProvisioning]);
+
+  useEffect(() => {
+    if (!auth || !sandboxReady) {
+      setHarnessStatus(null);
+      setHarnessTools(null);
+      setHarnessRuns(null);
+      setHarnessError(null);
+      return;
+    }
+    void refreshHarness(auth, selectedHarnessModule);
+  }, [auth, sandboxReady, sandbox?.updatedAt]);
 
   useEffect(() => {
     if (!auth || !selectedProjectId) {
@@ -515,6 +686,8 @@ export function ControlPlanePage() {
     setProjects([]);
     setWorkspaces([]);
     setSessions([]);
+    setHarnessUsage(null);
+    setHarnessUsageEvents([]);
     setRouteToken(null);
     setAccountMenuOpen(false);
     setCreatePanelOpen(null);
@@ -627,6 +800,29 @@ export function ControlPlanePage() {
         setMessage(`Sandbox manager reports ${health.status.state}.`);
       }
     });
+  }
+
+  async function handleHarnessModuleSelect(module: ControlPlaneHarnessModule) {
+    setSelectedHarnessModule(module);
+    if (!auth || !sandboxReady) {
+      return;
+    }
+    setMetadataLoading((current) => ({ ...current, harness: true }));
+    setHarnessError(null);
+    try {
+      const [tools, runs] = await Promise.all([
+        fetchControlPlaneHarnessModuleTools(auth, module),
+        fetchControlPlaneHarnessModuleRuns(auth, module),
+      ]);
+      setHarnessTools(tools);
+      setHarnessRuns(runs);
+    } catch (caught) {
+      setHarnessTools(null);
+      setHarnessRuns(null);
+      setHarnessError(caught instanceof Error ? caught.message : 'Harness module refresh failed.');
+    } finally {
+      setMetadataLoading((current) => ({ ...current, harness: false }));
+    }
   }
 
   async function handleInspectSandbox() {
@@ -781,6 +977,9 @@ export function ControlPlanePage() {
                   <div><span>Requests</span><strong>{usage?.requestCount ?? 0}</strong></div>
                   <div><span>Tokens</span><strong>{totalTokens}</strong></div>
                   <div><span>Cost</span><strong>${Number(usage?.costUsd ?? 0).toFixed(2)}</strong></div>
+                  <div><span>Harness</span><strong>{harnessUsage?.eventCount ?? 0}</strong></div>
+                  <div><span>Compute</span><strong>{Number(harnessUsage?.computeUnits ?? 0).toFixed(1)}</strong></div>
+                  <div><span>Harness cost</span><strong>${Number(harnessUsage?.costUsd ?? 0).toFixed(2)}</strong></div>
                 </div>
                 <div className="control-usage-events compact">
                   {metadataLoading.usageEvents ? (
@@ -792,6 +991,21 @@ export function ControlPlanePage() {
                       <div key={event.id}>
                         <strong>{event.model}</strong>
                         <span>{event.provider}, {event.inputTokens + event.outputTokens} tokens, ${Number(event.costUsd).toFixed(2)}</span>
+                        <small>{event.occurredAt}</small>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div className="control-usage-events compact">
+                  {metadataLoading.usageEvents ? (
+                    <p className="control-empty">Loading Harness usage...</p>
+                  ) : harnessUsageEvents.length === 0 ? (
+                    <p className="control-empty">No Harness usage events yet.</p>
+                  ) : (
+                    harnessUsageEvents.slice(0, 4).map((event) => (
+                      <div key={event.id}>
+                        <strong>{event.tool ?? event.module}</strong>
+                        <span>{event.module}, {event.status}, ${Number(event.costUsd).toFixed(2)}</span>
                         <small>{event.occurredAt}</small>
                       </div>
                     ))
@@ -1151,6 +1365,93 @@ export function ControlPlanePage() {
               </>
             ) : (
               <p className="control-empty">Loading sandbox registry.</p>
+            )}
+          </section>
+
+          <section className="control-panel">
+            <div className="control-panel-heading">
+              <h2>Harness</h2>
+              <span className={`control-status-pill ${harnessTone(harnessStatusText)}`}>
+                {harnessStatusText}
+              </span>
+            </div>
+            {!sandboxReady ? (
+              <p className="control-empty">Start the sandbox to inspect Harness tools.</p>
+            ) : (
+              <>
+                <div className="control-action-row">
+                  <ActionButton
+                    onClick={() => void refreshHarness(auth, selectedHarnessModule)}
+                    disabled={!auth || metadataLoading.harness}
+                  >
+                    {metadataLoading.harness ? 'Checking...' : 'Refresh'}
+                  </ActionButton>
+                </div>
+                {harnessError ? (
+                  <div className="control-alert warning">Harness unavailable: {harnessError}</div>
+                ) : null}
+                <dl className="control-detail-list compact">
+                  <div><dt>Base URL</dt><dd>{harnessStatus?.baseUrl ?? 'not reported'}</dd></div>
+                  <div><dt>Key</dt><dd>{harnessStatus?.keyPresent ? 'present' : 'not present'}</dd></div>
+                  <div><dt>Chemistry</dt><dd>{harnessStatus?.chemistryToolsEnabled ? 'enabled' : 'disabled'}</dd></div>
+                  <div><dt>Health</dt><dd>{harnessStatus?.health ? 'ok' : 'not available'}</dd></div>
+                </dl>
+                <div className="control-segment-row" role="tablist" aria-label="Harness modules">
+                  {harnessModules.map((module) => (
+                    <button
+                      key={module}
+                      type="button"
+                      role="tab"
+                      aria-selected={selectedHarnessModule === module}
+                      className={selectedHarnessModule === module ? 'selected' : ''}
+                      onClick={() => void handleHarnessModuleSelect(module)}
+                      disabled={metadataLoading.harness || !harnessStatus?.enabled || !harnessStatus.keyPresent}
+                    >
+                      {HARNESS_MODULE_LABELS[module]}
+                    </button>
+                  ))}
+                </div>
+                <div className="control-usage-events compact">
+                  <div>
+                    <strong>{HARNESS_MODULE_LABELS[selectedHarnessModule]} tools</strong>
+                    <small>{harnessToolItems.length} advertised</small>
+                  </div>
+                  {harnessToolItems.slice(0, 5).map((item, index) => (
+                    <div key={`${selectedHarnessModule}-tool-${index}`}>
+                      <strong>{payloadItemLabel(item, `tool-${index + 1}`)}</strong>
+                      <span>{payloadItemMeta(item) || 'tool'}</span>
+                    </div>
+                  ))}
+                  {harnessToolItems.length === 0 && harnessToolsPreview ? (
+                    <div>
+                      <span>{harnessToolsPreview.slice(0, 180)}</span>
+                    </div>
+                  ) : null}
+                  {harnessToolItems.length === 0 && !harnessToolsPreview ? (
+                    <p className="control-empty">No tools reported for this module.</p>
+                  ) : null}
+                </div>
+                <div className="control-usage-events compact">
+                  <div>
+                    <strong>Recent runs</strong>
+                    <small>{harnessRunItems.length} reported</small>
+                  </div>
+                  {harnessRunItems.slice(0, 4).map((item, index) => (
+                    <div key={`${selectedHarnessModule}-run-${index}`}>
+                      <strong>{payloadItemLabel(item, `run-${index + 1}`)}</strong>
+                      <span>{payloadItemMeta(item) || 'run'}</span>
+                    </div>
+                  ))}
+                  {harnessRunItems.length === 0 && harnessRunsPreview ? (
+                    <div>
+                      <span>{harnessRunsPreview.slice(0, 180)}</span>
+                    </div>
+                  ) : null}
+                  {harnessRunItems.length === 0 && !harnessRunsPreview ? (
+                    <p className="control-empty">No runs reported yet.</p>
+                  ) : null}
+                </div>
+              </>
             )}
           </section>
 

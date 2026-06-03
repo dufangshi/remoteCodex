@@ -18,6 +18,64 @@ export interface WorkerSessionCheckpointResult {
   };
 }
 
+export interface WorkerHarnessUsageEventInput {
+  workspaceId?: string | null | undefined;
+  sessionId?: string | null | undefined;
+  threadId?: string | null | undefined;
+  turnId?: string | null | undefined;
+  module: 'estructural' | 'quntur' | 'farmaco';
+  tool?: string | null | undefined;
+  runId?: string | null | undefined;
+  jobId?: string | null | undefined;
+  externalEventId?: string | null | undefined;
+  computeUnits?: number | null | undefined;
+  costUsd?: number | null | undefined;
+  status?: string | null | undefined;
+  metadata?: Record<string, unknown> | null | undefined;
+  occurredAt?: string | null | undefined;
+}
+
+export interface WorkerHarnessQuotaCheckInput {
+  workspaceId?: string | null | undefined;
+  sessionId?: string | null | undefined;
+  module: 'estructural' | 'quntur' | 'farmaco';
+  tool?: string | null | undefined;
+  estimatedComputeUnits?: number | null | undefined;
+  estimatedCostUsd?: number | null | undefined;
+}
+
+export interface WorkerHarnessQuotaCheckResult {
+  allowed: boolean;
+  denial?: {
+    reason: string;
+    quotaProfile: string;
+    limit: number;
+    used: number;
+  };
+}
+
+export interface WorkerHarnessUsageEventResult {
+  harnessUsageEvent: {
+    id: string;
+    userId: string;
+    sandboxId: string;
+    workspaceId: string | null;
+    sessionId: string | null;
+    provider: string;
+    module: string;
+    tool: string | null;
+    runId: string | null;
+    jobId: string | null;
+    externalEventId: string | null;
+    computeUnits: number;
+    costUsd: number;
+    status: string;
+    metadataJson: string;
+    occurredAt: string;
+    importedAt: string;
+  };
+}
+
 export interface WorkerControlPlaneSyncOptions {
   fetchImpl?: typeof fetch;
   maxAttempts?: number;
@@ -49,9 +107,58 @@ export class WorkerControlPlaneSyncClient {
   }
 
   async checkpointSession(input: WorkerSessionCheckpointInput): Promise<WorkerSessionCheckpointResult> {
+    const url = new URL(
+      `/api/internal/sessions/${encodeURIComponent(input.sessionId)}/checkpoint`,
+      this.config.controlPlaneBaseUrl ?? 'http://127.0.0.1',
+    );
+    const body = this.internalRequestBody({
+      userId: this.config.userId,
+      sandboxId: this.config.sandboxId,
+      ...(input.workerSessionId !== undefined ? { workerSessionId: input.workerSessionId } : {}),
+      ...(input.status !== undefined ? { status: input.status } : {}),
+    });
+    return this.postWithRetry<WorkerSessionCheckpointResult>(url, body, {
+      rejectedCode: 'checkpoint_rejected',
+      retryableCode: 'checkpoint_retryable',
+      failedCode: 'checkpoint_failed',
+      label: 'Control-plane checkpoint',
+    });
+  }
+
+  async recordHarnessUsageEvent(input: WorkerHarnessUsageEventInput): Promise<WorkerHarnessUsageEventResult> {
+    const body = this.internalRequestBody({
+      ...input,
+      userId: this.config.userId,
+      sandboxId: this.config.sandboxId,
+    });
+    const url = new URL('/api/internal/harness/usage-events', this.config.controlPlaneBaseUrl!);
+    return this.postWithRetry<WorkerHarnessUsageEventResult>(url, body, {
+      rejectedCode: 'harness_usage_rejected',
+      retryableCode: 'harness_usage_retryable',
+      failedCode: 'harness_usage_failed',
+      label: 'Harness usage event',
+    });
+  }
+
+  async checkHarnessQuota(input: WorkerHarnessQuotaCheckInput): Promise<WorkerHarnessQuotaCheckResult> {
+    const body = this.internalRequestBody({
+      ...input,
+      userId: this.config.userId,
+      sandboxId: this.config.sandboxId,
+    });
+    const url = new URL('/api/internal/harness/quota/check', this.config.controlPlaneBaseUrl!);
+    return this.postWithRetry<WorkerHarnessQuotaCheckResult>(url, body, {
+      rejectedCode: 'harness_quota_rejected',
+      retryableCode: 'harness_quota_retryable',
+      failedCode: 'harness_quota_failed',
+      label: 'Harness quota check',
+    });
+  }
+
+  private internalRequestBody(payload: Record<string, unknown>) {
     if (this.config.runtimeRole !== 'worker') {
       throw new WorkerControlPlaneSyncError(
-        'Session checkpoints can only be sent from worker mode.',
+        'Control-plane sync can only be sent from worker mode.',
         'not_worker',
       );
     }
@@ -67,18 +174,19 @@ export class WorkerControlPlaneSyncClient {
         'identity_missing',
       );
     }
+    return JSON.stringify(payload);
+  }
 
-    const url = new URL(
-      `/api/internal/sessions/${encodeURIComponent(input.sessionId)}/checkpoint`,
-      this.config.controlPlaneBaseUrl,
-    );
-    const body = JSON.stringify({
-      userId: this.config.userId,
-      sandboxId: this.config.sandboxId,
-      ...(input.workerSessionId !== undefined ? { workerSessionId: input.workerSessionId } : {}),
-      ...(input.status !== undefined ? { status: input.status } : {}),
-    });
-
+  private async postWithRetry<T>(
+    url: URL,
+    body: string,
+    errors: {
+      rejectedCode: string;
+      retryableCode: string;
+      failedCode: string;
+      label: string;
+    },
+  ): Promise<T> {
     let lastError: unknown = null;
     for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
       try {
@@ -86,27 +194,27 @@ export class WorkerControlPlaneSyncClient {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
-            'x-remote-codex-service-token': this.config.controlPlaneServiceToken,
+            'x-remote-codex-service-token': this.config.controlPlaneServiceToken!,
           },
           body,
         });
         if (response.ok) {
-          return await response.json() as WorkerSessionCheckpointResult;
+          return await response.json() as T;
         }
         if (response.status < 500 || attempt === this.maxAttempts) {
           throw new WorkerControlPlaneSyncError(
-            `Control-plane checkpoint failed with status ${response.status}.`,
-            'checkpoint_rejected',
+            `${errors.label} sync failed with status ${response.status}.`,
+            errors.rejectedCode,
             response.status,
           );
         }
         lastError = new WorkerControlPlaneSyncError(
-          `Control-plane checkpoint failed with status ${response.status}.`,
-          'checkpoint_retryable',
+          `${errors.label} sync failed with status ${response.status}.`,
+          errors.retryableCode,
           response.status,
         );
       } catch (error) {
-        if (error instanceof WorkerControlPlaneSyncError && error.code === 'checkpoint_rejected') {
+        if (error instanceof WorkerControlPlaneSyncError && error.code === errors.rejectedCode) {
           throw error;
         }
         lastError = error;
@@ -118,8 +226,8 @@ export class WorkerControlPlaneSyncClient {
     }
 
     throw new WorkerControlPlaneSyncError(
-      lastError instanceof Error ? lastError.message : 'Control-plane checkpoint failed.',
-      'checkpoint_failed',
+      lastError instanceof Error ? lastError.message : `${errors.label} sync failed.`,
+      errors.failedCode,
     );
   }
 }

@@ -14,8 +14,13 @@ import {
   verifySignedTokenWithKeys,
 } from '../../../packages/shared/src/tokens';
 import {
+  AwsSandboxSecretWriter,
   HttpLlmGatewayAdmin,
+  HttpHarnessAdmin,
+  HarnessAdmin,
+  type HarnessUsageExportEvent,
   LlmGatewayAdmin,
+  NoopHarnessAdmin,
   NoopLlmGatewayAdmin,
   NoopSandboxManager,
   SandboxManagerError,
@@ -23,6 +28,7 @@ import {
   AwsEksFargateSandboxManager,
   KubectlAwsSandboxKubernetesClient,
   loadAwsSandboxAdapterConfig,
+  SandboxSecretWriter,
   type SandboxStartInput,
 } from './adapters';
 import {
@@ -32,7 +38,7 @@ import {
   requireAuthenticatedUser,
 } from './auth';
 import { ControlPlaneConfig, loadControlPlaneConfig } from './config';
-import { checkRouteTokenQuota, QuotaDenial } from './quota';
+import { checkHarnessQuota, checkRouteTokenQuota, QuotaDenial } from './quota';
 import { ControlPlaneRepository, type UsageEventInput } from './repository';
 import { SandboxReaper } from './sandbox-reaper';
 
@@ -53,6 +59,8 @@ export interface ControlPlaneServices {
   repository: ControlPlaneRepository;
   sandboxManager: SandboxManager;
   llmGatewayAdmin: LlmGatewayAdmin;
+  harnessAdmin: HarnessAdmin;
+  sandboxSecretWriter: SandboxSecretWriter | null;
   authVerifier: AuthVerifier;
   sandboxReaper: SandboxReaper;
 }
@@ -68,10 +76,16 @@ export const CONTROL_PLANE_LOG_REDACTION_PATHS = [
   'llmGatewayAdminToken',
   'LLM_GATEWAY_STATIC_TOKEN',
   'llmGatewayStaticToken',
+  'ELAGENTE_HARNESS_ADMIN_KEY',
+  'harnessAdminKey',
   'gatewayKey.keyCiphertext',
   '*.gatewayKey.keyCiphertext',
+  'harnessKey.keyCiphertext',
+  '*.harnessKey.keyCiphertext',
   'body.gatewayKey.keyCiphertext',
   'payload.gatewayKey.keyCiphertext',
+  'body.harnessKey.keyCiphertext',
+  'payload.harnessKey.keyCiphertext',
   '*.keyCiphertext',
   'keyCiphertext',
 ];
@@ -182,6 +196,35 @@ const checkpointSessionSchema = z.object({
   status: z.enum(['created', 'active', 'idle', 'archived', 'deleted']).optional(),
 });
 
+const internalHarnessUsageEventSchema = z.object({
+  userId: z.string().uuid(),
+  sandboxId: z.string().uuid(),
+  workspaceId: z.string().uuid().nullable().optional(),
+  sessionId: z.string().uuid().nullable().optional(),
+  threadId: z.string().min(1).max(200).nullable().optional(),
+  turnId: z.string().min(1).max(200).nullable().optional(),
+  module: z.enum(['estructural', 'quntur', 'farmaco']),
+  tool: z.string().trim().min(1).max(160).regex(/^[a-zA-Z0-9_-]+$/).nullable().optional(),
+  runId: z.string().trim().min(1).max(200).nullable().optional(),
+  jobId: z.string().trim().min(1).max(200).nullable().optional(),
+  externalEventId: z.string().trim().min(1).max(200).nullable().optional(),
+  computeUnits: z.number().finite().nonnegative().nullable().optional(),
+  costUsd: z.number().finite().nonnegative().nullable().optional(),
+  status: z.string().trim().min(1).max(120).nullable().optional(),
+  metadata: z.record(z.string(), z.unknown()).nullable().optional(),
+  occurredAt: z.string().datetime().nullable().optional(),
+});
+const internalHarnessQuotaCheckSchema = z.object({
+  userId: z.string().uuid(),
+  sandboxId: z.string().uuid(),
+  workspaceId: z.string().uuid().nullable().optional(),
+  sessionId: z.string().uuid().nullable().optional(),
+  module: z.enum(['estructural', 'quntur', 'farmaco']),
+  tool: z.string().trim().min(1).max(160).regex(/^[a-zA-Z0-9_-]+$/).nullable().optional(),
+  estimatedComputeUnits: z.number().finite().nonnegative().nullable().optional(),
+  estimatedCostUsd: z.number().finite().nonnegative().nullable().optional(),
+});
+
 const reasoningEffortSchema = z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']);
 
 const sendSessionPromptSchema = z.object({
@@ -190,12 +233,23 @@ const sendSessionPromptSchema = z.object({
   reasoningEffort: reasoningEffortSchema.nullable().optional(),
 });
 
+const harnessInvokeSchema = z.object({
+  input: z.record(z.string(), z.unknown()).default({}),
+  workspaceId: z.string().uuid().nullable().optional(),
+  sessionId: z.string().uuid().nullable().optional(),
+  externalEventId: z.string().min(1).max(200).nullable().optional(),
+  estimatedComputeUnits: z.number().finite().nonnegative().nullable().optional(),
+  estimatedCostUsd: z.number().finite().nonnegative().nullable().optional(),
+});
+
 const routeTokenSchema = z.object({
   projectId: z.string().uuid().optional(),
   workspaceId: z.string().uuid().optional(),
   sessionId: z.string().uuid().optional(),
   scopes: z.array(z.string().min(1)).default(['worker:read', 'worker:write']),
 });
+const harnessModuleSchema = z.enum(['estructural', 'quntur', 'farmaco']);
+const harnessRunIdSchema = z.string().trim().min(1).max(200).regex(/^[a-zA-Z0-9_.-]+$/);
 
 const workerThreadSchema = z.object({
   id: z.string().min(1),
@@ -268,6 +322,20 @@ function redactGatewayKey<T extends { keyCiphertext?: string | null } | null | u
   };
 }
 
+function redactHarnessKey<T extends { keyCiphertext?: string | null; apiKey?: string | null } | null | undefined>(
+  harnessKey: T,
+) {
+  if (!harnessKey) {
+    return harnessKey;
+  }
+  const { apiKey: _apiKey, ...rest } = harnessKey;
+  return {
+    ...rest,
+    keyCiphertext: null,
+    hasEncryptedKey: Boolean(harnessKey.keyCiphertext),
+  };
+}
+
 function requireGatewayKeyContext(app: FastifyInstance, sandboxId: string) {
   const sandbox = app.services.repository.getSandboxById(sandboxId);
   if (!sandbox) {
@@ -288,6 +356,29 @@ function requireGatewayKeyContext(app: FastifyInstance, sandboxId: string) {
     sandbox,
     gatewayKey,
     gatewayUser,
+  };
+}
+
+function requireHarnessKeyContext(app: FastifyInstance, sandboxId: string) {
+  const sandbox = app.services.repository.getSandboxById(sandboxId);
+  if (!sandbox) {
+    throw new HttpError(404, 'not_found', 'Sandbox not found.');
+  }
+  const harnessKey = app.services.repository.getHarnessKeyForSandbox(sandbox.id);
+  if (!harnessKey) {
+    throw new HttpError(404, 'harness_key_missing', 'Harness key is missing.');
+  }
+  const harnessUser = app.services.repository.getHarnessUserForUser({
+    userId: sandbox.userId,
+    provider: harnessKey.provider,
+  });
+  if (!harnessUser) {
+    throw new HttpError(409, 'harness_user_missing', 'Harness user is missing.');
+  }
+  return {
+    sandbox,
+    harnessKey,
+    harnessUser,
   };
 }
 
@@ -1203,6 +1294,80 @@ async function sendWorkerSessionLifecycleRequest(
   });
 }
 
+async function sendWorkerHarnessRequest(
+  app: FastifyInstance,
+  input: {
+    sandbox: {
+      id: string;
+      state: string;
+      k8sNamespace: string | null;
+      workerServiceName: string | null;
+    };
+    userId: string;
+    path: string;
+  },
+) {
+  const { workerBaseUrl, routeToken } = workerProxyBaseUrl(app, {
+    sandbox: input.sandbox,
+    userId: input.userId,
+    scopes: ['worker:read'],
+  });
+  return sendWorkerJsonRequest(app, {
+    workerBaseUrl,
+    routeToken,
+    path: input.path,
+    method: 'GET',
+    failureCode: 'harness_unavailable',
+    fallbackMessage: 'Worker Harness request failed',
+  });
+}
+
+async function sendWorkerHarnessDownloadRequest(
+  app: FastifyInstance,
+  input: {
+    sandbox: {
+      id: string;
+      state: string;
+      k8sNamespace: string | null;
+      workerServiceName: string | null;
+    };
+    userId: string;
+    path: string;
+  },
+) {
+  const { workerBaseUrl, routeToken } = workerProxyBaseUrl(app, {
+    sandbox: input.sandbox,
+    userId: input.userId,
+    scopes: ['worker:read'],
+  });
+  const response = await fetch(`${workerBaseUrl}${input.path}`, {
+    method: 'GET',
+    headers: {
+      ...(routeToken
+        ? { authorization: `Bearer ${routeToken}` }
+        : { 'x-remote-codex-worker-token': app.services.config.sandboxWorkerAuthToken! }),
+    },
+  }).catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new HttpError(503, 'harness_unavailable', `Worker Harness artifact download failed: ${message}`);
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new HttpError(
+      response.status === 404 || response.status === 409 ? 409 : 502,
+      'harness_unavailable',
+      text || 'Worker Harness artifact download failed',
+    );
+  }
+
+  return {
+    body: Buffer.from(await response.arrayBuffer()),
+    contentType: response.headers.get('content-type') ?? 'application/octet-stream',
+    contentDisposition: response.headers.get('content-disposition'),
+  };
+}
+
 function quotaExceededError(denial: QuotaDenial) {
   return new HttpError(402, 'quota_exceeded', 'Quota exceeded.', {
     reason: denial.reason,
@@ -1269,6 +1434,110 @@ function gatewayUsageExportEventToImportEvent(
     costUsd: event.costUsd,
     externalRequestId: event.eventId,
     occurredAt: event.occurredAt,
+  };
+}
+
+function normalizeHarnessUsageExportEvent(
+  repository: ControlPlaneRepository,
+  provider: string,
+  event: HarnessUsageExportEvent,
+) {
+  const harnessKey = event.externalKeyId
+    ? repository.getHarnessKeyByExternalId({
+        provider,
+        externalKeyId: event.externalKeyId,
+      })
+    : null;
+  const userId = event.userId ?? harnessKey?.userId;
+  const sandboxId = event.sandboxId ?? harnessKey?.sandboxId;
+  if (!userId || !sandboxId) {
+    throw new HttpError(
+      400,
+      'harness_usage_identity_unresolved',
+      'Harness usage export event must include user/sandbox ids or a known Harness key id.',
+    );
+  }
+  const user = repository.getUserById(userId);
+  if (!user) {
+    throw new HttpError(400, 'harness_usage_identity_unresolved', 'Harness usage user could not be resolved.');
+  }
+  if (user.status !== 'active') {
+    throw new HttpError(403, 'account_inactive', 'Harness usage user account is not active.');
+  }
+  return {
+    userId,
+    sandboxId,
+    workspaceId: event.workspaceId ?? null,
+    sessionId: event.sessionId ?? null,
+    provider,
+    module: event.module,
+    tool: event.tool ?? null,
+    runId: event.runId ?? null,
+    jobId: event.jobId ?? null,
+    externalEventId: event.eventId,
+    computeUnits: event.computeUnits ?? 0,
+    costUsd: event.costUsd ?? 0,
+    status: event.status ?? 'unknown',
+    occurredAt: event.occurredAt,
+    metadata: {
+      ...(event.metadata ?? {}),
+      ...(event.externalKeyId ? { externalKeyId: event.externalKeyId } : {}),
+      source: 'harness-export',
+    },
+  };
+}
+
+function recordField(payload: unknown, fields: string[]) {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+  const record = payload as Record<string, unknown>;
+  for (const field of fields) {
+    const value = record[field];
+    if (typeof value === 'string' && value.trim()) {
+      return value;
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value);
+    }
+  }
+  return null;
+}
+
+function numberField(payload: unknown, fields: string[]) {
+  if (!payload || typeof payload !== 'object') {
+    return 0;
+  }
+  const record = payload as Record<string, unknown>;
+  for (const field of fields) {
+    const value = record[field];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) {
+      return Number(value);
+    }
+  }
+  return 0;
+}
+
+function payloadObject(payload: unknown) {
+  if (!payload || typeof payload !== 'object') {
+    return {};
+  }
+  if ('payload' in payload && payload.payload && typeof payload.payload === 'object') {
+    return payload.payload as Record<string, unknown>;
+  }
+  return payload as Record<string, unknown>;
+}
+
+function harnessUsageMetadata(payload: unknown) {
+  const body = payloadObject(payload);
+  return {
+    runUrl: recordField(body, ['run_url', 'runUrl', 'url']),
+    artifactsUrl: recordField(body, ['artifacts_url', 'artifactsUrl']),
+    downloadUrl: recordField(body, ['download_url', 'downloadUrl']),
+    resultStatus: recordField(body, ['status', 'state']),
   };
 }
 
@@ -1347,6 +1616,81 @@ async function importGatewayUsageBatch(app: FastifyInstance, input: {
   }
 }
 
+async function importHarnessUsageBatch(app: FastifyInstance, input: {
+  cursor?: string | null;
+  limit?: number;
+  useStoredCursor?: boolean;
+}) {
+  const repository = app.services.repository;
+  const provider = app.services.config.harnessProvider;
+  const source = 'harness';
+  const state = input.useStoredCursor
+    ? repository.getUsageImportState({ provider, source })
+    : null;
+  repository.markUsageImportStarted({ provider, source });
+  try {
+    const harnessExport = await app.services.harnessAdmin.exportUsage({
+      cursor: input.cursor ?? state?.cursor ?? null,
+      limit: input.limit ?? 100,
+    });
+    const inputEvents = harnessExport.events.map((event) =>
+      normalizeHarnessUsageExportEvent(repository, provider, event),
+    );
+    const events = inputEvents.map((event) =>
+      repository.recordHarnessUsageEvent(event),
+    );
+    const metrics = {
+      source,
+      sourceCount: inputEvents.length,
+      importedCount: events.length,
+      duplicateCount: Math.max(0, inputEvents.length - new Set(events.map((event) => event.id)).size),
+      failureCount: 0,
+      nextCursor: harnessExport.nextCursor ?? null,
+    };
+    const importState = repository.recordUsageImportMetrics({
+      provider,
+      source,
+      cursor: metrics.nextCursor,
+      sourceCount: metrics.sourceCount,
+      importedCount: metrics.importedCount,
+      duplicateCount: metrics.duplicateCount,
+      failureCount: metrics.failureCount,
+    });
+    repository.audit(null, 'usage.import_completed', 'usage_import', importState.id, {
+      provider,
+      source,
+      sourceCount: metrics.sourceCount,
+      importedCount: metrics.importedCount,
+      duplicateCount: metrics.duplicateCount,
+      failureCount: metrics.failureCount,
+      nextCursor: metrics.nextCursor,
+    });
+    return {
+      events,
+      import: metrics,
+      state: importState,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Harness usage import failed.';
+    const importState = repository.recordUsageImportMetrics({
+      provider,
+      source,
+      sourceCount: 0,
+      importedCount: 0,
+      duplicateCount: 0,
+      failureCount: 1,
+      failureMessage: message,
+    });
+    repository.audit(null, 'usage.import_failed', 'usage_import', importState.id, {
+      provider,
+      source,
+      failureCount: 1,
+      message,
+    });
+    throw error;
+  }
+}
+
 async function ensureGateway(app: FastifyInstance, user: { id: string; email: string; displayName: string | null }, sandbox: { id: string }) {
   const gatewayUser = await app.services.llmGatewayAdmin.ensureUser({
     userId: user.id,
@@ -1371,6 +1715,129 @@ async function ensureGateway(app: FastifyInstance, user: { id: string; email: st
     externalKeyId: gatewayKey.externalKeyId,
     keyCiphertext: gatewayKey.keyCiphertext ?? null,
   });
+}
+
+async function ensureSandboxHarnessSecret(
+  app: FastifyInstance,
+  input: {
+    sandboxId: string;
+    apiKey: string | null;
+  },
+) {
+  const secretName = app.services.config.harnessAppKeySecretName;
+  if (!app.services.config.chemistryToolsEnabled || !secretName || !input.apiKey) {
+    return null;
+  }
+  const writer = app.services.sandboxSecretWriter;
+  if (!writer) {
+    return null;
+  }
+  await writer.putSecretValue({
+    secretName,
+    key: input.sandboxId,
+    value: input.apiKey,
+  });
+  return {
+    secretName,
+    secretKey: input.sandboxId,
+  };
+}
+
+async function hasSandboxHarnessSecret(
+  app: FastifyInstance,
+  input: {
+    sandboxId: string;
+  },
+) {
+  const secretName = app.services.config.harnessAppKeySecretName;
+  const writer = app.services.sandboxSecretWriter;
+  if (!app.services.config.chemistryToolsEnabled || !secretName || !writer?.hasSecretValue) {
+    return null;
+  }
+  return writer.hasSecretValue({
+    secretName,
+    key: input.sandboxId,
+  });
+}
+
+async function ensureHarness(
+  app: FastifyInstance,
+  user: { id: string; email: string; displayName: string | null },
+  sandbox: { id: string },
+) {
+  if (!app.services.config.chemistryToolsEnabled) {
+    return null;
+  }
+  if (!app.services.config.harnessBaseUrl) {
+    throw new HttpError(400, 'harness_config_missing', 'Harness base URL is not configured.');
+  }
+  if (!app.services.config.harnessAdminBaseUrl || !app.services.config.harnessAdminKey) {
+    throw new HttpError(400, 'harness_admin_config_missing', 'Harness admin credentials are not configured.');
+  }
+
+  const existing = app.services.repository.getHarnessKeyForSandbox(sandbox.id);
+  const existingSecretBindingMatches =
+    existing?.status === 'active' &&
+    (!app.services.config.harnessAppKeySecretName ||
+      (existing.secretName === app.services.config.harnessAppKeySecretName &&
+        existing.secretKey === sandbox.id));
+  if (existingSecretBindingMatches) {
+    const secretPresent = await hasSandboxHarnessSecret(app, { sandboxId: sandbox.id });
+    if (secretPresent !== false) {
+      return existing;
+    }
+  }
+
+  try {
+    const harnessUser = await app.services.harnessAdmin.ensureUser({
+      userId: user.id,
+      email: user.email,
+      displayName: user.displayName,
+    });
+    app.services.repository.upsertHarnessUser({
+      userId: user.id,
+      provider: app.services.config.harnessProvider,
+      externalUserId: harnessUser.externalUserId,
+    });
+
+    const harnessKey =
+      existing?.status === 'active' && existing.externalKeyId
+        ? await app.services.harnessAdmin.rotateSandboxKey({
+            userId: user.id,
+            sandboxId: sandbox.id,
+            externalUserId: harnessUser.externalUserId,
+            externalKeyId: existing.externalKeyId,
+          })
+        : await app.services.harnessAdmin.ensureSandboxKey({
+            userId: user.id,
+            sandboxId: sandbox.id,
+            externalUserId: harnessUser.externalUserId,
+            email: user.email,
+            displayName: user.displayName,
+          });
+    const secretBinding = await ensureSandboxHarnessSecret(app, {
+      sandboxId: sandbox.id,
+      apiKey: harnessKey.apiKey,
+    });
+    const keyInput = {
+      userId: user.id,
+      sandboxId: sandbox.id,
+      provider: app.services.config.harnessProvider,
+      externalKeyId: harnessKey.externalKeyId,
+      keyCiphertext: harnessKey.keyCiphertext ?? null,
+      secretName: secretBinding?.secretName ?? existing?.secretName ?? null,
+      secretKey: secretBinding?.secretKey ?? existing?.secretKey ?? null,
+    };
+    return existing
+      ? app.services.repository.updateHarnessKeyRotation(keyInput)
+      : app.services.repository.upsertHarnessKey(keyInput);
+  } catch (error) {
+    if (error instanceof HttpError) {
+      throw error;
+    }
+    const message = error instanceof Error ? error.message : 'Harness provisioning failed.';
+    throw new HttpError(503, 'harness_unavailable', message);
+  }
 }
 
 function gatewayStartInput(
@@ -1423,6 +1890,17 @@ function defaultSandboxManager(env: NodeJS.ProcessEnv, routerBaseUrl: string): S
   );
 }
 
+function defaultSandboxSecretWriter(env: NodeJS.ProcessEnv): SandboxSecretWriter | null {
+  if (!hasAwsSandboxConfig(env)) {
+    return null;
+  }
+  const awsConfig = loadAwsSandboxAdapterConfig(env);
+  return new AwsSandboxSecretWriter({
+    namespace: awsConfig.namespace,
+    kubernetesClient: new KubectlAwsSandboxKubernetesClient(),
+  });
+}
+
 function originAllowed(config: ControlPlaneConfig, origin: string) {
   return config.corsAllowedOrigins.has(origin) || config.corsAllowedOrigins.has('*');
 }
@@ -1455,6 +1933,8 @@ export function buildControlPlaneApp(
     env?: NodeJS.ProcessEnv;
     sandboxManager?: SandboxManager;
     llmGatewayAdmin?: LlmGatewayAdmin;
+    harnessAdmin?: HarnessAdmin;
+    sandboxSecretWriter?: SandboxSecretWriter | null;
   } = {},
 ): FastifyInstance {
   const config = loadControlPlaneConfig(options.env);
@@ -1490,6 +1970,10 @@ export function buildControlPlaneApp(
 
   const runtimeEnv = options.env ?? process.env;
   const sandboxManager = options.sandboxManager ?? defaultSandboxManager(runtimeEnv, config.routerBaseUrl);
+  const sandboxSecretWriter =
+    options.sandboxSecretWriter !== undefined
+      ? options.sandboxSecretWriter
+      : defaultSandboxSecretWriter(runtimeEnv);
   const services: ControlPlaneServices = {
     config,
     database,
@@ -1503,6 +1987,16 @@ export function buildControlPlaneApp(
             adminToken: config.llmGatewayAdminToken,
           })
         : new NoopLlmGatewayAdmin()),
+    harnessAdmin:
+      options.harnessAdmin ??
+      (config.harnessAdminBaseUrl && config.harnessAdminKey
+        ? new HttpHarnessAdmin({
+            baseUrl: config.harnessAdminBaseUrl,
+            adminKey: config.harnessAdminKey,
+            legacyFallback: config.harnessLegacyAdminFallback,
+          })
+        : new NoopHarnessAdmin()),
+    sandboxSecretWriter,
     authVerifier,
     sandboxReaper: new SandboxReaper({
       repository,
@@ -1655,8 +2149,11 @@ export function buildControlPlaneApp(
       resourceProfile: config.sandboxDefaultResourceProfile,
       s3PrefixBase: config.sandboxS3PrefixBase,
     });
-    const gatewayKey = await ensureGateway(app, user, sandbox);
-    return { user, sandbox, gatewayKey: redactGatewayKey(gatewayKey) };
+    const [gatewayKey, harnessKey] = await Promise.all([
+      ensureGateway(app, user, sandbox),
+      ensureHarness(app, user, sandbox),
+    ]);
+    return { user, sandbox, gatewayKey: redactGatewayKey(gatewayKey), harnessKey: redactHarnessKey(harnessKey) };
   });
 
   app.post('/api/me/bootstrap', async (request) => {
@@ -1684,8 +2181,11 @@ export function buildControlPlaneApp(
       resourceProfile: config.sandboxDefaultResourceProfile,
       s3PrefixBase: config.sandboxS3PrefixBase,
     });
-    const gatewayKey = await ensureGateway(app, user, sandbox);
-    return { user, sandbox, gatewayKey: redactGatewayKey(gatewayKey) };
+    const [gatewayKey, harnessKey] = await Promise.all([
+      ensureGateway(app, user, sandbox),
+      ensureHarness(app, user, sandbox),
+    ]);
+    return { user, sandbox, gatewayKey: redactGatewayKey(gatewayKey), harnessKey: redactHarnessKey(harnessKey) };
   });
 
   app.get('/api/me', async (request) => {
@@ -1728,6 +2228,21 @@ export function buildControlPlaneApp(
       })
       .parse(request.query);
     return { events: repository.listUsageEventsForUser(user.id, query.limit) };
+  });
+
+  app.get('/api/usage/harness/summary', async (request) => {
+    const user = requireUser(app, request);
+    return { usage: repository.harnessUsageSummaryForUser(user.id) };
+  });
+
+  app.get('/api/usage/harness/events', async (request) => {
+    const user = requireUser(app, request);
+    const query = z
+      .object({
+        limit: z.coerce.number().int().positive().max(500).default(100),
+      })
+      .parse(request.query);
+    return { events: repository.listHarnessUsageEventsForUser(user.id, query.limit) };
   });
 
   app.get('/api/admin/users', async (request) => {
@@ -1778,6 +2293,15 @@ export function buildControlPlaneApp(
         nextCursor: null,
       },
     };
+  });
+
+  app.post('/api/admin/usage/harness/import', async (request) => {
+    requireAdmin(app, request);
+    const input = importUsageSchema.pick({ cursor: true, limit: true }).parse(request.body ?? {});
+    return importHarnessUsageBatch(app, {
+      cursor: input.cursor ?? null,
+      limit: input.limit ?? 100,
+    });
   });
 
   app.get('/api/internal/sandboxes/:sandboxId/endpoint', async (request) => {
@@ -1839,6 +2363,96 @@ export function buildControlPlaneApp(
     };
   });
 
+  app.post('/api/internal/harness/usage-events', async (request) => {
+    requireInternalService(app, request);
+    const input = internalHarnessUsageEventSchema.parse(request.body);
+    const sandbox = repository.getSandboxById(input.sandboxId);
+    if (!sandbox) {
+      throw new HttpError(404, 'not_found', 'Sandbox not found.');
+    }
+    if (sandbox.userId !== input.userId) {
+      repository.audit(sandbox.userId, 'harness.usage_record_failed', 'sandbox', sandbox.id, {
+        reason: 'wrong_user',
+        expectedUserId: sandbox.userId,
+        receivedUserId: input.userId,
+      });
+      throw new HttpError(403, 'wrong_user', 'Harness usage user does not match sandbox owner.');
+    }
+
+    let workspaceId = input.workspaceId ?? null;
+    const sessionId = input.sessionId ?? null;
+    if (workspaceId) {
+      const workspace = repository.getWorkspaceById(workspaceId);
+      if (!workspace || workspace.userId !== input.userId || workspace.sandboxId !== input.sandboxId) {
+        throw new HttpError(404, 'not_found', 'Workspace not found.');
+      }
+    }
+    if (sessionId) {
+      const session = repository.getSessionById(sessionId);
+      if (!session || session.userId !== input.userId || session.sandboxId !== input.sandboxId) {
+        throw new HttpError(404, 'not_found', 'Session not found.');
+      }
+      workspaceId = workspaceId ?? session.workspaceId;
+    }
+
+    const event = repository.recordHarnessUsageEvent({
+      userId: input.userId,
+      sandboxId: input.sandboxId,
+      workspaceId,
+      sessionId,
+      provider: config.harnessProvider,
+      module: input.module,
+      tool: input.tool ?? null,
+      runId: input.runId ?? null,
+      jobId: input.jobId ?? null,
+      externalEventId: input.externalEventId ?? null,
+      computeUnits: input.computeUnits ?? 0,
+      costUsd: input.costUsd ?? 0,
+      status: input.status ?? 'unknown',
+      occurredAt: input.occurredAt ?? undefined,
+      metadata: {
+        ...(input.metadata ?? {}),
+        ...(input.threadId ? { threadId: input.threadId } : {}),
+        ...(input.turnId ? { turnId: input.turnId } : {}),
+        source: 'worker-local-harness-api',
+      },
+    });
+    return { harnessUsageEvent: event };
+  });
+
+  app.post('/api/internal/harness/quota/check', async (request) => {
+    requireInternalService(app, request);
+    const input = internalHarnessQuotaCheckSchema.parse(request.body);
+    const sandbox = repository.getSandboxById(input.sandboxId);
+    if (!sandbox) {
+      throw new HttpError(404, 'not_found', 'Sandbox not found.');
+    }
+    if (sandbox.userId !== input.userId) {
+      throw new HttpError(403, 'wrong_user', 'Harness quota user does not match sandbox owner.');
+    }
+    if (input.workspaceId) {
+      const workspace = repository.getWorkspaceById(input.workspaceId);
+      if (!workspace || workspace.userId !== input.userId || workspace.sandboxId !== input.sandboxId) {
+        throw new HttpError(404, 'not_found', 'Workspace not found.');
+      }
+    }
+    if (input.sessionId) {
+      const session = repository.getSessionById(input.sessionId);
+      if (!session || session.userId !== input.userId || session.sandboxId !== input.sandboxId) {
+        throw new HttpError(404, 'not_found', 'Session not found.');
+      }
+    }
+    const user = repository.getUserById(input.userId);
+    if (!user) {
+      throw new HttpError(404, 'not_found', 'User not found.');
+    }
+    const quota = checkHarnessQuota(user, repository.harnessUsageSummaryForUser(user.id), {
+      computeUnits: input.estimatedComputeUnits ?? null,
+      costUsd: input.estimatedCostUsd ?? null,
+    });
+    return quota;
+  });
+
   app.post('/api/internal/sandboxes/reap', async (request) => {
     requireInternalService(app, request);
     return {
@@ -1854,6 +2468,19 @@ export function buildControlPlaneApp(
       })
       .parse(request.body ?? {});
     return importGatewayUsageBatch(app, {
+      limit: input.limit ?? 100,
+      useStoredCursor: true,
+    });
+  });
+
+  app.post('/api/internal/jobs/harness-usage-import', async (request) => {
+    requireInternalService(app, request);
+    const input = z
+      .object({
+        limit: z.number().int().positive().max(500).optional(),
+      })
+      .parse(request.body ?? {});
+    return importHarnessUsageBatch(app, {
       limit: input.limit ?? 100,
       useStoredCursor: true,
     });
@@ -1935,6 +2562,11 @@ export function buildControlPlaneApp(
       region: config.sandboxDefaultRegion,
       resourceProfile: config.sandboxDefaultResourceProfile,
     }) ?? sandbox;
+    const sandboxUser = repository.getUserById(runtimeSandbox.userId);
+    if (!sandboxUser) {
+      throw new HttpError(409, 'user_missing', 'Sandbox user is missing.');
+    }
+    await ensureHarness(app, sandboxUser, runtimeSandbox);
     const result = await app.services.sandboxManager.restartSandbox({
       sandboxId: runtimeSandbox.id,
       userId: runtimeSandbox.userId,
@@ -2059,6 +2691,69 @@ export function buildControlPlaneApp(
     return { gatewayKey: redactGatewayKey(gatewayKey) };
   });
 
+  app.post('/api/admin/sandboxes/:sandboxId/harness-key/rotate', async (request) => {
+    requireAdmin(app, request);
+    const params = z.object({ sandboxId: z.string().uuid() }).parse(request.params);
+    const { sandbox, harnessKey, harnessUser } = requireHarnessKeyContext(app, params.sandboxId);
+    const rotated = await app.services.harnessAdmin.rotateSandboxKey({
+      userId: sandbox.userId,
+      sandboxId: sandbox.id,
+      externalUserId: harnessUser.externalUserId,
+      externalKeyId: harnessKey.externalKeyId,
+    });
+    const secretBinding = await ensureSandboxHarnessSecret(app, {
+      sandboxId: sandbox.id,
+      apiKey: rotated.apiKey,
+    });
+    return {
+      harnessKey: redactHarnessKey(
+        repository.updateHarnessKeyRotation({
+          sandboxId: sandbox.id,
+          provider: harnessKey.provider,
+          externalKeyId: rotated.externalKeyId,
+          keyCiphertext: rotated.keyCiphertext ?? null,
+          secretName: secretBinding?.secretName ?? harnessKey.secretName,
+          secretKey: secretBinding?.secretKey ?? harnessKey.secretKey,
+        }),
+      ),
+    };
+  });
+
+  app.post('/api/admin/sandboxes/:sandboxId/harness-key/revoke', async (request) => {
+    requireAdmin(app, request);
+    const params = z.object({ sandboxId: z.string().uuid() }).parse(request.params);
+    const { sandbox, harnessKey, harnessUser } = requireHarnessKeyContext(app, params.sandboxId);
+    await app.services.harnessAdmin.revokeSandboxKey({
+      userId: sandbox.userId,
+      sandboxId: sandbox.id,
+      externalUserId: harnessUser.externalUserId,
+      externalKeyId: harnessKey.externalKeyId,
+    });
+    return {
+      harnessKey: redactHarnessKey(
+        repository.revokeHarnessKey({
+          sandboxId: sandbox.id,
+          provider: harnessKey.provider,
+        }),
+      ),
+    };
+  });
+
+  app.post('/api/admin/sandboxes/:sandboxId/harness-key/reconcile', async (request) => {
+    requireAdmin(app, request);
+    const params = z.object({ sandboxId: z.string().uuid() }).parse(request.params);
+    const sandbox = repository.getSandboxById(params.sandboxId);
+    if (!sandbox) {
+      throw new HttpError(404, 'not_found', 'Sandbox not found.');
+    }
+    const user = repository.getUserById(sandbox.userId);
+    if (!user) {
+      throw new HttpError(409, 'user_missing', 'Sandbox user is missing.');
+    }
+    const harnessKey = await ensureHarness(app, user, sandbox);
+    return { harnessKey: redactHarnessKey(harnessKey) };
+  });
+
   app.get('/api/sandbox', async (request) => {
     const user = requireUser(app, request);
     const sandbox = repository.ensureSandboxForUser(user.id, {
@@ -2092,6 +2787,202 @@ export function buildControlPlaneApp(
     };
   });
 
+  app.get('/api/sandbox/harness/status', async (request) => {
+    const user = requireUser(app, request);
+    const sandbox = repository.getSandboxByUserId(user.id);
+    if (!sandbox) {
+      throw new HttpError(404, 'not_found', 'Sandbox not found.');
+    }
+    return sendWorkerHarnessRequest(app, {
+      sandbox,
+      userId: user.id,
+      path: '/api/harness/status',
+    });
+  });
+
+  app.get('/api/sandbox/harness/modules/:module/tools', async (request) => {
+    const user = requireUser(app, request);
+    const params = z.object({ module: harnessModuleSchema }).parse(request.params);
+    const sandbox = repository.getSandboxByUserId(user.id);
+    if (!sandbox) {
+      throw new HttpError(404, 'not_found', 'Sandbox not found.');
+    }
+    return sendWorkerHarnessRequest(app, {
+      sandbox,
+      userId: user.id,
+      path: `/api/harness/modules/${encodeURIComponent(params.module)}/tools`,
+    });
+  });
+
+  app.get('/api/sandbox/harness/modules/:module/help', async (request) => {
+    const user = requireUser(app, request);
+    const params = z.object({ module: harnessModuleSchema }).parse(request.params);
+    const sandbox = repository.getSandboxByUserId(user.id);
+    if (!sandbox) {
+      throw new HttpError(404, 'not_found', 'Sandbox not found.');
+    }
+    return sendWorkerHarnessRequest(app, {
+      sandbox,
+      userId: user.id,
+      path: `/api/harness/modules/${encodeURIComponent(params.module)}/help`,
+    });
+  });
+
+  app.get('/api/sandbox/harness/modules/:module/runs', async (request) => {
+    const user = requireUser(app, request);
+    const params = z.object({ module: harnessModuleSchema }).parse(request.params);
+    const sandbox = repository.getSandboxByUserId(user.id);
+    if (!sandbox) {
+      throw new HttpError(404, 'not_found', 'Sandbox not found.');
+    }
+    return sendWorkerHarnessRequest(app, {
+      sandbox,
+      userId: user.id,
+      path: `/api/harness/modules/${encodeURIComponent(params.module)}/runs`,
+    });
+  });
+
+  app.get('/api/sandbox/harness/modules/:module/runs/:runId', async (request) => {
+    const user = requireUser(app, request);
+    const params = z.object({
+      module: harnessModuleSchema,
+      runId: harnessRunIdSchema,
+    }).parse(request.params);
+    const sandbox = repository.getSandboxByUserId(user.id);
+    if (!sandbox) {
+      throw new HttpError(404, 'not_found', 'Sandbox not found.');
+    }
+    return sendWorkerHarnessRequest(app, {
+      sandbox,
+      userId: user.id,
+      path: `/api/harness/modules/${encodeURIComponent(params.module)}/runs/${encodeURIComponent(params.runId)}`,
+    });
+  });
+
+  app.get('/api/sandbox/harness/modules/:module/runs/:runId/artifacts', async (request) => {
+    const user = requireUser(app, request);
+    const params = z.object({
+      module: harnessModuleSchema,
+      runId: harnessRunIdSchema,
+    }).parse(request.params);
+    const sandbox = repository.getSandboxByUserId(user.id);
+    if (!sandbox) {
+      throw new HttpError(404, 'not_found', 'Sandbox not found.');
+    }
+    return sendWorkerHarnessRequest(app, {
+      sandbox,
+      userId: user.id,
+      path: `/api/harness/modules/${encodeURIComponent(params.module)}/runs/${encodeURIComponent(params.runId)}/artifacts`,
+    });
+  });
+
+  app.get('/api/sandbox/harness/modules/:module/runs/:runId/download.zip', async (request, reply) => {
+    const user = requireUser(app, request);
+    const params = z.object({
+      module: harnessModuleSchema,
+      runId: harnessRunIdSchema,
+    }).parse(request.params);
+    const sandbox = repository.getSandboxByUserId(user.id);
+    if (!sandbox) {
+      throw new HttpError(404, 'not_found', 'Sandbox not found.');
+    }
+    const artifact = await sendWorkerHarnessDownloadRequest(app, {
+      sandbox,
+      userId: user.id,
+      path: `/api/harness/modules/${encodeURIComponent(params.module)}/runs/${encodeURIComponent(params.runId)}/download.zip`,
+    });
+    reply.header('content-type', artifact.contentType);
+    reply.header(
+      'content-disposition',
+      artifact.contentDisposition ?? `attachment; filename="${params.module}-${params.runId}-artifacts.zip"`,
+    );
+    return reply.send(artifact.body);
+  });
+
+  app.post('/api/sandbox/harness/modules/:module/tools/:tool/invoke', async (request) => {
+    const user = requireUser(app, request);
+    const params = z.object({
+      module: harnessModuleSchema,
+      tool: z.string().trim().min(1).max(160).regex(/^[a-zA-Z0-9_-]+$/),
+    }).parse(request.params);
+    const body = harnessInvokeSchema.parse(request.body ?? {});
+    const sandbox = repository.getSandboxByUserId(user.id);
+    if (!sandbox) {
+      throw new HttpError(404, 'not_found', 'Sandbox not found.');
+    }
+    let workspaceId = body.workspaceId ?? null;
+    let sessionId = body.sessionId ?? null;
+    if (workspaceId) {
+      const workspace = repository.getWorkspaceById(workspaceId);
+      if (!workspace || workspace.userId !== user.id || workspace.sandboxId !== sandbox.id) {
+        throw new HttpError(404, 'not_found', 'Workspace not found.');
+      }
+    }
+    if (sessionId) {
+      const session = repository.getSessionById(sessionId);
+      if (!session || session.userId !== user.id || session.sandboxId !== sandbox.id) {
+        throw new HttpError(404, 'not_found', 'Session not found.');
+      }
+      workspaceId = workspaceId ?? session.workspaceId;
+    }
+    const quota = checkHarnessQuota(user, repository.harnessUsageSummaryForUser(user.id), {
+      computeUnits: body.estimatedComputeUnits ?? null,
+      costUsd: body.estimatedCostUsd ?? null,
+    });
+    if (!quota.allowed) {
+      throw quotaExceededError(quota.denial!);
+    }
+    const payload = await sendWorkerJsonRequest(app, {
+      ...workerProxyBaseUrl(app, {
+        sandbox,
+        userId: user.id,
+        workspaceId,
+        sessionId,
+        scopes: ['worker:read', 'worker:write'],
+      }),
+      path: `/api/harness/modules/${encodeURIComponent(params.module)}/tools/${encodeURIComponent(params.tool)}/invoke`,
+      body: {
+        ...body.input,
+        _remoteCodexContext: {
+          workspaceId,
+          sessionId,
+          recordUsage: false,
+          estimatedComputeUnits: body.estimatedComputeUnits ?? null,
+          estimatedCostUsd: body.estimatedCostUsd ?? null,
+        },
+      },
+      workerIdentity: {
+        userId: user.id,
+        sandboxId: sandbox.id,
+        scopes: ['worker:write'],
+      },
+      failureCode: 'harness_unavailable',
+      fallbackMessage: 'Worker Harness tool invocation failed',
+    });
+    const result = payloadObject(payload);
+    const externalEventId =
+      body.externalEventId ??
+      recordField(result, ['event_id', 'eventId', 'request_id', 'requestId']) ??
+      recordField(result, ['run_id', 'runId', 'job_id', 'jobId']);
+    const event = repository.recordHarnessUsageEvent({
+      userId: user.id,
+      sandboxId: sandbox.id,
+      workspaceId,
+      sessionId,
+      provider: config.harnessProvider,
+      module: params.module,
+      tool: params.tool,
+      runId: recordField(result, ['run_id', 'runId']),
+      jobId: recordField(result, ['job_id', 'jobId', 'compute_job_id', 'computeJobId']),
+      externalEventId,
+      computeUnits: numberField(result, ['compute_units', 'computeUnits', 'worker_observed_seconds', 'workerObservedSeconds']),
+      costUsd: numberField(result, ['cost_usd', 'costUsd', 'estimated_cost_usd', 'estimatedCostUsd']),
+      status: recordField(result, ['status', 'state']) ?? 'unknown',
+      metadata: harnessUsageMetadata(payload),
+    });
+    return { result: payload, harnessUsageEvent: event };
+  });
+
   app.post('/api/sandbox/start', async (request) => {
     return withSandboxLifecycleError('start', async () => {
       const user = requireUser(app, request);
@@ -2106,6 +2997,7 @@ export function buildControlPlaneApp(
         region: config.sandboxDefaultRegion,
         resourceProfile: config.sandboxDefaultResourceProfile,
       }) ?? sandbox;
+      await ensureHarness(app, user, runtimeSandbox);
       const result = await app.services.sandboxManager.startSandbox({
         sandboxId: runtimeSandbox.id,
         userId: user.id,
@@ -2162,6 +3054,7 @@ export function buildControlPlaneApp(
         region: config.sandboxDefaultRegion,
         resourceProfile: config.sandboxDefaultResourceProfile,
       }) ?? sandbox;
+      await ensureHarness(app, user, runtimeSandbox);
       const result = await app.services.sandboxManager.restartSandbox({
         sandboxId: runtimeSandbox.id,
         userId: user.id,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { checkRouteTokenQuota } from './quota';
+import { checkHarnessQuota, checkRouteTokenQuota } from './quota';
 
 describe('quota checks', () => {
   it('allows route tokens for users under the developer quota', () => {
@@ -72,5 +72,52 @@ describe('quota checks', () => {
       },
     });
   });
-});
 
+  it('denies Harness jobs when the estimated compute would exceed quota', () => {
+    expect(
+      checkHarnessQuota(
+        { quotaProfile: 'developer' },
+        {
+          eventCount: 10,
+          computeUnits: 990,
+          costUsd: 2,
+        },
+        {
+          computeUnits: 25,
+        },
+      ),
+    ).toEqual({
+      allowed: false,
+      denial: {
+        reason: 'harness_compute_quota_exceeded',
+        quotaProfile: 'developer',
+        limit: 1000,
+        used: 990,
+      },
+    });
+  });
+
+  it('denies Harness jobs when the estimated spend would exceed quota', () => {
+    expect(
+      checkHarnessQuota(
+        { quotaProfile: 'developer' },
+        {
+          eventCount: 10,
+          computeUnits: 10,
+          costUsd: 49,
+        },
+        {
+          costUsd: 2,
+        },
+      ),
+    ).toEqual({
+      allowed: false,
+      denial: {
+        reason: 'harness_spend_quota_exceeded',
+        quotaProfile: 'developer',
+        limit: 50,
+        used: 49,
+      },
+    });
+  });
+});

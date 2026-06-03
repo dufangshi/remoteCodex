@@ -303,15 +303,17 @@ describe('ControlPlaneSessionPage', () => {
     setPromptValue(screen.getByRole('textbox', { name: 'Prompt' }), 'Continue from here');
     fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
 
-    await waitFor(() => {
-      expect(screen.getByText('Prompt sent. Waiting for worker updates...')).toBeInTheDocument();
-    });
-
-    const promptCall = vi.mocked(fetch).mock.calls.find(
+    const findPromptCall = () => vi.mocked(fetch).mock.calls.find(
       ([input]) =>
         String(input) ===
         `${routerBaseUrl}/api/sandboxes/sandbox-1/api/threads/worker-session-1/prompt`,
     );
+    await waitFor(() => {
+      expect(findPromptCall()).toBeDefined();
+    });
+    expect(screen.queryByText('Prompt sent. Waiting for worker updates...')).not.toBeInTheDocument();
+
+    const promptCall = findPromptCall();
     expect(promptCall?.[1]?.method).toBe('POST');
     expect(promptCall?.[1]?.body).toBe(JSON.stringify({ prompt: 'Continue from here' }));
     expect(new Headers(promptCall?.[1]?.headers).get('Authorization')).toBe('Bearer route-token');
@@ -523,10 +525,11 @@ describe('ControlPlaneSessionPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
 
     await waitFor(() => {
-      expect(
-        screen.getByText('Prompt sent after reconnect. Waiting for worker updates...'),
-      ).toBeInTheDocument();
+      expect(screen.getByText('Retry after worker restart')).toBeInTheDocument();
     });
+    expect(
+      screen.queryByText('Prompt sent after reconnect. Waiting for worker updates...'),
+    ).not.toBeInTheDocument();
     expect(screen.getByText('Retry after worker restart')).toBeInTheDocument();
 
     const oldPromptCall = vi.mocked(fetch).mock.calls.find(
