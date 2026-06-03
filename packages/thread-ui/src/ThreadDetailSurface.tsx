@@ -235,7 +235,7 @@ export function ThreadDetailSurface({
             >
               <ThreadComposer
                 {...composerProps}
-                activeView={activeView}
+                activeView="chat"
                 edgeToEdgeMobile
                 onSubmit={adapter.sendPrompt}
               />
@@ -244,7 +244,7 @@ export function ThreadDetailSurface({
             <div ref={composerHostRef}>
               <ThreadComposer
                 {...composerProps}
-                activeView={activeView}
+                activeView="chat"
                 onSubmit={adapter.sendPrompt}
               />
             </div>
