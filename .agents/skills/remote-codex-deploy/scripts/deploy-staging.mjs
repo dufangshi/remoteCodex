@@ -22,6 +22,8 @@ Options:
   --watch                  Wait for the latest Staging Images run for HEAD.
   --branch <name>          Expected branch. Default: ${EXPECTED_BRANCH}
   --timeout-minutes <n>    Watch timeout. Default: 30.
+  --discovery-seconds <n>  Time to wait for a new Staging Images run. Default: 45.
+  --allow-no-run           Continue if HEAD does not trigger Staging Images.
   --no-health              Skip health endpoint checks.
   --help                   Show this help.
 
@@ -40,6 +42,8 @@ function parseArgs(argv) {
     watch: false,
     branch: EXPECTED_BRANCH,
     timeoutMinutes: 30,
+    discoverySeconds: 45,
+    allowNoRun: false,
     health: true,
   };
 
@@ -65,6 +69,10 @@ function parseArgs(argv) {
       args.health = false;
       continue;
     }
+    if (arg === '--allow-no-run') {
+      args.allowNoRun = true;
+      continue;
+    }
     if (arg === '--commit') {
       args.commit = requiredValue(argv, index, arg);
       index += 1;
@@ -81,6 +89,15 @@ function parseArgs(argv) {
         throw new Error('--timeout-minutes must be a positive number.');
       }
       args.timeoutMinutes = value;
+      index += 1;
+      continue;
+    }
+    if (arg === '--discovery-seconds') {
+      const value = Number(requiredValue(argv, index, arg));
+      if (!Number.isFinite(value) || value <= 0) {
+        throw new Error('--discovery-seconds must be a positive number.');
+      }
+      args.discoverySeconds = value;
       index += 1;
       continue;
     }
@@ -223,9 +240,24 @@ function waitForRunDiscovery(workflowName, sha, timeoutMs) {
   throw new Error(`No ${workflowName} run appeared for ${sha}.`);
 }
 
-function watchStagingRun(sha, timeoutMinutes) {
+function watchStagingRun(sha, timeoutMinutes, discoverySeconds, allowNoRun) {
   printHeading('Watch Deployment');
-  const run = waitForRunDiscovery(STAGING_WORKFLOW, sha, 120_000);
+  let run = null;
+  try {
+    run = waitForRunDiscovery(STAGING_WORKFLOW, sha, discoverySeconds * 1000);
+  } catch (error) {
+    console.log(
+      `${STAGING_WORKFLOW} did not appear for ${shortSha(sha)} within ${discoverySeconds}s.`,
+    );
+    console.log(
+      'This usually means the commit only touched files outside the workflow path filter, such as .agents/skills/**.',
+    );
+    printRecentRuns();
+    if (allowNoRun) {
+      return false;
+    }
+    throw error;
+  }
   console.log(`${STAGING_WORKFLOW}: ${run.url}`);
   const result = spawnSync(
     'gh',
@@ -247,6 +279,7 @@ function watchStagingRun(sha, timeoutMinutes) {
   if (worker) {
     console.log(`${WORKER_WORKFLOW}: ${worker.conclusion || worker.status} ${worker.url}`);
   }
+  return true;
 }
 
 function fetchJson(url) {
@@ -297,16 +330,25 @@ function main() {
     pushBranch();
   }
 
+  let watchedDeployment = false;
   if (args.watch) {
-    watchStagingRun(sha, args.timeoutMinutes);
+    watchedDeployment = watchStagingRun(
+      sha,
+      args.timeoutMinutes,
+      args.discoverySeconds,
+      args.allowNoRun,
+    );
   }
 
   if (args.status || !args.watch) {
     printRecentRuns();
   }
 
-  if (args.health) {
+  if (args.health && (!args.watch || watchedDeployment)) {
     checkHealth(sha);
+  } else if (args.health) {
+    console.log('\n== Live Health ==');
+    console.log('Skipped health buildSha check because no deployment run was found for HEAD.');
   }
 
   printSmokeHint();
