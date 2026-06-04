@@ -702,6 +702,65 @@ describe('control plane api', () => {
     });
   });
 
+  it('reconciles legacy sub2api gateway key ids instead of rotating them during bootstrap', async () => {
+    const llmGatewayAdmin = new RecordingLlmGatewayAdmin();
+    llmGatewayAdmin.nextKey = {
+      externalKeyId: '8',
+      keyCiphertext: 'sub2api-api-key-reconciled',
+    };
+    const app = buildControlPlaneApp({
+      env: {
+        ...testEnv('legacy-gateway-key-bootstrap'),
+        LLM_GATEWAY_BASE_URL: 'https://llm-gateway.example.test',
+        LLM_GATEWAY_TOKEN_SECRET_NAME: 'remote-codex-gateway-tokens',
+      },
+      llmGatewayAdmin,
+      sandboxSecretWriter: new RecordingSandboxSecretWriter(),
+    });
+    apps.push(app);
+
+    const auth = { authorization: 'Bearer dev:legacy-gateway-key-user' };
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: auth,
+      payload: {
+        email: 'legacy-gateway-key@example.com',
+      },
+    });
+    expect(first.statusCode).toBe(200);
+    const { user, sandbox } = first.json();
+
+    app.services.repository.updateGatewayKeyRotation({
+      sandboxId: sandbox.id,
+      provider: 'sub2api',
+      externalKeyId: `sub2api-key-${sandbox.id}`,
+      keyCiphertext: null,
+    });
+    llmGatewayAdmin.ensureKeys.length = 0;
+    llmGatewayAdmin.rotations.length = 0;
+
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: auth,
+      payload: {
+        email: 'legacy-gateway-key@example.com',
+      },
+    });
+    expect(second.statusCode).toBe(200);
+    expect(llmGatewayAdmin.rotations).toEqual([]);
+    expect(llmGatewayAdmin.ensureKeys).toEqual([
+      {
+        userId: user.id,
+        sandboxId: sandbox.id,
+        externalUserId: `sub2api-user-${user.id}`,
+        groupId: null,
+      },
+    ]);
+    expect(second.json().gatewayKey.externalKeyId).toBe('8');
+  });
+
   it('rotates and revokes gateway keys from admin sandbox APIs', async () => {
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
     const originalFetch = globalThis.fetch;

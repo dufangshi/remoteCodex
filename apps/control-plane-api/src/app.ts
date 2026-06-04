@@ -1994,20 +1994,21 @@ async function ensureGateway(
     return existing;
   }
 
-  const gatewayKey = existing?.externalKeyId
-    ? await app.services.llmGatewayAdmin.rotateSandboxKey({
-        userId: user.id,
-        sandboxId: sandbox.id,
-        externalUserId: gatewayUser.externalUserId,
-        externalKeyId: existing.externalKeyId,
-        groupId: app.services.config.llmGatewayGroupId,
-      })
-    : await app.services.llmGatewayAdmin.ensureSandboxKey({
-        userId: user.id,
-        sandboxId: sandbox.id,
-        externalUserId: gatewayUser.externalUserId,
-        groupId: app.services.config.llmGatewayGroupId,
-      });
+  const gatewayKey =
+    existing?.externalKeyId && canRotateGatewayKey(app, existing.externalKeyId)
+      ? await app.services.llmGatewayAdmin.rotateSandboxKey({
+          userId: user.id,
+          sandboxId: sandbox.id,
+          externalUserId: gatewayUser.externalUserId,
+          externalKeyId: existing.externalKeyId,
+          groupId: app.services.config.llmGatewayGroupId,
+        })
+      : await app.services.llmGatewayAdmin.ensureSandboxKey({
+          userId: user.id,
+          sandboxId: sandbox.id,
+          externalUserId: gatewayUser.externalUserId,
+          groupId: app.services.config.llmGatewayGroupId,
+        });
   const storedGatewayKey = existing
     ? app.services.repository.updateGatewayKeyRotation({
         sandboxId: sandbox.id,
@@ -2029,6 +2030,13 @@ async function ensureGateway(
     });
   }
   return storedGatewayKey;
+}
+
+function canRotateGatewayKey(app: FastifyInstance, externalKeyId: string) {
+  if (app.services.config.llmGatewayProvider === 'sub2api') {
+    return /^\d+$/.test(externalKeyId);
+  }
+  return true;
 }
 
 function billingSummaryForUser(
