@@ -8,9 +8,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {
   ImportPluginInput,
+  ThreadHistoryItemDetailDto,
   PluginMcpServerDto,
   PluginDto,
   PluginManifestDto,
+  ThreadHistoryItemDto,
   ThreadTurnDto,
 } from '../../../../packages/shared/src/index';
 import type {
@@ -224,14 +226,22 @@ export class PluginService {
     threadId: string;
     workspacePath: string;
     turns: ThreadTurnDto[];
+    deferredDetails?: Map<string, ThreadHistoryItemDetailDto>;
   }): ThreadTurnDto[] {
     const manifests = this.registry.enabledManifests();
     if (manifests.length === 0) {
       return input.turns;
     }
 
-    return appendArtifactItemsToTurns(
-      input.turns,
+    const turnsForExtraction = input.deferredDetails
+      ? materializeDeferredDetailsForArtifactExtraction(
+          input.turns,
+          input.deferredDetails,
+        )
+      : input.turns;
+
+    const enrichedTurns = appendArtifactItemsToTurns(
+      turnsForExtraction,
       new ManifestArtifactExtractor(manifests),
       {
         threadId: input.threadId,
@@ -239,6 +249,9 @@ export class PluginService {
         now: new Date().toISOString(),
       },
     );
+    return turnsForExtraction === input.turns
+      ? enrichedTurns
+      : restoreOriginalNonArtifactItems(enrichedTurns, input.turns);
   }
 
   private loadPersistedSettings() {
@@ -297,4 +310,66 @@ export class PluginService {
 
     return JSON.parse(manifestJson);
   }
+}
+
+function restoreOriginalNonArtifactItems(
+  enrichedTurns: ThreadTurnDto[],
+  originalTurns: ThreadTurnDto[],
+): ThreadTurnDto[] {
+  const originalItemsByTurnId = new Map(
+    originalTurns.map((turn) => [
+      turn.id,
+      new Map(turn.items.map((item) => [item.id, item])),
+    ]),
+  );
+
+  return enrichedTurns.map((turn) => {
+    const originalItems = originalItemsByTurnId.get(turn.id);
+    if (!originalItems) {
+      return turn;
+    }
+
+    return {
+      ...turn,
+      items: turn.items.map((item) =>
+        item.kind === 'artifact' ? item : originalItems.get(item.id) ?? item,
+      ),
+    };
+  });
+}
+
+function materializeDeferredDetailsForArtifactExtraction(
+  turns: ThreadTurnDto[],
+  deferredDetails: Map<string, ThreadHistoryItemDetailDto>,
+): ThreadTurnDto[] {
+  if (deferredDetails.size === 0) {
+    return turns;
+  }
+
+  return turns.map((turn) => {
+    let changed = false;
+    const items = turn.items.map((item): ThreadHistoryItemDto => {
+      if (!item.hasDeferredDetail || item.detailText) {
+        return item;
+      }
+
+      const detail = deferredDetails.get(item.id);
+      if (!detail?.text) {
+        return item;
+      }
+
+      changed = true;
+      return {
+        ...item,
+        detailText: detail.text,
+      };
+    });
+
+    return changed
+      ? {
+          ...turn,
+          items,
+        }
+      : turn;
+  });
 }

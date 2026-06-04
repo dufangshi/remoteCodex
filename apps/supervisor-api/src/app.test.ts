@@ -2676,6 +2676,111 @@ describe('supervisor api', () => {
     expect(commandDetailResponse.json().text).toContain('final status: success');
   });
 
+  it('extracts plugin artifacts from deferred tool call details', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace')
+      }
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Deferred MCP Artifact Thread'
+      }
+    });
+
+    const waterXyz = [
+      '3',
+      'water',
+      'O 0.000000 0.000000 0.000000',
+      'H 0.758602 0.000000 0.504284',
+      'H 0.758602 0.000000 -0.504284',
+    ].join('\n');
+    const artifactPayload = {
+      type: 'remote-codex.artifact',
+      artifactType: 'chemistry.molecule3d',
+      title: 'Water',
+      summaryText: 'Water molecule',
+      payload: {
+        format: 'xyz',
+        content: [waterXyz],
+      },
+    };
+    const remoteThread = fakeCodexManager.threads.get(createResponse.json().providerSessionId);
+    expect(remoteThread).toBeTruthy();
+    remoteThread!.status = { type: 'idle' };
+    remoteThread!.turns = [
+      {
+        id: 'turn-1',
+        status: 'completed',
+        error: null,
+        items: [
+          {
+            id: 'mcp-1',
+            type: 'mcpToolCall',
+            server: 'remote_codex_plugins',
+            tool: 'remote_codex_render_molecule',
+            status: 'completed',
+            result: {
+              output: {
+                content: [
+                  {
+                    type: 'text',
+                    text: [
+                      'Created a 3D molecule artifact for Water.',
+                      '',
+                      '```remote-codex-artifact',
+                      JSON.stringify(artifactPayload),
+                      '```',
+                    ].join('\n'),
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      } as any,
+    ];
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createResponse.json().id}`
+    });
+
+    expect(detailResponse.statusCode).toBe(200);
+    const items = detailResponse.json().turns.at(-1).items;
+    expect(items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'mcp-1',
+          kind: 'toolCall',
+          detailText: null,
+          hasDeferredDetail: true,
+        }),
+        expect.objectContaining({
+          kind: 'artifact',
+          artifact: expect.objectContaining({
+            pluginId: 'remote-codex.xyz-viewer',
+            type: 'chemistry.molecule3d',
+            title: 'Water',
+            payload: {
+              format: 'xyz',
+              content: [waterXyz],
+            },
+          }),
+        }),
+      ]),
+    );
+  });
+
   it('treats an empty rollout read error as a bootstrap transient after the first prompt', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',

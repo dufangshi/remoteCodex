@@ -663,6 +663,7 @@ export class ThreadService {
       threadId: updated.id,
       workspacePath: workspace.absPath,
       turns: cachedDetail.turns,
+      deferredDetails: cachedDetail.deferredDetails,
     }) ?? cachedDetail.turns;
     const pagedTurns =
       cachedDetail.isPaged &&

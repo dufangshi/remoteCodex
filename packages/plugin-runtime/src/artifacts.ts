@@ -118,6 +118,100 @@ function findFencedBlocks(text: string, languages: Set<string>): FencedBlock[] {
   return blocks;
 }
 
+function readBalancedJsonFragment(text: string, startIndex: number) {
+  const opener = text[startIndex];
+  const expectedClose = opener === '{' ? '}' : opener === '[' ? ']' : null;
+  if (!expectedClose) {
+    return null;
+  }
+
+  const stack = [expectedClose];
+  let inString = false;
+  let escaping = false;
+  for (let index = startIndex + 1; index < text.length; index += 1) {
+    const char = text[index];
+
+    if (inString) {
+      if (escaping) {
+        escaping = false;
+      } else if (char === '\\') {
+        escaping = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (char === '{') {
+      stack.push('}');
+      continue;
+    }
+
+    if (char === '[') {
+      stack.push(']');
+      continue;
+    }
+
+    if (char === stack.at(-1)) {
+      stack.pop();
+      if (stack.length === 0) {
+        return text.slice(startIndex, index + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
+function collectStringValues(value: unknown, output: string[]) {
+  if (typeof value === 'string') {
+    output.push(value);
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      collectStringValues(entry, output);
+    }
+    return;
+  }
+
+  if (value && typeof value === 'object') {
+    for (const entry of Object.values(value)) {
+      collectStringValues(entry, output);
+    }
+  }
+}
+
+function extractJsonStringValues(text: string) {
+  const values: string[] = [];
+  const seenFragments = new Set<string>();
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char !== '{' && char !== '[') {
+      continue;
+    }
+
+    const fragment = readBalancedJsonFragment(text, index);
+    if (!fragment || seenFragments.has(fragment)) {
+      continue;
+    }
+
+    seenFragments.add(fragment);
+    try {
+      collectStringValues(JSON.parse(fragment), values);
+    } catch {
+      continue;
+    }
+  }
+  return values;
+}
+
 function isFiniteNumberToken(value: string | undefined) {
   return typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value));
 }
@@ -213,7 +307,15 @@ export class ManifestArtifactExtractor implements ArtifactExtractor {
     text: string,
   ): ThreadArtifactDto[] {
     const artifacts: ThreadArtifactDto[] = [];
-    for (const block of findFencedBlocks(text, artifactFenceLanguages)) {
+    const extractableTexts = [text, ...extractJsonStringValues(text)];
+    const seenBlocks = new Set<string>();
+    for (const extractableText of extractableTexts) {
+      for (const block of findFencedBlocks(extractableText, artifactFenceLanguages)) {
+        const blockKey = `${block.language}\n${block.content}`;
+        if (seenBlocks.has(blockKey)) {
+          continue;
+        }
+        seenBlocks.add(blockKey);
       if (!block.content) {
         continue;
       }
@@ -247,6 +349,7 @@ export class ManifestArtifactExtractor implements ArtifactExtractor {
         sourceItemId: item.id,
         createdAt: context.now,
       });
+    }
     }
     return artifacts;
   }
