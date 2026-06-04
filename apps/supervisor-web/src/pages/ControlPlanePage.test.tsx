@@ -1067,7 +1067,8 @@ describe('ControlPlanePage', () => {
     expect(screen.getByText('3')).toBeInTheDocument();
     expect(screen.getByText('Tokens')).toBeInTheDocument();
     expect(screen.getAllByText('1500').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('Cost')).toBeInTheDocument();
+    expect(screen.getByText('Total cost')).toBeInTheDocument();
+    expect(screen.getByText('LLM cost')).toBeInTheDocument();
     expect(screen.getAllByText('$1.25').length).toBeGreaterThanOrEqual(1);
     const accountMenu = screen.getByRole('menu');
     expect(within(accountMenu).getByText('Harness')).toBeInTheDocument();

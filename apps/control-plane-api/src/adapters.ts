@@ -1390,6 +1390,7 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
 
 export interface GatewayUserResult {
   externalUserId: string;
+  balance?: number | null;
 }
 
 export interface GatewayKeyResult {
@@ -1421,6 +1422,13 @@ export interface LlmGatewayAdmin {
     displayName?: string | null;
     balance?: number | null;
   }): Promise<GatewayUserResult>;
+  ensureUserBalance(input: {
+    externalUserId: string;
+    minimumBalance: number;
+    targetBalance: number;
+  }): Promise<
+    GatewayUserResult & { adjusted: boolean; previousBalance?: number | null }
+  >;
   ensureSandboxKey(input: {
     userId: string;
     sandboxId: string;
@@ -1514,6 +1522,14 @@ function gatewayKeyCiphertextFromPayload(payload: unknown) {
     return payload.key;
   }
   return null;
+}
+
+function numberFromPayload(payload: unknown, key: string) {
+  if (!payload || typeof payload !== 'object' || !(key in payload)) {
+    return null;
+  }
+  const value = payload[key as keyof typeof payload];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 function gatewayUsageEventsFromPayload(
@@ -1644,6 +1660,12 @@ export class HttpLlmGatewayAdmin implements LlmGatewayAdmin {
       : `/users/${encodeURIComponent(externalUserId)}/keys/ensure`;
   }
 
+  private userBalanceEnsurePath(externalUserId: string) {
+    return this.contract === 'generic'
+      ? `/api/admin/users/${encodeURIComponent(externalUserId)}/balance/ensure`
+      : `/users/${encodeURIComponent(externalUserId)}/balance/ensure`;
+  }
+
   private userKeyRotatePath(externalUserId: string, externalKeyId: string) {
     return this.contract === 'generic'
       ? `/api/admin/users/${encodeURIComponent(externalUserId)}/keys/${encodeURIComponent(externalKeyId)}/rotate`
@@ -1690,6 +1712,39 @@ export class HttpLlmGatewayAdmin implements LlmGatewayAdmin {
     const payload = await parseGatewayResponse<unknown>(response);
     return {
       externalUserId: externalIdFromPayload(payload, 'external user id'),
+      balance: numberFromPayload(payload, 'balance'),
+    };
+  }
+
+  async ensureUserBalance(input: {
+    externalUserId: string;
+    minimumBalance: number;
+    targetBalance: number;
+  }): Promise<
+    GatewayUserResult & { adjusted: boolean; previousBalance?: number | null }
+  > {
+    const response = await this.fetchImpl(
+      this.adminPath(this.userBalanceEnsurePath(input.externalUserId)),
+      {
+        method: 'POST',
+        headers: this.adminHeaders(true),
+        body: JSON.stringify({
+          minimumBalance: input.minimumBalance,
+          targetBalance: input.targetBalance,
+          notes: 'remote-codex automatic balance refill',
+        }),
+      },
+    );
+    const payload = await parseGatewayResponse<unknown>(response);
+    return {
+      externalUserId: externalIdFromPayload(payload, 'external user id'),
+      balance: numberFromPayload(payload, 'balance'),
+      previousBalance: numberFromPayload(payload, 'previousBalance'),
+      adjusted:
+        !!payload &&
+        typeof payload === 'object' &&
+        'adjusted' in payload &&
+        payload.adjusted === true,
     };
   }
 
@@ -1826,6 +1881,20 @@ export class HttpLlmGatewayAdmin implements LlmGatewayAdmin {
 export class NoopLlmGatewayAdmin implements LlmGatewayAdmin {
   async ensureUser(input: { userId: string }): Promise<GatewayUserResult> {
     return { externalUserId: `sub2api-user-${input.userId}` };
+  }
+
+  async ensureUserBalance(input: {
+    externalUserId: string;
+    targetBalance: number;
+  }): Promise<
+    GatewayUserResult & { adjusted: boolean; previousBalance?: number | null }
+  > {
+    return {
+      externalUserId: input.externalUserId,
+      balance: input.targetBalance,
+      previousBalance: input.targetBalance,
+      adjusted: false,
+    };
   }
 
   async ensureSandboxKey(input: {

@@ -1973,6 +1973,11 @@ async function ensureGateway(
     provider: app.services.config.llmGatewayProvider,
     externalUserId: gatewayUser.externalUserId,
   });
+  await app.services.llmGatewayAdmin.ensureUserBalance({
+    externalUserId: gatewayUser.externalUserId,
+    minimumBalance: app.services.config.llmGatewayMinUserBalance,
+    targetBalance: app.services.config.llmGatewayRefillUserBalance,
+  });
 
   const existing = app.services.repository.getGatewayKeyForSandbox(sandbox.id);
   if (existing?.status === 'active' && existing.keyCiphertext) {
@@ -2024,6 +2029,19 @@ async function ensureGateway(
     });
   }
   return storedGatewayKey;
+}
+
+function billingSummaryForUser(
+  repository: ControlPlaneRepository,
+  userId: string,
+) {
+  const llm = repository.usageSummaryForUser(userId);
+  const harness = repository.harnessUsageSummaryForUser(userId);
+  return {
+    totalCostUsd: Number(llm.costUsd ?? 0) + Number(harness.costUsd ?? 0),
+    llmCostUsd: Number(llm.costUsd ?? 0),
+    harnessCostUsd: Number(harness.costUsd ?? 0),
+  };
 }
 
 function shouldMaterializeSandboxGatewaySecret(app: FastifyInstance) {
@@ -2646,6 +2664,7 @@ export function buildControlPlaneApp(
       user,
       sandbox,
       usage: repository.usageSummaryForUser(user.id),
+      billing: billingSummaryForUser(repository, user.id),
     };
   });
 
@@ -2663,7 +2682,10 @@ export function buildControlPlaneApp(
 
   app.get('/api/usage/summary', async (request) => {
     const user = requireUser(app, request);
-    return { usage: repository.usageSummaryForUser(user.id) };
+    return {
+      usage: repository.usageSummaryForUser(user.id),
+      billing: billingSummaryForUser(repository, user.id),
+    };
   });
 
   app.get('/api/usage/events', async (request) => {
@@ -3236,6 +3258,11 @@ export function buildControlPlaneApp(
         userId: user.id,
         provider: config.llmGatewayProvider,
         externalUserId: gatewayUser.externalUserId,
+      });
+      await app.services.llmGatewayAdmin.ensureUserBalance({
+        externalUserId: gatewayUser.externalUserId,
+        minimumBalance: config.llmGatewayMinUserBalance,
+        targetBalance: config.llmGatewayRefillUserBalance,
       });
       const existingGatewayKey = repository.getGatewayKeyForSandbox(sandbox.id);
       const reconciled = await app.services.llmGatewayAdmin.reconcileSandboxKey(

@@ -32,6 +32,7 @@ import {
   type ControlPlaneHarnessStatus,
   type ControlPlaneHarnessUsageEvent,
   type ControlPlaneHarnessUsageSummary,
+  type ControlPlaneBillingSummary,
   type ControlPlaneSandboxDetail,
   type ControlPlaneProject,
   type ControlPlaneRouteToken,
@@ -270,6 +271,7 @@ export function ControlPlanePage() {
   const [sandbox, setSandbox] = useState<ControlPlaneSandbox | null>(null);
   const [adminSandboxDetail, setAdminSandboxDetail] = useState<ControlPlaneSandboxDetail | null>(null);
   const [usage, setUsage] = useState<ControlPlaneUsageSummary | null>(null);
+  const [billing, setBilling] = useState<ControlPlaneBillingSummary | null>(null);
   const [usageEvents, setUsageEvents] = useState<ControlPlaneUsageEvent[]>([]);
   const [harnessUsage, setHarnessUsage] = useState<ControlPlaneHarnessUsageSummary | null>(null);
   const [harnessUsageEvents, setHarnessUsageEvents] = useState<ControlPlaneHarnessUsageEvent[]>([]);
@@ -391,6 +393,7 @@ export function ControlPlanePage() {
   const harnessRunsPreview = payloadPreview(harnessRuns);
   const accountInitial = (user?.displayName ?? user?.email ?? 'U').trim().charAt(0).toUpperCase() || 'U';
   const totalTokens = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
+  const totalCostUsd = billing?.totalCostUsd ?? Number(usage?.costUsd ?? 0) + Number(harnessUsage?.costUsd ?? 0);
   const activeSessions = sessions.filter((session) => session.status === 'active').length;
   const controlPlaneBaseUrl = auth?.baseUrl ?? readStoredControlPlaneAuth()?.baseUrl ?? 'not connected';
 
@@ -459,6 +462,7 @@ export function ControlPlanePage() {
       setUser(me.user);
       setSandbox(me.sandbox);
       setUsage(me.usage);
+      setBilling(me.billing ?? null);
       setUsageEvents(usageEventResult.events);
       setHarnessUsage(harnessUsageResult.usage);
       setHarnessUsageEvents(harnessUsageEventResult.events);
@@ -976,9 +980,10 @@ export function ControlPlanePage() {
                 <div className="control-usage-grid compact">
                   <div><span>Requests</span><strong>{usage?.requestCount ?? 0}</strong></div>
                   <div><span>Tokens</span><strong>{totalTokens}</strong></div>
-                  <div><span>Cost</span><strong>${Number(usage?.costUsd ?? 0).toFixed(2)}</strong></div>
+                  <div><span>Total cost</span><strong>${totalCostUsd.toFixed(2)}</strong></div>
                   <div><span>Harness</span><strong>{harnessUsage?.eventCount ?? 0}</strong></div>
                   <div><span>Compute</span><strong>{Number(harnessUsage?.computeUnits ?? 0).toFixed(1)}</strong></div>
+                  <div><span>LLM cost</span><strong>${Number(usage?.costUsd ?? 0).toFixed(2)}</strong></div>
                   <div><span>Harness cost</span><strong>${Number(harnessUsage?.costUsd ?? 0).toFixed(2)}</strong></div>
                 </div>
                 <div className="control-usage-events compact">

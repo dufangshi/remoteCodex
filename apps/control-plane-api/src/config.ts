@@ -44,6 +44,8 @@ const envSchema = z.object({
   LLM_GATEWAY_ADMIN_TOKEN: z.string().min(1).optional(),
   LLM_GATEWAY_GROUP_ID: z.coerce.number().int().positive().optional(),
   LLM_GATEWAY_USER_BALANCE: z.coerce.number().nonnegative().optional(),
+  LLM_GATEWAY_MIN_USER_BALANCE: z.coerce.number().nonnegative().optional(),
+  LLM_GATEWAY_REFILL_USER_BALANCE: z.coerce.number().positive().optional(),
   ELAGENTE_HARNESS_BASE_URL: z.string().url().optional(),
   ELAGENTE_HARNESS_PROVIDER: z.string().trim().min(1).optional(),
   ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: z.string().min(1).optional(),
@@ -121,6 +123,8 @@ export interface ControlPlaneConfig {
   llmGatewayAdminToken: string | null;
   llmGatewayGroupId: number | null;
   llmGatewayUserBalance: number | null;
+  llmGatewayMinUserBalance: number;
+  llmGatewayRefillUserBalance: number;
   harnessBaseUrl: string | null;
   harnessProvider: string;
   harnessAppKeySecretName: string | null;
@@ -193,6 +197,14 @@ export function loadControlPlaneConfig(
       'ELAGENTE_HARNESS_BASE_URL is required when chemistry tools are enabled.',
     );
   }
+  const llmGatewayMinUserBalance = parsed.LLM_GATEWAY_MIN_USER_BALANCE ?? 100;
+  const llmGatewayRefillUserBalance =
+    parsed.LLM_GATEWAY_REFILL_USER_BALANCE ?? 1000;
+  if (llmGatewayRefillUserBalance < llmGatewayMinUserBalance) {
+    throw new Error(
+      'LLM_GATEWAY_REFILL_USER_BALANCE must be greater than or equal to LLM_GATEWAY_MIN_USER_BALANCE.',
+    );
+  }
 
   const jwtSecret =
     parsed.CONTROL_PLANE_JWT_SECRET ?? 'dev-control-plane-route-token-secret';
@@ -257,6 +269,8 @@ export function loadControlPlaneConfig(
     llmGatewayAdminToken: parsed.LLM_GATEWAY_ADMIN_TOKEN ?? null,
     llmGatewayGroupId: parsed.LLM_GATEWAY_GROUP_ID ?? null,
     llmGatewayUserBalance: parsed.LLM_GATEWAY_USER_BALANCE ?? null,
+    llmGatewayMinUserBalance,
+    llmGatewayRefillUserBalance,
     harnessBaseUrl: parsed.ELAGENTE_HARNESS_BASE_URL ?? null,
     harnessProvider: parsed.ELAGENTE_HARNESS_PROVIDER ?? 'elagente-harness',
     harnessAppKeySecretName:

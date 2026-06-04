@@ -340,7 +340,15 @@ describe('sandbox manager adapters', () => {
       fetchImpl: (async (url: string | URL | Request, init?: RequestInit) => {
         requests.push({ url: String(url), init });
         if (String(url).endsWith('/users/ensure')) {
-          return Response.json({ externalUserId: '123' });
+          return Response.json({ externalUserId: '123', balance: 50 });
+        }
+        if (String(url).endsWith('/users/123/balance/ensure')) {
+          return Response.json({
+            externalUserId: '123',
+            balance: 1000,
+            previousBalance: 50,
+            adjusted: true,
+          });
         }
         if (String(url).includes('/keys/ensure')) {
           return Response.json({
@@ -381,7 +389,19 @@ describe('sandbox manager adapters', () => {
         displayName: 'User',
         balance: 1,
       }),
-    ).resolves.toEqual({ externalUserId: '123' });
+    ).resolves.toEqual({ externalUserId: '123', balance: 50 });
+    await expect(
+      admin.ensureUserBalance({
+        externalUserId: '123',
+        minimumBalance: 100,
+        targetBalance: 1000,
+      }),
+    ).resolves.toEqual({
+      externalUserId: '123',
+      balance: 1000,
+      previousBalance: 50,
+      adjusted: true,
+    });
     await expect(
       admin.ensureSandboxKey({
         userId: 'control-user',
@@ -426,6 +446,7 @@ describe('sandbox manager adapters', () => {
 
     expect(requests.map((request) => request.url)).toEqual([
       'https://sub2api.example.test/api/v1/admin/integrations/remote-codex/users/ensure',
+      'https://sub2api.example.test/api/v1/admin/integrations/remote-codex/users/123/balance/ensure',
       'https://sub2api.example.test/api/v1/admin/integrations/remote-codex/users/123/keys/ensure',
       'https://sub2api.example.test/api/v1/admin/integrations/remote-codex/users/123/keys/456/rotate',
       'https://sub2api.example.test/api/v1/admin/integrations/remote-codex/usage/export?cursor=cursor-current&limit=25',
@@ -436,12 +457,16 @@ describe('sandbox manager adapters', () => {
       displayName: 'User',
       balance: 1,
     });
-    expect(requests[1]?.init?.headers).toMatchObject({
+    expect(JSON.parse(String(requests[1]?.init?.body))).toMatchObject({
+      minimumBalance: 100,
+      targetBalance: 1000,
+    });
+    expect(requests[2]?.init?.headers).toMatchObject({
       authorization: 'Bearer admin-token',
       'x-api-key': 'admin-token',
       'content-type': 'application/json',
     });
-    expect(JSON.parse(String(requests[1]?.init?.body))).toMatchObject({
+    expect(JSON.parse(String(requests[2]?.init?.body))).toMatchObject({
       externalId: 'sandbox-1',
       sandboxId: 'sandbox-1',
       group_id: 42,
@@ -1260,7 +1285,7 @@ describe('HTTP LLM gateway admin', () => {
         email: 'user@example.test',
         displayName: 'User Test',
       }),
-    ).resolves.toEqual({ externalUserId: 'gw-user-123' });
+    ).resolves.toEqual({ externalUserId: 'gw-user-123', balance: null });
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
       url: 'https://gateway-admin.example.test/api/admin/users/ensure',

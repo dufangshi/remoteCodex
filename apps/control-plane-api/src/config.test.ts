@@ -30,6 +30,8 @@ describe('control plane config', () => {
       LLM_GATEWAY_ADMIN_TOKEN: 'gateway-admin-token',
       LLM_GATEWAY_GROUP_ID: '42',
       LLM_GATEWAY_USER_BALANCE: '1.5',
+      LLM_GATEWAY_MIN_USER_BALANCE: '100',
+      LLM_GATEWAY_REFILL_USER_BALANCE: '1000',
       SANDBOX_DEFAULT_RESOURCE_PROFILE: 'large',
       SANDBOX_WORKER_ENABLED_AGENT_PROVIDERS: 'codex',
       CONTROL_PLANE_BUILD_SHA: 'abc123',
@@ -69,6 +71,8 @@ describe('control plane config', () => {
     expect(config.llmGatewayAdminToken).toBe('gateway-admin-token');
     expect(config.llmGatewayGroupId).toBe(42);
     expect(config.llmGatewayUserBalance).toBe(1.5);
+    expect(config.llmGatewayMinUserBalance).toBe(100);
+    expect(config.llmGatewayRefillUserBalance).toBe(1000);
     expect(config.sandboxDefaultResourceProfile).toBe('large');
     expect(config.sandboxWorkerEnabledAgentProviders).toBe('codex');
     expect(config.buildSha).toBe('abc123');
@@ -128,6 +132,19 @@ describe('control plane config', () => {
       }),
     ).toThrow(
       'ELAGENTE_HARNESS_BASE_URL is required when chemistry tools are enabled.',
+    );
+  });
+
+  it('rejects gateway refill balance below the minimum threshold', () => {
+    expect(() =>
+      loadControlPlaneConfig({
+        NODE_ENV: 'test',
+        CONTROL_PLANE_DATABASE_URL: ':memory:',
+        LLM_GATEWAY_MIN_USER_BALANCE: '100',
+        LLM_GATEWAY_REFILL_USER_BALANCE: '50',
+      }),
+    ).toThrow(
+      'LLM_GATEWAY_REFILL_USER_BALANCE must be greater than or equal to LLM_GATEWAY_MIN_USER_BALANCE.',
     );
   });
 });

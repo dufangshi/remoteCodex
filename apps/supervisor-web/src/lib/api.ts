@@ -273,6 +273,12 @@ export interface ControlPlaneUsageSummary {
   costUsd: number;
 }
 
+export interface ControlPlaneBillingSummary {
+  totalCostUsd: number;
+  llmCostUsd: number;
+  harnessCostUsd: number;
+}
+
 export interface ControlPlaneUsageEvent {
   id: string;
   userId: string;
@@ -443,6 +449,7 @@ export function fetchControlPlaneMe(auth: ControlPlaneAuth) {
     user: ControlPlaneUser;
     sandbox: ControlPlaneSandbox;
     usage: ControlPlaneUsageSummary;
+    billing?: ControlPlaneBillingSummary;
   }>(auth, '/api/me', {
     cache: 'no-store',
   });

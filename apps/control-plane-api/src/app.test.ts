@@ -233,6 +233,12 @@ class RecordingLlmGatewayAdmin implements LlmGatewayAdmin {
     userId: string;
     email: string;
     displayName?: string | null;
+    balance?: number | null;
+  }> = [];
+  readonly balanceEnsures: Array<{
+    externalUserId: string;
+    minimumBalance: number;
+    targetBalance: number;
   }> = [];
   readonly ensureKeys: Array<{
     userId: string;
@@ -263,9 +269,24 @@ class RecordingLlmGatewayAdmin implements LlmGatewayAdmin {
     userId: string;
     email: string;
     displayName?: string | null;
+    balance?: number | null;
   }) {
     this.ensureUsers.push(input);
-    return { externalUserId: `sub2api-user-${input.userId}` };
+    return { externalUserId: `sub2api-user-${input.userId}`, balance: 50 };
+  }
+
+  async ensureUserBalance(input: {
+    externalUserId: string;
+    minimumBalance: number;
+    targetBalance: number;
+  }) {
+    this.balanceEnsures.push(input);
+    return {
+      externalUserId: input.externalUserId,
+      balance: input.targetBalance,
+      previousBalance: 50,
+      adjusted: true,
+    };
   }
 
   async ensureSandboxKey(input: {
@@ -570,6 +591,13 @@ describe('control plane api', () => {
       if (String(url).endsWith('/users/ensure')) {
         return Response.json({ externalUserId: 'gw-user-from-http' });
       }
+      if (String(url).endsWith('/balance/ensure')) {
+        return Response.json({
+          externalUserId: 'gw-user-from-http',
+          balance: 1000,
+          adjusted: true,
+        });
+      }
       return Response.json({
         externalKeyId: 'gw-key-from-http',
         keyCiphertext: 'encrypted-bootstrap-token',
@@ -601,6 +629,7 @@ describe('control plane api', () => {
       expect(response.json().gatewayKey.hasEncryptedKey).toBe(true);
       expect(requests.map((request) => request.url)).toEqual([
         'https://gateway-admin.example.test/api/v1/admin/integrations/remote-codex/users/ensure',
+        'https://gateway-admin.example.test/api/v1/admin/integrations/remote-codex/users/gw-user-from-http/balance/ensure',
         'https://gateway-admin.example.test/api/v1/admin/integrations/remote-codex/users/gw-user-from-http/keys/ensure',
       ]);
       expect(requests[0]!.init!.headers).toMatchObject({
@@ -684,6 +713,13 @@ describe('control plane api', () => {
       const urlText = String(url);
       if (urlText.endsWith('/users/ensure')) {
         return Response.json({ externalUserId: 'gw-user-admin' });
+      }
+      if (urlText.endsWith('/balance/ensure')) {
+        return Response.json({
+          externalUserId: 'gw-user-admin',
+          balance: 1000,
+          adjusted: true,
+        });
       }
       if (urlText.endsWith('/keys/ensure')) {
         return Response.json({ externalKeyId: 'gw-key-original' });
@@ -771,6 +807,13 @@ describe('control plane api', () => {
       if (urlText.endsWith('/users/ensure')) {
         return Response.json({ externalUserId: 'gw-user-reconcile' });
       }
+      if (urlText.endsWith('/balance/ensure')) {
+        return Response.json({
+          externalUserId: 'gw-user-reconcile',
+          balance: 1000,
+          adjusted: true,
+        });
+      }
       if (urlText.endsWith('/keys/ensure')) {
         const body = JSON.parse(String(init?.body ?? '{}'));
         if (body.externalKeyId) {
@@ -847,6 +890,9 @@ describe('control plane api', () => {
         LLM_GATEWAY_BASE_URL: 'https://llm-gateway.example.test',
         LLM_GATEWAY_TOKEN_SECRET_NAME: 'remote-codex-gateway-tokens',
         LLM_GATEWAY_GROUP_ID: '42',
+        LLM_GATEWAY_USER_BALANCE: '1000',
+        LLM_GATEWAY_MIN_USER_BALANCE: '100',
+        LLM_GATEWAY_REFILL_USER_BALANCE: '1000',
         ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
         ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: 'remote-codex-harness-app-keys',
         ELAGENTE_HARNESS_ADMIN_KEY: 'harness-admin-key',
@@ -869,6 +915,21 @@ describe('control plane api', () => {
       },
     });
     expect(bootstrap.statusCode).toBe(200);
+    expect(llmGatewayAdmin.ensureUsers).toEqual([
+      {
+        userId: bootstrap.json().user.id,
+        email: 'gateway-start@example.com',
+        displayName: null,
+        balance: 1000,
+      },
+    ]);
+    expect(llmGatewayAdmin.balanceEnsures).toEqual([
+      {
+        externalUserId: `sub2api-user-${bootstrap.json().user.id}`,
+        minimumBalance: 100,
+        targetBalance: 1000,
+      },
+    ]);
     expect(llmGatewayAdmin.ensureKeys).toEqual([
       {
         userId: bootstrap.json().user.id,
@@ -891,18 +952,20 @@ describe('control plane api', () => {
       secretName: 'remote-codex-harness-app-keys',
       secretKey: bootstrap.json().sandbox.id,
     });
-    expect(sandboxSecretWriter.writes).toEqual([
-      {
-        secretName: 'remote-codex-gateway-tokens',
-        key: `sub2api-key-${bootstrap.json().sandbox.id}`,
-        value: `sub2api-api-key-${bootstrap.json().sandbox.id}`,
-      },
-      {
-        secretName: 'remote-codex-harness-app-keys',
-        key: bootstrap.json().sandbox.id,
-        value: `harness-api-key-${bootstrap.json().sandbox.id}`,
-      },
-    ]);
+    expect(sandboxSecretWriter.writes).toEqual(
+      expect.arrayContaining([
+        {
+          secretName: 'remote-codex-gateway-tokens',
+          key: `sub2api-key-${bootstrap.json().sandbox.id}`,
+          value: `sub2api-api-key-${bootstrap.json().sandbox.id}`,
+        },
+        {
+          secretName: 'remote-codex-harness-app-keys',
+          key: bootstrap.json().sandbox.id,
+          value: `harness-api-key-${bootstrap.json().sandbox.id}`,
+        },
+      ]),
+    );
 
     const started = await app.inject({
       method: 'POST',
@@ -4442,6 +4505,103 @@ describe('control plane api', () => {
     });
   });
 
+  it('exposes combined LLM and Harness billing totals for the user', async () => {
+    const app = buildControlPlaneApp({
+      env: testEnvWithInternalService('combined-billing'),
+    });
+    apps.push(app);
+
+    const auth = { authorization: 'Bearer dev:combined-billing-user' };
+    const bootstrap = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: auth,
+      payload: {
+        email: 'combined-billing@example.com',
+      },
+    });
+    expect(bootstrap.statusCode).toBe(200);
+    const { user, sandbox, gatewayKey } = bootstrap.json();
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: {
+        authorization: 'Bearer dev:admin',
+      },
+      payload: {
+        email: 'admin-combined-billing@example.com',
+      },
+    });
+
+    const llmImported = await app.inject({
+      method: 'POST',
+      url: '/api/admin/usage/import',
+      headers: {
+        authorization: 'Bearer dev:admin',
+      },
+      payload: {
+        events: [
+          {
+            gatewayExternalKeyId: gatewayKey.externalKeyId,
+            provider: 'sub2api',
+            model: 'gpt-5.4',
+            inputTokens: 10,
+            outputTokens: 5,
+            costUsd: 0.25,
+            externalRequestId: 'combined_billing_llm_1',
+          },
+        ],
+      },
+    });
+    expect(llmImported.statusCode).toBe(200);
+
+    const harnessRecorded = await app.inject({
+      method: 'POST',
+      url: '/api/internal/harness/usage-events',
+      headers: {
+        'x-remote-codex-service-token': 'test-internal-service-token',
+      },
+      payload: {
+        userId: user.id,
+        sandboxId: sandbox.id,
+        provider: 'elagente-harness',
+        module: 'farmaco',
+        externalEventId: 'combined_billing_harness_1',
+        computeUnits: 2,
+        costUsd: 0.75,
+      },
+    });
+    expect(harnessRecorded.statusCode).toBe(200);
+
+    const summary = await app.inject({
+      method: 'GET',
+      url: '/api/usage/summary',
+      headers: auth,
+    });
+    expect(summary.statusCode).toBe(200);
+    expect(summary.json().usage).toMatchObject({
+      costUsd: 0.25,
+    });
+    expect(summary.json().billing).toEqual({
+      totalCostUsd: 1,
+      llmCostUsd: 0.25,
+      harnessCostUsd: 0.75,
+    });
+
+    const me = await app.inject({
+      method: 'GET',
+      url: '/api/me',
+      headers: auth,
+    });
+    expect(me.statusCode).toBe(200);
+    expect(me.json().billing).toEqual({
+      totalCostUsd: 1,
+      llmCostUsd: 0.25,
+      harnessCostUsd: 0.75,
+    });
+  });
+
   it('imports usage pulled from the configured gateway export adapter', async () => {
     const exportedUsage = {
       events: [
@@ -4475,6 +4635,13 @@ describe('control plane api', () => {
       llmGatewayAdmin: {
         async ensureUser(input) {
           return { externalUserId: `sub2api-user-${input.userId}` };
+        },
+        async ensureUserBalance(input) {
+          return {
+            externalUserId: input.externalUserId,
+            balance: input.targetBalance,
+            adjusted: false,
+          };
         },
         async ensureSandboxKey(input) {
           return {
@@ -4679,6 +4846,13 @@ describe('control plane api', () => {
       llmGatewayAdmin: {
         async ensureUser(input) {
           return { externalUserId: `sub2api-user-${input.userId}` };
+        },
+        async ensureUserBalance(input) {
+          return {
+            externalUserId: input.externalUserId,
+            balance: input.targetBalance,
+            adjusted: false,
+          };
         },
         async ensureSandboxKey(input) {
           externalKeyId = `sub2api-key-${input.sandboxId}`;
