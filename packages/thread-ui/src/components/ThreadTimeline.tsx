@@ -4873,10 +4873,12 @@ function ThreadTimelineComponent({
   const previousContentRevisionRef = useRef<number | null>(null);
   const previousBottomSpacerRef = useRef(bottomSpacer);
   const lastObservedScrollHeightRef = useRef(0);
+  const lastScrollTopRef = useRef(0);
   const tailSentinelRef = useRef<HTMLDivElement | null>(null);
   const topSentinelRef = useRef<HTMLDivElement | null>(null);
   const isTailVisibleRef = useRef(true);
   const shouldStickToBottomRef = useRef(true);
+  const userScrolledAwayFromTailRef = useRef(false);
   const userScrolledHistoryRef = useRef(false);
   const autoLoadedEarlierRef = useRef(false);
   const expandedTextRequestIdRef = useRef(0);
@@ -5086,7 +5088,22 @@ function ThreadTimelineComponent({
     const container = scrollContainerRef.current;
     if (container) {
       userScrolledHistoryRef.current = true;
-      shouldStickToBottomRef.current = isNearBottom(container, FOLLOW_TAIL_THRESHOLD_PX);
+      const nextScrollTop = container.scrollTop;
+      const previousScrollTop = lastScrollTopRef.current;
+      const delta = nextScrollTop - previousScrollTop;
+      lastScrollTopRef.current = nextScrollTop;
+
+      if (isNearBottom(container, 1)) {
+        userScrolledAwayFromTailRef.current = false;
+        shouldStickToBottomRef.current = true;
+      } else if (delta < -1) {
+        userScrolledAwayFromTailRef.current = true;
+        shouldStickToBottomRef.current = false;
+      } else if (delta > 1) {
+        shouldStickToBottomRef.current =
+          !userScrolledAwayFromTailRef.current &&
+          isNearBottom(container, FOLLOW_TAIL_THRESHOLD_PX);
+      }
     }
     recomputeTailVisibility();
   }, [recomputeTailVisibility]);
@@ -5098,9 +5115,11 @@ function ThreadTimelineComponent({
     }
 
     container.scrollTop = container.scrollHeight;
+    lastScrollTopRef.current = container.scrollTop;
     lastObservedScrollHeightRef.current = container.scrollHeight;
     isTailVisibleRef.current = true;
     setIsTailVisible((current) => (current ? current : true));
+    userScrolledAwayFromTailRef.current = false;
     shouldStickToBottomRef.current = true;
   }, []);
 
@@ -5133,7 +5152,16 @@ function ThreadTimelineComponent({
     const container = scrollContainerRef.current;
     if (container) {
       lastObservedScrollHeightRef.current = container.scrollHeight;
-      shouldStickToBottomRef.current = isNearBottom(container, FOLLOW_TAIL_THRESHOLD_PX);
+      lastScrollTopRef.current = container.scrollTop;
+      if (isNearBottom(container, 1)) {
+        userScrolledAwayFromTailRef.current = false;
+        shouldStickToBottomRef.current = true;
+      } else if (
+        userScrolledAwayFromTailRef.current ||
+        !isNearBottom(container, FOLLOW_TAIL_THRESHOLD_PX)
+      ) {
+        shouldStickToBottomRef.current = false;
+      }
     }
     recomputeTailVisibility();
   }, [
@@ -5156,7 +5184,11 @@ function ThreadTimelineComponent({
     previousContentRevisionRef.current = contentRevision;
     const shouldAutoScroll =
       shouldForceScroll ||
-      (contentChanged && (isTailVisible || shouldStickToBottomRef.current));
+      (
+        contentChanged &&
+        shouldStickToBottomRef.current &&
+        !userScrolledAwayFromTailRef.current
+      );
 
     if (!shouldAutoScroll) {
       return;
@@ -5197,7 +5229,17 @@ function ThreadTimelineComponent({
         return;
       }
 
-      if (!(shouldStickToBottomRef.current || isTailVisibleRef.current)) {
+      const wasAtBottomBeforeResize =
+        previousScrollHeight > 0 &&
+        previousScrollHeight - container.scrollTop - container.clientHeight <= 1;
+      if (
+        userScrolledAwayFromTailRef.current ||
+        !(
+          shouldStickToBottomRef.current ||
+          wasAtBottomBeforeResize ||
+          isTailVisibleRef.current
+        )
+      ) {
         return;
       }
 
@@ -5213,7 +5255,7 @@ function ThreadTimelineComponent({
   }, [scrollToBottom]);
 
   useEffect(() => {
-    if (!isTailVisible) {
+    if (!shouldStickToBottomRef.current || userScrolledAwayFromTailRef.current) {
       previousBottomSpacerRef.current = bottomSpacer;
       return;
     }
@@ -5230,7 +5272,7 @@ function ThreadTimelineComponent({
     return () => {
       window.cancelAnimationFrame(frame);
     };
-  }, [bottomSpacer, isTailVisible, scrollToBottom]);
+  }, [bottomSpacer, scrollToBottom]);
 
   useEffect(() => {
     onTailVisibilityChange?.(isTailVisible);

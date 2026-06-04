@@ -4177,6 +4177,57 @@ describe('ThreadTimeline', () => {
     expect(scrollTop).toBe(120);
   });
 
+  it('stops following the tail immediately when the user scrolls upward', () => {
+    const turns = [makeTurn(1)];
+
+    render(<ThreadTimeline turns={turns} liveOutput="" />);
+
+    const scrollContainer = screen.getByTestId('thread-scroll-container');
+    const content = scrollContainer.firstElementChild as HTMLElement | null;
+    expect(content).toBeTruthy();
+    const tailSentinel = content?.lastElementChild as HTMLElement | null;
+    expect(tailSentinel).toBeTruthy();
+
+    let scrollHeight = 1000;
+    let scrollTop = 600;
+    Object.defineProperty(scrollContainer, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeight,
+    });
+    Object.defineProperty(scrollContainer, 'clientHeight', {
+      configurable: true,
+      value: 400,
+    });
+    Object.defineProperty(scrollContainer, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value) => {
+        scrollTop = value;
+      },
+    });
+    Object.defineProperty(scrollContainer, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => mockRect({ top: 0, height: 400 }),
+    });
+
+    let tailTop = 399;
+    Object.defineProperty(tailSentinel!, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => mockRect({ top: tailTop, height: 1 }),
+    });
+
+    fireEvent.scroll(scrollContainer);
+    scrollTop = 560;
+    tailTop = 399;
+    fireEvent.scroll(scrollContainer);
+
+    scrollHeight = 1260;
+    tailTop = 659;
+    FakeResizeObserver.triggerAll(content!);
+
+    expect(scrollTop).toBe(560);
+  });
+
   it('honors one-shot jump requests even when the latest turn is offscreen', () => {
     const turns = [
       {
