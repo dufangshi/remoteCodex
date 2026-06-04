@@ -38,7 +38,7 @@ concurrency:
 
 env:
   AWS_REGION: ca-central-1
-  AWS_ACCOUNT_ID: "918876873590"
+  AWS_ACCOUNT_ID: '918876873590'
   EKS_CLUSTER_NAME: inact-harness-agents
   K8S_NAMESPACE: remote-codex-staging
   WORKER_ECR_REPOSITORY: remote-codex-worker-staging
@@ -50,17 +50,18 @@ env:
   ROUTER_DEPLOYMENT: remote-codex-sandbox-router
   ROUTER_CONTAINER: sandbox-router
   SUB2API_BASE_URL: https://sub.lnz-study.com
+  SUB2API_ADMIN_BASE_URL: https://sub2api-production-5f8f.up.railway.app
   LLM_GATEWAY_TOKEN_SECRET_NAME: remote-codex-llm-gateway-tokens
-  LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY: sub2api-api-key
+  LLM_GATEWAY_GROUP_ID: '2'
   SANDBOX_WORKER_DEFAULT_CODEX_MODEL: gpt-5.4
   SANDBOX_WORKER_DEFAULT_REASONING_EFFORT: medium
-  SANDBOX_ROUTE_TOKEN_TTL_SECONDS: "3600"
+  SANDBOX_ROUTE_TOKEN_TTL_SECONDS: '3600'
   ELAGENTE_HARNESS_BASE_URL: https://elagenteharness-production.up.railway.app
   ELAGENTE_HARNESS_ADMIN_BASE_URL: https://elagenteharness-production.up.railway.app
   ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: remote-codex-harness-app-keys
   ELAGENTE_HARNESS_PROVIDER: elagente-harness
-  ELAGENTE_HARNESS_LEGACY_ADMIN_FALLBACK: "false"
-  REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: "true"
+  ELAGENTE_HARNESS_LEGACY_ADMIN_FALLBACK: 'false'
+  REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true'
 
 jobs:
   build-and-push:
@@ -69,7 +70,6 @@ jobs:
     timeout-minutes: 60
     env:
       RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-      SUB2API_STAGING_API_KEY: ${{ secrets.SUB2API_STAGING_API_KEY }}
       ELAGENTE_HARNESS_ADMIN_KEY: ${{ secrets.ELAGENTE_HARNESS_ADMIN_KEY }}
 
     steps:
@@ -196,12 +196,6 @@ jobs:
         run: |
           docker push "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${WORKER_ECR_REPOSITORY}:${{ steps.image.outputs.tag }}"
 
-      - name: Require staging LLM gateway token
-        if: env.SUB2API_STAGING_API_KEY == ''
-        run: |
-          echo "SUB2API_STAGING_API_KEY secret is required to configure the staging LLM gateway token." >&2
-          exit 1
-
       - name: Require Harness admin key
         if: env.ELAGENTE_HARNESS_ADMIN_KEY == ''
         run: |
@@ -236,8 +230,8 @@ jobs:
               "LLM_GATEWAY_PROVIDER=sub2api" \
               "LLM_GATEWAY_BASE_URL=${SUB2API_BASE_URL}" \
               "LLM_GATEWAY_TOKEN_SECRET_NAME=${LLM_GATEWAY_TOKEN_SECRET_NAME}" \
-              "LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY=${LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY}" \
-              "LLM_GATEWAY_STATIC_TOKEN=${SUB2API_STAGING_API_KEY}" \
+              "LLM_GATEWAY_ADMIN_BASE_URL=${SUB2API_ADMIN_BASE_URL}" \
+              "LLM_GATEWAY_GROUP_ID=${LLM_GATEWAY_GROUP_ID}" \
               "ELAGENTE_HARNESS_BASE_URL=${ELAGENTE_HARNESS_BASE_URL}" \
               "ELAGENTE_HARNESS_ADMIN_BASE_URL=${ELAGENTE_HARNESS_ADMIN_BASE_URL}" \
               "ELAGENTE_HARNESS_ADMIN_KEY=${ELAGENTE_HARNESS_ADMIN_KEY}" \
@@ -262,7 +256,8 @@ jobs:
               grep -qx "LLM_GATEWAY_PROVIDER=sub2api" <<<"${variables}" &&
               grep -qx "LLM_GATEWAY_BASE_URL=${SUB2API_BASE_URL}" <<<"${variables}" &&
               grep -qx "LLM_GATEWAY_TOKEN_SECRET_NAME=${LLM_GATEWAY_TOKEN_SECRET_NAME}" <<<"${variables}" &&
-              grep -qx "LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY=${LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY}" <<<"${variables}" &&
+              grep -qx "LLM_GATEWAY_ADMIN_BASE_URL=${SUB2API_ADMIN_BASE_URL}" <<<"${variables}" &&
+              grep -qx "LLM_GATEWAY_GROUP_ID=${LLM_GATEWAY_GROUP_ID}" <<<"${variables}" &&
               grep -qx "ELAGENTE_HARNESS_BASE_URL=${ELAGENTE_HARNESS_BASE_URL}" <<<"${variables}" &&
               grep -qx "ELAGENTE_HARNESS_ADMIN_BASE_URL=${ELAGENTE_HARNESS_ADMIN_BASE_URL}" <<<"${variables}" &&
               grep -qx "ELAGENTE_HARNESS_APP_KEY_SECRET_NAME=${ELAGENTE_HARNESS_APP_KEY_SECRET_NAME}" <<<"${variables}" &&
