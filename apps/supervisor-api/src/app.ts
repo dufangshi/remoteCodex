@@ -72,6 +72,7 @@ export interface AppServices {
   providerHostConfigService: ProviderHostConfigService;
   pluginRegistry: PluginRegistry;
   pluginService: PluginService;
+  repoRoot: string;
 }
 
 function findRepoRoot(start = process.cwd()) {
@@ -154,6 +155,7 @@ export function buildApp(
   const pluginSettingsStore = new PluginSettingsStore(database.db);
   const pluginService = new PluginService(pluginRegistry, pluginSettingsStore);
   const runtimeBootstrap = options.runtimeBootstrap ?? createAgentRuntimeBootstrap(config);
+  const repoRoot = findRepoRoot();
   const agentRuntimes = options.agentRuntimes ?? runtimeBootstrap.agentRuntimes;
   const threadService = new ThreadService(
     database.db,
@@ -203,7 +205,8 @@ export function buildApp(
     shellService,
     providerHostConfigService,
     pluginRegistry,
-    pluginService
+    pluginService,
+    repoRoot
   });
 
   const backendPluginHost = new BackendPluginHost(app);
@@ -456,6 +459,10 @@ export function buildApp(
 
   app.addHook('onReady', async () => {
     try {
+      await pluginService.syncManagedCodexMcpConfig({
+        codexHome: runtimeBootstrap.providerHostHomes.codex ?? null,
+        repoRoot,
+      });
       await Promise.all(agentRuntimes.all().map((runtime) => runtime.start()));
       await shellService.syncShellStateOnStartup();
     } catch (error) {

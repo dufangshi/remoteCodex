@@ -667,6 +667,9 @@ export class CodexRuntimeAdapter extends EventEmitter implements AgentRuntime {
     if (input.collaborationMode !== undefined) {
       turnInput.collaborationMode = input.collaborationMode;
     }
+    if (input.developerInstructions !== undefined) {
+      turnInput.developerInstructions = input.developerInstructions;
+    }
     const sandboxPolicy = buildSandboxPolicy(input.sandboxMode, input.workspacePath);
     if (sandboxPolicy !== undefined) {
       turnInput.sandboxPolicy = sandboxPolicy;

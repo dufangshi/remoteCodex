@@ -21,6 +21,20 @@ function optionalStringArray(value: unknown, field: string) {
   return value;
 }
 
+function optionalStringRecord(value: unknown, field: string) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    throw new Error(`Plugin manifest field "${field}" must be an object.`);
+  }
+  const entries = Object.entries(value);
+  if (entries.some(([, entry]) => typeof entry !== 'string')) {
+    throw new Error(`Plugin manifest field "${field}" must contain string values.`);
+  }
+  return Object.fromEntries(entries) as Record<string, string>;
+}
+
 export function parsePluginManifest(value: unknown): PluginManifestDto {
   if (!isRecord(value)) {
     throw new Error('Plugin manifest must be an object.');
@@ -54,6 +68,16 @@ export function parsePluginManifest(value: unknown): PluginManifestDto {
   const backend = capabilities.backend;
   if (backend !== undefined && !isRecord(backend)) {
     throw new Error('Plugin manifest field "capabilities.backend" must be an object.');
+  }
+
+  const modelHints = capabilities.modelHints;
+  if (modelHints !== undefined && !Array.isArray(modelHints)) {
+    throw new Error('Plugin manifest field "capabilities.modelHints" must be an array.');
+  }
+
+  const mcpServers = capabilities.mcpServers;
+  if (mcpServers !== undefined && !Array.isArray(mcpServers)) {
+    throw new Error('Plugin manifest field "capabilities.mcpServers" must be an array.');
   }
 
   return {
@@ -99,6 +123,39 @@ export function parsePluginManifest(value: unknown): PluginManifestDto {
             entry.artifactTypes,
             `capabilities.threadPanels[${index}].artifactTypes`,
           ) ?? [],
+        };
+      }),
+      modelHints: (modelHints ?? []).map((entry, index) => {
+        if (!isRecord(entry)) {
+          throw new Error(
+            `Plugin manifest field "capabilities.modelHints[${index}]" must be an object.`,
+          );
+        }
+        return {
+          id: assertString(entry.id, `capabilities.modelHints[${index}].id`),
+          text: assertString(entry.text, `capabilities.modelHints[${index}].text`),
+        };
+      }),
+      mcpServers: (mcpServers ?? []).map((entry, index) => {
+        if (!isRecord(entry)) {
+          throw new Error(
+            `Plugin manifest field "capabilities.mcpServers[${index}]" must be an object.`,
+          );
+        }
+        const args = optionalStringArray(
+          entry.args,
+          `capabilities.mcpServers[${index}].args`,
+        );
+        const env = optionalStringRecord(
+          entry.env,
+          `capabilities.mcpServers[${index}].env`,
+        );
+        return {
+          id: assertString(entry.id, `capabilities.mcpServers[${index}].id`),
+          name: assertString(entry.name, `capabilities.mcpServers[${index}].name`),
+          command: assertString(entry.command, `capabilities.mcpServers[${index}].command`),
+          ...(args ? { args } : {}),
+          ...(env ? { env } : {}),
         };
       }),
       ...(frontend

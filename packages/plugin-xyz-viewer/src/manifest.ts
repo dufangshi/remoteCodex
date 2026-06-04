@@ -18,6 +18,16 @@ export interface XyzViewerPluginManifest {
       label: string;
       artifactTypes: Array<typeof XYZ_MOLECULE_ARTIFACT_TYPE>;
     }>;
+    modelHints: Array<{
+      id: string;
+      text: string;
+    }>;
+    mcpServers: Array<{
+      id: string;
+      name: string;
+      command: string;
+      args: string[];
+    }>;
     frontend: {
       entry: string;
       style: string;
@@ -46,6 +56,21 @@ export const xyzViewerPluginManifest: XyzViewerPluginManifest = {
         id: 'xyz-viewer',
         label: 'Molecules',
         artifactTypes: [XYZ_MOLECULE_ARTIFACT_TYPE],
+      },
+    ],
+    modelHints: [
+      {
+        id: 'render-molecule',
+        text:
+          'XYZ Molecule Viewer is enabled. When outputting a molecular structure, you must call remote_codex_render_molecule; do not output plain xyz, pdb, cif, or extxyz text. Do not invent coordinates unless asked for an example.',
+      },
+    ],
+    mcpServers: [
+      {
+        id: 'remote-codex-plugin-mcp',
+        name: 'remote_codex_plugins',
+        command: 'node',
+        args: ['bin/remote-codex-plugin-mcp.mjs'],
       },
     ],
     frontend: {

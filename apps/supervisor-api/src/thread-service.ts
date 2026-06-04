@@ -145,6 +145,10 @@ function canUseRuntimePagedTurns(
   return cachedDetail.totalTurnCount > enrichedTurns.length;
 }
 
+function pluginDeveloperInstructions(pluginService?: PluginService) {
+  return pluginService?.modelContextPrompt() ?? null;
+}
+
 export class ThreadService {
   private readonly liveState = new ThreadLiveStateStore();
   private readonly detailAssembler: ThreadDetailAssembler;
@@ -914,6 +918,7 @@ export class ThreadService {
       ...record,
       providerSessionId,
     };
+    const developerInstructions = pluginDeveloperInstructions(this.pluginService);
 
     if (record.providerTurnId && record.status === 'running') {
       if (!turnConfig.supportsRunningTurnInput) {
@@ -935,6 +940,7 @@ export class ThreadService {
         sandboxMode: turnConfig.sandboxMode,
         performanceMode: turnConfig.performanceMode,
         workspacePath: workspace.absPath,
+        developerInstructions,
       });
     }
 
@@ -947,6 +953,7 @@ export class ThreadService {
       sandboxMode: turnConfig.sandboxMode,
       performanceMode: turnConfig.performanceMode,
       workspacePath: workspace.absPath,
+      developerInstructions,
     });
   }
 

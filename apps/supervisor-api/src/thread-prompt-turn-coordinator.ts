@@ -46,6 +46,7 @@ interface PromptTurnInput {
   sandboxMode: SandboxModeDto;
   performanceMode: 'fast' | 'standard';
   workspacePath: string;
+  developerInstructions?: string | null;
   hidden?: boolean;
   displayTurnId?: string | null;
 }
@@ -102,6 +103,7 @@ export class ThreadPromptTurnCoordinator {
       collaborationMode: input.collaborationMode,
       sandboxMode: input.sandboxMode,
       workspacePath: input.workspacePath,
+      developerInstructions: input.developerInstructions ?? null,
     };
     if (input.hidden !== undefined) {
       startTurnInput.hidden = input.hidden;
@@ -238,6 +240,7 @@ export class ThreadPromptTurnCoordinator {
       sandboxMode: input.sandboxMode,
       performanceMode: input.performanceMode,
       workspacePath: input.workspacePath,
+      developerInstructions: input.developerInstructions ?? null,
     });
   }
 }

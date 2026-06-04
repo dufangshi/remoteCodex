@@ -425,10 +425,25 @@ export interface PluginThreadPanelDto {
   artifactTypes: string[];
 }
 
+export interface PluginModelHintDto {
+  id: string;
+  text: string;
+}
+
+export interface PluginMcpServerDto {
+  id: string;
+  name: string;
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+}
+
 export interface PluginCapabilitiesDto {
   artifactTypes: PluginArtifactTypeDto[];
   timelineRenderers: string[];
   threadPanels: PluginThreadPanelDto[];
+  modelHints?: PluginModelHintDto[];
+  mcpServers?: PluginMcpServerDto[];
   frontend?: {
     entry?: string;
     style?: string;

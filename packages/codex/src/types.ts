@@ -322,6 +322,7 @@ export interface TurnStartInput {
   collaborationMode?: CollaborationModeKind | null;
   sandboxPolicy?: SandboxPolicy | null;
   serviceTier?: ServiceTier | null;
+  developerInstructions?: string | null;
 }
 
 export interface TurnSteerInput {

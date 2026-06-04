@@ -81,6 +81,7 @@ export class FakeCodexManager extends EventEmitter {
     threadId: string;
     prompt: string;
     serviceTier?: 'fast' | 'flex' | null;
+    developerInstructions?: string | null;
   }> = [];
 
   async start() {
@@ -218,12 +219,16 @@ export class FakeCodexManager extends EventEmitter {
     collaborationMode?: 'default' | 'plan' | null;
     sandboxPolicy?: 'read-only' | 'workspace-write' | 'danger-full-access' | null;
     serviceTier?: 'fast' | 'flex' | null;
+    developerInstructions?: string | null;
   }) {
     this.startTurnCalls.push({
       threadId: input.threadId,
       prompt: input.prompt,
       ...(input.serviceTier !== undefined
         ? { serviceTier: input.serviceTier }
+        : {}),
+      ...(input.developerInstructions !== undefined
+        ? { developerInstructions: input.developerInstructions }
         : {}),
     });
     const existing = this.threads.get(input.threadId) ?? makeThread({ id: input.threadId });

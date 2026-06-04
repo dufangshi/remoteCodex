@@ -4,8 +4,11 @@ import {
   parsePluginManifest,
   PluginRegistry,
 } from '../../../../packages/plugin-runtime/src/index';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import type {
   ImportPluginInput,
+  PluginMcpServerDto,
   PluginDto,
   PluginManifestDto,
   ThreadTurnDto,
@@ -14,6 +17,80 @@ import type {
   PersistedPluginSettings,
   PluginSettingsStore,
 } from './plugin-settings-store';
+
+const MANAGED_CODEX_MCP_BEGIN =
+  '# BEGIN remote-codex managed plugin MCP servers';
+const MANAGED_CODEX_MCP_END =
+  '# END remote-codex managed plugin MCP servers';
+
+function jsonString(value: string) {
+  return JSON.stringify(value);
+}
+
+function normalizeManagedCommand(server: PluginMcpServerDto, repoRoot: string) {
+  if (server.name === 'remote_codex_plugins') {
+    return {
+      command: process.execPath,
+      args: [path.join(repoRoot, 'bin', 'remote-codex-plugin-mcp.mjs')],
+    };
+  }
+
+  return {
+    command: server.command,
+    args: server.args ?? [],
+  };
+}
+
+function stripManagedCodexMcpBlock(content: string) {
+  const pattern = new RegExp(
+    `\\n?${MANAGED_CODEX_MCP_BEGIN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?${MANAGED_CODEX_MCP_END.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n?`,
+    'g',
+  );
+  return content.replace(pattern, '\n').replace(/\n{3,}/g, '\n\n').trimEnd();
+}
+
+function buildManagedCodexMcpBlock(servers: PluginMcpServerDto[], repoRoot: string) {
+  if (servers.length === 0) {
+    return '';
+  }
+
+  const lines = [
+    MANAGED_CODEX_MCP_BEGIN,
+    '# This block is generated from enabled Remote Codex plugins.',
+  ];
+  for (const server of servers) {
+    const normalized = normalizeManagedCommand(server, repoRoot);
+    lines.push(
+      '',
+      `[mcp_servers.${server.name}]`,
+      `command = ${jsonString(normalized.command)}`,
+      `args = ${JSON.stringify(normalized.args)}`,
+    );
+
+    const envEntries = Object.entries(server.env ?? {});
+    if (envEntries.length > 0) {
+      lines.push(`[mcp_servers.${server.name}.env]`);
+      for (const [key, value] of envEntries) {
+        lines.push(`${key} = ${jsonString(value)}`);
+      }
+    }
+  }
+  lines.push(MANAGED_CODEX_MCP_END);
+  return lines.join('\n');
+}
+
+function upsertManagedCodexMcpBlock(
+  content: string,
+  servers: PluginMcpServerDto[],
+  repoRoot: string,
+) {
+  const stripped = stripManagedCodexMcpBlock(content);
+  const managedBlock = buildManagedCodexMcpBlock(servers, repoRoot);
+  if (!managedBlock) {
+    return stripped ? `${stripped}\n` : '';
+  }
+  return `${stripped ? `${stripped}\n\n` : ''}${managedBlock}\n`;
+}
 
 export class PluginService {
   private settings: PersistedPluginSettings = {
@@ -41,6 +118,77 @@ export class PluginService {
     this.settings.enabled[pluginId] = enabled;
     this.persistSettings();
     return plugin;
+  }
+
+  modelContextPrompt(): string | null {
+    const hints = this.registry.enabledManifests().flatMap(
+      (manifest) => manifest.capabilities.modelHints ?? [],
+    );
+    const text = hints.map((hint) => hint.text.trim()).filter(Boolean).join('\n');
+    return text || null;
+  }
+
+  enabledMcpServers(): PluginMcpServerDto[] {
+    const byName = new Map<string, PluginMcpServerDto & { pluginIds: string[] }>();
+    for (const manifest of this.registry.enabledManifests()) {
+      for (const server of manifest.capabilities.mcpServers ?? []) {
+        const existing = byName.get(server.name);
+        if (existing) {
+          byName.set(server.name, {
+            ...existing,
+            env: {
+              ...(existing.env ?? {}),
+              ...(server.env ?? {}),
+            },
+            pluginIds: [...existing.pluginIds, manifest.id],
+          });
+        } else {
+          byName.set(server.name, {
+            ...server,
+            pluginIds: [manifest.id],
+          });
+        }
+      }
+    }
+
+    return [...byName.values()].map(({ pluginIds, ...server }) => ({
+      ...server,
+      env: {
+        ...(server.env ?? {}),
+        REMOTE_CODEX_ENABLED_PLUGIN_IDS: [...new Set(pluginIds)].sort().join(','),
+      },
+    }));
+  }
+
+  async syncManagedCodexMcpConfig(input: {
+    codexHome?: string | null;
+    repoRoot: string;
+  }) {
+    if (!input.codexHome) {
+      return;
+    }
+
+    const configPath = path.join(input.codexHome, 'config.toml');
+    let current = '';
+    try {
+      current = await fs.readFile(configPath, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+    }
+
+    const next = upsertManagedCodexMcpBlock(
+      current,
+      this.enabledMcpServers(),
+      input.repoRoot,
+    );
+    if (next === current) {
+      return;
+    }
+
+    await fs.mkdir(path.dirname(configPath), { recursive: true });
+    await fs.writeFile(configPath, next, 'utf8');
   }
 
   importPlugin(input: ImportPluginInput): PluginDto {

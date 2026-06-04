@@ -835,6 +835,10 @@ describe('supervisor api', () => {
         }),
       ]),
     );
+    const initialCodexConfig = await fs.readFile(path.join(codexHome, 'config.toml'), 'utf8');
+    expect(initialCodexConfig).toContain('[mcp_servers.remote_codex_plugins]');
+    expect(initialCodexConfig).toContain('REMOTE_CODEX_ENABLED_PLUGIN_IDS = "remote-codex.xyz-viewer"');
+    expect(initialCodexConfig).toContain('remote-codex-plugin-mcp.mjs');
 
     const importedManifest = {
       id: 'example.markdown-diagram',
@@ -884,6 +888,11 @@ describe('supervisor api', () => {
       id: 'remote-codex.xyz-viewer',
       enabled: false,
     });
+    await expect(fs.readFile(path.join(codexHome, 'config.toml'), 'utf8')).resolves.not.toContain(
+      '[mcp_servers.remote_codex_plugins]',
+    );
+    expect(fakeCodexManager.stopCalls).toBeGreaterThan(0);
+    expect(fakeCodexManager.startCalls).toBeGreaterThan(1);
 
     await app.close();
     app = buildTestApp(fakeCodexManager);
@@ -909,6 +918,75 @@ describe('supervisor api', () => {
         }),
       ]),
     );
+    await expect(fs.readFile(path.join(codexHome, 'config.toml'), 'utf8')).resolves.not.toContain(
+      '[mcp_servers.remote_codex_plugins]',
+    );
+  });
+
+  it('injects enabled plugin developer instructions into Codex turns', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+    expect(workspaceResponse.statusCode).toBe(200);
+
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspaceResponse.json().id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Plugin hint thread',
+      },
+    });
+    expect(createResponse.statusCode).toBe(200);
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createResponse.json().id}/prompt`,
+      payload: {
+        prompt: 'Render a water molecule.',
+      },
+    });
+    expect(promptResponse.statusCode).toBe(200);
+    expect(fakeCodexManager.startTurnCalls.at(-1)?.developerInstructions).toContain(
+      'must call remote_codex_render_molecule',
+    );
+
+    const toggleResponse = await app.inject({
+      method: 'PATCH',
+      url: '/api/plugins/remote-codex.xyz-viewer',
+      payload: {
+        enabled: false,
+      },
+    });
+    expect(toggleResponse.statusCode).toBe(200);
+
+    const secondCreateResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspaceResponse.json().id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'No plugin hint thread',
+      },
+    });
+    expect(secondCreateResponse.statusCode).toBe(200);
+
+    const secondPromptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${secondCreateResponse.json().id}/prompt`,
+      payload: {
+        prompt: 'Render a water molecule.',
+      },
+    });
+    expect(secondPromptResponse.statusCode).toBe(200);
+    expect(fakeCodexManager.startTurnCalls.at(-1)?.developerInstructions).toBeNull();
   });
 
   it('rejects imported manifests that replace built-in plugin ids', async () => {

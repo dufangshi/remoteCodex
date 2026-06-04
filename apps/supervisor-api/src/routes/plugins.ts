@@ -25,6 +25,18 @@ const importPluginSchema = z.object({
 });
 
 export async function registerPluginRoutes(app: FastifyInstance) {
+  async function syncManagedPluginMcpConfig() {
+    await app.services.pluginService.syncManagedCodexMcpConfig({
+      codexHome: app.services.config.agentProviders.codex.home ?? null,
+      repoRoot: app.services.repoRoot,
+    });
+    const codexRuntime = app.services.agentRuntimes.getOptional('codex');
+    if (codexRuntime) {
+      await codexRuntime.stop();
+      await codexRuntime.start();
+    }
+  }
+
   app.get('/api/plugins', async () => {
     return app.services.pluginService.listPlugins() satisfies PluginDto[];
   });
@@ -37,7 +49,9 @@ export async function registerPluginRoutes(app: FastifyInstance) {
       ...(parsed.manifestJson === undefined ? {} : { manifestJson: parsed.manifestJson }),
     };
     try {
-      return app.services.pluginService.importPlugin(body) satisfies PluginDto;
+      const plugin = app.services.pluginService.importPlugin(body);
+      await syncManagedPluginMcpConfig();
+      return plugin satisfies PluginDto;
     } catch (error) {
       if (error instanceof SyntaxError) {
         throw new HttpError(400, {
@@ -68,7 +82,9 @@ export async function registerPluginRoutes(app: FastifyInstance) {
     const { pluginId } = pluginParamsSchema.parse(request.params);
     const body = updatePluginSchema.parse(request.body) satisfies UpdatePluginInput;
     try {
-      return app.services.pluginService.setPluginEnabled(pluginId, body.enabled);
+      const plugin = app.services.pluginService.setPluginEnabled(pluginId, body.enabled);
+      await syncManagedPluginMcpConfig();
+      return plugin;
     } catch {
       throw new HttpError(404, {
         code: 'not_found',

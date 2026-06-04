@@ -192,12 +192,17 @@ export class ManifestArtifactExtractor implements ArtifactExtractor {
     item: ThreadHistoryItemDto,
     context: ArtifactExtractionContext,
   ): ThreadArtifactDto[] {
-    if (item.kind === 'artifact' || !item.text.trim()) {
+    const extractableText = [item.text, item.detailText ?? '']
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .join('\n\n');
+
+    if (item.kind === 'artifact' || !extractableText) {
       return [];
     }
 
     const artifacts: ThreadArtifactDto[] = [];
-    artifacts.push(...this.extractJsonArtifacts(turn, item, context));
+    artifacts.push(...this.extractJsonArtifacts(turn, item, context, extractableText));
     return artifacts;
   }
 
@@ -205,9 +210,10 @@ export class ManifestArtifactExtractor implements ArtifactExtractor {
     turn: ThreadTurnDto,
     item: ThreadHistoryItemDto,
     context: ArtifactExtractionContext,
+    text: string,
   ): ThreadArtifactDto[] {
     const artifacts: ThreadArtifactDto[] = [];
-    for (const block of findFencedBlocks(item.text, artifactFenceLanguages)) {
+    for (const block of findFencedBlocks(text, artifactFenceLanguages)) {
       if (!block.content) {
         continue;
       }

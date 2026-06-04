@@ -110,6 +110,60 @@ describe('ManifestArtifactExtractor', () => {
     });
   });
 
+  it('extracts artifact payloads from tool call detail text', () => {
+    const turns: ThreadTurnDto[] = [
+      {
+        id: 'turn-1',
+        startedAt: '2026-05-22T00:00:00.000Z',
+        status: 'completed',
+        error: null,
+        items: [
+          {
+            id: 'tool-1',
+            kind: 'toolCall',
+            text: 'remote_codex_render_molecule',
+            detailText: [
+              'Result',
+              '',
+              '```remote-codex-artifact',
+              JSON.stringify({
+                type: 'remote-codex.artifact',
+                artifactType: 'chemistry.molecule3d',
+                title: 'Water',
+                payload: {
+                  format: 'xyz',
+                  content: [waterXyz],
+                },
+              }),
+              '```',
+            ].join('\n'),
+            sequence: 1,
+          },
+        ],
+      },
+    ];
+
+    const enriched = appendArtifactItemsToTurns(
+      turns,
+      new ManifestArtifactExtractor([xyzViewerManifest]),
+      {
+        threadId: 'thread-1',
+        workspacePath: '/tmp',
+        now: '2026-05-22T00:00:00.000Z',
+      },
+    );
+
+    expect(enriched[0]?.items).toHaveLength(2);
+    expect(enriched[0]?.items[1]).toMatchObject({
+      kind: 'artifact',
+      artifact: {
+        pluginId: 'remote-codex.xyz-viewer',
+        type: 'chemistry.molecule3d',
+        title: 'Water',
+      },
+    });
+  });
+
   it('does not append timeline artifact items for molecule code fences', () => {
     const turns: ThreadTurnDto[] = [
       {
