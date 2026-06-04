@@ -4774,6 +4774,7 @@ describe('control plane api', () => {
       sourceCount: 2,
       importedCount: 2,
       duplicateCount: 1,
+      skippedCount: 0,
       failureCount: 0,
       nextCursor: 'cursor-next',
     });
@@ -4790,6 +4791,125 @@ describe('control plane api', () => {
       outputTokens: 75,
       cachedTokens: 30,
       costUsd: 0.55,
+    });
+  });
+
+  it('skips gateway usage export events for unknown gateway keys', async () => {
+    const exportedUsage = {
+      events: [
+        {
+          eventId: 'gateway_export_known_req',
+          externalKeyId: '',
+          model: 'gpt-5.1-codex',
+          inputTokens: 100,
+          outputTokens: 25,
+          costUsd: 0.22,
+        },
+        {
+          eventId: 'gateway_export_unknown_req',
+          externalKeyId: 'unmanaged-sub2api-key',
+          model: 'gpt-5.1-codex',
+          inputTokens: 999,
+          outputTokens: 999,
+          costUsd: 9.99,
+        },
+      ],
+      nextCursor: 'cursor-after-unknown',
+    };
+    const app = buildControlPlaneApp({
+      env: testEnv('gateway-export-unknown-key'),
+      llmGatewayAdmin: {
+        async ensureUser(input) {
+          return { externalUserId: `sub2api-user-${input.userId}` };
+        },
+        async ensureUserBalance(input) {
+          return {
+            externalUserId: input.externalUserId,
+            balance: input.targetBalance,
+            adjusted: false,
+          };
+        },
+        async ensureSandboxKey(input) {
+          return {
+            externalKeyId: `sub2api-key-${input.sandboxId}`,
+            keyCiphertext: null,
+          };
+        },
+        async rotateSandboxKey(input) {
+          return {
+            externalKeyId: `sub2api-key-${input.sandboxId}-rotated`,
+            keyCiphertext: null,
+          };
+        },
+        async revokeSandboxKey() {},
+        async reconcileSandboxKey(input) {
+          return {
+            externalKeyId: `sub2api-key-${input.sandboxId}`,
+            keyCiphertext: null,
+          };
+        },
+        async exportUsage() {
+          return exportedUsage;
+        },
+      },
+    });
+    apps.push(app);
+
+    const auth = { authorization: 'Bearer dev:gateway-export-known-user' };
+    const bootstrap = await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: auth,
+      payload: {
+        email: 'gateway-export-known@example.com',
+      },
+    });
+    expect(bootstrap.statusCode).toBe(200);
+    const { gatewayKey } = bootstrap.json();
+    exportedUsage.events[0]!.externalKeyId = gatewayKey.externalKeyId;
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/me/bootstrap',
+      headers: {
+        authorization: 'Bearer dev:admin',
+      },
+      payload: {
+        email: 'admin-gateway-export-unknown@example.com',
+      },
+    });
+
+    const imported = await app.inject({
+      method: 'POST',
+      url: '/api/admin/usage/import',
+      headers: {
+        authorization: 'Bearer dev:admin',
+      },
+      payload: {},
+    });
+    expect(imported.statusCode).toBe(200);
+    expect(imported.json().events).toHaveLength(1);
+    expect(imported.json().import).toEqual({
+      source: 'gateway',
+      sourceCount: 2,
+      importedCount: 1,
+      duplicateCount: 0,
+      skippedCount: 1,
+      failureCount: 0,
+      nextCursor: 'cursor-after-unknown',
+    });
+
+    const summary = await app.inject({
+      method: 'GET',
+      url: '/api/usage/summary',
+      headers: auth,
+    });
+    expect(summary.statusCode).toBe(200);
+    expect(summary.json().usage).toMatchObject({
+      requestCount: 1,
+      inputTokens: 100,
+      outputTokens: 25,
+      costUsd: 0.22,
     });
   });
 

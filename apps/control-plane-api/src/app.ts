@@ -1792,17 +1792,37 @@ async function importGatewayUsageBatch(
     const inputEvents = gatewayExport.events.map((event) =>
       gatewayUsageExportEventToImportEvent(provider, event),
     );
-    const events = inputEvents.map((event) =>
-      repository.recordUsageEvent(normalizeUsageImportEvent(repository, event)),
-    );
+    const events = [];
+    let skippedCount = 0;
+    for (const event of inputEvents) {
+      try {
+        events.push(
+          repository.recordUsageEvent(
+            normalizeUsageImportEvent(repository, event),
+          ),
+        );
+      } catch (error) {
+        if (
+          error instanceof HttpError &&
+          error.code === 'usage_identity_unresolved'
+        ) {
+          skippedCount += 1;
+          continue;
+        }
+        throw error;
+      }
+    }
     const metrics = {
       source,
       sourceCount: inputEvents.length,
       importedCount: events.length,
       duplicateCount: Math.max(
         0,
-        inputEvents.length - new Set(events.map((event) => event.id)).size,
+        inputEvents.length -
+          skippedCount -
+          new Set(events.map((event) => event.id)).size,
       ),
+      skippedCount,
       failureCount: 0,
       nextCursor: gatewayExport.nextCursor ?? null,
     };
@@ -1826,6 +1846,7 @@ async function importGatewayUsageBatch(
         sourceCount: metrics.sourceCount,
         importedCount: metrics.importedCount,
         duplicateCount: metrics.duplicateCount,
+        skippedCount: metrics.skippedCount,
         failureCount: metrics.failureCount,
         nextCursor: metrics.nextCursor,
       },
