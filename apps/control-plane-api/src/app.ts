@@ -1,4 +1,11 @@
-import { createHash, createHmac, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
+import {
+  createHash,
+  createHmac,
+  randomBytes,
+  randomUUID,
+  scryptSync,
+  timingSafeEqual,
+} from 'node:crypto';
 
 import Fastify, { FastifyInstance, FastifyRequest } from 'fastify';
 import { z, ZodError } from 'zod';
@@ -102,18 +109,27 @@ function redactSandboxLifecycleError(rawMessage: string) {
     .replace(/sk-[A-Za-z0-9._~+/=-]+/g, 'sk-[redacted]')
     .replace(/"Value"\s*:\s*"[^"]*"/g, '"Value":"[redacted]"')
     .replace(/"value"\s*:\s*"[^"]*"/g, '"value":"[redacted]"')
-    .replace(/"stringData"\s*:\s*\{[^}]*\}/g, '"stringData":{"[redacted]":"[redacted]"}')
+    .replace(
+      /"stringData"\s*:\s*\{[^}]*\}/g,
+      '"stringData":{"[redacted]":"[redacted]"}',
+    )
     .replace(/"data"\s*:\s*\{[^}]*\}/g, '"data":{"[redacted]":"[redacted]"}');
 }
 
-async function withSandboxLifecycleError<T>(operation: string, task: () => Promise<T>): Promise<T> {
+async function withSandboxLifecycleError<T>(
+  operation: string,
+  task: () => Promise<T>,
+): Promise<T> {
   try {
     return await task();
   } catch (error) {
     if (error instanceof HttpError || error instanceof SandboxManagerError) {
       throw error;
     }
-    throw new SandboxManagerError('provider', sandboxLifecycleErrorMessage(operation, error));
+    throw new SandboxManagerError(
+      'provider',
+      sandboxLifecycleErrorMessage(operation, error),
+    );
   }
 }
 
@@ -193,7 +209,9 @@ const createSessionSchema = z.object({
 
 const updateSessionSchema = z.object({
   title: z.string().min(1).optional(),
-  status: z.enum(['created', 'active', 'idle', 'archived', 'deleted']).optional(),
+  status: z
+    .enum(['created', 'active', 'idle', 'archived', 'deleted'])
+    .optional(),
   workerSessionId: z.string().min(1).nullable().optional(),
 });
 
@@ -201,7 +219,9 @@ const checkpointSessionSchema = z.object({
   userId: z.string().uuid(),
   sandboxId: z.string().uuid(),
   workerSessionId: z.string().min(1).nullable().optional(),
-  status: z.enum(['created', 'active', 'idle', 'archived', 'deleted']).optional(),
+  status: z
+    .enum(['created', 'active', 'idle', 'archived', 'deleted'])
+    .optional(),
 });
 
 const internalHarnessUsageEventSchema = z.object({
@@ -212,7 +232,14 @@ const internalHarnessUsageEventSchema = z.object({
   threadId: z.string().min(1).max(200).nullable().optional(),
   turnId: z.string().min(1).max(200).nullable().optional(),
   module: z.enum(['estructural', 'quntur', 'farmaco']),
-  tool: z.string().trim().min(1).max(160).regex(/^[a-zA-Z0-9_-]+$/).nullable().optional(),
+  tool: z
+    .string()
+    .trim()
+    .min(1)
+    .max(160)
+    .regex(/^[a-zA-Z0-9_-]+$/)
+    .nullable()
+    .optional(),
   runId: z.string().trim().min(1).max(200).nullable().optional(),
   jobId: z.string().trim().min(1).max(200).nullable().optional(),
   externalEventId: z.string().trim().min(1).max(200).nullable().optional(),
@@ -228,12 +255,31 @@ const internalHarnessQuotaCheckSchema = z.object({
   workspaceId: z.string().uuid().nullable().optional(),
   sessionId: z.string().uuid().nullable().optional(),
   module: z.enum(['estructural', 'quntur', 'farmaco']),
-  tool: z.string().trim().min(1).max(160).regex(/^[a-zA-Z0-9_-]+$/).nullable().optional(),
-  estimatedComputeUnits: z.number().finite().nonnegative().nullable().optional(),
+  tool: z
+    .string()
+    .trim()
+    .min(1)
+    .max(160)
+    .regex(/^[a-zA-Z0-9_-]+$/)
+    .nullable()
+    .optional(),
+  estimatedComputeUnits: z
+    .number()
+    .finite()
+    .nonnegative()
+    .nullable()
+    .optional(),
   estimatedCostUsd: z.number().finite().nonnegative().nullable().optional(),
 });
 
-const reasoningEffortSchema = z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']);
+const reasoningEffortSchema = z.enum([
+  'none',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+]);
 
 const sendSessionPromptSchema = z.object({
   prompt: z.string().min(1),
@@ -246,7 +292,12 @@ const harnessInvokeSchema = z.object({
   workspaceId: z.string().uuid().nullable().optional(),
   sessionId: z.string().uuid().nullable().optional(),
   externalEventId: z.string().min(1).max(200).nullable().optional(),
-  estimatedComputeUnits: z.number().finite().nonnegative().nullable().optional(),
+  estimatedComputeUnits: z
+    .number()
+    .finite()
+    .nonnegative()
+    .nullable()
+    .optional(),
   estimatedCostUsd: z.number().finite().nonnegative().nullable().optional(),
 });
 
@@ -257,7 +308,12 @@ const routeTokenSchema = z.object({
   scopes: z.array(z.string().min(1)).default(['worker:read', 'worker:write']),
 });
 const harnessModuleSchema = z.enum(['estructural', 'quntur', 'farmaco']);
-const harnessRunIdSchema = z.string().trim().min(1).max(200).regex(/^[a-zA-Z0-9_.-]+$/);
+const harnessRunIdSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .regex(/^[a-zA-Z0-9_.-]+$/);
 
 const workerThreadSchema = z.object({
   id: z.string().min(1),
@@ -304,11 +360,7 @@ const usageImportEventSchema = z.object({
 const importUsageSchema = z.object({
   cursor: z.string().min(1).nullable().optional(),
   limit: z.number().int().positive().max(500).optional(),
-  events: z
-    .array(
-      usageImportEventSchema,
-    )
-    .optional(),
+  events: z.array(usageImportEventSchema).optional(),
 });
 
 type UsageImportEvent = z.infer<typeof usageImportEventSchema>;
@@ -317,9 +369,9 @@ const adminSandboxReasonSchema = z.object({
   reason: z.string().min(1).max(500).optional(),
 });
 
-function redactGatewayKey<T extends { keyCiphertext?: string | null } | null | undefined>(
-  gatewayKey: T,
-) {
+function redactGatewayKey<
+  T extends { keyCiphertext?: string | null } | null | undefined,
+>(gatewayKey: T) {
   if (!gatewayKey) {
     return gatewayKey;
   }
@@ -330,9 +382,12 @@ function redactGatewayKey<T extends { keyCiphertext?: string | null } | null | u
   };
 }
 
-function redactHarnessKey<T extends { keyCiphertext?: string | null; apiKey?: string | null } | null | undefined>(
-  harnessKey: T,
-) {
+function redactHarnessKey<
+  T extends
+    | { keyCiphertext?: string | null; apiKey?: string | null }
+    | null
+    | undefined,
+>(harnessKey: T) {
   if (!harnessKey) {
     return harnessKey;
   }
@@ -349,7 +404,9 @@ function requireGatewayKeyContext(app: FastifyInstance, sandboxId: string) {
   if (!sandbox) {
     throw new HttpError(404, 'not_found', 'Sandbox not found.');
   }
-  const gatewayKey = app.services.repository.getGatewayKeyForSandbox(sandbox.id);
+  const gatewayKey = app.services.repository.getGatewayKeyForSandbox(
+    sandbox.id,
+  );
   if (!gatewayKey) {
     throw new HttpError(404, 'not_found', 'Gateway key not found.');
   }
@@ -358,7 +415,11 @@ function requireGatewayKeyContext(app: FastifyInstance, sandboxId: string) {
     provider: gatewayKey.provider,
   });
   if (!gatewayUser) {
-    throw new HttpError(409, 'gateway_user_missing', 'Gateway user is missing.');
+    throw new HttpError(
+      409,
+      'gateway_user_missing',
+      'Gateway user is missing.',
+    );
   }
   return {
     sandbox,
@@ -372,7 +433,9 @@ function requireHarnessKeyContext(app: FastifyInstance, sandboxId: string) {
   if (!sandbox) {
     throw new HttpError(404, 'not_found', 'Sandbox not found.');
   }
-  const harnessKey = app.services.repository.getHarnessKeyForSandbox(sandbox.id);
+  const harnessKey = app.services.repository.getHarnessKeyForSandbox(
+    sandbox.id,
+  );
   if (!harnessKey) {
     throw new HttpError(404, 'harness_key_missing', 'Harness key is missing.');
   }
@@ -381,7 +444,11 @@ function requireHarnessKeyContext(app: FastifyInstance, sandboxId: string) {
     provider: harnessKey.provider,
   });
   if (!harnessUser) {
-    throw new HttpError(409, 'harness_user_missing', 'Harness user is missing.');
+    throw new HttpError(
+      409,
+      'harness_user_missing',
+      'Harness user is missing.',
+    );
   }
   return {
     sandbox,
@@ -424,7 +491,8 @@ function toErrorPayload(error: unknown) {
       };
     }
     return {
-      statusCode: error.code === 'quota' ? 402 : error.code === 'config' ? 400 : 503,
+      statusCode:
+        error.code === 'quota' ? 402 : error.code === 'config' ? 400 : 503,
       payload: {
         code: `sandbox_${error.code}`,
         message: redactSandboxLifecycleError(error.message),
@@ -491,7 +559,10 @@ function normalizeEmail(value: string) {
   return value.trim().toLowerCase();
 }
 
-function passwordHash(password: string, salt = randomBytes(16).toString('base64url')) {
+function passwordHash(
+  password: string,
+  salt = randomBytes(16).toString('base64url'),
+) {
   const derived = scryptSync(password, salt, 64).toString('base64url');
   return `scrypt:${salt}:${derived}`;
 }
@@ -501,7 +572,9 @@ function verifyPassword(password: string, storedHash: string) {
   if (scheme !== 'scrypt' || !salt || !hash) {
     return false;
   }
-  const actual = Buffer.from(scryptSync(password, salt, 64).toString('base64url'));
+  const actual = Buffer.from(
+    scryptSync(password, salt, 64).toString('base64url'),
+  );
   const expected = Buffer.from(hash);
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
@@ -542,7 +615,10 @@ function sessionResponse(
   };
 }
 
-function controlPlaneCallbackUrl(config: ControlPlaneConfig, provider: 'google' | 'github') {
+function controlPlaneCallbackUrl(
+  config: ControlPlaneConfig,
+  provider: 'google' | 'github',
+) {
   return `${config.publicBaseUrl.replace(/\/+$/, '')}/api/auth/oauth/${provider}/callback`;
 }
 
@@ -550,7 +626,10 @@ function frontendOAuthReturnUrl(config: ControlPlaneConfig) {
   return `${(config.frontendBaseUrl ?? config.publicBaseUrl).replace(/\/+$/, '')}/control-plane/login`;
 }
 
-function allowedOAuthReturnUrl(config: ControlPlaneConfig, returnTo?: string | null) {
+function allowedOAuthReturnUrl(
+  config: ControlPlaneConfig,
+  returnTo?: string | null,
+) {
   const fallback = frontendOAuthReturnUrl(config);
   if (!returnTo) {
     return fallback;
@@ -563,7 +642,10 @@ function allowedOAuthReturnUrl(config: ControlPlaneConfig, returnTo?: string | n
   return requestedUrl.toString();
 }
 
-function oauthState(config: ControlPlaneConfig, input: { provider: 'google' | 'github'; returnTo?: string | null }) {
+function oauthState(
+  config: ControlPlaneConfig,
+  input: { provider: 'google' | 'github'; returnTo?: string | null },
+) {
   const payload: SignedTokenPayload = {
     sub: input.provider,
     provider: input.provider,
@@ -575,14 +657,17 @@ function oauthState(config: ControlPlaneConfig, input: { provider: 'google' | 'g
   return createSignedToken(payload, config.productSessionSecret);
 }
 
-function verifyOAuthState(config: ControlPlaneConfig, token: string, provider: 'google' | 'github') {
-  const payload = verifySignedTokenWithKeys<SignedTokenPayload & {
-    provider?: unknown;
-    returnTo?: unknown;
-  }>(
-    token,
-    [{ id: 'product-session', secret: config.productSessionSecret }],
-  );
+function verifyOAuthState(
+  config: ControlPlaneConfig,
+  token: string,
+  provider: 'google' | 'github',
+) {
+  const payload = verifySignedTokenWithKeys<
+    SignedTokenPayload & {
+      provider?: unknown;
+      returnTo?: unknown;
+    }
+  >(token, [{ id: 'product-session', secret: config.productSessionSecret }]);
   if (payload.provider !== provider) {
     throw new HttpError(400, 'bad_request', 'OAuth state is invalid.');
   }
@@ -608,33 +693,64 @@ async function requestFormToken(url: string, input: Record<string, string>) {
     },
     body: new URLSearchParams(input).toString(),
   });
-  const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+  const payload = (await response.json().catch(() => ({}))) as Record<
+    string,
+    unknown
+  >;
   if (!response.ok || typeof payload.access_token !== 'string') {
-    throw new HttpError(401, 'unauthorized', 'OAuth provider token exchange failed.');
+    throw new HttpError(
+      401,
+      'unauthorized',
+      'OAuth provider token exchange failed.',
+    );
   }
   return payload.access_token;
 }
 
-async function fetchGoogleProfile(config: ControlPlaneConfig, code: string): Promise<OAuthProfile> {
+async function fetchGoogleProfile(
+  config: ControlPlaneConfig,
+  code: string,
+): Promise<OAuthProfile> {
   if (!config.googleClientId || !config.googleClientSecret) {
-    throw new HttpError(503, 'service_unavailable', 'Google login is not configured.');
+    throw new HttpError(
+      503,
+      'service_unavailable',
+      'Google login is not configured.',
+    );
   }
-  const accessToken = await requestFormToken('https://oauth2.googleapis.com/token', {
-    code,
-    client_id: config.googleClientId,
-    client_secret: config.googleClientSecret,
-    redirect_uri: controlPlaneCallbackUrl(config, 'google'),
-    grant_type: 'authorization_code',
-  });
-  const response = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
-    headers: {
-      authorization: `Bearer ${accessToken}`,
-      accept: 'application/json',
+  const accessToken = await requestFormToken(
+    'https://oauth2.googleapis.com/token',
+    {
+      code,
+      client_id: config.googleClientId,
+      client_secret: config.googleClientSecret,
+      redirect_uri: controlPlaneCallbackUrl(config, 'google'),
+      grant_type: 'authorization_code',
     },
-  });
-  const profile = await response.json().catch(() => ({})) as Record<string, unknown>;
-  if (!response.ok || typeof profile.sub !== 'string' || typeof profile.email !== 'string') {
-    throw new HttpError(401, 'unauthorized', 'Google account profile could not be resolved.');
+  );
+  const response = await fetch(
+    'https://openidconnect.googleapis.com/v1/userinfo',
+    {
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        accept: 'application/json',
+      },
+    },
+  );
+  const profile = (await response.json().catch(() => ({}))) as Record<
+    string,
+    unknown
+  >;
+  if (
+    !response.ok ||
+    typeof profile.sub !== 'string' ||
+    typeof profile.email !== 'string'
+  ) {
+    throw new HttpError(
+      401,
+      'unauthorized',
+      'Google account profile could not be resolved.',
+    );
   }
   return {
     provider: 'google',
@@ -652,25 +768,39 @@ async function fetchGitHubEmail(accessToken: string) {
       'user-agent': 'remote-codex-control-plane',
     },
   });
-  const emails = await response.json().catch(() => []) as Array<Record<string, unknown>>;
+  const emails = (await response.json().catch(() => [])) as Array<
+    Record<string, unknown>
+  >;
   if (!response.ok || !Array.isArray(emails)) {
     return null;
   }
-  const primary = emails.find((email) => email.primary === true && email.verified === true);
+  const primary = emails.find(
+    (email) => email.primary === true && email.verified === true,
+  );
   const verified = primary ?? emails.find((email) => email.verified === true);
   return typeof verified?.email === 'string' ? verified.email : null;
 }
 
-async function fetchGitHubProfile(config: ControlPlaneConfig, code: string): Promise<OAuthProfile> {
+async function fetchGitHubProfile(
+  config: ControlPlaneConfig,
+  code: string,
+): Promise<OAuthProfile> {
   if (!config.githubClientId || !config.githubClientSecret) {
-    throw new HttpError(503, 'service_unavailable', 'GitHub login is not configured.');
+    throw new HttpError(
+      503,
+      'service_unavailable',
+      'GitHub login is not configured.',
+    );
   }
-  const accessToken = await requestFormToken('https://github.com/login/oauth/access_token', {
-    code,
-    client_id: config.githubClientId,
-    client_secret: config.githubClientSecret,
-    redirect_uri: controlPlaneCallbackUrl(config, 'github'),
-  });
+  const accessToken = await requestFormToken(
+    'https://github.com/login/oauth/access_token',
+    {
+      code,
+      client_id: config.githubClientId,
+      client_secret: config.githubClientSecret,
+      redirect_uri: controlPlaneCallbackUrl(config, 'github'),
+    },
+  );
   const response = await fetch('https://api.github.com/user', {
     headers: {
       authorization: `Bearer ${accessToken}`,
@@ -678,13 +808,27 @@ async function fetchGitHubProfile(config: ControlPlaneConfig, code: string): Pro
       'user-agent': 'remote-codex-control-plane',
     },
   });
-  const profile = await response.json().catch(() => ({})) as Record<string, unknown>;
+  const profile = (await response.json().catch(() => ({}))) as Record<
+    string,
+    unknown
+  >;
   if (!response.ok || typeof profile.id !== 'number') {
-    throw new HttpError(401, 'unauthorized', 'GitHub account profile could not be resolved.');
+    throw new HttpError(
+      401,
+      'unauthorized',
+      'GitHub account profile could not be resolved.',
+    );
   }
-  const email = typeof profile.email === 'string' ? profile.email : await fetchGitHubEmail(accessToken);
+  const email =
+    typeof profile.email === 'string'
+      ? profile.email
+      : await fetchGitHubEmail(accessToken);
   if (!email) {
-    throw new HttpError(400, 'bad_request', 'GitHub account does not expose a verified email.');
+    throw new HttpError(
+      400,
+      'bad_request',
+      'GitHub account does not expose a verified email.',
+    );
   }
   return {
     provider: 'github',
@@ -699,15 +843,24 @@ async function fetchGitHubProfile(config: ControlPlaneConfig, code: string): Pro
   };
 }
 
-function upsertOAuthUser(repository: ControlPlaneRepository, profile: OAuthProfile) {
-  const existingByIdentity = repository.getUserByAuthIdentity(profile.provider, profile.subject);
+function upsertOAuthUser(
+  repository: ControlPlaneRepository,
+  profile: OAuthProfile,
+) {
+  const existingByIdentity = repository.getUserByAuthIdentity(
+    profile.provider,
+    profile.subject,
+  );
   const existingByEmail = repository.getUserByEmail(profile.email);
-  const user = existingByIdentity ?? existingByEmail ?? repository.upsertUser({
-    authProvider: profile.provider,
-    authSubject: profile.subject,
-    email: normalizeEmail(profile.email),
-    displayName: profile.displayName,
-  });
+  const user =
+    existingByIdentity ??
+    existingByEmail ??
+    repository.upsertUser({
+      authProvider: profile.provider,
+      authSubject: profile.subject,
+      email: normalizeEmail(profile.email),
+      displayName: profile.displayName,
+    });
   repository.upsertAuthIdentity({
     userId: user.id,
     authProvider: profile.provider,
@@ -720,7 +873,11 @@ function upsertOAuthUser(repository: ControlPlaneRepository, profile: OAuthProfi
 
 function requireAdmin(app: FastifyInstance, request: FastifyRequest) {
   const user = requireUser(app, request);
-  if (!app.services.config.adminIdentities.has(identityKey(user.authProvider, user.authSubject))) {
+  if (
+    !app.services.config.adminIdentities.has(
+      identityKey(user.authProvider, user.authSubject),
+    )
+  ) {
     throw new HttpError(403, 'forbidden', 'Administrator access is required.');
   }
   return user;
@@ -732,14 +889,21 @@ function requireInternalService(app: FastifyInstance, request: FastifyRequest) {
   }
   const token = request.headers['x-remote-codex-service-token'];
   if (token !== app.services.config.internalServiceToken) {
-    throw new HttpError(403, 'forbidden', 'Internal service access is required.');
+    throw new HttpError(
+      403,
+      'forbidden',
+      'Internal service access is required.',
+    );
   }
 }
 
-function workerBaseUrlForSandbox(app: FastifyInstance, sandbox: {
-  k8sNamespace: string | null;
-  workerServiceName: string | null;
-}) {
+function workerBaseUrlForSandbox(
+  app: FastifyInstance,
+  sandbox: {
+    k8sNamespace: string | null;
+    workerServiceName: string | null;
+  },
+) {
   if (!sandbox.workerServiceName) {
     return null;
   }
@@ -771,7 +935,9 @@ function workerIdentityHeaders(input: {
     .digest('base64url');
   return {
     [WORKER_IDENTITY_HEADERS.user]: envelope.userId,
-    ...(envelope.projectId ? { [WORKER_IDENTITY_HEADERS.project]: envelope.projectId } : {}),
+    ...(envelope.projectId
+      ? { [WORKER_IDENTITY_HEADERS.project]: envelope.projectId }
+      : {}),
     [WORKER_IDENTITY_HEADERS.sandbox]: envelope.sandboxId,
     [WORKER_IDENTITY_HEADERS.scopes]: envelope.scopes.join(','),
     [WORKER_IDENTITY_HEADERS.expiresAt]: envelope.expiresAt,
@@ -779,15 +945,21 @@ function workerIdentityHeaders(input: {
   };
 }
 
-function canControlRunningWorker(app: FastifyInstance, sandbox: {
-  state: string;
-  k8sNamespace: string | null;
-  workerServiceName: string | null;
-}) {
+function canControlRunningWorker(
+  app: FastifyInstance,
+  sandbox: {
+    state: string;
+    k8sNamespace: string | null;
+    workerServiceName: string | null;
+  },
+) {
   return (
     sandbox.state === 'running' &&
     Boolean(app.services.config.sandboxWorkerAuthToken) &&
-    Boolean(app.services.config.routerBaseUrl || workerBaseUrlForSandbox(app, sandbox))
+    Boolean(
+      app.services.config.routerBaseUrl ||
+      workerBaseUrlForSandbox(app, sandbox),
+    )
   );
 }
 
@@ -820,11 +992,7 @@ function requireRunningWorkerEndpoint(
   }
   const workerBaseUrl = workerBaseUrlForSandbox(app, input.sandbox);
   if (!workerBaseUrl) {
-    throw new HttpError(
-      409,
-      input.unavailableCode,
-      input.unavailableMessage,
-    );
+    throw new HttpError(409, input.unavailableCode, input.unavailableMessage);
   }
   return workerBaseUrl.replace(/\/+$/, '');
 }
@@ -924,10 +1092,15 @@ async function sendWorkerJsonRequest(
   const init: RequestInit = {
     method: input.method ?? 'POST',
     headers: {
-      ...(input.body === undefined ? {} : { 'content-type': 'application/json' }),
+      ...(input.body === undefined
+        ? {}
+        : { 'content-type': 'application/json' }),
       ...(input.routeToken
         ? { authorization: `Bearer ${input.routeToken}` }
-        : { 'x-remote-codex-worker-token': app.services.config.sandboxWorkerAuthToken! }),
+        : {
+            'x-remote-codex-worker-token':
+              app.services.config.sandboxWorkerAuthToken!,
+          }),
       ...(input.workerIdentity
         ? workerIdentityHeaders({
             ...input.workerIdentity,
@@ -937,9 +1110,16 @@ async function sendWorkerJsonRequest(
     },
     ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
   };
-  const response = await fetch(`${input.workerBaseUrl}${input.path}`, init).catch((error: unknown) => {
+  const response = await fetch(
+    `${input.workerBaseUrl}${input.path}`,
+    init,
+  ).catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
-    throw new HttpError(503, input.failureCode, `${input.fallbackMessage}: ${message}`);
+    throw new HttpError(
+      503,
+      input.failureCode,
+      `${input.fallbackMessage}: ${message}`,
+    );
   });
 
   const text = await response.text();
@@ -1060,7 +1240,9 @@ async function materializeSandboxWorkspaces(
   const result = app.services.repository.listWorkspaces(input.userId, {
     status: 'active',
   });
-  const workspaces = result.items.filter((workspace) => workspace.sandboxId === input.sandbox.id);
+  const workspaces = result.items.filter(
+    (workspace) => workspace.sandboxId === input.sandbox.id,
+  );
   for (const workspace of workspaces) {
     await materializeWorkerWorkspace(app, {
       sandbox: input.sandbox,
@@ -1071,7 +1253,9 @@ async function materializeSandboxWorkspaces(
 
 async function tryMaterializeSandboxWorkspaces(
   app: FastifyInstance,
-  input: Parameters<typeof materializeSandboxWorkspaces>[1] & { operation: string },
+  input: Parameters<typeof materializeSandboxWorkspaces>[1] & {
+    operation: string;
+  },
 ) {
   try {
     await materializeSandboxWorkspaces(app, input);
@@ -1188,7 +1372,9 @@ async function sendWorkerThreadPrompt(
     body: {
       prompt: input.prompt,
       ...(input.model ? { model: input.model } : {}),
-      ...(input.reasoningEffort !== undefined ? { reasoningEffort: input.reasoningEffort } : {}),
+      ...(input.reasoningEffort !== undefined
+        ? { reasoningEffort: input.reasoningEffort }
+        : {}),
     },
     workerIdentity: {
       userId: input.userId,
@@ -1233,7 +1419,9 @@ async function materializeControlPlaneSession(
       'Sandbox must be running before this session can be started in the worker.',
     );
   }
-  const provider = createSessionSchema.shape.provider.parse(input.session.provider);
+  const provider = createSessionSchema.shape.provider.parse(
+    input.session.provider,
+  );
   const workerThread = await createWorkerThreadSession(app, {
     sandbox: input.sandbox,
     workspace: input.workspace,
@@ -1246,9 +1434,9 @@ async function materializeControlPlaneSession(
   });
 }
 
-function requireMaterializedSession<T extends { id: string; workerSessionId: string | null }>(
-  session: T | undefined,
-) {
+function requireMaterializedSession<
+  T extends { id: string; workerSessionId: string | null },
+>(session: T | undefined) {
   if (!session?.workerSessionId) {
     throw new HttpError(
       500,
@@ -1353,11 +1541,18 @@ async function sendWorkerHarnessDownloadRequest(
     headers: {
       ...(routeToken
         ? { authorization: `Bearer ${routeToken}` }
-        : { 'x-remote-codex-worker-token': app.services.config.sandboxWorkerAuthToken! }),
+        : {
+            'x-remote-codex-worker-token':
+              app.services.config.sandboxWorkerAuthToken!,
+          }),
     },
   }).catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
-    throw new HttpError(503, 'harness_unavailable', `Worker Harness artifact download failed: ${message}`);
+    throw new HttpError(
+      503,
+      'harness_unavailable',
+      `Worker Harness artifact download failed: ${message}`,
+    );
   });
 
   if (!response.ok) {
@@ -1371,7 +1566,8 @@ async function sendWorkerHarnessDownloadRequest(
 
   return {
     body: Buffer.from(await response.arrayBuffer()),
-    contentType: response.headers.get('content-type') ?? 'application/octet-stream',
+    contentType:
+      response.headers.get('content-type') ?? 'application/octet-stream',
     contentDisposition: response.headers.get('content-disposition'),
   };
 }
@@ -1406,10 +1602,18 @@ function normalizeUsageImportEvent(
   }
   const user = repository.getUserById(userId);
   if (!user) {
-    throw new HttpError(400, 'usage_identity_unresolved', 'Usage import user could not be resolved.');
+    throw new HttpError(
+      400,
+      'usage_identity_unresolved',
+      'Usage import user could not be resolved.',
+    );
   }
   if (user.status !== 'active') {
-    throw new HttpError(403, 'account_inactive', 'Usage import user account is not active.');
+    throw new HttpError(
+      403,
+      'account_inactive',
+      'Usage import user account is not active.',
+    );
   }
   return {
     ...event,
@@ -1467,10 +1671,18 @@ function normalizeHarnessUsageExportEvent(
   }
   const user = repository.getUserById(userId);
   if (!user) {
-    throw new HttpError(400, 'harness_usage_identity_unresolved', 'Harness usage user could not be resolved.');
+    throw new HttpError(
+      400,
+      'harness_usage_identity_unresolved',
+      'Harness usage user could not be resolved.',
+    );
   }
   if (user.status !== 'active') {
-    throw new HttpError(403, 'account_inactive', 'Harness usage user account is not active.');
+    throw new HttpError(
+      403,
+      'account_inactive',
+      'Harness usage user account is not active.',
+    );
   }
   return {
     userId,
@@ -1522,7 +1734,11 @@ function numberField(payload: unknown, fields: string[]) {
     if (typeof value === 'number' && Number.isFinite(value)) {
       return value;
     }
-    if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) {
+    if (
+      typeof value === 'string' &&
+      value.trim() &&
+      Number.isFinite(Number(value))
+    ) {
       return Number(value);
     }
   }
@@ -1533,7 +1749,11 @@ function payloadObject(payload: unknown) {
   if (!payload || typeof payload !== 'object') {
     return {};
   }
-  if ('payload' in payload && payload.payload && typeof payload.payload === 'object') {
+  if (
+    'payload' in payload &&
+    payload.payload &&
+    typeof payload.payload === 'object'
+  ) {
     return payload.payload as Record<string, unknown>;
   }
   return payload as Record<string, unknown>;
@@ -1549,11 +1769,14 @@ function harnessUsageMetadata(payload: unknown) {
   };
 }
 
-async function importGatewayUsageBatch(app: FastifyInstance, input: {
-  cursor?: string | null;
-  limit?: number;
-  useStoredCursor?: boolean;
-}) {
+async function importGatewayUsageBatch(
+  app: FastifyInstance,
+  input: {
+    cursor?: string | null;
+    limit?: number;
+    useStoredCursor?: boolean;
+  },
+) {
   const repository = app.services.repository;
   const provider = app.services.config.llmGatewayProvider;
   const source = 'gateway';
@@ -1576,7 +1799,10 @@ async function importGatewayUsageBatch(app: FastifyInstance, input: {
       source,
       sourceCount: inputEvents.length,
       importedCount: events.length,
-      duplicateCount: Math.max(0, inputEvents.length - new Set(events.map((event) => event.id)).size),
+      duplicateCount: Math.max(
+        0,
+        inputEvents.length - new Set(events.map((event) => event.id)).size,
+      ),
       failureCount: 0,
       nextCursor: gatewayExport.nextCursor ?? null,
     };
@@ -1589,22 +1815,29 @@ async function importGatewayUsageBatch(app: FastifyInstance, input: {
       duplicateCount: metrics.duplicateCount,
       failureCount: metrics.failureCount,
     });
-    repository.audit(null, 'usage.import_completed', 'usage_import', importState.id, {
-      provider,
-      source,
-      sourceCount: metrics.sourceCount,
-      importedCount: metrics.importedCount,
-      duplicateCount: metrics.duplicateCount,
-      failureCount: metrics.failureCount,
-      nextCursor: metrics.nextCursor,
-    });
+    repository.audit(
+      null,
+      'usage.import_completed',
+      'usage_import',
+      importState.id,
+      {
+        provider,
+        source,
+        sourceCount: metrics.sourceCount,
+        importedCount: metrics.importedCount,
+        duplicateCount: metrics.duplicateCount,
+        failureCount: metrics.failureCount,
+        nextCursor: metrics.nextCursor,
+      },
+    );
     return {
       events,
       import: metrics,
       state: importState,
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Usage import failed.';
+    const message =
+      error instanceof Error ? error.message : 'Usage import failed.';
     const importState = repository.recordUsageImportMetrics({
       provider,
       source,
@@ -1614,21 +1847,30 @@ async function importGatewayUsageBatch(app: FastifyInstance, input: {
       failureCount: 1,
       failureMessage: message,
     });
-    repository.audit(null, 'usage.import_failed', 'usage_import', importState.id, {
-      provider,
-      source,
-      failureCount: 1,
-      message,
-    });
+    repository.audit(
+      null,
+      'usage.import_failed',
+      'usage_import',
+      importState.id,
+      {
+        provider,
+        source,
+        failureCount: 1,
+        message,
+      },
+    );
     throw error;
   }
 }
 
-async function importHarnessUsageBatch(app: FastifyInstance, input: {
-  cursor?: string | null;
-  limit?: number;
-  useStoredCursor?: boolean;
-}) {
+async function importHarnessUsageBatch(
+  app: FastifyInstance,
+  input: {
+    cursor?: string | null;
+    limit?: number;
+    useStoredCursor?: boolean;
+  },
+) {
   const repository = app.services.repository;
   const provider = app.services.config.harnessProvider;
   const source = 'harness';
@@ -1651,7 +1893,10 @@ async function importHarnessUsageBatch(app: FastifyInstance, input: {
       source,
       sourceCount: inputEvents.length,
       importedCount: events.length,
-      duplicateCount: Math.max(0, inputEvents.length - new Set(events.map((event) => event.id)).size),
+      duplicateCount: Math.max(
+        0,
+        inputEvents.length - new Set(events.map((event) => event.id)).size,
+      ),
       failureCount: 0,
       nextCursor: harnessExport.nextCursor ?? null,
     };
@@ -1664,22 +1909,29 @@ async function importHarnessUsageBatch(app: FastifyInstance, input: {
       duplicateCount: metrics.duplicateCount,
       failureCount: metrics.failureCount,
     });
-    repository.audit(null, 'usage.import_completed', 'usage_import', importState.id, {
-      provider,
-      source,
-      sourceCount: metrics.sourceCount,
-      importedCount: metrics.importedCount,
-      duplicateCount: metrics.duplicateCount,
-      failureCount: metrics.failureCount,
-      nextCursor: metrics.nextCursor,
-    });
+    repository.audit(
+      null,
+      'usage.import_completed',
+      'usage_import',
+      importState.id,
+      {
+        provider,
+        source,
+        sourceCount: metrics.sourceCount,
+        importedCount: metrics.importedCount,
+        duplicateCount: metrics.duplicateCount,
+        failureCount: metrics.failureCount,
+        nextCursor: metrics.nextCursor,
+      },
+    );
     return {
       events,
       import: metrics,
       state: importState,
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Harness usage import failed.';
+    const message =
+      error instanceof Error ? error.message : 'Harness usage import failed.';
     const importState = repository.recordUsageImportMetrics({
       provider,
       source,
@@ -1689,17 +1941,27 @@ async function importHarnessUsageBatch(app: FastifyInstance, input: {
       failureCount: 1,
       failureMessage: message,
     });
-    repository.audit(null, 'usage.import_failed', 'usage_import', importState.id, {
-      provider,
-      source,
-      failureCount: 1,
-      message,
-    });
+    repository.audit(
+      null,
+      'usage.import_failed',
+      'usage_import',
+      importState.id,
+      {
+        provider,
+        source,
+        failureCount: 1,
+        message,
+      },
+    );
     throw error;
   }
 }
 
-async function ensureGateway(app: FastifyInstance, user: { id: string; email: string; displayName: string | null }, sandbox: { id: string }) {
+async function ensureGateway(
+  app: FastifyInstance,
+  user: { id: string; email: string; displayName: string | null },
+  sandbox: { id: string },
+) {
   const gatewayUser = await app.services.llmGatewayAdmin.ensureUser({
     userId: user.id,
     email: user.email,
@@ -1711,18 +1973,97 @@ async function ensureGateway(app: FastifyInstance, user: { id: string; email: st
     externalUserId: gatewayUser.externalUserId,
   });
 
-  const gatewayKey = await app.services.llmGatewayAdmin.ensureSandboxKey({
-    userId: user.id,
-    sandboxId: sandbox.id,
-    externalUserId: gatewayUser.externalUserId,
+  const existing = app.services.repository.getGatewayKeyForSandbox(sandbox.id);
+  if (existing?.status === 'active' && existing.keyCiphertext) {
+    await ensureSandboxGatewaySecret(app, {
+      keyId: existing.externalKeyId,
+      apiKey: existing.keyCiphertext,
+    });
+    return existing;
+  }
+  if (
+    existing?.status === 'active' &&
+    !shouldMaterializeSandboxGatewaySecret(app)
+  ) {
+    return existing;
+  }
+
+  const gatewayKey = existing?.externalKeyId
+    ? await app.services.llmGatewayAdmin.rotateSandboxKey({
+        userId: user.id,
+        sandboxId: sandbox.id,
+        externalUserId: gatewayUser.externalUserId,
+        externalKeyId: existing.externalKeyId,
+        groupId: app.services.config.llmGatewayGroupId,
+      })
+    : await app.services.llmGatewayAdmin.ensureSandboxKey({
+        userId: user.id,
+        sandboxId: sandbox.id,
+        externalUserId: gatewayUser.externalUserId,
+        groupId: app.services.config.llmGatewayGroupId,
+      });
+  const storedGatewayKey = existing
+    ? app.services.repository.updateGatewayKeyRotation({
+        sandboxId: sandbox.id,
+        provider: app.services.config.llmGatewayProvider,
+        externalKeyId: gatewayKey.externalKeyId,
+        keyCiphertext: gatewayKey.keyCiphertext ?? null,
+      })
+    : app.services.repository.upsertGatewayKey({
+        userId: user.id,
+        sandboxId: sandbox.id,
+        provider: app.services.config.llmGatewayProvider,
+        externalKeyId: gatewayKey.externalKeyId,
+        keyCiphertext: gatewayKey.keyCiphertext ?? null,
+      });
+  if (gatewayKey.keyCiphertext) {
+    await ensureSandboxGatewaySecret(app, {
+      keyId: gatewayKey.externalKeyId,
+      apiKey: gatewayKey.keyCiphertext,
+    });
+  }
+  return storedGatewayKey;
+}
+
+function shouldMaterializeSandboxGatewaySecret(app: FastifyInstance) {
+  return Boolean(
+    app.services.config.llmGatewayBaseUrl &&
+    app.services.config.llmGatewayTokenSecretName &&
+    !app.services.config.llmGatewayStaticToken,
+  );
+}
+
+async function ensureSandboxGatewaySecret(
+  app: FastifyInstance,
+  input: {
+    keyId: string;
+    apiKey: string | null;
+  },
+) {
+  if (app.services.config.llmGatewayStaticToken) {
+    return null;
+  }
+  const secretName = app.services.config.llmGatewayTokenSecretName;
+  if (!secretName || !input.apiKey) {
+    return null;
+  }
+  const writer = app.services.sandboxSecretWriter;
+  if (!writer) {
+    throw new HttpError(
+      400,
+      'gateway_secret_writer_missing',
+      'Gateway secret writer is not configured.',
+    );
+  }
+  await writer.putSecretValue({
+    secretName,
+    key: input.keyId,
+    value: input.apiKey,
   });
-  return app.services.repository.upsertGatewayKey({
-    userId: user.id,
-    sandboxId: sandbox.id,
-    provider: app.services.config.llmGatewayProvider,
-    externalKeyId: gatewayKey.externalKeyId,
-    keyCiphertext: gatewayKey.keyCiphertext ?? null,
-  });
+  return {
+    secretName,
+    secretKey: input.keyId,
+  };
 }
 
 async function ensureSandboxHarnessSecret(
@@ -1733,7 +2074,11 @@ async function ensureSandboxHarnessSecret(
   },
 ) {
   const secretName = app.services.config.harnessAppKeySecretName;
-  if (!app.services.config.chemistryToolsEnabled || !secretName || !input.apiKey) {
+  if (
+    !app.services.config.chemistryToolsEnabled ||
+    !secretName ||
+    !input.apiKey
+  ) {
     return null;
   }
   const writer = app.services.sandboxSecretWriter;
@@ -1759,7 +2104,11 @@ async function hasSandboxHarnessSecret(
 ) {
   const secretName = app.services.config.harnessAppKeySecretName;
   const writer = app.services.sandboxSecretWriter;
-  if (!app.services.config.chemistryToolsEnabled || !secretName || !writer?.hasSecretValue) {
+  if (
+    !app.services.config.chemistryToolsEnabled ||
+    !secretName ||
+    !writer?.hasSecretValue
+  ) {
     return null;
   }
   return writer.hasSecretValue({
@@ -1777,10 +2126,21 @@ async function ensureHarness(
     return null;
   }
   if (!app.services.config.harnessBaseUrl) {
-    throw new HttpError(400, 'harness_config_missing', 'Harness base URL is not configured.');
+    throw new HttpError(
+      400,
+      'harness_config_missing',
+      'Harness base URL is not configured.',
+    );
   }
-  if (!app.services.config.harnessAdminBaseUrl || !app.services.config.harnessAdminKey) {
-    throw new HttpError(400, 'harness_admin_config_missing', 'Harness admin credentials are not configured.');
+  if (
+    !app.services.config.harnessAdminBaseUrl ||
+    !app.services.config.harnessAdminKey
+  ) {
+    throw new HttpError(
+      400,
+      'harness_admin_config_missing',
+      'Harness admin credentials are not configured.',
+    );
   }
 
   const existing = app.services.repository.getHarnessKeyForSandbox(sandbox.id);
@@ -1790,7 +2150,9 @@ async function ensureHarness(
       (existing.secretName === app.services.config.harnessAppKeySecretName &&
         existing.secretKey === sandbox.id));
   if (existingSecretBindingMatches) {
-    const secretPresent = await hasSandboxHarnessSecret(app, { sandboxId: sandbox.id });
+    const secretPresent = await hasSandboxHarnessSecret(app, {
+      sandboxId: sandbox.id,
+    });
     if (secretPresent !== false) {
       return existing;
     }
@@ -1843,7 +2205,8 @@ async function ensureHarness(
     if (error instanceof HttpError) {
       throw error;
     }
-    const message = error instanceof Error ? error.message : 'Harness provisioning failed.';
+    const message =
+      error instanceof Error ? error.message : 'Harness provisioning failed.';
     throw new HttpError(503, 'harness_unavailable', message);
   }
 }
@@ -1852,15 +2215,28 @@ function gatewayStartInput(
   app: FastifyInstance,
   sandbox: { id: string },
 ): SandboxStartInput['gateway'] {
-  const gatewayKey = app.services.repository.getGatewayKeyForSandbox(sandbox.id);
-  if (!gatewayKey || gatewayKey.status !== 'active' || !app.services.config.llmGatewayBaseUrl) {
+  const gatewayKey = app.services.repository.getGatewayKeyForSandbox(
+    sandbox.id,
+  );
+  if (
+    !gatewayKey ||
+    gatewayKey.status !== 'active' ||
+    !app.services.config.llmGatewayBaseUrl
+  ) {
     return undefined;
   }
   return {
     baseUrl: app.services.config.llmGatewayBaseUrl,
-    keyId: app.services.config.llmGatewayStaticTokenSecretKey ?? gatewayKey.externalKeyId,
-    tokenSecretName: app.services.config.llmGatewayTokenSecretName,
-    staticToken: app.services.config.llmGatewayStaticToken,
+    keyId: app.services.config.llmGatewayStaticToken
+      ? (app.services.config.llmGatewayStaticTokenSecretKey ??
+        gatewayKey.externalKeyId)
+      : gatewayKey.externalKeyId,
+    tokenSecretName: app.services.config.llmGatewayStaticToken
+      ? null
+      : app.services.config.llmGatewayTokenSecretName,
+    ...(app.services.config.llmGatewayStaticToken
+      ? { staticToken: app.services.config.llmGatewayStaticToken }
+      : {}),
   };
 }
 
@@ -1878,17 +2254,20 @@ function harnessStartInput(app: FastifyInstance): SandboxStartInput['harness'] {
 function hasAwsSandboxConfig(env: NodeJS.ProcessEnv) {
   return Boolean(
     env.SANDBOX_EKS_CLUSTER_NAME &&
-      env.SANDBOX_K8S_SERVICE_ACCOUNT &&
-      env.SANDBOX_WORKER_IMAGE_REPOSITORY &&
-      env.SANDBOX_WORKER_IMAGE_TAG &&
-      env.SANDBOX_ROUTER_BASE_URL &&
-      env.SANDBOX_WORKER_AUTH_TOKEN_SECRET_NAME &&
-      env.SANDBOX_SUBNET_IDS &&
-      env.SANDBOX_SECURITY_GROUP_IDS,
+    env.SANDBOX_K8S_SERVICE_ACCOUNT &&
+    env.SANDBOX_WORKER_IMAGE_REPOSITORY &&
+    env.SANDBOX_WORKER_IMAGE_TAG &&
+    env.SANDBOX_ROUTER_BASE_URL &&
+    env.SANDBOX_WORKER_AUTH_TOKEN_SECRET_NAME &&
+    env.SANDBOX_SUBNET_IDS &&
+    env.SANDBOX_SECURITY_GROUP_IDS,
   );
 }
 
-function defaultSandboxManager(env: NodeJS.ProcessEnv, routerBaseUrl: string): SandboxManager {
+function defaultSandboxManager(
+  env: NodeJS.ProcessEnv,
+  routerBaseUrl: string,
+): SandboxManager {
   if (!hasAwsSandboxConfig(env)) {
     return new NoopSandboxManager(routerBaseUrl);
   }
@@ -1898,7 +2277,9 @@ function defaultSandboxManager(env: NodeJS.ProcessEnv, routerBaseUrl: string): S
   );
 }
 
-function defaultSandboxSecretWriter(env: NodeJS.ProcessEnv): SandboxSecretWriter | null {
+function defaultSandboxSecretWriter(
+  env: NodeJS.ProcessEnv,
+): SandboxSecretWriter | null {
   if (!hasAwsSandboxConfig(env)) {
     return null;
   }
@@ -1910,7 +2291,9 @@ function defaultSandboxSecretWriter(env: NodeJS.ProcessEnv): SandboxSecretWriter
 }
 
 function originAllowed(config: ControlPlaneConfig, origin: string) {
-  return config.corsAllowedOrigins.has(origin) || config.corsAllowedOrigins.has('*');
+  return (
+    config.corsAllowedOrigins.has(origin) || config.corsAllowedOrigins.has('*')
+  );
 }
 
 function registerCorsHooks(app: FastifyInstance, config: ControlPlaneConfig) {
@@ -1919,7 +2302,10 @@ function registerCorsHooks(app: FastifyInstance, config: ControlPlaneConfig) {
     if (typeof origin === 'string' && originAllowed(config, origin)) {
       reply.header('Access-Control-Allow-Origin', origin);
       reply.header('Vary', 'Origin');
-      reply.header('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+      reply.header(
+        'Access-Control-Allow-Methods',
+        'GET,POST,PATCH,DELETE,OPTIONS',
+      );
       reply.header(
         'Access-Control-Allow-Headers',
         'authorization,content-type,x-remote-codex-service-token',
@@ -1977,7 +2363,9 @@ export function buildControlPlaneApp(
   registerCorsHooks(app, config);
 
   const runtimeEnv = options.env ?? process.env;
-  const sandboxManager = options.sandboxManager ?? defaultSandboxManager(runtimeEnv, config.routerBaseUrl);
+  const sandboxManager =
+    options.sandboxManager ??
+    defaultSandboxManager(runtimeEnv, config.routerBaseUrl);
   const sandboxSecretWriter =
     options.sandboxSecretWriter !== undefined
       ? options.sandboxSecretWriter
@@ -2032,7 +2420,11 @@ export function buildControlPlaneApp(
     const input = emailPasswordAuthSchema.parse(request.body);
     const email = normalizeEmail(input.email);
     if (repository.getPasswordCredentialByEmail(email)) {
-      throw new HttpError(409, 'conflict', 'An account already exists for this email.');
+      throw new HttpError(
+        409,
+        'conflict',
+        'An account already exists for this email.',
+      );
     }
     const user =
       repository.getUserByEmail(email) ??
@@ -2058,10 +2450,19 @@ export function buildControlPlaneApp(
   });
 
   app.post('/api/auth/password/login', async (request) => {
-    const input = emailPasswordAuthSchema.omit({ displayName: true }).parse(request.body);
+    const input = emailPasswordAuthSchema
+      .omit({ displayName: true })
+      .parse(request.body);
     const credential = repository.getPasswordCredentialByEmail(input.email);
-    if (!credential || !verifyPassword(input.password, credential.passwordHash)) {
-      throw new HttpError(401, 'unauthorized', 'Email or password is incorrect.');
+    if (
+      !credential ||
+      !verifyPassword(input.password, credential.passwordHash)
+    ) {
+      throw new HttpError(
+        401,
+        'unauthorized',
+        'Email or password is incorrect.',
+      );
     }
     repository.markPasswordCredentialUsed(credential.id);
     const user = repository.getUserById(credential.userId);
@@ -2078,19 +2479,30 @@ export function buildControlPlaneApp(
   });
 
   app.get('/api/auth/oauth/:provider/start', async (request, reply) => {
-    const params = z.object({ provider: oauthProviderSchema }).parse(request.params);
-    const query = z.object({ returnTo: z.string().url().optional() }).parse(request.query);
+    const params = z
+      .object({ provider: oauthProviderSchema })
+      .parse(request.params);
+    const query = z
+      .object({ returnTo: z.string().url().optional() })
+      .parse(request.query);
     const state = oauthState(config, {
       provider: params.provider,
       returnTo: allowedOAuthReturnUrl(config, query.returnTo),
     });
     if (params.provider === 'google') {
       if (!config.googleClientId || !config.googleClientSecret) {
-        throw new HttpError(503, 'service_unavailable', 'Google login is not configured.');
+        throw new HttpError(
+          503,
+          'service_unavailable',
+          'Google login is not configured.',
+        );
       }
       const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
       url.searchParams.set('client_id', config.googleClientId);
-      url.searchParams.set('redirect_uri', controlPlaneCallbackUrl(config, 'google'));
+      url.searchParams.set(
+        'redirect_uri',
+        controlPlaneCallbackUrl(config, 'google'),
+      );
       url.searchParams.set('response_type', 'code');
       url.searchParams.set('scope', 'openid email profile');
       url.searchParams.set('state', state);
@@ -2099,18 +2511,27 @@ export function buildControlPlaneApp(
       return;
     }
     if (!config.githubClientId || !config.githubClientSecret) {
-      throw new HttpError(503, 'service_unavailable', 'GitHub login is not configured.');
+      throw new HttpError(
+        503,
+        'service_unavailable',
+        'GitHub login is not configured.',
+      );
     }
     const url = new URL('https://github.com/login/oauth/authorize');
     url.searchParams.set('client_id', config.githubClientId);
-    url.searchParams.set('redirect_uri', controlPlaneCallbackUrl(config, 'github'));
+    url.searchParams.set(
+      'redirect_uri',
+      controlPlaneCallbackUrl(config, 'github'),
+    );
     url.searchParams.set('scope', 'read:user user:email');
     url.searchParams.set('state', state);
     reply.redirect(url.toString());
   });
 
   app.get('/api/auth/oauth/:provider/callback', async (request, reply) => {
-    const params = z.object({ provider: oauthProviderSchema }).parse(request.params);
+    const params = z
+      .object({ provider: oauthProviderSchema })
+      .parse(request.params);
     const query = z
       .object({
         code: z.string().min(1).optional(),
@@ -2123,7 +2544,10 @@ export function buildControlPlaneApp(
       : frontendOAuthReturnUrl(config);
     const redirectUrl = new URL(returnTo ?? frontendOAuthReturnUrl(config));
     if (query.error || !query.code) {
-      redirectUrl.searchParams.set('auth_error', query.error ?? 'oauth_cancelled');
+      redirectUrl.searchParams.set(
+        'auth_error',
+        query.error ?? 'oauth_cancelled',
+      );
       reply.redirect(redirectUrl.toString());
       return;
     }
@@ -2135,7 +2559,10 @@ export function buildControlPlaneApp(
     const session = createProductSessionToken(config, user);
     redirectUrl.searchParams.set('control_plane_token', session.token);
     redirectUrl.searchParams.set('control_plane_expires_at', session.expiresAt);
-    redirectUrl.searchParams.set('control_plane_base_url', config.publicBaseUrl);
+    redirectUrl.searchParams.set(
+      'control_plane_base_url',
+      config.publicBaseUrl,
+    );
     reply.redirect(redirectUrl.toString());
   });
 
@@ -2161,7 +2588,12 @@ export function buildControlPlaneApp(
       ensureGateway(app, user, sandbox),
       ensureHarness(app, user, sandbox),
     ]);
-    return { user, sandbox, gatewayKey: redactGatewayKey(gatewayKey), harnessKey: redactHarnessKey(harnessKey) };
+    return {
+      user,
+      sandbox,
+      gatewayKey: redactGatewayKey(gatewayKey),
+      harnessKey: redactHarnessKey(harnessKey),
+    };
   });
 
   app.post('/api/me/bootstrap', async (request) => {
@@ -2193,7 +2625,12 @@ export function buildControlPlaneApp(
       ensureGateway(app, user, sandbox),
       ensureHarness(app, user, sandbox),
     ]);
-    return { user, sandbox, gatewayKey: redactGatewayKey(gatewayKey), harnessKey: redactHarnessKey(harnessKey) };
+    return {
+      user,
+      sandbox,
+      gatewayKey: redactGatewayKey(gatewayKey),
+      harnessKey: redactHarnessKey(harnessKey),
+    };
   });
 
   app.get('/api/me', async (request) => {
@@ -2250,7 +2687,9 @@ export function buildControlPlaneApp(
         limit: z.coerce.number().int().positive().max(500).default(100),
       })
       .parse(request.query);
-    return { events: repository.listHarnessUsageEventsForUser(user.id, query.limit) };
+    return {
+      events: repository.listHarnessUsageEventsForUser(user.id, query.limit),
+    };
   });
 
   app.get('/api/admin/users', async (request) => {
@@ -2268,7 +2707,9 @@ export function buildControlPlaneApp(
 
   app.patch('/api/admin/users/:userId', async (request) => {
     requireAdmin(app, request);
-    const params = z.object({ userId: z.string().uuid() }).parse(request.params);
+    const params = z
+      .object({ userId: z.string().uuid() })
+      .parse(request.params);
     const input = updateUserSchema.parse(request.body);
     const user = repository.updateUser(params.userId, input);
     if (!user) {
@@ -2296,7 +2737,10 @@ export function buildControlPlaneApp(
         source: input.events ? 'manual' : 'gateway',
         sourceCount: inputEvents.length,
         importedCount: events.length,
-        duplicateCount: Math.max(0, inputEvents.length - new Set(events.map((event) => event.id)).size),
+        duplicateCount: Math.max(
+          0,
+          inputEvents.length - new Set(events.map((event) => event.id)).size,
+        ),
         failureCount: 0,
         nextCursor: null,
       },
@@ -2305,7 +2749,9 @@ export function buildControlPlaneApp(
 
   app.post('/api/admin/usage/harness/import', async (request) => {
     requireAdmin(app, request);
-    const input = importUsageSchema.pick({ cursor: true, limit: true }).parse(request.body ?? {});
+    const input = importUsageSchema
+      .pick({ cursor: true, limit: true })
+      .parse(request.body ?? {});
     return importHarnessUsageBatch(app, {
       cursor: input.cursor ?? null,
       limit: input.limit ?? 100,
@@ -2314,18 +2760,28 @@ export function buildControlPlaneApp(
 
   app.get('/api/internal/sandboxes/:sandboxId/endpoint', async (request) => {
     requireInternalService(app, request);
-    const params = z.object({ sandboxId: z.string().uuid() }).parse(request.params);
+    const params = z
+      .object({ sandboxId: z.string().uuid() })
+      .parse(request.params);
     const query = z.object({ userId: z.string().uuid() }).parse(request.query);
     const sandbox = repository.getSandboxById(params.sandboxId);
     if (!sandbox || sandbox.userId !== query.userId) {
       throw new HttpError(404, 'not_found', 'Sandbox endpoint not found.');
     }
     if (sandbox.state !== 'running') {
-      throw new HttpError(409, 'sandbox_not_running', 'Sandbox is not running.');
+      throw new HttpError(
+        409,
+        'sandbox_not_running',
+        'Sandbox is not running.',
+      );
     }
     const workerBaseUrl = workerBaseUrlForSandbox(app, sandbox);
     if (!workerBaseUrl) {
-      throw new HttpError(409, 'worker_endpoint_unavailable', 'Sandbox worker endpoint is unavailable.');
+      throw new HttpError(
+        409,
+        'worker_endpoint_unavailable',
+        'Sandbox worker endpoint is unavailable.',
+      );
     }
     return {
       sandboxId: sandbox.id,
@@ -2336,32 +2792,60 @@ export function buildControlPlaneApp(
 
   app.post('/api/internal/sessions/:sessionId/checkpoint', async (request) => {
     requireInternalService(app, request);
-    const params = z.object({ sessionId: z.string().uuid() }).parse(request.params);
+    const params = z
+      .object({ sessionId: z.string().uuid() })
+      .parse(request.params);
     const input = checkpointSessionSchema.parse(request.body);
     const session = repository.getSessionById(params.sessionId);
     if (!session) {
-      repository.audit(input.userId, 'session.checkpoint_failed', 'session', params.sessionId, {
-        reason: 'session_not_found',
-        sandboxId: input.sandboxId,
-      });
+      repository.audit(
+        input.userId,
+        'session.checkpoint_failed',
+        'session',
+        params.sessionId,
+        {
+          reason: 'session_not_found',
+          sandboxId: input.sandboxId,
+        },
+      );
       throw new HttpError(404, 'not_found', 'Session not found.');
     }
     if (session.userId !== input.userId) {
-      repository.audit(session.userId, 'session.checkpoint_failed', 'session', session.id, {
-        reason: 'wrong_user',
-        expectedUserId: session.userId,
-        receivedUserId: input.userId,
-        sandboxId: input.sandboxId,
-      });
-      throw new HttpError(403, 'wrong_user', 'Checkpoint user does not match session owner.');
+      repository.audit(
+        session.userId,
+        'session.checkpoint_failed',
+        'session',
+        session.id,
+        {
+          reason: 'wrong_user',
+          expectedUserId: session.userId,
+          receivedUserId: input.userId,
+          sandboxId: input.sandboxId,
+        },
+      );
+      throw new HttpError(
+        403,
+        'wrong_user',
+        'Checkpoint user does not match session owner.',
+      );
     }
     if (session.sandboxId !== input.sandboxId) {
-      repository.audit(session.userId, 'session.checkpoint_failed', 'session', session.id, {
-        reason: 'wrong_sandbox',
-        expectedSandboxId: session.sandboxId,
-        receivedSandboxId: input.sandboxId,
-      });
-      throw new HttpError(403, 'wrong_sandbox', 'Checkpoint sandbox does not match session sandbox.');
+      repository.audit(
+        session.userId,
+        'session.checkpoint_failed',
+        'session',
+        session.id,
+        {
+          reason: 'wrong_sandbox',
+          expectedSandboxId: session.sandboxId,
+          receivedSandboxId: input.sandboxId,
+        },
+      );
+      throw new HttpError(
+        403,
+        'wrong_sandbox',
+        'Checkpoint sandbox does not match session sandbox.',
+      );
     }
     return {
       session: repository.checkpointSession(session.id, {
@@ -2379,25 +2863,43 @@ export function buildControlPlaneApp(
       throw new HttpError(404, 'not_found', 'Sandbox not found.');
     }
     if (sandbox.userId !== input.userId) {
-      repository.audit(sandbox.userId, 'harness.usage_record_failed', 'sandbox', sandbox.id, {
-        reason: 'wrong_user',
-        expectedUserId: sandbox.userId,
-        receivedUserId: input.userId,
-      });
-      throw new HttpError(403, 'wrong_user', 'Harness usage user does not match sandbox owner.');
+      repository.audit(
+        sandbox.userId,
+        'harness.usage_record_failed',
+        'sandbox',
+        sandbox.id,
+        {
+          reason: 'wrong_user',
+          expectedUserId: sandbox.userId,
+          receivedUserId: input.userId,
+        },
+      );
+      throw new HttpError(
+        403,
+        'wrong_user',
+        'Harness usage user does not match sandbox owner.',
+      );
     }
 
     let workspaceId = input.workspaceId ?? null;
     const sessionId = input.sessionId ?? null;
     if (workspaceId) {
       const workspace = repository.getWorkspaceById(workspaceId);
-      if (!workspace || workspace.userId !== input.userId || workspace.sandboxId !== input.sandboxId) {
+      if (
+        !workspace ||
+        workspace.userId !== input.userId ||
+        workspace.sandboxId !== input.sandboxId
+      ) {
         throw new HttpError(404, 'not_found', 'Workspace not found.');
       }
     }
     if (sessionId) {
       const session = repository.getSessionById(sessionId);
-      if (!session || session.userId !== input.userId || session.sandboxId !== input.sandboxId) {
+      if (
+        !session ||
+        session.userId !== input.userId ||
+        session.sandboxId !== input.sandboxId
+      ) {
         throw new HttpError(404, 'not_found', 'Session not found.');
       }
       workspaceId = workspaceId ?? session.workspaceId;
@@ -2436,17 +2938,29 @@ export function buildControlPlaneApp(
       throw new HttpError(404, 'not_found', 'Sandbox not found.');
     }
     if (sandbox.userId !== input.userId) {
-      throw new HttpError(403, 'wrong_user', 'Harness quota user does not match sandbox owner.');
+      throw new HttpError(
+        403,
+        'wrong_user',
+        'Harness quota user does not match sandbox owner.',
+      );
     }
     if (input.workspaceId) {
       const workspace = repository.getWorkspaceById(input.workspaceId);
-      if (!workspace || workspace.userId !== input.userId || workspace.sandboxId !== input.sandboxId) {
+      if (
+        !workspace ||
+        workspace.userId !== input.userId ||
+        workspace.sandboxId !== input.sandboxId
+      ) {
         throw new HttpError(404, 'not_found', 'Workspace not found.');
       }
     }
     if (input.sessionId) {
       const session = repository.getSessionById(input.sessionId);
-      if (!session || session.userId !== input.userId || session.sandboxId !== input.sandboxId) {
+      if (
+        !session ||
+        session.userId !== input.userId ||
+        session.sandboxId !== input.sandboxId
+      ) {
         throw new HttpError(404, 'not_found', 'Session not found.');
       }
     }
@@ -2454,10 +2968,14 @@ export function buildControlPlaneApp(
     if (!user) {
       throw new HttpError(404, 'not_found', 'User not found.');
     }
-    const quota = checkHarnessQuota(user, repository.harnessUsageSummaryForUser(user.id), {
-      computeUnits: input.estimatedComputeUnits ?? null,
-      costUsd: input.estimatedCostUsd ?? null,
-    });
+    const quota = checkHarnessQuota(
+      user,
+      repository.harnessUsageSummaryForUser(user.id),
+      {
+        computeUnits: input.estimatedComputeUnits ?? null,
+        costUsd: input.estimatedCostUsd ?? null,
+      },
+    );
     return quota;
   });
 
@@ -2503,7 +3021,9 @@ export function buildControlPlaneApp(
 
   app.get('/api/admin/sandboxes/:sandboxId', async (request) => {
     requireAdmin(app, request);
-    const params = z.object({ sandboxId: z.string().uuid() }).parse(request.params);
+    const params = z
+      .object({ sandboxId: z.string().uuid() })
+      .parse(request.params);
     const sandbox = repository.getSandboxById(params.sandboxId);
     if (!sandbox) {
       throw new HttpError(404, 'not_found', 'Sandbox not found.');
@@ -2533,7 +3053,9 @@ export function buildControlPlaneApp(
 
   app.post('/api/admin/sandboxes/:sandboxId/force-stop', async (request) => {
     const admin = requireAdmin(app, request);
-    const params = z.object({ sandboxId: z.string().uuid() }).parse(request.params);
+    const params = z
+      .object({ sandboxId: z.string().uuid() })
+      .parse(request.params);
     const input = adminSandboxReasonSchema.parse(request.body ?? {});
     const sandbox = repository.getSandboxById(params.sandboxId);
     if (!sandbox) {
@@ -2546,7 +3068,10 @@ export function buildControlPlaneApp(
     return {
       sandbox: repository.updateSandboxState(sandbox.id, {
         ...result,
-        statusReason: input.reason ?? result.statusReason ?? 'force-stopped by administrator',
+        statusReason:
+          input.reason ??
+          result.statusReason ??
+          'force-stopped by administrator',
         auditMetadata: {
           operatorUserId: admin.id,
           operatorIdentity: identityKey(admin.authProvider, admin.authSubject),
@@ -2559,40 +3084,50 @@ export function buildControlPlaneApp(
 
   app.post('/api/admin/sandboxes/:sandboxId/restart', async (request) => {
     const admin = requireAdmin(app, request);
-    const params = z.object({ sandboxId: z.string().uuid() }).parse(request.params);
+    const params = z
+      .object({ sandboxId: z.string().uuid() })
+      .parse(request.params);
     const input = adminSandboxReasonSchema.parse(request.body ?? {});
     const sandbox = repository.getSandboxById(params.sandboxId);
     if (!sandbox) {
       throw new HttpError(404, 'not_found', 'Sandbox not found.');
     }
-    const runtimeSandbox = repository.patchSandbox(sandbox.id, {
-      image: config.sandboxDefaultImage,
-      region: config.sandboxDefaultRegion,
-      resourceProfile: config.sandboxDefaultResourceProfile,
-    }) ?? sandbox;
+    const runtimeSandbox =
+      repository.patchSandbox(sandbox.id, {
+        image: config.sandboxDefaultImage,
+        region: config.sandboxDefaultRegion,
+        resourceProfile: config.sandboxDefaultResourceProfile,
+      }) ?? sandbox;
     const sandboxUser = repository.getUserById(runtimeSandbox.userId);
     if (!sandboxUser) {
       throw new HttpError(409, 'user_missing', 'Sandbox user is missing.');
     }
+    await ensureGateway(app, sandboxUser, runtimeSandbox);
     await ensureHarness(app, sandboxUser, runtimeSandbox);
-    const result = await app.services.sandboxManager.restartSandbox({
-      sandboxId: runtimeSandbox.id,
-      userId: runtimeSandbox.userId,
-      image: runtimeSandbox.image,
-      region: runtimeSandbox.region,
-      s3Prefix: runtimeSandbox.s3Prefix,
-      enabledAgentProviders: config.sandboxWorkerEnabledAgentProviders,
-      gateway: gatewayStartInput(app, runtimeSandbox),
-      harness: harnessStartInput(app),
-    }).catch((error: unknown) => {
-      if (error instanceof SandboxManagerError) {
-        throw error;
-      }
-      throw new SandboxManagerError('provider', sandboxLifecycleErrorMessage('restart', error));
-    });
+    const result = await app.services.sandboxManager
+      .restartSandbox({
+        sandboxId: runtimeSandbox.id,
+        userId: runtimeSandbox.userId,
+        image: runtimeSandbox.image,
+        region: runtimeSandbox.region,
+        s3Prefix: runtimeSandbox.s3Prefix,
+        enabledAgentProviders: config.sandboxWorkerEnabledAgentProviders,
+        gateway: gatewayStartInput(app, runtimeSandbox),
+        harness: harnessStartInput(app),
+      })
+      .catch((error: unknown) => {
+        if (error instanceof SandboxManagerError) {
+          throw error;
+        }
+        throw new SandboxManagerError(
+          'provider',
+          sandboxLifecycleErrorMessage('restart', error),
+        );
+      });
     const updatedSandbox = repository.updateSandboxState(runtimeSandbox.id, {
       ...result,
-      statusReason: input.reason ?? result.statusReason ?? 'restarted by administrator',
+      statusReason:
+        input.reason ?? result.statusReason ?? 'restarted by administrator',
       auditMetadata: {
         operatorUserId: admin.id,
         operatorIdentity: identityKey(admin.authProvider, admin.authSubject),
@@ -2612,155 +3147,209 @@ export function buildControlPlaneApp(
     };
   });
 
-  app.post('/api/admin/sandboxes/:sandboxId/gateway-key/rotate', async (request) => {
-    requireAdmin(app, request);
-    const params = z.object({ sandboxId: z.string().uuid() }).parse(request.params);
-    const { sandbox, gatewayKey, gatewayUser } = requireGatewayKeyContext(app, params.sandboxId);
-    const rotated = await app.services.llmGatewayAdmin.rotateSandboxKey({
-      userId: sandbox.userId,
-      sandboxId: sandbox.id,
-      externalUserId: gatewayUser.externalUserId,
-      externalKeyId: gatewayKey.externalKeyId,
-    });
-    return {
-      gatewayKey: redactGatewayKey(
-        repository.updateGatewayKeyRotation({
-          sandboxId: sandbox.id,
-          provider: gatewayKey.provider,
-          externalKeyId: rotated.externalKeyId,
-          keyCiphertext: rotated.keyCiphertext ?? null,
-        }),
-      ),
-    };
-  });
+  app.post(
+    '/api/admin/sandboxes/:sandboxId/gateway-key/rotate',
+    async (request) => {
+      requireAdmin(app, request);
+      const params = z
+        .object({ sandboxId: z.string().uuid() })
+        .parse(request.params);
+      const { sandbox, gatewayKey, gatewayUser } = requireGatewayKeyContext(
+        app,
+        params.sandboxId,
+      );
+      const rotated = await app.services.llmGatewayAdmin.rotateSandboxKey({
+        userId: sandbox.userId,
+        sandboxId: sandbox.id,
+        externalUserId: gatewayUser.externalUserId,
+        externalKeyId: gatewayKey.externalKeyId,
+        groupId: config.llmGatewayGroupId,
+      });
+      await ensureSandboxGatewaySecret(app, {
+        keyId: rotated.externalKeyId,
+        apiKey: rotated.keyCiphertext ?? null,
+      });
+      return {
+        gatewayKey: redactGatewayKey(
+          repository.updateGatewayKeyRotation({
+            sandboxId: sandbox.id,
+            provider: gatewayKey.provider,
+            externalKeyId: rotated.externalKeyId,
+            keyCiphertext: rotated.keyCiphertext ?? null,
+          }),
+        ),
+      };
+    },
+  );
 
-  app.post('/api/admin/sandboxes/:sandboxId/gateway-key/revoke', async (request) => {
-    requireAdmin(app, request);
-    const params = z.object({ sandboxId: z.string().uuid() }).parse(request.params);
-    const { sandbox, gatewayKey, gatewayUser } = requireGatewayKeyContext(app, params.sandboxId);
-    await app.services.llmGatewayAdmin.revokeSandboxKey({
-      userId: sandbox.userId,
-      sandboxId: sandbox.id,
-      externalUserId: gatewayUser.externalUserId,
-      externalKeyId: gatewayKey.externalKeyId,
-    });
-    return {
-      gatewayKey: redactGatewayKey(
-        repository.revokeGatewayKey({
-          sandboxId: sandbox.id,
-          provider: gatewayKey.provider,
-        }),
-      ),
-    };
-  });
+  app.post(
+    '/api/admin/sandboxes/:sandboxId/gateway-key/revoke',
+    async (request) => {
+      requireAdmin(app, request);
+      const params = z
+        .object({ sandboxId: z.string().uuid() })
+        .parse(request.params);
+      const { sandbox, gatewayKey, gatewayUser } = requireGatewayKeyContext(
+        app,
+        params.sandboxId,
+      );
+      await app.services.llmGatewayAdmin.revokeSandboxKey({
+        userId: sandbox.userId,
+        sandboxId: sandbox.id,
+        externalUserId: gatewayUser.externalUserId,
+        externalKeyId: gatewayKey.externalKeyId,
+      });
+      return {
+        gatewayKey: redactGatewayKey(
+          repository.revokeGatewayKey({
+            sandboxId: sandbox.id,
+            provider: gatewayKey.provider,
+          }),
+        ),
+      };
+    },
+  );
 
-  app.post('/api/admin/sandboxes/:sandboxId/gateway-key/reconcile', async (request) => {
-    requireAdmin(app, request);
-    const params = z.object({ sandboxId: z.string().uuid() }).parse(request.params);
-    const sandbox = repository.getSandboxById(params.sandboxId);
-    if (!sandbox) {
-      throw new HttpError(404, 'not_found', 'Sandbox not found.');
-    }
-    const user = repository.getUserById(sandbox.userId);
-    if (!user) {
-      throw new HttpError(409, 'user_missing', 'Sandbox user is missing.');
-    }
-    const gatewayUser = await app.services.llmGatewayAdmin.ensureUser({
-      userId: user.id,
-      email: user.email,
-      displayName: user.displayName,
-    });
-    repository.upsertGatewayUser({
-      userId: user.id,
-      provider: config.llmGatewayProvider,
-      externalUserId: gatewayUser.externalUserId,
-    });
-    const existingGatewayKey = repository.getGatewayKeyForSandbox(sandbox.id);
-    const reconciled = await app.services.llmGatewayAdmin.reconcileSandboxKey({
-      userId: user.id,
-      sandboxId: sandbox.id,
-      externalUserId: gatewayUser.externalUserId,
-      externalKeyId: existingGatewayKey?.externalKeyId ?? null,
-    });
-    const gatewayKey = existingGatewayKey
-      ? repository.updateGatewayKeyRotation({
-          sandboxId: sandbox.id,
-          provider: existingGatewayKey.provider,
-          externalKeyId: reconciled.externalKeyId,
-          keyCiphertext: reconciled.keyCiphertext ?? null,
-        })
-      : repository.upsertGatewayKey({
+  app.post(
+    '/api/admin/sandboxes/:sandboxId/gateway-key/reconcile',
+    async (request) => {
+      requireAdmin(app, request);
+      const params = z
+        .object({ sandboxId: z.string().uuid() })
+        .parse(request.params);
+      const sandbox = repository.getSandboxById(params.sandboxId);
+      if (!sandbox) {
+        throw new HttpError(404, 'not_found', 'Sandbox not found.');
+      }
+      const user = repository.getUserById(sandbox.userId);
+      if (!user) {
+        throw new HttpError(409, 'user_missing', 'Sandbox user is missing.');
+      }
+      const gatewayUser = await app.services.llmGatewayAdmin.ensureUser({
+        userId: user.id,
+        email: user.email,
+        displayName: user.displayName,
+      });
+      repository.upsertGatewayUser({
+        userId: user.id,
+        provider: config.llmGatewayProvider,
+        externalUserId: gatewayUser.externalUserId,
+      });
+      const existingGatewayKey = repository.getGatewayKeyForSandbox(sandbox.id);
+      const reconciled = await app.services.llmGatewayAdmin.reconcileSandboxKey(
+        {
           userId: user.id,
           sandboxId: sandbox.id,
-          provider: config.llmGatewayProvider,
-          externalKeyId: reconciled.externalKeyId,
-          keyCiphertext: reconciled.keyCiphertext ?? null,
-        });
-    return { gatewayKey: redactGatewayKey(gatewayKey) };
-  });
+          externalUserId: gatewayUser.externalUserId,
+          externalKeyId: existingGatewayKey?.externalKeyId ?? null,
+          groupId: config.llmGatewayGroupId,
+        },
+      );
+      await ensureSandboxGatewaySecret(app, {
+        keyId: reconciled.externalKeyId,
+        apiKey: reconciled.keyCiphertext ?? null,
+      });
+      const gatewayKey = existingGatewayKey
+        ? repository.updateGatewayKeyRotation({
+            sandboxId: sandbox.id,
+            provider: existingGatewayKey.provider,
+            externalKeyId: reconciled.externalKeyId,
+            keyCiphertext: reconciled.keyCiphertext ?? null,
+          })
+        : repository.upsertGatewayKey({
+            userId: user.id,
+            sandboxId: sandbox.id,
+            provider: config.llmGatewayProvider,
+            externalKeyId: reconciled.externalKeyId,
+            keyCiphertext: reconciled.keyCiphertext ?? null,
+          });
+      return { gatewayKey: redactGatewayKey(gatewayKey) };
+    },
+  );
 
-  app.post('/api/admin/sandboxes/:sandboxId/harness-key/rotate', async (request) => {
-    requireAdmin(app, request);
-    const params = z.object({ sandboxId: z.string().uuid() }).parse(request.params);
-    const { sandbox, harnessKey, harnessUser } = requireHarnessKeyContext(app, params.sandboxId);
-    const rotated = await app.services.harnessAdmin.rotateSandboxKey({
-      userId: sandbox.userId,
-      sandboxId: sandbox.id,
-      externalUserId: harnessUser.externalUserId,
-      externalKeyId: harnessKey.externalKeyId,
-    });
-    const secretBinding = await ensureSandboxHarnessSecret(app, {
-      sandboxId: sandbox.id,
-      apiKey: rotated.apiKey,
-    });
-    return {
-      harnessKey: redactHarnessKey(
-        repository.updateHarnessKeyRotation({
-          sandboxId: sandbox.id,
-          provider: harnessKey.provider,
-          externalKeyId: rotated.externalKeyId,
-          keyCiphertext: rotated.keyCiphertext ?? null,
-          secretName: secretBinding?.secretName ?? harnessKey.secretName,
-          secretKey: secretBinding?.secretKey ?? harnessKey.secretKey,
-        }),
-      ),
-    };
-  });
+  app.post(
+    '/api/admin/sandboxes/:sandboxId/harness-key/rotate',
+    async (request) => {
+      requireAdmin(app, request);
+      const params = z
+        .object({ sandboxId: z.string().uuid() })
+        .parse(request.params);
+      const { sandbox, harnessKey, harnessUser } = requireHarnessKeyContext(
+        app,
+        params.sandboxId,
+      );
+      const rotated = await app.services.harnessAdmin.rotateSandboxKey({
+        userId: sandbox.userId,
+        sandboxId: sandbox.id,
+        externalUserId: harnessUser.externalUserId,
+        externalKeyId: harnessKey.externalKeyId,
+      });
+      const secretBinding = await ensureSandboxHarnessSecret(app, {
+        sandboxId: sandbox.id,
+        apiKey: rotated.apiKey,
+      });
+      return {
+        harnessKey: redactHarnessKey(
+          repository.updateHarnessKeyRotation({
+            sandboxId: sandbox.id,
+            provider: harnessKey.provider,
+            externalKeyId: rotated.externalKeyId,
+            keyCiphertext: rotated.keyCiphertext ?? null,
+            secretName: secretBinding?.secretName ?? harnessKey.secretName,
+            secretKey: secretBinding?.secretKey ?? harnessKey.secretKey,
+          }),
+        ),
+      };
+    },
+  );
 
-  app.post('/api/admin/sandboxes/:sandboxId/harness-key/revoke', async (request) => {
-    requireAdmin(app, request);
-    const params = z.object({ sandboxId: z.string().uuid() }).parse(request.params);
-    const { sandbox, harnessKey, harnessUser } = requireHarnessKeyContext(app, params.sandboxId);
-    await app.services.harnessAdmin.revokeSandboxKey({
-      userId: sandbox.userId,
-      sandboxId: sandbox.id,
-      externalUserId: harnessUser.externalUserId,
-      externalKeyId: harnessKey.externalKeyId,
-    });
-    return {
-      harnessKey: redactHarnessKey(
-        repository.revokeHarnessKey({
-          sandboxId: sandbox.id,
-          provider: harnessKey.provider,
-        }),
-      ),
-    };
-  });
+  app.post(
+    '/api/admin/sandboxes/:sandboxId/harness-key/revoke',
+    async (request) => {
+      requireAdmin(app, request);
+      const params = z
+        .object({ sandboxId: z.string().uuid() })
+        .parse(request.params);
+      const { sandbox, harnessKey, harnessUser } = requireHarnessKeyContext(
+        app,
+        params.sandboxId,
+      );
+      await app.services.harnessAdmin.revokeSandboxKey({
+        userId: sandbox.userId,
+        sandboxId: sandbox.id,
+        externalUserId: harnessUser.externalUserId,
+        externalKeyId: harnessKey.externalKeyId,
+      });
+      return {
+        harnessKey: redactHarnessKey(
+          repository.revokeHarnessKey({
+            sandboxId: sandbox.id,
+            provider: harnessKey.provider,
+          }),
+        ),
+      };
+    },
+  );
 
-  app.post('/api/admin/sandboxes/:sandboxId/harness-key/reconcile', async (request) => {
-    requireAdmin(app, request);
-    const params = z.object({ sandboxId: z.string().uuid() }).parse(request.params);
-    const sandbox = repository.getSandboxById(params.sandboxId);
-    if (!sandbox) {
-      throw new HttpError(404, 'not_found', 'Sandbox not found.');
-    }
-    const user = repository.getUserById(sandbox.userId);
-    if (!user) {
-      throw new HttpError(409, 'user_missing', 'Sandbox user is missing.');
-    }
-    const harnessKey = await ensureHarness(app, user, sandbox);
-    return { harnessKey: redactHarnessKey(harnessKey) };
-  });
+  app.post(
+    '/api/admin/sandboxes/:sandboxId/harness-key/reconcile',
+    async (request) => {
+      requireAdmin(app, request);
+      const params = z
+        .object({ sandboxId: z.string().uuid() })
+        .parse(request.params);
+      const sandbox = repository.getSandboxById(params.sandboxId);
+      if (!sandbox) {
+        throw new HttpError(404, 'not_found', 'Sandbox not found.');
+      }
+      const user = repository.getUserById(sandbox.userId);
+      if (!user) {
+        throw new HttpError(409, 'user_missing', 'Sandbox user is missing.');
+      }
+      const harnessKey = await ensureHarness(app, user, sandbox);
+      return { harnessKey: redactHarnessKey(harnessKey) };
+    },
+  );
 
   app.get('/api/sandbox', async (request) => {
     const user = requireUser(app, request);
@@ -2810,7 +3399,9 @@ export function buildControlPlaneApp(
 
   app.get('/api/sandbox/harness/modules/:module/tools', async (request) => {
     const user = requireUser(app, request);
-    const params = z.object({ module: harnessModuleSchema }).parse(request.params);
+    const params = z
+      .object({ module: harnessModuleSchema })
+      .parse(request.params);
     const sandbox = repository.getSandboxByUserId(user.id);
     if (!sandbox) {
       throw new HttpError(404, 'not_found', 'Sandbox not found.');
@@ -2824,7 +3415,9 @@ export function buildControlPlaneApp(
 
   app.get('/api/sandbox/harness/modules/:module/help', async (request) => {
     const user = requireUser(app, request);
-    const params = z.object({ module: harnessModuleSchema }).parse(request.params);
+    const params = z
+      .object({ module: harnessModuleSchema })
+      .parse(request.params);
     const sandbox = repository.getSandboxByUserId(user.id);
     if (!sandbox) {
       throw new HttpError(404, 'not_found', 'Sandbox not found.');
@@ -2838,7 +3431,9 @@ export function buildControlPlaneApp(
 
   app.get('/api/sandbox/harness/modules/:module/runs', async (request) => {
     const user = requireUser(app, request);
-    const params = z.object({ module: harnessModuleSchema }).parse(request.params);
+    const params = z
+      .object({ module: harnessModuleSchema })
+      .parse(request.params);
     const sandbox = repository.getSandboxByUserId(user.id);
     if (!sandbox) {
       throw new HttpError(404, 'not_found', 'Sandbox not found.');
@@ -2850,146 +3445,204 @@ export function buildControlPlaneApp(
     });
   });
 
-  app.get('/api/sandbox/harness/modules/:module/runs/:runId', async (request) => {
-    const user = requireUser(app, request);
-    const params = z.object({
-      module: harnessModuleSchema,
-      runId: harnessRunIdSchema,
-    }).parse(request.params);
-    const sandbox = repository.getSandboxByUserId(user.id);
-    if (!sandbox) {
-      throw new HttpError(404, 'not_found', 'Sandbox not found.');
-    }
-    return sendWorkerHarnessRequest(app, {
-      sandbox,
-      userId: user.id,
-      path: `/api/harness/modules/${encodeURIComponent(params.module)}/runs/${encodeURIComponent(params.runId)}`,
-    });
-  });
-
-  app.get('/api/sandbox/harness/modules/:module/runs/:runId/artifacts', async (request) => {
-    const user = requireUser(app, request);
-    const params = z.object({
-      module: harnessModuleSchema,
-      runId: harnessRunIdSchema,
-    }).parse(request.params);
-    const sandbox = repository.getSandboxByUserId(user.id);
-    if (!sandbox) {
-      throw new HttpError(404, 'not_found', 'Sandbox not found.');
-    }
-    return sendWorkerHarnessRequest(app, {
-      sandbox,
-      userId: user.id,
-      path: `/api/harness/modules/${encodeURIComponent(params.module)}/runs/${encodeURIComponent(params.runId)}/artifacts`,
-    });
-  });
-
-  app.get('/api/sandbox/harness/modules/:module/runs/:runId/download.zip', async (request, reply) => {
-    const user = requireUser(app, request);
-    const params = z.object({
-      module: harnessModuleSchema,
-      runId: harnessRunIdSchema,
-    }).parse(request.params);
-    const sandbox = repository.getSandboxByUserId(user.id);
-    if (!sandbox) {
-      throw new HttpError(404, 'not_found', 'Sandbox not found.');
-    }
-    const artifact = await sendWorkerHarnessDownloadRequest(app, {
-      sandbox,
-      userId: user.id,
-      path: `/api/harness/modules/${encodeURIComponent(params.module)}/runs/${encodeURIComponent(params.runId)}/download.zip`,
-    });
-    reply.header('content-type', artifact.contentType);
-    reply.header(
-      'content-disposition',
-      artifact.contentDisposition ?? `attachment; filename="${params.module}-${params.runId}-artifacts.zip"`,
-    );
-    return reply.send(artifact.body);
-  });
-
-  app.post('/api/sandbox/harness/modules/:module/tools/:tool/invoke', async (request) => {
-    const user = requireUser(app, request);
-    const params = z.object({
-      module: harnessModuleSchema,
-      tool: z.string().trim().min(1).max(160).regex(/^[a-zA-Z0-9_-]+$/),
-    }).parse(request.params);
-    const body = harnessInvokeSchema.parse(request.body ?? {});
-    const sandbox = repository.getSandboxByUserId(user.id);
-    if (!sandbox) {
-      throw new HttpError(404, 'not_found', 'Sandbox not found.');
-    }
-    let workspaceId = body.workspaceId ?? null;
-    let sessionId = body.sessionId ?? null;
-    if (workspaceId) {
-      const workspace = repository.getWorkspaceById(workspaceId);
-      if (!workspace || workspace.userId !== user.id || workspace.sandboxId !== sandbox.id) {
-        throw new HttpError(404, 'not_found', 'Workspace not found.');
+  app.get(
+    '/api/sandbox/harness/modules/:module/runs/:runId',
+    async (request) => {
+      const user = requireUser(app, request);
+      const params = z
+        .object({
+          module: harnessModuleSchema,
+          runId: harnessRunIdSchema,
+        })
+        .parse(request.params);
+      const sandbox = repository.getSandboxByUserId(user.id);
+      if (!sandbox) {
+        throw new HttpError(404, 'not_found', 'Sandbox not found.');
       }
-    }
-    if (sessionId) {
-      const session = repository.getSessionById(sessionId);
-      if (!session || session.userId !== user.id || session.sandboxId !== sandbox.id) {
-        throw new HttpError(404, 'not_found', 'Session not found.');
-      }
-      workspaceId = workspaceId ?? session.workspaceId;
-    }
-    const quota = checkHarnessQuota(user, repository.harnessUsageSummaryForUser(user.id), {
-      computeUnits: body.estimatedComputeUnits ?? null,
-      costUsd: body.estimatedCostUsd ?? null,
-    });
-    if (!quota.allowed) {
-      throw quotaExceededError(quota.denial!);
-    }
-    const payload = await sendWorkerJsonRequest(app, {
-      ...workerProxyBaseUrl(app, {
+      return sendWorkerHarnessRequest(app, {
         sandbox,
         userId: user.id,
-        workspaceId,
-        sessionId,
-        scopes: ['worker:read', 'worker:write'],
-      }),
-      path: `/api/harness/modules/${encodeURIComponent(params.module)}/tools/${encodeURIComponent(params.tool)}/invoke`,
-      body: {
-        ...body.input,
-        _remoteCodexContext: {
+        path: `/api/harness/modules/${encodeURIComponent(params.module)}/runs/${encodeURIComponent(params.runId)}`,
+      });
+    },
+  );
+
+  app.get(
+    '/api/sandbox/harness/modules/:module/runs/:runId/artifacts',
+    async (request) => {
+      const user = requireUser(app, request);
+      const params = z
+        .object({
+          module: harnessModuleSchema,
+          runId: harnessRunIdSchema,
+        })
+        .parse(request.params);
+      const sandbox = repository.getSandboxByUserId(user.id);
+      if (!sandbox) {
+        throw new HttpError(404, 'not_found', 'Sandbox not found.');
+      }
+      return sendWorkerHarnessRequest(app, {
+        sandbox,
+        userId: user.id,
+        path: `/api/harness/modules/${encodeURIComponent(params.module)}/runs/${encodeURIComponent(params.runId)}/artifacts`,
+      });
+    },
+  );
+
+  app.get(
+    '/api/sandbox/harness/modules/:module/runs/:runId/download.zip',
+    async (request, reply) => {
+      const user = requireUser(app, request);
+      const params = z
+        .object({
+          module: harnessModuleSchema,
+          runId: harnessRunIdSchema,
+        })
+        .parse(request.params);
+      const sandbox = repository.getSandboxByUserId(user.id);
+      if (!sandbox) {
+        throw new HttpError(404, 'not_found', 'Sandbox not found.');
+      }
+      const artifact = await sendWorkerHarnessDownloadRequest(app, {
+        sandbox,
+        userId: user.id,
+        path: `/api/harness/modules/${encodeURIComponent(params.module)}/runs/${encodeURIComponent(params.runId)}/download.zip`,
+      });
+      reply.header('content-type', artifact.contentType);
+      reply.header(
+        'content-disposition',
+        artifact.contentDisposition ??
+          `attachment; filename="${params.module}-${params.runId}-artifacts.zip"`,
+      );
+      return reply.send(artifact.body);
+    },
+  );
+
+  app.post(
+    '/api/sandbox/harness/modules/:module/tools/:tool/invoke',
+    async (request) => {
+      const user = requireUser(app, request);
+      const params = z
+        .object({
+          module: harnessModuleSchema,
+          tool: z
+            .string()
+            .trim()
+            .min(1)
+            .max(160)
+            .regex(/^[a-zA-Z0-9_-]+$/),
+        })
+        .parse(request.params);
+      const body = harnessInvokeSchema.parse(request.body ?? {});
+      const sandbox = repository.getSandboxByUserId(user.id);
+      if (!sandbox) {
+        throw new HttpError(404, 'not_found', 'Sandbox not found.');
+      }
+      let workspaceId = body.workspaceId ?? null;
+      let sessionId = body.sessionId ?? null;
+      if (workspaceId) {
+        const workspace = repository.getWorkspaceById(workspaceId);
+        if (
+          !workspace ||
+          workspace.userId !== user.id ||
+          workspace.sandboxId !== sandbox.id
+        ) {
+          throw new HttpError(404, 'not_found', 'Workspace not found.');
+        }
+      }
+      if (sessionId) {
+        const session = repository.getSessionById(sessionId);
+        if (
+          !session ||
+          session.userId !== user.id ||
+          session.sandboxId !== sandbox.id
+        ) {
+          throw new HttpError(404, 'not_found', 'Session not found.');
+        }
+        workspaceId = workspaceId ?? session.workspaceId;
+      }
+      const quota = checkHarnessQuota(
+        user,
+        repository.harnessUsageSummaryForUser(user.id),
+        {
+          computeUnits: body.estimatedComputeUnits ?? null,
+          costUsd: body.estimatedCostUsd ?? null,
+        },
+      );
+      if (!quota.allowed) {
+        throw quotaExceededError(quota.denial!);
+      }
+      const payload = await sendWorkerJsonRequest(app, {
+        ...workerProxyBaseUrl(app, {
+          sandbox,
+          userId: user.id,
           workspaceId,
           sessionId,
-          recordUsage: false,
-          estimatedComputeUnits: body.estimatedComputeUnits ?? null,
-          estimatedCostUsd: body.estimatedCostUsd ?? null,
+          scopes: ['worker:read', 'worker:write'],
+        }),
+        path: `/api/harness/modules/${encodeURIComponent(params.module)}/tools/${encodeURIComponent(params.tool)}/invoke`,
+        body: {
+          ...body.input,
+          _remoteCodexContext: {
+            workspaceId,
+            sessionId,
+            recordUsage: false,
+            estimatedComputeUnits: body.estimatedComputeUnits ?? null,
+            estimatedCostUsd: body.estimatedCostUsd ?? null,
+          },
         },
-      },
-      workerIdentity: {
+        workerIdentity: {
+          userId: user.id,
+          sandboxId: sandbox.id,
+          scopes: ['worker:write'],
+        },
+        failureCode: 'harness_unavailable',
+        fallbackMessage: 'Worker Harness tool invocation failed',
+      });
+      const result = payloadObject(payload);
+      const externalEventId =
+        body.externalEventId ??
+        recordField(result, [
+          'event_id',
+          'eventId',
+          'request_id',
+          'requestId',
+        ]) ??
+        recordField(result, ['run_id', 'runId', 'job_id', 'jobId']);
+      const event = repository.recordHarnessUsageEvent({
         userId: user.id,
         sandboxId: sandbox.id,
-        scopes: ['worker:write'],
-      },
-      failureCode: 'harness_unavailable',
-      fallbackMessage: 'Worker Harness tool invocation failed',
-    });
-    const result = payloadObject(payload);
-    const externalEventId =
-      body.externalEventId ??
-      recordField(result, ['event_id', 'eventId', 'request_id', 'requestId']) ??
-      recordField(result, ['run_id', 'runId', 'job_id', 'jobId']);
-    const event = repository.recordHarnessUsageEvent({
-      userId: user.id,
-      sandboxId: sandbox.id,
-      workspaceId,
-      sessionId,
-      provider: config.harnessProvider,
-      module: params.module,
-      tool: params.tool,
-      runId: recordField(result, ['run_id', 'runId']),
-      jobId: recordField(result, ['job_id', 'jobId', 'compute_job_id', 'computeJobId']),
-      externalEventId,
-      computeUnits: numberField(result, ['compute_units', 'computeUnits', 'worker_observed_seconds', 'workerObservedSeconds']),
-      costUsd: numberField(result, ['cost_usd', 'costUsd', 'estimated_cost_usd', 'estimatedCostUsd']),
-      status: recordField(result, ['status', 'state']) ?? 'unknown',
-      metadata: harnessUsageMetadata(payload),
-    });
-    return { result: payload, harnessUsageEvent: event };
-  });
+        workspaceId,
+        sessionId,
+        provider: config.harnessProvider,
+        module: params.module,
+        tool: params.tool,
+        runId: recordField(result, ['run_id', 'runId']),
+        jobId: recordField(result, [
+          'job_id',
+          'jobId',
+          'compute_job_id',
+          'computeJobId',
+        ]),
+        externalEventId,
+        computeUnits: numberField(result, [
+          'compute_units',
+          'computeUnits',
+          'worker_observed_seconds',
+          'workerObservedSeconds',
+        ]),
+        costUsd: numberField(result, [
+          'cost_usd',
+          'costUsd',
+          'estimated_cost_usd',
+          'estimatedCostUsd',
+        ]),
+        status: recordField(result, ['status', 'state']) ?? 'unknown',
+        metadata: harnessUsageMetadata(payload),
+      });
+      return { result: payload, harnessUsageEvent: event };
+    },
+  );
 
   app.post('/api/sandbox/start', async (request) => {
     return withSandboxLifecycleError('start', async () => {
@@ -3000,28 +3653,38 @@ export function buildControlPlaneApp(
         resourceProfile: config.sandboxDefaultResourceProfile,
         s3PrefixBase: config.sandboxS3PrefixBase,
       });
-      const runtimeSandbox = repository.patchSandbox(sandbox.id, {
-        image: config.sandboxDefaultImage,
-        region: config.sandboxDefaultRegion,
-        resourceProfile: config.sandboxDefaultResourceProfile,
-      }) ?? sandbox;
+      const runtimeSandbox =
+        repository.patchSandbox(sandbox.id, {
+          image: config.sandboxDefaultImage,
+          region: config.sandboxDefaultRegion,
+          resourceProfile: config.sandboxDefaultResourceProfile,
+        }) ?? sandbox;
+      await ensureGateway(app, user, runtimeSandbox);
       await ensureHarness(app, user, runtimeSandbox);
-      const result = await app.services.sandboxManager.startSandbox({
-        sandboxId: runtimeSandbox.id,
-        userId: user.id,
-        image: runtimeSandbox.image,
-        region: runtimeSandbox.region,
-        s3Prefix: runtimeSandbox.s3Prefix,
-        enabledAgentProviders: config.sandboxWorkerEnabledAgentProviders,
-        gateway: gatewayStartInput(app, runtimeSandbox),
-        harness: harnessStartInput(app),
-      }).catch((error: unknown) => {
-        if (error instanceof SandboxManagerError) {
-          throw error;
-        }
-        throw new SandboxManagerError('provider', sandboxLifecycleErrorMessage('start', error));
-      });
-      const updatedSandbox = repository.updateSandboxState(runtimeSandbox.id, result);
+      const result = await app.services.sandboxManager
+        .startSandbox({
+          sandboxId: runtimeSandbox.id,
+          userId: user.id,
+          image: runtimeSandbox.image,
+          region: runtimeSandbox.region,
+          s3Prefix: runtimeSandbox.s3Prefix,
+          enabledAgentProviders: config.sandboxWorkerEnabledAgentProviders,
+          gateway: gatewayStartInput(app, runtimeSandbox),
+          harness: harnessStartInput(app),
+        })
+        .catch((error: unknown) => {
+          if (error instanceof SandboxManagerError) {
+            throw error;
+          }
+          throw new SandboxManagerError(
+            'provider',
+            sandboxLifecycleErrorMessage('start', error),
+          );
+        });
+      const updatedSandbox = repository.updateSandboxState(
+        runtimeSandbox.id,
+        result,
+      );
       if (updatedSandbox && canControlRunningWorker(app, updatedSandbox)) {
         await tryMaterializeSandboxWorkspaces(app, {
           userId: user.id,
@@ -3057,28 +3720,38 @@ export function buildControlPlaneApp(
       if (!sandbox) {
         throw new HttpError(404, 'not_found', 'Sandbox not found.');
       }
-      const runtimeSandbox = repository.patchSandbox(sandbox.id, {
-        image: config.sandboxDefaultImage,
-        region: config.sandboxDefaultRegion,
-        resourceProfile: config.sandboxDefaultResourceProfile,
-      }) ?? sandbox;
+      const runtimeSandbox =
+        repository.patchSandbox(sandbox.id, {
+          image: config.sandboxDefaultImage,
+          region: config.sandboxDefaultRegion,
+          resourceProfile: config.sandboxDefaultResourceProfile,
+        }) ?? sandbox;
+      await ensureGateway(app, user, runtimeSandbox);
       await ensureHarness(app, user, runtimeSandbox);
-      const result = await app.services.sandboxManager.restartSandbox({
-        sandboxId: runtimeSandbox.id,
-        userId: user.id,
-        image: runtimeSandbox.image,
-        region: runtimeSandbox.region,
-        s3Prefix: runtimeSandbox.s3Prefix,
-        enabledAgentProviders: config.sandboxWorkerEnabledAgentProviders,
-        gateway: gatewayStartInput(app, runtimeSandbox),
-        harness: harnessStartInput(app),
-      }).catch((error: unknown) => {
-        if (error instanceof SandboxManagerError) {
-          throw error;
-        }
-        throw new SandboxManagerError('provider', sandboxLifecycleErrorMessage('restart', error));
-      });
-      const updatedSandbox = repository.updateSandboxState(runtimeSandbox.id, result);
+      const result = await app.services.sandboxManager
+        .restartSandbox({
+          sandboxId: runtimeSandbox.id,
+          userId: user.id,
+          image: runtimeSandbox.image,
+          region: runtimeSandbox.region,
+          s3Prefix: runtimeSandbox.s3Prefix,
+          enabledAgentProviders: config.sandboxWorkerEnabledAgentProviders,
+          gateway: gatewayStartInput(app, runtimeSandbox),
+          harness: harnessStartInput(app),
+        })
+        .catch((error: unknown) => {
+          if (error instanceof SandboxManagerError) {
+            throw error;
+          }
+          throw new SandboxManagerError(
+            'provider',
+            sandboxLifecycleErrorMessage('restart', error),
+          );
+        });
+      const updatedSandbox = repository.updateSandboxState(
+        runtimeSandbox.id,
+        result,
+      );
       if (updatedSandbox && canControlRunningWorker(app, updatedSandbox)) {
         await tryMaterializeSandboxWorkspaces(app, {
           userId: user.id,
@@ -3123,7 +3796,9 @@ export function buildControlPlaneApp(
 
   app.get('/api/projects/:projectId', async (request) => {
     const user = requireUser(app, request);
-    const params = z.object({ projectId: z.string().uuid() }).parse(request.params);
+    const params = z
+      .object({ projectId: z.string().uuid() })
+      .parse(request.params);
     const project = repository.getProjectById(params.projectId);
     if (!project || project.userId !== user.id) {
       throw new HttpError(404, 'not_found', 'Project not found.');
@@ -3133,19 +3808,26 @@ export function buildControlPlaneApp(
 
   app.patch('/api/projects/:projectId', async (request) => {
     const user = requireUser(app, request);
-    const params = z.object({ projectId: z.string().uuid() }).parse(request.params);
+    const params = z
+      .object({ projectId: z.string().uuid() })
+      .parse(request.params);
     const project = repository.getProjectById(params.projectId);
     if (!project || project.userId !== user.id) {
       throw new HttpError(404, 'not_found', 'Project not found.');
     }
     return {
-      project: repository.updateProject(project.id, updateProjectSchema.parse(request.body)),
+      project: repository.updateProject(
+        project.id,
+        updateProjectSchema.parse(request.body),
+      ),
     };
   });
 
   app.delete('/api/projects/:projectId', async (request) => {
     const user = requireUser(app, request);
-    const params = z.object({ projectId: z.string().uuid() }).parse(request.params);
+    const params = z
+      .object({ projectId: z.string().uuid() })
+      .parse(request.params);
     const project = repository.getProjectById(params.projectId);
     if (!project || project.userId !== user.id) {
       throw new HttpError(404, 'not_found', 'Project not found.');
@@ -3157,7 +3839,9 @@ export function buildControlPlaneApp(
 
   app.get('/api/projects/:projectId/workspaces', async (request) => {
     const user = requireUser(app, request);
-    const params = z.object({ projectId: z.string().uuid() }).parse(request.params);
+    const params = z
+      .object({ projectId: z.string().uuid() })
+      .parse(request.params);
     const query = productListQuerySchema
       .extend({
         status: z.enum(['active', 'archived', 'deleted']).optional(),
@@ -3181,7 +3865,9 @@ export function buildControlPlaneApp(
 
   app.post('/api/projects/:projectId/workspaces', async (request) => {
     const user = requireUser(app, request);
-    const params = z.object({ projectId: z.string().uuid() }).parse(request.params);
+    const params = z
+      .object({ projectId: z.string().uuid() })
+      .parse(request.params);
     const project = repository.getProjectById(params.projectId);
     if (!project || project.userId !== user.id) {
       throw new HttpError(404, 'not_found', 'Project not found.');
@@ -3192,7 +3878,9 @@ export function buildControlPlaneApp(
       resourceProfile: config.sandboxDefaultResourceProfile,
       s3PrefixBase: config.sandboxS3PrefixBase,
     });
-    const input = createWorkspaceSchema.omit({ projectId: true }).parse(request.body);
+    const input = createWorkspaceSchema
+      .omit({ projectId: true })
+      .parse(request.body);
     const workspace = repository.createWorkspace({
       userId: user.id,
       sandboxId: sandbox.id,
@@ -3275,7 +3963,9 @@ export function buildControlPlaneApp(
 
   app.patch('/api/workspaces/:workspaceId', async (request) => {
     const user = requireUser(app, request);
-    const params = z.object({ workspaceId: z.string().uuid() }).parse(request.params);
+    const params = z
+      .object({ workspaceId: z.string().uuid() })
+      .parse(request.params);
     const workspace = repository.getWorkspaceById(params.workspaceId);
     if (!workspace || workspace.userId !== user.id) {
       throw new HttpError(404, 'not_found', 'Workspace not found.');
@@ -3293,10 +3983,14 @@ export function buildControlPlaneApp(
 
   app.get('/api/workspaces/:workspaceId/sessions', async (request) => {
     const user = requireUser(app, request);
-    const params = z.object({ workspaceId: z.string().uuid() }).parse(request.params);
+    const params = z
+      .object({ workspaceId: z.string().uuid() })
+      .parse(request.params);
     const query = productListQuerySchema
       .extend({
-        status: z.enum(['created', 'active', 'idle', 'archived', 'deleted']).optional(),
+        status: z
+          .enum(['created', 'active', 'idle', 'archived', 'deleted'])
+          .optional(),
         provider: z.string().trim().min(1).max(50).optional(),
       })
       .parse(request.query);
@@ -3318,7 +4012,9 @@ export function buildControlPlaneApp(
 
   app.post('/api/workspaces/:workspaceId/sessions', async (request) => {
     const user = requireUser(app, request);
-    const params = z.object({ workspaceId: z.string().uuid() }).parse(request.params);
+    const params = z
+      .object({ workspaceId: z.string().uuid() })
+      .parse(request.params);
     const workspace = repository.getWorkspaceById(params.workspaceId);
     if (!workspace || workspace.userId !== user.id) {
       throw new HttpError(404, 'not_found', 'Workspace not found.');
@@ -3328,16 +4024,15 @@ export function buildControlPlaneApp(
     if (!sandbox || sandbox.userId !== user.id) {
       throw new HttpError(404, 'not_found', 'Sandbox not found.');
     }
-    const workerThread =
-      canControlRunningWorker(app, sandbox)
-        ? await createWorkerThreadSession(app, {
-            sandbox,
-            workspace,
-            provider: input.provider,
-            title: input.title,
-            ...(input.model ? { model: input.model } : {}),
-          })
-        : null;
+    const workerThread = canControlRunningWorker(app, sandbox)
+      ? await createWorkerThreadSession(app, {
+          sandbox,
+          workspace,
+          provider: input.provider,
+          title: input.title,
+          ...(input.model ? { model: input.model } : {}),
+        })
+      : null;
     const session = repository.createSession({
       userId: user.id,
       sandboxId: workspace.sandboxId,
@@ -3358,19 +4053,26 @@ export function buildControlPlaneApp(
 
   app.patch('/api/sessions/:sessionId', async (request) => {
     const user = requireUser(app, request);
-    const params = z.object({ sessionId: z.string().uuid() }).parse(request.params);
+    const params = z
+      .object({ sessionId: z.string().uuid() })
+      .parse(request.params);
     const session = repository.getSessionById(params.sessionId);
     if (!session || session.userId !== user.id) {
       throw new HttpError(404, 'not_found', 'Session not found.');
     }
     return {
-      session: repository.updateSession(session.id, updateSessionSchema.parse(request.body)),
+      session: repository.updateSession(
+        session.id,
+        updateSessionSchema.parse(request.body),
+      ),
     };
   });
 
   app.post('/api/sessions/:sessionId/close', async (request) => {
     const user = requireUser(app, request);
-    const params = z.object({ sessionId: z.string().uuid() }).parse(request.params);
+    const params = z
+      .object({ sessionId: z.string().uuid() })
+      .parse(request.params);
     const session = repository.getSessionById(params.sessionId);
     if (!session || session.userId !== user.id) {
       throw new HttpError(404, 'not_found', 'Session not found.');
@@ -3395,7 +4097,9 @@ export function buildControlPlaneApp(
 
   app.post('/api/sessions/:sessionId/resume', async (request) => {
     const user = requireUser(app, request);
-    const params = z.object({ sessionId: z.string().uuid() }).parse(request.params);
+    const params = z
+      .object({ sessionId: z.string().uuid() })
+      .parse(request.params);
     const session = repository.getSessionById(params.sessionId);
     if (!session || session.userId !== user.id) {
       throw new HttpError(404, 'not_found', 'Session not found.');
@@ -3453,7 +4157,9 @@ export function buildControlPlaneApp(
 
   app.post('/api/sessions/:sessionId/prompt', async (request) => {
     const user = requireUser(app, request);
-    const params = z.object({ sessionId: z.string().uuid() }).parse(request.params);
+    const params = z
+      .object({ sessionId: z.string().uuid() })
+      .parse(request.params);
     const input = sendSessionPromptSchema.parse(request.body);
     let session = repository.getSessionById(params.sessionId);
     if (!session || session.userId !== user.id) {
@@ -3488,10 +4194,14 @@ export function buildControlPlaneApp(
         workerSessionId: materializedSession.workerSessionId,
         prompt: input.prompt,
         ...(input.model ? { model: input.model } : {}),
-        reasoningEffort: input.reasoningEffort ?? app.services.config.sandboxWorkerDefaultReasoningEffort,
+        reasoningEffort:
+          input.reasoningEffort ??
+          app.services.config.sandboxWorkerDefaultReasoningEffort,
       });
       return {
-        session: repository.updateSession(materializedSession.id, { status: 'active' }),
+        session: repository.updateSession(materializedSession.id, {
+          status: 'active',
+        }),
         turn,
       };
     } catch (error) {
@@ -3515,10 +4225,14 @@ export function buildControlPlaneApp(
           workerSessionId: rematerialized.workerSessionId,
           prompt: input.prompt,
           ...(input.model ? { model: input.model } : {}),
-          reasoningEffort: input.reasoningEffort ?? app.services.config.sandboxWorkerDefaultReasoningEffort,
+          reasoningEffort:
+            input.reasoningEffort ??
+            app.services.config.sandboxWorkerDefaultReasoningEffort,
         });
         return {
-          session: repository.updateSession(rematerialized.id, { status: 'active' }),
+          session: repository.updateSession(rematerialized.id, {
+            status: 'active',
+          }),
           turn,
         };
       }
@@ -3528,15 +4242,24 @@ export function buildControlPlaneApp(
 
   app.post('/api/sandboxes/:sandboxId/route-token', async (request) => {
     const user = requireUser(app, request);
-    const params = z.object({ sandboxId: z.string().uuid() }).parse(request.params);
+    const params = z
+      .object({ sandboxId: z.string().uuid() })
+      .parse(request.params);
     const sandbox = repository.getSandboxById(params.sandboxId);
     if (!sandbox || sandbox.userId !== user.id) {
       throw new HttpError(404, 'not_found', 'Sandbox not found.');
     }
     if (sandbox.state !== 'running') {
-      throw new HttpError(409, 'sandbox_not_running', 'Sandbox must be running before issuing a route token.');
+      throw new HttpError(
+        409,
+        'sandbox_not_running',
+        'Sandbox must be running before issuing a route token.',
+      );
     }
-    const quota = checkRouteTokenQuota(user, repository.usageSummaryForUser(user.id));
+    const quota = checkRouteTokenQuota(
+      user,
+      repository.usageSummaryForUser(user.id),
+    );
     if (!quota.allowed) {
       throw quotaExceededError(quota.denial!);
     }
@@ -3551,7 +4274,11 @@ export function buildControlPlaneApp(
     let workspaceProjectId: string | null = null;
     if (input.workspaceId) {
       const workspace = repository.getWorkspaceById(input.workspaceId);
-      if (!workspace || workspace.userId !== user.id || workspace.sandboxId !== sandbox.id) {
+      if (
+        !workspace ||
+        workspace.userId !== user.id ||
+        workspace.sandboxId !== sandbox.id
+      ) {
         throw new HttpError(404, 'not_found', 'Workspace not found.');
       }
       workspaceProjectId = workspace.projectId;
@@ -3561,18 +4288,31 @@ export function buildControlPlaneApp(
     }
     if (input.sessionId) {
       const session = repository.getSessionById(input.sessionId);
-      if (!session || session.userId !== user.id || session.sandboxId !== sandbox.id) {
+      if (
+        !session ||
+        session.userId !== user.id ||
+        session.sandboxId !== sandbox.id
+      ) {
         throw new HttpError(404, 'not_found', 'Session not found.');
       }
       if (session.status === 'archived' || session.status === 'deleted') {
-        throw new HttpError(409, 'session_not_active', 'Session must be active before issuing a route token.');
+        throw new HttpError(
+          409,
+          'session_not_active',
+          'Session must be active before issuing a route token.',
+        );
       }
       if (input.workspaceId && session.workspaceId !== input.workspaceId) {
         throw new HttpError(404, 'not_found', 'Session not found.');
       }
       if (input.projectId && !input.workspaceId) {
-        const sessionWorkspace = repository.getWorkspaceById(session.workspaceId);
-        if (!sessionWorkspace || sessionWorkspace.projectId !== input.projectId) {
+        const sessionWorkspace = repository.getWorkspaceById(
+          session.workspaceId,
+        );
+        if (
+          !sessionWorkspace ||
+          sessionWorkspace.projectId !== input.projectId
+        ) {
           throw new HttpError(404, 'not_found', 'Session not found.');
         }
         workspaceProjectId = sessionWorkspace.projectId;
@@ -3583,16 +4323,20 @@ export function buildControlPlaneApp(
     const nowSeconds = Math.floor(Date.now() / 1000);
     const expiresAtSeconds = nowSeconds + config.routeTokenTtlSeconds;
     const payload = {
-        sub: user.id,
-        sandbox_id: sandbox.id,
-        scopes: input.scopes,
-        iat: nowSeconds,
-        exp: expiresAtSeconds,
-        jti: randomUUID(),
-      };
+      sub: user.id,
+      sandbox_id: sandbox.id,
+      scopes: input.scopes,
+      iat: nowSeconds,
+      exp: expiresAtSeconds,
+      jti: randomUUID(),
+    };
     const signingKey = config.routeTokenSigningKeys[0];
     if (!signingKey) {
-      throw new HttpError(500, 'route_token_config_error', 'Route token signing key is not configured.');
+      throw new HttpError(
+        500,
+        'route_token_config_error',
+        'Route token signing key is not configured.',
+      );
     }
     const token = createSignedToken(
       {
@@ -3614,7 +4358,11 @@ export function buildControlPlaneApp(
 
     const routerBaseUrl = config.routerBaseUrl || sandbox.routerBaseUrl;
     if (!routerBaseUrl) {
-      throw new HttpError(409, 'sandbox_route_unavailable', 'Sandbox router endpoint is unavailable.');
+      throw new HttpError(
+        409,
+        'sandbox_route_unavailable',
+        'Sandbox router endpoint is unavailable.',
+      );
     }
     return {
       sandboxId: sandbox.id,
@@ -3626,11 +4374,19 @@ export function buildControlPlaneApp(
   });
 
   app.get('/api/route-token/verify', async (request) => {
-    const token = z.object({ token: z.string().min(1) }).parse(request.query).token;
+    const token = z
+      .object({ token: z.string().min(1) })
+      .parse(request.query).token;
     try {
-      return { payload: verifySignedTokenWithKeys(token, config.routeTokenSigningKeys) };
+      return {
+        payload: verifySignedTokenWithKeys(token, config.routeTokenSigningKeys),
+      };
     } catch {
-      throw new HttpError(401, 'invalid_route_token', 'Route token is invalid or expired.');
+      throw new HttpError(
+        401,
+        'invalid_route_token',
+        'Route token is invalid or expired.',
+      );
     }
   });
 

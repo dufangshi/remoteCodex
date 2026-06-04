@@ -29,7 +29,8 @@ function awsConfig() {
     AWS_REGION: 'us-east-1',
     SANDBOX_EKS_CLUSTER_NAME: 'remote-codex-staging',
     SANDBOX_K8S_SERVICE_ACCOUNT: 'remote-codex-worker',
-    SANDBOX_WORKER_IMAGE_REPOSITORY: '123456789012.dkr.ecr.us-east-1.amazonaws.com/remote-codex-worker',
+    SANDBOX_WORKER_IMAGE_REPOSITORY:
+      '123456789012.dkr.ecr.us-east-1.amazonaws.com/remote-codex-worker',
     SANDBOX_WORKER_IMAGE_TAG: 'staging-abc123',
     SANDBOX_ROUTER_BASE_URL: 'https://sandbox-router.example.test',
     SANDBOX_WORKER_AUTH_TOKEN_SECRET_NAME: 'remote-codex-worker-token',
@@ -46,9 +47,18 @@ function mockKubernetesClient(
 ) {
   const calls: {
     appliedPods: AwsWorkerPodSpec[];
-    secretWrites: Array<{ namespace: string; secretName: string; key: string; value: string }>;
+    secretWrites: Array<{
+      namespace: string;
+      secretName: string;
+      key: string;
+      value: string;
+    }>;
     secretReads: Array<{ namespace: string; secretName: string; key: string }>;
-    deletedPods: Array<{ namespace: string; podName: string; serviceName: string }>;
+    deletedPods: Array<{
+      namespace: string;
+      podName: string;
+      serviceName: string;
+    }>;
     endpointRequests: Array<{ namespace: string; serviceName: string }>;
   } = {
     appliedPods: [],
@@ -122,19 +132,26 @@ describe('sandbox manager adapters', () => {
       workerServiceName: 'local-worker-sbx_test',
     });
 
-    await expect(manager.getSandboxStatus(sandboxInput)).resolves.toMatchObject({
-      state: 'running',
-    });
+    await expect(manager.getSandboxStatus(sandboxInput)).resolves.toMatchObject(
+      {
+        state: 'running',
+      },
+    );
 
     const stopped = await manager.stopSandbox(sandboxInput);
     expect(stopped.state).toBe('stopped');
-    await expect(manager.getSandboxStatus(sandboxInput)).resolves.toMatchObject({
-      state: 'stopped',
-    });
+    await expect(manager.getSandboxStatus(sandboxInput)).resolves.toMatchObject(
+      {
+        state: 'stopped',
+      },
+    );
   });
 
   it('classifies sandbox manager errors for API mapping', () => {
-    const error = new SandboxManagerError('capacity', 'No sandbox capacity is available.');
+    const error = new SandboxManagerError(
+      'capacity',
+      'No sandbox capacity is available.',
+    );
 
     expect(error.code).toBe('capacity');
     expect(error.message).toBe('No sandbox capacity is available.');
@@ -146,7 +163,8 @@ describe('sandbox manager adapters', () => {
       SANDBOX_EKS_CLUSTER_NAME: 'remote-codex-staging',
       SANDBOX_K8S_NAMESPACE: 'remote-codex-sandboxes',
       SANDBOX_K8S_SERVICE_ACCOUNT: 'remote-codex-worker',
-      SANDBOX_WORKER_IMAGE_REPOSITORY: '123456789012.dkr.ecr.us-east-1.amazonaws.com/remote-codex-worker',
+      SANDBOX_WORKER_IMAGE_REPOSITORY:
+        '123456789012.dkr.ecr.us-east-1.amazonaws.com/remote-codex-worker',
       SANDBOX_WORKER_IMAGE_TAG: 'staging-abc123',
       SANDBOX_ROUTER_BASE_URL: 'https://sandbox-router.example.test',
       SANDBOX_WORKER_AUTH_TOKEN_SECRET_NAME: 'remote-codex-worker-token',
@@ -162,7 +180,8 @@ describe('sandbox manager adapters', () => {
       clusterName: 'remote-codex-staging',
       namespace: 'remote-codex-sandboxes',
       serviceAccountName: 'remote-codex-worker',
-      imageRepository: '123456789012.dkr.ecr.us-east-1.amazonaws.com/remote-codex-worker',
+      imageRepository:
+        '123456789012.dkr.ecr.us-east-1.amazonaws.com/remote-codex-worker',
       imageTag: 'staging-abc123',
       routerBaseUrl: 'https://sandbox-router.example.test',
       workerAuthTokenSecretName: 'remote-codex-worker-token',
@@ -211,7 +230,9 @@ describe('sandbox manager adapters', () => {
       'remote-codex.dev/image-tag': 'staging-abc123',
       'remote-codex.dev/resource-profile': 'standard',
     });
-    expect(awsSandboxWorkerCleanupSelector({ environmentName: 'staging' })).toEqual({
+    expect(
+      awsSandboxWorkerCleanupSelector({ environmentName: 'staging' }),
+    ).toEqual({
       'remote-codex.dev/cleanup-scope': 'sandbox-worker',
       'remote-codex.dev/environment': 'staging',
     });
@@ -284,7 +305,9 @@ describe('sandbox manager adapters', () => {
     });
     expect(Object.keys(env.env)).not.toContain('OPENAI_API_KEY');
     expect(Object.keys(env.env)).not.toContain('ANTHROPIC_API_KEY');
-    expect(Object.keys(env.env)).not.toContain('REMOTE_CODEX_LLM_GATEWAY_TOKEN');
+    expect(Object.keys(env.env)).not.toContain(
+      'REMOTE_CODEX_LLM_GATEWAY_TOKEN',
+    );
     expect(Object.keys(env.env)).not.toContain('INACT_X_APP_KEY');
   });
 
@@ -307,6 +330,119 @@ describe('sandbox manager adapters', () => {
       REMOTE_CODEX_LLM_GATEWAY_TOKEN: 'gateway-static-token',
     });
     expect(env.secretEnv).not.toHaveProperty('REMOTE_CODEX_LLM_GATEWAY_TOKEN');
+  });
+
+  it('uses the sub2api remote-codex admin contract for sandbox keys and usage export', async () => {
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const admin = new HttpLlmGatewayAdmin({
+      baseUrl: 'https://sub2api.example.test',
+      adminToken: 'admin-token',
+      fetchImpl: (async (url: string | URL | Request, init?: RequestInit) => {
+        requests.push({ url: String(url), init });
+        if (String(url).endsWith('/users/ensure')) {
+          return Response.json({ externalUserId: '123' });
+        }
+        if (String(url).includes('/keys/ensure')) {
+          return Response.json({
+            externalKeyId: '456',
+            key: 'sk-sandbox-key',
+          });
+        }
+        if (String(url).includes('/keys/456/rotate')) {
+          return Response.json({
+            externalKeyId: '789',
+            keyCiphertext: 'sk-rotated-key',
+          });
+        }
+        if (String(url).includes('/usage/export')) {
+          return Response.json({
+            events: [
+              {
+                eventId: 'usage-1',
+                externalKeyId: '789',
+                model: 'gpt-5.4',
+                inputTokens: 12,
+                outputTokens: 34,
+                costUsd: 0.001,
+                occurredAt: '2026-06-04T17:00:00Z',
+              },
+            ],
+            nextCursor: 'cursor-next',
+          });
+        }
+        return Response.json({});
+      }) as typeof fetch,
+    });
+
+    await expect(
+      admin.ensureUser({
+        userId: 'control-user',
+        email: 'user@example.com',
+        displayName: 'User',
+      }),
+    ).resolves.toEqual({ externalUserId: '123' });
+    await expect(
+      admin.ensureSandboxKey({
+        userId: 'control-user',
+        sandboxId: 'sandbox-1',
+        externalUserId: '123',
+        groupId: 42,
+      }),
+    ).resolves.toEqual({
+      externalKeyId: '456',
+      keyCiphertext: 'sk-sandbox-key',
+    });
+    await expect(
+      admin.rotateSandboxKey({
+        userId: 'control-user',
+        sandboxId: 'sandbox-1',
+        externalUserId: '123',
+        externalKeyId: '456',
+        groupId: 42,
+      }),
+    ).resolves.toEqual({
+      externalKeyId: '789',
+      keyCiphertext: 'sk-rotated-key',
+    });
+    await expect(
+      admin.exportUsage({ cursor: 'cursor-current', limit: 25 }),
+    ).resolves.toEqual({
+      events: [
+        {
+          eventId: 'usage-1',
+          externalKeyId: '789',
+          model: 'gpt-5.4',
+          inputTokens: 12,
+          outputTokens: 34,
+          cachedTokens: undefined,
+          costUsd: 0.001,
+          currency: undefined,
+          occurredAt: '2026-06-04T17:00:00Z',
+        },
+      ],
+      nextCursor: 'cursor-next',
+    });
+
+    expect(requests.map((request) => request.url)).toEqual([
+      'https://sub2api.example.test/api/v1/admin/integrations/remote-codex/users/ensure',
+      'https://sub2api.example.test/api/v1/admin/integrations/remote-codex/users/123/keys/ensure',
+      'https://sub2api.example.test/api/v1/admin/integrations/remote-codex/users/123/keys/456/rotate',
+      'https://sub2api.example.test/api/v1/admin/integrations/remote-codex/usage/export?cursor=cursor-current&limit=25',
+    ]);
+    expect(requests[1]?.init?.headers).toMatchObject({
+      authorization: 'Bearer admin-token',
+      'x-api-key': 'admin-token',
+      'content-type': 'application/json',
+    });
+    expect(JSON.parse(String(requests[1]?.init?.body))).toMatchObject({
+      externalId: 'sandbox-1',
+      sandboxId: 'sandbox-1',
+      group_id: 42,
+    });
+    expect(JSON.parse(String(requests[2]?.init?.body))).toMatchObject({
+      sandboxId: 'sandbox-1',
+      group_id: 42,
+    });
   });
 
   it('lets control plane override the AWS worker enabled provider list at launch', async () => {
@@ -347,7 +483,8 @@ describe('sandbox manager adapters', () => {
       namespace: 'remote-codex-sandboxes',
       podName: 'remote-codex-worker-sbx-test',
       serviceName: 'remote-codex-worker-sbx-test',
-      image: '123456789012.dkr.ecr.us-east-1.amazonaws.com/remote-codex-worker:staging-abc123',
+      image:
+        '123456789012.dkr.ecr.us-east-1.amazonaws.com/remote-codex-worker:staging-abc123',
       serviceAccountName: 'remote-codex-worker',
       subnetIds: ['subnet-a'],
       securityGroupIds: ['sg-worker'],
@@ -425,7 +562,8 @@ describe('sandbox manager adapters', () => {
   it('maps AWS worker Pod status to sandbox lifecycle states', async () => {
     const ready = new AwsEksFargateSandboxManager(
       awsConfig(),
-      mockKubernetesClient({ podStatus: { phase: 'Running', ready: true } }).client,
+      mockKubernetesClient({ podStatus: { phase: 'Running', ready: true } })
+        .client,
     );
     await expect(ready.getSandboxStatus(sandboxInput)).resolves.toMatchObject({
       state: 'running',
@@ -437,12 +575,15 @@ describe('sandbox manager adapters', () => {
 
     const pending = new AwsEksFargateSandboxManager(
       awsConfig(),
-      mockKubernetesClient({ podStatus: { phase: 'Pending', ready: false } }).client,
+      mockKubernetesClient({ podStatus: { phase: 'Pending', ready: false } })
+        .client,
     );
-    await expect(pending.getSandboxStatus(sandboxInput)).resolves.toMatchObject({
-      state: 'starting',
-      statusReason: 'Worker Pod is pending.',
-    });
+    await expect(pending.getSandboxStatus(sandboxInput)).resolves.toMatchObject(
+      {
+        state: 'starting',
+        statusReason: 'Worker Pod is pending.',
+      },
+    );
 
     const imagePullFailure = new AwsEksFargateSandboxManager(
       awsConfig(),
@@ -455,7 +596,9 @@ describe('sandbox manager adapters', () => {
         },
       }).client,
     );
-    await expect(imagePullFailure.getSandboxStatus(sandboxInput)).resolves.toMatchObject({
+    await expect(
+      imagePullFailure.getSandboxStatus(sandboxInput),
+    ).resolves.toMatchObject({
       state: 'failed',
       statusReason: 'Cannot pull worker image.',
       startupProgress: 25,
@@ -474,7 +617,9 @@ describe('sandbox manager adapters', () => {
         },
       }).client,
     );
-    await expect(capacityFailure.getSandboxStatus(sandboxInput)).resolves.toMatchObject({
+    await expect(
+      capacityFailure.getSandboxStatus(sandboxInput),
+    ).resolves.toMatchObject({
       state: 'failed',
       statusReason: 'No Fargate capacity is currently available.',
       startupProgress: 25,
@@ -493,7 +638,9 @@ describe('sandbox manager adapters', () => {
         },
       }).client,
     );
-    await expect(readinessFailure.getSandboxStatus(sandboxInput)).resolves.toMatchObject({
+    await expect(
+      readinessFailure.getSandboxStatus(sandboxInput),
+    ).resolves.toMatchObject({
       state: 'failed',
       statusReason: 'Worker did not become ready before timeout.',
       startupProgress: 100,
@@ -586,7 +733,10 @@ describe('sandbox manager adapters', () => {
 describe('HTTP ElAgenteHarness admin', () => {
   it('ensures a sandbox key through the planned admin ensure API', async () => {
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
-    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       requests.push({ url: String(url), init });
       return Response.json({
         externalUserId: 'remote-codex:user:user-123',
@@ -634,7 +784,10 @@ describe('HTTP ElAgenteHarness admin', () => {
 
   it('rotates a sandbox key through the planned Harness admin API', async () => {
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
-    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       requests.push({ url: String(url), init });
       return Response.json({
         externalKeyId: 'remote-codex:sandbox:sbx-123',
@@ -678,7 +831,10 @@ describe('HTTP ElAgenteHarness admin', () => {
 
   it('falls back to the current Harness rekey API when planned rotate is unavailable', async () => {
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
-    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       requests.push({ url: String(url), init });
       if (String(url).endsWith('/admin/members/harness-key-42/rekey')) {
         return new Response('not found', { status: 404 });
@@ -711,7 +867,10 @@ describe('HTTP ElAgenteHarness admin', () => {
 
   it('revokes a sandbox key through the planned Harness admin API', async () => {
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
-    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       requests.push({ url: String(url), init });
       return Response.json({ status: 'revoked' });
     };
@@ -743,7 +902,10 @@ describe('HTTP ElAgenteHarness admin', () => {
 
   it('falls back to the current Harness delete API when planned revoke is unavailable', async () => {
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
-    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       requests.push({ url: String(url), init });
       if (String(url).endsWith('/admin/members/harness-key-42/revoke')) {
         return new Response('not found', { status: 404 });
@@ -772,7 +934,10 @@ describe('HTTP ElAgenteHarness admin', () => {
 
   it('reconciles a sandbox key through the planned Harness admin API', async () => {
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
-    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       requests.push({ url: String(url), init });
       return Response.json({
         externalKeyId: 'remote-codex:sandbox:sbx-123',
@@ -818,7 +983,10 @@ describe('HTTP ElAgenteHarness admin', () => {
 
   it('falls back to metadata-only reconcile when the planned Harness reconcile API is unavailable', async () => {
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
-    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       requests.push({ url: String(url), init });
       return new Response('not found', { status: 404 });
     };
@@ -847,12 +1015,17 @@ describe('HTTP ElAgenteHarness admin', () => {
 
   it('falls back to the current Harness admin create API', async () => {
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
-    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       requests.push({ url: String(url), init });
       if (String(url).endsWith('/admin/members/ensure')) {
         return new Response('not found', { status: 404 });
       }
-      return new Response('OK\nid      = 42\nkind    = "agent"\napi_key = "harness-api-key-42"\n');
+      return new Response(
+        'OK\nid      = 42\nkind    = "agent"\napi_key = "harness-api-key-42"\n',
+      );
     };
     const admin = new HttpHarnessAdmin({
       baseUrl: 'https://harness.example.test',
@@ -879,7 +1052,10 @@ describe('HTTP ElAgenteHarness admin', () => {
 
   it('does not fall back to the current Harness admin create API when legacy fallback is disabled', async () => {
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
-    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       requests.push({ url: String(url), init });
       return new Response('not found', { status: 404 });
     };
@@ -907,7 +1083,10 @@ describe('HTTP ElAgenteHarness admin', () => {
 
   it('does not fall back to legacy Harness rotate, revoke, or reconcile paths when legacy fallback is disabled', async () => {
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
-    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       requests.push({ url: String(url), init });
       return new Response('not found', { status: 404 });
     };
@@ -981,7 +1160,10 @@ describe('HTTP ElAgenteHarness admin', () => {
 
   it('exports Harness usage through the admin API', async () => {
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
-    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       requests.push({ url: String(url), init });
       return Response.json({
         events: [
@@ -1010,7 +1192,9 @@ describe('HTTP ElAgenteHarness admin', () => {
       fetchImpl,
     });
 
-    await expect(admin.exportUsage({ cursor: 'cursor-1', limit: 25 })).resolves.toEqual({
+    await expect(
+      admin.exportUsage({ cursor: 'cursor-1', limit: 25 }),
+    ).resolves.toEqual({
       events: [
         {
           eventId: 'harness-event-1',
@@ -1049,13 +1233,17 @@ describe('HTTP ElAgenteHarness admin', () => {
 describe('HTTP LLM gateway admin', () => {
   it('ensures a gateway user through the admin API', async () => {
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
-    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       requests.push({ url: String(url), init });
       return Response.json({ externalUserId: 'gw-user-123' });
     };
     const admin = new HttpLlmGatewayAdmin({
       baseUrl: 'https://gateway-admin.example.test/',
       adminToken: 'admin-token',
+      contract: 'generic',
       fetchImpl,
     });
 
@@ -1086,7 +1274,10 @@ describe('HTTP LLM gateway admin', () => {
 
   it('ensures a gateway sandbox key through the admin API', async () => {
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
-    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       requests.push({ url: String(url), init });
       return Response.json({
         externalKeyId: 'gw-key-123',
@@ -1096,6 +1287,7 @@ describe('HTTP LLM gateway admin', () => {
     const admin = new HttpLlmGatewayAdmin({
       baseUrl: 'https://gateway-admin.example.test',
       adminToken: 'admin-token',
+      contract: 'generic',
       fetchImpl,
     });
 
@@ -1129,7 +1321,10 @@ describe('HTTP LLM gateway admin', () => {
 
   it('rotates a gateway sandbox key through the admin API', async () => {
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
-    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       requests.push({ url: String(url), init });
       return Response.json({
         externalKeyId: 'gw-key-rotated',
@@ -1139,6 +1334,7 @@ describe('HTTP LLM gateway admin', () => {
     const admin = new HttpLlmGatewayAdmin({
       baseUrl: 'https://gateway-admin.example.test',
       adminToken: 'admin-token',
+      contract: 'generic',
       fetchImpl,
     });
 
@@ -1171,13 +1367,17 @@ describe('HTTP LLM gateway admin', () => {
 
   it('revokes a gateway sandbox key through the admin API', async () => {
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
-    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       requests.push({ url: String(url), init });
       return Response.json({ ok: true });
     };
     const admin = new HttpLlmGatewayAdmin({
       baseUrl: 'https://gateway-admin.example.test',
       adminToken: 'admin-token',
+      contract: 'generic',
       fetchImpl,
     });
 
@@ -1207,7 +1407,10 @@ describe('HTTP LLM gateway admin', () => {
 
   it('reconciles a gateway sandbox key through the admin API', async () => {
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
-    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       requests.push({ url: String(url), init });
       return Response.json({
         externalKeyId: 'gw-key-reconciled',
@@ -1217,6 +1420,7 @@ describe('HTTP LLM gateway admin', () => {
     const admin = new HttpLlmGatewayAdmin({
       baseUrl: 'https://gateway-admin.example.test',
       adminToken: 'admin-token',
+      contract: 'generic',
       fetchImpl,
     });
 
@@ -1251,7 +1455,10 @@ describe('HTTP LLM gateway admin', () => {
 
   it('exports gateway usage through the admin API', async () => {
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
-    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       requests.push({ url: String(url), init });
       return Response.json({
         events: [
@@ -1273,10 +1480,13 @@ describe('HTTP LLM gateway admin', () => {
     const admin = new HttpLlmGatewayAdmin({
       baseUrl: 'https://gateway-admin.example.test',
       adminToken: 'admin-token',
+      contract: 'generic',
       fetchImpl,
     });
 
-    await expect(admin.exportUsage({ cursor: 'cursor-1', limit: 25 })).resolves.toEqual({
+    await expect(
+      admin.exportUsage({ cursor: 'cursor-1', limit: 25 }),
+    ).resolves.toEqual({
       events: [
         {
           eventId: 'gateway_req_1',
@@ -1309,6 +1519,7 @@ describe('HTTP LLM gateway admin', () => {
     const admin = new HttpLlmGatewayAdmin({
       baseUrl: 'https://gateway-admin.example.test',
       adminToken: 'admin-token',
+      contract: 'generic',
       fetchImpl,
     });
 

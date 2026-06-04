@@ -32,17 +32,21 @@ export interface SandboxStartInput {
   region: string;
   s3Prefix: string;
   enabledAgentProviders?: string;
-  gateway?: {
-    baseUrl: string;
-    keyId: string;
-    tokenSecretName?: string | null;
-    staticToken?: string | null;
-  } | undefined;
-  harness?: {
-    baseUrl: string;
-    appKeySecretName?: string | null;
-    chemistryToolsEnabled?: boolean;
-  } | undefined;
+  gateway?:
+    | {
+        baseUrl: string;
+        keyId: string;
+        tokenSecretName?: string | null;
+        staticToken?: string | null;
+      }
+    | undefined;
+  harness?:
+    | {
+        baseUrl: string;
+        appKeySecretName?: string | null;
+        chemistryToolsEnabled?: boolean;
+      }
+    | undefined;
 }
 
 export interface SandboxEnvironment {
@@ -72,7 +76,11 @@ export interface SandboxSecretWriter {
   }): Promise<boolean>;
 }
 
-export type SandboxManagerErrorCode = 'quota' | 'capacity' | 'config' | 'provider';
+export type SandboxManagerErrorCode =
+  | 'quota'
+  | 'capacity'
+  | 'config'
+  | 'provider';
 
 export class SandboxManagerError extends Error {
   constructor(
@@ -86,12 +94,26 @@ export class SandboxManagerError extends Error {
 export interface SandboxManager {
   createSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult>;
   startSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult>;
-  stopSandbox(input: { sandboxId: string; userId: string }): Promise<SandboxProvisionResult>;
+  stopSandbox(input: {
+    sandboxId: string;
+    userId: string;
+  }): Promise<SandboxProvisionResult>;
   restartSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult>;
-  deleteSandbox(input: { sandboxId: string; userId: string }): Promise<SandboxProvisionResult>;
-  getSandboxStatus(input: { sandboxId: string; userId: string }): Promise<SandboxProvisionResult>;
-  getSandboxEndpoint(input: { sandboxId: string; userId: string }): Promise<{ routerBaseUrl: string | null }>;
-  prepareSandboxEnvironment(input: SandboxStartInput): Promise<SandboxEnvironment>;
+  deleteSandbox(input: {
+    sandboxId: string;
+    userId: string;
+  }): Promise<SandboxProvisionResult>;
+  getSandboxStatus(input: {
+    sandboxId: string;
+    userId: string;
+  }): Promise<SandboxProvisionResult>;
+  getSandboxEndpoint(input: {
+    sandboxId: string;
+    userId: string;
+  }): Promise<{ routerBaseUrl: string | null }>;
+  prepareSandboxEnvironment(
+    input: SandboxStartInput,
+  ): Promise<SandboxEnvironment>;
   listRuntimeResources?(): Promise<SandboxRuntimeResource[]>;
   cleanupRuntimeResource?(input: {
     sandboxId: string;
@@ -103,15 +125,21 @@ export interface SandboxManager {
 export class NoopSandboxManager implements SandboxManager {
   constructor(private readonly routerBaseUrl: string) {}
 
-  async createSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
+  async createSandbox(
+    input: SandboxStartInput,
+  ): Promise<SandboxProvisionResult> {
     return this.runningResult(input);
   }
 
-  async startSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
+  async startSandbox(
+    input: SandboxStartInput,
+  ): Promise<SandboxProvisionResult> {
     return this.runningResult(input);
   }
 
-  async restartSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
+  async restartSandbox(
+    input: SandboxStartInput,
+  ): Promise<SandboxProvisionResult> {
     return this.runningResult(input);
   }
 
@@ -123,7 +151,9 @@ export class NoopSandboxManager implements SandboxManager {
     return { state: 'deleted' };
   }
 
-  async getSandboxStatus(input: { sandboxId: string }): Promise<SandboxProvisionResult> {
+  async getSandboxStatus(input: {
+    sandboxId: string;
+  }): Promise<SandboxProvisionResult> {
     return {
       state: 'running',
       routerBaseUrl: this.routerBaseUrl,
@@ -137,7 +167,9 @@ export class NoopSandboxManager implements SandboxManager {
     return { routerBaseUrl: this.routerBaseUrl };
   }
 
-  async prepareSandboxEnvironment(input: SandboxStartInput): Promise<SandboxEnvironment> {
+  async prepareSandboxEnvironment(
+    input: SandboxStartInput,
+  ): Promise<SandboxEnvironment> {
     return {
       env: {
         REMOTE_CODEX_RUNTIME_ROLE: 'worker',
@@ -152,7 +184,9 @@ export class NoopSandboxManager implements SandboxManager {
     return [];
   }
 
-  async cleanupRuntimeResource(input: { sandboxId: string }): Promise<SandboxProvisionResult> {
+  async cleanupRuntimeResource(input: {
+    sandboxId: string;
+  }): Promise<SandboxProvisionResult> {
     return {
       state: 'deleted',
       k8sNamespace: 'remote-codex-sandboxes',
@@ -183,29 +217,39 @@ export class LocalWorkerProcessSandboxManager implements SandboxManager {
     },
   ) {}
 
-  async createSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
+  async createSandbox(
+    input: SandboxStartInput,
+  ): Promise<SandboxProvisionResult> {
     return this.startSandbox(input);
   }
 
-  async startSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
+  async startSandbox(
+    input: SandboxStartInput,
+  ): Promise<SandboxProvisionResult> {
     if (!this.processes.has(input.sandboxId)) {
       const env = await this.prepareSandboxEnvironment(input);
-      const child = spawn(this.input.workerCommand, this.input.workerArgs ?? [], {
-        env: {
-          ...process.env,
-          ...this.input.workerEnv,
-          ...env.env,
+      const child = spawn(
+        this.input.workerCommand,
+        this.input.workerArgs ?? [],
+        {
+          env: {
+            ...process.env,
+            ...this.input.workerEnv,
+            ...env.env,
+          },
+          stdio: 'ignore',
+          detached: true,
         },
-        stdio: 'ignore',
-        detached: true,
-      });
+      );
       child.unref();
       this.processes.set(input.sandboxId, child);
     }
     return this.runningResult(input.sandboxId);
   }
 
-  async stopSandbox(input: { sandboxId: string }): Promise<SandboxProvisionResult> {
+  async stopSandbox(input: {
+    sandboxId: string;
+  }): Promise<SandboxProvisionResult> {
     const child = this.processes.get(input.sandboxId);
     if (child) {
       child.kill();
@@ -214,17 +258,23 @@ export class LocalWorkerProcessSandboxManager implements SandboxManager {
     return { state: 'stopped' };
   }
 
-  async restartSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
+  async restartSandbox(
+    input: SandboxStartInput,
+  ): Promise<SandboxProvisionResult> {
     await this.stopSandbox(input);
     return this.startSandbox(input);
   }
 
-  async deleteSandbox(input: { sandboxId: string }): Promise<SandboxProvisionResult> {
+  async deleteSandbox(input: {
+    sandboxId: string;
+  }): Promise<SandboxProvisionResult> {
     await this.stopSandbox(input);
     return { state: 'deleted' };
   }
 
-  async getSandboxStatus(input: { sandboxId: string }): Promise<SandboxProvisionResult> {
+  async getSandboxStatus(input: {
+    sandboxId: string;
+  }): Promise<SandboxProvisionResult> {
     return this.processes.has(input.sandboxId)
       ? this.runningResult(input.sandboxId)
       : { state: 'stopped' };
@@ -234,14 +284,17 @@ export class LocalWorkerProcessSandboxManager implements SandboxManager {
     return { routerBaseUrl: this.input.routerBaseUrl };
   }
 
-  async prepareSandboxEnvironment(input: SandboxStartInput): Promise<SandboxEnvironment> {
+  async prepareSandboxEnvironment(
+    input: SandboxStartInput,
+  ): Promise<SandboxEnvironment> {
     return {
       env: {
         REMOTE_CODEX_RUNTIME_ROLE: 'worker',
         REMOTE_CODEX_SANDBOX_ID: input.sandboxId,
         REMOTE_CODEX_USER_ID: input.userId,
         REMOTE_CODEX_WORKER_AUTH_TOKEN:
-          this.input.workerEnv?.REMOTE_CODEX_WORKER_AUTH_TOKEN ?? 'local-worker-token',
+          this.input.workerEnv?.REMOTE_CODEX_WORKER_AUTH_TOKEN ??
+          'local-worker-token',
         ...(input.gateway
           ? {
               REMOTE_CODEX_LLM_GATEWAY_BASE_URL: input.gateway.baseUrl,
@@ -257,7 +310,8 @@ export class LocalWorkerProcessSandboxManager implements SandboxManager {
         ...(input.harness
           ? {
               ELAGENTE_HARNESS_BASE_URL: input.harness.baseUrl,
-              REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: input.harness.chemistryToolsEnabled
+              REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: input.harness
+                .chemistryToolsEnabled
                 ? 'true'
                 : 'false',
               ...(this.input.workerEnv?.INACT_X_APP_KEY
@@ -283,7 +337,9 @@ export class LocalWorkerProcessSandboxManager implements SandboxManager {
     }));
   }
 
-  async cleanupRuntimeResource(input: { sandboxId: string }): Promise<SandboxProvisionResult> {
+  async cleanupRuntimeResource(input: {
+    sandboxId: string;
+  }): Promise<SandboxProvisionResult> {
     return this.stopSandbox({ sandboxId: input.sandboxId });
   }
 
@@ -310,7 +366,9 @@ const awsSandboxAdapterEnvSchema = z.object({
   SANDBOX_WORKER_AUTH_TOKEN_SECRET_NAME: z.string().min(1),
   SANDBOX_SUBNET_IDS: z.string().min(1),
   SANDBOX_SECURITY_GROUP_IDS: z.string().min(1),
-  SANDBOX_RESOURCE_PROFILE: z.enum(['small', 'standard', 'large']).default('standard'),
+  SANDBOX_RESOURCE_PROFILE: z
+    .enum(['small', 'standard', 'large'])
+    .default('standard'),
   SANDBOX_WORKER_ENABLED_AGENT_PROVIDERS: z.string().default('codex'),
 });
 
@@ -436,7 +494,10 @@ function workerPodManifest(spec: AwsWorkerPodSpec) {
             },
           ],
           env: [
-            ...Object.entries(spec.env).map(([name, value]) => ({ name, value })),
+            ...Object.entries(spec.env).map(([name, value]) => ({
+              name,
+              value,
+            })),
             ...Object.entries(spec.secretEnv).map(([name, ref]) => ({
               name,
               valueFrom: {
@@ -494,7 +555,8 @@ function workerServiceManifest(spec: AwsWorkerPodSpec) {
     spec: {
       type: 'ClusterIP',
       selector: {
-        'remote-codex.dev/sandbox-id': spec.labels['remote-codex.dev/sandbox-id'],
+        'remote-codex.dev/sandbox-id':
+          spec.labels['remote-codex.dev/sandbox-id'],
         'remote-codex.dev/runtime-role': 'worker',
       },
       ports: [
@@ -509,9 +571,12 @@ function workerServiceManifest(spec: AwsWorkerPodSpec) {
 }
 
 function podReadyFromStatus(pod: any) {
-  const conditions = Array.isArray(pod?.status?.conditions) ? pod.status.conditions : [];
+  const conditions = Array.isArray(pod?.status?.conditions)
+    ? pod.status.conditions
+    : [];
   return conditions.some(
-    (condition: any) => condition?.type === 'Ready' && condition?.status === 'True',
+    (condition: any) =>
+      condition?.type === 'Ready' && condition?.status === 'True',
   );
 }
 
@@ -529,7 +594,9 @@ function podReasonFromStatus(pod: any) {
     };
   }
 
-  const conditions = Array.isArray(pod?.status?.conditions) ? pod.status.conditions : [];
+  const conditions = Array.isArray(pod?.status?.conditions)
+    ? pod.status.conditions
+    : [];
   const notReady = conditions
     .filter((condition: any) => condition?.status !== 'True')
     .find((condition: any) => condition?.reason || condition?.message);
@@ -548,11 +615,10 @@ export class KubectlAwsSandboxKubernetesClient implements AwsSandboxKubernetesCl
   ) {}
 
   async applyWorkerPod(spec: AwsWorkerPodSpec): Promise<void> {
-    await this.kubectl([
-      'apply',
-      '-f',
-      '-',
-    ], `${shellJson(workerServiceManifest(spec))}\n---\n${shellJson(workerPodManifest(spec))}\n`);
+    await this.kubectl(
+      ['apply', '-f', '-'],
+      `${shellJson(workerServiceManifest(spec))}\n---\n${shellJson(workerPodManifest(spec))}\n`,
+    );
   }
 
   async upsertSecretKey(input: {
@@ -591,7 +657,9 @@ export class KubectlAwsSandboxKubernetesClient implements AwsSandboxKubernetesCl
         '-o',
         'json',
       ]);
-      const secret = JSON.parse(result.stdout) as { data?: Record<string, unknown> };
+      const secret = JSON.parse(result.stdout) as {
+        data?: Record<string, unknown>;
+      };
       return typeof secret.data?.[input.key] === 'string';
     } catch {
       return false;
@@ -603,8 +671,20 @@ export class KubectlAwsSandboxKubernetesClient implements AwsSandboxKubernetesCl
     podName: string;
     serviceName: string;
   }): Promise<{ deleted: boolean }> {
-    const podExists = await this.exists(['get', 'pod', input.podName, '-n', input.namespace]);
-    const serviceExists = await this.exists(['get', 'service', input.serviceName, '-n', input.namespace]);
+    const podExists = await this.exists([
+      'get',
+      'pod',
+      input.podName,
+      '-n',
+      input.namespace,
+    ]);
+    const serviceExists = await this.exists([
+      'get',
+      'service',
+      input.serviceName,
+      '-n',
+      input.namespace,
+    ]);
     await this.kubectl([
       'delete',
       'pod',
@@ -628,15 +708,11 @@ export class KubectlAwsSandboxKubernetesClient implements AwsSandboxKubernetesCl
     namespace: string;
     podName: string;
   }): Promise<AwsWorkerPodStatus | null> {
-    const result = await this.kubectl([
-      'get',
-      'pod',
-      input.podName,
-      '-n',
-      input.namespace,
-      '-o',
-      'json',
-    ], undefined, { allowNotFound: true });
+    const result = await this.kubectl(
+      ['get', 'pod', input.podName, '-n', input.namespace, '-o', 'json'],
+      undefined,
+      { allowNotFound: true },
+    );
     if (result.notFound) {
       return null;
     }
@@ -706,10 +782,14 @@ export class KubectlAwsSandboxKubernetesClient implements AwsSandboxKubernetesCl
         const result = await this.spawnKubectl(args, stdin);
         return { stdout: result.stdout, notFound: false };
       }
-      const result = await execFileAsync(this.input.kubectlPath ?? 'kubectl', args, {
-        timeout: this.input.timeoutMs ?? 60_000,
-        maxBuffer: 10 * 1024 * 1024,
-      });
+      const result = await execFileAsync(
+        this.input.kubectlPath ?? 'kubectl',
+        args,
+        {
+          timeout: this.input.timeoutMs ?? 60_000,
+          maxBuffer: 10 * 1024 * 1024,
+        },
+      );
       return { stdout: result.stdout, notFound: false };
     } catch (error) {
       const failure = error as {
@@ -731,7 +811,10 @@ export class KubectlAwsSandboxKubernetesClient implements AwsSandboxKubernetesCl
     }
   }
 
-  private spawnKubectl(args: string[], stdin: string): Promise<{ stdout: string }> {
+  private spawnKubectl(
+    args: string[],
+    stdin: string,
+  ): Promise<{ stdout: string }> {
     return new Promise((resolve, reject) => {
       const child = spawn(this.input.kubectlPath ?? 'kubectl', args, {
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -760,7 +843,11 @@ export class KubectlAwsSandboxKubernetesClient implements AwsSandboxKubernetesCl
           resolve({ stdout });
           return;
         }
-        reject(new Error(stderr || `kubectl ${args.join(' ')} exited with code ${code}.`));
+        reject(
+          new Error(
+            stderr || `kubectl ${args.join(' ')} exited with code ${code}.`,
+          ),
+        );
       });
       child.stdin.end(stdin);
     });
@@ -825,7 +912,10 @@ export function loadAwsSandboxAdapterConfig(
   const subnetIds = commaList(parsed.SANDBOX_SUBNET_IDS);
   const securityGroupIds = commaList(parsed.SANDBOX_SECURITY_GROUP_IDS);
   if (subnetIds.length === 0) {
-    throw new SandboxManagerError('config', 'SANDBOX_SUBNET_IDS must include at least one subnet id.');
+    throw new SandboxManagerError(
+      'config',
+      'SANDBOX_SUBNET_IDS must include at least one subnet id.',
+    );
   }
   if (securityGroupIds.length === 0) {
     throw new SandboxManagerError(
@@ -836,7 +926,9 @@ export function loadAwsSandboxAdapterConfig(
 
   return {
     region: parsed.SANDBOX_AWS_REGION ?? parsed.AWS_REGION ?? 'us-east-1',
-    environmentName: kubernetesLabelValue(parsed.SANDBOX_ENVIRONMENT ?? parsed.NODE_ENV ?? 'development'),
+    environmentName: kubernetesLabelValue(
+      parsed.SANDBOX_ENVIRONMENT ?? parsed.NODE_ENV ?? 'development',
+    ),
     clusterName: parsed.SANDBOX_EKS_CLUSTER_NAME,
     namespace: parsed.SANDBOX_K8S_NAMESPACE,
     serviceAccountName: parsed.SANDBOX_K8S_SERVICE_ACCOUNT,
@@ -931,7 +1023,9 @@ export function awsSandboxWorkerCleanupSelector(input: {
     'remote-codex.dev/environment': kubernetesLabelValue(input.environmentName),
   };
   if (input.sandboxId) {
-    labels['remote-codex.dev/sandbox-id'] = kubernetesLabelValue(input.sandboxId);
+    labels['remote-codex.dev/sandbox-id'] = kubernetesLabelValue(
+      input.sandboxId,
+    );
   }
   return labels;
 }
@@ -942,11 +1036,15 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
     private readonly kubernetesClient?: AwsSandboxKubernetesClient,
   ) {}
 
-  async createSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
+  async createSandbox(
+    input: SandboxStartInput,
+  ): Promise<SandboxProvisionResult> {
     return this.startSandbox(input);
   }
 
-  async startSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
+  async startSandbox(
+    input: SandboxStartInput,
+  ): Promise<SandboxProvisionResult> {
     const podSpec = await this.buildWorkerPodSpec(input);
     const kubernetesClient = this.requireKubernetesClient('start sandboxes');
     await kubernetesClient.deleteWorkerPod({
@@ -966,10 +1064,14 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
     };
   }
 
-  async stopSandbox(input: { sandboxId: string }): Promise<SandboxProvisionResult> {
+  async stopSandbox(input: {
+    sandboxId: string;
+  }): Promise<SandboxProvisionResult> {
     const podName = this.podName(input.sandboxId);
     const workerServiceName = this.workerServiceName(input.sandboxId);
-    const result = await this.requireKubernetesClient('stop sandboxes').deleteWorkerPod({
+    const result = await this.requireKubernetesClient(
+      'stop sandboxes',
+    ).deleteWorkerPod({
       namespace: this.config.namespace,
       podName,
       serviceName: workerServiceName,
@@ -987,12 +1089,16 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
     };
   }
 
-  async restartSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
+  async restartSandbox(
+    input: SandboxStartInput,
+  ): Promise<SandboxProvisionResult> {
     await this.stopSandbox(input);
     return this.startSandbox(input);
   }
 
-  async deleteSandbox(input: { sandboxId: string }): Promise<SandboxProvisionResult> {
+  async deleteSandbox(input: {
+    sandboxId: string;
+  }): Promise<SandboxProvisionResult> {
     await this.stopSandbox(input);
     return {
       state: 'deleted',
@@ -1003,10 +1109,14 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
     };
   }
 
-  async getSandboxStatus(input: { sandboxId: string }): Promise<SandboxProvisionResult> {
+  async getSandboxStatus(input: {
+    sandboxId: string;
+  }): Promise<SandboxProvisionResult> {
     const podName = this.podName(input.sandboxId);
     const workerServiceName = this.workerServiceName(input.sandboxId);
-    const podStatus = await this.requireKubernetesClient('poll sandbox status').getWorkerPod({
+    const podStatus = await this.requireKubernetesClient(
+      'poll sandbox status',
+    ).getWorkerPod({
       namespace: this.config.namespace,
       podName,
     });
@@ -1017,8 +1127,12 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
     });
   }
 
-  async getSandboxEndpoint(input: { sandboxId: string }): Promise<{ routerBaseUrl: string | null }> {
-    const endpoint = await this.requireKubernetesClient('discover sandbox endpoints').getWorkerEndpoint({
+  async getSandboxEndpoint(input: {
+    sandboxId: string;
+  }): Promise<{ routerBaseUrl: string | null }> {
+    const endpoint = await this.requireKubernetesClient(
+      'discover sandbox endpoints',
+    ).getWorkerEndpoint({
       namespace: this.config.namespace,
       serviceName: this.workerServiceName(input.sandboxId),
     });
@@ -1048,7 +1162,9 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
     });
   }
 
-  async prepareSandboxEnvironment(input: SandboxStartInput): Promise<SandboxEnvironmentSpec> {
+  async prepareSandboxEnvironment(
+    input: SandboxStartInput,
+  ): Promise<SandboxEnvironmentSpec> {
     return {
       env: {
         REMOTE_CODEX_RUNTIME_ROLE: 'worker',
@@ -1081,7 +1197,8 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
         ...(input.harness
           ? {
               ELAGENTE_HARNESS_BASE_URL: input.harness.baseUrl,
-              REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: input.harness.chemistryToolsEnabled
+              REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: input.harness
+                .chemistryToolsEnabled
                 ? 'true'
                 : 'false',
             }
@@ -1116,7 +1233,9 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
     };
   }
 
-  private async buildWorkerPodSpec(input: SandboxStartInput): Promise<AwsWorkerPodSpec> {
+  private async buildWorkerPodSpec(
+    input: SandboxStartInput,
+  ): Promise<AwsWorkerPodSpec> {
     const env = await this.prepareSandboxEnvironment(input);
     const image = `${this.config.imageRepository}:${this.config.imageTag}`;
     return {
@@ -1182,8 +1301,10 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
         state: reason === 'ReadinessTimeout' ? 'failed' : 'degraded',
         statusReason: statusReason ?? 'Worker Pod is running but not ready.',
         startupProgress: reason === 'ReadinessTimeout' ? 100 : 75,
-        lastFailureCode: reason === 'ReadinessTimeout' ? 'readiness_timeout' : null,
-        lastFailureMessage: reason === 'ReadinessTimeout' ? statusReason ?? null : null,
+        lastFailureCode:
+          reason === 'ReadinessTimeout' ? 'readiness_timeout' : null,
+        lastFailureMessage:
+          reason === 'ReadinessTimeout' ? (statusReason ?? null) : null,
       };
     }
 
@@ -1303,12 +1424,14 @@ export interface LlmGatewayAdmin {
     userId: string;
     sandboxId: string;
     externalUserId: string;
+    groupId?: number | null;
   }): Promise<GatewayKeyResult>;
   rotateSandboxKey(input: {
     userId: string;
     sandboxId: string;
     externalUserId: string;
     externalKeyId: string;
+    groupId?: number | null;
   }): Promise<GatewayKeyResult>;
   revokeSandboxKey(input: {
     userId: string;
@@ -1321,6 +1444,7 @@ export interface LlmGatewayAdmin {
     sandboxId: string;
     externalUserId: string;
     externalKeyId?: string | null;
+    groupId?: number | null;
   }): Promise<GatewayKeyResult>;
   exportUsage(input?: {
     cursor?: string | null;
@@ -1356,7 +1480,10 @@ async function parseGatewayResponse<T>(response: Response): Promise<T> {
 
 function externalIdFromPayload(payload: unknown, fallbackName: string) {
   if (!payload || typeof payload !== 'object') {
-    throw new SandboxManagerError('provider', `Gateway admin response missing ${fallbackName}.`);
+    throw new SandboxManagerError(
+      'provider',
+      `Gateway admin response missing ${fallbackName}.`,
+    );
   }
   const candidate =
     'externalUserId' in payload
@@ -1367,14 +1494,40 @@ function externalIdFromPayload(payload: unknown, fallbackName: string) {
           ? payload.id
           : null;
   if (typeof candidate !== 'string' || !candidate.trim()) {
-    throw new SandboxManagerError('provider', `Gateway admin response missing ${fallbackName}.`);
+    throw new SandboxManagerError(
+      'provider',
+      `Gateway admin response missing ${fallbackName}.`,
+    );
   }
   return candidate;
 }
 
-function gatewayUsageEventsFromPayload(payload: unknown): GatewayUsageExportResult {
-  if (!payload || typeof payload !== 'object' || !('events' in payload) || !Array.isArray(payload.events)) {
-    throw new SandboxManagerError('provider', 'Gateway usage export response missing events.');
+function gatewayKeyCiphertextFromPayload(payload: unknown) {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+  if ('keyCiphertext' in payload && typeof payload.keyCiphertext === 'string') {
+    return payload.keyCiphertext;
+  }
+  if ('key' in payload && typeof payload.key === 'string') {
+    return payload.key;
+  }
+  return null;
+}
+
+function gatewayUsageEventsFromPayload(
+  payload: unknown,
+): GatewayUsageExportResult {
+  if (
+    !payload ||
+    typeof payload !== 'object' ||
+    !('events' in payload) ||
+    !Array.isArray(payload.events)
+  ) {
+    throw new SandboxManagerError(
+      'provider',
+      'Gateway usage export response missing events.',
+    );
   }
   const nextCursor =
     'nextCursor' in payload && typeof payload.nextCursor === 'string'
@@ -1383,19 +1536,32 @@ function gatewayUsageEventsFromPayload(payload: unknown): GatewayUsageExportResu
   return {
     events: payload.events.map((entry) => {
       if (!entry || typeof entry !== 'object') {
-        throw new SandboxManagerError('provider', 'Gateway usage export event is invalid.');
+        throw new SandboxManagerError(
+          'provider',
+          'Gateway usage export event is invalid.',
+        );
       }
       const eventId = 'eventId' in entry ? entry.eventId : null;
-      const externalKeyId = 'externalKeyId' in entry ? entry.externalKeyId : null;
+      const externalKeyId =
+        'externalKeyId' in entry ? entry.externalKeyId : null;
       const model = 'model' in entry ? entry.model : null;
       if (typeof eventId !== 'string' || !eventId.trim()) {
-        throw new SandboxManagerError('provider', 'Gateway usage export event missing event id.');
+        throw new SandboxManagerError(
+          'provider',
+          'Gateway usage export event missing event id.',
+        );
       }
       if (typeof externalKeyId !== 'string' || !externalKeyId.trim()) {
-        throw new SandboxManagerError('provider', 'Gateway usage export event missing external key id.');
+        throw new SandboxManagerError(
+          'provider',
+          'Gateway usage export event missing external key id.',
+        );
       }
       if (typeof model !== 'string' || !model.trim()) {
-        throw new SandboxManagerError('provider', 'Gateway usage export event missing model.');
+        throw new SandboxManagerError(
+          'provider',
+          'Gateway usage export event missing model.',
+        );
       }
       return {
         eventId,
@@ -1434,38 +1600,90 @@ function gatewayUsageEventsFromPayload(payload: unknown): GatewayUsageExportResu
 export class HttpLlmGatewayAdmin implements LlmGatewayAdmin {
   private readonly baseUrl: string;
 
-  constructor(
-    input: {
-      baseUrl: string;
-      adminToken: string;
-      fetchImpl?: GatewayFetch;
-    },
-  ) {
+  constructor(input: {
+    baseUrl: string;
+    adminToken: string;
+    contract?: 'sub2api' | 'generic';
+    fetchImpl?: GatewayFetch;
+  }) {
     this.baseUrl = trimTrailingSlash(input.baseUrl);
     this.adminToken = input.adminToken;
+    this.contract = input.contract ?? 'sub2api';
     this.fetchImpl = input.fetchImpl ?? fetch;
   }
 
   private readonly adminToken: string;
+  private readonly contract: 'sub2api' | 'generic';
   private readonly fetchImpl: GatewayFetch;
+
+  private adminHeaders(contentType = false) {
+    return {
+      authorization: `Bearer ${this.adminToken}`,
+      'x-api-key': this.adminToken,
+      ...(contentType ? { 'content-type': 'application/json' } : {}),
+    };
+  }
+
+  private adminPath(path: string) {
+    if (this.contract === 'generic') {
+      return `${this.baseUrl}${path}`;
+    }
+    return `${this.baseUrl}/api/v1/admin/integrations/remote-codex${path}`;
+  }
+
+  private usersEnsurePath() {
+    return this.contract === 'generic'
+      ? '/api/admin/users/ensure'
+      : '/users/ensure';
+  }
+
+  private userKeyEnsurePath(externalUserId: string) {
+    return this.contract === 'generic'
+      ? `/api/admin/users/${encodeURIComponent(externalUserId)}/keys/ensure`
+      : `/users/${encodeURIComponent(externalUserId)}/keys/ensure`;
+  }
+
+  private userKeyRotatePath(externalUserId: string, externalKeyId: string) {
+    return this.contract === 'generic'
+      ? `/api/admin/users/${encodeURIComponent(externalUserId)}/keys/${encodeURIComponent(externalKeyId)}/rotate`
+      : `/users/${encodeURIComponent(externalUserId)}/keys/${encodeURIComponent(externalKeyId)}/rotate`;
+  }
+
+  private userKeyRevokePath(externalUserId: string, externalKeyId: string) {
+    return this.contract === 'generic'
+      ? `/api/admin/users/${encodeURIComponent(externalUserId)}/keys/${encodeURIComponent(externalKeyId)}/revoke`
+      : `/users/${encodeURIComponent(externalUserId)}/keys/${encodeURIComponent(externalKeyId)}/revoke`;
+  }
+
+  private userKeyReconcilePath(externalUserId: string) {
+    return this.contract === 'generic'
+      ? `/api/admin/users/${encodeURIComponent(externalUserId)}/keys/reconcile`
+      : `/users/${encodeURIComponent(externalUserId)}/keys/ensure`;
+  }
+
+  private usageExportPath() {
+    return this.contract === 'generic'
+      ? '/api/admin/usage/export'
+      : '/usage/export';
+  }
 
   async ensureUser(input: {
     userId: string;
     email: string;
     displayName?: string | null;
   }): Promise<GatewayUserResult> {
-    const response = await this.fetchImpl(`${this.baseUrl}/api/admin/users/ensure`, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${this.adminToken}`,
-        'content-type': 'application/json',
+    const response = await this.fetchImpl(
+      this.adminPath(this.usersEnsurePath()),
+      {
+        method: 'POST',
+        headers: this.adminHeaders(true),
+        body: JSON.stringify({
+          externalId: input.userId,
+          email: input.email,
+          displayName: input.displayName ?? null,
+        }),
       },
-      body: JSON.stringify({
-        externalId: input.userId,
-        email: input.email,
-        displayName: input.displayName ?? null,
-      }),
-    });
+    );
     const payload = await parseGatewayResponse<unknown>(response);
     return {
       externalUserId: externalIdFromPayload(payload, 'external user id'),
@@ -1476,32 +1694,25 @@ export class HttpLlmGatewayAdmin implements LlmGatewayAdmin {
     userId: string;
     sandboxId: string;
     externalUserId: string;
+    groupId?: number | null;
   }): Promise<GatewayKeyResult> {
     const response = await this.fetchImpl(
-      `${this.baseUrl}/api/admin/users/${encodeURIComponent(input.externalUserId)}/keys/ensure`,
+      this.adminPath(this.userKeyEnsurePath(input.externalUserId)),
       {
         method: 'POST',
-        headers: {
-          authorization: `Bearer ${this.adminToken}`,
-          'content-type': 'application/json',
-        },
+        headers: this.adminHeaders(true),
         body: JSON.stringify({
           externalId: input.sandboxId,
           userId: input.userId,
           sandboxId: input.sandboxId,
+          group_id: input.groupId ?? undefined,
         }),
       },
     );
     const payload = await parseGatewayResponse<unknown>(response);
     return {
       externalKeyId: externalIdFromPayload(payload, 'external key id'),
-      keyCiphertext:
-        payload &&
-        typeof payload === 'object' &&
-        'keyCiphertext' in payload &&
-        typeof payload.keyCiphertext === 'string'
-          ? payload.keyCiphertext
-          : null,
+      keyCiphertext: gatewayKeyCiphertextFromPayload(payload),
     };
   }
 
@@ -1510,31 +1721,26 @@ export class HttpLlmGatewayAdmin implements LlmGatewayAdmin {
     sandboxId: string;
     externalUserId: string;
     externalKeyId: string;
+    groupId?: number | null;
   }): Promise<GatewayKeyResult> {
     const response = await this.fetchImpl(
-      `${this.baseUrl}/api/admin/users/${encodeURIComponent(input.externalUserId)}/keys/${encodeURIComponent(input.externalKeyId)}/rotate`,
+      this.adminPath(
+        this.userKeyRotatePath(input.externalUserId, input.externalKeyId),
+      ),
       {
         method: 'POST',
-        headers: {
-          authorization: `Bearer ${this.adminToken}`,
-          'content-type': 'application/json',
-        },
+        headers: this.adminHeaders(true),
         body: JSON.stringify({
           userId: input.userId,
           sandboxId: input.sandboxId,
+          group_id: input.groupId ?? undefined,
         }),
       },
     );
     const payload = await parseGatewayResponse<unknown>(response);
     return {
       externalKeyId: externalIdFromPayload(payload, 'external key id'),
-      keyCiphertext:
-        payload &&
-        typeof payload === 'object' &&
-        'keyCiphertext' in payload &&
-        typeof payload.keyCiphertext === 'string'
-          ? payload.keyCiphertext
-          : null,
+      keyCiphertext: gatewayKeyCiphertextFromPayload(payload),
     };
   }
 
@@ -1545,13 +1751,12 @@ export class HttpLlmGatewayAdmin implements LlmGatewayAdmin {
     externalKeyId: string;
   }): Promise<void> {
     const response = await this.fetchImpl(
-      `${this.baseUrl}/api/admin/users/${encodeURIComponent(input.externalUserId)}/keys/${encodeURIComponent(input.externalKeyId)}/revoke`,
+      this.adminPath(
+        this.userKeyRevokePath(input.externalUserId, input.externalKeyId),
+      ),
       {
         method: 'POST',
-        headers: {
-          authorization: `Bearer ${this.adminToken}`,
-          'content-type': 'application/json',
-        },
+        headers: this.adminHeaders(true),
         body: JSON.stringify({
           userId: input.userId,
           sandboxId: input.sandboxId,
@@ -1566,40 +1771,35 @@ export class HttpLlmGatewayAdmin implements LlmGatewayAdmin {
     sandboxId: string;
     externalUserId: string;
     externalKeyId?: string | null;
+    groupId?: number | null;
   }): Promise<GatewayKeyResult> {
     const response = await this.fetchImpl(
-      `${this.baseUrl}/api/admin/users/${encodeURIComponent(input.externalUserId)}/keys/reconcile`,
+      this.adminPath(this.userKeyReconcilePath(input.externalUserId)),
       {
         method: 'POST',
-        headers: {
-          authorization: `Bearer ${this.adminToken}`,
-          'content-type': 'application/json',
-        },
+        headers: this.adminHeaders(true),
         body: JSON.stringify({
           externalId: input.sandboxId,
           userId: input.userId,
           sandboxId: input.sandboxId,
           externalKeyId: input.externalKeyId ?? null,
+          group_id: input.groupId ?? undefined,
         }),
       },
     );
     const payload = await parseGatewayResponse<unknown>(response);
     return {
       externalKeyId: externalIdFromPayload(payload, 'external key id'),
-      keyCiphertext:
-        payload &&
-        typeof payload === 'object' &&
-        'keyCiphertext' in payload &&
-        typeof payload.keyCiphertext === 'string'
-          ? payload.keyCiphertext
-          : null,
+      keyCiphertext: gatewayKeyCiphertextFromPayload(payload),
     };
   }
 
-  async exportUsage(input: {
-    cursor?: string | null;
-    limit?: number;
-  } = {}): Promise<GatewayUsageExportResult> {
+  async exportUsage(
+    input: {
+      cursor?: string | null;
+      limit?: number;
+    } = {},
+  ): Promise<GatewayUsageExportResult> {
     const search = new URLSearchParams();
     if (input.cursor) {
       search.set('cursor', input.cursor);
@@ -1609,12 +1809,10 @@ export class HttpLlmGatewayAdmin implements LlmGatewayAdmin {
     }
     const query = search.toString();
     const response = await this.fetchImpl(
-      `${this.baseUrl}/api/admin/usage/export${query ? `?${query}` : ''}`,
+      `${this.adminPath(this.usageExportPath())}${query ? `?${query}` : ''}`,
       {
         method: 'GET',
-        headers: {
-          authorization: `Bearer ${this.adminToken}`,
-        },
+        headers: this.adminHeaders(),
       },
     );
     const payload = await parseGatewayResponse<unknown>(response);
@@ -1636,7 +1834,9 @@ export class NoopLlmGatewayAdmin implements LlmGatewayAdmin {
     };
   }
 
-  async rotateSandboxKey(input: { sandboxId: string }): Promise<GatewayKeyResult> {
+  async rotateSandboxKey(input: {
+    sandboxId: string;
+  }): Promise<GatewayKeyResult> {
     return {
       externalKeyId: `sub2api-key-${input.sandboxId}-rotated`,
       keyCiphertext: null,
@@ -1645,7 +1845,9 @@ export class NoopLlmGatewayAdmin implements LlmGatewayAdmin {
 
   async revokeSandboxKey(): Promise<void> {}
 
-  async reconcileSandboxKey(input: { sandboxId: string }): Promise<GatewayKeyResult> {
+  async reconcileSandboxKey(input: {
+    sandboxId: string;
+  }): Promise<GatewayKeyResult> {
     return {
       externalKeyId: `sub2api-key-${input.sandboxId}`,
       keyCiphertext: null,
@@ -1731,7 +1933,9 @@ export interface HarnessAdmin {
 }
 
 function textFieldFromHarnessResponse(text: string, name: string) {
-  const match = text.match(new RegExp(`^${name}\\s*=\\s*(?:"([^"]*)"|([^\\n\\r]+))\\s*$`, 'm'));
+  const match = text.match(
+    new RegExp(`^${name}\\s*=\\s*(?:"([^"]*)"|([^\\n\\r]+))\\s*$`, 'm'),
+  );
   return match?.[1] ?? match?.[2]?.trim() ?? null;
 }
 
@@ -1783,7 +1987,10 @@ function harnessExternalIdFromPayload(payload: unknown, fallbackName: string) {
       return id;
     }
   }
-  throw new SandboxManagerError('provider', `Harness admin response missing ${fallbackName}.`);
+  throw new SandboxManagerError(
+    'provider',
+    `Harness admin response missing ${fallbackName}.`,
+  );
 }
 
 function harnessApiKeyFromPayload(payload: unknown) {
@@ -1839,16 +2046,30 @@ function harnessNumberField(entry: Record<string, unknown>, fields: string[]) {
     if (typeof value === 'number' && Number.isFinite(value)) {
       return value;
     }
-    if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) {
+    if (
+      typeof value === 'string' &&
+      value.trim() &&
+      Number.isFinite(Number(value))
+    ) {
       return Number(value);
     }
   }
   return undefined;
 }
 
-function harnessUsageEventsFromPayload(payload: unknown): HarnessUsageExportResult {
-  if (!payload || typeof payload !== 'object' || !('events' in payload) || !Array.isArray(payload.events)) {
-    throw new SandboxManagerError('provider', 'Harness usage export response missing events.');
+function harnessUsageEventsFromPayload(
+  payload: unknown,
+): HarnessUsageExportResult {
+  if (
+    !payload ||
+    typeof payload !== 'object' ||
+    !('events' in payload) ||
+    !Array.isArray(payload.events)
+  ) {
+    throw new SandboxManagerError(
+      'provider',
+      'Harness usage export response missing events.',
+    );
   }
   const nextCursor =
     'nextCursor' in payload && typeof payload.nextCursor === 'string'
@@ -1857,37 +2078,85 @@ function harnessUsageEventsFromPayload(payload: unknown): HarnessUsageExportResu
   return {
     events: payload.events.map((entry) => {
       if (!entry || typeof entry !== 'object') {
-        throw new SandboxManagerError('provider', 'Harness usage export event is invalid.');
+        throw new SandboxManagerError(
+          'provider',
+          'Harness usage export event is invalid.',
+        );
       }
       const record = entry as Record<string, unknown>;
-      const eventId = harnessStringField(record, ['eventId', 'event_id', 'externalEventId', 'external_event_id', 'requestId', 'request_id']);
+      const eventId = harnessStringField(record, [
+        'eventId',
+        'event_id',
+        'externalEventId',
+        'external_event_id',
+        'requestId',
+        'request_id',
+      ]);
       const module = harnessStringField(record, ['module']);
       if (!eventId) {
-        throw new SandboxManagerError('provider', 'Harness usage export event missing event id.');
+        throw new SandboxManagerError(
+          'provider',
+          'Harness usage export event missing event id.',
+        );
       }
-      if (module !== 'estructural' && module !== 'quntur' && module !== 'farmaco') {
-        throw new SandboxManagerError('provider', 'Harness usage export event missing approved module.');
+      if (
+        module !== 'estructural' &&
+        module !== 'quntur' &&
+        module !== 'farmaco'
+      ) {
+        throw new SandboxManagerError(
+          'provider',
+          'Harness usage export event missing approved module.',
+        );
       }
       const metadata =
-        'metadata' in record && record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata)
-          ? record.metadata as Record<string, unknown>
+        'metadata' in record &&
+        record.metadata &&
+        typeof record.metadata === 'object' &&
+        !Array.isArray(record.metadata)
+          ? (record.metadata as Record<string, unknown>)
           : undefined;
       return {
         eventId,
-        externalKeyId: harnessStringField(record, ['externalKeyId', 'external_key_id', 'keyId', 'key_id']),
+        externalKeyId: harnessStringField(record, [
+          'externalKeyId',
+          'external_key_id',
+          'keyId',
+          'key_id',
+        ]),
         userId: harnessStringField(record, ['userId', 'user_id']),
         sandboxId: harnessStringField(record, ['sandboxId', 'sandbox_id']),
-        workspaceId: harnessStringField(record, ['workspaceId', 'workspace_id']),
+        workspaceId: harnessStringField(record, [
+          'workspaceId',
+          'workspace_id',
+        ]),
         sessionId: harnessStringField(record, ['sessionId', 'session_id']),
         module,
         tool: harnessStringField(record, ['tool', 'toolName', 'tool_name']),
         runId: harnessStringField(record, ['runId', 'run_id']),
-        jobId: harnessStringField(record, ['jobId', 'job_id', 'computeJobId', 'compute_job_id']),
-        computeUnits: harnessNumberField(record, ['computeUnits', 'compute_units', 'workerObservedSeconds', 'worker_observed_seconds']),
-        costUsd: harnessNumberField(record, ['costUsd', 'cost_usd', 'estimatedCostUsd', 'estimated_cost_usd']),
+        jobId: harnessStringField(record, [
+          'jobId',
+          'job_id',
+          'computeJobId',
+          'compute_job_id',
+        ]),
+        computeUnits: harnessNumberField(record, [
+          'computeUnits',
+          'compute_units',
+          'workerObservedSeconds',
+          'worker_observed_seconds',
+        ]),
+        costUsd: harnessNumberField(record, [
+          'costUsd',
+          'cost_usd',
+          'estimatedCostUsd',
+          'estimated_cost_usd',
+        ]),
         status: harnessStringField(record, ['status', 'state']) ?? undefined,
         metadata,
-        occurredAt: harnessStringField(record, ['occurredAt', 'occurred_at']) ?? undefined,
+        occurredAt:
+          harnessStringField(record, ['occurredAt', 'occurred_at']) ??
+          undefined,
       };
     }),
     nextCursor,
@@ -1900,23 +2169,19 @@ export class HttpHarnessAdmin implements HarnessAdmin {
   private readonly fetchImpl: GatewayFetch;
   private readonly legacyFallback: boolean;
 
-  constructor(
-    input: {
-      baseUrl: string;
-      adminKey: string;
-      fetchImpl?: GatewayFetch;
-      legacyFallback?: boolean;
-    },
-  ) {
+  constructor(input: {
+    baseUrl: string;
+    adminKey: string;
+    fetchImpl?: GatewayFetch;
+    legacyFallback?: boolean;
+  }) {
     this.baseUrl = trimTrailingSlash(input.baseUrl);
     this.adminKey = input.adminKey;
     this.fetchImpl = input.fetchImpl ?? fetch;
     this.legacyFallback = input.legacyFallback ?? true;
   }
 
-  async ensureUser(input: {
-    userId: string;
-  }): Promise<HarnessUserResult> {
+  async ensureUser(input: { userId: string }): Promise<HarnessUserResult> {
     return {
       externalUserId: `remote-codex:user:${input.userId}`,
     };
@@ -1929,23 +2194,26 @@ export class HttpHarnessAdmin implements HarnessAdmin {
     email?: string | null;
     displayName?: string | null;
   }): Promise<HarnessKeyResult> {
-    const ensureResponse = await this.fetchImpl(`${this.baseUrl}/admin/members/ensure`, {
-      method: 'POST',
-      headers: {
-        'x-admin-key': this.adminKey,
-        'content-type': 'application/json',
+    const ensureResponse = await this.fetchImpl(
+      `${this.baseUrl}/admin/members/ensure`,
+      {
+        method: 'POST',
+        headers: {
+          'x-admin-key': this.adminKey,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          externalId: `remote-codex:sandbox:${input.sandboxId}`,
+          userId: input.userId,
+          sandboxId: input.sandboxId,
+          externalUserId: input.externalUserId,
+          name: `remote-codex-sandbox-${input.sandboxId.slice(0, 8)}`,
+          kind: 'agent',
+          email: input.email ?? '',
+          description: `Remote Codex sandbox ${input.sandboxId} for user ${input.userId}`,
+        }),
       },
-      body: JSON.stringify({
-        externalId: `remote-codex:sandbox:${input.sandboxId}`,
-        userId: input.userId,
-        sandboxId: input.sandboxId,
-        externalUserId: input.externalUserId,
-        name: `remote-codex-sandbox-${input.sandboxId.slice(0, 8)}`,
-        kind: 'agent',
-        email: input.email ?? '',
-        description: `Remote Codex sandbox ${input.sandboxId} for user ${input.userId}`,
-      }),
-    });
+    );
     if (ensureResponse.status !== 404) {
       const payload = await parseHarnessResponse(ensureResponse);
       return {
@@ -1958,19 +2226,22 @@ export class HttpHarnessAdmin implements HarnessAdmin {
       await parseHarnessResponse(ensureResponse);
     }
 
-    const createResponse = await this.fetchImpl(`${this.baseUrl}/admin/create`, {
-      method: 'POST',
-      headers: {
-        'x-admin-key': this.adminKey,
-        'content-type': 'application/json',
+    const createResponse = await this.fetchImpl(
+      `${this.baseUrl}/admin/create`,
+      {
+        method: 'POST',
+        headers: {
+          'x-admin-key': this.adminKey,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: `remote-codex-sandbox-${input.sandboxId.slice(0, 8)}`,
+          kind: 'agent',
+          email: input.email ?? '',
+          description: `Remote Codex sandbox ${input.sandboxId} for user ${input.userId}`,
+        }),
       },
-      body: JSON.stringify({
-        name: `remote-codex-sandbox-${input.sandboxId.slice(0, 8)}`,
-        kind: 'agent',
-        email: input.email ?? '',
-        description: `Remote Codex sandbox ${input.sandboxId} for user ${input.userId}`,
-      }),
-    });
+    );
     const payload = await parseHarnessResponse(createResponse);
     return {
       externalKeyId: harnessExternalIdFromPayload(payload, 'external key id'),
@@ -2076,23 +2347,26 @@ export class HttpHarnessAdmin implements HarnessAdmin {
     externalUserId: string;
     externalKeyId?: string | null;
   }): Promise<HarnessKeyResult> {
-    const response = await this.fetchImpl(`${this.baseUrl}/admin/members/reconcile`, {
-      method: 'POST',
-      headers: {
-        'x-admin-key': this.adminKey,
-        'content-type': 'application/json',
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/admin/members/reconcile`,
+      {
+        method: 'POST',
+        headers: {
+          'x-admin-key': this.adminKey,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          externalId: `remote-codex:sandbox:${input.sandboxId}`,
+          externalKeyId: input.externalKeyId ?? null,
+          userId: input.userId,
+          sandboxId: input.sandboxId,
+          externalUserId: input.externalUserId,
+          name: `remote-codex-sandbox-${input.sandboxId.slice(0, 8)}`,
+          kind: 'agent',
+          description: `Remote Codex sandbox ${input.sandboxId} for user ${input.userId}`,
+        }),
       },
-      body: JSON.stringify({
-        externalId: `remote-codex:sandbox:${input.sandboxId}`,
-        externalKeyId: input.externalKeyId ?? null,
-        userId: input.userId,
-        sandboxId: input.sandboxId,
-        externalUserId: input.externalUserId,
-        name: `remote-codex-sandbox-${input.sandboxId.slice(0, 8)}`,
-        kind: 'agent',
-        description: `Remote Codex sandbox ${input.sandboxId} for user ${input.userId}`,
-      }),
-    });
+    );
     if (response.status !== 404) {
       const payload = await parseHarnessResponse(response);
       return {
@@ -2115,10 +2389,12 @@ export class HttpHarnessAdmin implements HarnessAdmin {
     return this.ensureSandboxKey(input);
   }
 
-  async exportUsage(input: {
-    cursor?: string | null;
-    limit?: number;
-  } = {}): Promise<HarnessUsageExportResult> {
+  async exportUsage(
+    input: {
+      cursor?: string | null;
+      limit?: number;
+    } = {},
+  ): Promise<HarnessUsageExportResult> {
     const search = new URLSearchParams();
     if (input.cursor) {
       search.set('cursor', input.cursor);
@@ -2146,7 +2422,9 @@ export class NoopHarnessAdmin implements HarnessAdmin {
     return { externalUserId: `harness-user-${input.userId}` };
   }
 
-  async ensureSandboxKey(input: { sandboxId: string }): Promise<HarnessKeyResult> {
+  async ensureSandboxKey(input: {
+    sandboxId: string;
+  }): Promise<HarnessKeyResult> {
     return {
       externalKeyId: `harness-key-${input.sandboxId}`,
       apiKey: `harness-api-key-${input.sandboxId}`,
@@ -2154,7 +2432,10 @@ export class NoopHarnessAdmin implements HarnessAdmin {
     };
   }
 
-  async rotateSandboxKey(input: { sandboxId: string; externalKeyId: string }): Promise<HarnessKeyResult> {
+  async rotateSandboxKey(input: {
+    sandboxId: string;
+    externalKeyId: string;
+  }): Promise<HarnessKeyResult> {
     return {
       externalKeyId: input.externalKeyId,
       apiKey: `harness-api-key-${input.sandboxId}-rotated`,
@@ -2164,7 +2445,10 @@ export class NoopHarnessAdmin implements HarnessAdmin {
 
   async revokeSandboxKey(): Promise<void> {}
 
-  async reconcileSandboxKey(input: { sandboxId: string; externalKeyId?: string | null }): Promise<HarnessKeyResult> {
+  async reconcileSandboxKey(input: {
+    sandboxId: string;
+    externalKeyId?: string | null;
+  }): Promise<HarnessKeyResult> {
     return {
       externalKeyId: input.externalKeyId ?? `harness-key-${input.sandboxId}`,
       apiKey: null,

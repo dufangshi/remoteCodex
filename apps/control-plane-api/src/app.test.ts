@@ -5,8 +5,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createSignedToken } from '../../../packages/shared/src/tokens';
 import type {
+  GatewayKeyResult,
   HarnessAdmin,
   HarnessKeyResult,
+  LlmGatewayAdmin,
   SandboxManager,
   SandboxProvisionResult,
   SandboxRuntimeResource,
@@ -18,7 +20,10 @@ import { CONTROL_PLANE_LOG_REDACTION_PATHS, buildControlPlaneApp } from './app';
 function testEnv(name: string) {
   return {
     NODE_ENV: 'test',
-    CONTROL_PLANE_DATABASE_URL: path.join(os.tmpdir(), `remote-codex-control-plane-${name}-${Date.now()}.sqlite`),
+    CONTROL_PLANE_DATABASE_URL: path.join(
+      os.tmpdir(),
+      `remote-codex-control-plane-${name}-${Date.now()}.sqlite`,
+    ),
     CONTROL_PLANE_JWT_SECRET: 'test-control-plane-secret-key',
     SANDBOX_ROUTER_BASE_URL: 'https://sandbox-gateway.test',
     CONTROL_PLANE_ADMIN_IDENTITIES: 'dev:admin',
@@ -39,7 +44,9 @@ function decodeTokenHeader(token: string) {
   }
   const normalized = encodedHeader.replaceAll('-', '+').replaceAll('_', '/');
   const padding = '='.repeat((4 - (normalized.length % 4)) % 4);
-  return JSON.parse(Buffer.from(`${normalized}${padding}`, 'base64').toString('utf8')) as {
+  return JSON.parse(
+    Buffer.from(`${normalized}${padding}`, 'base64').toString('utf8'),
+  ) as {
     kid?: string;
   };
 }
@@ -47,17 +54,25 @@ function decodeTokenHeader(token: string) {
 class RecordingSandboxManager implements SandboxManager {
   readonly starts: SandboxStartInput[] = [];
   readonly stops: Array<{ sandboxId: string; userId: string }> = [];
-  readonly cleanupRequests: Array<{ sandboxId: string; userId?: string | null; reason: string }> = [];
+  readonly cleanupRequests: Array<{
+    sandboxId: string;
+    userId?: string | null;
+    reason: string;
+  }> = [];
   runtimeResources: SandboxRuntimeResource[] = [];
   statusResult: SandboxProvisionResult = { state: 'running' };
   stopResult: SandboxProvisionResult = { state: 'stopped' };
   startError: Error | null = null;
 
-  async createSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
+  async createSandbox(
+    input: SandboxStartInput,
+  ): Promise<SandboxProvisionResult> {
     return this.startSandbox(input);
   }
 
-  async startSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
+  async startSandbox(
+    input: SandboxStartInput,
+  ): Promise<SandboxProvisionResult> {
     this.starts.push(input);
     if (this.startError) {
       throw this.startError;
@@ -69,12 +84,17 @@ class RecordingSandboxManager implements SandboxManager {
     };
   }
 
-  async stopSandbox(input: { sandboxId: string; userId: string }): Promise<SandboxProvisionResult> {
+  async stopSandbox(input: {
+    sandboxId: string;
+    userId: string;
+  }): Promise<SandboxProvisionResult> {
     this.stops.push(input);
     return this.stopResult;
   }
 
-  async restartSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult> {
+  async restartSandbox(
+    input: SandboxStartInput,
+  ): Promise<SandboxProvisionResult> {
     return this.startSandbox(input);
   }
 
@@ -113,10 +133,28 @@ class RecordingSandboxManager implements SandboxManager {
 }
 
 class RecordingHarnessAdmin implements HarnessAdmin {
-  readonly ensureUsers: Array<{ userId: string; email: string; displayName?: string | null }> = [];
-  readonly ensureKeys: Array<{ userId: string; sandboxId: string; externalUserId: string }> = [];
-  readonly rotations: Array<{ userId: string; sandboxId: string; externalUserId: string; externalKeyId: string }> = [];
-  readonly revocations: Array<{ userId: string; sandboxId: string; externalUserId: string; externalKeyId: string }> = [];
+  readonly ensureUsers: Array<{
+    userId: string;
+    email: string;
+    displayName?: string | null;
+  }> = [];
+  readonly ensureKeys: Array<{
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+  }> = [];
+  readonly rotations: Array<{
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId: string;
+  }> = [];
+  readonly revocations: Array<{
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId: string;
+  }> = [];
   readonly exportCalls: Array<{ cursor?: string | null; limit?: number }> = [];
   nextKey: HarnessKeyResult | null = null;
   usageExport = {
@@ -124,18 +162,28 @@ class RecordingHarnessAdmin implements HarnessAdmin {
     nextCursor: null,
   } as Awaited<ReturnType<HarnessAdmin['exportUsage']>>;
 
-  async ensureUser(input: { userId: string; email: string; displayName?: string | null }) {
+  async ensureUser(input: {
+    userId: string;
+    email: string;
+    displayName?: string | null;
+  }) {
     this.ensureUsers.push(input);
     return { externalUserId: `harness-user-${input.userId}` };
   }
 
-  async ensureSandboxKey(input: { userId: string; sandboxId: string; externalUserId: string }) {
+  async ensureSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+  }) {
     this.ensureKeys.push(input);
-    return this.nextKey ?? {
-      externalKeyId: `harness-key-${input.sandboxId}`,
-      apiKey: `harness-api-key-${input.sandboxId}`,
-      keyCiphertext: null,
-    };
+    return (
+      this.nextKey ?? {
+        externalKeyId: `harness-key-${input.sandboxId}`,
+        apiKey: `harness-api-key-${input.sandboxId}`,
+        keyCiphertext: null,
+      }
+    );
   }
 
   async rotateSandboxKey(input: {
@@ -145,11 +193,13 @@ class RecordingHarnessAdmin implements HarnessAdmin {
     externalKeyId: string;
   }) {
     this.rotations.push(input);
-    return this.nextKey ?? {
-      externalKeyId: input.externalKeyId,
-      apiKey: `harness-api-key-${input.sandboxId}-rotated`,
-      keyCiphertext: null,
-    };
+    return (
+      this.nextKey ?? {
+        externalKeyId: input.externalKeyId,
+        apiKey: `harness-api-key-${input.sandboxId}-rotated`,
+        keyCiphertext: null,
+      }
+    );
   }
 
   async revokeSandboxKey(input: {
@@ -178,9 +228,116 @@ class RecordingHarnessAdmin implements HarnessAdmin {
   }
 }
 
+class RecordingLlmGatewayAdmin implements LlmGatewayAdmin {
+  readonly ensureUsers: Array<{
+    userId: string;
+    email: string;
+    displayName?: string | null;
+  }> = [];
+  readonly ensureKeys: Array<{
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    groupId?: number | null;
+  }> = [];
+  readonly rotations: Array<{
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId: string;
+    groupId?: number | null;
+  }> = [];
+  readonly revocations: Array<{
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId: string;
+  }> = [];
+  nextKey: GatewayKeyResult | null = null;
+  usageExport = {
+    events: [],
+    nextCursor: null,
+  } as Awaited<ReturnType<LlmGatewayAdmin['exportUsage']>>;
+
+  async ensureUser(input: {
+    userId: string;
+    email: string;
+    displayName?: string | null;
+  }) {
+    this.ensureUsers.push(input);
+    return { externalUserId: `sub2api-user-${input.userId}` };
+  }
+
+  async ensureSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    groupId?: number | null;
+  }) {
+    this.ensureKeys.push(input);
+    return (
+      this.nextKey ?? {
+        externalKeyId: `sub2api-key-${input.sandboxId}`,
+        keyCiphertext: `sub2api-api-key-${input.sandboxId}`,
+      }
+    );
+  }
+
+  async rotateSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId: string;
+    groupId?: number | null;
+  }) {
+    this.rotations.push(input);
+    return (
+      this.nextKey ?? {
+        externalKeyId: `sub2api-key-${input.sandboxId}-rotated`,
+        keyCiphertext: `sub2api-api-key-${input.sandboxId}-rotated`,
+      }
+    );
+  }
+
+  async revokeSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId: string;
+  }) {
+    this.revocations.push(input);
+  }
+
+  async reconcileSandboxKey(input: {
+    sandboxId: string;
+    externalKeyId?: string | null;
+    groupId?: number | null;
+  }) {
+    return (
+      this.nextKey ?? {
+        externalKeyId: input.externalKeyId ?? `sub2api-key-${input.sandboxId}`,
+        keyCiphertext: `sub2api-api-key-${input.sandboxId}-reconciled`,
+      }
+    );
+  }
+
+  async exportUsage() {
+    return this.usageExport;
+  }
+}
+
 class RecordingSandboxSecretWriter implements SandboxSecretWriter {
-  readonly writes: Array<{ namespace?: string; secretName: string; key: string; value: string }> = [];
-  readonly reads: Array<{ namespace?: string; secretName: string; key: string }> = [];
+  readonly writes: Array<{
+    namespace?: string;
+    secretName: string;
+    key: string;
+    value: string;
+  }> = [];
+  readonly reads: Array<{
+    namespace?: string;
+    secretName: string;
+    key: string;
+  }> = [];
   readonly values = new Set<string>();
 
   private valueKey(input: { secretName: string; key: string }) {
@@ -262,7 +419,9 @@ describe('control plane api', () => {
       'https://frontend.example.test',
     );
     expect(preflight.headers['access-control-allow-methods']).toContain('POST');
-    expect(preflight.headers['access-control-allow-headers']).toContain('authorization');
+    expect(preflight.headers['access-control-allow-headers']).toContain(
+      'authorization',
+    );
 
     const response = await app.inject({
       method: 'POST',
@@ -342,7 +501,9 @@ describe('control plane api', () => {
       'https://debug.lnz-study.com',
     );
     expect(response.headers['access-control-allow-methods']).toContain('POST');
-    expect(response.headers['access-control-allow-headers']).toContain('content-type');
+    expect(response.headers['access-control-allow-headers']).toContain(
+      'content-type',
+    );
   });
 
   it('does not allow unconfigured browser origins', async () => {
@@ -393,15 +554,20 @@ describe('control plane api', () => {
       lastFailureCode: null,
       lastFailureMessage: null,
     });
-    expect(body.gatewayKey.externalKeyId).toBe(`sub2api-key-${body.sandbox.id}`);
+    expect(body.gatewayKey.externalKeyId).toBe(
+      `sub2api-key-${body.sandbox.id}`,
+    );
   });
 
   it('uses configured gateway admin credentials during bootstrap', async () => {
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    globalThis.fetch = (async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       requests.push({ url: String(url), init });
-      if (String(url).endsWith('/api/admin/users/ensure')) {
+      if (String(url).endsWith('/users/ensure')) {
         return Response.json({ externalUserId: 'gw-user-from-http' });
       }
       return Response.json({
@@ -434,11 +600,12 @@ describe('control plane api', () => {
       expect(response.json().gatewayKey.keyCiphertext).toBeNull();
       expect(response.json().gatewayKey.hasEncryptedKey).toBe(true);
       expect(requests.map((request) => request.url)).toEqual([
-        'https://gateway-admin.example.test/api/admin/users/ensure',
-        'https://gateway-admin.example.test/api/admin/users/gw-user-from-http/keys/ensure',
+        'https://gateway-admin.example.test/api/v1/admin/integrations/remote-codex/users/ensure',
+        'https://gateway-admin.example.test/api/v1/admin/integrations/remote-codex/users/gw-user-from-http/keys/ensure',
       ]);
       expect(requests[0]!.init!.headers).toMatchObject({
         authorization: 'Bearer gateway-admin-token',
+        'x-api-key': 'gateway-admin-token',
       });
     } finally {
       globalThis.fetch = originalFetch;
@@ -448,7 +615,10 @@ describe('control plane api', () => {
   it('returns stable gateway unavailable errors when gateway provisioning fails', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async () =>
-      Response.json({ message: 'gateway unavailable' }, { status: 503 })) as typeof fetch;
+      Response.json(
+        { message: 'gateway unavailable' },
+        { status: 503 },
+      )) as typeof fetch;
 
     try {
       const app = buildControlPlaneApp({
@@ -506,10 +676,13 @@ describe('control plane api', () => {
   it('rotates and revokes gateway keys from admin sandbox APIs', async () => {
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    globalThis.fetch = (async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       requests.push({ url: String(url), init });
       const urlText = String(url);
-      if (urlText.endsWith('/api/admin/users/ensure')) {
+      if (urlText.endsWith('/users/ensure')) {
         return Response.json({ externalUserId: 'gw-user-admin' });
       }
       if (urlText.endsWith('/keys/ensure')) {
@@ -559,6 +732,10 @@ describe('control plane api', () => {
         revokedAt: null,
       });
       expect(rotate.json().gatewayKey.rotatedAt).toEqual(expect.any(String));
+      expect(requests.at(-1)?.init?.headers).toMatchObject({
+        authorization: 'Bearer gateway-admin-token',
+        'x-api-key': 'gateway-admin-token',
+      });
 
       const revoke = await app.inject({
         method: 'POST',
@@ -572,10 +749,10 @@ describe('control plane api', () => {
       });
       expect(revoke.json().gatewayKey.revokedAt).toEqual(expect.any(String));
       expect(requests.map((request) => request.url)).toContain(
-        'https://gateway-admin.example.test/api/admin/users/gw-user-admin/keys/gw-key-original/rotate',
+        'https://gateway-admin.example.test/api/v1/admin/integrations/remote-codex/users/gw-user-admin/keys/gw-key-original/rotate',
       );
       expect(requests.map((request) => request.url)).toContain(
-        'https://gateway-admin.example.test/api/admin/users/gw-user-admin/keys/gw-key-rotated/revoke',
+        'https://gateway-admin.example.test/api/v1/admin/integrations/remote-codex/users/gw-user-admin/keys/gw-key-rotated/revoke',
       );
     } finally {
       globalThis.fetch = originalFetch;
@@ -585,19 +762,26 @@ describe('control plane api', () => {
   it('reconciles gateway keys from the admin sandbox API', async () => {
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    globalThis.fetch = (async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       requests.push({ url: String(url), init });
       const urlText = String(url);
-      if (urlText.endsWith('/api/admin/users/ensure')) {
+      if (urlText.endsWith('/users/ensure')) {
         return Response.json({ externalUserId: 'gw-user-reconcile' });
       }
       if (urlText.endsWith('/keys/ensure')) {
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        if (body.externalKeyId) {
+          return Response.json({
+            externalKeyId: 'gw-key-reconciled',
+            keyCiphertext: 'encrypted-reconciled-token',
+          });
+        }
         return Response.json({ externalKeyId: 'gw-key-before-reconcile' });
       }
-      return Response.json({
-        externalKeyId: 'gw-key-reconciled',
-        keyCiphertext: 'encrypted-reconciled-token',
-      });
+      return Response.json({});
     }) as typeof fetch;
 
     try {
@@ -636,10 +820,12 @@ describe('control plane api', () => {
       });
       expect(reconcile.json().gatewayKey.rotatedAt).toEqual(expect.any(String));
       expect(requests.map((request) => request.url)).toContain(
-        'https://gateway-admin.example.test/api/admin/users/gw-user-reconcile/keys/reconcile',
+        'https://gateway-admin.example.test/api/v1/admin/integrations/remote-codex/users/gw-user-reconcile/keys/ensure',
       );
-      const reconcileRequest = requests.find((request) =>
-        request.url.endsWith('/keys/reconcile'),
+      const reconcileRequest = requests.find(
+        (request) =>
+          request.url.endsWith('/keys/ensure') &&
+          JSON.parse(String(request.init?.body ?? '{}')).externalKeyId,
       );
       expect(JSON.parse(String(reconcileRequest!.init!.body))).toMatchObject({
         externalKeyId: 'gw-key-before-reconcile',
@@ -652,6 +838,7 @@ describe('control plane api', () => {
 
   it('attaches gateway credential metadata when starting a sandbox', async () => {
     const sandboxManager = new RecordingSandboxManager();
+    const llmGatewayAdmin = new RecordingLlmGatewayAdmin();
     const harnessAdmin = new RecordingHarnessAdmin();
     const sandboxSecretWriter = new RecordingSandboxSecretWriter();
     const app = buildControlPlaneApp({
@@ -659,13 +846,14 @@ describe('control plane api', () => {
         ...testEnv('gateway-start'),
         LLM_GATEWAY_BASE_URL: 'https://llm-gateway.example.test',
         LLM_GATEWAY_TOKEN_SECRET_NAME: 'remote-codex-gateway-tokens',
-        LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY: 'sub2api-api-key',
+        LLM_GATEWAY_GROUP_ID: '42',
         ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
         ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: 'remote-codex-harness-app-keys',
         ELAGENTE_HARNESS_ADMIN_KEY: 'harness-admin-key',
         REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
       },
       sandboxManager,
+      llmGatewayAdmin,
       harnessAdmin,
       sandboxSecretWriter,
     });
@@ -681,6 +869,20 @@ describe('control plane api', () => {
       },
     });
     expect(bootstrap.statusCode).toBe(200);
+    expect(llmGatewayAdmin.ensureKeys).toEqual([
+      {
+        userId: bootstrap.json().user.id,
+        sandboxId: bootstrap.json().sandbox.id,
+        externalUserId: `sub2api-user-${bootstrap.json().user.id}`,
+        groupId: 42,
+      },
+    ]);
+    expect(bootstrap.json().gatewayKey).toMatchObject({
+      externalKeyId: `sub2api-key-${bootstrap.json().sandbox.id}`,
+      keyCiphertext: null,
+      hasEncryptedKey: true,
+      status: 'active',
+    });
     expect(bootstrap.json().harnessKey).toMatchObject({
       externalKeyId: `harness-key-${bootstrap.json().sandbox.id}`,
       keyCiphertext: null,
@@ -690,6 +892,11 @@ describe('control plane api', () => {
       secretKey: bootstrap.json().sandbox.id,
     });
     expect(sandboxSecretWriter.writes).toEqual([
+      {
+        secretName: 'remote-codex-gateway-tokens',
+        key: `sub2api-key-${bootstrap.json().sandbox.id}`,
+        value: `sub2api-api-key-${bootstrap.json().sandbox.id}`,
+      },
       {
         secretName: 'remote-codex-harness-app-keys',
         key: bootstrap.json().sandbox.id,
@@ -709,7 +916,7 @@ describe('control plane api', () => {
       enabledAgentProviders: 'codex',
       gateway: {
         baseUrl: 'https://llm-gateway.example.test',
-        keyId: 'sub2api-api-key',
+        keyId: `sub2api-key-${bootstrap.json().sandbox.id}`,
         tokenSecretName: 'remote-codex-gateway-tokens',
       },
       harness: {
@@ -718,6 +925,8 @@ describe('control plane api', () => {
         chemistryToolsEnabled: true,
       },
     });
+    expect(sandboxManager.starts[0]?.gateway?.staticToken).toBeUndefined();
+    expect(llmGatewayAdmin.rotations).toHaveLength(0);
   });
 
   it('skips Harness key rotation when an active sandbox Secret is still present', async () => {
@@ -829,7 +1038,11 @@ describe('control plane api', () => {
         value: `harness-api-key-${bootstrap.json().sandbox.id}-rotated`,
       },
     ]);
-    expect(app.services.repository.getHarnessKeyForSandbox(bootstrap.json().sandbox.id)).toMatchObject({
+    expect(
+      app.services.repository.getHarnessKeyForSandbox(
+        bootstrap.json().sandbox.id,
+      ),
+    ).toMatchObject({
       status: 'active',
       rotatedAt: expect.any(String),
       secretName: 'remote-codex-harness-app-keys',
@@ -871,6 +1084,7 @@ describe('control plane api', () => {
 
   it('attaches gateway and harness metadata when restarting a sandbox', async () => {
     const sandboxManager = new RecordingSandboxManager();
+    const llmGatewayAdmin = new RecordingLlmGatewayAdmin();
     const harnessAdmin = new RecordingHarnessAdmin();
     const sandboxSecretWriter = new RecordingSandboxSecretWriter();
     const app = buildControlPlaneApp({
@@ -878,13 +1092,13 @@ describe('control plane api', () => {
         ...testEnv('gateway-restart'),
         LLM_GATEWAY_BASE_URL: 'https://llm-gateway.example.test',
         LLM_GATEWAY_TOKEN_SECRET_NAME: 'remote-codex-gateway-tokens',
-        LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY: 'sub2api-api-key',
         ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
         ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: 'remote-codex-harness-app-keys',
         ELAGENTE_HARNESS_ADMIN_KEY: 'harness-admin-key',
         REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
       },
       sandboxManager,
+      llmGatewayAdmin,
       harnessAdmin,
       sandboxSecretWriter,
     });
@@ -913,7 +1127,7 @@ describe('control plane api', () => {
       enabledAgentProviders: 'codex',
       gateway: {
         baseUrl: 'https://llm-gateway.example.test',
-        keyId: 'sub2api-api-key',
+        keyId: `sub2api-key-${bootstrap.json().sandbox.id}`,
         tokenSecretName: 'remote-codex-gateway-tokens',
       },
       harness: {
@@ -921,6 +1135,13 @@ describe('control plane api', () => {
         appKeySecretName: 'remote-codex-harness-app-keys',
         chemistryToolsEnabled: true,
       },
+    });
+    expect(llmGatewayAdmin.ensureKeys).toHaveLength(1);
+    expect(llmGatewayAdmin.rotations).toHaveLength(0);
+    expect(sandboxSecretWriter.writes).toContainEqual({
+      secretName: 'remote-codex-gateway-tokens',
+      key: `sub2api-key-${bootstrap.json().sandbox.id}`,
+      value: `sub2api-api-key-${bootstrap.json().sandbox.id}`,
     });
   });
 
@@ -1117,7 +1338,9 @@ describe('control plane api', () => {
     });
     expect(google.statusCode).toBe(302);
     const googleUrl = new URL(google.headers.location as string);
-    expect(googleUrl.origin + googleUrl.pathname).toBe('https://accounts.google.com/o/oauth2/v2/auth');
+    expect(googleUrl.origin + googleUrl.pathname).toBe(
+      'https://accounts.google.com/o/oauth2/v2/auth',
+    );
     expect(googleUrl.searchParams.get('client_id')).toBe('google-client');
     expect(googleUrl.searchParams.get('scope')).toContain('openid');
     expect(googleUrl.searchParams.get('redirect_uri')).toBe(
@@ -1130,7 +1353,9 @@ describe('control plane api', () => {
     });
     expect(github.statusCode).toBe(302);
     const githubUrl = new URL(github.headers.location as string);
-    expect(githubUrl.origin + githubUrl.pathname).toBe('https://github.com/login/oauth/authorize');
+    expect(githubUrl.origin + githubUrl.pathname).toBe(
+      'https://github.com/login/oauth/authorize',
+    );
     expect(githubUrl.searchParams.get('client_id')).toBe('github-client');
     expect(githubUrl.searchParams.get('scope')).toContain('user:email');
     expect(githubUrl.searchParams.get('redirect_uri')).toBe(
@@ -1206,7 +1431,9 @@ describe('control plane api', () => {
     expect(redirectUrl.origin + redirectUrl.pathname).toBe(
       'https://frontend.example.test/control-plane/login',
     );
-    expect(redirectUrl.searchParams.get('control_plane_base_url')).toBe('https://control.example.test');
+    expect(redirectUrl.searchParams.get('control_plane_base_url')).toBe(
+      'https://control.example.test',
+    );
     const token = redirectUrl.searchParams.get('control_plane_token');
     expect(token).toEqual(expect.any(String));
 
@@ -1437,7 +1664,10 @@ describe('control plane api', () => {
       workerToken: string | null;
     }> = [];
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    globalThis.fetch = (async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       const textBody = typeof init?.body === 'string' ? init.body : null;
       const body = textBody ? JSON.parse(textBody) : null;
       const headers = new Headers(init?.headers);
@@ -1471,7 +1701,10 @@ describe('control plane api', () => {
           },
         });
       }
-      return Response.json({ message: 'unexpected worker request' }, { status: 404 });
+      return Response.json(
+        { message: 'unexpected worker request' },
+        { status: 404 },
+      );
     }) as typeof fetch;
 
     try {
@@ -1555,12 +1788,11 @@ describe('control plane api', () => {
         `https://sandbox-gateway.test/api/sandboxes/${app.services.repository.getSandboxByUserId(sessionResponse.json().session.userId)!.id}/api/threads/start`,
         `https://sandbox-gateway.test/api/sandboxes/${app.services.repository.getSandboxByUserId(sessionResponse.json().session.userId)!.id}/api/threads/worker-thread-1/prompt`,
       ]);
-      expect(workerRequests.map((request) => request.workerToken?.startsWith('Bearer '))).toEqual([
-        true,
-        true,
-        true,
-        true,
-      ]);
+      expect(
+        workerRequests.map((request) =>
+          request.workerToken?.startsWith('Bearer '),
+        ),
+      ).toEqual([true, true, true, true]);
       expect(workerRequests[0]!.body).toMatchObject({
         absPath: '/workspace/worker-workspace',
         label: 'Worker Workspace',
@@ -1587,7 +1819,10 @@ describe('control plane api', () => {
       workerToken: string | null;
     }> = [];
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    globalThis.fetch = (async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       const headers = new Headers(init?.headers);
       workerRequests.push({
         url: String(url),
@@ -1630,15 +1865,31 @@ describe('control plane api', () => {
           },
         });
       }
-      if (String(url).endsWith('/api/harness/modules/farmaco/runs/run-1/artifacts')) {
+      if (
+        String(url).endsWith(
+          '/api/harness/modules/farmaco/runs/run-1/artifacts',
+        )
+      ) {
         return Response.json({
           payload: [{ path: 'result.xyz', type: 'xyz' }],
           normalized: {
-            artifacts: [{ module: 'farmaco', runId: 'run-1', path: 'result.xyz', type: 'xyz', previewKind: 'molecule' }],
+            artifacts: [
+              {
+                module: 'farmaco',
+                runId: 'run-1',
+                path: 'result.xyz',
+                type: 'xyz',
+                previewKind: 'molecule',
+              },
+            ],
           },
         });
       }
-      if (String(url).endsWith('/api/harness/modules/farmaco/runs/run-1/download.zip')) {
+      if (
+        String(url).endsWith(
+          '/api/harness/modules/farmaco/runs/run-1/download.zip',
+        )
+      ) {
         return new Response(Buffer.from('zip-bytes'), {
           headers: {
             'content-type': 'application/zip',
@@ -1646,7 +1897,10 @@ describe('control plane api', () => {
           },
         });
       }
-      return Response.json({ message: 'unexpected worker request' }, { status: 404 });
+      return Response.json(
+        { message: 'unexpected worker request' },
+        { status: 404 },
+      );
     }) as typeof fetch;
 
     try {
@@ -1695,7 +1949,9 @@ describe('control plane api', () => {
         headers: auth,
       });
       expect(tools.statusCode).toBe(200);
-      expect(tools.json()).toEqual({ payload: [{ name: 'generate_ligand_xyz' }] });
+      expect(tools.json()).toEqual({
+        payload: [{ name: 'generate_ligand_xyz' }],
+      });
 
       const help = await app.inject({
         method: 'GET',
@@ -1740,7 +1996,15 @@ describe('control plane api', () => {
       expect(artifacts.json()).toEqual({
         payload: [{ path: 'result.xyz', type: 'xyz' }],
         normalized: {
-          artifacts: [{ module: 'farmaco', runId: 'run-1', path: 'result.xyz', type: 'xyz', previewKind: 'molecule' }],
+          artifacts: [
+            {
+              module: 'farmaco',
+              runId: 'run-1',
+              path: 'result.xyz',
+              type: 'xyz',
+              previewKind: 'molecule',
+            },
+          ],
         },
       });
 
@@ -1751,7 +2015,9 @@ describe('control plane api', () => {
       });
       expect(download.statusCode).toBe(200);
       expect(download.headers['content-type']).toContain('application/zip');
-      expect(download.headers['content-disposition']).toBe('attachment; filename="farmaco-run-1.zip"');
+      expect(download.headers['content-disposition']).toBe(
+        'attachment; filename="farmaco-run-1.zip"',
+      );
       expect(download.body).toBe('zip-bytes');
 
       expect(workerRequests.map((request) => request.url)).toEqual([
@@ -1763,15 +2029,11 @@ describe('control plane api', () => {
         `https://sandbox-gateway.test/api/sandboxes/${sandbox.id}/api/harness/modules/farmaco/runs/run-1/artifacts`,
         `https://sandbox-gateway.test/api/sandboxes/${sandbox.id}/api/harness/modules/farmaco/runs/run-1/download.zip`,
       ]);
-      expect(workerRequests.map((request) => request.workerToken?.startsWith('Bearer '))).toEqual([
-        true,
-        true,
-        true,
-        true,
-        true,
-        true,
-        true,
-      ]);
+      expect(
+        workerRequests.map((request) =>
+          request.workerToken?.startsWith('Bearer '),
+        ),
+      ).toEqual([true, true, true, true, true, true, true]);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -1785,7 +2047,10 @@ describe('control plane api', () => {
       workerToken: string | null;
     }> = [];
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    globalThis.fetch = (async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       const headers = new Headers(init?.headers);
       workerRequests.push({
         url: String(url),
@@ -1795,7 +2060,11 @@ describe('control plane api', () => {
           headers.get('x-remote-codex-worker-token') ??
           headers.get('authorization'),
       });
-      if (String(url).endsWith('/api/harness/modules/farmaco/tools/generate_ligand_xyz/invoke')) {
+      if (
+        String(url).endsWith(
+          '/api/harness/modules/farmaco/tools/generate_ligand_xyz/invoke',
+        )
+      ) {
         return Response.json({
           payload: {
             event_id: 'harness-event-1',
@@ -1825,7 +2094,10 @@ describe('control plane api', () => {
           providerSessionId: 'codex-harness-session',
         });
       }
-      return Response.json({ message: 'unexpected worker request' }, { status: 404 });
+      return Response.json(
+        { message: 'unexpected worker request' },
+        { status: 404 },
+      );
     }) as typeof fetch;
 
     try {
@@ -1912,7 +2184,9 @@ describe('control plane api', () => {
         payload: invokePayload,
       });
       expect(duplicate.statusCode).toBe(200);
-      expect(duplicate.json().harnessUsageEvent.id).toBe(invoke.json().harnessUsageEvent.id);
+      expect(duplicate.json().harnessUsageEvent.id).toBe(
+        invoke.json().harnessUsageEvent.id,
+      );
 
       const summary = await app.inject({
         method: 'GET',
@@ -1943,15 +2217,26 @@ describe('control plane api', () => {
         action: 'harness.usage_recorded',
       });
       expect(audits).toHaveLength(1);
-      expect(JSON.stringify({ invoke: invoke.json(), events: events.json(), audits })).not.toContain('harness-api-key');
+      expect(
+        JSON.stringify({
+          invoke: invoke.json(),
+          events: events.json(),
+          audits,
+        }),
+      ).not.toContain('harness-api-key');
       const harnessRequests = workerRequests.filter((request) =>
-        request.url.endsWith('/api/harness/modules/farmaco/tools/generate_ligand_xyz/invoke'),
+        request.url.endsWith(
+          '/api/harness/modules/farmaco/tools/generate_ligand_xyz/invoke',
+        ),
       );
       expect(harnessRequests.map((request) => request.url)).toEqual([
         `https://sandbox-gateway.test/api/sandboxes/${sandbox.id}/api/harness/modules/farmaco/tools/generate_ligand_xyz/invoke`,
         `https://sandbox-gateway.test/api/sandboxes/${sandbox.id}/api/harness/modules/farmaco/tools/generate_ligand_xyz/invoke`,
       ]);
-      expect(harnessRequests.map((request) => request.method)).toEqual(['POST', 'POST']);
+      expect(harnessRequests.map((request) => request.method)).toEqual([
+        'POST',
+        'POST',
+      ]);
       expect(harnessRequests.map((request) => request.body)).toEqual([
         {
           smiles: 'CCO',
@@ -1974,7 +2259,11 @@ describe('control plane api', () => {
           },
         },
       ]);
-      expect(harnessRequests.map((request) => request.workerToken?.startsWith('Bearer '))).toEqual([true, true]);
+      expect(
+        harnessRequests.map((request) =>
+          request.workerToken?.startsWith('Bearer '),
+        ),
+      ).toEqual([true, true]);
 
       const expensive = await app.inject({
         method: 'POST',
@@ -1996,16 +2285,22 @@ describe('control plane api', () => {
           limit: 50,
         },
       });
-      expect(workerRequests.filter((request) =>
-        request.url.endsWith('/api/harness/modules/farmaco/tools/generate_ligand_xyz/invoke'),
-      )).toHaveLength(2);
+      expect(
+        workerRequests.filter((request) =>
+          request.url.endsWith(
+            '/api/harness/modules/farmaco/tools/generate_ligand_xyz/invoke',
+          ),
+        ),
+      ).toHaveLength(2);
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
   it('refuses route tokens when project, workspace, and session scopes do not match', async () => {
-    const app = buildControlPlaneApp({ env: testEnv('route-token-scope-mismatch') });
+    const app = buildControlPlaneApp({
+      env: testEnv('route-token-scope-mismatch'),
+    });
     apps.push(app);
 
     const auth = { authorization: 'Bearer dev:scope-user' };
@@ -2105,7 +2400,8 @@ describe('control plane api', () => {
         ...testEnv('route-token-rotation'),
         CONTROL_PLANE_JWT_SECRET_ID: 'key-2026-05',
         CONTROL_PLANE_JWT_SECRET: 'current-route-token-secret',
-        CONTROL_PLANE_JWT_PREVIOUS_SECRETS: 'key-2026-04:previous-route-token-secret',
+        CONTROL_PLANE_JWT_PREVIOUS_SECRETS:
+          'key-2026-04:previous-route-token-secret',
       },
     });
     apps.push(app);
@@ -2275,7 +2571,9 @@ describe('control plane api', () => {
       },
     });
     expect(patchedProject.statusCode).toBe(200);
-    expect(patchedProject.json().project.name).toBe('Renamed Chemistry Project');
+    expect(patchedProject.json().project.name).toBe(
+      'Renamed Chemistry Project',
+    );
 
     const workspaceResponse = await app.inject({
       method: 'POST',
@@ -2396,9 +2694,15 @@ describe('control plane api', () => {
   });
 
   it('closes and resumes control-plane sessions through the worker session API', async () => {
-    const workerRequests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const workerRequests: Array<{
+      url: string;
+      init: RequestInit | undefined;
+    }> = [];
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    globalThis.fetch = (async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       workerRequests.push({ url: String(url), init });
       return Response.json({
         thread: {
@@ -2511,9 +2815,15 @@ describe('control plane api', () => {
   });
 
   it('materializes created control-plane sessions on resume after the sandbox is running', async () => {
-    const workerRequests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const workerRequests: Array<{
+      url: string;
+      init: RequestInit | undefined;
+    }> = [];
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    globalThis.fetch = (async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       workerRequests.push({ url: String(url), init });
       if (String(url).endsWith('/api/workspaces')) {
         return Response.json({ id: 'worker-workspace-1' });
@@ -2593,7 +2903,9 @@ describe('control plane api', () => {
       });
 
       const requestUrls = workerRequests.map((request) => request.url);
-      expect(requestUrls.filter((url) => url.endsWith('/api/workspaces'))).toHaveLength(2);
+      expect(
+        requestUrls.filter((url) => url.endsWith('/api/workspaces')),
+      ).toHaveLength(2);
       expect(requestUrls.at(-1)).toBe(
         `https://sandbox-gateway.test/api/sandboxes/${resume.json().session.sandboxId}/api/threads/start`,
       );
@@ -2609,13 +2921,22 @@ describe('control plane api', () => {
   });
 
   it('recreates stale worker sessions on resume after worker storage is reset', async () => {
-    const workerRequests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const workerRequests: Array<{
+      url: string;
+      init: RequestInit | undefined;
+    }> = [];
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    globalThis.fetch = (async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       workerRequests.push({ url: String(url), init });
       const requestUrl = String(url);
       if (requestUrl.endsWith('/api/threads/stale-worker-session/resume')) {
-        return Response.json({ code: 'not_found', message: 'Thread not found.' }, { status: 404 });
+        return Response.json(
+          { code: 'not_found', message: 'Thread not found.' },
+          { status: 404 },
+        );
       }
       if (requestUrl.endsWith('/api/workspaces')) {
         return Response.json({ id: 'worker-workspace-after-reset' });
@@ -2626,7 +2947,10 @@ describe('control plane api', () => {
           providerSessionId: 'codex-session-after-reset',
         });
       }
-      return Response.json({ message: 'unexpected worker request' }, { status: 404 });
+      return Response.json(
+        { message: 'unexpected worker request' },
+        { status: 404 },
+      );
     }) as typeof fetch;
 
     try {
@@ -2709,7 +3033,9 @@ describe('control plane api', () => {
         `https://sandbox-gateway.test/api/sandboxes/${resume.json().session.sandboxId}/api/workspaces`,
         `https://sandbox-gateway.test/api/sandboxes/${resume.json().session.sandboxId}/api/threads/start`,
       ]);
-      expect(JSON.parse(String(workerRequests.at(-1)?.init?.body))).toMatchObject({
+      expect(
+        JSON.parse(String(workerRequests.at(-1)?.init?.body)),
+      ).toMatchObject({
         workspaceId: 'worker-workspace-after-reset',
         provider: 'codex',
         title: 'Stale Resume Session',
@@ -2720,13 +3046,22 @@ describe('control plane api', () => {
   });
 
   it('recreates stale worker sessions and retries prompts when worker storage is reset', async () => {
-    const workerRequests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const workerRequests: Array<{
+      url: string;
+      init: RequestInit | undefined;
+    }> = [];
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    globalThis.fetch = (async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       workerRequests.push({ url: String(url), init });
       const requestUrl = String(url);
       if (requestUrl.endsWith('/api/threads/stale-worker-session/prompt')) {
-        return Response.json({ code: 'not_found', message: 'Thread not found.' }, { status: 404 });
+        return Response.json(
+          { code: 'not_found', message: 'Thread not found.' },
+          { status: 404 },
+        );
       }
       if (requestUrl.endsWith('/api/workspaces')) {
         return Response.json({ id: 'worker-workspace-after-prompt-reset' });
@@ -2737,7 +3072,11 @@ describe('control plane api', () => {
           providerSessionId: 'codex-session-after-prompt-reset',
         });
       }
-      if (requestUrl.endsWith('/api/threads/worker-session-after-prompt-reset/prompt')) {
+      if (
+        requestUrl.endsWith(
+          '/api/threads/worker-session-after-prompt-reset/prompt',
+        )
+      ) {
         return Response.json({
           turn: {
             id: 'turn-after-reset',
@@ -2745,7 +3084,10 @@ describe('control plane api', () => {
           },
         });
       }
-      return Response.json({ message: 'unexpected worker request' }, { status: 404 });
+      return Response.json(
+        { message: 'unexpected worker request' },
+        { status: 404 },
+      );
     }) as typeof fetch;
 
     try {
@@ -2841,7 +3183,9 @@ describe('control plane api', () => {
       expect(JSON.parse(String(workerRequests[0]?.init?.body))).toMatchObject({
         prompt: 'Continue after redeploy.',
       });
-      expect(JSON.parse(String(workerRequests.at(-1)?.init?.body))).toMatchObject({
+      expect(
+        JSON.parse(String(workerRequests.at(-1)?.init?.body)),
+      ).toMatchObject({
         prompt: 'Continue after redeploy.',
       });
     } finally {
@@ -2850,7 +3194,9 @@ describe('control plane api', () => {
   });
 
   it('paginates project, workspace, and session lists', async () => {
-    const app = buildControlPlaneApp({ env: testEnv('product-list-pagination') });
+    const app = buildControlPlaneApp({
+      env: testEnv('product-list-pagination'),
+    });
     apps.push(app);
 
     const auth = { authorization: 'Bearer dev:pagination-user' };
@@ -3048,24 +3394,30 @@ describe('control plane api', () => {
       payload: { email: 'other@example.com' },
     });
 
-    const project = (await app.inject({
-      method: 'POST',
-      url: '/api/projects',
-      headers: ownerAuth,
-      payload: { name: 'Private Project', slug: 'private-project' },
-    })).json().project;
-    const workspace = (await app.inject({
-      method: 'POST',
-      url: `/api/projects/${project.id}/workspaces`,
-      headers: ownerAuth,
-      payload: { name: 'Private Workspace', slug: 'private-workspace' },
-    })).json().workspace;
-    const session = (await app.inject({
-      method: 'POST',
-      url: `/api/workspaces/${workspace.id}/sessions`,
-      headers: ownerAuth,
-      payload: { provider: 'codex', title: 'Private Session' },
-    })).json().session;
+    const project = (
+      await app.inject({
+        method: 'POST',
+        url: '/api/projects',
+        headers: ownerAuth,
+        payload: { name: 'Private Project', slug: 'private-project' },
+      })
+    ).json().project;
+    const workspace = (
+      await app.inject({
+        method: 'POST',
+        url: `/api/projects/${project.id}/workspaces`,
+        headers: ownerAuth,
+        payload: { name: 'Private Workspace', slug: 'private-workspace' },
+      })
+    ).json().workspace;
+    const session = (
+      await app.inject({
+        method: 'POST',
+        url: `/api/workspaces/${workspace.id}/sessions`,
+        headers: ownerAuth,
+        payload: { provider: 'codex', title: 'Private Session' },
+      })
+    ).json().session;
 
     const projectRead = await app.inject({
       method: 'GET',
@@ -3090,11 +3442,13 @@ describe('control plane api', () => {
     });
     expect(sessionPatch.statusCode).toBe(404);
 
-    const otherSandbox = (await app.inject({
-      method: 'POST',
-      url: '/api/sandbox/start',
-      headers: otherAuth,
-    })).json().sandbox;
+    const otherSandbox = (
+      await app.inject({
+        method: 'POST',
+        url: '/api/sandbox/start',
+        headers: otherAuth,
+      })
+    ).json().sandbox;
     const badRouteToken = await app.inject({
       method: 'POST',
       url: `/api/sandboxes/${otherSandbox.id}/route-token`,
@@ -3108,7 +3462,9 @@ describe('control plane api', () => {
   });
 
   it('accepts internal worker session checkpoints and audits sync failures', async () => {
-    const app = buildControlPlaneApp({ env: testEnvWithInternalService('session-checkpoint') });
+    const app = buildControlPlaneApp({
+      env: testEnvWithInternalService('session-checkpoint'),
+    });
     apps.push(app);
 
     const auth = { authorization: 'Bearer dev:checkpoint-user' };
@@ -3200,7 +3556,9 @@ describe('control plane api', () => {
       workerSessionId: 'worker-session-1',
       status: 'active',
     });
-    expect(checkpoint.json().session.lastActivityAt).toEqual(expect.any(String));
+    expect(checkpoint.json().session.lastActivityAt).toEqual(
+      expect.any(String),
+    );
 
     const refreshed = await app.inject({
       method: 'GET',
@@ -3219,14 +3577,15 @@ describe('control plane api', () => {
       resourceId: session.id,
     });
     expect(failures).toHaveLength(2);
-    expect(failures.map((entry) => JSON.parse(entry.metadataJson).reason).sort()).toEqual([
-      'wrong_sandbox',
-      'wrong_user',
-    ]);
+    expect(
+      failures.map((entry) => JSON.parse(entry.metadataJson).reason).sort(),
+    ).toEqual(['wrong_sandbox', 'wrong_user']);
   });
 
   it('accepts internal worker Harness usage events and validates ownership', async () => {
-    const app = buildControlPlaneApp({ env: testEnvWithInternalService('harness-usage-internal') });
+    const app = buildControlPlaneApp({
+      env: testEnvWithInternalService('harness-usage-internal'),
+    });
     apps.push(app);
 
     const auth = { authorization: 'Bearer dev:harness-usage-internal-user' };
@@ -3336,7 +3695,9 @@ describe('control plane api', () => {
       costUsd: 0.012,
       status: 'ok',
     });
-    expect(JSON.parse(recorded.json().harnessUsageEvent.metadataJson)).toMatchObject({
+    expect(
+      JSON.parse(recorded.json().harnessUsageEvent.metadataJson),
+    ).toMatchObject({
       resultStatus: 'ok',
       threadId: 'thread-1',
       turnId: 'turn-1',
@@ -3360,7 +3721,9 @@ describe('control plane api', () => {
       },
     });
     expect(duplicate.statusCode).toBe(200);
-    expect(duplicate.json().harnessUsageEvent.id).toBe(recorded.json().harnessUsageEvent.id);
+    expect(duplicate.json().harnessUsageEvent.id).toBe(
+      recorded.json().harnessUsageEvent.id,
+    );
 
     const summary = await app.inject({
       method: 'GET',
@@ -3670,7 +4033,11 @@ describe('control plane api', () => {
       },
     });
     expect(list.statusCode).toBe(200);
-    expect(list.json().sandboxes.some((sandbox: { id: string }) => sandbox.id === sandboxId)).toBe(true);
+    expect(
+      list
+        .json()
+        .sandboxes.some((sandbox: { id: string }) => sandbox.id === sandboxId),
+    ).toBe(true);
 
     const detail = await app.inject({
       method: 'GET',
@@ -3855,11 +4222,15 @@ describe('control plane api', () => {
         }),
       ]),
     );
-    expect(app.services.repository.getSandboxById(startingSandbox.id)).toMatchObject({
+    expect(
+      app.services.repository.getSandboxById(startingSandbox.id),
+    ).toMatchObject({
       state: 'stopped',
       statusReason: 'Worker Pod is absent.',
     });
-    expect(app.services.repository.getSandboxById(stoppingSandbox.id)).toMatchObject({
+    expect(
+      app.services.repository.getSandboxById(stoppingSandbox.id),
+    ).toMatchObject({
       state: 'stopped',
       statusReason: 'Worker Pod is absent.',
     });
@@ -4273,7 +4644,9 @@ describe('control plane api', () => {
       },
     });
     expect(imported.statusCode).toBe(200);
-    expect(harnessAdmin.exportCalls).toEqual([{ cursor: 'harness-cursor-current', limit: 50 }]);
+    expect(harnessAdmin.exportCalls).toEqual([
+      { cursor: 'harness-cursor-current', limit: 50 },
+    ]);
     expect(imported.json().events).toHaveLength(2);
     expect(imported.json().events[1].id).toBe(imported.json().events[0].id);
     expect(imported.json().import).toEqual({
@@ -4408,12 +4781,16 @@ describe('control plane api', () => {
       lastFailureCount: 0,
     });
     expect(
-      app.services.repository.listAuditLogs({ action: 'usage.import_completed' }),
+      app.services.repository.listAuditLogs({
+        action: 'usage.import_completed',
+      }),
     ).toHaveLength(2);
   });
 
   it('rejects gateway usage import when identity cannot be resolved', async () => {
-    const app = buildControlPlaneApp({ env: testEnv('gateway-usage-unresolved') });
+    const app = buildControlPlaneApp({
+      env: testEnv('gateway-usage-unresolved'),
+    });
     apps.push(app);
 
     await app.inject({
@@ -4688,7 +5065,9 @@ describe('control plane api', () => {
   });
 
   it('refuses route tokens when the quota profile disables worker routing', async () => {
-    const app = buildControlPlaneApp({ env: testEnv('route-token-quota-disabled') });
+    const app = buildControlPlaneApp({
+      env: testEnv('route-token-quota-disabled'),
+    });
     apps.push(app);
 
     const userAuth = { authorization: 'Bearer dev:quota-disabled-user' };
@@ -4743,7 +5122,9 @@ describe('control plane api', () => {
   });
 
   it('refuses route tokens when LLM spend reaches the user quota', async () => {
-    const app = buildControlPlaneApp({ env: testEnv('route-token-quota-spend') });
+    const app = buildControlPlaneApp({
+      env: testEnv('route-token-quota-spend'),
+    });
     apps.push(app);
 
     const userAuth = { authorization: 'Bearer dev:quota-spend-user' };
