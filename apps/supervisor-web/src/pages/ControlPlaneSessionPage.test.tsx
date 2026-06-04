@@ -3,13 +3,17 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { ThreadDetailDto } from '../../../../packages/shared/src/index';
 import {
   AppShellNavContext,
   AppShellSettingsDialog,
   type AppShellNavContextValue,
   type ThemeMode,
 } from '@remote-codex/thread-ui';
-import { ControlPlaneSessionPage } from './ControlPlaneSessionPage';
+import {
+  ControlPlaneSessionPage,
+  mergeControlPlaneThreadDetail,
+} from './ControlPlaneSessionPage';
 
 const baseUrl = 'http://127.0.0.1:8790';
 const routerBaseUrl = 'https://router.example.test';
@@ -92,7 +96,7 @@ const session = {
   updatedAt: '2026-05-25T00:00:00.000Z',
 };
 
-const threadDetail = {
+const threadDetail: ThreadDetailDto = {
   thread: {
     id: 'worker-session-1',
     workspaceId: 'worker-workspace-1',
@@ -336,7 +340,13 @@ describe('ControlPlaneSessionPage', () => {
       projectId: 'project-1',
       workspaceId: 'workspace-1',
       sessionId: 'session-1',
-      scopes: ['worker:read', 'worker:write', 'session:prompt', 'provider:turn:create'],
+      scopes: [
+        'worker:read',
+        'worker:write',
+        'session:prompt',
+        'provider:turn:create',
+        'provider:turn:interrupt',
+      ],
     });
 
     expect(
@@ -424,6 +434,107 @@ describe('ControlPlaneSessionPage', () => {
       expect(screen.getByText('Ready from sandbox')).toBeInTheDocument();
     });
     expect(threadReads).toBeGreaterThanOrEqual(2);
+  });
+
+  it('preserves unchanged timeline references across polling refreshes', () => {
+    const equivalentDetail = JSON.parse(JSON.stringify(threadDetail));
+    const merged = mergeControlPlaneThreadDetail(threadDetail, equivalentDetail);
+
+    expect(merged.turns).toBe(threadDetail.turns);
+    expect(merged.turns[0]).toBe(threadDetail.turns[0]);
+    expect(merged.pendingRequests).toBe(threadDetail.pendingRequests);
+  });
+
+  it('interrupts the active worker turn through the router', async () => {
+    const runningThreadDetail = {
+      ...threadDetail,
+      thread: {
+        ...threadDetail.thread,
+        status: 'running',
+        activeTurnId: 'turn-2',
+      },
+      turns: [
+        ...threadDetail.turns,
+        {
+          id: 'turn-2',
+          startedAt: '2026-05-25T00:03:00.000Z',
+          status: 'inProgress',
+          error: null,
+          items: [
+            {
+              id: 'item-4',
+              kind: 'userMessage',
+              text: 'Run a longer task',
+            },
+          ],
+        },
+      ],
+      totalTurnCount: 2,
+    };
+    let interrupted = false;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
+
+      if (path === '/api/me' && !init?.method) {
+        return jsonResponse({ user, sandbox, usage: {} });
+      }
+      if (path === '/api/projects' && !init?.method) {
+        return jsonResponse({ projects: [project] });
+      }
+      if (path === '/api/workspaces?projectId=project-1' && !init?.method) {
+        return jsonResponse({ workspaces: [workspace] });
+      }
+      if (path === '/api/workspaces/workspace-1/sessions' && !init?.method) {
+        return jsonResponse({ sessions: [session] });
+      }
+      if (path === '/api/sessions/session-1/resume' && init?.method === 'POST') {
+        return jsonResponse({ session });
+      }
+      if (path === '/api/sandboxes/sandbox-1/route-token' && init?.method === 'POST') {
+        return jsonResponse({
+          sandboxId: 'sandbox-1',
+          routerBaseUrl,
+          wsBaseUrl: 'wss://router.example.test',
+          token: 'route-token',
+          expiresAt: '2026-05-25T00:05:00.000Z',
+        });
+      }
+      if (url === `${routerBaseUrl}/api/sandboxes/sandbox-1/api/threads/worker-session-1`) {
+        return jsonResponse(interrupted ? threadDetail : runningThreadDetail);
+      }
+      if (
+        url === `${routerBaseUrl}/api/sandboxes/sandbox-1/api/threads/worker-session-1/interrupt` &&
+        init?.method === 'POST'
+      ) {
+        interrupted = true;
+        return jsonResponse({ ...threadDetail.thread, status: 'interrupted' });
+      }
+
+      return jsonResponse({ code: 'not_found', message: `Unhandled request: ${url}` }, 404);
+    });
+
+    renderControlPlaneSessionPage();
+
+    const stopButton = await screen.findByRole('button', { name: 'Stop Current Turn' });
+    expect(stopButton).toBeEnabled();
+    fireEvent.click(stopButton);
+
+    const findInterruptCall = () => vi.mocked(fetch).mock.calls.find(
+      ([input]) =>
+        String(input) ===
+        `${routerBaseUrl}/api/sandboxes/sandbox-1/api/threads/worker-session-1/interrupt`,
+    );
+    await waitFor(() => {
+      expect(findInterruptCall()).toBeDefined();
+    });
+
+    const interruptCall = findInterruptCall();
+    expect(interruptCall?.[1]?.method).toBe('POST');
+    expect(interruptCall?.[1]?.body).toBe(JSON.stringify({ turnId: 'turn-2' }));
+    expect(new Headers(interruptCall?.[1]?.headers).get('Authorization')).toBe(
+      'Bearer route-token',
+    );
   });
 
   it('refreshes the router token before it expires', async () => {

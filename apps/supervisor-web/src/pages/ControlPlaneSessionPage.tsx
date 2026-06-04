@@ -27,6 +27,7 @@ import {
   fetchControlPlaneSessions,
   fetchControlPlaneWorkerThread,
   fetchControlPlaneWorkspaces,
+  interruptControlPlaneWorkerThread,
   resumeControlPlaneSession,
   sendControlPlaneWorkerThreadPrompt,
   type ControlPlaneAuth,
@@ -37,6 +38,10 @@ import {
   type ControlPlaneWorkspace,
   type PromptAttachmentUpload,
 } from '../lib/api';
+import {
+  appendLatestTurns,
+  mergePendingRequests,
+} from './threadDetailModel';
 import {
   clearStoredControlPlaneAuth,
   readStoredControlPlaneAuth,
@@ -51,6 +56,7 @@ const ROUTE_TOKEN_SCOPES = [
   'worker:write',
   'session:prompt',
   'provider:turn:create',
+  'provider:turn:interrupt',
 ];
 
 const EMPTY_ANSWERED_REQUEST_NOTES: NonNullable<
@@ -61,7 +67,7 @@ const EMPTY_PENDING_STEERS: NonNullable<ThreadDetailDto['pendingSteers']> = [];
 
 const controlPlaneCapabilities: AgentProviderCapabilitiesDto = {
   sessions: { list: false, read: true, resume: true, importLocal: false },
-  turns: { start: true, streamInput: false, steer: false, interrupt: false, compact: false },
+  turns: { start: true, streamInput: false, steer: false, interrupt: true, compact: false },
   branching: { fork: false, hardRollback: false, resumeAt: false, rewindFiles: false },
   controls: {
     planMode: false,
@@ -184,6 +190,79 @@ function isDisconnectedWorkerThreadError(caught: unknown) {
   return caught instanceof ApiError && (caught.statusCode === 404 || caught.statusCode === 409);
 }
 
+function sameJsonValue(left: unknown, right: unknown) {
+  if (Object.is(left, right)) {
+    return true;
+  }
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function reuseEquivalentArrayItems<T extends { id: string }>(
+  current: T[],
+  incoming: T[],
+) {
+  let changed =
+    current.length !== incoming.length ||
+    current.some((entry, index) => entry.id !== incoming[index]?.id);
+  const byId = new Map(current.map((entry) => [entry.id, entry] as const));
+  const merged = incoming.map((entry) => {
+    const existing = byId.get(entry.id);
+    if (existing && sameJsonValue(existing, entry)) {
+      return existing;
+    }
+    changed = true;
+    return entry;
+  });
+  return changed ? merged : current;
+}
+
+function reuseEquivalentValue<T>(current: T, incoming: T) {
+  return sameJsonValue(current, incoming) ? current : incoming;
+}
+
+export function mergeControlPlaneThreadDetail(
+  current: ThreadDetailDto | null,
+  next: ThreadDetailDto,
+): ThreadDetailDto {
+  if (!current) {
+    return next;
+  }
+  const turns = reuseEquivalentArrayItems(
+    current.turns,
+    appendLatestTurns(current.turns, next.turns),
+  );
+  const pendingRequests = reuseEquivalentArrayItems(
+    current.pendingRequests,
+    mergePendingRequests(
+      current.pendingRequests,
+      next.pendingRequests,
+      new Set(),
+    ),
+  );
+  const merged: ThreadDetailDto = {
+    ...next,
+    turns,
+    pendingRequests,
+    pendingSteers: reuseEquivalentArrayItems(current.pendingSteers, next.pendingSteers),
+  };
+  if ('answeredRequestNotes' in next || 'answeredRequestNotes' in current) {
+    merged.answeredRequestNotes = reuseEquivalentValue(
+      current.answeredRequestNotes,
+      next.answeredRequestNotes,
+    ) ?? [];
+  }
+  if ('activityNotes' in next || 'activityNotes' in current) {
+    merged.activityNotes = reuseEquivalentValue(current.activityNotes, next.activityNotes) ?? [];
+  }
+  if ('livePlan' in next || 'livePlan' in current) {
+    merged.livePlan = reuseEquivalentValue(current.livePlan, next.livePlan) ?? null;
+  }
+  if ('liveItems' in next || 'liveItems' in current) {
+    merged.liveItems = reuseEquivalentValue(current.liveItems, next.liveItems) ?? null;
+  }
+  return merged;
+}
+
 export function ControlPlaneSessionPage() {
   return <ControlPlaneSessionSurface />;
 }
@@ -213,6 +292,15 @@ function ControlPlaneSessionSurface() {
   const [followTail, setFollowTail] = useState(true);
   const reconnectingRef = useRef(false);
   const routeTokenRefreshTimerRef = useRef<number | null>(null);
+  const detailRef = useRef<ThreadDetailDto | null>(null);
+
+  const applyDetailResponse = useCallback((nextDetail: ThreadDetailDto) => {
+    setDetail((current) => {
+      const merged = mergeControlPlaneThreadDetail(current, nextDetail);
+      detailRef.current = merged;
+      return merged;
+    });
+  }, []);
 
   const issueRouteToken = useCallback(async (
     input: {
@@ -256,6 +344,7 @@ function ControlPlaneSessionSurface() {
         setSession(null);
         setRouteToken(null);
         setDetail(null);
+        detailRef.current = null;
         setError('Sandbox is not running. Start the sandbox from the control plane before opening chat.');
         return null;
       }
@@ -290,11 +379,12 @@ function ControlPlaneSessionSurface() {
           setSession(resumed.session);
           if (!resumed.session.workerSessionId) {
             setDetail(null);
+            detailRef.current = null;
             setError('Session resumed, but the worker did not return a thread id.');
             return null;
           }
           const thread = await fetchControlPlaneWorkerThread(token, resumed.session.workerSessionId);
-          setDetail(thread);
+          applyDetailResponse(thread);
           setScrollRequestKey((current) => current + 1);
           setMessage('Chat session connected.');
           return { session: resumed.session, token, detail: thread };
@@ -313,7 +403,7 @@ function ControlPlaneSessionSurface() {
     } finally {
       setLoading(false);
     }
-  }, [auth, issueRouteToken, navigate, sessionId]);
+  }, [applyDetailResponse, auth, issueRouteToken, navigate, sessionId]);
 
   useEffect(() => {
     void loadSession();
@@ -360,13 +450,13 @@ function ControlPlaneSessionSurface() {
       setError(null);
     }
     try {
-      setDetail(await fetchControlPlaneWorkerThread(routeToken, session.workerSessionId));
+      applyDetailResponse(await fetchControlPlaneWorkerThread(routeToken, session.workerSessionId));
     } catch (caught) {
       if (isInvalidRouteTokenError(caught)) {
         try {
           const token = await refreshRouteToken();
           if (token && session.workerSessionId) {
-            setDetail(await fetchControlPlaneWorkerThread(token, session.workerSessionId));
+            applyDetailResponse(await fetchControlPlaneWorkerThread(token, session.workerSessionId));
             return;
           }
         } catch (retryError) {
@@ -386,7 +476,7 @@ function ControlPlaneSessionSurface() {
       }
       setError(caught instanceof Error ? caught.message : 'Unable to refresh worker thread.');
     }
-  }, [loadSession, refreshRouteToken, routeToken, session?.workerSessionId]);
+  }, [applyDetailResponse, loadSession, refreshRouteToken, routeToken, session?.workerSessionId]);
 
   useEffect(() => {
     const active =
@@ -437,7 +527,7 @@ function ControlPlaneSessionSurface() {
             prompt: trimmed,
           });
           const thread = await fetchControlPlaneWorkerThread(token, session.workerSessionId);
-          setDetail(thread);
+          applyDetailResponse(thread);
           setDraft({ prompt: '', attachments: [] });
           setScrollRequestKey((current) => current + 1);
           return true;
@@ -465,7 +555,7 @@ function ControlPlaneSessionSurface() {
             reconnected.token,
             reconnected.session.workerSessionId,
           );
-          setDetail(thread);
+          applyDetailResponse(thread);
           setDraft({ prompt: '', attachments: [] });
           setScrollRequestKey((current) => current + 1);
           return true;
@@ -478,6 +568,48 @@ function ControlPlaneSessionSurface() {
       }
       setError(caught instanceof Error ? caught.message : 'Unable to send prompt.');
       return false;
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function handleInterrupt() {
+    if (!routeToken || !session?.workerSessionId) {
+      return;
+    }
+    setSending(true);
+    setError(null);
+    try {
+      const activeTurnId = detailRef.current?.thread.activeTurnId ?? undefined;
+      const thread = await interruptControlPlaneWorkerThread(
+        routeToken,
+        session.workerSessionId,
+        activeTurnId ? { turnId: activeTurnId } : {},
+      );
+      setDetail((current) => (current ? { ...current, thread } : current));
+      await refreshThread({ silent: true });
+    } catch (caught) {
+      if (isInvalidRouteTokenError(caught)) {
+        try {
+          const token = await refreshRouteToken();
+          if (!token || !session.workerSessionId) {
+            throw caught;
+          }
+          const activeTurnId = detailRef.current?.thread.activeTurnId ?? undefined;
+          const thread = await interruptControlPlaneWorkerThread(
+            token,
+            session.workerSessionId,
+            activeTurnId ? { turnId: activeTurnId } : {},
+          );
+          setDetail((current) => (current ? { ...current, thread } : current));
+          applyDetailResponse(await fetchControlPlaneWorkerThread(token, session.workerSessionId));
+          return;
+        } catch (retryError) {
+          setError(retryError instanceof Error ? retryError.message : 'Unable to interrupt turn.');
+          return;
+        }
+      }
+      setError(caught instanceof Error ? caught.message : 'Unable to interrupt turn.');
     } finally {
       setSending(false);
     }
@@ -617,7 +749,8 @@ function ControlPlaneSessionSurface() {
         draftPrompt: draft.prompt,
         draftAttachments: draft.attachments,
         onDraftChange: setDraft,
-        canInterrupt: false,
+        canInterrupt: Boolean(detail.thread.activeTurnId),
+        onInterrupt: handleInterrupt,
         shellControlState: remoteShellUnavailableState,
         onToggleView: () => setActiveView('shell'),
         onToggleFollow: () => setScrollRequestKey((current) => current + 1),
@@ -673,6 +806,7 @@ function ControlPlaneSessionSurface() {
       getThreadHref: (threadId: string) => `/control-plane/sessions/${threadId}`,
       getNewThreadHref: () => '/control-plane',
       sendPrompt: handlePromptSubmit,
+      interrupt: handleInterrupt,
       getImageAssetUrl,
       shell: null,
     }),

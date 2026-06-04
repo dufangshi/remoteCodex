@@ -751,6 +751,24 @@ export function sendControlPlaneWorkerThreadPrompt(
   );
 }
 
+export function interruptControlPlaneWorkerThread(
+  routeToken: ControlPlaneRouteToken,
+  workerSessionId: string,
+  input: InterruptTurnInput = {},
+) {
+  return request<ThreadDto>(
+    controlPlaneWorkerProxyUrl(
+      routeToken,
+      `/api/threads/${encodeURIComponent(workerSessionId)}/interrupt`,
+    ),
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: routeTokenHeaders(routeToken),
+    },
+  );
+}
+
 function normalizedUploadFileName(attachment: PromptAttachmentUpload, index: number) {
   const explicitName = attachment.originalName.trim();
   if (explicitName) {
