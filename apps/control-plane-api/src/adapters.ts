@@ -1419,6 +1419,7 @@ export interface LlmGatewayAdmin {
     userId: string;
     email: string;
     displayName?: string | null;
+    balance?: number | null;
   }): Promise<GatewayUserResult>;
   ensureSandboxKey(input: {
     userId: string;
@@ -1671,6 +1672,7 @@ export class HttpLlmGatewayAdmin implements LlmGatewayAdmin {
     userId: string;
     email: string;
     displayName?: string | null;
+    balance?: number | null;
   }): Promise<GatewayUserResult> {
     const response = await this.fetchImpl(
       this.adminPath(this.usersEnsurePath()),
@@ -1681,6 +1683,7 @@ export class HttpLlmGatewayAdmin implements LlmGatewayAdmin {
           externalId: input.userId,
           email: input.email,
           displayName: input.displayName ?? null,
+          balance: input.balance ?? undefined,
         }),
       },
     );

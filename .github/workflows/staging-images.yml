@@ -49,10 +49,11 @@ env:
   STAGING_CONTROL_PLANE_BASE_URL: https://remote-codex-control-plane-production.up.railway.app
   ROUTER_DEPLOYMENT: remote-codex-sandbox-router
   ROUTER_CONTAINER: sandbox-router
-  SUB2API_BASE_URL: https://sub.lnz-study.com
+  SUB2API_BASE_URL: https://sub2api-production-5f8f.up.railway.app
   SUB2API_ADMIN_BASE_URL: https://sub2api-production-5f8f.up.railway.app
   LLM_GATEWAY_TOKEN_SECRET_NAME: remote-codex-llm-gateway-tokens
   LLM_GATEWAY_GROUP_ID: '2'
+  LLM_GATEWAY_USER_BALANCE: '1'
   SANDBOX_WORKER_DEFAULT_CODEX_MODEL: gpt-5.4
   SANDBOX_WORKER_DEFAULT_REASONING_EFFORT: medium
   SANDBOX_ROUTE_TOKEN_TTL_SECONDS: '3600'

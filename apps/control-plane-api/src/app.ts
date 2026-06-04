@@ -1966,6 +1966,7 @@ async function ensureGateway(
     userId: user.id,
     email: user.email,
     displayName: user.displayName,
+    balance: app.services.config.llmGatewayUserBalance,
   });
   app.services.repository.upsertGatewayUser({
     userId: user.id,
@@ -3229,6 +3230,7 @@ export function buildControlPlaneApp(
         userId: user.id,
         email: user.email,
         displayName: user.displayName,
+        balance: config.llmGatewayUserBalance,
       });
       repository.upsertGatewayUser({
         userId: user.id,

@@ -379,6 +379,7 @@ describe('sandbox manager adapters', () => {
         userId: 'control-user',
         email: 'user@example.com',
         displayName: 'User',
+        balance: 1,
       }),
     ).resolves.toEqual({ externalUserId: '123' });
     await expect(
@@ -429,6 +430,12 @@ describe('sandbox manager adapters', () => {
       'https://sub2api.example.test/api/v1/admin/integrations/remote-codex/users/123/keys/456/rotate',
       'https://sub2api.example.test/api/v1/admin/integrations/remote-codex/usage/export?cursor=cursor-current&limit=25',
     ]);
+    expect(JSON.parse(String(requests[0]!.init!.body))).toMatchObject({
+      externalId: 'control-user',
+      email: 'user@example.com',
+      displayName: 'User',
+      balance: 1,
+    });
     expect(requests[1]?.init?.headers).toMatchObject({
       authorization: 'Bearer admin-token',
       'x-api-key': 'admin-token',

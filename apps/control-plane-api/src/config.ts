@@ -43,6 +43,7 @@ const envSchema = z.object({
   LLM_GATEWAY_ADMIN_BASE_URL: z.string().url().optional(),
   LLM_GATEWAY_ADMIN_TOKEN: z.string().min(1).optional(),
   LLM_GATEWAY_GROUP_ID: z.coerce.number().int().positive().optional(),
+  LLM_GATEWAY_USER_BALANCE: z.coerce.number().nonnegative().optional(),
   ELAGENTE_HARNESS_BASE_URL: z.string().url().optional(),
   ELAGENTE_HARNESS_PROVIDER: z.string().trim().min(1).optional(),
   ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: z.string().min(1).optional(),
@@ -119,6 +120,7 @@ export interface ControlPlaneConfig {
   llmGatewayAdminBaseUrl: string | null;
   llmGatewayAdminToken: string | null;
   llmGatewayGroupId: number | null;
+  llmGatewayUserBalance: number | null;
   harnessBaseUrl: string | null;
   harnessProvider: string;
   harnessAppKeySecretName: string | null;
@@ -254,6 +256,7 @@ export function loadControlPlaneConfig(
     llmGatewayAdminBaseUrl: parsed.LLM_GATEWAY_ADMIN_BASE_URL ?? null,
     llmGatewayAdminToken: parsed.LLM_GATEWAY_ADMIN_TOKEN ?? null,
     llmGatewayGroupId: parsed.LLM_GATEWAY_GROUP_ID ?? null,
+    llmGatewayUserBalance: parsed.LLM_GATEWAY_USER_BALANCE ?? null,
     harnessBaseUrl: parsed.ELAGENTE_HARNESS_BASE_URL ?? null,
     harnessProvider: parsed.ELAGENTE_HARNESS_PROVIDER ?? 'elagente-harness',
     harnessAppKeySecretName:

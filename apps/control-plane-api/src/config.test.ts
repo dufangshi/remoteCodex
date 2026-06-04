@@ -28,6 +28,8 @@ describe('control plane config', () => {
       LLM_GATEWAY_STATIC_TOKEN: 'gateway-static-token',
       LLM_GATEWAY_ADMIN_BASE_URL: 'https://llm-gateway-admin.example.test',
       LLM_GATEWAY_ADMIN_TOKEN: 'gateway-admin-token',
+      LLM_GATEWAY_GROUP_ID: '42',
+      LLM_GATEWAY_USER_BALANCE: '1.5',
       SANDBOX_DEFAULT_RESOURCE_PROFILE: 'large',
       SANDBOX_WORKER_ENABLED_AGENT_PROVIDERS: 'codex',
       CONTROL_PLANE_BUILD_SHA: 'abc123',
@@ -56,18 +58,28 @@ describe('control plane config', () => {
     expect(config.githubClientSecret).toBe('github-secret');
     expect(config.llmGatewayBaseUrl).toBe('https://llm-gateway.example.test');
     expect(config.llmGatewayProvider).toBe('custom-compatible');
-    expect(config.llmGatewayTokenSecretName).toBe('remote-codex-gateway-tokens');
+    expect(config.llmGatewayTokenSecretName).toBe(
+      'remote-codex-gateway-tokens',
+    );
     expect(config.llmGatewayStaticTokenSecretKey).toBe('sub2api-api-key');
     expect(config.llmGatewayStaticToken).toBe('gateway-static-token');
-    expect(config.llmGatewayAdminBaseUrl).toBe('https://llm-gateway-admin.example.test');
+    expect(config.llmGatewayAdminBaseUrl).toBe(
+      'https://llm-gateway-admin.example.test',
+    );
     expect(config.llmGatewayAdminToken).toBe('gateway-admin-token');
+    expect(config.llmGatewayGroupId).toBe(42);
+    expect(config.llmGatewayUserBalance).toBe(1.5);
     expect(config.sandboxDefaultResourceProfile).toBe('large');
     expect(config.sandboxWorkerEnabledAgentProviders).toBe('codex');
     expect(config.buildSha).toBe('abc123');
     expect(config.harnessBaseUrl).toBe('https://harness.example.test');
     expect(config.harnessProvider).toBe('custom-harness');
-    expect(config.harnessAppKeySecretName).toBe('remote-codex-harness-app-keys');
-    expect(config.harnessAdminBaseUrl).toBe('https://harness-admin.example.test');
+    expect(config.harnessAppKeySecretName).toBe(
+      'remote-codex-harness-app-keys',
+    );
+    expect(config.harnessAdminBaseUrl).toBe(
+      'https://harness-admin.example.test',
+    );
     expect(config.harnessAdminKey).toBe('harness-admin-key');
     expect(config.harnessLegacyAdminFallback).toBe(false);
     expect(config.chemistryToolsEnabled).toBe(true);
@@ -102,7 +114,9 @@ describe('control plane config', () => {
 
     expect(config.corsAllowedOrigins.has('http://127.0.0.1:5173')).toBe(true);
     expect(config.corsAllowedOrigins.has('http://localhost:5173')).toBe(true);
-    expect(config.corsAllowedOrigins.has('https://debug.lnz-study.com')).toBe(true);
+    expect(config.corsAllowedOrigins.has('https://debug.lnz-study.com')).toBe(
+      true,
+    );
   });
 
   it('requires a harness base URL when chemistry tools are enabled', () => {
@@ -112,6 +126,8 @@ describe('control plane config', () => {
         CONTROL_PLANE_DATABASE_URL: ':memory:',
         REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
       }),
-    ).toThrow('ELAGENTE_HARNESS_BASE_URL is required when chemistry tools are enabled.');
+    ).toThrow(
+      'ELAGENTE_HARNESS_BASE_URL is required when chemistry tools are enabled.',
+    );
   });
 });
