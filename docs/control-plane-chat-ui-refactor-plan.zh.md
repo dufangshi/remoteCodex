@@ -1156,14 +1156,14 @@ Tasks：
     - mobile chat workspace
   - Evidence：screenshots or trace.
 
-- [ ] 部署并验证 build sha。
+- [x] 部署并验证 build sha。
   - Done when：
     ```bash
     curl -sS https://remote-codex-frontend-production.up.railway.app/build.json
     ```
     returns pushed SHA.
 
-- [ ] 手工验收清单。
+- [x] 手工验收清单。
   - Control Plane：
     - 首屏不显示 raw ids。
     - session 列表一眼能看运行状态。
@@ -1196,10 +1196,36 @@ Verification:
 - output/playwright/control-plane-session-phase8-logs-desktop.png
 - output/playwright/control-plane-session-phase8-logs-mobile.png
 - output/playwright/control-plane-session-phase9-mobile-touch-targets.png
+- git commit 9e8d13d533816896b8dcb9b0d87edf372954ec3d
+- node .agents/skills/remote-codex-deploy/scripts/deploy-staging.mjs --push --watch
+- GitHub Actions Staging Images: success, https://github.com/dufangshi/remoteCodex/actions/runs/27084771422
+- GitHub Actions Worker Image: success, https://github.com/dufangshi/remoteCodex/actions/runs/27084771424
+- curl -sS https://remote-codex-frontend-production.up.railway.app/build.json -> {"buildSha":"9e8d13d533816896b8dcb9b0d87edf372954ec3d"}
+- curl -sS https://remote-codex-control-plane-production.up.railway.app/healthz -> {"ok":true,"service":"control-plane-api","buildSha":"9e8d13d533816896b8dcb9b0d87edf372954ec3d"}
+- curl -sS https://sandbox-router.lnz.app/healthz -> {"ok":true,"role":"sandbox-router"}
+- Playwright staging smoke: https://remote-codex-frontend-production.up.railway.app/control-plane
+- Playwright staging smoke: https://remote-codex-frontend-production.up.railway.app/control-plane/sessions/2008afb1-a046-4509-981e-8ce19361453f
+- output/playwright/staging-control-plane-ia-desktop.png
+- output/playwright/staging-control-plane-account-menu.png
+- output/playwright/staging-control-plane-inspector-metadata.png
+- output/playwright/staging-control-plane-ia-mobile.png
+- output/playwright/staging-control-plane-chat-desktop.png
+- output/playwright/staging-control-plane-chat-settings.png
 
-Not completed:
-- Staging deploy and production build SHA verification are intentionally still unchecked.
-- The worktree includes multi-phase dirty files plus pre-existing unrelated changes, so deployment should happen from a deliberate commit slice.
+Manual staging results:
+- `/control-plane` login works with `dev@example.com`.
+- First viewport shows compact top bar, Workspace Browser, overview strip, Sessions list, and Inspector. Raw sandbox ids, image, worker id, S3 prefix, and exact timestamps are hidden until Inspector Metadata.
+- User avatar menu opens and contains account identity, usage summary, usage history disclosure, account details disclosure, and sign out.
+- Project -> workspace -> session hierarchy works. Selecting `Computational chemistry test / test1` shows 2 active sessions with status, relative activity, runtime readiness, one Resume action, and More menu.
+- Inspector Summary/Metadata tabs work; Metadata fields have Copy buttons.
+- Mobile `/control-plane` renders the stacked layout without a blank page or obvious overlap in the captured viewport.
+- Resume opens the chat workspace at `/control-plane/sessions/2008afb1-a046-4509-981e-8ce19361453f`.
+- Chat workspace shows shared thread-ui hamburger, thread list, settings panel, timeline, collapsed command/tool batches, sticky composer, Send, and Stop. Stop is correctly disabled for an idle session.
+- Settings opens from the thread sidebar and shows remote session controls.
+
+Residual risk:
+- Account menu does not close on Escape in the Playwright smoke; it closes by clicking the avatar again. This is a follow-up a11y polish item, not a deploy blocker.
+- Chat page console had one non-blocking WebSocket close warning during staging smoke. The UI still reported `Chat session connected`; avoid logging route tokens verbatim when investigating this later.
 ```
 
 ## Recommended PR Slicing
