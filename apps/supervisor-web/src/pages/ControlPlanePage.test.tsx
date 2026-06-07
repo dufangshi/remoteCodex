@@ -368,6 +368,9 @@ async function openAccountMenu() {
 }
 
 function openInspectorTab(name: 'Summary' | 'Metadata' | 'Route' | 'Logs') {
+  if (!screen.queryByRole('heading', { name: 'Inspector' })) {
+    fireEvent.click(screen.getByRole('button', { name: 'Show details inspector' }));
+  }
   fireEvent.click(screen.getByRole('tab', { name }));
 }
 
@@ -593,7 +596,7 @@ describe('ControlPlanePage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Molecule study/i }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sandbox Start' }));
 
     await waitFor(() => {
       expect(screen.getAllByText('Running').length).toBeGreaterThan(0);
@@ -666,7 +669,8 @@ describe('ControlPlanePage', () => {
       'Bearer dev:dev-user',
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('button', { name: /More actions for session Plan calculation/i }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Close session' }));
 
     await waitFor(() => {
       expect(screen.getByText('Session finalized and disconnected.')).toBeInTheDocument();
@@ -707,7 +711,7 @@ describe('ControlPlanePage', () => {
     );
     expect(new Headers(resumeCall?.[1]?.headers).has('x-remote-codex-worker-token')).toBe(false);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sandbox Start' }));
 
     await waitFor(() => {
       expect(screen.getAllByText('Running').length).toBeGreaterThan(0);
@@ -802,7 +806,7 @@ describe('ControlPlanePage', () => {
       expect(screen.getByText('Start the sandbox before creating a session.')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sandbox Start' }));
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Open create panel for session' })).not.toBeDisabled();
     });
@@ -855,7 +859,7 @@ describe('ControlPlanePage', () => {
     expect(screen.getAllByText(/^Codex · /).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Runtime ready').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Not started').length).toBeGreaterThan(0);
-    expect(screen.getByText('1 active sessions')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Active 1' })).toBeInTheDocument();
     expect(screen.queryByText('P')).not.toBeInTheDocument();
     expect(screen.queryByText('W')).not.toBeInTheDocument();
     expect(screen.queryByText('S')).not.toBeInTheDocument();
@@ -1051,13 +1055,14 @@ describe('ControlPlanePage', () => {
       const view = renderWithSandbox(current.sandbox);
 
       await waitFor(() => {
-        expect(screen.getByRole('heading', { name: 'Sandbox' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: `Sandbox ${current.startName}` })).toBeInTheDocument();
       });
 
-      const start = screen.getByRole('button', { name: current.startName });
+      const start = screen.getByRole('button', { name: `Sandbox ${current.startName}` });
+      const restart = screen.getByRole('button', { name: 'Sandbox restart' });
+      const health = screen.getByRole('button', { name: 'Sandbox health' });
+      openInspectorTab('Summary');
       const stop = screen.getByRole('button', { name: 'Stop' });
-      const restart = screen.getByRole('button', { name: 'Restart' });
-      const health = screen.getByRole('button', { name: 'Health' });
       const inspect = screen.getByRole('button', { name: 'Inspect' });
 
       if (current.startDisabled) {
@@ -1323,10 +1328,8 @@ describe('ControlPlanePage', () => {
     render(<ControlPlanePage />);
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Inspector' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Show details inspector' })).toBeInTheDocument();
     });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Hide details inspector' }));
     expect(screen.queryByRole('heading', { name: 'Inspector' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Show details inspector' }));
@@ -1705,7 +1708,7 @@ describe('ControlPlanePage', () => {
     expect(healthRequests).toBe(1);
 
     currentSandbox = startingSandbox;
-    fireEvent.click(screen.getByRole('button', { name: 'Health' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sandbox health' }));
 
     await waitFor(() => {
       expect(screen.getAllByText('Checking readiness').length).toBeGreaterThanOrEqual(2);
@@ -1716,7 +1719,7 @@ describe('ControlPlanePage', () => {
     expect(screen.getAllByText('Worker Pod is running but not ready.').length).toBeGreaterThan(0);
     openInspectorTab('Summary');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Restart' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sandbox restart' }));
 
     await waitFor(() => {
       expect(screen.getAllByText('Startup failed').length).toBeGreaterThanOrEqual(2);

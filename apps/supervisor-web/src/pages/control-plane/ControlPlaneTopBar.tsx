@@ -11,6 +11,11 @@ export function ControlPlaneTopBar({
 }) {
   return (
     <header className="control-console-header">
+      <div className="control-window-controls" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </div>
       <div className="control-titlebar-copy">
         <h1>{title}</h1>
         <span>{subtitle}</span>

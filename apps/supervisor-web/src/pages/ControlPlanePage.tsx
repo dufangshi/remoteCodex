@@ -651,7 +651,7 @@ export function ControlPlanePage() {
   const [message, setMessage] = useState<string | null>(null);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [createPanelOpen, setCreatePanelOpen] = useState<CreatePanelKind | null>(null);
-  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('summary');
   const [profileName, setProfileName] = useState(() => readStoredControlPlaneAuth()?.displayName ?? '');
   const [gatewayUnavailable, setGatewayUnavailable] = useState<string | null>(null);
@@ -750,11 +750,20 @@ export function ControlPlanePage() {
   const totalCostUsd = billing?.totalCostUsd ?? Number(usage?.costUsd ?? 0) + Number(harnessUsage?.costUsd ?? 0);
   const activeSessions = sessions.filter((session) => session.status === 'active').length;
   const sessionsNeedingStart = sessions.filter((session) => !session.workerSessionId).length;
+  const failedSessions = sessions.filter((session) => session.status === 'failed' || session.status === 'closed').length;
+  const sessionFilters = [
+    { label: 'All', value: sessions.length },
+    { label: 'Active', value: activeSessions },
+    { label: 'Needs runtime', value: sessionsNeedingStart },
+    { label: 'Closed', value: failedSessions },
+  ];
   const controlPlaneBaseUrl = auth?.baseUrl ?? readStoredControlPlaneAuth()?.baseUrl ?? 'not connected';
   const selectedSessionActivity = selectedSession?.lastActivityAt ?? selectedSession?.updatedAt ?? null;
   const sandboxActivity = sandbox?.lastSeenAt ?? sandbox?.updatedAt ?? null;
   const sandboxProgressLabel = sandboxStageLabel(sandbox);
   const sandboxHealthSummary = sandboxHealthLabel(sandbox);
+  const toolbarTitle = selectedWorkspace?.name ?? selectedProject?.name ?? 'Control Plane';
+  const toolbarSubtitle = selectedPath || 'Choose a project and workspace to manage sessions';
 
   async function run<T>(label: string, action: () => Promise<T>) {
     setBusy(label);
@@ -969,6 +978,20 @@ export function ControlPlanePage() {
     },
     [],
   );
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'Escape') {
+        return;
+      }
+      setAccountMenuOpen(false);
+      setCreatePanelOpen(null);
+      setOpenSessionMenuId(null);
+      setInspectorOpen(false);
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   function closeWorkerSocket() {
     const socket = workerSocketRef.current;
@@ -1252,6 +1275,8 @@ export function ControlPlanePage() {
     closeWorkerSocket();
     clearRouteTokenRefreshTimer();
     setWorkerConnectionState('idle');
+    setInspectorTab('summary');
+    setInspectorOpen(true);
   }
 
   function handleShowSessionDetails(session: ControlPlaneSession) {
@@ -1305,8 +1330,8 @@ export function ControlPlanePage() {
 
   const topBar = (
       <ControlPlaneTopBar
-        title="Control Plane"
-        subtitle={selectedPath || 'Select a project, workspace, or session'}
+        title={toolbarTitle}
+        subtitle={toolbarSubtitle}
         actions={
           <>
           {sandbox ? (
@@ -1321,7 +1346,7 @@ export function ControlPlanePage() {
             onClick={() => setInspectorOpen((open) => !open)}
             ariaLabel={inspectorOpen ? 'Hide details inspector' : 'Show details inspector'}
           >
-            Details
+            Inspector
           </ActionButton>
           <div className="control-account-menu">
             <button
@@ -1441,8 +1466,8 @@ export function ControlPlanePage() {
         <ControlPlaneSidebar>
           <div className="control-explorer-toolbar">
             <div>
-              <h2>Workspace Browser</h2>
-              <span>{projects.length} projects, {activeSessions} active sessions</span>
+              <h2>Remote Codex</h2>
+              <span>{user?.email ?? 'Product account'}</span>
             </div>
             <button
               type="button"
@@ -1506,6 +1531,76 @@ export function ControlPlanePage() {
               )}
             </div>
           ) : null}
+
+          <div className="control-sidebar-body">
+            <section className="control-sidebar-section">
+              <div className="control-sidebar-section-title">
+                <span>Workspace</span>
+                <strong>{selectedWorkspace?.name ?? selectedProject?.name ?? 'Not selected'}</strong>
+              </div>
+              <div className="control-context-card">
+                <div>
+                  <span>Project</span>
+                  <strong>{selectedProject?.name ?? 'Choose project'}</strong>
+                </div>
+                <div>
+                  <span>Workspace</span>
+                  <strong>{selectedWorkspace?.name ?? 'Choose workspace'}</strong>
+                </div>
+              </div>
+            </section>
+
+            <section className="control-sidebar-section">
+              <div className="control-sidebar-section-title">
+                <span>Sessions</span>
+                <strong>{sessions.length}</strong>
+              </div>
+              <div className="control-nav-list" aria-label="Session filters">
+                {sessionFilters.map((filter, index) => (
+                  <button key={filter.label} type="button" className={`control-nav-row ${index === 0 ? 'selected' : ''}`}>
+                    <span>{filter.label}</span>
+                    <strong>{filter.value}</strong>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="control-sidebar-section">
+              <div className="control-sidebar-section-title">
+                <span>System</span>
+              </div>
+              <div className="control-nav-list" aria-label="System navigation">
+                <button
+                  type="button"
+                  className="control-nav-row"
+                  aria-label={`Open sandbox details, ${statusLabel(sandbox?.state)}`}
+                  onClick={() => {
+                    setInspectorTab('summary');
+                    setInspectorOpen(true);
+                  }}
+                >
+                  <span>Sandbox</span>
+                  <strong>{statusLabel(sandbox?.state)}</strong>
+                </button>
+                <button
+                  type="button"
+                  className="control-nav-row"
+                  onClick={() => setAccountMenuOpen(true)}
+                >
+                  <span>Usage</span>
+                  <strong>${totalCostUsd.toFixed(2)}</strong>
+                </button>
+                <button
+                  type="button"
+                  className="control-nav-row"
+                  onClick={() => setAccountMenuOpen(true)}
+                >
+                  <span>Settings</span>
+                  <strong>{user?.plan ?? 'dev'}</strong>
+                </button>
+              </div>
+            </section>
+          </div>
 
           <div className="control-explorer-tree">
             {metadataLoading.projects ? (
@@ -1613,6 +1708,54 @@ export function ControlPlanePage() {
         </ControlPlaneSidebar>
 
         <main className="control-main-column">
+          <section className="control-workspace-hero" aria-label="Current control plane context">
+            <div>
+              <span>Current workspace</span>
+              <h2>{selectedWorkspace?.name ?? selectedProject?.name ?? 'Select a workspace'}</h2>
+              <p>
+                {selectedWorkspace
+                  ? `${selectedProject?.name ?? 'Project'} · ${workspaceSourceLabel(selectedWorkspace.sourceType)}`
+                  : 'Pick a project and workspace before creating sessions.'}
+              </p>
+            </div>
+            <div className="control-workspace-hero-actions">
+              <span className={`control-status-pill ${statusTone(sandbox?.state ?? 'unknown')}`}>
+                {statusLabel(sandbox?.state)}
+              </span>
+              <ActionButton
+                onClick={() => void sandboxAction('start')}
+                disabled={sandboxActions.start.disabled}
+                title={sandboxActions.start.title}
+                ariaLabel={`Sandbox ${sandboxActions.start.label}`}
+              >
+                {sandboxActions.start.label}
+              </ActionButton>
+              <ActionButton
+                onClick={() => void sandboxAction('restart')}
+                disabled={sandboxActions.restart.disabled}
+                title={sandboxActions.restart.title}
+                ariaLabel="Sandbox restart"
+              >
+                {sandboxActions.restart.label}
+              </ActionButton>
+              <ActionButton
+                onClick={() => void sandboxAction('health')}
+                disabled={sandboxActions.health.disabled}
+                title={sandboxActions.health.title}
+                ariaLabel="Sandbox health"
+              >
+                {sandboxActions.health.label}
+              </ActionButton>
+              <ActionButton
+                onClick={() => setCreatePanelOpen(createTarget)}
+                disabled={createTarget === 'workspace' ? !canCreateWorkspace : createTarget === 'session' ? !canCreateSession : !canUseControlPlane}
+                title={createTarget === 'workspace' ? workspaceCreateBlocker : createTarget === 'session' ? sessionCreateBlocker : undefined}
+              >
+                New {createTargetLabel}
+              </ActionButton>
+            </div>
+          </section>
+
           <section className="control-overview-strip" aria-label="Control plane overview">
             <div>
               <span>Projects</span>
@@ -1623,8 +1766,8 @@ export function ControlPlanePage() {
               <strong>{workspaces.length}</strong>
             </div>
             <div>
-              <span>Sessions</span>
-              <strong>{sessions.length}</strong>
+              <span>Active sessions</span>
+              <strong>{activeSessions}</strong>
             </div>
             <div>
               <span>Sandbox</span>
@@ -1637,7 +1780,7 @@ export function ControlPlanePage() {
               <h2>Sessions</h2>
               <span>
                 {selectedWorkspace
-                  ? `${activeSessions} active sessions`
+                  ? `${sessions.length} in workspace`
                   : 'Select workspace'}
               </span>
             </div>
@@ -1751,9 +1894,9 @@ export function ControlPlanePage() {
             )}
           </section>
 
-          <section className="control-panel control-selected-panel">
+          <section className="control-panel control-selected-panel control-context-summary-panel">
             <div className="control-panel-heading">
-              <h2>{selectedSession ? 'Session' : selectedWorkspace ? 'Workspace' : selectedProject ? 'Project' : 'Selection'}</h2>
+              <h2>{selectedSession ? 'Selected session' : selectedWorkspace ? 'Workspace context' : selectedProject ? 'Project context' : 'Selection'}</h2>
               <span>
                 {selectedSession
                   ? statusLabel(selectedSession.status)
@@ -1785,11 +1928,12 @@ export function ControlPlanePage() {
                     {selectedSession.workerSessionId ? 'Resume' : 'Start sandbox session'}
                   </ActionButton>
                   <ActionButton
-                    onClick={() => void handleCloseSession(selectedSession)}
-                    disabled={!auth || !selectedSession.workerSessionId || !sandboxReady}
-                    title={!selectedSession.workerSessionId ? 'Session has not been started yet.' : undefined}
+                    onClick={() => {
+                      setInspectorTab('metadata');
+                      setInspectorOpen(true);
+                    }}
                   >
-                    Close
+                    Details
                   </ActionButton>
                 </div>
               </>
@@ -1880,32 +2024,11 @@ export function ControlPlanePage() {
                 </div>
                 <div className="control-action-row">
                   <ActionButton
-                    onClick={() => void sandboxAction('start')}
-                    disabled={sandboxActions.start.disabled}
-                    title={sandboxActions.start.title}
-                  >
-                    {sandboxActions.start.label}
-                  </ActionButton>
-                  <ActionButton
                     onClick={() => void sandboxAction('stop')}
                     disabled={sandboxActions.stop.disabled}
                     title={sandboxActions.stop.title}
                   >
                     {sandboxActions.stop.label}
-                  </ActionButton>
-                  <ActionButton
-                    onClick={() => void sandboxAction('restart')}
-                    disabled={sandboxActions.restart.disabled}
-                    title={sandboxActions.restart.title}
-                  >
-                    {sandboxActions.restart.label}
-                  </ActionButton>
-                  <ActionButton
-                    onClick={() => void sandboxAction('health')}
-                    disabled={sandboxActions.health.disabled}
-                    title={sandboxActions.health.title}
-                  >
-                    {sandboxActions.health.label}
                   </ActionButton>
                   <ActionButton
                     onClick={handleInspectSandbox}
