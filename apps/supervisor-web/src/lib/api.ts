@@ -235,6 +235,7 @@ export interface ControlPlaneWorkspace {
   sandboxId: string;
   name: string;
   slug: string;
+  status: string;
   path: string;
   sourceType: string;
   gitUrl: string | null;
@@ -509,6 +510,31 @@ export function createControlPlaneProject(
   });
 }
 
+export function updateControlPlaneProject(
+  auth: ControlPlaneAuth,
+  projectId: string,
+  input: { name?: string; slug?: string; status?: 'active' | 'archived' },
+) {
+  return controlPlaneRequest<{ project: ControlPlaneProject }>(
+    auth,
+    `/api/projects/${encodeURIComponent(projectId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function deleteControlPlaneProject(auth: ControlPlaneAuth, projectId: string) {
+  return controlPlaneRequest<{ project: ControlPlaneProject }>(
+    auth,
+    `/api/projects/${encodeURIComponent(projectId)}`,
+    {
+      method: 'DELETE',
+    },
+  );
+}
+
 export function fetchControlPlaneWorkspaces(auth: ControlPlaneAuth, projectId?: string) {
   const suffix = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
   return controlPlaneRequest<{ workspaces: ControlPlaneWorkspace[] }>(
@@ -534,6 +560,21 @@ export function createControlPlaneWorkspace(
   });
 }
 
+export function updateControlPlaneWorkspace(
+  auth: ControlPlaneAuth,
+  workspaceId: string,
+  input: { name?: string; status?: 'active' | 'archived' | 'deleted' },
+) {
+  return controlPlaneRequest<{ workspace: ControlPlaneWorkspace }>(
+    auth,
+    `/api/workspaces/${encodeURIComponent(workspaceId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
 export function fetchControlPlaneSessions(auth: ControlPlaneAuth, workspaceId: string) {
   return controlPlaneRequest<{ sessions: ControlPlaneSession[] }>(
     auth,
@@ -552,6 +593,25 @@ export function createControlPlaneSession(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/sessions`,
     {
       method: 'POST',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function updateControlPlaneSession(
+  auth: ControlPlaneAuth,
+  sessionId: string,
+  input: {
+    title?: string;
+    status?: 'created' | 'active' | 'idle' | 'archived' | 'deleted';
+    workerSessionId?: string | null;
+  },
+) {
+  return controlPlaneRequest<{ session: ControlPlaneSession }>(
+    auth,
+    `/api/sessions/${encodeURIComponent(sessionId)}`,
+    {
+      method: 'PATCH',
       body: JSON.stringify(input),
     },
   );

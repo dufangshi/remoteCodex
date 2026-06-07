@@ -2,12 +2,14 @@ import { FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 
 import { useNavigate } from 'react-router-dom';
 
 import type { AgentBackendIdDto } from '../../../../packages/shared/src/index';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import {
   closeControlPlaneSession,
   createControlPlaneProject,
   createControlPlaneRouteToken,
   createControlPlaneSession,
   createControlPlaneWorkspace,
+  deleteControlPlaneProject,
   fetchControlPlaneMe,
   fetchControlPlaneAdminSandboxDetail,
   fetchControlPlaneHarnessModuleRuns,
@@ -24,6 +26,9 @@ import {
   resumeControlPlaneSession,
   startControlPlaneSandbox,
   stopControlPlaneSandbox,
+  updateControlPlaneProject,
+  updateControlPlaneSession,
+  updateControlPlaneWorkspace,
   updateControlPlaneMe,
   ApiError,
   type ControlPlaneAuth,
@@ -63,6 +68,10 @@ const HARNESS_MODULE_LABELS: Record<ControlPlaneHarnessModule, string> = {
 };
 type CreatePanelKind = 'project' | 'workspace' | 'session';
 type InspectorTab = 'summary' | 'metadata' | 'route' | 'logs';
+type EditableEntity =
+  | { type: 'project'; id: string }
+  | { type: 'workspace'; id: string }
+  | { type: 'session'; id: string };
 
 function formatRelativeTime(value: string | null | undefined) {
   if (!value) {
@@ -147,6 +156,10 @@ function sessionRuntimeLabel(session: ControlPlaneSession) {
   return session.workerSessionId ? 'Runtime ready' : 'Not started';
 }
 
+function entityKey(entity: EditableEntity | null) {
+  return entity ? `${entity.type}:${entity.id}` : '';
+}
+
 function providerLabel(provider: string) {
   switch (provider) {
     case 'codex':
@@ -210,6 +223,36 @@ function SessionTreeIcon() {
     <svg aria-hidden="true" viewBox="0 0 16 16" focusable="false">
       <path
         d="M4 3.25h5.25L12 6v6.75H4zM9.25 3.25V6H12M6 8.25h4M6 10.25h3"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.25"
+      />
+    </svg>
+  );
+}
+
+function PencilIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16" focusable="false">
+      <path
+        d="m3.2 10.9-.45 2.35 2.35-.45 6.95-6.95-1.9-1.9zm7.8-7.8.95-.95a1.35 1.35 0 0 1 1.9 1.9l-.95.95"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.25"
+      />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16" focusable="false">
+      <path
+        d="M3 4.25h10M6.25 4.25V3h3.5v1.25M4.5 4.25l.55 8.25h5.9l.55-8.25M6.75 6.75v3.5M9.25 6.75v3.5"
         fill="none"
         stroke="currentColor"
         strokeLinecap="round"
@@ -614,6 +657,74 @@ function SessionStatusBadge({ status }: { status: string }) {
   return <span className={`control-status-pill compact ${statusTone(status)}`}>{statusLabel(status)}</span>;
 }
 
+function TreeEntityActions({
+  label,
+  onEdit,
+  onDelete,
+}: {
+  label: string;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <span className="control-tree-actions">
+      <button
+        type="button"
+        className="control-tree-action-button"
+        onClick={(event) => {
+          event.stopPropagation();
+          onEdit();
+        }}
+        aria-label={`Rename ${label}`}
+        title={`Rename ${label}`}
+      >
+        <PencilIcon />
+      </button>
+      <button
+        type="button"
+        className="control-tree-action-button danger"
+        onClick={(event) => {
+          event.stopPropagation();
+          onDelete();
+        }}
+        aria-label={`Delete ${label}`}
+        title={`Delete ${label}`}
+      >
+        <TrashIcon />
+      </button>
+    </span>
+  );
+}
+
+function TreeRenameForm({
+  label,
+  value,
+  onChange,
+  onCancel,
+  onSubmit,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  onCancel: () => void;
+  onSubmit: (event: FormEvent) => void;
+}) {
+  return (
+    <form className="control-tree-edit-form" onSubmit={onSubmit}>
+      <label>
+        <span>{label}</span>
+        <input
+          value={value}
+          onChange={(event) => onChange(event.currentTarget.value)}
+          autoFocus
+        />
+      </label>
+      <button type="submit">Save</button>
+      <button type="button" onClick={onCancel}>Cancel</button>
+    </form>
+  );
+}
+
 export function ControlPlanePage() {
   const navigate = useNavigate();
   const [auth, setAuth] = useState<ControlPlaneAuth | null>(() => {
@@ -646,6 +757,9 @@ export function ControlPlanePage() {
   const [workspaceName, setWorkspaceName] = useState('Molecule study');
   const [sessionTitle, setSessionTitle] = useState('Plan calculation');
   const [sessionProvider, setSessionProvider] = useState<AgentBackendIdDto>('codex');
+  const [editingEntity, setEditingEntity] = useState<EditableEntity | null>(null);
+  const [editingName, setEditingName] = useState('');
+  const [pendingDelete, setPendingDelete] = useState<EditableEntity | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -1293,6 +1407,133 @@ export function ControlPlanePage() {
     setMessage(`${label} copied.`);
   }
 
+  function startEditEntity(entity: EditableEntity, name: string) {
+    setEditingEntity(entity);
+    setEditingName(name);
+    setOpenSessionMenuId(null);
+  }
+
+  function cancelEditEntity() {
+    setEditingEntity(null);
+    setEditingName('');
+  }
+
+  async function saveEditEntity(event: FormEvent) {
+    event.preventDefault();
+    if (!auth || !editingEntity) {
+      return;
+    }
+    const nextName = editingName.trim();
+    if (!nextName) {
+      setError('Name is required.');
+      return;
+    }
+
+    const entity = editingEntity;
+    await run(`Rename ${entity.type}`, async () => {
+      if (entity.type === 'project') {
+        const result = await updateControlPlaneProject(auth, entity.id, {
+          name: nextName,
+          slug: slugFromName(nextName),
+        });
+        setProjects((current) =>
+          current.map((project) => (project.id === result.project.id ? result.project : project)),
+        );
+      } else if (entity.type === 'workspace') {
+        const result = await updateControlPlaneWorkspace(auth, entity.id, { name: nextName });
+        setWorkspaces((current) =>
+          current.map((workspace) =>
+            workspace.id === result.workspace.id ? result.workspace : workspace,
+          ),
+        );
+      } else {
+        const result = await updateControlPlaneSession(auth, entity.id, { title: nextName });
+        setSessions((current) =>
+          current.map((session) => (session.id === result.session.id ? result.session : session)),
+        );
+      }
+      cancelEditEntity();
+      setMessage(`${statusLabel(entity.type)} renamed.`);
+    });
+  }
+
+  function deleteDialogCopy(entity: EditableEntity | null) {
+    if (!entity) {
+      return {
+        title: 'Delete item',
+        description: 'This item will be removed from the active control plane view.',
+      };
+    }
+    if (entity.type === 'project') {
+      const target = projects.find((project) => project.id === entity.id);
+      return {
+        title: `Delete project ${target?.name ?? ''}`.trim(),
+        description:
+          'The project will be archived and removed from the active project list. Its existing workspace records remain in the control plane database.',
+      };
+    }
+    if (entity.type === 'workspace') {
+      const target = workspaces.find((workspace) => workspace.id === entity.id);
+      return {
+        title: `Delete workspace ${target?.name ?? ''}`.trim(),
+        description:
+          'The workspace will be marked deleted and removed from this project view. Sessions under it will no longer be shown from the active workspace browser.',
+      };
+    }
+    const target = sessions.find((session) => session.id === entity.id);
+    return {
+      title: `Delete session ${target?.title ?? ''}`.trim(),
+      description:
+        'The session will be marked deleted and removed from this workspace view. This does not delete files in the sandbox workspace.',
+    };
+  }
+
+  async function confirmDeleteEntity() {
+    if (!auth || !pendingDelete) {
+      return;
+    }
+    const entity = pendingDelete;
+    await run(`Delete ${entity.type}`, async () => {
+      if (entity.type === 'project') {
+        const result = await deleteControlPlaneProject(auth, entity.id);
+        setProjects((current) => current.filter((project) => project.id !== result.project.id));
+        if (selectedProjectId === result.project.id) {
+          setSelectedProjectId('');
+          setSelectedWorkspaceId('');
+          setSelectedSessionId('');
+          setWorkspaces([]);
+          setSessions([]);
+        }
+      } else if (entity.type === 'workspace') {
+        const result = await updateControlPlaneWorkspace(auth, entity.id, { status: 'deleted' });
+        setWorkspaces((current) =>
+          current.filter((workspace) => workspace.id !== result.workspace.id),
+        );
+        if (selectedWorkspaceId === result.workspace.id) {
+          setSelectedWorkspaceId('');
+          setSelectedSessionId('');
+          setSessions([]);
+        }
+      } else {
+        const result = await updateControlPlaneSession(auth, entity.id, { status: 'deleted' });
+        setSessions((current) => current.filter((session) => session.id !== result.session.id));
+        if (selectedSessionId === result.session.id) {
+          setSelectedSessionId('');
+        }
+      }
+      if (editingEntity && entityKey(editingEntity) === entityKey(entity)) {
+        cancelEditEntity();
+      }
+      setPendingDelete(null);
+      setRouteToken(null);
+      setWorkerSocketUrl(null);
+      closeWorkerSocket();
+      clearRouteTokenRefreshTimer();
+      setWorkerConnectionState('idle');
+      setMessage(`${statusLabel(entity.type)} deleted.`);
+    });
+  }
+
   async function handleCloseSession(session: ControlPlaneSession) {
     if (!auth || !sandboxReady) {
       return;
@@ -1454,7 +1695,10 @@ export function ControlPlanePage() {
     </>
   );
 
+  const deleteCopy = deleteDialogCopy(pendingDelete);
+
   return (
+    <>
     <ControlPlaneShell
       topBar={topBar}
       alerts={alerts}
@@ -1610,30 +1854,48 @@ export function ControlPlanePage() {
             ) : (
               projects.map((project) => (
                 <div key={project.id} className="control-tree-group">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedProjectId(project.id);
-                      setSelectedWorkspaceId('');
-                      setSessions([]);
-                      setSelectedSessionId('');
-                      setRouteToken(null);
-                      setWorkerSocketUrl(null);
-                      closeWorkerSocket();
-                      clearRouteTokenRefreshTimer();
-                      setWorkerConnectionState('idle');
-                    }}
-                    className={`control-tree-row project ${selectedProjectId === project.id ? 'selected' : ''}`}
-                  >
-                    <span className="control-tree-caret">
-                      <TreeChevron open={selectedProjectId === project.id} />
-                    </span>
-                    <span className="control-tree-icon">
-                      <ProjectTreeIcon />
-                    </span>
-                    <strong>{project.name}</strong>
-                    <small>{statusLabel(project.status)}</small>
-                  </button>
+                  {entityKey(editingEntity) === `project:${project.id}` ? (
+                    <TreeRenameForm
+                      label="Project name"
+                      value={editingName}
+                      onChange={setEditingName}
+                      onCancel={cancelEditEntity}
+                      onSubmit={saveEditEntity}
+                    />
+                  ) : (
+                    <div className={`control-tree-item ${selectedProjectId === project.id ? 'selected' : ''}`}>
+                      <button
+                        type="button"
+                        aria-label={`Select project ${project.name}`}
+                        onClick={() => {
+                          setSelectedProjectId(project.id);
+                          setSelectedWorkspaceId('');
+                          setSessions([]);
+                          setSelectedSessionId('');
+                          setRouteToken(null);
+                          setWorkerSocketUrl(null);
+                          closeWorkerSocket();
+                          clearRouteTokenRefreshTimer();
+                          setWorkerConnectionState('idle');
+                        }}
+                        className="control-tree-row project"
+                      >
+                        <span className="control-tree-caret">
+                          <TreeChevron open={selectedProjectId === project.id} />
+                        </span>
+                        <span className="control-tree-icon">
+                          <ProjectTreeIcon />
+                        </span>
+                        <strong>{project.name}</strong>
+                        <small>{statusLabel(project.status)}</small>
+                      </button>
+                      <TreeEntityActions
+                        label={`project ${project.name}`}
+                        onEdit={() => startEditEntity({ type: 'project', id: project.id }, project.name)}
+                        onDelete={() => setPendingDelete({ type: 'project', id: project.id })}
+                      />
+                    </div>
+                  )}
 
                   {selectedProjectId === project.id ? (
                     <div className="control-tree-children">
@@ -1644,28 +1906,46 @@ export function ControlPlanePage() {
                       ) : (
                         workspaces.map((workspace) => (
                           <div key={workspace.id} className="control-tree-group">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedWorkspaceId(workspace.id);
-                                setSelectedSessionId('');
-                                setRouteToken(null);
-                                setWorkerSocketUrl(null);
-                                closeWorkerSocket();
-                                clearRouteTokenRefreshTimer();
-                                setWorkerConnectionState('idle');
-                              }}
-                              className={`control-tree-row workspace ${selectedWorkspaceId === workspace.id ? 'selected' : ''}`}
-                            >
-                              <span className="control-tree-caret">
-                                <TreeChevron open={selectedWorkspaceId === workspace.id} />
-                              </span>
-                              <span className="control-tree-icon">
-                                <WorkspaceTreeIcon />
-                              </span>
-                              <strong>{workspace.name}</strong>
-                              <small>{workspaceTreeLabel(workspace)}</small>
-                            </button>
+                            {entityKey(editingEntity) === `workspace:${workspace.id}` ? (
+                              <TreeRenameForm
+                                label="Workspace name"
+                                value={editingName}
+                                onChange={setEditingName}
+                                onCancel={cancelEditEntity}
+                                onSubmit={saveEditEntity}
+                              />
+                            ) : (
+                              <div className={`control-tree-item ${selectedWorkspaceId === workspace.id ? 'selected' : ''}`}>
+                                <button
+                                  type="button"
+                                  aria-label={`Select workspace ${workspace.name}`}
+                                  onClick={() => {
+                                    setSelectedWorkspaceId(workspace.id);
+                                    setSelectedSessionId('');
+                                    setRouteToken(null);
+                                    setWorkerSocketUrl(null);
+                                    closeWorkerSocket();
+                                    clearRouteTokenRefreshTimer();
+                                    setWorkerConnectionState('idle');
+                                  }}
+                                  className="control-tree-row workspace"
+                                >
+                                  <span className="control-tree-caret">
+                                    <TreeChevron open={selectedWorkspaceId === workspace.id} />
+                                  </span>
+                                  <span className="control-tree-icon">
+                                    <WorkspaceTreeIcon />
+                                  </span>
+                                  <strong>{workspace.name}</strong>
+                                  <small>{workspaceTreeLabel(workspace)}</small>
+                                </button>
+                                <TreeEntityActions
+                                  label={`workspace ${workspace.name}`}
+                                  onEdit={() => startEditEntity({ type: 'workspace', id: workspace.id }, workspace.name)}
+                                  onDelete={() => setPendingDelete({ type: 'workspace', id: workspace.id })}
+                                />
+                              </div>
+                            )}
 
                             {selectedWorkspaceId === workspace.id ? (
                               <div className="control-tree-children sessions">
@@ -1675,23 +1955,41 @@ export function ControlPlanePage() {
                                   <p className="control-empty">No sessions for this workspace.</p>
                                 ) : (
                                   sessions.map((session) => (
-                                    <button
-                                      key={session.id}
-                                      type="button"
-                                      aria-label={`Open session ${session.title} from workspace browser`}
-                                      onClick={() => void handleOpenSession(session)}
-                                      className={`control-tree-row session ${selectedSessionId === session.id ? 'selected' : ''}`}
-                                    >
-                                      <span className="control-tree-caret" />
-                                      <span className="control-tree-icon">
-                                        <SessionTreeIcon />
-                                      </span>
-                                      <strong>{session.title}</strong>
-                                      <small>
-                                        {providerLabel(session.provider)} / {statusLabel(session.status)}
-                                        {session.workerSessionId ? '' : ' / Not started'}
-                                      </small>
-                                    </button>
+                                    <div key={session.id} className="control-tree-group">
+                                      {entityKey(editingEntity) === `session:${session.id}` ? (
+                                        <TreeRenameForm
+                                          label="Session title"
+                                          value={editingName}
+                                          onChange={setEditingName}
+                                          onCancel={cancelEditEntity}
+                                          onSubmit={saveEditEntity}
+                                        />
+                                      ) : (
+                                        <div className={`control-tree-item ${selectedSessionId === session.id ? 'selected' : ''}`}>
+                                          <button
+                                            type="button"
+                                            aria-label={`Open session ${session.title} from workspace browser`}
+                                            onClick={() => void handleOpenSession(session)}
+                                            className="control-tree-row session"
+                                          >
+                                            <span className="control-tree-caret" />
+                                            <span className="control-tree-icon">
+                                              <SessionTreeIcon />
+                                            </span>
+                                            <strong>{session.title}</strong>
+                                            <small>
+                                              {providerLabel(session.provider)} / {statusLabel(session.status)}
+                                              {session.workerSessionId ? '' : ' / Not started'}
+                                            </small>
+                                          </button>
+                                          <TreeEntityActions
+                                            label={`session ${session.title}`}
+                                            onEdit={() => startEditEntity({ type: 'session', id: session.id }, session.title)}
+                                            onDelete={() => setPendingDelete({ type: 'session', id: session.id })}
+                                          />
+                                        </div>
+                                      )}
+                                    </div>
                                   ))
                                 )}
                               </div>
@@ -2323,5 +2621,15 @@ export function ControlPlanePage() {
             ) : null}
         </ControlPlaneInspector>
     </ControlPlaneShell>
+    <ConfirmDialog
+      open={Boolean(pendingDelete)}
+      title={deleteCopy.title}
+      description={deleteCopy.description}
+      confirmLabel="Delete"
+      busy={Boolean(busy?.startsWith('Delete '))}
+      onCancel={() => setPendingDelete(null)}
+      onConfirm={confirmDeleteEntity}
+    />
+    </>
   );
 }

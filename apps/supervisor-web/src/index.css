@@ -519,7 +519,7 @@ body.thread-detail-scroll-locked {
 
 .control-account-menu {
   position: relative;
-  z-index: 70;
+  z-index: 140;
   display: inline-flex;
 }
 
@@ -568,7 +568,7 @@ body.thread-detail-scroll-locked {
 
 .control-account-popover {
   position: absolute;
-  z-index: 80;
+  z-index: 150;
   top: calc(100% + 0.5rem);
   right: 0;
   width: min(27rem, calc(100vw - 2rem));
@@ -827,6 +827,25 @@ body.thread-detail-scroll-locked {
   gap: 0.18rem;
 }
 
+.control-tree-item {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.2rem;
+  border: 1px solid transparent;
+  border-radius: 0.55rem;
+}
+
+.control-tree-item:hover {
+  background: var(--theme-hover);
+}
+
+.control-tree-item.selected {
+  border-color: var(--theme-accent-border);
+  background: var(--theme-accent-soft);
+}
+
 .control-tree-row {
   min-width: 0;
   width: 100%;
@@ -837,7 +856,7 @@ body.thread-detail-scroll-locked {
     "caret icon meta";
   align-items: center;
   gap: 0 0.38rem;
-  border: 1px solid transparent;
+  border: 0;
   border-radius: 0.55rem;
   padding: 0.42rem 0.5rem;
   background: transparent;
@@ -845,12 +864,11 @@ body.thread-detail-scroll-locked {
 }
 
 .control-tree-row:hover {
-  background: var(--theme-hover);
+  background: transparent;
 }
 
 .control-tree-row.selected {
-  border-color: var(--theme-accent-border);
-  background: var(--theme-accent-soft);
+  background: transparent;
 }
 
 .control-tree-caret {
@@ -905,6 +923,93 @@ body.thread-detail-scroll-locked {
   font-size: 0.72rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.control-tree-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.16rem;
+  padding-right: 0.26rem;
+}
+
+.control-tree-action-button {
+  width: 1.72rem;
+  height: 1.72rem;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 0.48rem;
+  background: transparent;
+  color: var(--theme-fg-muted);
+}
+
+.control-tree-action-button svg {
+  width: 0.92rem;
+  height: 0.92rem;
+}
+
+.control-tree-action-button:hover {
+  border-color: var(--theme-border);
+  background: var(--theme-surface-strong);
+  color: var(--theme-fg);
+}
+
+.control-tree-action-button.danger:hover {
+  border-color: var(--status-danger-border);
+  background: var(--status-danger-bg);
+  color: var(--status-danger-fg);
+}
+
+.control-tree-edit-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: end;
+  gap: 0.28rem;
+  border: 1px solid var(--theme-accent-border);
+  border-radius: 0.62rem;
+  padding: 0.42rem;
+  background: var(--theme-surface);
+}
+
+.control-tree-edit-form label {
+  min-width: 0;
+  display: grid;
+  gap: 0.22rem;
+  color: var(--theme-fg-muted);
+  font-size: 0.68rem;
+  font-weight: 720;
+}
+
+.control-tree-edit-form input {
+  min-width: 0;
+  height: 1.9rem;
+  border: 1px solid var(--theme-border);
+  border-radius: 0.48rem;
+  background: var(--theme-panel);
+  padding: 0 0.5rem;
+  color: var(--theme-fg);
+  font-size: 0.78rem;
+  outline: none;
+}
+
+.control-tree-edit-form input:focus {
+  border-color: var(--theme-accent-border);
+  box-shadow: 0 0 0 2px var(--theme-accent-soft);
+}
+
+.control-tree-edit-form button {
+  min-height: 1.9rem;
+  border: 1px solid var(--theme-border);
+  border-radius: 0.48rem;
+  background: var(--theme-surface-strong);
+  padding: 0 0.52rem;
+  color: var(--theme-fg);
+  font-size: 0.72rem;
+  font-weight: 720;
+}
+
+.control-tree-edit-form button:hover {
+  background: var(--theme-hover);
 }
 
 .control-tree-children {
@@ -2014,7 +2119,7 @@ body.thread-detail-scroll-locked {
   padding-block: 0.3rem;
 }
 
-.control-tree-row.selected {
+.control-tree-item.selected {
   border-color: color-mix(in srgb, rgb(96 165 250) 22%, transparent);
   background: var(--control-selection-bg);
 }

@@ -154,6 +154,7 @@ const workspace = {
   sandboxId: 'sandbox-1',
   name: 'Molecule study',
   slug: 'molecule-study',
+  status: 'active',
   path: '/workspace/molecule-study',
   sourceType: 'empty',
   gitUrl: null,
@@ -345,13 +346,13 @@ function renderWithSandbox(sandbox: ControlPlaneSandbox | null) {
 
 async function selectExistingHierarchy() {
   await waitFor(() => {
-    expect(screen.getByRole('button', { name: /Computational chemistry/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select project Computational chemistry' })).toBeInTheDocument();
   });
-  fireEvent.click(screen.getByRole('button', { name: /Computational chemistry/i }));
+  fireEvent.click(screen.getByRole('button', { name: 'Select project Computational chemistry' }));
   await waitFor(() => {
-    expect(screen.getByRole('button', { name: /Molecule study/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select workspace Molecule study' })).toBeInTheDocument();
   });
-  fireEvent.click(screen.getByRole('button', { name: /Molecule study/i }));
+  fireEvent.click(screen.getByRole('button', { name: 'Select workspace Molecule study' }));
   await waitFor(() => {
     expect(
       screen.getByRole('button', { name: /Open session Plan calculation from workspace browser/i }),
@@ -452,6 +453,22 @@ describe('ControlPlanePage', () => {
           return jsonResponse({ project });
         }
 
+        if (path === '/api/projects/project-1' && init?.method === 'PATCH') {
+          const body = JSON.parse(String(init.body));
+          return jsonResponse({
+            project: {
+              ...project,
+              name: body.name ?? project.name,
+              slug: body.slug ?? project.slug,
+            },
+          });
+        }
+
+        if (path === '/api/projects/project-1' && init?.method === 'DELETE') {
+          projectCreated = false;
+          return jsonResponse({ project: { ...project, status: 'archived' } });
+        }
+
         if (
           (path === '/api/workspaces' || path === '/api/workspaces?projectId=project-1') &&
           !init?.method
@@ -462,6 +479,20 @@ describe('ControlPlanePage', () => {
         if (path === '/api/projects/project-1/workspaces' && init?.method === 'POST') {
           workspaceCreated = true;
           return jsonResponse({ workspace });
+        }
+
+        if (path === '/api/workspaces/workspace-1' && init?.method === 'PATCH') {
+          const body = JSON.parse(String(init.body));
+          if (body.status === 'deleted') {
+            workspaceCreated = false;
+          }
+          return jsonResponse({
+            workspace: {
+              ...workspace,
+              name: body.name ?? workspace.name,
+              status: body.status ?? workspace.status,
+            },
+          });
         }
 
         if (path === '/api/sandbox/start' && init?.method === 'POST') {
@@ -531,6 +562,19 @@ describe('ControlPlanePage', () => {
           return jsonResponse({ session: currentSession });
         }
 
+        if (path === '/api/sessions/session-1' && init?.method === 'PATCH') {
+          const body = JSON.parse(String(init.body));
+          currentSession = {
+            ...currentSession,
+            title: body.title ?? currentSession.title,
+            status: body.status ?? currentSession.status,
+          };
+          if (body.status === 'deleted') {
+            sessionCreated = false;
+          }
+          return jsonResponse({ session: currentSession });
+        }
+
         if (path === '/api/sandboxes/sandbox-1/route-token' && init?.method === 'POST') {
           return jsonResponse({
             sandboxId: 'sandbox-1',
@@ -570,13 +614,13 @@ describe('ControlPlanePage', () => {
     submitCreatePanel('project');
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Computational chemistry/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Select project Computational chemistry' })).toBeInTheDocument();
     });
     expect(screen.queryByText('computational-chemistry')).not.toBeInTheDocument();
     expect(screen.getByText('Project "Computational chemistry" created. Select it before creating a workspace.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Open create panel for workspace' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Computational chemistry/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select project Computational chemistry' }));
 
     await waitFor(() => {
       expect(screen.getByText('Selected project')).toBeInTheDocument();
@@ -589,12 +633,12 @@ describe('ControlPlanePage', () => {
     submitCreatePanel('workspace');
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Molecule study/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Select workspace Molecule study' })).toBeInTheDocument();
     });
     expect(screen.getByText('Workspace "Molecule study" created. Select it before creating a session.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Open create panel for session' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Molecule study/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select workspace Molecule study' }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Sandbox Start' }));
 
@@ -718,6 +762,127 @@ describe('ControlPlanePage', () => {
     });
   });
 
+  it('renames and deletes project, workspace, and session records from the explorer', async () => {
+    render(<ControlPlanePage />);
+
+    await openCreatePanel('project');
+    submitCreatePanel('project');
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Select project Computational chemistry' })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Rename project Computational chemistry' }));
+    fireEvent.change(screen.getByLabelText('Project name'), {
+      target: { value: 'Chem dashboard' },
+    });
+    fireEvent.submit(screen.getByLabelText('Project name').closest('form')!);
+
+    await waitFor(() => {
+      expect(screen.getByText('Project renamed.')).toBeInTheDocument();
+    });
+    const projectPatchCall = vi.mocked(fetch).mock.calls.find(
+      ([input, init]) => String(input) === `${baseUrl}/api/projects/project-1` && init?.method === 'PATCH',
+    );
+    expect(JSON.parse(String(projectPatchCall?.[1]?.body))).toEqual({
+      name: 'Chem dashboard',
+      slug: 'chem-dashboard',
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select project Chem dashboard' }));
+    await openCreatePanel('workspace');
+    submitCreatePanel('workspace');
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Select workspace Molecule study' })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Rename workspace Molecule study' }));
+    fireEvent.change(screen.getByLabelText('Workspace name'), {
+      target: { value: 'Docking workspace' },
+    });
+    fireEvent.submit(screen.getByLabelText('Workspace name').closest('form')!);
+
+    await waitFor(() => {
+      expect(screen.getByText('Workspace renamed.')).toBeInTheDocument();
+    });
+    const workspacePatchCall = vi.mocked(fetch).mock.calls.find(
+      ([input, init]) => String(input) === `${baseUrl}/api/workspaces/workspace-1` && init?.method === 'PATCH',
+    );
+    expect(JSON.parse(String(workspacePatchCall?.[1]?.body))).toEqual({
+      name: 'Docking workspace',
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select workspace Docking workspace' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sandbox Start' }));
+    await waitFor(() => {
+      expect(screen.getAllByText('Running').length).toBeGreaterThan(0);
+    });
+    await openCreatePanel('session');
+    submitCreatePanel('session');
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Open session Plan calculation from workspace browser/i })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Rename session Plan calculation' }));
+    fireEvent.change(screen.getByLabelText('Session title'), {
+      target: { value: 'Docking plan' },
+    });
+    fireEvent.submit(screen.getByLabelText('Session title').closest('form')!);
+
+    await waitFor(() => {
+      expect(screen.getByText('Session renamed.')).toBeInTheDocument();
+    });
+    const sessionRenameCall = vi.mocked(fetch).mock.calls.find(
+      ([input, init]) =>
+        String(input) === `${baseUrl}/api/sessions/session-1` &&
+        init?.method === 'PATCH' &&
+        String(init.body).includes('Docking plan'),
+    );
+    expect(JSON.parse(String(sessionRenameCall?.[1]?.body))).toEqual({
+      title: 'Docking plan',
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete session Docking plan' }));
+    expect(screen.getByRole('dialog', { name: 'Delete session Docking plan' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    await waitFor(() => {
+      expect(screen.getByText('Session deleted.')).toBeInTheDocument();
+    });
+    const sessionDeleteCall = vi.mocked(fetch).mock.calls.find(
+      ([input, init]) =>
+        String(input) === `${baseUrl}/api/sessions/session-1` &&
+        init?.method === 'PATCH' &&
+        String(init.body).includes('deleted'),
+    );
+    expect(JSON.parse(String(sessionDeleteCall?.[1]?.body))).toEqual({
+      status: 'deleted',
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete workspace Docking workspace' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    await waitFor(() => {
+      expect(screen.getByText('Workspace deleted.')).toBeInTheDocument();
+    });
+    const workspaceDeleteCall = vi.mocked(fetch).mock.calls.find(
+      ([input, init]) =>
+        String(input) === `${baseUrl}/api/workspaces/workspace-1` &&
+        init?.method === 'PATCH' &&
+        String(init.body).includes('deleted'),
+    );
+    expect(JSON.parse(String(workspaceDeleteCall?.[1]?.body))).toEqual({
+      status: 'deleted',
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete project Chem dashboard' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    await waitFor(() => {
+      expect(screen.getByText('Project deleted.')).toBeInTheDocument();
+    });
+    const projectDeleteCall = vi.mocked(fetch).mock.calls.find(
+      ([input, init]) => String(input) === `${baseUrl}/api/projects/project-1` && init?.method === 'DELETE',
+    );
+    expect(projectDeleteCall).toBeDefined();
+  });
+
   it('shows a route authorization failure when session opening cannot acquire a route token', async () => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -784,12 +949,12 @@ describe('ControlPlanePage', () => {
     await openCreatePanel('project');
     submitCreatePanel('project');
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Computational chemistry/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Select project Computational chemistry' })).toBeInTheDocument();
     });
     expect(screen.queryByRole('button', { name: 'Open create panel for workspace' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Open create panel for session' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Computational chemistry/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select project Computational chemistry' }));
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Open create panel for workspace' })).not.toBeDisabled();
     });
@@ -797,11 +962,11 @@ describe('ControlPlanePage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open create panel for workspace' }));
     submitCreatePanel('workspace');
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Molecule study/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Select workspace Molecule study' })).toBeInTheDocument();
     });
     expect(screen.queryByRole('button', { name: 'Open create panel for session' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Molecule study/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select workspace Molecule study' }));
     await waitFor(() => {
       expect(screen.getByText('Start the sandbox before creating a session.')).toBeInTheDocument();
     });
@@ -853,8 +1018,8 @@ describe('ControlPlanePage', () => {
 
     await selectExistingHierarchy();
 
-    expect(screen.getByRole('button', { name: /Computational chemistry Active/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Molecule study Local workspace/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select project Computational chemistry' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select workspace Molecule study' })).toBeInTheDocument();
     expect(screen.getAllByText('Codex / Active').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/^Codex · /).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Runtime ready').length).toBeGreaterThan(0);
@@ -1818,16 +1983,16 @@ describe('ControlPlanePage', () => {
     render(<ControlPlanePage />);
     expect(await screen.findByText('Loading projects...')).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Computational chemistry/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Select project Computational chemistry' })).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole('button', { name: /Computational chemistry/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select project Computational chemistry' }));
     await waitFor(() => {
       expect(screen.getByText('Loading workspaces...')).toBeInTheDocument();
     });
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Molecule study/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Select workspace Molecule study' })).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole('button', { name: /Molecule study/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select workspace Molecule study' }));
     await waitFor(() => {
       expect(
         screen.getByRole('button', { name: /Open session Plan calculation from workspace browser/i }),
