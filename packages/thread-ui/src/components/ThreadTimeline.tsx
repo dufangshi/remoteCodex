@@ -86,6 +86,14 @@ export interface ThreadTimelineProps {
     itemId: string,
   ) => Promise<ThreadHistoryItemDetailDto> | ThreadHistoryItemDetailDto;
   onOpenThread?: (threadId: string) => void;
+  onSelectArtifact?: (input: {
+    item: ThreadHistoryItemDto & { kind: 'artifact' };
+    artifact: NonNullable<ThreadHistoryItemDto['artifact']>;
+  }) => void;
+  onSelectHistoryItemDetail?: (input: {
+    item: ThreadHistoryItemDto;
+    detail: ThreadHistoryItemDetailDto;
+  }) => void;
   adapter?: ThreadTimelineAdapter | undefined;
 }
 
@@ -3768,8 +3776,13 @@ const GenericHistoryItem = memo(function GenericHistoryItem({
 
 const ArtifactHistoryItem = memo(function ArtifactHistoryItem({
   item,
+  onSelect,
 }: {
   item: ThreadHistoryItemDto & { kind: 'artifact' };
+  onSelect?: (
+    item: ThreadHistoryItemDto & { kind: 'artifact' },
+    artifact: NonNullable<ThreadHistoryItemDto['artifact']>,
+  ) => void;
 }) {
   const plugins = usePlugins();
   const [expanded, setExpanded] = useState(false);
@@ -3790,9 +3803,21 @@ const ArtifactHistoryItem = memo(function ArtifactHistoryItem({
         <span className="timeline-meta-text text-[10px] uppercase tracking-[0.16em]">
           {artifact?.type ?? historyItemLabel(item.kind)}
         </span>
-        {artifact && !plugins.hasRendererForArtifact(artifact) && (
-          <span className="timeline-meta-text text-[10px]">No renderer</span>
-        )}
+        <span className="inline-flex items-center gap-2">
+          {artifact && !plugins.hasRendererForArtifact(artifact) && (
+            <span className="timeline-meta-text text-[10px]">No renderer</span>
+          )}
+          {artifact && onSelect ? (
+            <button
+              type="button"
+              aria-label={`Open artifact inspector for ${artifact.title}`}
+              onClick={() => onSelect(item, artifact)}
+              className="rounded-full border border-[var(--theme-border)] px-2 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-[var(--theme-fg-muted)] transition hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)]"
+            >
+              Inspect
+            </button>
+          ) : null}
+        </span>
       </div>
       <div className="mt-2">
         {rendered ?? (
@@ -3919,6 +3944,7 @@ const HistoryItemRow = memo(function HistoryItemRow({
   onOpenCommandDetail,
   onOpenToolCallDetail,
   onOpenDeferredHistoryItemDetail,
+  onSelectArtifact,
   adapter,
 }: {
   threadId: string | undefined;
@@ -3942,6 +3968,7 @@ const HistoryItemRow = memo(function HistoryItemRow({
     loadingText: string,
     errorText: string,
   ) => void;
+  onSelectArtifact?: ThreadTimelineProps['onSelectArtifact'];
   adapter?: ThreadTimelineAdapter | undefined;
 }) {
   if (isCompactChatItem(item.kind)) {
@@ -3967,6 +3994,12 @@ const HistoryItemRow = memo(function HistoryItemRow({
             kind: 'artifact';
           }
         }
+        {...(onSelectArtifact
+          ? {
+              onSelect: (nextItem, artifact) =>
+                onSelectArtifact({ item: nextItem, artifact }),
+            }
+          : {})}
       />
     );
   }
@@ -4541,6 +4574,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
   onOpenCommandDetail,
   onOpenToolCallDetail,
   onOpenDeferredHistoryItemDetail,
+  onSelectArtifact,
   scrollRootRef,
   articleRef,
   isLatestVisibleTurn = false,
@@ -4579,6 +4613,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
     loadingText: string,
     errorText: string,
   ) => void;
+  onSelectArtifact?: ThreadTimelineProps['onSelectArtifact'];
   scrollRootRef: RefObject<HTMLDivElement | null>;
   articleRef?: RefCallback<HTMLElement> | undefined;
   isLatestVisibleTurn?: boolean;
@@ -4692,6 +4727,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
             onOpenCommandDetail={onOpenCommandDetail}
             onOpenToolCallDetail={onOpenToolCallDetail}
             onOpenDeferredHistoryItemDetail={onOpenDeferredHistoryItemDetail}
+            {...(onSelectArtifact ? { onSelectArtifact } : {})}
             {...(adapter ? { adapter } : {})}
           />
           {displayedLivePlan && (
@@ -4727,6 +4763,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
               onOpenCommandDetail={onOpenCommandDetail}
               onOpenToolCallDetail={onOpenToolCallDetail}
               onOpenDeferredHistoryItemDetail={onOpenDeferredHistoryItemDetail}
+              {...(onSelectArtifact ? { onSelectArtifact } : {})}
               {...(adapter ? { adapter } : {})}
             />
           ) : visibleLiveOutput ? (
@@ -4759,6 +4796,7 @@ function TimelineHistoryEntries({
   onOpenCommandDetail,
   onOpenToolCallDetail,
   onOpenDeferredHistoryItemDetail,
+  onSelectArtifact,
   adapter,
 }: {
   entries: TimelineHistoryEntry[];
@@ -4784,6 +4822,7 @@ function TimelineHistoryEntries({
     loadingText: string,
     errorText: string,
   ) => void;
+  onSelectArtifact?: ThreadTimelineProps['onSelectArtifact'];
   adapter?: ThreadTimelineAdapter | undefined;
 }) {
   return (
@@ -4831,6 +4870,7 @@ function TimelineHistoryEntries({
             onOpenCommandDetail={onOpenCommandDetail}
             onOpenToolCallDetail={onOpenToolCallDetail}
             onOpenDeferredHistoryItemDetail={onOpenDeferredHistoryItemDetail}
+            {...(onSelectArtifact ? { onSelectArtifact } : {})}
             {...(adapter ? { adapter } : {})}
           />
         ),
@@ -4865,6 +4905,8 @@ function ThreadTimelineComponent({
   optimisticTurn = null,
   onLoadHistoryItemDetail,
   onOpenThread,
+  onSelectArtifact,
+  onSelectHistoryItemDetail,
   adapter,
 }: ThreadTimelineProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -4934,6 +4976,17 @@ function ThreadTimelineComponent({
     setExpandedText({ title, text });
   }, []);
 
+  const handleResolvedHistoryItemDetail = useCallback(
+    (item: ThreadHistoryItemDto, detail: ThreadHistoryItemDetailDto) => {
+      if (onSelectHistoryItemDetail) {
+        onSelectHistoryItemDetail({ item, detail });
+        return;
+      }
+      setExpandedText({ title: detail.title, text: detail.text });
+    },
+    [onSelectHistoryItemDetail],
+  );
+
   const handleOpenCommandDetail = useCallback(
     async (
       item: ThreadHistoryItemDto & { kind: 'commandExecution' },
@@ -4941,19 +4994,26 @@ function ThreadTimelineComponent({
     ) => {
       const inlineText = item.detailText?.trim() || item.text || 'Command output';
       if (!item.hasDeferredDetail || !loadHistoryItemDetail) {
-        setExpandedText({ title: fallbackTitle, text: inlineText });
+        handleResolvedHistoryItemDetail(item, {
+          id: item.id,
+          kind: item.kind,
+          title: fallbackTitle,
+          text: inlineText,
+        });
         return;
       }
 
       const cached = deferredDetailCacheRef.current.get(item.id);
       if (cached) {
-        setExpandedText({ title: cached.title, text: cached.text });
+        handleResolvedHistoryItemDetail(item, cached);
         return;
       }
 
       const requestId = expandedTextRequestIdRef.current + 1;
       expandedTextRequestIdRef.current = requestId;
-      setExpandedText({ title: fallbackTitle, text: 'Loading full command output...' });
+      if (!onSelectHistoryItemDetail) {
+        setExpandedText({ title: fallbackTitle, text: 'Loading full command output...' });
+      }
 
       try {
         const detail = await loadHistoryItemDetail(item.id);
@@ -4961,21 +5021,24 @@ function ThreadTimelineComponent({
         if (expandedTextRequestIdRef.current !== requestId) {
           return;
         }
-        setExpandedText({ title: detail.title, text: detail.text });
+        handleResolvedHistoryItemDetail(item, detail);
       } catch (caught) {
         if (expandedTextRequestIdRef.current !== requestId) {
           return;
         }
-        setExpandedText({
+        const text =
+          caught instanceof Error
+            ? caught.message
+            : 'Unable to load full command output.';
+        handleResolvedHistoryItemDetail(item, {
+          id: item.id,
+          kind: item.kind,
           title: fallbackTitle,
-          text:
-            caught instanceof Error
-              ? caught.message
-              : 'Unable to load full command output.',
+          text,
         });
       }
     },
-    [loadHistoryItemDetail],
+    [handleResolvedHistoryItemDetail, loadHistoryItemDetail, onSelectHistoryItemDetail],
   );
 
   const handleOpenToolCallDetail = useCallback(
@@ -4987,19 +5050,26 @@ function ThreadTimelineComponent({
     ) => {
       const inlineText = item.detailText?.trim() || item.text || 'Tool call';
       if (!item.hasDeferredDetail || !loadHistoryItemDetail) {
-        setExpandedText({ title: fallbackTitle, text: inlineText });
+        handleResolvedHistoryItemDetail(item, {
+          id: item.id,
+          kind: item.kind,
+          title: fallbackTitle,
+          text: inlineText,
+        });
         return;
       }
 
       const cached = deferredDetailCacheRef.current.get(item.id);
       if (cached) {
-        setExpandedText({ title: cached.title, text: cached.text });
+        handleResolvedHistoryItemDetail(item, cached);
         return;
       }
 
       const requestId = expandedTextRequestIdRef.current + 1;
       expandedTextRequestIdRef.current = requestId;
-      setExpandedText({ title: fallbackTitle, text: 'Loading full tool call details...' });
+      if (!onSelectHistoryItemDetail) {
+        setExpandedText({ title: fallbackTitle, text: 'Loading full tool call details...' });
+      }
 
       try {
         const detail = await loadHistoryItemDetail(item.id);
@@ -5007,21 +5077,24 @@ function ThreadTimelineComponent({
         if (expandedTextRequestIdRef.current !== requestId) {
           return;
         }
-        setExpandedText({ title: detail.title, text: detail.text });
+        handleResolvedHistoryItemDetail(item, detail);
       } catch (caught) {
         if (expandedTextRequestIdRef.current !== requestId) {
           return;
         }
-        setExpandedText({
+        const text =
+          caught instanceof Error
+            ? caught.message
+            : 'Unable to load full tool call details.';
+        handleResolvedHistoryItemDetail(item, {
+          id: item.id,
+          kind: item.kind,
           title: fallbackTitle,
-          text:
-            caught instanceof Error
-              ? caught.message
-              : 'Unable to load full tool call details.',
+          text,
         });
       }
     },
-    [loadHistoryItemDetail],
+    [handleResolvedHistoryItemDetail, loadHistoryItemDetail, onSelectHistoryItemDetail],
   );
 
   const handleOpenDeferredHistoryItemDetail = useCallback(
@@ -5715,6 +5788,7 @@ function ThreadTimelineComponent({
                     onOpenCommandDetail={handleOpenCommandDetail}
                     onOpenToolCallDetail={handleOpenToolCallDetail}
                     onOpenDeferredHistoryItemDetail={handleOpenDeferredHistoryItemDetail}
+                    {...(onSelectArtifact ? { onSelectArtifact } : {})}
                     scrollRootRef={scrollContainerRef}
                     articleRef={undefined}
                   />
@@ -5809,6 +5883,7 @@ function ThreadTimelineComponent({
                     onOpenCommandDetail={handleOpenCommandDetail}
                     onOpenToolCallDetail={handleOpenToolCallDetail}
                     onOpenDeferredHistoryItemDetail={handleOpenDeferredHistoryItemDetail}
+                    {...(onSelectArtifact ? { onSelectArtifact } : {})}
                     scrollRootRef={scrollContainerRef}
                   />
                   {(activityNoteAnchors.afterTurnId.get(optimisticTurn.id)?.length ?? 0) > 0 ? (
@@ -5900,6 +5975,7 @@ function ThreadTimelineComponent({
                 onOpenCommandDetail={handleOpenCommandDetail}
                 onOpenToolCallDetail={handleOpenToolCallDetail}
                 onOpenDeferredHistoryItemDetail={handleOpenDeferredHistoryItemDetail}
+                {...(onSelectArtifact ? { onSelectArtifact } : {})}
                 {...(adapter ? { adapter } : {})}
               />
             </div>
@@ -5919,6 +5995,7 @@ function ThreadTimelineComponent({
                   onOpenCommandDetail={handleOpenCommandDetail}
                   onOpenToolCallDetail={handleOpenToolCallDetail}
                   onOpenDeferredHistoryItemDetail={handleOpenDeferredHistoryItemDetail}
+                  {...(onSelectArtifact ? { onSelectArtifact } : {})}
                   {...(adapter ? { adapter } : {})}
                 />
               ) : (

@@ -1069,6 +1069,47 @@ describe('ThreadTimeline', () => {
     });
   });
 
+  it('sends command details to an external inspector when provided', async () => {
+    const onSelectHistoryItemDetail = vi.fn();
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        onSelectHistoryItemDetail={onSelectHistoryItemDetail}
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'command-1',
+                kind: 'commandExecution',
+                text: 'pnpm test\nmiddle output line\nfinal status: success',
+                status: 'completed',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open full command' }));
+
+    expect(onSelectHistoryItemDetail).toHaveBeenCalledWith({
+      item: expect.objectContaining({ id: 'command-1', kind: 'commandExecution' }),
+      detail: {
+        id: 'command-1',
+        kind: 'commandExecution',
+        title: 'Command Output',
+        text: 'pnpm test\nmiddle output line\nfinal status: success',
+      },
+    });
+    expect(
+      screen.queryByRole('dialog', { name: 'Command Output' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('loads deferred tool call details on demand before opening the dialog', async () => {
     const loadDetail = vi.fn(async () => ({
       id: 'tool-1',
@@ -1113,6 +1154,60 @@ describe('ThreadTimeline', () => {
       expect(
         screen.getByRole('dialog', { name: 'Tool Call Details' }),
       ).toHaveTextContent('"count": 123');
+    });
+  });
+
+  it('loads deferred tool call details before sending them to an external inspector', async () => {
+    const loadDetail = vi.fn(async () => ({
+      id: 'tool-1',
+      kind: 'toolCall' as const,
+      title: 'Tool Call Details',
+      text: 'tool_name\n\nResult\nok',
+    }));
+    const onSelectHistoryItemDetail = vi.fn();
+
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        onLoadHistoryItemDetail={loadDetail}
+        onSelectHistoryItemDetail={onSelectHistoryItemDetail}
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'tool-1',
+                kind: 'toolCall',
+                text: 'tool_name',
+                detailText: null,
+                hasDeferredDetail: true,
+                status: 'completed',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open full tool call' }));
+
+    expect(loadDetail).toHaveBeenCalledWith('tool-1');
+    expect(
+      screen.queryByRole('dialog', { name: 'Tool Call Details' }),
+    ).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(onSelectHistoryItemDetail).toHaveBeenCalledWith({
+        item: expect.objectContaining({ id: 'tool-1', kind: 'toolCall' }),
+        detail: {
+          id: 'tool-1',
+          kind: 'toolCall',
+          title: 'Tool Call Details',
+          text: 'tool_name\n\nResult\nok',
+        },
+      });
     });
   });
 
@@ -4932,5 +5027,53 @@ describe('ThreadTimeline', () => {
       'src',
       '/api/threads/thread-123/assets/image?path=.%2F.temp%2Fthreads%2Fthread-123%2Fscreenshot.png',
     );
+  });
+
+  it('notifies when an artifact is selected for an inspector panel', () => {
+    const onSelectArtifact = vi.fn();
+    render(
+      <ThreadTimeline
+        threadId="thread-123"
+        liveOutput=""
+        onSelectArtifact={onSelectArtifact}
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'artifact-item-1',
+                kind: 'artifact',
+                text: 'Created a molecule artifact',
+                artifact: {
+                  id: 'artifact-1',
+                  pluginId: 'remote-codex.xyz-viewer',
+                  type: 'chemistry.molecule3d',
+                  title: 'Methane',
+                  summaryText: 'XYZ molecule preview',
+                  payload: {
+                    format: 'xyz',
+                    content: ['5\nmethane\nC 0 0 0'],
+                  },
+                  assets: null,
+                  sourceTurnId: 'turn-1',
+                  sourceItemId: 'artifact-item-1',
+                  createdAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 10)).toISOString(),
+                },
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open artifact inspector for Methane' }));
+
+    expect(onSelectArtifact).toHaveBeenCalledWith({
+      item: expect.objectContaining({ id: 'artifact-item-1', kind: 'artifact' }),
+      artifact: expect.objectContaining({ id: 'artifact-1', title: 'Methane' }),
+    });
   });
 });

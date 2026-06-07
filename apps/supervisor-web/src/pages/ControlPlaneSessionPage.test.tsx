@@ -147,10 +147,39 @@ const threadDetail: ThreadDetailDto = {
           text: 'Ready from sandbox',
         },
         {
+          id: 'item-command-1',
+          kind: 'commandExecution',
+          text: 'pnpm test',
+          detailText: null,
+          hasDeferredDetail: true,
+          status: 'completed',
+        },
+        {
           id: 'item-3',
           kind: 'image',
           text: 'Worker screenshot',
           assetPath: './.temp/threads/worker-session-1/screenshot.png',
+        },
+        {
+          id: 'item-4',
+          kind: 'artifact',
+          text: 'Created methane molecule artifact',
+          artifact: {
+            id: 'artifact-1',
+            pluginId: 'remote-codex.xyz-viewer',
+            type: 'chemistry.molecule3d',
+            title: 'Methane',
+            summaryText: 'XYZ molecule preview',
+            payload: {
+              format: 'xyz',
+              content: ['5\nmethane\nC 0 0 0\nH 0 0 1\nH 0 1 0\nH 1 0 0\nH 0 -1 0'],
+              name: 'methane.xyz',
+            },
+            assets: null,
+            sourceTurnId: 'turn-1',
+            sourceItemId: 'item-4',
+            createdAt: '2026-05-25T00:02:10.000Z',
+          },
         },
       ],
     },
@@ -252,6 +281,17 @@ describe('ControlPlaneSessionPage', () => {
           return jsonResponse(threadDetail);
         }
         if (
+          url ===
+          `${routerBaseUrl}/api/sandboxes/sandbox-1/api/threads/worker-session-1/items/item-command-1/detail`
+        ) {
+          return jsonResponse({
+            id: 'item-command-1',
+            kind: 'commandExecution',
+            title: 'Command Output',
+            text: 'pnpm test\nmiddle output line\nfinal status: success',
+          });
+        }
+        if (
           url === `${routerBaseUrl}/api/sandboxes/sandbox-1/api/threads/worker-session-1/prompt` &&
           init?.method === 'POST'
         ) {
@@ -278,10 +318,60 @@ describe('ControlPlaneSessionPage', () => {
     expect(screen.getByRole('link', { name: /Plan calculation/ })).toBeInTheDocument();
     expect(screen.getByText('Hello remote worker')).toBeInTheDocument();
     expect(screen.getByText('Ready from sandbox')).toBeInTheDocument();
+    expect(screen.getAllByText('Molecule study').length).toBeGreaterThan(0);
+    expect(screen.getByText('Computational chemistry')).toBeInTheDocument();
+    expect(screen.getAllByText('gpt-5.1-codex').length).toBeGreaterThan(0);
+    expect(screen.queryByText('session-1')).not.toBeInTheDocument();
+    expect(screen.queryByText('worker-session-1')).not.toBeInTheDocument();
+    expect(screen.queryByText(routerBaseUrl)).not.toBeInTheDocument();
+    expect(screen.queryByText('/workspace/molecule-study')).not.toBeInTheDocument();
     expect(await screen.findByRole('img', { name: 'Worker screenshot' })).toHaveAttribute(
       'src',
       `${routerBaseUrl}/api/sandboxes/sandbox-1/api/threads/worker-session-1/assets/image?path=.%2F.temp%2Fthreads%2Fworker-session-1%2Fscreenshot.png`,
     );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Open artifact inspector for Methane' }),
+    );
+    expect(screen.getByRole('complementary', { name: 'Thread inspector' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Preview' })).toHaveAttribute('aria-selected', 'true');
+    fireEvent.click(screen.getByRole('tab', { name: 'Source' }));
+    expect(screen.getByText('methane.xyz')).toBeInTheDocument();
+    expect(screen.getByText(/C 0 0 0/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Metadata' }));
+    expect(screen.getByText('artifact-1')).toBeInTheDocument();
+    expect(screen.getByText('remote-codex.xyz-viewer')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close thread inspector' }));
+    expect(
+      screen.queryByRole('complementary', { name: 'Thread inspector' }),
+    ).not.toBeInTheDocument();
+
+    expect(screen.queryByText(/middle output line/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open full command' }));
+    await waitFor(() => {
+      expect(screen.getByRole('complementary', { name: 'Thread inspector' })).toBeInTheDocument();
+    });
+    expect(screen.getByRole('tab', { name: 'Logs' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText(/middle output line/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Metadata' }));
+    expect(screen.getAllByText('item-command-1').length).toBeGreaterThan(0);
+    const commandDetailCall = vi.mocked(fetch).mock.calls.find(
+      ([input]) =>
+        String(input) ===
+        `${routerBaseUrl}/api/sandboxes/sandbox-1/api/threads/worker-session-1/items/item-command-1/detail`,
+    );
+    expect(new Headers(commandDetailCall?.[1]?.headers).get('Authorization')).toBe(
+      'Bearer route-token',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Close thread inspector' }));
+
+    fireEvent.click(screen.getByRole('button', { name: /Diagnostics/ }));
+    expect(screen.getByText('Control session id')).toBeInTheDocument();
+    expect(screen.getByText('session-1')).toBeInTheDocument();
+    expect(screen.getByText('Worker thread id')).toBeInTheDocument();
+    expect(screen.getByText('worker-session-1')).toBeInTheDocument();
+    expect(screen.getByText(routerBaseUrl)).toBeInTheDocument();
+    expect(screen.getByText('/workspace/molecule-study')).toBeInTheDocument();
+
     fireEvent.click(screen.getByRole('button', { name: 'Open Navigation' }));
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
     expect(screen.getByText('Terminal')).toBeInTheDocument();

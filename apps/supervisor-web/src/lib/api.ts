@@ -733,6 +733,23 @@ export function fetchControlPlaneWorkerThread(
   );
 }
 
+export function fetchControlPlaneWorkerThreadHistoryItemDetail(
+  routeToken: ControlPlaneRouteToken,
+  workerSessionId: string,
+  itemId: string,
+) {
+  return request<ThreadHistoryItemDetailDto>(
+    controlPlaneWorkerProxyUrl(
+      routeToken,
+      `/api/threads/${encodeURIComponent(workerSessionId)}/items/${encodeURIComponent(itemId)}/detail`,
+    ),
+    {
+      cache: 'no-store',
+      headers: routeTokenHeaders(routeToken),
+    },
+  );
+}
+
 export function sendControlPlaneWorkerThreadPrompt(
   routeToken: ControlPlaneRouteToken,
   workerSessionId: string,

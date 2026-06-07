@@ -62,7 +62,7 @@ export const xyzViewerPluginManifest: XyzViewerPluginManifest = {
       {
         id: 'render-molecule',
         text:
-          'XYZ Molecule Viewer is enabled. Use the remote_codex_render_molecule MCP tool for valid xyz, extxyz, cif, or pdb structures that should render as an interactive 3D molecule; do not invent coordinates unless asked for an example.',
+          'XYZ Molecule Viewer is enabled. When outputting a molecular structure, you must call remote_codex_render_molecule; do not output plain xyz, pdb, cif, or extxyz text. Do not invent coordinates unless asked for an example.',
       },
     ],
     mcpServers: [

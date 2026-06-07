@@ -1024,6 +1024,8 @@ describe('supervisor api', () => {
     expect(developerInstructions).toContain('/farmaco/tools');
     expect(developerInstructions).toContain('POST /{module}/tools/{tool}');
     expect(developerInstructions).toContain('remote_codex_render_molecule');
+    expect(developerInstructions).toContain('must call remote_codex_render_molecule');
+    expect(developerInstructions).toContain('do not output plain xyz, pdb, cif, or extxyz text');
     expect(developerInstructions).not.toContain('must-not-leak-harness-key');
   });
 
@@ -1072,6 +1074,8 @@ describe('supervisor api', () => {
     expect(promptResponse.statusCode).toBe(200);
     const developerInstructions = fakeCodexManager.startTurnCalls.at(-1)?.developerInstructions;
     expect(developerInstructions).toContain('remote_codex_render_molecule');
+    expect(developerInstructions).toContain('must call remote_codex_render_molecule');
+    expect(developerInstructions).toContain('do not output plain xyz, pdb, cif, or extxyz text');
     expect(developerInstructions).not.toContain('elagenteharness-production');
     expect(developerInstructions).not.toContain('must-not-leak-harness-key');
   });

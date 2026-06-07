@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import type {
   AgentProviderCapabilitiesDto,
+  ThreadArtifactDto,
   ThreadDetailDto,
+  ThreadHistoryItemDetailDto,
+  ThreadHistoryItemDto,
   ThreadDto,
   ThreadStatusDto,
 } from '../../../../packages/shared/src/index';
@@ -14,6 +17,7 @@ import {
   formatLongTimestamp,
   threadStatusLabel,
   useAppShellNav,
+  usePlugins,
   type ThreadComposerProps,
   type ThreadDetailUiAdapter,
   type ThreadShellControlState,
@@ -26,6 +30,7 @@ import {
   fetchControlPlaneProjects,
   fetchControlPlaneSessions,
   fetchControlPlaneWorkerThread,
+  fetchControlPlaneWorkerThreadHistoryItemDetail,
   fetchControlPlaneWorkspaces,
   interruptControlPlaneWorkerThread,
   resumeControlPlaneSession,
@@ -58,6 +63,269 @@ const ROUTE_TOKEN_SCOPES = [
   'provider:turn:create',
   'provider:turn:interrupt',
 ];
+
+function formatRelativeTime(value: string | null | undefined) {
+  if (!value) {
+    return 'no activity yet';
+  }
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) {
+    return value;
+  }
+  const deltaMs = Date.now() - timestamp;
+  const absMs = Math.abs(deltaMs);
+  const suffix = deltaMs >= 0 ? 'ago' : 'from now';
+  const minute = 60_000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  if (absMs < minute) {
+    return 'just now';
+  }
+  if (absMs < hour) {
+    return `${Math.round(absMs / minute)}m ${suffix}`;
+  }
+  if (absMs < day) {
+    return `${Math.round(absMs / hour)}h ${suffix}`;
+  }
+  return `${Math.round(absMs / day)}d ${suffix}`;
+}
+
+function MetadataDisclosure({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section className="control-metadata-disclosure">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className="control-metadata-trigger"
+      >
+        <span>{title}</span>
+        <span>{open ? 'Hide' : 'Show'}</span>
+      </button>
+      {open ? children : null}
+    </section>
+  );
+}
+
+function CopyField({ label, value }: { label: string; value: string | null | undefined }) {
+  const printable = value && value.trim() ? value : 'not assigned';
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd>
+        <span>{printable}</span>
+        {value ? (
+          <button
+            type="button"
+            className="control-copy-button"
+            onClick={() => {
+              void navigator.clipboard?.writeText(value);
+            }}
+          >
+            Copy
+          </button>
+        ) : null}
+      </dd>
+    </div>
+  );
+}
+
+type SelectedArtifact = {
+  kind: 'artifact';
+  item: ThreadHistoryItemDto & { kind: 'artifact' };
+  artifact: ThreadArtifactDto;
+};
+
+type SelectedHistoryDetail = {
+  kind: 'historyDetail';
+  item: ThreadHistoryItemDto;
+  detail: ThreadHistoryItemDetailDto;
+};
+
+type SelectedInspectorItem = SelectedArtifact | SelectedHistoryDetail;
+
+function artifactPayloadSource(payload: unknown) {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+  const record = payload as {
+    content?: unknown;
+    format?: unknown;
+    name?: unknown;
+  };
+  const content = Array.isArray(record.content)
+    ? record.content.filter((entry): entry is string => typeof entry === 'string')
+    : typeof record.content === 'string'
+      ? [record.content]
+      : [];
+  if (content.length === 0) {
+    return null;
+  }
+  return {
+    content: content.join('\n'),
+    format: typeof record.format === 'string' ? record.format : 'text',
+    name: typeof record.name === 'string' ? record.name : null,
+  };
+}
+
+function ThreadInspector({
+  selected,
+  onClose,
+}: {
+  selected: SelectedInspectorItem;
+  onClose: () => void;
+}) {
+  const plugins = usePlugins();
+  const [activeTab, setActiveTab] = useState<'preview' | 'source' | 'logs' | 'metadata'>(
+    selected.kind === 'artifact' ? 'preview' : 'logs',
+  );
+  const [expanded, setExpanded] = useState(true);
+  const artifact = selected.kind === 'artifact' ? selected.artifact : null;
+  const historyDetail = selected.kind === 'historyDetail' ? selected.detail : null;
+  const item = selected.item;
+  const source = artifact ? artifactPayloadSource(artifact.payload) : null;
+  const preview = artifact
+    ? plugins.renderArtifact({
+        artifact,
+        expanded,
+        onToggleExpanded: () => setExpanded((current) => !current),
+      })
+    : null;
+  const tabs = [
+    { id: 'preview', label: 'Preview' },
+    { id: 'source', label: 'Source' },
+    { id: 'logs', label: 'Logs' },
+    { id: 'metadata', label: 'Metadata' },
+  ] as const;
+
+  return (
+    <aside className="control-artifact-inspector" aria-label="Thread inspector">
+      <header className="control-artifact-inspector-header">
+        <div className="min-w-0">
+          <p>{artifact?.type ?? item.kind}</p>
+          <h2>{artifact?.title ?? historyDetail?.title ?? item.text ?? 'Timeline detail'}</h2>
+        </div>
+        <button type="button" onClick={onClose} aria-label="Close thread inspector">
+          x
+        </button>
+      </header>
+
+      <div className="control-artifact-tabs" role="tablist" aria-label="Thread details">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab.id}
+            onClick={() => setActiveTab(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="control-artifact-panel">
+        {activeTab === 'preview' ? (
+          selected.kind !== 'artifact' ? (
+            <div className="control-artifact-empty">
+              Preview is available for artifacts. Open Logs for this item detail.
+            </div>
+          ) : preview ? (
+            <div className="control-artifact-preview">{preview}</div>
+          ) : (
+            <div className="control-artifact-empty">
+              No renderer is enabled for this artifact type.
+            </div>
+          )
+        ) : null}
+
+        {activeTab === 'source' ? (
+          historyDetail ? (
+            <pre className="control-artifact-source-raw">{historyDetail.text}</pre>
+          ) : source ? (
+            <div className="control-artifact-source">
+              <div>
+                <span>{source.format}</span>
+                {source.name ? <strong>{source.name}</strong> : null}
+              </div>
+              <pre>{source.content}</pre>
+            </div>
+          ) : (
+            <pre className="control-artifact-source-raw">
+              {JSON.stringify(artifact?.payload, null, 2)}
+            </pre>
+          )
+        ) : null}
+
+        {activeTab === 'logs' ? (
+          <div className="control-artifact-logs">
+            {historyDetail ? (
+              <pre>{historyDetail.text}</pre>
+            ) : (
+              <dl className="control-detail-list">
+                <div>
+                  <dt>Timeline item</dt>
+                  <dd>{item.text || item.previewText || artifact?.summaryText || 'Artifact created'}</dd>
+                </div>
+                <div>
+                  <dt>Status</dt>
+                  <dd>{item.status ?? 'completed'}</dd>
+                </div>
+                <div>
+                  <dt>Source turn</dt>
+                  <dd>{artifact?.sourceTurnId ?? item.sourceTurnId ?? 'not assigned'}</dd>
+                </div>
+                <div>
+                  <dt>Source item</dt>
+                  <dd>{artifact?.sourceItemId ?? item.id}</dd>
+                </div>
+              </dl>
+            )}
+          </div>
+        ) : null}
+
+        {activeTab === 'metadata' ? (
+          <dl className="control-detail-list">
+            <CopyField label="Timeline item id" value={item.id} />
+            <CopyField label="Timeline kind" value={item.kind} />
+            {artifact ? (
+              <>
+                <CopyField label="Artifact id" value={artifact.id} />
+                <CopyField label="Plugin id" value={artifact.pluginId} />
+                <CopyField label="Artifact type" value={artifact.type} />
+                <CopyField label="Created" value={formatLongTimestamp(artifact.createdAt)} />
+                <CopyField label="Source turn" value={artifact.sourceTurnId} />
+                <CopyField label="Source item" value={artifact.sourceItemId} />
+              </>
+            ) : (
+              <>
+                <CopyField label="Detail id" value={historyDetail?.id} />
+                <CopyField label="Detail kind" value={historyDetail?.kind} />
+              </>
+            )}
+            <div>
+              <dt>Payload</dt>
+              <dd>
+                <pre>
+                  {artifact
+                    ? JSON.stringify(artifact.payload, null, 2)
+                    : JSON.stringify({ item, detail: historyDetail }, null, 2)}
+                </pre>
+              </dd>
+            </div>
+          </dl>
+        ) : null}
+      </div>
+    </aside>
+  );
+}
 
 const EMPTY_ANSWERED_REQUEST_NOTES: NonNullable<
   ThreadDetailDto['answeredRequestNotes']
@@ -290,6 +558,7 @@ function ControlPlaneSessionSurface() {
   const [scrollRequestKey, setScrollRequestKey] = useState(0);
   const [activeView, setActiveView] = useState<'chat' | 'shell'>('chat');
   const [followTail, setFollowTail] = useState(true);
+  const [selectedInspectorItem, setSelectedInspectorItem] = useState<SelectedInspectorItem | null>(null);
   const reconnectingRef = useRef(false);
   const routeTokenRefreshTimerRef = useRef<number | null>(null);
   const detailRef = useRef<ThreadDetailDto | null>(null);
@@ -408,6 +677,10 @@ function ControlPlaneSessionSurface() {
   useEffect(() => {
     void loadSession();
   }, [loadSession]);
+
+  useEffect(() => {
+    setSelectedInspectorItem(null);
+  }, [sessionId]);
 
   useEffect(() => {
     if (routeTokenRefreshTimerRef.current) {
@@ -628,61 +901,63 @@ function ControlPlaneSessionSurface() {
     ? [activeThread, ...sidebarThreads]
     : sidebarThreads;
 
+  const currentStatus = detail?.thread.status ?? normalizeThreadStatus(session?.status);
+  const currentStatusLabel = threadStatusLabel(currentStatus);
+  const currentActivityAt =
+    detail?.thread.lastTurnStartedAt ??
+    detail?.thread.updatedAt ??
+    session?.lastActivityAt ??
+    session?.updatedAt ??
+    null;
+  const currentProvider = session?.provider ?? detail?.thread.provider ?? 'codex';
+  const currentModel = detail?.thread.model ?? 'default model';
+  const routeTokenExpiresAt = routeToken?.expiresAt ?? null;
+
   const metaContent = (
-    <dl className="space-y-4 text-sm">
-      <div>
-        <dt className="text-[var(--theme-fg-muted)]">Control Session</dt>
-        <dd className="mt-1 break-all text-[var(--theme-fg)]">{session?.id ?? sessionId}</dd>
-      </div>
-      <div>
-        <dt className="text-[var(--theme-fg-muted)]">Worker Thread</dt>
-        <dd className="mt-1 break-all text-[var(--theme-fg)]">
-          {session?.workerSessionId ?? 'Not started'}
-        </dd>
-      </div>
-      <div>
-        <dt className="text-[var(--theme-fg-muted)]">Source</dt>
-        <dd className="mt-1 text-[var(--theme-fg)]">
-          {session?.provider ?? detail?.thread.provider ?? 'codex'} remote sandbox session
-        </dd>
-      </div>
-      <div>
-        <dt className="text-[var(--theme-fg-muted)]">Status</dt>
-        <dd className="mt-1 text-[var(--theme-fg)]">
-          {threadStatusLabel(detail?.thread.status ?? normalizeThreadStatus(session?.status))}
-        </dd>
-      </div>
-      <div>
-        <dt className="text-[var(--theme-fg-muted)]">Workspace</dt>
-        <dd className="mt-1 break-words text-[var(--theme-fg)]">
-          {workspace?.path ?? detail?.workspace.absPath ?? 'Unavailable'}
-        </dd>
-      </div>
-      <div>
-        <dt className="text-[var(--theme-fg-muted)]">Project</dt>
-        <dd className="mt-1 text-[var(--theme-fg)]">
-          {project?.name ?? 'None'}
-        </dd>
-      </div>
-      <div>
-        <dt className="text-[var(--theme-fg-muted)]">Sandbox</dt>
-        <dd className="mt-1 text-[var(--theme-fg)]">
-          {sandbox?.state ?? 'Unknown'}
-        </dd>
-      </div>
-      <div>
-        <dt className="text-[var(--theme-fg-muted)]">Router</dt>
-        <dd className="mt-1 break-all text-[var(--theme-fg)]">
-          {routeToken?.routerBaseUrl ?? sandbox?.routerBaseUrl ?? 'Unavailable'}
-        </dd>
-      </div>
-      <div>
-        <dt className="text-[var(--theme-fg-muted)]">Updated</dt>
-        <dd className="mt-1 text-[var(--theme-fg)]">
-          {formatLongTimestamp(session?.updatedAt ?? null)}
-        </dd>
-      </div>
-    </dl>
+    <div className="control-session-meta">
+      <dl className="control-detail-list compact summary two">
+        <div>
+          <dt>Status</dt>
+          <dd>{currentStatusLabel}</dd>
+        </div>
+        <div>
+          <dt>Provider</dt>
+          <dd>{currentProvider}</dd>
+        </div>
+        <div>
+          <dt>Workspace</dt>
+          <dd>{workspace?.name ?? detail?.workspace.label ?? 'Unavailable'}</dd>
+        </div>
+        <div>
+          <dt>Project</dt>
+          <dd>{project?.name ?? 'None'}</dd>
+        </div>
+        <div>
+          <dt>Model</dt>
+          <dd>{currentModel}</dd>
+        </div>
+        <div>
+          <dt>Last activity</dt>
+          <dd>{formatRelativeTime(currentActivityAt)}</dd>
+        </div>
+      </dl>
+
+      <MetadataDisclosure title="Diagnostics">
+        <dl className="control-detail-list">
+          <CopyField label="Control session id" value={session?.id ?? sessionId} />
+          <CopyField label="Worker thread id" value={session?.workerSessionId} />
+          <CopyField label="Workspace path" value={workspace?.path ?? detail?.workspace.absPath} />
+          <CopyField label="Workspace id" value={workspace?.id} />
+          <CopyField label="Project id" value={project?.id} />
+          <CopyField label="Sandbox id" value={sandbox?.id} />
+          <CopyField label="Router URL" value={routeToken?.routerBaseUrl ?? sandbox?.routerBaseUrl} />
+          <CopyField label="Image" value={sandbox?.image} />
+          <CopyField label="Worker service" value={sandbox?.workerServiceName} />
+          <CopyField label="Session updated" value={formatLongTimestamp(session?.updatedAt ?? null)} />
+          <CopyField label="Route token expires" value={formatLongTimestamp(routeTokenExpiresAt)} />
+        </dl>
+      </MetadataDisclosure>
+    </div>
   );
 
   const settingsContent = (
@@ -711,6 +986,31 @@ function ControlPlaneSessionSurface() {
     </div>
   );
 
+  const handleSelectArtifact = useCallback((input: Omit<SelectedArtifact, 'kind'>) => {
+    setSelectedInspectorItem({ kind: 'artifact', ...input });
+  }, []);
+
+  const handleSelectHistoryItemDetail = useCallback(
+    (input: Omit<SelectedHistoryDetail, 'kind'>) => {
+      setSelectedInspectorItem({ kind: 'historyDetail', ...input });
+    },
+    [],
+  );
+
+  const loadHistoryItemDetail = useCallback(
+    async (itemId: string) => {
+      if (!routeToken || !session?.workerSessionId) {
+        throw new Error('Reconnect this session before loading item details.');
+      }
+      return fetchControlPlaneWorkerThreadHistoryItemDetail(
+        routeToken,
+        session.workerSessionId,
+        itemId,
+      );
+    },
+    [routeToken, session?.workerSessionId],
+  );
+
   const timelineProps = useMemo<Partial<ThreadTimelineProps>>(
     () => ({
       scrollRequestKey,
@@ -720,11 +1020,17 @@ function ControlPlaneSessionSurface() {
         detail?.answeredRequestNotes ?? EMPTY_ANSWERED_REQUEST_NOTES,
       activityNotes: detail?.activityNotes ?? EMPTY_ACTIVITY_NOTES,
       pendingSteers: detail?.pendingSteers ?? EMPTY_PENDING_STEERS,
+      onLoadHistoryItemDetail: loadHistoryItemDetail,
+      onSelectArtifact: handleSelectArtifact,
+      onSelectHistoryItemDetail: handleSelectHistoryItemDetail,
     }),
     [
       detail?.activityNotes,
       detail?.answeredRequestNotes,
       detail?.pendingSteers,
+      handleSelectArtifact,
+      handleSelectHistoryItemDetail,
+      loadHistoryItemDetail,
       scrollRequestKey,
     ],
   );
@@ -758,8 +1064,8 @@ function ControlPlaneSessionSurface() {
     : null;
 
   const surfaceActions = (
-    <span className="rounded-full border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-2 text-xs font-medium text-[var(--theme-fg)] shadow-lg shadow-stone-950/20">
-      {detail?.thread.status ?? session?.status ?? 'loading'}
+    <span className="control-session-status-badge">
+      {currentStatusLabel}
     </span>
   );
 
@@ -814,48 +1120,56 @@ function ControlPlaneSessionSurface() {
   );
 
   return (
-    <ThreadDetailSurface
-      threads={threads}
-      detail={detail}
-      status={null}
-      loading={loading}
-      error={loading ? null : error}
-      adapter={surfaceAdapter}
-      currentWorkspaceId={workspace?.id ?? null}
-      currentWorkspaceLabel={workspace?.name ?? detail?.workspace.label ?? null}
-      metaContent={metaContent}
-      settingsContent={settingsContent}
-      surfaceActions={surfaceActions}
-      beforeTimelineContent={beforeTimelineContent}
-      appMenuButton={<AppShellMenuButton />}
-      appNavigationMenu={
-        <AppShellNavigationMenu
-          currentPath={`/control-plane/sessions/${sessionId}`}
-          items={[
-            { label: 'Control Plane', href: '/control-plane' },
-            { label: 'Workspaces', href: '/workspaces' },
-          ]}
-          onNavigate={navigate}
+    <div className={`control-chat-workspace ${selectedInspectorItem ? 'artifact-open' : ''}`}>
+      <ThreadDetailSurface
+        threads={threads}
+        detail={detail}
+        status={null}
+        loading={loading}
+        error={loading ? null : error}
+        adapter={surfaceAdapter}
+        currentWorkspaceId={workspace?.id ?? null}
+        currentWorkspaceLabel={workspace?.name ?? detail?.workspace.label ?? null}
+        metaContent={metaContent}
+        settingsContent={settingsContent}
+        surfaceActions={surfaceActions}
+        beforeTimelineContent={beforeTimelineContent}
+        appMenuButton={<AppShellMenuButton />}
+        appNavigationMenu={
+          <AppShellNavigationMenu
+            currentPath={`/control-plane/sessions/${sessionId}`}
+            items={[
+              { label: 'Control Plane', href: '/control-plane' },
+              { label: 'Workspaces', href: '/workspaces' },
+            ]}
+            onNavigate={navigate}
+          />
+        }
+        onCloseAppNavigation={shellNav?.closeNav ?? (() => {})}
+        activeView={activeView}
+        timelineProps={timelineProps}
+        shellUnavailableContent={shellUnavailableContent}
+        shellDisconnectedContent={shellUnavailableContent}
+        shellContent={shellUnavailableContent}
+        loadingContent={
+          <div className="flex flex-1 items-center justify-center px-6 py-12 text-center text-[var(--theme-fg-muted)]">
+            Opening worker thread...
+          </div>
+        }
+        emptyContent={
+          <div className="flex flex-1 items-center justify-center px-6 py-12 text-center text-[var(--theme-fg-muted)]">
+            No worker thread is connected yet.
+          </div>
+        }
+        {...(session ? { currentThreadId: session.id } : {})}
+        {...(composerProps ? { composerProps } : {})}
+      />
+      {selectedInspectorItem ? (
+        <ThreadInspector
+          selected={selectedInspectorItem}
+          onClose={() => setSelectedInspectorItem(null)}
         />
-      }
-      onCloseAppNavigation={shellNav?.closeNav ?? (() => {})}
-      activeView={activeView}
-      timelineProps={timelineProps}
-      shellUnavailableContent={shellUnavailableContent}
-      shellDisconnectedContent={shellUnavailableContent}
-      shellContent={shellUnavailableContent}
-      loadingContent={
-        <div className="flex flex-1 items-center justify-center px-6 py-12 text-center text-[var(--theme-fg-muted)]">
-          Opening worker thread...
-        </div>
-      }
-      emptyContent={
-        <div className="flex flex-1 items-center justify-center px-6 py-12 text-center text-[var(--theme-fg-muted)]">
-          No worker thread is connected yet.
-        </div>
-      }
-      {...(session ? { currentThreadId: session.id } : {})}
-      {...(composerProps ? { composerProps } : {})}
-    />
+      ) : null}
+    </div>
   );
 }

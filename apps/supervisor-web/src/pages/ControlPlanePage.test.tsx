@@ -130,6 +130,13 @@ const failedSandbox: ControlPlaneSandbox = {
   lastFailureMessage: 'Cannot pull worker image.',
 };
 
+const stoppingSandbox: ControlPlaneSandbox = {
+  ...runningSandbox,
+  state: 'stopping',
+  statusReason: 'Sandbox shutdown is in progress.',
+  startupProgress: 50,
+};
+
 const project = {
   id: 'project-1',
   userId: 'user-1',
@@ -305,6 +312,37 @@ function usageEventsResponse(
   return null;
 }
 
+function renderWithSandbox(sandbox: ControlPlaneSandbox | null) {
+  vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
+
+    if (path === '/api/me' && !init?.method) {
+      return jsonResponse({ user, sandbox, usage });
+    }
+
+    if (path === '/api/projects' && !init?.method) {
+      return jsonResponse({ projects: [] });
+    }
+
+    if (path === '/api/workspaces' && !init?.method) {
+      return jsonResponse({ workspaces: [] });
+    }
+
+    const usageEvents = usageEventsResponse(path);
+    if (usageEvents) {
+      return usageEvents;
+    }
+
+    return jsonResponse({
+      code: 'not_found',
+      message: `Unhandled request: ${path}`,
+    }, 404);
+  });
+
+  return render(<ControlPlanePage />);
+}
+
 async function selectExistingHierarchy() {
   await waitFor(() => {
     expect(screen.getByRole('button', { name: /Computational chemistry/i })).toBeInTheDocument();
@@ -315,9 +353,11 @@ async function selectExistingHierarchy() {
   });
   fireEvent.click(screen.getByRole('button', { name: /Molecule study/i }));
   await waitFor(() => {
-    expect(screen.getByRole('button', { name: /Plan calculation/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /Open session Plan calculation from workspace browser/i }),
+    ).toBeInTheDocument();
   });
-  fireEvent.click(screen.getByRole('button', { name: /Plan calculation/i }));
+  fireEvent.click(screen.getByRole('button', { name: /Open session Plan calculation from workspace browser/i }));
 }
 
 async function openAccountMenu() {
@@ -325,6 +365,10 @@ async function openAccountMenu() {
     expect(screen.getByRole('button', { name: 'Open account menu' })).toBeInTheDocument();
   });
   fireEvent.click(screen.getByRole('button', { name: 'Open account menu' }));
+}
+
+function openInspectorTab(name: 'Summary' | 'Metadata' | 'Route' | 'Logs') {
+  fireEvent.click(screen.getByRole('tab', { name }));
 }
 
 async function openCreatePanel(label: 'project' | 'workspace' | 'session') {
@@ -354,6 +398,12 @@ describe('ControlPlanePage', () => {
     navigateMock.mockReset();
     MockWorkerWebSocket.instances = [];
     vi.stubGlobal('WebSocket', MockWorkerWebSocket);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: vi.fn(() => Promise.resolve()),
+      },
+    });
     window.localStorage.clear();
     window.localStorage.setItem(
       'remote-codex-control-plane-auth',
@@ -507,7 +557,10 @@ describe('ControlPlanePage', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Open account menu' })).toBeInTheDocument();
     });
+    expect(screen.queryByText('remote-codex-worker:dev')).not.toBeInTheDocument();
+    openInspectorTab('Metadata');
     expect(screen.getByText('remote-codex-worker:dev')).toBeInTheDocument();
+    openInspectorTab('Summary');
     expect(screen.getByText('No projects yet.')).toBeInTheDocument();
 
     await openCreatePanel('project');
@@ -516,7 +569,7 @@ describe('ControlPlanePage', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Computational chemistry/i })).toBeInTheDocument();
     });
-    expect(screen.getAllByText('computational-chemistry').length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText('computational-chemistry')).not.toBeInTheDocument();
     expect(screen.getByText('Project "Computational chemistry" created. Select it before creating a workspace.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Open create panel for workspace' })).not.toBeInTheDocument();
 
@@ -525,6 +578,9 @@ describe('ControlPlanePage', () => {
     await waitFor(() => {
       expect(screen.getByText('Selected project')).toBeInTheDocument();
     });
+    openInspectorTab('Metadata');
+    expect(screen.getByText('Project metadata')).toBeInTheDocument();
+    openInspectorTab('Summary');
 
     await openCreatePanel('workspace');
     submitCreatePanel('workspace');
@@ -540,26 +596,31 @@ describe('ControlPlanePage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
     await waitFor(() => {
-      expect(screen.getByText('https://router.example.test')).toBeInTheDocument();
+      expect(screen.getAllByText('Running').length).toBeGreaterThan(0);
     });
+    openInspectorTab('Logs');
     await waitFor(() => {
       expect(screen.getByText('https://elagenteharness.example.test')).toBeInTheDocument();
     });
     expect(screen.getByText('generate_ligand_xyz')).toBeInTheDocument();
     expect(screen.getByText('farmaco-run-1')).toBeInTheDocument();
     expect(document.body.textContent).not.toContain('harness-key-secret');
+    openInspectorTab('Summary');
 
     await openCreatePanel('session');
     submitCreatePanel('session');
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Plan calculation/i })).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: /Open session Plan calculation from workspace browser/i }),
+      ).toBeInTheDocument();
     });
     expect(screen.getByText('Session "Plan calculation" created. Select it before connecting.')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Plan calculation/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Open session Plan calculation from workspace browser/i }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Inspect' }));
+    openInspectorTab('Logs');
 
     await waitFor(() => {
       expect(screen.getByText('Admin inspection')).toBeInTheDocument();
@@ -570,6 +631,7 @@ describe('ControlPlanePage', () => {
     expect(screen.getByText('Worker Pod is running and ready.')).toBeInTheDocument();
     expect(screen.getByText('sandbox.running')).toBeInTheDocument();
 
+    openInspectorTab('Route');
     fireEvent.click(screen.getByRole('button', { name: 'Create route token' }));
 
     await waitFor(() => {
@@ -581,10 +643,10 @@ describe('ControlPlanePage', () => {
     expect(MockWorkerWebSocket.instances[0]?.url).toBe(
       'wss://router.example.test/api/sandboxes/sandbox-1/ws?token=route-token',
     );
-    expect(screen.getByText('Connecting worker route.')).toBeInTheDocument();
+    expect(screen.getByText('Connecting sandbox route.')).toBeInTheDocument();
     MockWorkerWebSocket.instances[0]?.open();
     await waitFor(() => {
-      expect(screen.getByText('ready')).toBeInTheDocument();
+      expect(screen.getAllByText('Ready').length).toBeGreaterThan(0);
     });
 
     expect(JSON.stringify(storageSnapshot(window.localStorage))).not.toContain('route-token');
@@ -612,7 +674,7 @@ describe('ControlPlanePage', () => {
     expect(MockWorkerWebSocket.instances[0]?.readyState).toBe(MockWorkerWebSocket.CLOSED);
     expect(screen.getByText(/codex \/ idle/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
+    fireEvent.click(screen.getByRole('button', { name: /Resume session Plan calculation from detail/i }));
 
     await waitFor(() => {
       expect(screen.getByText('Session resumed.')).toBeInTheDocument();
@@ -620,10 +682,11 @@ describe('ControlPlanePage', () => {
     expect(screen.getByText(/codex \/ active/i)).toBeInTheDocument();
     expect(navigateMock).toHaveBeenCalledWith('/control-plane/sessions/session-1');
 
+    openInspectorTab('Summary');
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
 
     await waitFor(() => {
-      expect(screen.getAllByText('stopped').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Stopped').length).toBeGreaterThan(0);
     });
     expect(MockWorkerWebSocket.instances[0]?.readyState).toBe(MockWorkerWebSocket.CLOSED);
 
@@ -644,10 +707,10 @@ describe('ControlPlanePage', () => {
     );
     expect(new Headers(resumeCall?.[1]?.headers).has('x-remote-codex-worker-token')).toBe(false);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Restart' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
     await waitFor(() => {
-      expect(screen.getByText('running')).toBeInTheDocument();
+      expect(screen.getAllByText('Running').length).toBeGreaterThan(0);
     });
   });
 
@@ -694,7 +757,7 @@ describe('ControlPlanePage', () => {
 
     await selectExistingHierarchy();
 
-    fireEvent.click(screen.getByRole('button', { name: /Plan calculation/i }));
+    openInspectorTab('Route');
     fireEvent.click(screen.getByRole('button', { name: 'Create route token' }));
 
     await waitFor(() => {
@@ -745,7 +808,121 @@ describe('ControlPlanePage', () => {
     });
   });
 
-  it('does not crash when creating a route token from the connection panel', async () => {
+  it('uses product-facing labels in the workspace browser and session summaries', async () => {
+    const draftSession: ControlPlaneSession = {
+      ...createdSession,
+      id: 'session-2',
+      title: 'Draft calculation',
+    };
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
+
+      if (path === '/api/me' && !init?.method) {
+        return jsonResponse({ user, sandbox: runningSandbox, usage });
+      }
+
+      if (path === '/api/projects' && !init?.method) {
+        return jsonResponse({ projects: [project] });
+      }
+
+      if (path === '/api/workspaces?projectId=project-1' && !init?.method) {
+        return jsonResponse({ workspaces: [workspace] });
+      }
+
+      if (path === '/api/workspaces/workspace-1/sessions' && !init?.method) {
+        return jsonResponse({ sessions: [session, draftSession] });
+      }
+
+      const usageEvents = usageEventsResponse(path);
+      if (usageEvents) {
+        return usageEvents;
+      }
+
+      return jsonResponse({
+        code: 'not_found',
+        message: `Unhandled request: ${path}`,
+      }, 404);
+    });
+
+    render(<ControlPlanePage />);
+
+    await selectExistingHierarchy();
+
+    expect(screen.getByRole('button', { name: /Computational chemistry Active/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Molecule study Local workspace/i })).toBeInTheDocument();
+    expect(screen.getAllByText('Codex / Active').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/^Codex · /).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Runtime ready').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Not started').length).toBeGreaterThan(0);
+    expect(screen.getByText('1 active sessions')).toBeInTheDocument();
+    expect(screen.queryByText('P')).not.toBeInTheDocument();
+    expect(screen.queryByText('W')).not.toBeInTheDocument();
+    expect(screen.queryByText('S')).not.toBeInTheDocument();
+    expect(screen.queryByText('empty workspace')).not.toBeInTheDocument();
+    expect(screen.queryByText('runtime ready')).not.toBeInTheDocument();
+    expect(screen.queryByText('codex / Active')).not.toBeInTheDocument();
+  });
+
+  it('keeps secondary session actions behind a More menu', async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
+
+      if (path === '/api/me' && !init?.method) {
+        return jsonResponse({ user, sandbox: runningSandbox, usage });
+      }
+
+      if (path === '/api/projects' && !init?.method) {
+        return jsonResponse({ projects: [project] });
+      }
+
+      if (path === '/api/workspaces?projectId=project-1' && !init?.method) {
+        return jsonResponse({ workspaces: [workspace] });
+      }
+
+      if (path === '/api/workspaces/workspace-1/sessions' && !init?.method) {
+        return jsonResponse({ sessions: [session] });
+      }
+
+      const usageEvents = usageEventsResponse(path);
+      if (usageEvents) {
+        return usageEvents;
+      }
+
+      return jsonResponse({
+        code: 'not_found',
+        message: `Unhandled request: ${path}`,
+      }, 404);
+    });
+
+    render(<ControlPlanePage />);
+
+    await selectExistingHierarchy();
+
+    const sessionRow = screen.getByRole('listitem');
+    expect(within(sessionRow).getByRole('button', { name: /Resume session Plan calculation from summary/i })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Copy session ID' })).not.toBeInTheDocument();
+    expect(sessionRow.textContent).not.toContain('session-1');
+
+    fireEvent.click(screen.getByRole('button', { name: /More actions for session Plan calculation/i }));
+
+    expect(screen.getByRole('menuitem', { name: 'Show details' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Copy session ID' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Copy sandbox ID' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Close session' })).toBeInTheDocument();
+    expect(screen.getByRole('menu').textContent).not.toContain('session-1');
+
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Copy session ID' }));
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('session-1');
+    await waitFor(() => {
+      expect(screen.getByText('Session ID copied.')).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('menuitem', { name: 'Copy session ID' })).not.toBeInTheDocument();
+  });
+
+  it('keeps route token controls in the inspector instead of the main session area', async () => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const path = url.startsWith(baseUrl) ? url.slice(baseUrl.length) : url;
@@ -791,13 +968,128 @@ describe('ControlPlanePage', () => {
 
     await selectExistingHierarchy();
 
+    openInspectorTab('Route');
+    expect(screen.getByRole('button', { name: 'Create route token' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Hide details inspector' }));
+    expect(screen.queryByRole('button', { name: 'Create route token' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show details inspector' }));
+    openInspectorTab('Route');
+
     fireEvent.click(screen.getByRole('button', { name: 'Create route token' }));
 
     await waitFor(() => {
       expect(screen.getByText('wss://router.example.test')).toBeInTheDocument();
     });
-    expect(screen.getByText('connecting')).toBeInTheDocument();
+    expect(screen.getAllByText('Connecting').length).toBeGreaterThan(0);
     expect(MockWorkerWebSocket.instances).toHaveLength(1);
+  });
+
+  it('presents sandbox lifecycle actions according to sandbox state', async () => {
+    const cases: Array<{
+      sandbox: ControlPlaneSandbox;
+      startName: string;
+      startDisabled: boolean;
+      startTitle?: string;
+      stopDisabled: boolean;
+      restartDisabled: boolean;
+      restartTitle?: string;
+    }> = [
+      {
+        sandbox: stoppedSandbox,
+        startName: 'Start',
+        startDisabled: false,
+        stopDisabled: true,
+        restartDisabled: true,
+        restartTitle: 'Restart is available only when the sandbox is running or degraded.',
+      },
+      {
+        sandbox: runningSandbox,
+        startName: 'Running',
+        startDisabled: true,
+        startTitle: 'Sandbox is already running.',
+        stopDisabled: false,
+        restartDisabled: false,
+      },
+      {
+        sandbox: startingSandbox,
+        startName: 'Starting...',
+        startDisabled: true,
+        startTitle: 'Sandbox startup is already in progress.',
+        stopDisabled: false,
+        restartDisabled: true,
+        restartTitle: 'Restart is available only when the sandbox is running or degraded.',
+      },
+      {
+        sandbox: degradedSandbox,
+        startName: 'Start',
+        startDisabled: true,
+        startTitle: 'Use Restart to recover a degraded sandbox.',
+        stopDisabled: false,
+        restartDisabled: false,
+      },
+      {
+        sandbox: failedSandbox,
+        startName: 'Retry start',
+        startDisabled: false,
+        stopDisabled: true,
+        restartDisabled: true,
+        restartTitle: 'Use Retry start after a failed startup.',
+      },
+      {
+        sandbox: stoppingSandbox,
+        startName: 'Stopping...',
+        startDisabled: true,
+        startTitle: 'Wait for sandbox shutdown to finish before starting again.',
+        stopDisabled: true,
+        restartDisabled: true,
+        restartTitle: 'Restart is available only when the sandbox is running or degraded.',
+      },
+    ];
+
+    for (const current of cases) {
+      vi.clearAllMocks();
+      const view = renderWithSandbox(current.sandbox);
+
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { name: 'Sandbox' })).toBeInTheDocument();
+      });
+
+      const start = screen.getByRole('button', { name: current.startName });
+      const stop = screen.getByRole('button', { name: 'Stop' });
+      const restart = screen.getByRole('button', { name: 'Restart' });
+      const health = screen.getByRole('button', { name: 'Health' });
+      const inspect = screen.getByRole('button', { name: 'Inspect' });
+
+      if (current.startDisabled) {
+        expect(start).toBeDisabled();
+      } else {
+        expect(start).toBeEnabled();
+      }
+      if (current.startTitle) {
+        expect(start).toHaveAttribute('title', current.startTitle);
+      }
+
+      if (current.stopDisabled) {
+        expect(stop).toBeDisabled();
+        expect(stop).toHaveAttribute(
+          'title',
+          'Stop is available only while the sandbox is running or starting.',
+        );
+      } else {
+        expect(stop).toBeEnabled();
+      }
+
+      if (current.restartDisabled) {
+        expect(restart).toBeDisabled();
+        expect(restart).toHaveAttribute('title', current.restartTitle);
+      } else {
+        expect(restart).toBeEnabled();
+      }
+
+      expect(health).toBeEnabled();
+      expect(inspect).toBeEnabled();
+      view.unmount();
+    }
   });
 
   it('starts a created session in the worker when resumed after sandbox startup', async () => {
@@ -852,7 +1144,7 @@ describe('ControlPlanePage', () => {
 
     await selectExistingHierarchy();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start in sandbox' }));
+    fireEvent.click(screen.getByRole('button', { name: /Start session Plan calculation from detail/i }));
 
     await waitFor(() => {
       expect(screen.getByText('Session resumed.')).toBeInTheDocument();
@@ -912,7 +1204,7 @@ describe('ControlPlanePage', () => {
 
     await selectExistingHierarchy();
 
-    fireEvent.click(screen.getByRole('button', { name: /Plan calculation/i }));
+    openInspectorTab('Route');
     fireEvent.click(screen.getByRole('button', { name: 'Create route token' }));
     await waitFor(() => {
       expect(MockWorkerWebSocket.instances).toHaveLength(1);
@@ -920,7 +1212,7 @@ describe('ControlPlanePage', () => {
 
     MockWorkerWebSocket.instances[0]?.fail();
     await waitFor(() => {
-      expect(screen.getByText('Sandbox offline: Worker route connection failed.')).toBeInTheDocument();
+      expect(screen.getByText('Sandbox offline: Sandbox route connection failed.')).toBeInTheDocument();
     });
   });
 
@@ -978,7 +1270,7 @@ describe('ControlPlanePage', () => {
 
     await selectExistingHierarchy();
 
-    fireEvent.click(screen.getByRole('button', { name: /Plan calculation/i }));
+    openInspectorTab('Route');
     fireEvent.click(screen.getByRole('button', { name: 'Create route token' }));
 
     await waitFor(() => {
@@ -987,13 +1279,13 @@ describe('ControlPlanePage', () => {
     expect(MockWorkerWebSocket.instances[0]?.url).toContain('token=route-token-1');
     MockWorkerWebSocket.instances[0]?.open();
     await waitFor(() => {
-      expect(screen.getByText('ready')).toBeInTheDocument();
+      expect(screen.getAllByText('Ready').length).toBeGreaterThan(0);
     });
 
     await waitFor(() => {
       expect(routeTokenCount).toBe(2);
     }, { timeout: 6500 });
-    expect(screen.getByText('Reconnecting worker route.')).toBeInTheDocument();
+    expect(screen.getByText('Reconnecting sandbox route.')).toBeInTheDocument();
     await waitFor(() => {
       expect(MockWorkerWebSocket.instances).toHaveLength(2);
     });
@@ -1004,7 +1296,7 @@ describe('ControlPlanePage', () => {
     await waitFor(() => {
       expect(screen.getByText('Route token is available in memory.')).toBeInTheDocument();
     });
-    expect(screen.getByText('ready')).toBeInTheDocument();
+    expect(screen.getAllByText('Ready').length).toBeGreaterThan(0);
     expect(JSON.stringify(storageSnapshot(window.localStorage))).not.toContain('route-token-2');
     expect(JSON.stringify(storageSnapshot(window.sessionStorage))).not.toContain('route-token-2');
   }, 9000);
@@ -1025,6 +1317,23 @@ describe('ControlPlanePage', () => {
       email: 'dev@example.com',
       displayName: 'Developer',
     });
+  });
+
+  it('toggles the details inspector from the top bar and inspector header', async () => {
+    render(<ControlPlanePage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Inspector' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide details inspector' }));
+    expect(screen.queryByRole('heading', { name: 'Inspector' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show details inspector' }));
+    expect(screen.getByRole('heading', { name: 'Inspector' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close details inspector' }));
+    expect(screen.queryByRole('heading', { name: 'Inspector' })).not.toBeInTheDocument();
   });
 
   it('shows LLM and Harness usage summary after account bootstrap', async () => {
@@ -1075,7 +1384,17 @@ describe('ControlPlanePage', () => {
     expect(within(accountMenu).getByText('Compute')).toBeInTheDocument();
     expect(within(accountMenu).getByText('12.5')).toBeInTheDocument();
     expect(within(accountMenu).getByText('Harness cost')).toBeInTheDocument();
-    expect(screen.getByText('gpt-5.1-codex')).toBeInTheDocument();
+    expect(within(accountMenu).getByText('Account details')).toBeInTheDocument();
+    expect(within(accountMenu).getByText('Usage history')).toBeInTheDocument();
+    expect(screen.getByText(baseUrl)).not.toBeVisible();
+    expect(screen.getByText('gpt-5.1-codex')).not.toBeVisible();
+    expect(screen.getByText('generate_ligand_xyz')).not.toBeVisible();
+
+    fireEvent.click(within(accountMenu).getByText('Account details'));
+    expect(screen.getByText(baseUrl)).toBeVisible();
+
+    fireEvent.click(within(accountMenu).getByText('Usage history'));
+    expect(screen.getByText('gpt-5.1-codex')).toBeVisible();
     expect(screen.getByText(/sub2api/)).toBeInTheDocument();
     expect(screen.getByText('2026-05-25T00:02:00.000Z')).toBeInTheDocument();
     expect(screen.getByText('generate_ligand_xyz')).toBeInTheDocument();
@@ -1107,6 +1426,7 @@ describe('ControlPlanePage', () => {
     render(<ControlPlanePage />);
 
     await openAccountMenu();
+    fireEvent.click(screen.getByText('Usage history'));
     await waitFor(() => {
       expect(screen.getByText('No LLM usage events yet.')).toBeInTheDocument();
     });
@@ -1307,7 +1627,7 @@ describe('ControlPlanePage', () => {
 
     await selectExistingHierarchy();
 
-    fireEvent.click(screen.getByRole('button', { name: /Plan calculation/i }));
+    openInspectorTab('Route');
     fireEvent.click(screen.getByRole('button', { name: 'Create route token' }));
 
     await waitFor(() => {
@@ -1370,13 +1690,17 @@ describe('ControlPlanePage', () => {
     render(<ControlPlanePage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Startup progress')).toBeInTheDocument();
+      expect(screen.getAllByText('Scheduling sandbox').length).toBeGreaterThanOrEqual(2);
     });
     expect(screen.getByText('25%')).toBeInTheDocument();
-    expect(screen.getByText('Worker Pod has been applied and is waiting for readiness.')).toBeInTheDocument();
+    expect(screen.getByText('Waiting for runtime readiness')).toBeInTheDocument();
+    expect(screen.queryByText('Worker Pod has been applied and is waiting for readiness.')).not.toBeInTheDocument();
+    openInspectorTab('Metadata');
+    expect(screen.getAllByText('Worker Pod has been applied and is waiting for readiness.').length).toBeGreaterThan(0);
+    openInspectorTab('Summary');
 
     await waitFor(() => {
-      expect(screen.getAllByText('running').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Running').length).toBeGreaterThan(0);
     }, { timeout: 4000 });
     expect(healthRequests).toBe(1);
 
@@ -1384,14 +1708,22 @@ describe('ControlPlanePage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Health' }));
 
     await waitFor(() => {
-      expect(screen.getAllByText('Worker Pod is running but not ready.').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Checking readiness').length).toBeGreaterThanOrEqual(2);
+      expect(screen.getByText('Needs attention')).toBeInTheDocument();
     });
+    expect(screen.getAllByText('Worker Pod is running but not ready.').length).toBeGreaterThan(0);
+    openInspectorTab('Metadata');
+    expect(screen.getAllByText('Worker Pod is running but not ready.').length).toBeGreaterThan(0);
+    openInspectorTab('Summary');
 
     fireEvent.click(screen.getByRole('button', { name: 'Restart' }));
 
     await waitFor(() => {
+      expect(screen.getAllByText('Startup failed').length).toBeGreaterThanOrEqual(2);
+      expect(screen.getAllByText('Failed').length).toBeGreaterThan(0);
       expect(screen.getAllByText('Cannot pull worker image.').length).toBeGreaterThan(0);
     });
+    openInspectorTab('Metadata');
     expect(screen.getByText('image_pull')).toBeInTheDocument();
   });
 
@@ -1494,10 +1826,10 @@ describe('ControlPlanePage', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: /Molecule study/i }));
     await waitFor(() => {
-      expect(screen.getByText('Loading sessions...')).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: /Open session Plan calculation from workspace browser/i }),
+      ).toBeInTheDocument();
     });
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Plan calculation/i })).toBeInTheDocument();
-    });
+    expect(screen.getByRole('button', { name: /Open session Plan calculation summary/i })).toBeInTheDocument();
   });
 });
