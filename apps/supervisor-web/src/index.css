@@ -447,6 +447,8 @@ body.thread-detail-scroll-locked {
 }
 
 .control-console-header {
+  position: relative;
+  z-index: 60;
   display: flex;
   min-height: 3.4rem;
   align-items: center;
@@ -517,6 +519,7 @@ body.thread-detail-scroll-locked {
 
 .control-account-menu {
   position: relative;
+  z-index: 70;
   display: inline-flex;
 }
 
@@ -565,7 +568,7 @@ body.thread-detail-scroll-locked {
 
 .control-account-popover {
   position: absolute;
-  z-index: 20;
+  z-index: 80;
   top: calc(100% + 0.5rem);
   right: 0;
   width: min(27rem, calc(100vw - 2rem));
