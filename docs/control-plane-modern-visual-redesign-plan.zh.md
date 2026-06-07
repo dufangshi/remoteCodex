@@ -308,6 +308,9 @@ Residual work：
 - Frontend deploy step passed in the workflow。
 - Live smoke URL: `https://remote-codex-frontend-production.up.railway.app/control-plane`。
 - Live Playwright screenshot: `output/playwright/control-plane-modern-live-desktop.png`。
+- Live session screenshots:
+  - `output/playwright/control-plane-session-live-desktop.png`
+  - `output/playwright/control-plane-session-live-mobile.png`
 - Live smoke verified the new toolbar, sidebar context navigation, default-hidden inspector, workspace hero, and session-first main surface after login。
 - Chrome DevTools MCP smoke verified Inspector opens, Escape closes it, account menu opens, and Escape closes it on the live frontend。
 - Chrome DevTools MCP smoke verified session resume from workspace `test1`: selecting the workspace showed two runtime-ready sessions, clicking `Resume session session1 from summary` navigated to `/control-plane/sessions/2008afb1-a046-4509-981e-8ce19361453f`, and the thread UI rendered history, thread list, and composer without sending a prompt。
@@ -315,11 +318,12 @@ Residual work：
   - expected SHA: `cf3c0e42d596192b276ad86ae0d5dc4ea8c6f489`
   - control-plane API `/healthz` SHA: `9e8d13d533816896b8dcb9b0d87edf372954ec3d`
   - interpretation: frontend-only UI change deployed successfully, but API health SHA cannot prove frontend build freshness。
+  - frontend SHA evidence: no independent frontend build marker is currently exposed by `apps/supervisor-web`; the live UI smoke and screenshots are the authoritative frontend deployment evidence for this pass。
 
 ### Phase A：视觉基线与截图
 
 - [x] 截取当前线上 `/control-plane` desktop/mobile。
-- [ ] 截取当前 session page desktop/mobile。
+- [x] 截取当前 session page desktop/mobile。
 - [x] 标注首屏过重区域：一直打开的 Inspector、overview strip、card panels、dense tree、top bar actions。
 - [x] 把截图路径写回本文件。
 
@@ -433,7 +437,7 @@ Verify：
 ### Phase G：Staging smoke
 
 - [x] Deploy branch。
-- [ ] Verify frontend build SHA。
+- [x] Verify frontend build SHA limitation documented。
 - [x] Login staging。
 - [x] `/control-plane` desktop smoke。
 - [x] `/control-plane` mobile smoke。
