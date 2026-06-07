@@ -298,8 +298,21 @@ Evidence：
 
 Residual work：
 
-- Phase G staging deployment and live smoke are not done in this local implementation pass。
+- Phase G live frontend smoke is done. The deploy helper reported a control-plane API SHA mismatch because this pass changed only frontend UI and the API `/healthz` still reports the previous API build SHA。
 - The current redesign is intentionally scoped to `/control-plane`; session chat UI remains owned by `@remote-codex/thread-ui`。
+
+### 2026-06-07 Deployment Evidence
+
+- Commit: `cf3c0e42d596192b276ad86ae0d5dc4ea8c6f489` (`Modernize control plane shell`)。
+- GitHub Actions: `Staging Images` run `27086295547` passed。
+- Frontend deploy step passed in the workflow。
+- Live smoke URL: `https://remote-codex-frontend-production.up.railway.app/control-plane`。
+- Live Playwright screenshot: `output/playwright/control-plane-modern-live-desktop.png`。
+- Live smoke verified the new toolbar, sidebar context navigation, default-hidden inspector, workspace hero, and session-first main surface after login。
+- Deploy helper final health check:
+  - expected SHA: `cf3c0e42d596192b276ad86ae0d5dc4ea8c6f489`
+  - control-plane API `/healthz` SHA: `9e8d13d533816896b8dcb9b0d87edf372954ec3d`
+  - interpretation: frontend-only UI change deployed successfully, but API health SHA cannot prove frontend build freshness。
 
 ### Phase A：视觉基线与截图
 
@@ -417,14 +430,14 @@ Verify：
 
 ### Phase G：Staging smoke
 
-- [ ] Deploy branch。
+- [x] Deploy branch。
 - [ ] Verify frontend build SHA。
-- [ ] Login staging。
-- [ ] `/control-plane` desktop smoke。
-- [ ] `/control-plane` mobile smoke。
+- [x] Login staging。
+- [x] `/control-plane` desktop smoke。
+- [x] `/control-plane` mobile smoke。
 - [ ] session resume smoke。
 - [ ] settings/hamburger smoke。
-- [ ] record screenshots and residual risks。
+- [x] record screenshots and residual risks。
 
 Done when：
 
