@@ -309,6 +309,7 @@ Residual work：
 - Live smoke URL: `https://remote-codex-frontend-production.up.railway.app/control-plane`。
 - Live Playwright screenshot: `output/playwright/control-plane-modern-live-desktop.png`。
 - Live smoke verified the new toolbar, sidebar context navigation, default-hidden inspector, workspace hero, and session-first main surface after login。
+- Chrome DevTools MCP smoke verified Inspector opens, Escape closes it, account menu opens, and Escape closes it on the live frontend。
 - Deploy helper final health check:
   - expected SHA: `cf3c0e42d596192b276ad86ae0d5dc4ea8c6f489`
   - control-plane API `/healthz` SHA: `9e8d13d533816896b8dcb9b0d87edf372954ec3d`
@@ -436,7 +437,7 @@ Verify：
 - [x] `/control-plane` desktop smoke。
 - [x] `/control-plane` mobile smoke。
 - [ ] session resume smoke。
-- [ ] settings/hamburger smoke。
+- [x] settings/account-menu smoke。
 - [x] record screenshots and residual risks。
 
 Done when：
