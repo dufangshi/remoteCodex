@@ -8,8 +8,10 @@ ENV VITE_CONTROL_PLANE_BASE_URL=${VITE_CONTROL_PLANE_BASE_URL}
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     ca-certificates \
+    build-essential \
     git \
     openssh-client \
+    python3 \
   && rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable
@@ -21,9 +23,7 @@ COPY scripts/setup-thread-ui-git-auth.sh ./scripts/setup-thread-ui-git-auth.sh
 COPY apps/supervisor-web ./apps/supervisor-web
 COPY packages/shared ./packages/shared
 
-RUN --mount=type=secret,id=remote_codex_thread_ui_deploy_key,required=false \
-  REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_FILE=/run/secrets/remote_codex_thread_ui_deploy_key \
-  REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64="${REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64}" \
+RUN REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64="${REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64}" \
   bash ./scripts/setup-thread-ui-git-auth.sh \
   && pnpm --filter @remote-codex/supervisor-web... install --frozen-lockfile \
   && pnpm --filter @remote-codex/shared build \
