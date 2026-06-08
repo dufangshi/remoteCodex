@@ -11,11 +11,11 @@
     "test": "NODE_ENV=test vitest run"
   },
   "dependencies": {
-    "@remote-codex/plugin-runtime": "git+https://github.com/dufangshi/remote-codex-thread-ui.git#thread-ui-v0.1.1&path:/packages/plugin-runtime",
-    "@remote-codex/plugin-terminal": "git+https://github.com/dufangshi/remote-codex-thread-ui.git#thread-ui-v0.1.1&path:/packages/plugin-terminal",
-    "@remote-codex/plugin-xyz-viewer": "git+https://github.com/dufangshi/remote-codex-thread-ui.git#thread-ui-v0.1.1&path:/packages/plugin-xyz-viewer",
+    "@remote-codex/plugin-runtime": "git+https://github.com/dufangshi/remote-codex-thread-ui.git#thread-ui-v0.1.2&path:/packages/plugin-runtime",
+    "@remote-codex/plugin-terminal": "git+https://github.com/dufangshi/remote-codex-thread-ui.git#thread-ui-v0.1.2&path:/packages/plugin-terminal",
+    "@remote-codex/plugin-xyz-viewer": "git+https://github.com/dufangshi/remote-codex-thread-ui.git#thread-ui-v0.1.2&path:/packages/plugin-xyz-viewer",
     "@remote-codex/shared": "workspace:*",
-    "@remote-codex/thread-ui": "git+https://github.com/dufangshi/remote-codex-thread-ui.git#thread-ui-v0.1.1&path:/packages/thread-ui",
+    "@remote-codex/thread-ui": "git+https://github.com/dufangshi/remote-codex-thread-ui.git#thread-ui-v0.1.2&path:/packages/thread-ui",
     "@streamdown/code": "^1.1.1",
     "@xterm/addon-fit": "^0.11.0",
     "react": "^19.1.0",
