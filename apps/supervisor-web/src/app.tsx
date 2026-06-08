@@ -125,8 +125,7 @@ function AppShell({
     isThreadsRoute || isThreadDetailRoute || isControlPlaneSessionRoute;
   const isWorkspacesRoute = location.pathname === '/workspaces';
   const isControlPlaneRoute = location.pathname.startsWith('/control-plane');
-  const usesInlineTopbar =
-    isWorkspacesRoute || isThreadsRoute || (isControlPlaneRoute && !isControlPlaneSessionRoute);
+  const usesInlineTopbar = isWorkspacesRoute || isThreadsRoute || isControlPlaneRoute;
 
   useEffect(() => {
     setNavOpen(false);
@@ -180,7 +179,7 @@ function AppShell({
             isViewportLockedRoute ? 'absolute inset-0 pb-0 sm:pb-4' : 'pb-4'
           } ${
             isThreadWorkspaceRoute
-              ? isThreadDetailRoute
+              ? isThreadDetailRoute || isControlPlaneSessionRoute
                 ? 'pt-[env(safe-area-inset-top)] sm:pt-4'
                 : isThreadsRoute
                   ? 'pt-[env(safe-area-inset-top)] sm:pt-4'
