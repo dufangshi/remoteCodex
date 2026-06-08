@@ -40,8 +40,6 @@ RUN pnpm --filter @remote-codex/control-plane-api... install --frozen-lockfile \
   && pnpm --filter @remote-codex/config build \
   && pnpm --filter @remote-codex/db build \
   && pnpm --filter @remote-codex/shared build \
-  && CI=true pnpm prune --prod \
-  && pnpm store prune \
   && chmod +x /opt/remote-codex/scripts/start-control-plane-railway.sh
 
 EXPOSE 8790
