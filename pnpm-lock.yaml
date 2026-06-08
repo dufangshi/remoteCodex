@@ -207,20 +207,20 @@ importers:
   apps/supervisor-web:
     dependencies:
       '@remote-codex/plugin-runtime':
-        specifier: git+https://github.com/dufangshi/remote-codex-thread-ui.git#thread-ui-v0.1.0&path:/packages/plugin-runtime
-        version: git+https://github.com/dufangshi/remote-codex-thread-ui.git#71c2c9aa6dc6e6e2bd6e266bd3352f1a2b930809&path:/packages/plugin-runtime
+        specifier: git+https://github.com/dufangshi/remote-codex-thread-ui.git#thread-ui-v0.1.1&path:/packages/plugin-runtime
+        version: git+https://github.com/dufangshi/remote-codex-thread-ui.git#60008b01e8ad57eb7e49a514b7f83e36bf2392f7&path:/packages/plugin-runtime
       '@remote-codex/plugin-terminal':
-        specifier: git+https://github.com/dufangshi/remote-codex-thread-ui.git#thread-ui-v0.1.0&path:/packages/plugin-terminal
-        version: git+https://github.com/dufangshi/remote-codex-thread-ui.git#71c2c9aa6dc6e6e2bd6e266bd3352f1a2b930809&path:/packages/plugin-terminal
+        specifier: git+https://github.com/dufangshi/remote-codex-thread-ui.git#thread-ui-v0.1.1&path:/packages/plugin-terminal
+        version: git+https://github.com/dufangshi/remote-codex-thread-ui.git#60008b01e8ad57eb7e49a514b7f83e36bf2392f7&path:/packages/plugin-terminal
       '@remote-codex/plugin-xyz-viewer':
-        specifier: git+https://github.com/dufangshi/remote-codex-thread-ui.git#thread-ui-v0.1.0&path:/packages/plugin-xyz-viewer
-        version: git+https://github.com/dufangshi/remote-codex-thread-ui.git#71c2c9aa6dc6e6e2bd6e266bd3352f1a2b930809&path:/packages/plugin-xyz-viewer(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
+        specifier: git+https://github.com/dufangshi/remote-codex-thread-ui.git#thread-ui-v0.1.1&path:/packages/plugin-xyz-viewer
+        version: git+https://github.com/dufangshi/remote-codex-thread-ui.git#60008b01e8ad57eb7e49a514b7f83e36bf2392f7&path:/packages/plugin-xyz-viewer(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
       '@remote-codex/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       '@remote-codex/thread-ui':
-        specifier: git+https://github.com/dufangshi/remote-codex-thread-ui.git#thread-ui-v0.1.0&path:/packages/thread-ui
-        version: git+https://github.com/dufangshi/remote-codex-thread-ui.git#71c2c9aa6dc6e6e2bd6e266bd3352f1a2b930809&path:/packages/thread-ui(@remote-codex/plugin-runtime@git+https://github.com/dufangshi/remote-codex-thread-ui.git#71c2c9aa6dc6e6e2bd6e266bd3352f1a2b930809&path:/packages/plugin-runtime)(@remote-codex/plugin-terminal@git+https://github.com/dufangshi/remote-codex-thread-ui.git#71c2c9aa6dc6e6e2bd6e266bd3352f1a2b930809&path:/packages/plugin-terminal)(@remote-codex/plugin-xyz-viewer@git+https://github.com/dufangshi/remote-codex-thread-ui.git#71c2c9aa6dc6e6e2bd6e266bd3352f1a2b930809&path:/packages/plugin-xyz-viewer(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(@remote-codex/shared@packages+shared)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
+        specifier: git+https://github.com/dufangshi/remote-codex-thread-ui.git#thread-ui-v0.1.1&path:/packages/thread-ui
+        version: git+https://github.com/dufangshi/remote-codex-thread-ui.git#60008b01e8ad57eb7e49a514b7f83e36bf2392f7&path:/packages/thread-ui(@remote-codex/plugin-runtime@git+https://github.com/dufangshi/remote-codex-thread-ui.git#60008b01e8ad57eb7e49a514b7f83e36bf2392f7&path:/packages/plugin-runtime)(@remote-codex/plugin-terminal@git+https://github.com/dufangshi/remote-codex-thread-ui.git#60008b01e8ad57eb7e49a514b7f83e36bf2392f7&path:/packages/plugin-terminal)(@remote-codex/plugin-xyz-viewer@git+https://github.com/dufangshi/remote-codex-thread-ui.git#60008b01e8ad57eb7e49a514b7f83e36bf2392f7&path:/packages/plugin-xyz-viewer(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(@remote-codex/shared@packages+shared)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
       '@streamdown/code':
         specifier: ^1.1.1
         version: 1.1.1(react@19.2.5)
@@ -1029,23 +1029,23 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
-  '@remote-codex/plugin-runtime@git+https://github.com/dufangshi/remote-codex-thread-ui.git#71c2c9aa6dc6e6e2bd6e266bd3352f1a2b930809&path:/packages/plugin-runtime':
-    resolution: {commit: 71c2c9aa6dc6e6e2bd6e266bd3352f1a2b930809, path: /packages/plugin-runtime, repo: https://github.com/dufangshi/remote-codex-thread-ui.git, type: git}
+  '@remote-codex/plugin-runtime@git+https://github.com/dufangshi/remote-codex-thread-ui.git#60008b01e8ad57eb7e49a514b7f83e36bf2392f7&path:/packages/plugin-runtime':
+    resolution: {commit: 60008b01e8ad57eb7e49a514b7f83e36bf2392f7, path: /packages/plugin-runtime, repo: https://github.com/dufangshi/remote-codex-thread-ui.git, type: git}
     version: 0.1.0
 
-  '@remote-codex/plugin-terminal@git+https://github.com/dufangshi/remote-codex-thread-ui.git#71c2c9aa6dc6e6e2bd6e266bd3352f1a2b930809&path:/packages/plugin-terminal':
-    resolution: {commit: 71c2c9aa6dc6e6e2bd6e266bd3352f1a2b930809, path: /packages/plugin-terminal, repo: https://github.com/dufangshi/remote-codex-thread-ui.git, type: git}
+  '@remote-codex/plugin-terminal@git+https://github.com/dufangshi/remote-codex-thread-ui.git#60008b01e8ad57eb7e49a514b7f83e36bf2392f7&path:/packages/plugin-terminal':
+    resolution: {commit: 60008b01e8ad57eb7e49a514b7f83e36bf2392f7, path: /packages/plugin-terminal, repo: https://github.com/dufangshi/remote-codex-thread-ui.git, type: git}
     version: 0.1.0
 
-  '@remote-codex/plugin-xyz-viewer@git+https://github.com/dufangshi/remote-codex-thread-ui.git#71c2c9aa6dc6e6e2bd6e266bd3352f1a2b930809&path:/packages/plugin-xyz-viewer':
-    resolution: {commit: 71c2c9aa6dc6e6e2bd6e266bd3352f1a2b930809, path: /packages/plugin-xyz-viewer, repo: https://github.com/dufangshi/remote-codex-thread-ui.git, type: git}
+  '@remote-codex/plugin-xyz-viewer@git+https://github.com/dufangshi/remote-codex-thread-ui.git#60008b01e8ad57eb7e49a514b7f83e36bf2392f7&path:/packages/plugin-xyz-viewer':
+    resolution: {commit: 60008b01e8ad57eb7e49a514b7f83e36bf2392f7, path: /packages/plugin-xyz-viewer, repo: https://github.com/dufangshi/remote-codex-thread-ui.git, type: git}
     version: 0.1.0
     peerDependencies:
       react: ^19.1.0
       react-dom: ^19.1.0
 
-  '@remote-codex/thread-ui@git+https://github.com/dufangshi/remote-codex-thread-ui.git#71c2c9aa6dc6e6e2bd6e266bd3352f1a2b930809&path:/packages/thread-ui':
-    resolution: {commit: 71c2c9aa6dc6e6e2bd6e266bd3352f1a2b930809, path: /packages/thread-ui, repo: https://github.com/dufangshi/remote-codex-thread-ui.git, type: git}
+  '@remote-codex/thread-ui@git+https://github.com/dufangshi/remote-codex-thread-ui.git#60008b01e8ad57eb7e49a514b7f83e36bf2392f7&path:/packages/thread-ui':
+    resolution: {commit: 60008b01e8ad57eb7e49a514b7f83e36bf2392f7, path: /packages/thread-ui, repo: https://github.com/dufangshi/remote-codex-thread-ui.git, type: git}
     version: 0.1.0
     peerDependencies:
       '@remote-codex/plugin-runtime': 0.1.0
@@ -4867,22 +4867,22 @@ snapshots:
       - react-native-b4a
       - supports-color
 
-  '@remote-codex/plugin-runtime@git+https://github.com/dufangshi/remote-codex-thread-ui.git#71c2c9aa6dc6e6e2bd6e266bd3352f1a2b930809&path:/packages/plugin-runtime': {}
+  '@remote-codex/plugin-runtime@git+https://github.com/dufangshi/remote-codex-thread-ui.git#60008b01e8ad57eb7e49a514b7f83e36bf2392f7&path:/packages/plugin-runtime': {}
 
-  '@remote-codex/plugin-terminal@git+https://github.com/dufangshi/remote-codex-thread-ui.git#71c2c9aa6dc6e6e2bd6e266bd3352f1a2b930809&path:/packages/plugin-terminal': {}
+  '@remote-codex/plugin-terminal@git+https://github.com/dufangshi/remote-codex-thread-ui.git#60008b01e8ad57eb7e49a514b7f83e36bf2392f7&path:/packages/plugin-terminal': {}
 
-  '@remote-codex/plugin-xyz-viewer@git+https://github.com/dufangshi/remote-codex-thread-ui.git#71c2c9aa6dc6e6e2bd6e266bd3352f1a2b930809&path:/packages/plugin-xyz-viewer(react-dom@19.2.5(react@19.2.5))(react@19.2.5)':
+  '@remote-codex/plugin-xyz-viewer@git+https://github.com/dufangshi/remote-codex-thread-ui.git#60008b01e8ad57eb7e49a514b7f83e36bf2392f7&path:/packages/plugin-xyz-viewer(react-dom@19.2.5(react@19.2.5))(react@19.2.5)':
     dependencies:
       3dmol: 2.5.5
       lucide-react: 0.544.0(react@19.2.5)
       react: 19.2.5
       react-dom: 19.2.5(react@19.2.5)
 
-  '@remote-codex/thread-ui@git+https://github.com/dufangshi/remote-codex-thread-ui.git#71c2c9aa6dc6e6e2bd6e266bd3352f1a2b930809&path:/packages/thread-ui(@remote-codex/plugin-runtime@git+https://github.com/dufangshi/remote-codex-thread-ui.git#71c2c9aa6dc6e6e2bd6e266bd3352f1a2b930809&path:/packages/plugin-runtime)(@remote-codex/plugin-terminal@git+https://github.com/dufangshi/remote-codex-thread-ui.git#71c2c9aa6dc6e6e2bd6e266bd3352f1a2b930809&path:/packages/plugin-terminal)(@remote-codex/plugin-xyz-viewer@git+https://github.com/dufangshi/remote-codex-thread-ui.git#71c2c9aa6dc6e6e2bd6e266bd3352f1a2b930809&path:/packages/plugin-xyz-viewer(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(@remote-codex/shared@packages+shared)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)':
+  '@remote-codex/thread-ui@git+https://github.com/dufangshi/remote-codex-thread-ui.git#60008b01e8ad57eb7e49a514b7f83e36bf2392f7&path:/packages/thread-ui(@remote-codex/plugin-runtime@git+https://github.com/dufangshi/remote-codex-thread-ui.git#60008b01e8ad57eb7e49a514b7f83e36bf2392f7&path:/packages/plugin-runtime)(@remote-codex/plugin-terminal@git+https://github.com/dufangshi/remote-codex-thread-ui.git#60008b01e8ad57eb7e49a514b7f83e36bf2392f7&path:/packages/plugin-terminal)(@remote-codex/plugin-xyz-viewer@git+https://github.com/dufangshi/remote-codex-thread-ui.git#60008b01e8ad57eb7e49a514b7f83e36bf2392f7&path:/packages/plugin-xyz-viewer(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(@remote-codex/shared@packages+shared)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)':
     dependencies:
-      '@remote-codex/plugin-runtime': git+https://github.com/dufangshi/remote-codex-thread-ui.git#71c2c9aa6dc6e6e2bd6e266bd3352f1a2b930809&path:/packages/plugin-runtime
-      '@remote-codex/plugin-terminal': git+https://github.com/dufangshi/remote-codex-thread-ui.git#71c2c9aa6dc6e6e2bd6e266bd3352f1a2b930809&path:/packages/plugin-terminal
-      '@remote-codex/plugin-xyz-viewer': git+https://github.com/dufangshi/remote-codex-thread-ui.git#71c2c9aa6dc6e6e2bd6e266bd3352f1a2b930809&path:/packages/plugin-xyz-viewer(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
+      '@remote-codex/plugin-runtime': git+https://github.com/dufangshi/remote-codex-thread-ui.git#60008b01e8ad57eb7e49a514b7f83e36bf2392f7&path:/packages/plugin-runtime
+      '@remote-codex/plugin-terminal': git+https://github.com/dufangshi/remote-codex-thread-ui.git#60008b01e8ad57eb7e49a514b7f83e36bf2392f7&path:/packages/plugin-terminal
+      '@remote-codex/plugin-xyz-viewer': git+https://github.com/dufangshi/remote-codex-thread-ui.git#60008b01e8ad57eb7e49a514b7f83e36bf2392f7&path:/packages/plugin-xyz-viewer(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
       '@remote-codex/shared': link:packages/shared
       '@streamdown/code': 1.1.1(react@19.2.5)
       '@xterm/addon-fit': 0.11.0
