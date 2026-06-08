@@ -31,7 +31,11 @@ mkdir -p "${ssh_dir}"
 chmod 700 "${ssh_dir}"
 
 if [[ -n "${key_file}" ]]; then
-  cp "${key_file}" "${key_path}"
+  if grep -q "BEGIN OPENSSH PRIVATE KEY" "${key_file}"; then
+    cp "${key_file}" "${key_path}"
+  else
+    base64 -d "${key_file}" > "${key_path}"
+  fi
 elif [[ -n "${key_b64}" ]]; then
   printf '%s' "${key_b64}" | base64 -d > "${key_path}"
 else
