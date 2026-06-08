@@ -38,6 +38,14 @@ export default defineConfig(({ mode }) => {
     test: {
       environment: 'jsdom',
       setupFiles: './src/test/setup.ts',
+      server: {
+        deps: {
+          inline: [
+            '@remote-codex/thread-ui',
+            '@remote-codex/plugin-xyz-viewer',
+          ],
+        },
+      },
       env: {
         NODE_ENV: 'test',
       },

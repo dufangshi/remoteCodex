@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@source "../../../packages/thread-ui/src/**/*.{ts,tsx}";
+@source "../../../node_modules/@remote-codex/thread-ui/dist/index.js";
 @source "../../../node_modules/streamdown/dist/*.js";
 @source "../../../node_modules/@streamdown/code/dist/*.js";
 
