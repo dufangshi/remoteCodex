@@ -20,7 +20,7 @@ import {
   ThreadTurnPriceEstimateDto,
   ThreadTurnTokenUsageDto,
   truncateAutoThreadTitle,
-} from '../../../../packages/shared/src/index';
+} from '@remote-codex/shared';
 import {
   AppShellMenuButton,
   AppShellNavigationMenu,

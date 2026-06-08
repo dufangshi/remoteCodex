@@ -7,12 +7,12 @@ import type {
   AgentBackendInstallationDto,
   ProviderHostConfigArchiveDto,
   WorkspaceSettingsDto,
-} from '../../../../packages/shared/src/index';
+} from '@remote-codex/shared';
 import {
   agentBackendIds,
   agentBackendMetadata,
   defaultAgentBackendId,
-} from '../../../../packages/shared/src/index';
+} from '@remote-codex/shared';
 import {
   ApiError,
   applyProviderHostConfigArchive,

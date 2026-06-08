@@ -1,7 +1,7 @@
 import { FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import type { AgentBackendIdDto } from '../../../../packages/shared/src/index';
+import type { AgentBackendIdDto } from '@remote-codex/shared';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import {
   closeControlPlaneSession,

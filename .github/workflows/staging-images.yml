@@ -74,6 +74,7 @@ jobs:
     env:
       RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
       ELAGENTE_HARNESS_ADMIN_KEY: ${{ secrets.ELAGENTE_HARNESS_ADMIN_KEY }}
+      REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64: ${{ secrets.REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64 }}
 
     steps:
       - name: Checkout
@@ -140,6 +141,7 @@ jobs:
             -t "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${WORKER_ECR_REPOSITORY}:${{ steps.image.outputs.tag }}" \
             --build-arg REMOTE_CODEX_IMAGE_VERSION="${{ steps.image.outputs.tag }}" \
             --build-arg REMOTE_CODEX_GIT_SHA="${GITHUB_SHA}" \
+            --secret id=remote_codex_thread_ui_deploy_key,env=REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64 \
             .
 
       - name: Smoke worker image
@@ -173,6 +175,7 @@ jobs:
             -t "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ROUTER_ECR_REPOSITORY}:${{ steps.image.outputs.tag }}" \
             --build-arg REMOTE_CODEX_IMAGE_VERSION="${{ steps.image.outputs.tag }}" \
             --build-arg REMOTE_CODEX_GIT_SHA="${GITHUB_SHA}" \
+            --secret id=remote_codex_thread_ui_deploy_key,env=REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64 \
             .
 
       - name: Smoke sandbox router image
@@ -244,7 +247,8 @@ jobs:
               "ELAGENTE_HARNESS_APP_KEY_SECRET_NAME=${ELAGENTE_HARNESS_APP_KEY_SECRET_NAME}" \
               "ELAGENTE_HARNESS_PROVIDER=${ELAGENTE_HARNESS_PROVIDER}" \
               "ELAGENTE_HARNESS_LEGACY_ADMIN_FALLBACK=${ELAGENTE_HARNESS_LEGACY_ADMIN_FALLBACK}" \
-              "REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED=${REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED}"; then
+              "REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED=${REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED}" \
+              "REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64=${REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64}"; then
               break
             fi
 
@@ -301,7 +305,8 @@ jobs:
               --service "${RAILWAY_FRONTEND_SERVICE}" \
               --environment "${RAILWAY_ENVIRONMENT}" \
               "VITE_CONTROL_PLANE_BASE_URL=${STAGING_CONTROL_PLANE_BASE_URL}" \
-              "FRONTEND_BUILD_SHA=${GITHUB_SHA}"; then
+              "FRONTEND_BUILD_SHA=${GITHUB_SHA}" \
+              "REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64=${REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64}"; then
               break
             fi
             if [[ "${attempt}" == "3" ]]; then

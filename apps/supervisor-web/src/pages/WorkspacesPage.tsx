@@ -1,7 +1,7 @@
 import { KeyboardEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
-import type { WorkspaceDto } from '../../../../packages/shared/src/index';
+import type { WorkspaceDto } from '@remote-codex/shared';
 import {
   AppShellMenuButton,
   AppShellNavigationMenu,

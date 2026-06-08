@@ -3,7 +3,7 @@ import type { ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ThreadShellPanel } from './ThreadShellPanel';
-import type { ShellSessionDto, ThreadShellStateDto } from '../../../../packages/shared/src/index';
+import type { ShellSessionDto, ThreadShellStateDto } from '@remote-codex/shared';
 import type { ThreadShellAdapter } from '@remote-codex/thread-ui';
 
 vi.mock('xterm', () => ({

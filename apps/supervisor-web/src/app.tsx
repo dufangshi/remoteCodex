@@ -9,11 +9,11 @@ import {
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { PluginProvider } from '@remote-codex/thread-ui';
 
-import type { AgentBackendIdDto } from '../../../packages/shared/src/index';
+import type { AgentBackendIdDto } from '@remote-codex/shared';
 import {
   defaultAgentBackendId,
   normalizeAgentBackendId,
-} from '../../../packages/shared/src/index';
+} from '@remote-codex/shared';
 import {
   AppShellNavContext,
   type ThemeMode,

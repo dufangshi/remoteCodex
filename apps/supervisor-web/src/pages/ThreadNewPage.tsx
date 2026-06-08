@@ -8,7 +8,7 @@ import {
   defaultAgentBackendId,
   ModelOptionDto,
   WorkspaceDto,
-} from '../../../../packages/shared/src/index';
+} from '@remote-codex/shared';
 import { useAppShellNav } from '../components/AppShellNavContext';
 import {
   ApiError,

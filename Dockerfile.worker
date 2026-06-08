@@ -7,6 +7,7 @@ ARG ANTHROPIC_CLAUDE_CODE_VERSION=2.1.150
 ARG ANTHROPIC_CLAUDE_AGENT_SDK_VERSION=0.3.150
 ARG OPENCODE_AI_VERSION=1.15.10
 ARG OPENCODE_AI_SDK_VERSION=1.15.10
+ARG REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64
 
 LABEL org.opencontainers.image.title="remote-codex-worker" \
       org.opencontainers.image.version="${REMOTE_CODEX_IMAGE_VERSION}" \
@@ -35,15 +36,21 @@ RUN corepack enable
 WORKDIR /opt/remote-codex
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY scripts/setup-thread-ui-git-auth.sh ./scripts/setup-thread-ui-git-auth.sh
 COPY apps ./apps
 COPY packages ./packages
 COPY config ./config
 
-RUN pnpm install --frozen-lockfile \
+RUN --mount=type=secret,id=remote_codex_thread_ui_deploy_key,required=false \
+  REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_FILE=/run/secrets/remote_codex_thread_ui_deploy_key \
+  REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64="${REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64}" \
+  bash ./scripts/setup-thread-ui-git-auth.sh \
+  && pnpm install --frozen-lockfile \
   && pnpm --filter @remote-codex/supervisor-api build \
   && pnpm --filter @remote-codex/db build \
   && pnpm --filter @remote-codex/config build \
-  && pnpm store prune
+  && pnpm store prune \
+  && bash ./scripts/setup-thread-ui-git-auth.sh --cleanup
 
 RUN useradd --create-home --home-dir /home/agent --shell /bin/bash agent \
   && mkdir -p /workspace /home/agent/.remote-codex /home/agent/.codex /home/agent/.claude /home/agent/.opencode \

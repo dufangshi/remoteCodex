@@ -3,7 +3,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ThreadDetailDto } from '../../../../packages/shared/src/index';
+import type { ThreadDetailDto } from '@remote-codex/shared';
 import {
   AppShellNavContext,
   AppShellSettingsDialog,

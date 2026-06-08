@@ -9,7 +9,7 @@ import type {
   ThreadHistoryItemDto,
   ThreadDto,
   ThreadStatusDto,
-} from '../../../../packages/shared/src/index';
+} from '@remote-codex/shared';
 import {
   AppShellMenuButton,
   AppShellNavigationMenu,

@@ -1,6 +1,7 @@
 FROM node:22-bookworm-slim AS base
 
 ARG KUBECTL_VERSION=v1.34.2
+ARG REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64
 
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
@@ -11,6 +12,8 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
+    git \
+    openssh-client \
     unzip \
   && rm -rf /var/lib/apt/lists/*
 
@@ -27,20 +30,26 @@ RUN corepack enable
 WORKDIR /opt/remote-codex
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY scripts/setup-thread-ui-git-auth.sh ./scripts/setup-thread-ui-git-auth.sh
 COPY scripts/start-control-plane-railway.sh ./scripts/start-control-plane-railway.sh
 COPY apps/control-plane-api ./apps/control-plane-api
 COPY packages/config ./packages/config
 COPY packages/db ./packages/db
 COPY packages/shared ./packages/shared
 
-RUN pnpm install --frozen-lockfile \
+RUN --mount=type=secret,id=remote_codex_thread_ui_deploy_key,required=false \
+  REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_FILE=/run/secrets/remote_codex_thread_ui_deploy_key \
+  REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64="${REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64}" \
+  bash ./scripts/setup-thread-ui-git-auth.sh \
+  && pnpm --filter @remote-codex/control-plane-api... install --frozen-lockfile \
   && pnpm --filter @remote-codex/control-plane-api build \
   && pnpm --filter @remote-codex/config build \
   && pnpm --filter @remote-codex/db build \
   && pnpm --filter @remote-codex/shared build \
-  && pnpm prune --prod \
+  && CI=true pnpm prune --prod \
   && pnpm store prune \
-  && chmod +x /opt/remote-codex/scripts/start-control-plane-railway.sh
+  && chmod +x /opt/remote-codex/scripts/start-control-plane-railway.sh \
+  && bash ./scripts/setup-thread-ui-git-auth.sh --cleanup
 
 EXPOSE 8790
 

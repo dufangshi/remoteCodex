@@ -54,7 +54,7 @@ import type {
   UpdateWorkspaceFavoriteInput,
   WorkspaceDto,
   WorkspaceSettingsDto,
-} from '../../../../packages/shared/src/index';
+} from '@remote-codex/shared';
 export type { PromptAttachmentUpload } from '@remote-codex/thread-ui';
 import type { PromptAttachmentUpload } from '@remote-codex/thread-ui';
 
