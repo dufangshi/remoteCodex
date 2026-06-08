@@ -222,7 +222,7 @@ jobs:
           worker_image="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${WORKER_ECR_REPOSITORY}:${{ steps.image.outputs.tag }}"
           cors_allowed_origins="https://debug.lnz-study.com"
           for attempt in 1 2 3; do
-            if npm install -g @railway/cli; then
+            if timeout 180s npm install -g @railway/cli --no-audit --no-fund; then
               break
             fi
             if [[ "${attempt}" == "3" ]]; then
@@ -261,7 +261,7 @@ jobs:
               break
             fi
 
-            variables="$(railway variable list \
+            variables="$(timeout 120s railway variable list \
               --service "${RAILWAY_CONTROL_PLANE_SERVICE}" \
               --environment "${RAILWAY_ENVIRONMENT}" \
               --kv || true)"
@@ -309,7 +309,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
-            if npm install -g @railway/cli; then
+            if timeout 180s npm install -g @railway/cli --no-audit --no-fund; then
               break
             fi
             if [[ "${attempt}" == "3" ]]; then
@@ -386,7 +386,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
-            if npm install -g @railway/cli; then
+            if timeout 180s npm install -g @railway/cli --no-audit --no-fund; then
               break
             fi
             if [[ "${attempt}" == "3" ]]; then
