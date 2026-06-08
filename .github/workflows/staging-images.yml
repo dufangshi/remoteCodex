@@ -221,11 +221,21 @@ jobs:
           set -euo pipefail
           worker_image="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${WORKER_ECR_REPOSITORY}:${{ steps.image.outputs.tag }}"
           cors_allowed_origins="https://debug.lnz-study.com"
-          npm install -g @railway/cli
+          for attempt in 1 2 3; do
+            if npm install -g @railway/cli; then
+              break
+            fi
+            if [[ "${attempt}" == "3" ]]; then
+              echo "Railway CLI install failed after ${attempt} attempts." >&2
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
           for attempt in 1 2 3; do
             if railway variable set \
               --service "${RAILWAY_CONTROL_PLANE_SERVICE}" \
               --environment "${RAILWAY_ENVIRONMENT}" \
+              --skip-deploys \
               "SANDBOX_WORKER_IMAGE_TAG=${{ steps.image.outputs.tag }}" \
               "SANDBOX_DEFAULT_IMAGE=${worker_image}" \
               "CONTROL_PLANE_CORS_ALLOWED_ORIGINS=${cors_allowed_origins}" \
@@ -299,11 +309,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm install -g @railway/cli
+          for attempt in 1 2 3; do
+            if npm install -g @railway/cli; then
+              break
+            fi
+            if [[ "${attempt}" == "3" ]]; then
+              echo "Railway CLI install failed after ${attempt} attempts." >&2
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
           for attempt in 1 2 3; do
             if railway variable set \
               --service "${RAILWAY_FRONTEND_SERVICE}" \
               --environment "${RAILWAY_ENVIRONMENT}" \
+              --skip-deploys \
               "VITE_CONTROL_PLANE_BASE_URL=${STAGING_CONTROL_PLANE_BASE_URL}" \
               "FRONTEND_BUILD_SHA=${GITHUB_SHA}" \
               "REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64=${REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64}"; then
@@ -366,11 +386,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm install -g @railway/cli
+          for attempt in 1 2 3; do
+            if npm install -g @railway/cli; then
+              break
+            fi
+            if [[ "${attempt}" == "3" ]]; then
+              echo "Railway CLI install failed after ${attempt} attempts." >&2
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
           railway logs \
             --service "${RAILWAY_CONTROL_PLANE_SERVICE}" \
             --environment "${RAILWAY_ENVIRONMENT}" \
             --latest \
+            --build \
+            --lines 200 \
+            --json || true
+          railway logs \
+            --service "${RAILWAY_CONTROL_PLANE_SERVICE}" \
+            --environment "${RAILWAY_ENVIRONMENT}" \
+            --latest \
+            --deployment \
             --lines 120 \
             --json || true
           railway logs \
