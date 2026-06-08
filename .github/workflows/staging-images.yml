@@ -232,7 +232,7 @@ jobs:
             sleep $((attempt * 10))
           done
           for attempt in 1 2 3; do
-            if railway variable set \
+            if timeout 120s railway variable set \
               --service "${RAILWAY_CONTROL_PLANE_SERVICE}" \
               --environment "${RAILWAY_ENVIRONMENT}" \
               --skip-deploys \
@@ -257,8 +257,7 @@ jobs:
               "ELAGENTE_HARNESS_APP_KEY_SECRET_NAME=${ELAGENTE_HARNESS_APP_KEY_SECRET_NAME}" \
               "ELAGENTE_HARNESS_PROVIDER=${ELAGENTE_HARNESS_PROVIDER}" \
               "ELAGENTE_HARNESS_LEGACY_ADMIN_FALLBACK=${ELAGENTE_HARNESS_LEGACY_ADMIN_FALLBACK}" \
-              "REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED=${REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED}" \
-              "REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64=${REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64}"; then
+              "REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED=${REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED}"; then
               break
             fi
 
@@ -298,7 +297,7 @@ jobs:
 
             sleep $((attempt * 10))
           done
-          railway up \
+          timeout 30m railway up \
             --service "${RAILWAY_CONTROL_PLANE_SERVICE}" \
             --environment "${RAILWAY_ENVIRONMENT}" \
             --ci \
@@ -320,7 +319,7 @@ jobs:
             sleep $((attempt * 10))
           done
           for attempt in 1 2 3; do
-            if railway variable set \
+            if timeout 120s railway variable set \
               --service "${RAILWAY_FRONTEND_SERVICE}" \
               --environment "${RAILWAY_ENVIRONMENT}" \
               --skip-deploys \
@@ -337,7 +336,7 @@ jobs:
           done
           cp railway.frontend.json railway.json
           for attempt in 1 2 3; do
-            if railway up \
+            if timeout 30m railway up \
               --service "${RAILWAY_FRONTEND_SERVICE}" \
               --environment "${RAILWAY_ENVIRONMENT}" \
               --ci \
