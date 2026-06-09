@@ -48,6 +48,63 @@ should not be the primary live workspace filesystem for interactive agent runs.
   groups.
 - The sandbox namespace has the PVC named by `SANDBOX_WORKSPACE_PVC_NAME`.
 
+## EKS Configuration Plan
+
+1. Confirm the EKS cluster can mount EFS from Fargate Pods.
+   - The worker Pods run on EKS Fargate, so use EFS CSI static provisioning.
+   - Do not rely on dynamic EFS provisioning for Fargate.
+   - Confirm the cluster has the EFS CSI support required by the AWS account and
+     cluster version.
+
+2. Create the persistent workspace EFS file system.
+   - Use encryption at rest.
+   - Use `generalPurpose` performance mode for interactive workspace latency.
+   - Use elastic throughput for the first production shape unless measured load
+     justifies provisioned throughput.
+   - Keep lifecycle transition enabled for older inactive files.
+
+3. Create EFS mount targets in the worker private subnets.
+   - Use the same private subnet set that is passed to the control plane as
+     `SANDBOX_SUBNET_IDS`, or a subnet set that those worker Pods can reach.
+   - Confirm VPC DNS resolution and DNS hostnames are enabled; EFS mount helpers
+     depend on DNS.
+
+4. Configure NFS security group access.
+   - Attach an EFS security group to the EFS mount targets.
+   - Allow inbound TCP `2049` from every worker Pod security group in
+     `SANDBOX_SECURITY_GROUP_IDS`.
+   - Keep the worker security groups restricted to the router and required
+     egress paths; the EFS rule should not make workers publicly reachable.
+
+5. Create the Kubernetes static PV and PVC.
+   - Use `driver = "efs.csi.aws.com"`.
+   - Set `volume_handle` to the EFS file system id.
+   - Set access mode `ReadWriteMany`.
+   - Set reclaim policy `Retain` so deleting the PV/PVC does not delete
+     workspace data.
+   - Use an empty `storageClassName` for the static PV/PVC binding.
+   - Create the PVC in the sandbox worker namespace.
+
+6. Inject the control-plane adapter variables.
+   - `SANDBOX_WORKSPACE_PVC_NAME=<pvc name>`
+   - `SANDBOX_WORKSPACE_VOLUME_SUBPATH_PREFIX=<environment name>`
+   - The staging Terraform module writes both values into `control_plane_env`.
+
+7. Confirm the Fargate profile still matches worker Pods.
+   - The namespace and labels used by worker Pods must still match the existing
+     Fargate profile.
+   - Adding a PVC should not change the labels used for scheduling.
+
+8. Verify runtime mount behavior.
+   - Start a sandbox and confirm the worker Pod has the
+     `workspace-persistence` volume.
+   - Confirm the init container completes and creates
+     `<prefix>/<sandbox-id>` on EFS.
+   - Confirm the main worker container sees `/workspace` as writable by uid
+     `1000`.
+   - Create a file under `/workspace`, stop/restart the sandbox, and confirm the
+     file still exists after resume.
+
 ## Tradeoffs
 
 EFS gives the best live Unix filesystem compatibility among managed AWS options,
