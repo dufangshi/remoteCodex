@@ -95,6 +95,31 @@ describe('api request helper', () => {
     expect(headers.has('Content-Type')).toBe(false);
   });
 
+  it('preserves non-JSON upstream error status and body text', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        statusText: 'Service Unavailable',
+        headers: new Headers({ 'content-type': 'text/plain' }),
+        text: async () => 'OpenAI upstream unavailable.',
+      }),
+    );
+
+    await expect(
+      sendThreadPrompt('thread-1', {
+        prompt: 'Trigger outage.',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 503,
+      payload: {
+        code: 'service_unavailable',
+        message: 'Upstream service unavailable (503 Service Unavailable).\nOpenAI upstream unavailable.',
+      },
+    });
+  });
+
   it('uses the expected provider host file endpoints', async () => {
     await fetchProviderHostFile('codex', 'config.toml');
     await updateProviderHostFile('codex', 'auth.json', {

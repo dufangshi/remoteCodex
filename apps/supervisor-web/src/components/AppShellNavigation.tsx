@@ -28,7 +28,11 @@ import {
   updateProviderHostFile,
   updateWorkspaceSettings,
 } from '../lib/api';
-import { type AgentBackendId, type ThemeMode, useAppShellNav } from './AppShellNavContext';
+import {
+  type AgentBackendId,
+  type ThemeMode,
+  useAppShellNav,
+} from './AppShellNavContext';
 import { usePlugins } from '@remote-codex/thread-ui';
 
 function MenuIcon() {
@@ -95,10 +99,13 @@ const emptyManagementSchema: AgentBackendDto['managementSchema'] = {
   buildRestart: false,
 };
 
-const backendInstallationFallbacks: Record<AgentBackendIdDto, Pick<
-  AgentBackendInstallationDto,
-  'packageName' | 'installCommand' | 'updateCommand'
->> = {
+const backendInstallationFallbacks: Record<
+  AgentBackendIdDto,
+  Pick<
+    AgentBackendInstallationDto,
+    'packageName' | 'installCommand' | 'updateCommand'
+  >
+> = {
   codex: {
     packageName: '@openai/codex',
     installCommand: null,
@@ -106,8 +113,10 @@ const backendInstallationFallbacks: Record<AgentBackendIdDto, Pick<
   },
   claude: {
     packageName: '@anthropic-ai/claude-agent-sdk',
-    installCommand: 'npm install -g @anthropic-ai/claude-code @anthropic-ai/claude-agent-sdk',
-    updateCommand: 'npm install -g @anthropic-ai/claude-code@latest @anthropic-ai/claude-agent-sdk@latest',
+    installCommand:
+      'npm install -g @anthropic-ai/claude-code @anthropic-ai/claude-agent-sdk',
+    updateCommand:
+      'npm install -g @anthropic-ai/claude-code@latest @anthropic-ai/claude-agent-sdk@latest',
   },
   opencode: {
     packageName: 'opencode-ai',
@@ -116,7 +125,9 @@ const backendInstallationFallbacks: Record<AgentBackendIdDto, Pick<
   },
 };
 
-function unavailableInstallation(provider: AgentBackendIdDto): AgentBackendInstallationDto {
+function unavailableInstallation(
+  provider: AgentBackendIdDto,
+): AgentBackendInstallationDto {
   const fallback = backendInstallationFallbacks[provider];
   return {
     packageName: fallback.packageName,
@@ -130,7 +141,10 @@ function unavailableInstallation(provider: AgentBackendIdDto): AgentBackendInsta
   };
 }
 
-function unavailableBackend(provider: AgentBackendIdDto, displayName: string): AgentBackendDto {
+function unavailableBackend(
+  provider: AgentBackendIdDto,
+  displayName: string,
+): AgentBackendDto {
   return {
     provider,
     displayName,
@@ -192,7 +206,8 @@ function unavailableBackend(provider: AgentBackendIdDto, displayName: string): A
 }
 
 function normalizeBackendDescriptor(backend: AgentBackendDto): AgentBackendDto {
-  const installation = backend.installation ?? unavailableInstallation(backend.provider);
+  const installation =
+    backend.installation ?? unavailableInstallation(backend.provider);
   return {
     ...backend,
     installation: {
@@ -210,8 +225,8 @@ const fallbackBackends: AgentBackendDto[] = [
 
 function fallbackManagementSchema(provider: AgentBackendId) {
   return (
-    fallbackBackends.find((backend) => backend.provider === provider)?.managementSchema ??
-    emptyManagementSchema
+    fallbackBackends.find((backend) => backend.provider === provider)
+      ?.managementSchema ?? emptyManagementSchema
   );
 }
 
@@ -253,11 +268,7 @@ function defaultProviderHostFileState(name: string) {
   };
 }
 
-export function AppShellMenuButton({
-  className = '',
-}: {
-  className?: string;
-}) {
+export function AppShellMenuButton({ className = '' }: { className?: string }) {
   const shellNav = useAppShellNav();
 
   if (!shellNav) {
@@ -307,9 +318,10 @@ export function AppShellNavigationMenu({
         return;
       }
 
-      const trigger = target instanceof Element
-        ? target.closest('[aria-controls="app-shell-navigation-menu"]')
-        : null;
+      const trigger =
+        target instanceof Element
+          ? target.closest('[aria-controls="app-shell-navigation-menu"]')
+          : null;
       if (trigger) {
         return;
       }
@@ -380,7 +392,11 @@ export function AppShellNavigationMenu({
   );
 }
 
-export function AppShellSettingsDialog() {
+export function AppShellSettingsDialog({
+  embedded = false,
+}: {
+  embedded?: boolean;
+} = {}) {
   const shellNav = useAppShellNav();
   const plugins = usePlugins();
   const [pluginImportDraft, setPluginImportDraft] = useState('');
@@ -393,6 +409,7 @@ export function AppShellSettingsDialog() {
     message: null,
     error: null,
   });
+  const [pluginsPanelOpen, setPluginsPanelOpen] = useState(false);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [files, setFiles] = useState<
     Record<
@@ -436,7 +453,8 @@ export function AppShellSettingsDialog() {
     operatingAction: null,
     message: null,
   });
-  const [workspaceSettings, setWorkspaceSettings] = useState<WorkspaceSettingsDto | null>(null);
+  const [workspaceSettings, setWorkspaceSettings] =
+    useState<WorkspaceSettingsDto | null>(null);
   const [workspaceSettingsState, setWorkspaceSettingsState] = useState<{
     devHomeDraft: string;
     loading: boolean;
@@ -468,6 +486,7 @@ export function AppShellSettingsDialog() {
     error: null,
   });
   const selectedThemeMode = shellNav?.themeMode ?? 'system';
+  const settingsVisible = embedded || Boolean(shellNav?.settingsOpen);
 
   async function handleImportPlugin() {
     const manifestJson = pluginImportDraft.trim();
@@ -495,22 +514,37 @@ export function AppShellSettingsDialog() {
       setPluginImportState({
         busy: false,
         message: null,
-        error: error instanceof Error ? error.message : 'Unable to import plugin manifest.',
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Unable to import plugin manifest.',
       });
     }
   }
   const effectiveTheme = shellNav?.effectiveTheme ?? 'dark';
   const selectedBackend = shellNav?.defaultBackend ?? defaultAgentBackendId;
+  const enabledPluginCount = plugins.plugins.filter(
+    (plugin) => plugin.enabled,
+  ).length;
+  const pluginCountLabel = plugins.loading
+    ? 'Loading...'
+    : `${enabledPluginCount}/${plugins.plugins.length} enabled`;
   const activeBackend =
     backends.find((backend) => backend.provider === selectedBackend) ??
     fallbackBackends.find((backend) => backend.provider === selectedBackend) ??
     fallbackBackends[0]!;
   const activeManagementSchema =
-    activeBackend.managementSchema ?? fallbackManagementSchema(activeBackend.provider);
+    activeBackend.managementSchema ??
+    fallbackManagementSchema(activeBackend.provider);
   const editableFiles = activeManagementSchema.hostConfigFiles;
 
   useEffect(() => {
-    if (!shellNav?.settingsOpen || !activeManagementSchema.configArchives) {
+    if (
+      !settingsVisible ||
+      embedded ||
+      !shellNav ||
+      !activeManagementSchema.configArchives
+    ) {
       return;
     }
 
@@ -526,10 +560,15 @@ export function AppShellSettingsDialog() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [activeManagementSchema.configArchives, shellNav]);
+  }, [
+    activeManagementSchema.configArchives,
+    embedded,
+    settingsVisible,
+    shellNav,
+  ]);
 
   useEffect(() => {
-    if (!shellNav?.settingsOpen) {
+    if (!settingsVisible) {
       return;
     }
 
@@ -576,10 +615,10 @@ export function AppShellSettingsDialog() {
     return () => {
       cancelled = true;
     };
-  }, [shellNav?.settingsOpen]);
+  }, [settingsVisible]);
 
   useEffect(() => {
-    if (!shellNav?.settingsOpen) {
+    if (!settingsVisible) {
       return;
     }
 
@@ -622,10 +661,13 @@ export function AppShellSettingsDialog() {
     return () => {
       cancelled = true;
     };
-  }, [shellNav]);
+  }, [settingsVisible]);
 
   useEffect(() => {
-    if (!shellNav?.settingsOpen || !activeBackend.capabilities.management.hostConfigFiles) {
+    if (
+      !settingsVisible ||
+      !activeBackend.capabilities.management.hostConfigFiles
+    ) {
       return;
     }
 
@@ -650,7 +692,10 @@ export function AppShellSettingsDialog() {
       const results = await Promise.allSettled(
         editableFiles.map(async (file) => ({
           name: file.name,
-          result: await fetchProviderHostFile(activeBackend.provider, file.name),
+          result: await fetchProviderHostFile(
+            activeBackend.provider,
+            file.name,
+          ),
         })),
       );
 
@@ -663,10 +708,7 @@ export function AppShellSettingsDialog() {
 
         for (const result of results) {
           if (result.status === 'fulfilled') {
-            const {
-              name,
-              result: fileResult,
-            } = result.value;
+            const { name, result: fileResult } = result.value;
             next[name] = {
               path: fileResult.path,
               exists: fileResult.exists,
@@ -685,7 +727,8 @@ export function AppShellSettingsDialog() {
               ? result.reason.message
               : 'Unable to load the file.';
           const failedName =
-            editableFiles[results.indexOf(result)]?.name ?? editableFiles[0]?.name;
+            editableFiles[results.indexOf(result)]?.name ??
+            editableFiles[0]?.name;
           if (!failedName) {
             continue;
           }
@@ -712,11 +755,11 @@ export function AppShellSettingsDialog() {
     activeBackend.capabilities.management.hostConfigFiles,
     activeBackend.provider,
     editableFiles,
-    shellNav?.settingsOpen,
+    settingsVisible,
   ]);
 
   useEffect(() => {
-    if (!shellNav?.settingsOpen) {
+    if (!settingsVisible) {
       return;
     }
 
@@ -731,7 +774,9 @@ export function AppShellSettingsDialog() {
       }));
 
       try {
-        const results = await fetchProviderHostConfigArchives(activeBackend.provider);
+        const results = await fetchProviderHostConfigArchives(
+          activeBackend.provider,
+        );
         if (cancelled) {
           return;
         }
@@ -762,7 +807,11 @@ export function AppShellSettingsDialog() {
     return () => {
       cancelled = true;
     };
-  }, [activeBackend.provider, activeManagementSchema.configArchives, shellNav?.settingsOpen]);
+  }, [
+    activeBackend.provider,
+    activeManagementSchema.configArchives,
+    settingsVisible,
+  ]);
 
   async function handleRestartAppServer() {
     if (restartState.busy || backendState.saving) {
@@ -788,7 +837,9 @@ export function AppShellSettingsDialog() {
       });
       setBackends((current) =>
         current.map((backend) =>
-          backend.provider === normalizedRuntime.provider ? normalizedRuntime : backend,
+          backend.provider === normalizedRuntime.provider
+            ? normalizedRuntime
+            : backend,
         ),
       );
     } catch (error) {
@@ -796,7 +847,9 @@ export function AppShellSettingsDialog() {
         busy: false,
         message: null,
         error:
-          error instanceof ApiError ? error.message : 'Unable to restart the app server.',
+          error instanceof ApiError
+            ? error.message
+            : 'Unable to restart the app server.',
       });
     }
   }
@@ -824,7 +877,9 @@ export function AppShellSettingsDialog() {
       const normalizedRuntime = normalizeBackendDescriptor(runtime);
       setBackends((current) =>
         current.map((entry) =>
-          entry.provider === normalizedRuntime.provider ? normalizedRuntime : entry,
+          entry.provider === normalizedRuntime.provider
+            ? normalizedRuntime
+            : entry,
         ),
       );
       setBackendState((current) => ({
@@ -936,9 +991,13 @@ export function AppShellSettingsDialog() {
     }));
 
     try {
-      const updated = await updateProviderHostFile(activeBackend.provider, name, {
-        content: fileState.draftContent,
-      });
+      const updated = await updateProviderHostFile(
+        activeBackend.provider,
+        name,
+        {
+          content: fileState.draftContent,
+        },
+      );
 
       setFiles((current) => ({
         ...current,
@@ -955,13 +1014,15 @@ export function AppShellSettingsDialog() {
       }));
     } catch (error) {
       setFiles((current) => ({
-      ...current,
-      [name]: {
+        ...current,
+        [name]: {
           ...defaultProviderHostFileState(name),
           ...current[name],
           saving: false,
           error:
-            error instanceof ApiError ? error.message : 'Unable to save the file.',
+            error instanceof ApiError
+              ? error.message
+              : 'Unable to save the file.',
           saveMessage: null,
         },
       }));
@@ -981,7 +1042,9 @@ export function AppShellSettingsDialog() {
     }));
 
     try {
-      const archive = await createProviderHostConfigArchive(activeBackend.provider);
+      const archive = await createProviderHostConfigArchive(
+        activeBackend.provider,
+      );
       setArchives((current) => [archive, ...current]);
       setArchivesState((current) => ({
         ...current,
@@ -1013,7 +1076,10 @@ export function AppShellSettingsDialog() {
     }));
 
     try {
-      const result = await applyProviderHostConfigArchive(activeBackend.provider, archive.id);
+      const result = await applyProviderHostConfigArchive(
+        activeBackend.provider,
+        archive.id,
+      );
       setArchivesState((current) => ({
         ...current,
         applyingId: null,
@@ -1047,7 +1113,11 @@ export function AppShellSettingsDialog() {
     }));
 
     try {
-      const updated = await renameProviderHostConfigArchive(activeBackend.provider, archive.id, { label });
+      const updated = await renameProviderHostConfigArchive(
+        activeBackend.provider,
+        archive.id,
+        { label },
+      );
       setArchives((current) =>
         current.map((entry) => (entry.id === archive.id ? updated : entry)),
       );
@@ -1068,24 +1138,112 @@ export function AppShellSettingsDialog() {
     }
   }
 
-  if (!shellNav?.settingsOpen) {
+  if (!settingsVisible) {
     return null;
   }
 
-  return (
-    <div className="fixed inset-0 z-[70] flex items-start justify-center p-4 pt-[max(env(safe-area-inset-top),1rem)] sm:items-center">
-      <button
-        type="button"
-        aria-label="Close Settings"
-        onClick={shellNav.closeSettings}
-        className="ui-overlay-scrim absolute inset-0 backdrop-blur-sm"
-      />
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-label="Settings"
-        className="relative z-10 flex max-h-[calc(100vh-2rem)] w-full max-w-4xl flex-col overflow-hidden rounded-[1.8rem] border border-[var(--theme-border)] bg-[var(--theme-panel)] shadow-2xl shadow-black/20"
-      >
+  const pluginsManagementNode = (
+    <>
+      <div className="mt-3 grid gap-2">
+        {plugins.plugins.map((plugin) => (
+          <label
+            key={plugin.id}
+            className="flex items-start justify-between gap-3 rounded-[1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-2.5"
+          >
+            <span className="min-w-0">
+              <span className="block text-sm font-medium text-[var(--theme-fg)]">
+                {plugin.name}
+              </span>
+              <span className="mt-1 block text-xs leading-5 text-[var(--theme-fg-muted)]">
+                {plugin.description}
+              </span>
+              <span className="mt-2 block text-[10px] uppercase tracking-[0.16em] text-[var(--theme-fg-muted)]">
+                {[
+                  ...plugin.capabilities.artifactTypes.map((type) => type.type),
+                  ...plugin.capabilities.threadPanels.map(
+                    (panel) => panel.kind ?? panel.id,
+                  ),
+                ].join(', ') || 'utility'}
+              </span>
+              <span className="mt-1 block text-[10px] uppercase tracking-[0.16em] text-[var(--theme-fg-muted)]">
+                {plugin.source === 'imported'
+                  ? 'Imported manifest'
+                  : 'Built-in module'}
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              checked={plugin.enabled}
+              onChange={(event) =>
+                void plugins.setPluginEnabled(
+                  plugin.id,
+                  event.currentTarget.checked,
+                )
+              }
+              className="mt-1 h-4 w-4 shrink-0 accent-[var(--theme-accent-solid)]"
+            />
+          </label>
+        ))}
+        {plugins.plugins.length === 0 && (
+          <p className="rounded-[1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-3 text-xs text-[var(--theme-fg-muted)]">
+            No plugins are registered.
+          </p>
+        )}
+      </div>
+      <div className="mt-3 border-t border-[var(--theme-border)] pt-3">
+        <label className="block text-xs font-medium text-[var(--theme-fg)]">
+          Import manifest JSON
+        </label>
+        <textarea
+          value={pluginImportDraft}
+          onChange={(event) => {
+            setPluginImportDraft(event.currentTarget.value);
+            if (pluginImportState.message || pluginImportState.error) {
+              setPluginImportState({
+                busy: false,
+                message: null,
+                error: null,
+              });
+            }
+          }}
+          placeholder='{"id":"example.viewer","name":"Example Viewer","version":"0.1.0",...}'
+          rows={4}
+          className="mt-2 min-h-28 w-full resize-y rounded-[0.9rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-2 font-mono text-xs leading-5 text-[var(--theme-fg)] outline-none transition placeholder:text-[var(--theme-fg-muted)] focus:border-[var(--theme-accent-border)]"
+        />
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+          <p className="max-w-[42rem] text-xs leading-5 text-[var(--theme-fg-muted)]">
+            Imports register manifest-declared artifact types. Rendering code
+            still needs a trusted built-in frontend module.
+          </p>
+          <button
+            type="button"
+            onClick={() => void handleImportPlugin()}
+            disabled={!pluginImportDraft.trim() || pluginImportState.busy}
+            className="rounded-full border border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)] px-3 py-1.5 text-xs font-medium text-[var(--theme-accent-strong)] transition hover:bg-[var(--theme-hover)] disabled:cursor-not-allowed disabled:border-[var(--theme-border)] disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
+          >
+            {pluginImportState.busy ? 'Importing...' : 'Import'}
+          </button>
+        </div>
+        {pluginImportState.error && (
+          <p className="mt-2 text-xs text-rose-300">
+            {pluginImportState.error}
+          </p>
+        )}
+        {pluginImportState.message && (
+          <p className="mt-2 text-xs text-emerald-300">
+            {pluginImportState.message}
+          </p>
+        )}
+      </div>
+      {plugins.error && (
+        <p className="mt-2 text-xs text-rose-300">{plugins.error}</p>
+      )}
+    </>
+  );
+
+  const settingsContentNode = (
+    <>
+      {!embedded ? (
         <div className="shrink-0 p-5 pb-0">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -1102,21 +1260,28 @@ export function AppShellSettingsDialog() {
             <button
               type="button"
               aria-label="Close Settings"
-              onClick={shellNav.closeSettings}
+              onClick={shellNav?.closeSettings}
               className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--theme-border-strong)] bg-[var(--theme-surface-strong)] text-[var(--theme-fg)] transition hover:border-[var(--theme-border-contrast)] hover:bg-[var(--theme-hover)]"
             >
               <CloseIcon />
             </button>
           </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-5 pt-5">
-          <div className="space-y-2">
+      ) : null}
+      <div
+        className={`min-h-0 flex-1 overflow-y-auto ${embedded ? 'p-0' : 'p-5 pt-5'}`}
+      >
+        <div className="space-y-2">
+          {!embedded ? (
             <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-[var(--theme-fg)]">Appearance</p>
+                  <p className="text-sm font-medium text-[var(--theme-fg)]">
+                    Appearance
+                  </p>
                   <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                    Choose light, dark, or follow the system setting. Active: {effectiveTheme}.
+                    Choose light, dark, or follow the system setting. Active:{' '}
+                    {effectiveTheme}.
                   </p>
                 </div>
               </div>
@@ -1127,7 +1292,7 @@ export function AppShellSettingsDialog() {
                     <button
                       key={option.value}
                       type="button"
-                      onClick={() => shellNav.setThemeMode(option.value)}
+                      onClick={() => shellNav?.setThemeMode(option.value)}
                       className={`block rounded-[1rem] border px-3 py-2.5 text-left transition ${
                         active
                           ? 'border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)]'
@@ -1152,359 +1317,339 @@ export function AppShellSettingsDialog() {
                 })}
               </div>
             </div>
+          ) : null}
 
-            <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-[var(--theme-fg)]">Plugins</p>
-                  <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                    Enable renderers and thread extensions loaded by this supervisor.
-                  </p>
-                </div>
+          <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-[var(--theme-fg)]">
+                  Plugins
+                </p>
+                <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
+                  Enable renderers and thread extensions loaded by this
+                  supervisor.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void plugins.refresh()}
+                disabled={plugins.loading}
+                className="rounded-full border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-1.5 text-xs font-medium text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] disabled:cursor-not-allowed disabled:text-[var(--theme-fg-muted)]"
+              >
+                {plugins.loading ? 'Loading...' : 'Refresh'}
+              </button>
+            </div>
+            {embedded ? (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-[0.95rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-2">
+                <span className="text-xs text-[var(--theme-fg-muted)]">
+                  {pluginCountLabel}
+                </span>
                 <button
                   type="button"
-                  onClick={() => void plugins.refresh()}
-                  disabled={plugins.loading}
-                  className="rounded-full border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-1.5 text-xs font-medium text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] disabled:cursor-not-allowed disabled:text-[var(--theme-fg-muted)]"
+                  onClick={() => setPluginsPanelOpen(true)}
+                  className="rounded-full border border-[var(--theme-border-strong)] bg-[var(--theme-panel)] px-3 py-1.5 text-xs font-medium text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)]"
                 >
-                  {plugins.loading ? 'Loading...' : 'Refresh'}
+                  Manage
                 </button>
               </div>
-              <div className="mt-3 grid gap-2">
-                {plugins.plugins.map((plugin) => (
-                  <label
-                    key={plugin.id}
-                    className="flex items-start justify-between gap-3 rounded-[1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-2.5"
-                  >
-                    <span className="min-w-0">
-                      <span className="block text-sm font-medium text-[var(--theme-fg)]">
-                        {plugin.name}
-                      </span>
-                      <span className="mt-1 block text-xs leading-5 text-[var(--theme-fg-muted)]">
-                        {plugin.description}
-                      </span>
-                      <span className="mt-2 block text-[10px] uppercase tracking-[0.16em] text-[var(--theme-fg-muted)]">
-                        {[
-                          ...plugin.capabilities.artifactTypes.map((type) => type.type),
-                          ...plugin.capabilities.threadPanels.map((panel) => panel.kind ?? panel.id),
-                        ].join(', ') || 'utility'}
-                      </span>
-                      <span className="mt-1 block text-[10px] uppercase tracking-[0.16em] text-[var(--theme-fg-muted)]">
-                        {plugin.source === 'imported' ? 'Imported manifest' : 'Built-in module'}
-                      </span>
-                    </span>
-                    <input
-                      type="checkbox"
-                      checked={plugin.enabled}
-                      onChange={(event) =>
-                        void plugins.setPluginEnabled(plugin.id, event.currentTarget.checked)
-                      }
-                      className="mt-1 h-4 w-4 shrink-0 accent-[var(--theme-accent-solid)]"
-                    />
-                  </label>
-                ))}
-                {plugins.plugins.length === 0 && (
-                  <p className="rounded-[1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-3 text-xs text-[var(--theme-fg-muted)]">
-                    No plugins are registered.
-                  </p>
-                )}
+            ) : (
+              pluginsManagementNode
+            )}
+          </div>
+
+          <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-[var(--theme-fg)]">
+                  Workspace defaults
+                </p>
+                <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
+                  Git projects clone into dev home. New workspace directories
+                  can create one missing child under this path.
+                </p>
               </div>
-              <div className="mt-3 border-t border-[var(--theme-border)] pt-3">
-                <label className="block text-xs font-medium text-[var(--theme-fg)]">
-                  Import manifest JSON
+            </div>
+            <div className="mt-3 grid gap-3">
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--theme-fg-muted)]">
+                  Workspace root
+                </p>
+                <p
+                  title={
+                    workspaceSettings?.workspaceRoot ?? 'Loading workspace root'
+                  }
+                  className="mt-1 truncate rounded-[0.9rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-2 font-mono text-xs text-[var(--theme-fg-soft)]"
+                >
+                  {workspaceSettingsState.loading && !workspaceSettings
+                    ? 'Loading...'
+                    : (workspaceSettings?.workspaceRoot ?? 'Unavailable')}
+                </p>
+              </div>
+              <div>
+                <label
+                  htmlFor="settings-dev-home"
+                  className="text-[11px] uppercase tracking-[0.18em] text-[var(--theme-fg-muted)]"
+                >
+                  Dev home
                 </label>
-                <textarea
-                  value={pluginImportDraft}
-                  onChange={(event) => {
-                    setPluginImportDraft(event.currentTarget.value);
-                    if (pluginImportState.message || pluginImportState.error) {
-                      setPluginImportState({
-                        busy: false,
+                <div className="mt-1 flex flex-col gap-2 sm:flex-row">
+                  <input
+                    id="settings-dev-home"
+                    value={workspaceSettingsState.devHomeDraft}
+                    onChange={(event) =>
+                      setWorkspaceSettingsState((current) => ({
+                        ...current,
+                        devHomeDraft: event.target.value,
                         message: null,
                         error: null,
-                      });
+                      }))
                     }
-                  }}
-                  placeholder='{"id":"example.viewer","name":"Example Viewer","version":"0.1.0",...}'
-                  rows={4}
-                  className="mt-2 min-h-28 w-full resize-y rounded-[0.9rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-2 font-mono text-xs leading-5 text-[var(--theme-fg)] outline-none transition placeholder:text-[var(--theme-fg-muted)] focus:border-[var(--theme-accent-border)]"
-                />
-                <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                  <p className="max-w-[42rem] text-xs leading-5 text-[var(--theme-fg-muted)]">
-                    Imports register manifest-declared artifact types. Rendering code still needs a
-                    trusted built-in frontend module.
-                  </p>
+                    placeholder="/Users/name/dev"
+                    className="min-w-0 flex-1 rounded-full border border-[var(--theme-border)] bg-[var(--theme-panel)] px-3 py-2 text-sm text-[var(--theme-fg)] outline-none focus:border-[var(--theme-accent-border)]"
+                  />
                   <button
                     type="button"
-                    onClick={() => void handleImportPlugin()}
-                    disabled={!pluginImportDraft.trim() || pluginImportState.busy}
-                    className="rounded-full border border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)] px-3 py-1.5 text-xs font-medium text-[var(--theme-accent-strong)] transition hover:bg-[var(--theme-hover)] disabled:cursor-not-allowed disabled:border-[var(--theme-border)] disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
+                    aria-label="Save workspace defaults"
+                    onClick={() => void handleSaveWorkspaceSettings()}
+                    disabled={
+                      workspaceSettingsState.loading ||
+                      workspaceSettingsState.saving ||
+                      !workspaceSettingsState.devHomeDraft.trim()
+                    }
+                    className="rounded-full bg-[var(--theme-accent-solid)] px-4 py-2 text-xs font-medium text-[var(--theme-accent-solid-fg)] transition hover:bg-[var(--theme-accent-solid-hover)] disabled:cursor-not-allowed disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
                   >
-                    {pluginImportState.busy ? 'Importing...' : 'Import'}
+                    {workspaceSettingsState.saving ? 'Saving...' : 'Save'}
                   </button>
                 </div>
-                {pluginImportState.error && (
-                  <p className="mt-2 text-xs text-rose-300">{pluginImportState.error}</p>
-                )}
-                {pluginImportState.message && (
-                  <p className="mt-2 text-xs text-emerald-300">{pluginImportState.message}</p>
-                )}
               </div>
-              {plugins.error && (
-                <p className="mt-2 text-xs text-rose-300">{plugins.error}</p>
-              )}
             </div>
+            {workspaceSettingsState.error ? (
+              <p className="mt-2 text-xs text-rose-300">
+                {workspaceSettingsState.error}
+              </p>
+            ) : workspaceSettingsState.message ? (
+              <p className="mt-2 text-xs text-emerald-300">
+                {workspaceSettingsState.message}
+              </p>
+            ) : null}
+          </div>
 
-            <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-[var(--theme-fg)]">Workspace defaults</p>
-                  <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                    Git projects clone into dev home. New workspace directories can create one
-                    missing child under this path.
-                  </p>
-                </div>
+          <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-[var(--theme-fg)]">
+                  Runtime controls
+                </p>
+                <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
+                  Inspect installed backend versions, install optional runtimes,
+                  or restart the selected backend.
+                </p>
               </div>
-              <div className="mt-3 grid gap-3">
-                <div>
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--theme-fg-muted)]">
-                    Workspace root
-                  </p>
-                  <p
-                    title={workspaceSettings?.workspaceRoot ?? 'Loading workspace root'}
-                    className="mt-1 truncate rounded-[0.9rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-2 font-mono text-xs text-[var(--theme-fg-soft)]"
+              <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleRestartAppServer()}
+                  disabled={restartState.busy || backendState.saving}
+                  className="rounded-full border border-sky-400/35 bg-sky-400/10 px-3 py-1.5 text-xs font-medium text-sky-500 transition hover:bg-sky-400/16 disabled:cursor-not-allowed disabled:border-[var(--theme-border)] disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
+                >
+                  {restartState.busy ? 'Restarting...' : 'Restart'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleBuildAndRestartService()}
+                  disabled={restartState.busy || backendState.saving}
+                  className="rounded-full border border-amber-400/35 bg-amber-400/10 px-3 py-1.5 text-xs font-medium text-amber-500 transition hover:bg-amber-400/16 disabled:cursor-not-allowed disabled:border-[var(--theme-border)] disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
+                >
+                  {restartState.busy ? 'Working...' : 'Build and restart'}
+                </button>
+              </div>
+            </div>
+            <div className="mt-3 grid gap-2">
+              {backends.map((backend) => {
+                const installation = backend.installation;
+                const canInstall =
+                  !installation.installed &&
+                  Boolean(installation.installCommand);
+                const canUpdate =
+                  installation.installed && Boolean(installation.updateCommand);
+                const operationInProgress =
+                  backendState.saving &&
+                  backendState.operatingProvider === backend.provider;
+                const operationLabel = canInstall ? 'Install' : 'Update';
+                return (
+                  <div
+                    key={backend.provider}
+                    className="flex flex-col gap-2 rounded-[0.95rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
                   >
-                    {workspaceSettingsState.loading && !workspaceSettings
-                      ? 'Loading...'
-                      : workspaceSettings?.workspaceRoot ?? 'Unavailable'}
-                  </p>
-                </div>
-                <div>
-                  <label
-                    htmlFor="settings-dev-home"
-                    className="text-[11px] uppercase tracking-[0.18em] text-[var(--theme-fg-muted)]"
-                  >
-                    Dev home
-                  </label>
-                  <div className="mt-1 flex flex-col gap-2 sm:flex-row">
-                    <input
-                      id="settings-dev-home"
-                      value={workspaceSettingsState.devHomeDraft}
-                      onChange={(event) =>
-                        setWorkspaceSettingsState((current) => ({
-                          ...current,
-                          devHomeDraft: event.target.value,
-                          message: null,
-                          error: null,
-                        }))
-                      }
-                      placeholder="/Users/name/dev"
-                      className="min-w-0 flex-1 rounded-full border border-[var(--theme-border)] bg-[var(--theme-panel)] px-3 py-2 text-sm text-[var(--theme-fg)] outline-none focus:border-[var(--theme-accent-border)]"
-                    />
-                    <button
-                      type="button"
-                      aria-label="Save workspace defaults"
-                      onClick={() => void handleSaveWorkspaceSettings()}
-                      disabled={
-                        workspaceSettingsState.loading ||
-                        workspaceSettingsState.saving ||
-                        !workspaceSettingsState.devHomeDraft.trim()
-                      }
-                      className="rounded-full bg-[var(--theme-accent-solid)] px-4 py-2 text-xs font-medium text-[var(--theme-accent-solid-fg)] transition hover:bg-[var(--theme-accent-solid-hover)] disabled:cursor-not-allowed disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
-                    >
-                      {workspaceSettingsState.saving ? 'Saving...' : 'Save'}
-                    </button>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-medium text-[var(--theme-fg)]">
+                          {backend.displayName}
+                        </span>
+                        <span
+                          className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] ${
+                            backend.enabled
+                              ? 'border-emerald-400/35 bg-emerald-400/10 text-emerald-400'
+                              : 'border-[var(--theme-border)] bg-[var(--theme-muted)] text-[var(--theme-fg-muted)]'
+                          }`}
+                        >
+                          {backend.enabled
+                            ? 'Ready'
+                            : installation.installed
+                              ? backend.status.state
+                              : 'Not installed'}
+                        </span>
+                      </div>
+                      <p className="mt-1 truncate text-xs text-[var(--theme-fg-muted)]">
+                        Version:{' '}
+                        {installation.installedVersion ??
+                          (installation.installed
+                            ? 'Installed'
+                            : 'Unavailable')}
+                        {installation.latestVersion
+                          ? ` · Latest: ${installation.latestVersion}`
+                          : ''}
+                      </p>
+                      {installation.lastError ? (
+                        <p className="mt-1 line-clamp-2 text-xs text-rose-300">
+                          {installation.lastError}
+                        </p>
+                      ) : null}
+                    </div>
+                    {canInstall || canUpdate ? (
+                      <button
+                        type="button"
+                        aria-label={`${canInstall ? 'Install' : 'Update'} ${backend.displayName}`}
+                        onClick={() =>
+                          void handleInstallOrUpdateBackend(
+                            backend.provider,
+                            canInstall ? 'install' : 'update',
+                          )
+                        }
+                        disabled={
+                          restartState.busy ||
+                          backendState.saving ||
+                          (!canInstall && !canUpdate)
+                        }
+                        className="shrink-0 rounded-full border border-[var(--theme-border-strong)] bg-[var(--theme-panel)] px-3 py-1.5 text-xs font-medium text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] disabled:cursor-not-allowed disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
+                      >
+                        {operationInProgress
+                          ? backendState.operatingAction === 'install'
+                            ? 'Installing...'
+                            : 'Updating...'
+                          : operationLabel}
+                      </button>
+                    ) : null}
                   </div>
-                </div>
+                );
+              })}
+            </div>
+            {restartState.error ? (
+              <p className="mt-2 text-xs text-rose-300">{restartState.error}</p>
+            ) : restartState.message ? (
+              <p className="mt-2 text-xs text-emerald-300">
+                {restartState.message}
+              </p>
+            ) : backendState.message ? (
+              <p
+                className={`mt-2 whitespace-pre-line text-xs ${
+                  backendState.message.includes('requires attention')
+                    ? 'text-amber-300'
+                    : 'text-emerald-300'
+                }`}
+              >
+                {backendState.message}
+              </p>
+            ) : backendState.error ? (
+              <p className="mt-2 whitespace-pre-line text-xs text-rose-300">
+                {backendState.error}
+              </p>
+            ) : null}
+          </div>
+
+          <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-[var(--theme-fg)]">
+                  Provider host files
+                </p>
+                <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
+                  {activeBackend.displayName} exposes these editable files
+                  through its backend schema.
+                </p>
               </div>
-              {workspaceSettingsState.error ? (
-                <p className="mt-2 text-xs text-rose-300">{workspaceSettingsState.error}</p>
-              ) : workspaceSettingsState.message ? (
-                <p className="mt-2 text-xs text-emerald-300">{workspaceSettingsState.message}</p>
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              {editableFiles.map((file) => {
+                const state = files[file.name] ?? {
+                  path: file.name,
+                  exists: false,
+                  originalContent: '',
+                  draftContent: '',
+                  loading: false,
+                  saving: false,
+                  error: null,
+                  saveMessage: null,
+                };
+                const dirty = state.draftContent !== state.originalContent;
+
+                return (
+                  <button
+                    key={file.name}
+                    type="button"
+                    onClick={() => setSelectedFileName(file.name)}
+                    className="block rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-3 text-left transition hover:bg-[var(--theme-hover)]"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-[var(--theme-fg)]">
+                          {file.label}
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
+                          {file.description}
+                        </p>
+                      </div>
+                      <div className="shrink-0">
+                        {state.loading ? (
+                          <span className="text-[11px] uppercase tracking-[0.2em] text-[var(--theme-fg-muted)]">
+                            Loading
+                          </span>
+                        ) : dirty ? (
+                          <span className="rounded-full border border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)] px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-[var(--theme-accent-strong)]">
+                            Unsaved
+                          </span>
+                        ) : state.exists ? (
+                          <span className="rounded-full border border-emerald-400/25 bg-emerald-400/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-emerald-600 dark:text-emerald-100">
+                            Ready
+                          </span>
+                        ) : (
+                          <span className="rounded-full border border-sky-300/25 bg-sky-300/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-sky-600 dark:text-sky-100">
+                            New
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+              {editableFiles.length === 0 ? (
+                <p className="rounded-[1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-3 text-xs text-[var(--theme-fg-muted)]">
+                  This backend does not expose editable host files.
+                </p>
               ) : null}
             </div>
+          </div>
 
+          {activeManagementSchema.configArchives ? (
             <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-[var(--theme-fg)]">
-                    Runtime controls
+                    Config archives
                   </p>
                   <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                    Inspect installed backend versions, install optional runtimes, or restart the selected backend.
-                  </p>
-                </div>
-                <div className="flex shrink-0 flex-wrap justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void handleRestartAppServer()}
-                    disabled={restartState.busy || backendState.saving}
-                    className="rounded-full border border-sky-400/35 bg-sky-400/10 px-3 py-1.5 text-xs font-medium text-sky-500 transition hover:bg-sky-400/16 disabled:cursor-not-allowed disabled:border-[var(--theme-border)] disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
-                  >
-                    {restartState.busy ? 'Restarting...' : 'Restart'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleBuildAndRestartService()}
-                    disabled={restartState.busy || backendState.saving}
-                    className="rounded-full border border-amber-400/35 bg-amber-400/10 px-3 py-1.5 text-xs font-medium text-amber-500 transition hover:bg-amber-400/16 disabled:cursor-not-allowed disabled:border-[var(--theme-border)] disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
-                  >
-                    {restartState.busy ? 'Working...' : 'Build and restart'}
-                  </button>
-                </div>
-              </div>
-              <div className="mt-3 grid gap-2">
-                {backends.map((backend) => {
-                  const installation = backend.installation;
-                  const canInstall = !installation.installed && Boolean(installation.installCommand);
-                  const canUpdate = installation.installed && Boolean(installation.updateCommand);
-                  const operationInProgress = backendState.saving &&
-                    backendState.operatingProvider === backend.provider;
-                  const operationLabel = canInstall ? 'Install' : 'Update';
-                  return (
-                    <div
-                      key={backend.provider}
-                      className="flex flex-col gap-2 rounded-[0.95rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
-                    >
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-sm font-medium text-[var(--theme-fg)]">
-                            {backend.displayName}
-                          </span>
-                          <span className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] ${
-                            backend.enabled
-                              ? 'border-emerald-400/35 bg-emerald-400/10 text-emerald-400'
-                              : 'border-[var(--theme-border)] bg-[var(--theme-muted)] text-[var(--theme-fg-muted)]'
-                          }`}>
-                            {backend.enabled ? 'Ready' : installation.installed ? backend.status.state : 'Not installed'}
-                          </span>
-                        </div>
-                        <p className="mt-1 truncate text-xs text-[var(--theme-fg-muted)]">
-                          Version: {installation.installedVersion ?? (installation.installed ? 'Installed' : 'Unavailable')}
-                          {installation.latestVersion ? ` · Latest: ${installation.latestVersion}` : ''}
-                        </p>
-                        {installation.lastError ? (
-                          <p className="mt-1 line-clamp-2 text-xs text-rose-300">
-                            {installation.lastError}
-                          </p>
-                        ) : null}
-                      </div>
-                      {canInstall || canUpdate ? (
-                        <button
-                          type="button"
-                          aria-label={`${canInstall ? 'Install' : 'Update'} ${backend.displayName}`}
-                          onClick={() =>
-                            void handleInstallOrUpdateBackend(
-                              backend.provider,
-                              canInstall ? 'install' : 'update',
-                            )
-                          }
-                          disabled={restartState.busy || backendState.saving || (!canInstall && !canUpdate)}
-                          className="shrink-0 rounded-full border border-[var(--theme-border-strong)] bg-[var(--theme-panel)] px-3 py-1.5 text-xs font-medium text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] disabled:cursor-not-allowed disabled:bg-[var(--theme-muted)] disabled:text-[var(--theme-fg-muted)]"
-                        >
-                          {operationInProgress
-                            ? backendState.operatingAction === 'install'
-                              ? 'Installing...'
-                              : 'Updating...'
-                            : operationLabel}
-                        </button>
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
-              {restartState.error ? (
-                <p className="mt-2 text-xs text-rose-300">{restartState.error}</p>
-              ) : restartState.message ? (
-                <p className="mt-2 text-xs text-emerald-300">{restartState.message}</p>
-              ) : backendState.message ? (
-                <p className={`mt-2 whitespace-pre-line text-xs ${
-                  backendState.message.includes('requires attention')
-                    ? 'text-amber-300'
-                    : 'text-emerald-300'
-                }`}>{backendState.message}</p>
-              ) : backendState.error ? (
-                <p className="mt-2 whitespace-pre-line text-xs text-rose-300">{backendState.error}</p>
-              ) : null}
-            </div>
-
-            <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-[var(--theme-fg)]">Provider host files</p>
-                  <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                    {activeBackend.displayName} exposes these editable files through its backend schema.
-                  </p>
-                </div>
-              </div>
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                {editableFiles.map((file) => {
-                  const state = files[file.name] ?? {
-                    path: file.name,
-                    exists: false,
-                    originalContent: '',
-                    draftContent: '',
-                    loading: false,
-                    saving: false,
-                    error: null,
-                    saveMessage: null,
-                  };
-                  const dirty = state.draftContent !== state.originalContent;
-
-                  return (
-                    <button
-                      key={file.name}
-                      type="button"
-                      onClick={() => setSelectedFileName(file.name)}
-                      className="block rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-3 text-left transition hover:bg-[var(--theme-hover)]"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-[var(--theme-fg)]">
-                            {file.label}
-                          </p>
-                          <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                            {file.description}
-                          </p>
-                        </div>
-                        <div className="shrink-0">
-                          {state.loading ? (
-                            <span className="text-[11px] uppercase tracking-[0.2em] text-[var(--theme-fg-muted)]">
-                              Loading
-                            </span>
-                          ) : dirty ? (
-                            <span className="rounded-full border border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)] px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-[var(--theme-accent-strong)]">
-                              Unsaved
-                            </span>
-                          ) : state.exists ? (
-                            <span className="rounded-full border border-emerald-400/25 bg-emerald-400/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-emerald-600 dark:text-emerald-100">
-                              Ready
-                            </span>
-                          ) : (
-                            <span className="rounded-full border border-sky-300/25 bg-sky-300/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-sky-600 dark:text-sky-100">
-                              New
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-                {editableFiles.length === 0 ? (
-                  <p className="rounded-[1rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-3 text-xs text-[var(--theme-fg-muted)]">
-                    This backend does not expose editable host files.
-                  </p>
-                ) : null}
-              </div>
-            </div>
-
-            {activeManagementSchema.configArchives ? (
-            <div className="rounded-[1.1rem] border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-[var(--theme-fg)]">Config archives</p>
-                  <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                    Backup the selected backend host files, then apply a saved archive with a backend restart.
+                    Backup the selected backend host files, then apply a saved
+                    archive with a backend restart.
                   </p>
                 </div>
                 <button
@@ -1517,9 +1662,13 @@ export function AppShellSettingsDialog() {
                 </button>
               </div>
               {archivesState.error ? (
-                <p className="mt-2 text-xs text-rose-300">{archivesState.error}</p>
+                <p className="mt-2 text-xs text-rose-300">
+                  {archivesState.error}
+                </p>
               ) : archivesState.message ? (
-                <p className="mt-2 text-xs text-emerald-300">{archivesState.message}</p>
+                <p className="mt-2 text-xs text-emerald-300">
+                  {archivesState.message}
+                </p>
               ) : null}
               <div className="mt-3 space-y-2">
                 {archivesState.loading ? (
@@ -1558,7 +1707,9 @@ export function AppShellSettingsDialog() {
                                 <button
                                   type="button"
                                   aria-label={`Save archive name ${archive.label}`}
-                                  onClick={() => void handleRenameArchive(archive)}
+                                  onClick={() =>
+                                    void handleRenameArchive(archive)
+                                  }
                                   className="rounded-full bg-[var(--theme-accent-solid)] px-3 py-1.5 text-xs font-medium text-[var(--theme-accent-solid-fg)] transition hover:bg-[var(--theme-accent-solid-hover)]"
                                 >
                                   Save
@@ -1583,13 +1734,20 @@ export function AppShellSettingsDialog() {
                               </p>
                             )}
                             <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-[var(--theme-fg-muted)]">
-                              <span>Created {formatArchiveDate(archive.createdAt)}</span>
+                              <span>
+                                Created {formatArchiveDate(archive.createdAt)}
+                              </span>
                               {editableFiles.map((file) => (
                                 <span
                                   key={file.name}
                                   className="rounded-full border border-[var(--theme-border)] bg-[var(--theme-panel)] px-2 py-0.5 font-mono"
                                 >
-                                  {file.name}: {archive.files[file.name as keyof typeof archive.files]?.exists ? 'saved' : 'missing'}
+                                  {file.name}:{' '}
+                                  {archive.files[
+                                    file.name as keyof typeof archive.files
+                                  ]?.exists
+                                    ? 'saved'
+                                    : 'missing'}
                                 </span>
                               ))}
                             </div>
@@ -1629,9 +1787,78 @@ export function AppShellSettingsDialog() {
                 )}
               </div>
             </div>
-            ) : null}
-          </div>
+          ) : null}
         </div>
+      </div>
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <div className="flex min-h-0 flex-col overflow-hidden">
+        {settingsContentNode}
+        {pluginsPanelOpen ? (
+          <div className="fixed inset-0 z-[90] flex items-start justify-center p-4 pt-[max(env(safe-area-inset-top),4rem)] sm:items-center sm:pt-4">
+            <button
+              type="button"
+              aria-label="Close plugins panel"
+              onClick={() => setPluginsPanelOpen(false)}
+              className="absolute inset-0 bg-black/35 backdrop-blur-[2px]"
+            />
+            <section className="relative z-10 flex max-h-[min(82vh,42rem)] w-full max-w-2xl flex-col overflow-hidden rounded-[1.35rem] border border-[var(--theme-border)] bg-[var(--theme-panel)] shadow-2xl shadow-black/25">
+              <div className="flex items-center justify-between gap-3 border-b border-[var(--theme-border)] px-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-[var(--theme-fg)]">
+                    Plugins
+                  </p>
+                  <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
+                    {pluginCountLabel}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void plugins.refresh()}
+                    disabled={plugins.loading}
+                    className="rounded-full border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-3 py-1.5 text-xs font-medium text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] disabled:cursor-not-allowed disabled:text-[var(--theme-fg-muted)]"
+                  >
+                    {plugins.loading ? 'Loading...' : 'Refresh'}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Close plugins panel"
+                    onClick={() => setPluginsPanelOpen(false)}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--theme-border-strong)] bg-[var(--theme-surface-strong)] text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)]"
+                  >
+                    <CloseIcon />
+                  </button>
+                </div>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                {pluginsManagementNode}
+              </div>
+            </section>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-start justify-center p-4 pt-[max(env(safe-area-inset-top),1rem)] sm:items-center">
+      <button
+        type="button"
+        aria-label="Close Settings"
+        onClick={shellNav?.closeSettings}
+        className="ui-overlay-scrim absolute inset-0 backdrop-blur-sm"
+      />
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-label="Settings"
+        className="relative z-10 flex max-h-[calc(100vh-2rem)] w-full max-w-4xl flex-col overflow-hidden rounded-[1.8rem] border border-[var(--theme-border)] bg-[var(--theme-panel)] shadow-2xl shadow-black/20"
+      >
+        {settingsContentNode}
       </section>
 
       {selectedFileName && selectedFile ? (
@@ -1639,16 +1866,22 @@ export function AppShellSettingsDialog() {
           <div className="pointer-events-auto relative z-10 flex max-h-[min(88vh,56rem)] w-full max-w-3xl flex-col overflow-hidden rounded-[1.6rem] border border-[var(--theme-border)] bg-[var(--theme-panel)] shadow-2xl shadow-black/25">
             <div className="flex items-start justify-between gap-3 border-b border-[var(--theme-border)] px-4 py-3 sm:px-5">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-[var(--theme-fg)]">{selectedFileName}</p>
+                <p className="text-sm font-medium text-[var(--theme-fg)]">
+                  {selectedFileName}
+                </p>
                 <p className="mt-1 break-all font-mono text-xs text-[var(--theme-fg-muted)]">
                   {selectedFile.path}
                 </p>
               </div>
               <div className="flex items-center gap-2">
                 {selectedFile.error ? (
-                  <span className="text-xs text-rose-300">{selectedFile.error}</span>
+                  <span className="text-xs text-rose-300">
+                    {selectedFile.error}
+                  </span>
                 ) : selectedFile.saveMessage ? (
-                  <span className="text-xs text-emerald-300">{selectedFile.saveMessage}</span>
+                  <span className="text-xs text-emerald-300">
+                    {selectedFile.saveMessage}
+                  </span>
                 ) : null}
                 <button
                   type="button"

@@ -22,8 +22,7 @@ import {
   truncateAutoThreadTitle,
 } from '../../../../packages/shared/src/index';
 import {
-  AppShellMenuButton,
-  AppShellNavigationMenu,
+  AppShellSettingsDialog,
 } from '../components/AppShellNavigation';
 import { useAppShellNav } from '../components/AppShellNavContext';
 import {
@@ -36,6 +35,8 @@ import {
   type ThreadShellPanelHandle,
   type ThreadComposerProps,
   type ThreadTimelineProps,
+  type ThreadGraphWorkspaceFeatures,
+  type ThreadWorkspaceAdapter,
 } from '@remote-codex/thread-ui';
 import {
   formatLongTimestamp,
@@ -57,6 +58,8 @@ import {
   fetchAgentBackendModels,
   fetchAgentBackendStatus,
   fetchProviderHostFile,
+  fetchWorkspaceFilePreview,
+  fetchWorkspaceFileTree,
   fetchThreadForkTurns,
   fetchThreadGoal,
   fetchThreadHooks,
@@ -84,6 +87,9 @@ import {
   updateThreadSettings,
   terminateShell,
   untrustThreadHook,
+  uploadWorkspaceFile,
+  downloadWorkspaceFile,
+  buildWorkspaceRawFileUrl,
 } from '../lib/api';
 import {
   appendLatestTurns,
@@ -128,6 +134,14 @@ const EMPTY_ANSWERED_REQUEST_NOTES: NonNullable<
 > = [];
 const EMPTY_ACTIVITY_NOTES: NonNullable<ThreadDetailDto['activityNotes']> = [];
 const EMPTY_PENDING_STEERS: NonNullable<ThreadDetailDto['pendingSteers']> = [];
+const SUPERVISOR_WORKSPACE_FEATURES: ThreadGraphWorkspaceFeatures = {
+  workspace: true,
+  toolUsage: false,
+  guide: false,
+  threadGraph: false,
+  extensions: false,
+  defaultTab: 'workspace',
+};
 
 type RealtimeConnectionStatus =
   | 'checking'
@@ -1154,6 +1168,25 @@ export function ThreadDetailPage() {
           };
         }
         if (materializedTurn && current.serverTurnId) {
+          const materializedTurnHasPrompt =
+            turnHasUserMessage(materializedTurn, current.prompt) ||
+            (
+              current.prompt.includes('[PHOTO ') &&
+              (
+                turnHasPhotoPromptText(materializedTurn, current.prompt) ||
+                turnHasPhotoAttachment(materializedTurn)
+              )
+            );
+
+          if (!materializedTurnHasPrompt) {
+            return {
+              ...current,
+              id: materializedTurn.id,
+              serverTurnId: materializedTurn.id,
+              status: current.status === 'failed' ? current.status : 'inProgress',
+            };
+          }
+
           return materializedTurn.status === 'inProgress'
             ? {
                 ...current,
@@ -1552,8 +1585,7 @@ export function ThreadDetailPage() {
       showLoading: true,
       limit: INITIAL_DETAIL_TURN_PAGE_SIZE,
     });
-    void loadPageContext();
-  }, [loadPageContext, loadThreadDetail]);
+  }, [loadThreadDetail]);
 
   useEffect(() => {
     let isDisposed = false;
@@ -2985,12 +3017,30 @@ export function ThreadDetailPage() {
   const optimisticMaterializedTurn =
     optimisticTurn && detail
       ? detail.turns.find(
-          (turn) =>
-            (optimisticServerTurnId && turn.id === optimisticServerTurnId) ||
-            turn.id === optimisticTurn.id ||
-            turnHasUserMessage(turn, optimisticTurn.prompt) ||
-            (optimisticTurn.prompt.includes('[PHOTO ') &&
-              turnHasPhotoPromptText(turn, optimisticTurn.prompt)),
+          (turn) => {
+            const hasOptimisticPrompt =
+              turnHasUserMessage(turn, optimisticTurn.prompt) ||
+              (
+                optimisticTurn.prompt.includes('[PHOTO ') &&
+                (
+                  turnHasPhotoPromptText(turn, optimisticTurn.prompt) ||
+                  turnHasPhotoAttachment(turn)
+                )
+              );
+
+            return (
+              hasOptimisticPrompt &&
+              (
+                (optimisticServerTurnId && turn.id === optimisticServerTurnId) ||
+                turn.id === optimisticTurn.id ||
+                turnHasUserMessage(turn, optimisticTurn.prompt) ||
+                (
+                  optimisticTurn.prompt.includes('[PHOTO ') &&
+                  turnHasPhotoPromptText(turn, optimisticTurn.prompt)
+                )
+              )
+            );
+          },
         ) ?? null
       : null;
   const timelineOptimisticTurn = useMemo(
@@ -3389,6 +3439,42 @@ export function ThreadDetailPage() {
         : '',
     [detail?.thread.id, getThreadImageAssetUrl],
   );
+  const workspaceAdapter = useMemo<ThreadWorkspaceAdapter | null>(() => {
+    const workspaceId = detail?.workspace.id ?? null;
+    if (!workspaceId) {
+      return null;
+    }
+
+    return {
+      listTree: () => fetchWorkspaceFileTree(workspaceId),
+      readFile: (input) =>
+        fetchWorkspaceFilePreview(workspaceId, {
+          path: input.path,
+          ...(input.offset !== undefined ? { offset: input.offset } : {}),
+          ...(input.limit !== undefined ? { limit: input.limit } : {}),
+        }),
+      getRawFileUrl: (input) =>
+        buildWorkspaceRawFileUrl(workspaceId, { path: input.path }),
+      uploadFile: (input) =>
+        uploadWorkspaceFile(workspaceId, { file: input.file }),
+      downloadNode: async (input) => {
+        if (input.kind !== 'file') {
+          return;
+        }
+        const result = await downloadWorkspaceFile(workspaceId, {
+          path: input.path,
+        });
+        const url = URL.createObjectURL(result.blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = result.filename;
+        document.body.append(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(url);
+      },
+    };
+  }, [detail?.workspace.id]);
   const surfaceAdapter = useMemo(
     () => ({
       openThread,
@@ -3402,6 +3488,7 @@ export function ThreadDetailPage() {
       updateSettings: handleUpdateThreadSettings,
       loadHistoryItemDetail: handleLoadHistoryItemDetail,
       getImageAssetUrl: getCurrentThreadImageAssetUrl,
+      workspace: workspaceAdapter,
       shell: localShellAdapter,
     }),
     [
@@ -3416,8 +3503,12 @@ export function ThreadDetailPage() {
       handleUpdateThreadSettings,
       localShellAdapter,
       openThread,
+      workspaceAdapter,
     ],
   );
+  const workspaceReturnHref = detail?.thread.workspaceId
+    ? `/threads?workspaceId=${encodeURIComponent(detail.thread.workspaceId)}`
+    : '/workspaces';
   const dialogs = (
     <>
       <ExportTranscriptDialog
@@ -3463,12 +3554,13 @@ export function ThreadDetailPage() {
       adapter={surfaceAdapter}
       metaContent={metaContent}
       settingsContent={settingsContent}
+      globalSettingsContent={<AppShellSettingsDialog embedded />}
       mobileHeaderAction={mobileSessionConnectionButton}
-      appMenuButton={<AppShellMenuButton />}
-      appNavigationMenu={<AppShellNavigationMenu />}
+      workspaceReturnHref={workspaceReturnHref}
       onCloseAppNavigation={shellNav?.closeNav ?? (() => {})}
       surfaceActions={surfaceActions}
       floatingPanel={goalMonitorPanel}
+      workspaceFeatures={SUPERVISOR_WORKSPACE_FEATURES}
       activeView={activeView}
       liveOutput={liveOutput}
       timelineProps={timelineProps}
@@ -3479,6 +3571,10 @@ export function ThreadDetailPage() {
       shellPanelRef={shellPanelRef}
       shellPanelComponent={ThreadShellPanel}
       shellEffectiveTheme={shellNav?.effectiveTheme ?? 'dark'}
+      shellThemeMode={shellNav?.themeMode ?? 'system'}
+      {...(shellNav?.setThemeMode
+        ? { onShellThemeModeChange: shellNav.setThemeMode }
+        : {})}
       onShellStateChange={setShellControlState}
       loadingContent={
         <div className="flex flex-1 items-center justify-center px-6 py-12 text-center text-stone-400">

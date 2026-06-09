@@ -3237,6 +3237,34 @@ describe('ThreadTimeline', () => {
     expect(screen.getByText('streaming draft')).toBeInTheDocument();
   });
 
+  it('renders a failed turn as a user message followed by an agent error bubble', () => {
+    render(
+      <ThreadTimeline
+        turns={[
+          {
+            id: 'failed-turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'failed',
+            error: 'Too many requests (429). Please try again later.',
+            items: [
+              {
+                id: 'failed-turn-1-user',
+                kind: 'userMessage',
+                text: 'Run the expensive prompt.',
+              },
+            ],
+          },
+        ]}
+        liveOutput=""
+      />,
+    );
+
+    expect(screen.getByText('Run the expensive prompt.')).toBeInTheDocument();
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent('Agent response failed');
+    expect(alert).toHaveTextContent('Too many requests (429). Please try again later.');
+  });
+
   it('uses matching live items instead of live output on an optimistic turn', () => {
     render(
       <ThreadTimeline
@@ -3271,6 +3299,51 @@ describe('ThreadTimeline', () => {
 
     expect(screen.getByText('Structured live draft.')).toBeInTheDocument();
     expect(screen.queryByText('legacy fallback draft')).not.toBeInTheDocument();
+  });
+
+  it('merges an optimistic user message into a materialized turn with the same id', () => {
+    render(
+      <ThreadTimeline
+        turns={[
+          {
+            id: 'server-turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'inProgress',
+            error: null,
+            items: [
+              {
+                id: 'assistant-live-1',
+                kind: 'agentMessage',
+                text: 'Agent reply arrived first.',
+              },
+            ],
+          },
+        ]}
+        liveOutput=""
+        optimisticTurn={{
+          id: 'server-turn-1',
+          startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+          status: 'inProgress',
+          error: null,
+          items: [
+            {
+              id: 'optimistic-turn-1-user',
+              kind: 'userMessage',
+              text: 'Continue the active goal.',
+            },
+          ],
+        }}
+      />,
+    );
+
+    const userMessage = screen.getByText('Continue the active goal.');
+    const agentMessage = screen.getByText('Agent reply arrived first.');
+
+    expect(userMessage).toBeInTheDocument();
+    expect(
+      userMessage.compareDocumentPosition(agentMessage) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it('shows per-turn model metadata plus price in the turn header', () => {

@@ -45,7 +45,8 @@ export function ThreadNewPage() {
   );
   const [workspaceId, setWorkspaceId] = useState('');
   const [model, setModel] = useState('');
-  const [title, setTitle] = useState('');
+  const requestedTitle = searchParams.get('title');
+  const [title, setTitle] = useState(() => requestedTitle ?? '');
   const [approvalMode, setApprovalMode] = useState<'yolo' | 'guarded'>('yolo');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);

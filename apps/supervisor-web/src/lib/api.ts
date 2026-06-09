@@ -31,6 +31,9 @@ import type {
   ThreadDetailDto,
   ThreadExportTurnOptionsDto,
   ThreadHistoryItemDetailDto,
+  ThreadWorkspaceFilePreviewDto,
+  ThreadWorkspaceTreeNodeDto,
+  ThreadWorkspaceUploadResultDto,
   ThreadGoalDto,
   ThreadHooksDto,
   UntrustThreadHookInput,
@@ -72,6 +75,120 @@ export interface FileDownloadResult {
   filename: string;
 }
 
+function apiErrorCodeForStatus(status: number): ApiErrorShape['code'] {
+  if (status === 400) {
+    return 'bad_request';
+  }
+
+  if (status === 403) {
+    return 'forbidden';
+  }
+
+  if (status === 404) {
+    return 'not_found';
+  }
+
+  if (status === 409) {
+    return 'conflict';
+  }
+
+  if (status === 429 || status === 503) {
+    return 'service_unavailable';
+  }
+
+  return 'internal_error';
+}
+
+function fallbackErrorMessage(status: number, statusText?: string) {
+  const label = statusText?.trim();
+  const suffix = label ? `${status} ${label}` : `${status}`;
+
+  if (status === 429) {
+    return `Too many requests (${suffix}).`;
+  }
+
+  if (status === 503) {
+    return `Upstream service unavailable (${suffix}).`;
+  }
+
+  return `Request failed (${suffix}).`;
+}
+
+function normalizedApiErrorPayload(
+  response: Response,
+  payload: Partial<ApiErrorShape> | null | undefined,
+  fallbackMessage: string,
+): ApiErrorShape {
+  const message =
+    typeof payload?.message === 'string' && payload.message.trim()
+      ? payload.message.trim()
+      : fallbackMessage;
+  const details =
+    payload?.details && typeof payload.details === 'object'
+      ? payload.details
+      : undefined;
+
+  return {
+    code: payload?.code ?? apiErrorCodeForStatus(response.status),
+    message,
+    ...(details ? { details } : {}),
+  };
+}
+
+async function readApiErrorPayload(response: Response): Promise<ApiErrorShape> {
+  const fallbackMessage = fallbackErrorMessage(response.status, response.statusText);
+  const contentType = response.headers?.get?.('content-type') ?? '';
+  const readJsonPayload = async () =>
+    normalizedApiErrorPayload(
+      response,
+      (await response.json()) as Partial<ApiErrorShape>,
+      fallbackMessage,
+    );
+
+  if (contentType.includes('application/json')) {
+    try {
+      return await readJsonPayload();
+    } catch {
+      return normalizedApiErrorPayload(response, null, fallbackMessage);
+    }
+  }
+
+  try {
+    if (typeof response.text !== 'function') {
+      try {
+        return await readJsonPayload();
+      } catch {
+        return normalizedApiErrorPayload(response, null, fallbackMessage);
+      }
+    }
+
+    const text = (await response.text()).trim();
+    if (text.startsWith('{')) {
+      try {
+        return normalizedApiErrorPayload(
+          response,
+          JSON.parse(text) as Partial<ApiErrorShape>,
+          fallbackMessage,
+        );
+      } catch {
+        // Keep the raw response text visible below when it is not valid JSON.
+      }
+    }
+
+    return normalizedApiErrorPayload(
+      response,
+      text ? { message: `${fallbackMessage}\n${text}` } : null,
+      fallbackMessage,
+    );
+  } catch {
+    try {
+      return await readJsonPayload();
+    } catch {
+      return normalizedApiErrorPayload(response, null, fallbackMessage);
+    }
+  }
+}
+
 async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (init?.body !== undefined && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
@@ -84,7 +201,7 @@ async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    const payload = (await response.json()) as ApiErrorShape;
+    const payload = await readApiErrorPayload(response);
     throw new ApiError(response.status, payload);
   }
 
@@ -129,17 +246,8 @@ async function downloadFile(input: RequestInfo | URL, init?: RequestInit): Promi
   const response = await fetch(input, init);
 
   if (!response.ok) {
-    let payload: ApiErrorShape | null = null;
-    try {
-      payload = (await response.json()) as ApiErrorShape;
-    } catch {
-      payload = null;
-    }
-
-    throw new ApiError(response.status, payload ?? {
-      code: 'internal_error',
-      message: 'Unable to download file.',
-    });
+    const payload = await readApiErrorPayload(response);
+    throw new ApiError(response.status, payload);
   }
 
   const filename =
@@ -318,6 +426,65 @@ export function fetchSupervisorHealth() {
 
 export function fetchWorkspaces() {
   return request<WorkspaceDto[]>('/api/workspaces');
+}
+
+export function fetchWorkspaceFileTree(workspaceId: string) {
+  return request<ThreadWorkspaceTreeNodeDto>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/files/tree`,
+    {
+      cache: 'no-store',
+    },
+  );
+}
+
+export function fetchWorkspaceFilePreview(
+  workspaceId: string,
+  input: { path: string; offset?: number; limit?: number },
+) {
+  const params = new URLSearchParams({ path: input.path });
+  if (input.offset !== undefined) {
+    params.set('offset', String(input.offset));
+  }
+  if (input.limit !== undefined) {
+    params.set('limit', String(input.limit));
+  }
+
+  return request<ThreadWorkspaceFilePreviewDto>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/files/preview?${params.toString()}`,
+    {
+      cache: 'no-store',
+    },
+  );
+}
+
+export function buildWorkspaceRawFileUrl(
+  workspaceId: string,
+  input: { path: string },
+) {
+  const params = new URLSearchParams({ path: input.path });
+  return `/api/workspaces/${encodeURIComponent(workspaceId)}/files/raw?${params.toString()}`;
+}
+
+export function downloadWorkspaceFile(workspaceId: string, input: { path: string }) {
+  const params = new URLSearchParams({ path: input.path });
+  return downloadFile(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/files/download?${params.toString()}`,
+    {
+      cache: 'no-store',
+    },
+  );
+}
+
+export function uploadWorkspaceFile(workspaceId: string, input: { file: File }) {
+  const formData = new FormData();
+  formData.append('file', input.file, input.file.name);
+  return request<ThreadWorkspaceUploadResultDto>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/files/upload`,
+    {
+      method: 'POST',
+      body: formData,
+    },
+  );
 }
 
 export function fetchThreads() {

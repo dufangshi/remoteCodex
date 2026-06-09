@@ -12,12 +12,12 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import * as $3Dmol from '3dmol';
 
 import {
   readMoleculeViewerData,
   type MoleculeViewerSource,
 } from './moleculeViewerData';
+import { load3Dmol, type GLModel, type GLViewer } from './load3Dmol';
 
 type ThreeDmolAtom = {
   atom?: string;
@@ -110,8 +110,8 @@ export function XyzMoleculeViewer({
   onSelectionChange,
 }: XyzMoleculeViewerProps) {
   const viewerHostRef = useRef<HTMLDivElement | null>(null);
-  const viewerRef = useRef<$3Dmol.GLViewer | null>(null);
-  const modelRef = useRef<$3Dmol.GLModel | null>(null);
+  const viewerRef = useRef<GLViewer | null>(null);
+  const modelRef = useRef<GLModel | null>(null);
   const zoomedRef = useRef(false);
   const unitCellPreferenceRef = useRef(true);
 
@@ -165,6 +165,8 @@ export function XyzMoleculeViewer({
       return;
     }
 
+    let cancelled = false;
+
     if (!hasWebGLSupport()) {
       setViewerInitError(
         'WebGL is unavailable in this browser environment. Unable to render the 3D viewer.',
@@ -172,24 +174,35 @@ export function XyzMoleculeViewer({
       return;
     }
 
-    try {
-      const viewer = $3Dmol.createViewer(host, {});
-      viewerRef.current = viewer;
-      viewer.setBackgroundColor('#fbfbfb', 1);
-    } catch (error) {
-      console.error('Failed to initialize 3Dmol viewer:', error);
-      setViewerInitError('Failed to initialize the 3D molecule viewer.');
-      return;
-    }
-
     const resizeViewer = () => {
       viewerRef.current?.resize();
       viewerRef.current?.render();
     };
-    window.addEventListener('resize', resizeViewer);
-    window.setTimeout(resizeViewer, 100);
+
+    load3Dmol()
+      .then(($3Dmol) => {
+        if (cancelled || viewerRef.current) {
+          return;
+        }
+
+        try {
+          const viewer = $3Dmol.createViewer(host, {});
+          viewerRef.current = viewer;
+          viewer.setBackgroundColor('#fbfbfb', 1);
+          window.addEventListener('resize', resizeViewer);
+          window.setTimeout(resizeViewer, 100);
+        } catch (error) {
+          console.error('Failed to initialize 3Dmol viewer:', error);
+          setViewerInitError('Failed to initialize the 3D molecule viewer.');
+        }
+      })
+      .catch((error: unknown) => {
+        console.error('Failed to load 3Dmol viewer runtime:', error);
+        setViewerInitError('Failed to load the 3D molecule viewer runtime.');
+      });
 
     return () => {
+      cancelled = true;
       window.removeEventListener('resize', resizeViewer);
       viewerRef.current = null;
       modelRef.current = null;

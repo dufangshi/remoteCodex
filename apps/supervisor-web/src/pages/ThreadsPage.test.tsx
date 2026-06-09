@@ -263,6 +263,10 @@ describe('ThreadsPage', () => {
     expect(screen.queryByText(/^Next Step$/i)).not.toBeInTheDocument();
     expect(screen.getByText(/^Recent Threads$/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open Navigation' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Back to workspace' })).toHaveAttribute(
+      'href',
+      '/workspaces',
+    );
     expect(
       screen.queryByRole('button', { name: 'Expand thread navigation' }),
     ).not.toBeInTheDocument();

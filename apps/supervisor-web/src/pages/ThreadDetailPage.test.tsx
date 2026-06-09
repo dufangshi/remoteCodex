@@ -277,6 +277,17 @@ function setPromptValue(element: HTMLElement, value: string) {
   fireEvent.input(element);
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+
+  return { promise, resolve, reject };
+}
+
 const modelOptionsResponse = [
   {
     id: 'model-option-1',
@@ -678,6 +689,121 @@ describe('ThreadDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Thread Meta/i }));
 
     expect(screen.queryByText('/tmp/demo')).not.toBeInTheDocument();
+  });
+
+  it('prioritizes thread detail before loading page context', async () => {
+    const detailResponse = {
+      thread: {
+        id: 'thread-1',
+        workspaceId: 'workspace-1',
+        provider: 'codex',
+        providerSessionId: 'codex-1',
+        source: 'supervisor',
+        title: 'Demo Thread',
+        model: 'gpt-5',
+        reasoningEffort: 'medium',
+        collaborationMode: 'default',
+        approvalMode: 'yolo',
+        status: 'idle',
+        summaryText: 'Preview',
+        lastError: null,
+        activeTurnId: null,
+        isLoaded: true,
+        isPinned: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lastTurnStartedAt: null,
+        lastTurnCompletedAt: null,
+      },
+      workspace: {
+        id: 'workspace-1',
+        hostId: 'host-1',
+        label: 'Demo Workspace',
+        absPath: '/tmp/demo',
+        isFavorite: false,
+        createdAt: new Date().toISOString(),
+        lastOpenedAt: null,
+      },
+      workspacePathStatus: 'present',
+      pendingRequests: [],
+      totalTurnCount: 1,
+      turns: [
+        {
+          id: 'turn-1',
+          startedAt: new Date().toISOString(),
+          status: 'completed',
+          error: null,
+          items: [
+            {
+              id: 'item-1',
+              kind: 'userMessage',
+              text: 'hello',
+            },
+          ],
+        },
+      ],
+    };
+    const detailDeferred =
+      createDeferred<ReturnType<typeof okJsonResponse>>();
+    const requestedUrls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      withHealthz((input: RequestInfo | URL) => {
+        const url = String(input);
+        requestedUrls.push(url);
+
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
+          return detailDeferred.promise;
+        }
+
+        if (url.endsWith('/api/threads')) {
+          return okJsonResponse([detailResponse.thread]);
+        }
+
+        if (url.includes('/api/agent-runtimes/codex/status')) {
+          return okJsonResponse(codexBackendResponse);
+        }
+
+        if (url.includes('/api/agent-runtimes/codex/models')) {
+          return okJsonResponse(modelOptionsResponse);
+        }
+
+        return Promise.reject(new Error(`Unexpected request: ${url}`));
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(requestedUrls).toContain('/api/threads/thread-1?limit=3');
+    });
+
+    expect(requestedUrls).not.toContain('/api/threads');
+    expect(
+      requestedUrls.some((url) => url.includes('/api/agent-runtimes/codex/status')),
+    ).toBe(false);
+    expect(
+      requestedUrls.some((url) => url.includes('/api/agent-runtimes/codex/models')),
+    ).toBe(false);
+
+    detailDeferred.resolve(okJsonResponse(detailResponse));
+
+    await screen.findByText('hello');
+    await waitFor(() => {
+      expect(requestedUrls).toContain('/api/threads');
+      expect(
+        requestedUrls.some((url) => url.includes('/api/agent-runtimes/codex/status')),
+      ).toBe(true);
+      expect(
+        requestedUrls.some((url) => url.includes('/api/agent-runtimes/codex/models')),
+      ).toBe(true);
+    });
   });
 
   it('does not re-render the timeline when typing in the chat composer', async () => {
@@ -2504,7 +2630,128 @@ describe('ThreadDetailPage', () => {
 
     await waitFor(() => {
       expect(screen.getByLabelText('Failed')).toBeInTheDocument();
-      expect(screen.getAllByText('Prompt delivery failed.').length).toBeGreaterThan(0);
+      const alert = screen.getByRole('alert');
+      expect(alert).toHaveTextContent('Agent response failed');
+      expect(alert).toHaveTextContent('Prompt delivery failed.');
+    });
+  });
+
+  it('shows non-JSON upstream prompt errors as an agent error bubble', async () => {
+    vi.stubGlobal(
+      'fetch',
+      withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+
+        if (url.includes('/api/agent-runtimes/codex/status')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              state: 'ready',
+              transport: 'stdio',
+              lastStartedAt: new Date().toISOString(),
+              lastError: null,
+              restartCount: 0,
+            }),
+          });
+        }
+
+        if (url.includes('/api/agent-runtimes/codex/models')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => modelOptionsResponse,
+          });
+        }
+
+        if (url.endsWith('/api/threads/thread-1/prompt') && init?.method === 'POST') {
+          return Promise.resolve({
+            ok: false,
+            status: 503,
+            statusText: 'Service Unavailable',
+            headers: new Headers({ 'content-type': 'text/plain' }),
+            text: async () => 'OpenAI upstream unavailable.',
+            json: async () => {
+              throw new Error('not json');
+            },
+          });
+        }
+
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              thread: {
+                id: 'thread-1',
+                workspaceId: 'workspace-1',
+                providerSessionId: 'codex-1',
+                source: 'supervisor',
+                title: 'Demo Thread',
+                model: 'gpt-5',
+                reasoningEffort: 'medium',
+                collaborationMode: 'default',
+                approvalMode: 'yolo',
+                status: 'idle',
+                summaryText: 'Preview',
+                lastError: null,
+                activeTurnId: null,
+                isLoaded: true,
+                isPinned: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                lastTurnStartedAt: null,
+                lastTurnCompletedAt: null,
+              },
+              workspace: {
+                id: 'workspace-1',
+                hostId: 'host-1',
+                label: 'Demo Workspace',
+                absPath: '/tmp/demo',
+                isFavorite: false,
+                createdAt: new Date().toISOString(),
+                lastOpenedAt: null,
+              },
+              workspacePathStatus: 'present',
+              pendingRequests: [],
+              turns: [],
+            }),
+          });
+        }
+
+        if (url.endsWith('/api/threads')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => [],
+          });
+        }
+
+        throw new Error(`Unhandled fetch request: ${url}`);
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByText('Demo Workspace / Demo Thread').length,
+      ).toBeGreaterThan(0);
+    });
+
+    const editor = screen.getByLabelText('Prompt');
+    setPromptValue(editor, 'Trigger an upstream outage.');
+    fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
+
+    expect(screen.getAllByText('Trigger an upstream outage.').length).toBeGreaterThan(0);
+
+    await waitFor(() => {
+      const alert = screen.getByRole('alert');
+      expect(alert).toHaveTextContent('Agent response failed');
+      expect(alert).toHaveTextContent('Upstream service unavailable (503 Service Unavailable).');
+      expect(alert).toHaveTextContent('OpenAI upstream unavailable.');
     });
   });
 
@@ -3782,6 +4029,193 @@ describe('ThreadDetailPage', () => {
     expect(promptBodies).toHaveLength(1);
     expect(promptBodies[0]?.prompt).toBe('Steer this running turn.');
     expect(typeof promptBodies[0]?.clientRequestId).toBe('string');
+  });
+
+  it('keeps the optimistic user bubble when a goal turn first materializes with only agent output', async () => {
+    const startedAt = new Date(Date.UTC(2026, 3, 10, 0, 0, 0)).toISOString();
+    const goalPrompt = 'Continue the active goal.';
+    let detailRequestCount = 0;
+
+    vi.stubGlobal(
+      'fetch',
+      withHealthz((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+
+        if (url.includes('/api/agent-runtimes/codex/status')) {
+          return okJsonResponse(codexBackendResponse);
+        }
+
+        if (url.includes('/api/agent-runtimes/codex/models')) {
+          return okJsonResponse(modelOptionsResponse);
+        }
+
+        if (url.endsWith('/api/threads')) {
+          return okJsonResponse([
+            {
+              id: 'thread-1',
+              workspaceId: 'workspace-1',
+              providerSessionId: 'codex-1',
+              source: 'supervisor',
+              title: 'Demo Thread',
+              model: 'gpt-5',
+              reasoningEffort: 'medium',
+              collaborationMode: 'default',
+              approvalMode: 'yolo',
+              status: 'idle',
+              summaryText: 'Ready for goal work',
+              lastError: null,
+              activeTurnId: null,
+              isLoaded: true,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: null,
+              lastTurnCompletedAt: null,
+            },
+          ]);
+        }
+
+        if (url.endsWith('/api/threads/thread-1/prompt') && init?.method === 'POST') {
+          return okJsonResponse({
+            id: 'thread-1',
+            workspaceId: 'workspace-1',
+            providerSessionId: 'codex-1',
+            source: 'supervisor',
+            title: 'Demo Thread',
+            model: 'gpt-5',
+            reasoningEffort: 'medium',
+            collaborationMode: 'default',
+            approvalMode: 'yolo',
+            status: 'running',
+            summaryText: goalPrompt,
+            lastError: null,
+            activeTurnId: 'goal-turn-1',
+            isLoaded: true,
+            isPinned: false,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            lastTurnStartedAt: startedAt,
+            lastTurnCompletedAt: null,
+          });
+        }
+
+        if (url.startsWith('/api/threads/thread-1?') || url.endsWith('/api/threads/thread-1')) {
+          detailRequestCount += 1;
+          const hasAgentOnlyTurn = detailRequestCount > 1;
+
+          return okJsonResponse({
+            thread: {
+              id: 'thread-1',
+              workspaceId: 'workspace-1',
+              providerSessionId: 'codex-1',
+              source: 'supervisor',
+              title: 'Demo Thread',
+              model: 'gpt-5',
+              reasoningEffort: 'medium',
+              collaborationMode: 'default',
+              approvalMode: 'yolo',
+              status: hasAgentOnlyTurn ? 'running' : 'idle',
+              summaryText: hasAgentOnlyTurn ? goalPrompt : 'Ready for goal work',
+              lastError: null,
+              activeTurnId: hasAgentOnlyTurn ? 'goal-turn-1' : null,
+              isLoaded: true,
+              isPinned: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastTurnStartedAt: hasAgentOnlyTurn ? startedAt : null,
+              lastTurnCompletedAt: null,
+            },
+            workspace: {
+              id: 'workspace-1',
+              hostId: 'host-1',
+              label: 'Demo Workspace',
+              absPath: '/tmp/demo',
+              isFavorite: false,
+              createdAt: new Date().toISOString(),
+              lastOpenedAt: null,
+            },
+            workspacePathStatus: 'present',
+            pendingRequests: [],
+            pendingSteers: [],
+            goal: {
+              threadId: 'thread-1',
+              providerSessionId: 'codex-1',
+              localGoalId: 'goal-1',
+              objective: 'Keep working until done.',
+              status: 'active',
+              tokenBudget: null,
+              tokensUsed: 100,
+              timeUsedSeconds: 12,
+              createdAt: startedAt,
+              updatedAt: startedAt,
+              completedAt: null,
+            },
+            goalHistory: [],
+            turns: hasAgentOnlyTurn
+              ? [
+                  {
+                    id: 'goal-turn-1',
+                    startedAt,
+                    status: 'inProgress',
+                    error: null,
+                    items: [
+                      {
+                        id: 'agent-goal-1',
+                        kind: 'agentMessage',
+                        text: 'I am continuing the goal now.',
+                      },
+                    ],
+                  },
+                ]
+              : [],
+          });
+        }
+
+        throw new Error(`Unhandled fetch request: ${url}`);
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/threads/thread-1']}>
+        <Routes>
+          <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByText('Demo Workspace / Demo Thread').length,
+      ).toBeGreaterThan(0);
+    });
+
+    const editor = screen.getByLabelText('Prompt');
+    setPromptValue(editor, goalPrompt);
+    fireEvent.click(screen.getByRole('button', { name: 'Send Prompt' }));
+
+    await waitFor(() => {
+      expect(FakeWebSocket.instances.length).toBeGreaterThan(0);
+    });
+    emitSocketMessage(FakeWebSocket.instances[0]!, {
+      type: 'thread.turn.started',
+      threadId: 'thread-1',
+      payload: {
+        turnId: 'goal-turn-1',
+      },
+    });
+
+    await screen.findByText('I am continuing the goal now.');
+
+    const agentMessage = screen.getByText('I am continuing the goal now.');
+    const userMessage = screen
+      .getAllByText(goalPrompt)
+      .find((element) => element.closest('article') === agentMessage.closest('article'));
+
+    expect(userMessage).toBeDefined();
+    expect(
+      userMessage!.compareDocumentPosition(agentMessage) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it('automatically connects the shell after switching from chat to shell', async () => {

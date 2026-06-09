@@ -6,12 +6,11 @@ import type { ComponentProps } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { useAppShellNav } from './AppShellNavContext';
-import {
-  AppShellMenuButton,
-  AppShellNavigationMenu,
-} from './AppShellNavigation';
+import { AppShellSettingsDialog } from './AppShellNavigation';
 
-type ThreadWorkspaceLayoutProps = ComponentProps<typeof SharedThreadWorkspaceLayout>;
+type ThreadWorkspaceLayoutProps = ComponentProps<
+  typeof SharedThreadWorkspaceLayout
+>;
 
 function buildNewThreadHref(workspaceId?: string | null) {
   return workspaceId
@@ -22,8 +21,6 @@ function buildNewThreadHref(workspaceId?: string | null) {
 export { ThreadCards };
 
 export function ThreadWorkspaceLayout({
-  appMenuButton,
-  appNavigationMenu,
   getThreadHref,
   onOpenThread,
   getNewThreadHref,
@@ -34,14 +31,24 @@ export function ThreadWorkspaceLayout({
   const navigate = useNavigate();
   const shellNav = useAppShellNav();
   const closeAppNavigation = onCloseAppNavigation ?? shellNav?.closeNav;
+  const effectiveTheme = props.effectiveTheme ?? shellNav?.effectiveTheme;
+  const themeMode = props.themeMode ?? shellNav?.themeMode;
+  const onThemeModeChange = props.onThemeModeChange ?? shellNav?.setThemeMode;
 
   return (
     <SharedThreadWorkspaceLayout
       {...props}
-      appMenuButton={appMenuButton ?? <AppShellMenuButton />}
-      appNavigationMenu={appNavigationMenu ?? <AppShellNavigationMenu />}
+      workspaceReturnHref={props.workspaceReturnHref ?? '/workspaces'}
+      globalSettingsContent={
+        props.globalSettingsContent ?? <AppShellSettingsDialog embedded />
+      }
+      {...(effectiveTheme ? { effectiveTheme } : {})}
+      {...(themeMode ? { themeMode } : {})}
+      {...(onThemeModeChange ? { onThemeModeChange } : {})}
       getThreadHref={getThreadHref ?? ((threadId) => `/threads/${threadId}`)}
-      onOpenThread={onOpenThread ?? ((threadId) => navigate(`/threads/${threadId}`))}
+      onOpenThread={
+        onOpenThread ?? ((threadId) => navigate(`/threads/${threadId}`))
+      }
       getNewThreadHref={getNewThreadHref ?? buildNewThreadHref}
       renderThreadLink={
         renderThreadLink ??

@@ -82,12 +82,15 @@ function AppShell({
   const [defaultBackend, setDefaultBackendState] = useState<AgentBackendIdDto>(readInitialBackend);
   const location = useLocation();
   const isThreadDetailRoute = /^\/threads\/[^/]+$/.test(location.pathname);
+  const isControlPlaneSessionRoute = /^\/control-plane\/sessions\/[^/]+$/.test(location.pathname);
   const isThreadsRoute = location.pathname === '/threads';
-  const isViewportLockedRoute = isThreadDetailRoute || isThreadsRoute;
+  const isViewportLockedRoute = isThreadDetailRoute || isControlPlaneSessionRoute || isThreadsRoute;
   const isThreadWorkspaceRoute =
-    isThreadsRoute || isThreadDetailRoute;
+    isThreadsRoute || isThreadDetailRoute || isControlPlaneSessionRoute;
+  const ownsNavigationShell = isThreadDetailRoute || isControlPlaneSessionRoute;
   const isWorkspacesRoute = location.pathname === '/workspaces';
-  const usesInlineTopbar = isWorkspacesRoute || isThreadsRoute;
+  const isControlPlaneRoute = location.pathname.startsWith('/control-plane');
+  const usesInlineTopbar = isWorkspacesRoute || isThreadsRoute || isControlPlaneRoute;
 
   useEffect(() => {
     setNavOpen(false);
@@ -125,40 +128,40 @@ function AppShell({
             : 'min-h-screen'
         }`}
       >
-        {!usesInlineTopbar && (
-          <div
-            className={`fixed left-4 top-4 z-50 ${
-              isThreadDetailRoute ? 'hidden sm:block' : ''
-            }`}
-          >
+        {!usesInlineTopbar && !ownsNavigationShell && (
+          <div className="fixed left-4 top-4 z-50">
             <AppShellMenuButton />
             <AppShellNavigationMenu className="mt-3 w-[min(22rem,calc(100vw-2rem))]" />
           </div>
         )}
 
         <main
-          className={`mx-auto w-full max-w-[1600px] ${
+          className={`mx-auto w-full ${
+            isThreadWorkspaceRoute ? 'max-w-none' : 'max-w-[1600px]'
+          } ${
             isViewportLockedRoute ? 'absolute inset-0 pb-0 sm:pb-4' : 'pb-4'
           } ${
             isThreadWorkspaceRoute
-              ? isThreadDetailRoute
-                ? 'pt-[env(safe-area-inset-top)] sm:pt-4'
+              ? isThreadDetailRoute || isControlPlaneSessionRoute
+                ? 'pt-0'
                 : isThreadsRoute
                   ? 'pt-[env(safe-area-inset-top)] sm:pt-4'
                   : 'pt-[calc(env(safe-area-inset-top)+4rem)] sm:pt-4'
-              : isWorkspacesRoute
+              : isWorkspacesRoute || isControlPlaneRoute
                 ? 'pt-[env(safe-area-inset-top)] sm:pt-4'
                 : 'pt-4'
           } ${
             isViewportLockedRoute
-              ? 'overflow-hidden overscroll-none px-0 sm:px-6'
+              ? isThreadDetailRoute || isControlPlaneSessionRoute
+                ? 'overflow-hidden overscroll-none px-0'
+                : 'overflow-hidden overscroll-none px-0 sm:px-6'
               : 'px-4 sm:px-6'
           }`}
         >
           <section
             className={`min-w-0 ${
               isViewportLockedRoute
-                ? isThreadDetailRoute
+                ? isThreadDetailRoute || isControlPlaneSessionRoute
                   ? 'h-full min-h-0 overflow-hidden overscroll-none'
                   : 'h-full overflow-hidden overscroll-none'
                 : ''
