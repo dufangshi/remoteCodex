@@ -26,8 +26,7 @@ COPY packages/plugin-terminal ./packages/plugin-terminal
 COPY packages/plugin-xyz-viewer ./packages/plugin-xyz-viewer
 COPY packages/shared ./packages/shared
 
-RUN REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64="${REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64}" \
-  bash ./scripts/setup-thread-ui-git-auth.sh \
+RUN bash ./scripts/setup-thread-ui-git-auth.sh \
   && pnpm --filter @remote-codex/supervisor-web... install --frozen-lockfile \
   && pnpm --filter @remote-codex/plugin-runtime build \
   && pnpm --filter @remote-codex/plugin-terminal build \
