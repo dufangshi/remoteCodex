@@ -150,6 +150,30 @@ variable "default_resource_profile" {
   }
 }
 
+variable "workspace_pvc_name" {
+  description = "Kubernetes PVC name mounted by sandbox worker Pods at /workspace."
+  type        = string
+  default     = "remote-codex-worker-workspace"
+}
+
+variable "workspace_efs_pv_capacity" {
+  description = "Nominal Kubernetes PV capacity for the EFS-backed workspace file system. EFS grows elastically; this is used for PV/PVC binding."
+  type        = string
+  default     = "1Ti"
+}
+
+variable "workspace_efs_pvc_request" {
+  description = "Nominal Kubernetes PVC storage request for worker workspace persistence. EFS grows elastically; this is used for PV/PVC binding."
+  type        = string
+  default     = "1Ti"
+}
+
+variable "workspace_efs_transition_to_ia" {
+  description = "EFS lifecycle transition policy for infrequently accessed workspace files."
+  type        = string
+  default     = "AFTER_30_DAYS"
+}
+
 variable "worker_enabled_agent_providers" {
   description = "Comma-separated worker runtime providers injected when starting sandbox Pods. Staging defaults to codex only."
   type        = string

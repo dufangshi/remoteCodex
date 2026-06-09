@@ -64,22 +64,24 @@ locals {
   worker_image_repository_url = aws_ecr_repository.worker.repository_url
 
   control_plane_env = {
-    SANDBOX_AWS_REGION                     = var.aws_region
-    SANDBOX_ENVIRONMENT                    = var.environment
-    SANDBOX_EKS_CLUSTER_NAME               = var.eks_cluster_name
-    SANDBOX_K8S_NAMESPACE                  = kubernetes_namespace_v1.remote_codex.metadata[0].name
-    SANDBOX_K8S_SERVICE_ACCOUNT            = kubernetes_service_account_v1.sandbox_manager.metadata[0].name
-    SANDBOX_WORKER_IMAGE_REPOSITORY        = local.worker_image_repository_url
-    SANDBOX_WORKER_IMAGE_TAG               = var.worker_image_tag
-    SANDBOX_ROUTER_BASE_URL                = var.sandbox_router_base_url
-    SANDBOX_WORKER_AUTH_TOKEN_SECRET_NAME  = var.worker_auth_token_secret_name
-    SANDBOX_WORKER_IDENTITY_SECRET         = var.router_worker_identity_secret
-    SANDBOX_WORKER_ENABLED_AGENT_PROVIDERS = var.worker_enabled_agent_providers
-    LLM_GATEWAY_TOKEN_SECRET_NAME          = var.llm_gateway_token_secret_name
-    LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY    = var.llm_gateway_static_token_secret_key
-    SANDBOX_SUBNET_IDS                     = join(",", var.private_subnet_ids)
-    SANDBOX_SECURITY_GROUP_IDS             = join(",", var.worker_security_group_ids)
-    SANDBOX_RESOURCE_PROFILE               = var.default_resource_profile
+    SANDBOX_AWS_REGION                      = var.aws_region
+    SANDBOX_ENVIRONMENT                     = var.environment
+    SANDBOX_EKS_CLUSTER_NAME                = var.eks_cluster_name
+    SANDBOX_K8S_NAMESPACE                   = kubernetes_namespace_v1.remote_codex.metadata[0].name
+    SANDBOX_K8S_SERVICE_ACCOUNT             = kubernetes_service_account_v1.sandbox_manager.metadata[0].name
+    SANDBOX_WORKER_IMAGE_REPOSITORY         = local.worker_image_repository_url
+    SANDBOX_WORKER_IMAGE_TAG                = var.worker_image_tag
+    SANDBOX_ROUTER_BASE_URL                 = var.sandbox_router_base_url
+    SANDBOX_WORKER_AUTH_TOKEN_SECRET_NAME   = var.worker_auth_token_secret_name
+    SANDBOX_WORKER_IDENTITY_SECRET          = var.router_worker_identity_secret
+    SANDBOX_WORKER_ENABLED_AGENT_PROVIDERS  = var.worker_enabled_agent_providers
+    LLM_GATEWAY_TOKEN_SECRET_NAME           = var.llm_gateway_token_secret_name
+    LLM_GATEWAY_STATIC_TOKEN_SECRET_KEY     = var.llm_gateway_static_token_secret_key
+    SANDBOX_SUBNET_IDS                      = join(",", var.private_subnet_ids)
+    SANDBOX_SECURITY_GROUP_IDS              = join(",", var.worker_security_group_ids)
+    SANDBOX_RESOURCE_PROFILE                = var.default_resource_profile
+    SANDBOX_WORKSPACE_PVC_NAME              = kubernetes_persistent_volume_claim_v1.worker_workspace.metadata[0].name
+    SANDBOX_WORKSPACE_VOLUME_SUBPATH_PREFIX = var.environment
   }
 
   aws_staging_evidence_env = {
@@ -161,6 +163,57 @@ resource "aws_cloudwatch_log_group" "router" {
   tags = local.common_tags
 }
 
+resource "aws_security_group" "worker_workspace_efs" {
+  name        = "${var.environment}-remote-codex-worker-workspace-efs"
+  description = "Allows Remote Codex worker Pods to mount the workspace EFS file system."
+  vpc_id      = var.vpc_id
+
+  tags = merge(local.common_tags, {
+    Name = "${var.environment}-remote-codex-worker-workspace-efs"
+  })
+}
+
+resource "aws_vpc_security_group_ingress_rule" "worker_workspace_efs_nfs" {
+  for_each = toset(var.worker_security_group_ids)
+
+  security_group_id            = aws_security_group.worker_workspace_efs.id
+  referenced_security_group_id = each.value
+  ip_protocol                  = "tcp"
+  from_port                    = 2049
+  to_port                      = 2049
+  description                  = "NFS from Remote Codex worker Pods"
+}
+
+resource "aws_vpc_security_group_egress_rule" "worker_workspace_efs_all" {
+  security_group_id = aws_security_group.worker_workspace_efs.id
+  cidr_ipv4         = "0.0.0.0/0"
+  ip_protocol       = "-1"
+  description       = "Allow EFS mount target responses"
+}
+
+resource "aws_efs_file_system" "worker_workspace" {
+  creation_token   = "${var.environment}-remote-codex-worker-workspace"
+  encrypted        = true
+  performance_mode = "generalPurpose"
+  throughput_mode  = "elastic"
+
+  lifecycle_policy {
+    transition_to_ia = var.workspace_efs_transition_to_ia
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.environment}-remote-codex-worker-workspace"
+  })
+}
+
+resource "aws_efs_mount_target" "worker_workspace" {
+  for_each = toset(var.private_subnet_ids)
+
+  file_system_id  = aws_efs_file_system.worker_workspace.id
+  subnet_id       = each.value
+  security_groups = [aws_security_group.worker_workspace_efs.id]
+}
+
 resource "aws_ec2_tag" "public_load_balancer_subnets" {
   for_each = toset(var.public_load_balancer_subnet_ids)
 
@@ -233,6 +286,57 @@ resource "kubernetes_role_v1" "sandbox_manager" {
     api_groups = [""]
     resources  = ["secrets"]
     verbs      = ["create", "get", "list", "patch", "delete"]
+  }
+}
+
+resource "kubernetes_persistent_volume_v1" "worker_workspace" {
+  metadata {
+    name = "${var.environment}-remote-codex-worker-workspace"
+    labels = merge(local.worker_labels, {
+      "remote-codex.dev/storage-role" = "workspace"
+    })
+  }
+
+  spec {
+    capacity = {
+      storage = var.workspace_efs_pv_capacity
+    }
+
+    access_modes                     = ["ReadWriteMany"]
+    persistent_volume_reclaim_policy = "Retain"
+    storage_class_name               = ""
+    volume_mode                      = "Filesystem"
+
+    persistent_volume_source {
+      csi {
+        driver        = "efs.csi.aws.com"
+        volume_handle = aws_efs_file_system.worker_workspace.id
+      }
+    }
+  }
+
+  depends_on = [aws_efs_mount_target.worker_workspace]
+}
+
+resource "kubernetes_persistent_volume_claim_v1" "worker_workspace" {
+  metadata {
+    name      = var.workspace_pvc_name
+    namespace = kubernetes_namespace_v1.remote_codex.metadata[0].name
+    labels = merge(local.worker_labels, {
+      "remote-codex.dev/storage-role" = "workspace"
+    })
+  }
+
+  spec {
+    access_modes       = ["ReadWriteMany"]
+    storage_class_name = ""
+    volume_name        = kubernetes_persistent_volume_v1.worker_workspace.metadata[0].name
+
+    resources {
+      requests = {
+        storage = var.workspace_efs_pvc_request
+      }
+    }
   }
 }
 

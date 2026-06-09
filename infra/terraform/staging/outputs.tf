@@ -36,6 +36,7 @@ output "router_service_name" {
 output "control_plane_env" {
   description = "Environment variables for the control-plane AWS sandbox adapter."
   value       = local.control_plane_env
+  sensitive   = true
 }
 
 output "aws_staging_evidence_env" {

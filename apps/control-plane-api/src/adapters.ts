@@ -370,6 +370,8 @@ const awsSandboxAdapterEnvSchema = z.object({
     .enum(['small', 'standard', 'large'])
     .default('standard'),
   SANDBOX_WORKER_ENABLED_AGENT_PROVIDERS: z.string().default('codex'),
+  SANDBOX_WORKSPACE_PVC_NAME: z.string().min(1).optional(),
+  SANDBOX_WORKSPACE_VOLUME_SUBPATH_PREFIX: z.string().min(1).optional(),
 });
 
 export interface AwsSandboxAdapterConfig {
@@ -386,6 +388,10 @@ export interface AwsSandboxAdapterConfig {
   securityGroupIds: string[];
   resourceProfile: 'small' | 'standard' | 'large';
   enabledAgentProviders: string;
+  workspacePersistence: {
+    pvcName: string;
+    subPathPrefix: string | null;
+  } | null;
 }
 
 export interface AwsWorkerPodSpec {
@@ -404,6 +410,12 @@ export interface AwsWorkerPodSpec {
     cpu: string;
     memory: string;
     ephemeralStorage: string;
+  };
+  workspaceVolume?: {
+    pvcName: string;
+    mountPath: string;
+    initMountPath: string;
+    subPath: string;
   };
 }
 
@@ -467,6 +479,64 @@ function labelsToSelector(selector: Record<string, string>) {
 }
 
 function workerPodManifest(spec: AwsWorkerPodSpec) {
+  const workspaceVolumeName = 'workspace-persistence';
+  const workspaceVolume = spec.workspaceVolume;
+  const workspaceVolumeMount = workspaceVolume
+    ? {
+        name: workspaceVolumeName,
+        mountPath: workspaceVolume.mountPath,
+        subPathExpr: '$(REMOTE_CODEX_WORKSPACE_VOLUME_SUBPATH)',
+      }
+    : null;
+  const workspaceInitContainer = workspaceVolume
+    ? [
+        {
+          name: 'prepare-workspace-volume',
+          image: spec.image,
+          imagePullPolicy: 'IfNotPresent',
+          command: ['/bin/sh', '-lc'],
+          args: [
+            [
+              'set -eu',
+              'mkdir -p "${REMOTE_CODEX_WORKSPACE_VOLUME_ROOT}/${REMOTE_CODEX_WORKSPACE_VOLUME_SUBPATH}"',
+              'chown 1000:1000 "${REMOTE_CODEX_WORKSPACE_VOLUME_ROOT}/${REMOTE_CODEX_WORKSPACE_VOLUME_SUBPATH}" || true',
+              'chmod 700 "${REMOTE_CODEX_WORKSPACE_VOLUME_ROOT}/${REMOTE_CODEX_WORKSPACE_VOLUME_SUBPATH}"',
+            ].join('; '),
+          ],
+          env: [
+            {
+              name: 'REMOTE_CODEX_WORKSPACE_VOLUME_ROOT',
+              value: workspaceVolume.initMountPath,
+            },
+            {
+              name: 'REMOTE_CODEX_WORKSPACE_VOLUME_SUBPATH',
+              value: workspaceVolume.subPath,
+            },
+          ],
+          volumeMounts: [
+            {
+              name: workspaceVolumeName,
+              mountPath: workspaceVolume.initMountPath,
+            },
+          ],
+          securityContext: {
+            runAsUser: 0,
+            runAsGroup: 0,
+          },
+          resources: {
+            requests: {
+              cpu: '50m',
+              memory: '64Mi',
+            },
+            limits: {
+              cpu: '100m',
+              memory: '128Mi',
+            },
+          },
+        },
+      ]
+    : undefined;
+
   return {
     apiVersion: 'v1',
     kind: 'Pod',
@@ -482,6 +552,9 @@ function workerPodManifest(spec: AwsWorkerPodSpec) {
     spec: {
       serviceAccountName: spec.serviceAccountName,
       restartPolicy: 'Never',
+      ...(workspaceInitContainer
+        ? { initContainers: workspaceInitContainer }
+        : {}),
       containers: [
         {
           name: 'worker',
@@ -508,6 +581,9 @@ function workerPodManifest(spec: AwsWorkerPodSpec) {
               },
             })),
           ],
+          ...(workspaceVolumeMount
+            ? { volumeMounts: [workspaceVolumeMount] }
+            : {}),
           resources: {
             requests: {
               cpu: spec.resources.cpu,
@@ -539,6 +615,18 @@ function workerPodManifest(spec: AwsWorkerPodSpec) {
           },
         },
       ],
+      ...(workspaceVolume
+        ? {
+            volumes: [
+              {
+                name: workspaceVolumeName,
+                persistentVolumeClaim: {
+                  claimName: workspaceVolume.pvcName,
+                },
+              },
+            ],
+          }
+        : {}),
     },
   };
 }
@@ -940,6 +1028,13 @@ export function loadAwsSandboxAdapterConfig(
     securityGroupIds,
     resourceProfile: parsed.SANDBOX_RESOURCE_PROFILE,
     enabledAgentProviders: parsed.SANDBOX_WORKER_ENABLED_AGENT_PROVIDERS,
+    workspacePersistence: parsed.SANDBOX_WORKSPACE_PVC_NAME
+      ? {
+          pvcName: parsed.SANDBOX_WORKSPACE_PVC_NAME,
+          subPathPrefix:
+            parsed.SANDBOX_WORKSPACE_VOLUME_SUBPATH_PREFIX?.trim() || null,
+        }
+      : null,
   };
 }
 
@@ -980,6 +1075,33 @@ function kubernetesLabelValue(value: string) {
     .slice(0, 50)
     .replace(/[^a-z0-9]+$/g, '');
   return prefix ? `${prefix}-${digest}` : digest;
+}
+
+function filesystemPathSegment(value: string) {
+  const normalized = value
+    .replace(/[^A-Za-z0-9_.-]/g, '-')
+    .replace(/^[.-]+|[.-]+$/g, '');
+  if (normalized.length > 0 && normalized.length <= 128) {
+    return normalized;
+  }
+  const digest = createHash('sha256').update(value).digest('hex').slice(0, 16);
+  const prefix = normalized.slice(0, 111).replace(/[.-]+$/g, '');
+  return prefix ? `${prefix}-${digest}` : digest;
+}
+
+function workspaceVolumeSubPath(input: {
+  sandboxId: string;
+  subPathPrefix: string | null;
+}) {
+  const sandboxPath = filesystemPathSegment(input.sandboxId);
+  if (!input.subPathPrefix) {
+    return sandboxPath;
+  }
+  const prefixSegments = input.subPathPrefix
+    .split('/')
+    .map((segment) => filesystemPathSegment(segment))
+    .filter(Boolean);
+  return [...prefixSegments, sandboxPath].join('/');
 }
 
 export function awsSandboxWorkerLabels(input: {
@@ -1185,6 +1307,17 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
         REMOTE_CODEX_DISABLE_BUILD_RESTART: 'true',
         REMOTE_CODEX_ENABLED_AGENT_PROVIDERS:
           input.enabledAgentProviders ?? this.config.enabledAgentProviders,
+        ...(this.config.workspacePersistence
+          ? {
+              REMOTE_CODEX_WORKSPACE_PERSISTENCE: 'efs',
+              REMOTE_CODEX_WORKSPACE_VOLUME_PVC:
+                this.config.workspacePersistence.pvcName,
+              REMOTE_CODEX_WORKSPACE_VOLUME_SUBPATH: workspaceVolumeSubPath({
+                sandboxId: input.sandboxId,
+                subPathPrefix: this.config.workspacePersistence.subPathPrefix,
+              }),
+            }
+          : {}),
         ...(input.gateway
           ? {
               REMOTE_CODEX_LLM_GATEWAY_BASE_URL: input.gateway.baseUrl,
@@ -1257,6 +1390,19 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
       securityGroupIds: this.config.securityGroupIds,
       resourceProfile: this.config.resourceProfile,
       resources: awsResourceProfiles[this.config.resourceProfile],
+      ...(this.config.workspacePersistence
+        ? {
+            workspaceVolume: {
+              pvcName: this.config.workspacePersistence.pvcName,
+              mountPath: '/workspace',
+              initMountPath: '/mnt/remote-codex-workspaces',
+              subPath: workspaceVolumeSubPath({
+                sandboxId: input.sandboxId,
+                subPathPrefix: this.config.workspacePersistence.subPathPrefix,
+              }),
+            },
+          }
+        : {}),
     };
   }
 

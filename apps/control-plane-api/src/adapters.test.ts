@@ -189,6 +189,30 @@ describe('sandbox manager adapters', () => {
       securityGroupIds: ['sg-worker'],
       resourceProfile: 'standard',
       enabledAgentProviders: 'codex',
+      workspacePersistence: null,
+    });
+  });
+
+  it('loads AWS workspace persistence configuration for EFS-backed PVCs', () => {
+    const config = loadAwsSandboxAdapterConfig({
+      AWS_REGION: 'us-east-1',
+      SANDBOX_EKS_CLUSTER_NAME: 'remote-codex-staging',
+      SANDBOX_K8S_NAMESPACE: 'remote-codex-sandboxes',
+      SANDBOX_K8S_SERVICE_ACCOUNT: 'remote-codex-worker',
+      SANDBOX_WORKER_IMAGE_REPOSITORY:
+        '123456789012.dkr.ecr.us-east-1.amazonaws.com/remote-codex-worker',
+      SANDBOX_WORKER_IMAGE_TAG: 'staging-abc123',
+      SANDBOX_ROUTER_BASE_URL: 'https://sandbox-router.example.test',
+      SANDBOX_WORKER_AUTH_TOKEN_SECRET_NAME: 'remote-codex-worker-token',
+      SANDBOX_SUBNET_IDS: 'subnet-a',
+      SANDBOX_SECURITY_GROUP_IDS: 'sg-worker',
+      SANDBOX_WORKSPACE_PVC_NAME: 'remote-codex-worker-workspace',
+      SANDBOX_WORKSPACE_VOLUME_SUBPATH_PREFIX: 'staging',
+    });
+
+    expect(config.workspacePersistence).toEqual({
+      pvcName: 'remote-codex-worker-workspace',
+      subPathPrefix: 'staging',
     });
   });
 
@@ -488,6 +512,25 @@ describe('sandbox manager adapters', () => {
     expect(env.env.REMOTE_CODEX_ENABLED_AGENT_PROVIDERS).toBe('codex,opencode');
   });
 
+  it('injects EFS workspace persistence metadata when a PVC is configured', async () => {
+    const manager = new AwsEksFargateSandboxManager({
+      ...awsConfig(),
+      workspacePersistence: {
+        pvcName: 'remote-codex-worker-workspace',
+        subPathPrefix: 'staging',
+      },
+    });
+
+    const env = await manager.prepareSandboxEnvironment(sandboxInput);
+
+    expect(env.env).toMatchObject({
+      WORKSPACE_ROOT: '/workspace',
+      REMOTE_CODEX_WORKSPACE_PERSISTENCE: 'efs',
+      REMOTE_CODEX_WORKSPACE_VOLUME_PVC: 'remote-codex-worker-workspace',
+      REMOTE_CODEX_WORKSPACE_VOLUME_SUBPATH: 'staging/sbx_test',
+    });
+  });
+
   it('applies an AWS worker Pod spec with deterministic names, env, and secrets', async () => {
     const { client, calls } = mockKubernetesClient();
     const manager = new AwsEksFargateSandboxManager(awsConfig(), client);
@@ -567,6 +610,35 @@ describe('sandbox manager adapters', () => {
         secretName: 'remote-codex-worker-token',
         key: 'token',
       },
+    });
+  });
+
+  it('mounts the configured EFS-backed workspace PVC for AWS worker Pods', async () => {
+    const { client, calls } = mockKubernetesClient();
+    const manager = new AwsEksFargateSandboxManager(
+      {
+        ...awsConfig(),
+        workspacePersistence: {
+          pvcName: 'remote-codex-worker-workspace',
+          subPathPrefix: 'staging',
+        },
+      },
+      client,
+    );
+
+    await manager.startSandbox(sandboxInput);
+
+    expect(calls.appliedPods).toHaveLength(1);
+    expect(calls.appliedPods[0]?.workspaceVolume).toEqual({
+      pvcName: 'remote-codex-worker-workspace',
+      mountPath: '/workspace',
+      initMountPath: '/mnt/remote-codex-workspaces',
+      subPath: 'staging/sbx_test',
+    });
+    expect(calls.appliedPods[0]?.env).toMatchObject({
+      REMOTE_CODEX_WORKSPACE_PERSISTENCE: 'efs',
+      REMOTE_CODEX_WORKSPACE_VOLUME_PVC: 'remote-codex-worker-workspace',
+      REMOTE_CODEX_WORKSPACE_VOLUME_SUBPATH: 'staging/sbx_test',
     });
   });
 
