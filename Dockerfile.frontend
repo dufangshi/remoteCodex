@@ -21,11 +21,17 @@ WORKDIR /opt/remote-codex
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY scripts/setup-thread-ui-git-auth.sh ./scripts/setup-thread-ui-git-auth.sh
 COPY apps/supervisor-web ./apps/supervisor-web
+COPY packages/plugin-runtime ./packages/plugin-runtime
+COPY packages/plugin-terminal ./packages/plugin-terminal
+COPY packages/plugin-xyz-viewer ./packages/plugin-xyz-viewer
 COPY packages/shared ./packages/shared
 
 RUN REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64="${REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64}" \
   bash ./scripts/setup-thread-ui-git-auth.sh \
   && pnpm --filter @remote-codex/supervisor-web... install --frozen-lockfile \
+  && pnpm --filter @remote-codex/plugin-runtime build \
+  && pnpm --filter @remote-codex/plugin-terminal build \
+  && pnpm --filter @remote-codex/plugin-xyz-viewer build \
   && pnpm --filter @remote-codex/shared build \
   && pnpm --filter @remote-codex/supervisor-web build \
   && printf '{"buildSha":"%s"}\n' "${FRONTEND_BUILD_SHA}" > apps/supervisor-web/dist/build.json \
