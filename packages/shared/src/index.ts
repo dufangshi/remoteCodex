@@ -16,16 +16,16 @@ export type {
 
 export type ApiErrorCode =
   | 'bad_request'
-  | 'unauthorized'
   | 'not_found'
   | 'conflict'
   | 'provider_goal_error'
-  | 'gateway_unavailable'
-  | 'harness_unavailable'
-  | 'invalid_route_token'
-  | 'quota_exceeded'
-  | 'account_inactive'
   | 'forbidden'
+  | 'unauthorized'
+  | 'invalid_route_token'
+  | 'gateway_unavailable'
+  | 'account_inactive'
+  | 'quota_exceeded'
+  | 'harness_unavailable'
   | 'goal_feature_disabled'
   | 'internal_error'
   | 'service_unavailable';
@@ -319,6 +319,40 @@ export interface DeleteWorkspaceFileInput {
   path: string;
   recursive?: boolean;
 }
+
+export interface ThreadWorkspaceTreeNodeDto {
+  name: string;
+  path: string;
+  kind: 'file' | 'directory';
+  size?: number;
+  children?: ThreadWorkspaceTreeNodeDto[];
+}
+
+export interface ThreadWorkspaceFilePreviewDto {
+  path: string;
+  name: string;
+  content: string;
+  language: string;
+  size: number;
+  truncated: boolean;
+  nextOffset: number;
+}
+
+export type ThreadWorkspaceUploadResultDto =
+  | {
+      kind: 'file';
+      file: {
+        path: string;
+        name: string;
+        size: number;
+      };
+    }
+  | {
+      kind: 'archive';
+      archiveName: string;
+      extractedCount: number;
+      paths: string[];
+    };
 
 export type ApprovalMode = 'yolo' | 'guarded';
 export type ReasoningEffortDto = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';

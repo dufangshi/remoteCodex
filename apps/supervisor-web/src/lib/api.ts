@@ -31,6 +31,9 @@ import type {
   ThreadDetailDto,
   ThreadExportTurnOptionsDto,
   ThreadHistoryItemDetailDto,
+  ThreadWorkspaceFilePreviewDto,
+  ThreadWorkspaceTreeNodeDto,
+  ThreadWorkspaceUploadResultDto,
   ThreadGoalDto,
   ThreadHooksDto,
   UntrustThreadHookInput,
@@ -1008,6 +1011,65 @@ export function fetchSupervisorHealth() {
 
 export function fetchWorkspaces() {
   return request<WorkspaceDto[]>('/api/workspaces');
+}
+
+export function fetchWorkspaceFileTree(workspaceId: string) {
+  return request<ThreadWorkspaceTreeNodeDto>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/files/tree`,
+    {
+      cache: 'no-store',
+    },
+  );
+}
+
+export function fetchWorkspaceFilePreview(
+  workspaceId: string,
+  input: { path: string; offset?: number; limit?: number },
+) {
+  const params = new URLSearchParams({ path: input.path });
+  if (input.offset !== undefined) {
+    params.set('offset', String(input.offset));
+  }
+  if (input.limit !== undefined) {
+    params.set('limit', String(input.limit));
+  }
+
+  return request<ThreadWorkspaceFilePreviewDto>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/files/preview?${params.toString()}`,
+    {
+      cache: 'no-store',
+    },
+  );
+}
+
+export function buildWorkspaceRawFileUrl(
+  workspaceId: string,
+  input: { path: string },
+) {
+  const params = new URLSearchParams({ path: input.path });
+  return `/api/workspaces/${encodeURIComponent(workspaceId)}/files/raw?${params.toString()}`;
+}
+
+export function downloadWorkspaceFile(workspaceId: string, input: { path: string }) {
+  const params = new URLSearchParams({ path: input.path });
+  return downloadFile(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/files/download?${params.toString()}`,
+    {
+      cache: 'no-store',
+    },
+  );
+}
+
+export function uploadWorkspaceFile(workspaceId: string, input: { file: File }) {
+  const formData = new FormData();
+  formData.append('file', input.file, input.file.name);
+  return request<ThreadWorkspaceUploadResultDto>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/files/upload`,
+    {
+      method: 'POST',
+      body: formData,
+    },
+  );
 }
 
 export function fetchThreads() {

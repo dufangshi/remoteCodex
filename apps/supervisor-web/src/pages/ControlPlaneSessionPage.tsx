@@ -1120,7 +1120,7 @@ function ControlPlaneSessionSurface() {
   );
 
   return (
-    <div className={`control-chat-workspace ${selectedInspectorItem ? 'artifact-open' : ''}`}>
+    <div className="control-chat-workspace">
       <ThreadDetailSurface
         threads={threads}
         detail={detail}
@@ -1165,10 +1165,12 @@ function ControlPlaneSessionSurface() {
         {...(composerProps ? { composerProps } : {})}
       />
       {selectedInspectorItem ? (
-        <ThreadInspector
-          selected={selectedInspectorItem}
-          onClose={() => setSelectedInspectorItem(null)}
-        />
+        <div className="control-artifact-inspector-overlay">
+          <ThreadInspector
+            selected={selectedInspectorItem}
+            onClose={() => setSelectedInspectorItem(null)}
+          />
+        </div>
       ) : null}
     </div>
   );

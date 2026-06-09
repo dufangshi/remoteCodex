@@ -1,4 +1,9 @@
-import Fastify, { FastifyInstance } from 'fastify';
+import Fastify, {
+  FastifyInstance,
+  type FastifyPluginCallback,
+  type FastifyRequest,
+  type RouteOptions,
+} from 'fastify';
 import multipart from '@fastify/multipart';
 import websocket from '@fastify/websocket';
 import { spawn } from 'node:child_process';
@@ -50,6 +55,17 @@ import {
 import { WorkerIdentityError } from './worker-identity';
 import { WorkerHarnessClient } from './worker-harness-client';
 import { WorkerControlPlaneSyncClient } from './worker-control-plane-sync';
+
+type WebsocketLike = {
+  readyState: number;
+  send: (message: string) => void;
+  on(event: 'message', handler: (message: Buffer) => void): void;
+  on(event: 'close', handler: () => void): void;
+};
+
+type WebsocketRouteOptions = RouteOptions & {
+  wsHandler: (socket: WebsocketLike, request: FastifyRequest) => void | Promise<void>;
+};
 
 const MAX_PROMPT_ATTACHMENTS = 10;
 const MAX_PROMPT_ATTACHMENT_BYTES = 25 * 1024 * 1024;
@@ -246,12 +262,12 @@ export function buildApp(
     }
   });
 
-  app.register(multipart, {
+  app.register(multipart as unknown as FastifyPluginCallback<Record<string, unknown>>, {
     limits: {
       files: MAX_PROMPT_ATTACHMENTS,
       fileSize: MAX_PROMPT_ATTACHMENT_BYTES,
     },
-  });
+  } as Record<string, unknown>);
 
   app.decorate('services', {
     config,
@@ -273,9 +289,9 @@ export function buildApp(
   backendPluginHost.register(createTerminalPluginBackendContribution());
 
   app.register(async (realtimeApp) => {
-    await realtimeApp.register(websocket);
+    await realtimeApp.register(websocket as unknown as FastifyPluginCallback);
 
-    realtimeApp.route({
+    const websocketRoute = {
       method: 'GET',
       url: '/ws',
       handler: (_request, reply) => {
@@ -352,8 +368,10 @@ export function buildApp(
           unsubscribe();
           unsubscribeShell();
         });
-      }
-    });
+      },
+    } satisfies WebsocketRouteOptions;
+
+    realtimeApp.route(websocketRoute as RouteOptions);
   });
 
   app.register(registerSystemRoutes);
