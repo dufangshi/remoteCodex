@@ -1148,6 +1148,11 @@ function ControlPlaneSessionSurface() {
         onCloseAppNavigation={shellNav?.closeNav ?? (() => {})}
         activeView={activeView}
         timelineProps={timelineProps}
+        shellEffectiveTheme={shellNav?.effectiveTheme ?? 'dark'}
+        shellThemeMode={shellNav?.themeMode ?? 'system'}
+        {...(shellNav?.setThemeMode
+          ? { onShellThemeModeChange: shellNav.setThemeMode }
+          : {})}
         shellUnavailableContent={shellUnavailableContent}
         shellDisconnectedContent={shellUnavailableContent}
         shellContent={shellUnavailableContent}
