@@ -49,6 +49,31 @@ export function mergePluginState(
 export function createDefaultPluginContextValue(): PluginContextValue {
   const plugins = mergePluginState(builtinFrontendPlugins, []);
   const enabledModules = builtinFrontendPlugins;
+  const renderArtifact: PluginContextValue['renderArtifact'] = (context) => {
+    const module = enabledModules.find(
+      (entry) =>
+        entry.renderArtifact &&
+        entry.manifest.capabilities.artifactTypes.some(
+          (type) => type.type === context.artifact.type,
+        ),
+    );
+    return module?.renderArtifact?.(context) ?? null;
+  };
+  const renderInlineCode: PluginContextValue['renderInlineCode'] = (context) => {
+    for (const module of enabledModules) {
+      for (const renderer of module.inlineCodeRenderers ?? []) {
+        if (!renderer.languages.includes(context.language.trim().toLowerCase())) {
+          continue;
+        }
+        const rendered = renderer.render(context);
+        if (rendered) {
+          return rendered;
+        }
+      }
+    }
+    return null;
+  };
+
   return {
     plugins,
     loading: false,
@@ -57,9 +82,16 @@ export function createDefaultPluginContextValue(): PluginContextValue {
     async importPluginManifest() {},
     async setPluginEnabled() {},
     async uninstallPlugin() {},
-    renderArtifact: () => null,
-    renderInlineCode: () => null,
-    hasRendererForArtifact: () => false,
+    renderArtifact,
+    renderInlineCode,
+    hasRendererForArtifact: (artifact) =>
+      enabledModules.some(
+        (entry) =>
+          Boolean(entry.renderArtifact) &&
+          entry.manifest.capabilities.artifactTypes.some(
+            (type) => type.type === artifact.type,
+          ),
+      ),
     getThreadPanels: () =>
       enabledModules.flatMap((module) => module.threadPanels ?? []),
   };

@@ -1,9 +1,12 @@
+import './styles.css';
+
 export type {
   ShellSocketConnection,
   ShellSocketHandlers,
   ThreadDetailUiAdapter,
   ThreadShellAdapter,
   ThreadTimelineAdapter,
+  ThreadWorkspaceAdapter,
 } from './adapters';
 export type {
   PromptAttachmentUpload,
@@ -27,6 +30,7 @@ export {
   ThreadShellPanel,
   type ThreadShellPanelHandle,
 } from './components/ThreadShellPanel';
+export { ThreadGraphWorkspacePanel } from './components/ThreadGraphWorkspacePanel';
 export { ConfirmDialog } from './components/ConfirmDialog';
 export { ExportTranscriptDialog } from './components/ExportTranscriptDialog';
 export { LongTextDialog } from './components/LongTextDialog';

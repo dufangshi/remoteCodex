@@ -28,6 +28,86 @@ export interface ShellSocketConnection {
   close?: () => void;
 }
 
+export interface ThreadWorkspaceTreeNode {
+  name: string;
+  path: string;
+  kind: 'file' | 'directory';
+  size?: number;
+  children?: ThreadWorkspaceTreeNode[];
+}
+
+export interface ThreadWorkspaceFilePreview {
+  path: string;
+  name: string;
+  content: string;
+  language: string;
+  size: number;
+  truncated: boolean;
+  nextOffset: number;
+}
+
+export type ThreadWorkspaceUploadResult =
+  | {
+      kind: 'file';
+      file: {
+        path: string;
+        name: string;
+        size: number;
+      };
+    }
+  | {
+      kind: 'archive';
+      archiveName: string;
+      extractedCount: number;
+      paths: string[];
+    };
+
+export interface ThreadWorkspaceAdapter {
+  listTree(input: {
+    threadId: string;
+    workspaceId?: string | null;
+  }): Promise<ThreadWorkspaceTreeNode>;
+  readFile(input: {
+    threadId: string;
+    workspaceId?: string | null;
+    path: string;
+    offset?: number;
+    limit?: number;
+  }): Promise<ThreadWorkspaceFilePreview>;
+  getRawFileUrl?: (input: {
+    threadId: string;
+    workspaceId?: string | null;
+    path: string;
+  }) => string;
+  uploadFile?: (input: {
+    threadId: string;
+    workspaceId?: string | null;
+    path: string;
+    file: File;
+  }) => Promise<ThreadWorkspaceUploadResult>;
+  downloadNode?: (input: {
+    threadId: string;
+    workspaceId?: string | null;
+    path: string;
+    kind: 'file' | 'directory';
+  }) => Promise<void> | void;
+  listGarbage?: (input: {
+    threadId: string;
+    workspaceId?: string | null;
+  }) => Promise<string[]>;
+  emptyGarbage?: (input: {
+    threadId: string;
+    workspaceId?: string | null;
+  }) => Promise<void> | void;
+  subscribeWorkspaceChanged?: (
+    input: {
+      threadId: string;
+      workspaceId?: string | null;
+    },
+    onChanged: () => void,
+  ) => (() => void) | void;
+}
+
 export interface ThreadShellAdapter {
   fetchState(threadId: string): Promise<ThreadShellStateDto>;
   createShell(
@@ -56,5 +136,6 @@ export interface ThreadDetailUiAdapter {
     itemId: string,
   ) => Promise<ThreadHistoryItemDetailDto> | ThreadHistoryItemDetailDto;
   getImageAssetUrl?: (path: string) => string;
+  workspace?: ThreadWorkspaceAdapter | null;
   shell?: ThreadShellAdapter | null;
 }

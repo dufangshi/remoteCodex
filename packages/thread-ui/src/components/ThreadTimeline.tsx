@@ -10,8 +10,6 @@ import {
   type RefCallback,
   type RefObject,
 } from 'react';
-import { code } from '@streamdown/code';
-import { Streamdown, defaultRemarkPlugins, type CustomRendererProps } from 'streamdown';
 
 import type {
   RespondThreadActionRequestInput,
@@ -23,17 +21,36 @@ import type {
   ThreadTurnDto,
 } from '@remote-codex/shared';
 import { LongTextDialog } from './LongTextDialog';
-import { hasLikelyMarkdownSyntax } from './markdownHeuristics';
 import type { ThreadTimelineAdapter } from '../adapters';
 import {
   formatLongTimestamp,
   formatShortTimestamp,
-  historyItemAccentClassName,
-  historyItemLabel,
-  isScrollableHistoryItem,
   turnStatusLabel,
 } from './threadPresentation';
-import { usePlugins } from '../plugins/usePlugins';
+import { GraphChatMarkdownAwareBody } from './graph-chat/GraphChatMessageBody';
+import { GraphChatHistoryEntries } from './graph-chat/GraphChatHistoryEntries';
+import {
+  GraphChatAgentToolCallItem as AgentToolCallItem,
+  GraphChatArtifactHistoryItem as ArtifactHistoryItem,
+  GraphChatCommandGroupItem as CommandGroupItem,
+  GraphChatCommandItem as CommandItem,
+  GraphChatContextCompactionItem as ContextCompactionItem,
+  GraphChatFileChangeGroupItem as FileChangeGroupItem,
+  GraphChatFileChangeItem as FileChangeItem,
+  GraphChatFileReadGroupItem as FileReadGroupItem,
+  GraphChatFileReadItem as FileReadItem,
+  GraphChatGenericHistoryItem as GenericHistoryItem,
+  GraphChatHookItem as HookItem,
+  GraphChatImageItem as ImageItem,
+  GraphChatPlanHistoryItem as PlanHistoryItem,
+  GraphChatSearchGroupItem as SearchGroupItem,
+  GraphChatSkillToolCallItem as SkillToolCallItem,
+  GraphChatToolCallItem as ToolCallItem,
+  GraphChatWebSearchItem as WebSearchItem,
+} from './graph-chat/GraphChatHistoryItems';
+import { GraphChatCompactMessageItem as CompactMessageItem } from './graph-chat/GraphChatCompactMessageItem';
+import { GraphChatTurnBody } from './graph-chat/GraphChatTurnBody';
+import { GraphChatTurnFrame } from './graph-chat/GraphChatTurnFrame';
 
 export interface ThreadTimelineProps {
   threadId?: string | undefined;
@@ -86,6 +103,14 @@ export interface ThreadTimelineProps {
     itemId: string,
   ) => Promise<ThreadHistoryItemDetailDto> | ThreadHistoryItemDetailDto;
   onOpenThread?: (threadId: string) => void;
+  onSelectArtifact?: (input: {
+    item: ThreadHistoryItemDto & { kind: 'artifact' };
+    artifact: NonNullable<ThreadHistoryItemDto['artifact']>;
+  }) => void;
+  onSelectHistoryItemDetail?: (input: {
+    item: ThreadHistoryItemDto;
+    detail: ThreadHistoryItemDetailDto;
+  }) => void;
   adapter?: ThreadTimelineAdapter | undefined;
 }
 
@@ -118,11 +143,6 @@ interface AgentMessageHistoryItemWithReasoning extends ThreadHistoryItemDto {
   kind: 'agentMessage';
   reasoningItems?: Array<ThreadHistoryItemDto & { kind: 'reasoning' }>;
 }
-
-type UserMessageSegment =
-  | { type: 'text'; key: string; text: string }
-  | { type: 'photo'; key: string; path: string }
-  | { type: 'file'; key: string; path: string };
 
 type TimelineHistoryEntry =
   | {
@@ -173,8 +193,6 @@ interface TurnTokenDetail {
 const INITIAL_VISIBLE_TURNS = 10;
 const LOAD_STEP = 10;
 const FOLLOW_TAIL_THRESHOLD_PX = 80;
-const LARGE_MESSAGE_PREVIEW_CHARS = 4_000;
-
 function useChangeRevision(inputs: readonly unknown[]) {
   const previousInputsRef = useRef<readonly unknown[] | null>(null);
   const revisionRef = useRef(0);
@@ -190,91 +208,6 @@ function useChangeRevision(inputs: readonly unknown[]) {
   }
 
   return revisionRef.current;
-}
-
-function itemSurfaceClassName(kind: ThreadHistoryItemDto['kind']) {
-  switch (kind) {
-    case 'userMessage':
-      return 'timeline-user';
-    case 'agentMessage':
-      return 'timeline-agent';
-    case 'artifact':
-      return 'timeline-action';
-    case 'image':
-      return 'timeline-action';
-    case 'contextCompaction':
-      return 'timeline-action';
-    case 'commandExecution':
-      return 'timeline-command';
-    case 'webSearch':
-      return 'timeline-search';
-    case 'fileRead':
-      return 'timeline-file-read';
-    case 'reasoning':
-      return 'timeline-reasoning';
-    case 'agentToolCall':
-      return 'timeline-agent-tool';
-    case 'skillToolCall':
-      return 'timeline-skill-tool';
-    case 'toolCall':
-      return 'timeline-action';
-    case 'plan':
-      return 'timeline-plan';
-    case 'fileChange':
-      return 'timeline-file-change';
-    case 'hook':
-      return 'timeline-action';
-    case 'other':
-      return 'timeline-other';
-  }
-}
-
-function overlayBadgeClassName(
-  tone:
-    | 'user'
-    | 'agent'
-    | 'command'
-    | 'search'
-    | 'fileRead'
-    | 'agentTool'
-    | 'skillTool'
-    | 'action',
-) {
-  switch (tone) {
-    case 'user':
-      return 'timeline-overlay-badge timeline-overlay-badge-user';
-    case 'agent':
-      return 'timeline-overlay-badge timeline-overlay-badge-agent';
-    case 'command':
-      return 'timeline-overlay-badge timeline-overlay-badge-command';
-    case 'search':
-      return 'timeline-overlay-badge timeline-overlay-badge-search';
-    case 'fileRead':
-      return 'timeline-overlay-badge timeline-overlay-badge-file-read';
-    case 'agentTool':
-      return 'timeline-overlay-badge timeline-overlay-badge-agent-tool';
-    case 'skillTool':
-      return 'timeline-overlay-badge timeline-overlay-badge-skill-tool';
-    case 'action':
-      return 'timeline-overlay-badge timeline-overlay-badge-action';
-  }
-}
-
-function ContextCompactionIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-3.5 w-3.5 fill-none stroke-current"
-      strokeWidth="1.35"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M3.5 5.25h9" />
-      <path d="M5 8h6" />
-      <path d="M6.5 10.75h3" />
-    </svg>
-  );
 }
 
 function normalizeLines(text: string) {
@@ -294,24 +227,6 @@ function decodeXmlEntities(value: string) {
     .replace(/&gt;/g, '>')
     .replace(/&lt;/g, '<')
     .replace(/&amp;/g, '&');
-}
-
-function summarizeInlinePreviewText(text: string) {
-  const lines = normalizeLines(text);
-
-  if (lines.length === 1) {
-    return {
-      firstLine: lines[0] ?? '',
-      showGap: false,
-      isTruncated: false,
-    };
-  }
-
-  return {
-    firstLine: lines[0] ?? '',
-    showGap: true,
-    isTruncated: true,
-  };
 }
 
 function parseHookPromptText(text: string): ThreadHistoryItemDto | null {
@@ -344,168 +259,6 @@ function parseHookPromptText(text: string): ThreadHistoryItemDto | null {
     hookStatusMessage: null,
     hookOutputEntries: output ? [{ kind: 'warning', text: output }] : [],
   };
-}
-
-function basenameFromAssetPath(value: string) {
-  const normalized = value.replace(/[\\/]+$/, '').trim();
-  if (!normalized) {
-    return '';
-  }
-  const segments = normalized.split(/[\\/]/).filter(Boolean);
-  return segments.at(-1) ?? normalized;
-}
-
-function tokenizeUserMessageText(text: string): UserMessageSegment[] {
-  if (!text) {
-    return [];
-  }
-
-  const matcher = /\[(PHOTO|FILE)\s+([^\]]+)\]/g;
-  const segments: UserMessageSegment[] = [];
-  let cursor = 0;
-  let index = 0;
-
-  for (const match of text.matchAll(matcher)) {
-    const start = match.index ?? 0;
-    if (start > cursor) {
-      segments.push({
-        type: 'text',
-        key: `text-${index}`,
-        text: text.slice(cursor, start),
-      });
-      index += 1;
-    }
-
-    const kind = match[1];
-    const path = match[2]?.trim() ?? '';
-    if (kind === 'PHOTO' && path) {
-      segments.push({ type: 'photo', key: `photo-${index}`, path });
-    } else if (kind === 'FILE' && path) {
-      segments.push({ type: 'file', key: `file-${index}`, path });
-    } else {
-      segments.push({
-        type: 'text',
-        key: `text-${index}`,
-        text: match[0],
-      });
-    }
-    index += 1;
-    cursor = start + match[0].length;
-  }
-
-  if (cursor < text.length) {
-    segments.push({
-      type: 'text',
-      key: `text-${index}`,
-      text: text.slice(cursor),
-    });
-  }
-
-  return segments;
-}
-
-function formatTrailingPathLabel(label: string, maxLength = 42) {
-  const normalized = projectRelativePathLabel(label);
-  if (!normalized) {
-    return '';
-  }
-
-  const suffixMatch = normalized.match(/(, \+\d+ more.*)$/);
-  const suffix = suffixMatch?.[1] ?? '';
-  const base = suffix ? normalized.slice(0, -suffix.length) : normalized;
-  if (base.length <= maxLength) {
-    return `${base}${suffix}`;
-  }
-
-  const normalizedSeparators = base.replace(/\\/g, '/');
-  const segments = normalizedSeparators.split('/').filter(Boolean);
-  if (segments.length > 1) {
-    const keptSegments: string[] = [];
-    let currentLength = suffix.length + 4;
-
-    for (let index = segments.length - 1; index >= 0; index -= 1) {
-      const candidate = segments[index]!;
-      const nextLength = currentLength + candidate.length + (keptSegments.length > 0 ? 1 : 0);
-      if (keptSegments.length > 0 && nextLength > maxLength) {
-        break;
-      }
-      keptSegments.unshift(candidate);
-      currentLength = nextLength;
-    }
-
-    if (keptSegments.length > 0) {
-      return `.../${keptSegments.join('/')}${suffix}`;
-    }
-  }
-
-  return `...${base.slice(-(maxLength - suffix.length - 3))}${suffix}`;
-}
-
-function projectRelativePathLabel(label: string) {
-  const normalized = label.trim();
-  if (!normalized) {
-    return '';
-  }
-
-  const suffixMatch = normalized.match(/(, \+\d+ more.*)$/);
-  const suffix = suffixMatch?.[1] ?? '';
-  const base = suffix ? normalized.slice(0, -suffix.length) : normalized;
-  const slashNormalized = base.replace(/\\/g, '/');
-  if (!slashNormalized.startsWith('/')) {
-    return `${slashNormalized.replace(/^\.\//, '')}${suffix}`;
-  }
-
-  const markers = [
-    '/apps/',
-    '/packages/',
-    '/src/',
-    '/test/',
-    '/tests/',
-    '/docs/',
-    '/config/',
-    '/scripts/',
-    '/e2e/',
-    '/.agents/',
-    '/.codex/',
-  ];
-  for (const marker of markers) {
-    const markerIndex = slashNormalized.indexOf(marker);
-    if (markerIndex >= 0) {
-      return `${slashNormalized.slice(markerIndex + 1)}${suffix}`;
-    }
-  }
-
-  return normalized;
-}
-
-function fileChangeSummarySegments(item: ThreadHistoryItemDto & { kind: 'fileChange' }) {
-  const segments: string[] = [];
-
-  if (typeof item.changedFiles === 'number' && item.changedFiles > 0) {
-    segments.push(`${item.changedFiles} ${item.changedFiles === 1 ? 'file' : 'files'}`);
-  }
-  if (typeof item.addedLines === 'number' && item.addedLines > 0) {
-    segments.push(`+${item.addedLines}`);
-  }
-  if (typeof item.removedLines === 'number' && item.removedLines > 0) {
-    segments.push(`-${item.removedLines}`);
-  }
-
-  if (segments.length > 0) {
-    return segments;
-  }
-
-  const fallback = item.previewText?.trim();
-  if (!fallback) {
-    return [];
-  }
-
-  return fallback
-    .replace(/\bfiles changed\b/gi, 'files')
-    .replace(/\bfile changed\b/gi, 'file')
-    .split('·')
-    .map((segment) => segment.trim())
-    .filter(Boolean);
 }
 
 function isCompactChatItem(kind: ThreadHistoryItemDto['kind']) {
@@ -1036,272 +789,6 @@ function CompactMessageIcon({
   );
 }
 
-function CommandIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-3.5 w-3.5 fill-none stroke-current"
-      strokeWidth="1.35"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="m4 5 2 2-2 2" />
-      <path d="M7.75 9.5h4.25" />
-    </svg>
-  );
-}
-
-function ToolCallIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-3.5 w-3.5 fill-none stroke-current"
-      strokeWidth="1.35"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M6.25 4.25 3.5 7l2.75 2.75" />
-      <path d="M9.75 4.25 12.5 7 9.75 9.75" />
-      <path d="M8.9 3.5 7.1 10.5" />
-      <path d="M3 12.25h10" />
-    </svg>
-  );
-}
-
-function AgentToolIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-3.5 w-3.5 fill-none stroke-current"
-      strokeWidth="1.35"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <rect x="3.25" y="3" width="9.5" height="6.5" rx="2" />
-      <path d="M5.5 6.25h.01M10.5 6.25h.01" />
-      <path d="M6.25 11.25h3.5" />
-      <path d="M6 13h4" />
-      <path d="M5.25 9.5v1.75M10.75 9.5v1.75" />
-    </svg>
-  );
-}
-
-function SkillToolIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-3.5 w-3.5 fill-none stroke-current"
-      strokeWidth="1.35"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M5 3.25h6a1.5 1.5 0 0 1 1.5 1.5v6.5a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5v-6.5A1.5 1.5 0 0 1 5 3.25Z" />
-      <path d="M6.25 6.25h3.5" />
-      <path d="M6.25 8.25h2.25" />
-      <path d="M10.75 8.5v2.25" />
-      <path d="M9.62 9.62h2.26" />
-    </svg>
-  );
-}
-
-function HookIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-3.5 w-3.5 fill-none stroke-current"
-      strokeWidth="1.35"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M6.25 4.5v4.25a2.75 2.75 0 1 0 2.75 2.75V7.25" />
-      <path d="M9 7.25a2.75 2.75 0 1 0-2.75-2.75" />
-    </svg>
-  );
-}
-
-function CommandBatchIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-3.5 w-3.5 fill-none stroke-current"
-      strokeWidth="1.2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <rect x="2.75" y="3" width="8.5" height="3" rx="1.1" />
-      <rect x="4.25" y="6.5" width="8.5" height="3" rx="1.1" />
-      <rect x="5.75" y="10" width="7.5" height="3" rx="1.1" />
-      <path d="m6.25 4.5 1 1-1 1" />
-      <path d="M7.9 5.5h1.7" />
-      <path d="m7.75 8 1 1-1 1" />
-      <path d="M9.4 9h1.7" />
-    </svg>
-  );
-}
-
-function SearchIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-3.5 w-3.5 fill-none stroke-current"
-      strokeWidth="1.35"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <circle cx="7" cy="7" r="3.75" />
-      <path d="m10.25 10.25 3 3" />
-    </svg>
-  );
-}
-
-function SearchBatchIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-3.5 w-3.5 fill-none stroke-current"
-      strokeWidth="1.2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <circle cx="6" cy="6" r="2.3" />
-      <path d="m8 8 1.6 1.6" />
-      <circle cx="9.3" cy="8.8" r="2" />
-      <path d="m10.75 10.25 1.65 1.65" />
-      <circle cx="11.2" cy="4.75" r="1.8" />
-      <path d="m12.45 6 1.1 1.1" />
-    </svg>
-  );
-}
-
-function ImageIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-3.5 w-3.5 fill-none stroke-current"
-      strokeWidth="1.35"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <rect x="2.75" y="3" width="10.5" height="9.5" rx="1.5" />
-      <circle cx="6.1" cy="6.1" r="1.1" />
-      <path d="m4.5 10 2.2-2.2 1.9 1.9 1.1-1.1 1.8 1.8" />
-    </svg>
-  );
-}
-
-function FileChangeIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-3.5 w-3.5 fill-none stroke-current"
-      strokeWidth="1.3"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M5 2.75h4l2 2v6.5a1.5 1.5 0 0 1-1.5 1.5h-4A1.5 1.5 0 0 1 4 11.25v-7A1.5 1.5 0 0 1 5.5 2.75Z" />
-      <path d="M9 2.75v2h2" />
-      <path d="M6.2 8h3.6" />
-      <path d="M6.2 10h1.7" />
-    </svg>
-  );
-}
-
-function FileReadIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-3.5 w-3.5 fill-none stroke-current"
-      strokeWidth="1.3"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M5 2.75h4l2 2v6.5a1.5 1.5 0 0 1-1.5 1.5h-4A1.5 1.5 0 0 1 4 11.25v-7A1.5 1.5 0 0 1 5.5 2.75Z" />
-      <path d="M9 2.75v2h2" />
-      <path d="M6.15 7.25h3.7" />
-      <path d="M6.15 9.25h2.8" />
-      <path d="m10.4 10.7 1.2 1.2" />
-      <circle cx="9.25" cy="9.55" r="1.45" />
-    </svg>
-  );
-}
-
-function PlanIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-3.5 w-3.5 fill-none stroke-current"
-      strokeWidth="1.35"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M4.25 4.75h7.5" />
-      <path d="M4.25 8h7.5" />
-      <path d="M4.25 11.25h4.5" />
-      <path d="M2.25 4.75h.01M2.25 8h.01M2.25 11.25h.01" />
-    </svg>
-  );
-}
-
-function BrainIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-3.5 w-3.5 fill-none stroke-current"
-      strokeWidth="1.35"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M6.55 3.05a2.15 2.15 0 0 0-3.3 1.8 2.05 2.05 0 0 0 .28 1.03A2.25 2.25 0 0 0 3 9.77a2.2 2.2 0 0 0 2.14 2.73h1.41V3.05Z" />
-      <path d="M9.45 3.05a2.15 2.15 0 0 1 3.3 1.8 2.05 2.05 0 0 1-.28 1.03A2.25 2.25 0 0 1 13 9.77a2.2 2.2 0 0 1-2.14 2.73H9.45V3.05Z" />
-      <path d="M5.1 6.55h1.45" />
-      <path d="M9.45 6.55h1.45" />
-      <path d="M6.55 9.15H5.1" />
-      <path d="M9.45 9.15h1.45" />
-    </svg>
-  );
-}
-
-function ExpandIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 20 20"
-      className="h-3.5 w-3.5 fill-current"
-    >
-      <path d="m13.28 7.78 3.22-3.22v2.69a.75.75 0 0 0 1.5 0v-4.5a.75.75 0 0 0-.75-.75h-4.5a.75.75 0 0 0 0 1.5h2.69l-3.22 3.22a.75.75 0 0 0 1.06 1.06ZM2 17.25v-4.5a.75.75 0 0 1 1.5 0v2.69l3.22-3.22a.75.75 0 0 1 1.06 1.06L4.56 16.5h2.69a.75.75 0 0 1 0 1.5h-4.5a.747.747 0 0 1-.75-.75ZM12.22 13.28l3.22 3.22h-2.69a.75.75 0 0 0 0 1.5h4.5a.747.747 0 0 0 .75-.75v-4.5a.75.75 0 0 0-1.5 0v2.69l-3.22-3.22a.75.75 0 1 0-1.06 1.06ZM3.5 4.56l3.22 3.22a.75.75 0 0 0 1.06-1.06L4.56 3.5h2.69a.75.75 0 0 0 0-1.5h-4.5a.75.75 0 0 0-.75.75v4.5a.75.75 0 0 0 1.5 0V4.56Z" />
-    </svg>
-  );
-}
-
-function CopyIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-3.5 w-3.5 fill-none stroke-current"
-      strokeWidth="1.35"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <rect x="5.25" y="3.25" width="7.5" height="9" rx="1.5" />
-      <path d="M10.75 12.75H4.5a1.25 1.25 0 0 1-1.25-1.25V4.75A1.25 1.25 0 0 1 4.5 3.5h.75" />
-    </svg>
-  );
-}
-
 function RunningDots({
   tone = 'amber',
 }: {
@@ -1430,91 +917,6 @@ function deriveDisplayedLivePlan(
     ...livePlan,
     plan: nextPlan,
   };
-}
-
-function ClockIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-3.5 w-3.5 fill-none stroke-current"
-      strokeWidth="1.35"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <circle cx="8" cy="8" r="4.75" />
-      <path d="M8 5.25v2.9l2.05 1.2" />
-    </svg>
-  );
-}
-
-function PlanStepStatusIcon({
-  status,
-}: {
-  status: string;
-}) {
-  const normalized = normalizePlanStepStatus(status);
-  const label =
-    normalized === 'completed'
-      ? 'Plan step status: Completed'
-      : normalized === 'in_progress'
-        ? 'Plan step status: In progress'
-        : normalized === 'pending'
-          ? 'Plan step status: Pending'
-          : normalized === 'failed'
-            ? 'Plan step status: Failed'
-            : `Plan step status: ${status}`;
-
-  const className =
-    normalized === 'completed'
-      ? 'ui-status-success'
-      : normalized === 'in_progress'
-        ? 'ui-status-info'
-        : normalized === 'pending'
-          ? 'border-stone-700/90 bg-stone-900/80 text-stone-300'
-          : normalized === 'failed'
-            ? 'border-rose-300/30 bg-rose-300/10 text-rose-100'
-            : 'border-stone-700/90 bg-stone-900/80 text-stone-300';
-
-  return (
-    <span
-      aria-label={label}
-      title={label.replace('Plan step status: ', '')}
-      className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border ${className}`}
-    >
-      {normalized === 'completed' ? (
-        <svg
-          aria-hidden="true"
-          viewBox="0 0 16 16"
-          className="h-3.5 w-3.5 fill-none stroke-current"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="m3.75 8.25 2.5 2.5 6-6" />
-        </svg>
-      ) : normalized === 'in_progress' ? (
-        <RunningDots tone="sky" />
-      ) : normalized === 'pending' ? (
-        <ClockIcon />
-      ) : normalized === 'failed' ? (
-        <svg
-          aria-hidden="true"
-          viewBox="0 0 16 16"
-          className="h-3.5 w-3.5 fill-none stroke-current"
-          strokeWidth="1.7"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="m5 5 6 6M11 5l-6 6" />
-        </svg>
-      ) : (
-        <span className="text-[10px] font-semibold uppercase tracking-[0.14em]">
-          ?
-        </span>
-      )}
-    </span>
-  );
 }
 
 function TurnStatusIndicator({
@@ -2127,1790 +1529,6 @@ function formatTurnRuntimeSummary(turn: TimelineTurn) {
   return [modelLabel, reasoningLabel].join(' · ');
 }
 
-const MarkdownContent = memo(function MarkdownContent({
-  text,
-  className = 'agent-markdown',
-}: {
-  text: string;
-  className?: string;
-}) {
-  const plugins = usePlugins();
-  const inlineCodeRenderers = useMemo(
-    () => [
-      {
-        language: ['xyz', 'extxyz', 'cif', 'pdb'],
-        component: function InlinePluginCodeRenderer({
-          code: sourceCode,
-          isIncomplete,
-          language,
-          meta,
-        }: CustomRendererProps) {
-          const rendered = plugins.renderInlineCode({
-            code: sourceCode,
-            isIncomplete,
-            language,
-            ...(meta === undefined ? {} : { meta }),
-          });
-          return rendered ?? (
-            <code className="whitespace-pre-wrap break-words text-xs">
-              {sourceCode}
-            </code>
-          );
-        },
-      },
-    ],
-    [plugins],
-  );
-
-  return (
-    <Streamdown
-      mode="static"
-      plugins={{ code, renderers: inlineCodeRenderers }}
-      controls={false}
-      lineNumbers={false}
-      remarkPlugins={MARKDOWN_REMARK_PLUGINS}
-      className={className}
-    >
-      {text}
-    </Streamdown>
-  );
-});
-
-type MarkdownTreeNode = {
-  type?: string;
-  value?: string;
-  children?: MarkdownTreeNode[];
-};
-
-function remarkPreserveSoftBreaks() {
-  return (tree: MarkdownTreeNode) => {
-    preserveSoftBreaksInNode(tree);
-  };
-}
-
-const MARKDOWN_REMARK_PLUGINS = [
-  ...Object.values(defaultRemarkPlugins),
-  remarkPreserveSoftBreaks,
-];
-
-function preserveSoftBreaksInNode(node: MarkdownTreeNode) {
-  if (!Array.isArray(node.children)) {
-    return;
-  }
-
-  const nextChildren: MarkdownTreeNode[] = [];
-  for (const child of node.children) {
-    if (child.type === 'text' && typeof child.value === 'string' && child.value.includes('\n')) {
-      const lines = child.value.split('\n');
-      lines.forEach((line, index) => {
-        if (index > 0) {
-          nextChildren.push({ type: 'break' });
-        }
-
-        if (line) {
-          nextChildren.push({ ...child, value: line });
-        }
-      });
-      continue;
-    }
-
-    preserveSoftBreaksInNode(child);
-    nextChildren.push(child);
-  }
-
-  node.children = nextChildren;
-}
-
-const PLAIN_URL_PATTERN = /\b(?:https?:\/\/|www\.)[^\s<>"'`]+/gi;
-const TRAILING_URL_PUNCTUATION_PATTERN = /[),.;:!?]+$/;
-
-function normalizeHref(value: string) {
-  return value.startsWith('www.') ? `https://${value}` : value;
-}
-
-function LinkifiedPlainText({ text }: { text: string }) {
-  const parts: ReactNode[] = [];
-  let cursor = 0;
-
-  for (const match of text.matchAll(PLAIN_URL_PATTERN)) {
-    const rawMatch = match[0];
-    const index = match.index ?? 0;
-    const trailingPunctuation = rawMatch.match(TRAILING_URL_PUNCTUATION_PATTERN)?.[0] ?? '';
-    const urlText = trailingPunctuation
-      ? rawMatch.slice(0, -trailingPunctuation.length)
-      : rawMatch;
-
-    if (!urlText) {
-      continue;
-    }
-
-    if (index > cursor) {
-      parts.push(text.slice(cursor, index));
-    }
-
-    parts.push(
-      <a
-        key={`${index}-${urlText}`}
-        href={normalizeHref(urlText)}
-        target="_blank"
-        rel="noreferrer"
-        className="thread-inline-link"
-      >
-        {urlText}
-      </a>,
-    );
-
-    if (trailingPunctuation) {
-      parts.push(trailingPunctuation);
-    }
-
-    cursor = index + rawMatch.length;
-  }
-
-  if (cursor < text.length) {
-    parts.push(text.slice(cursor));
-  }
-
-  return <>{parts.length > 0 ? parts : text}</>;
-}
-
-const MarkdownAwareBody = memo(function MarkdownAwareBody({
-  text,
-  scrollRootRef,
-  streaming = false,
-  containerClassName = '',
-  plainTextClassName = 'whitespace-pre-wrap break-words text-[15px] leading-6 text-stone-100',
-  markdownClassName = 'agent-markdown',
-}: {
-  text: string;
-  scrollRootRef: RefObject<HTMLDivElement | null>;
-  streaming?: boolean;
-  containerClassName?: string;
-  plainTextClassName?: string;
-  markdownClassName?: string;
-}) {
-  const messageRef = useRef<HTMLDivElement | null>(null);
-  const [expanded, setExpanded] = useState(false);
-  const shouldRenderMarkdown = hasLikelyMarkdownSyntax(text);
-  const isLargeText = !streaming && text.length > LARGE_MESSAGE_PREVIEW_CHARS;
-  const displayText =
-    isLargeText && !expanded
-      ? `${text.slice(0, LARGE_MESSAGE_PREVIEW_CHARS).trimEnd()}\n\n...`
-      : text;
-  const [isActivated, setIsActivated] = useState(
-    streaming || typeof IntersectionObserver === 'undefined',
-  );
-
-  useEffect(() => {
-    if (streaming || typeof IntersectionObserver === 'undefined') {
-      setIsActivated(true);
-      return;
-    }
-
-    if (isActivated || !messageRef.current) {
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            setIsActivated(true);
-            observer.disconnect();
-            break;
-          }
-        }
-      },
-      {
-        root: scrollRootRef.current,
-        threshold: 0,
-      },
-    );
-
-    observer.observe(messageRef.current);
-    return () => {
-      observer.disconnect();
-    };
-  }, [isActivated, scrollRootRef, streaming]);
-
-  return (
-    <div ref={messageRef} className={containerClassName}>
-      {isActivated && shouldRenderMarkdown ? (
-        <MarkdownContent text={displayText} className={markdownClassName} />
-      ) : (
-        <p className={plainTextClassName}>
-          <LinkifiedPlainText text={displayText} />
-        </p>
-      )}
-      {isLargeText ? (
-        <button
-          type="button"
-          onClick={() => setExpanded((current) => !current)}
-          className="timeline-meta-text mt-2 inline-flex rounded-full border border-[var(--theme-border)] px-2.5 py-1 text-xs transition hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)]"
-        >
-          {expanded ? 'Show less' : `Show full message (${text.length.toLocaleString()} chars)`}
-        </button>
-      ) : null}
-    </div>
-  );
-});
-
-const AgentMessageBody = memo(function AgentMessageBody({
-  text,
-  scrollRootRef,
-  streaming = false,
-}: {
-  text: string;
-  scrollRootRef: RefObject<HTMLDivElement | null>;
-  streaming?: boolean;
-}) {
-  return (
-    <MarkdownAwareBody
-      text={text}
-      scrollRootRef={scrollRootRef}
-      streaming={streaming}
-      containerClassName="thread-message-prose"
-    />
-  );
-});
-
-const UserMessageBody = memo(function UserMessageBody({
-  threadId,
-  text,
-  getImageAssetUrl,
-}: {
-  threadId?: string | undefined;
-  text: string;
-  getImageAssetUrl?: ThreadTimelineAdapter['getImageAssetUrl'] | undefined;
-}) {
-  const segments = useMemo(() => tokenizeUserMessageText(text), [text]);
-
-  return (
-    <div className="thread-message-prose whitespace-pre-wrap break-words text-[15px] leading-6 text-stone-300">
-      {segments.map((segment) => {
-        if (segment.type === 'text') {
-          return <span key={segment.key}>{segment.text}</span>;
-        }
-
-        if (segment.type === 'photo') {
-          const imageUrl =
-            threadId
-              ? getImageAssetUrl?.({ threadId, path: segment.path }) ?? null
-              : null;
-          const label = basenameFromAssetPath(segment.path) || 'Attached image';
-
-          return (
-            <span key={segment.key} className="mx-[0.14rem] inline-flex align-middle">
-              <span className="inline-flex max-w-full flex-col rounded-[1rem] border border-sky-300/28 bg-sky-300/[0.08] p-1.5 shadow-sm shadow-stone-950/20">
-                {imageUrl ? (
-                  <img
-                    src={imageUrl}
-                    alt={label}
-                    className="h-[4.5rem] w-[6rem] rounded-[0.75rem] bg-stone-950 object-contain"
-                    loading="lazy"
-                  />
-                ) : (
-                  <span className="inline-flex h-[4.5rem] w-[6rem] items-center justify-center rounded-[0.75rem] bg-stone-950 text-[10px] text-sky-100">
-                    PHOTO
-                  </span>
-                )}
-                <span
-                  className="mt-1 max-w-[7rem] truncate text-[10px] font-medium tracking-[0.08em] text-sky-50"
-                  title={segment.path}
-                >
-                  {label}
-                </span>
-              </span>
-            </span>
-          );
-        }
-
-        const fileName = basenameFromAssetPath(segment.path) || 'Attached file';
-        return (
-          <span key={segment.key} className="mx-[0.14rem] inline-flex align-middle">
-            <span
-              className="inline-flex max-w-[12rem] items-center gap-2 rounded-[0.95rem] border border-emerald-300/28 bg-emerald-300/[0.08] px-2.5 py-2 text-[10px] font-medium tracking-[0.08em] text-emerald-50 shadow-sm shadow-stone-950/20"
-              title={segment.path}
-            >
-              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-emerald-200/20 bg-emerald-300/12 text-[9px]">
-                FILE
-              </span>
-              <span className="min-w-0 truncate">{fileName}</span>
-            </span>
-          </span>
-        );
-      })}
-    </div>
-  );
-});
-
-function commandStatusBadgeClassName(status: ThreadHistoryItemDto['status']) {
-  if (status === 'completed') {
-    return 'timeline-command-status-complete';
-  }
-
-  return 'timeline-command-status-pending';
-}
-
-function CommandStatusIcon({
-  status,
-}: {
-  status: ThreadHistoryItemDto['status'];
-}) {
-  if (status === 'completed') {
-    return (
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 16 16"
-        className="h-3.5 w-3.5 fill-none stroke-current"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="m3.75 8.25 2.5 2.5 6-6" />
-      </svg>
-    );
-  }
-
-  return <RunningDots tone="emerald" />;
-}
-
-const CompactMessageItem = memo(function CompactMessageItem({
-  threadId,
-  item,
-  scrollRootRef,
-  streaming = false,
-  adapter,
-}: {
-  threadId?: string | undefined;
-  item: ThreadHistoryItemDto & {
-    kind: Extract<ThreadHistoryItemDto['kind'], 'userMessage' | 'agentMessage'>;
-  } & Partial<Pick<AgentMessageHistoryItemWithReasoning, 'reasoningItems'>>;
-  scrollRootRef: RefObject<HTMLDivElement | null>;
-  streaming?: boolean;
-  adapter?: ThreadTimelineAdapter;
-}) {
-  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
-  const [reasoningOpen, setReasoningOpen] = useState(false);
-  const resetTimerRef = useRef<number | null>(null);
-  const reasoningItems = item.kind === 'agentMessage' ? item.reasoningItems ?? [] : [];
-  const reasoningText = reasoningItems
-    .map((entry) => entry.text.trim())
-    .filter(Boolean)
-    .join('\n\n');
-  const iconToneClassName =
-    item.kind === 'userMessage'
-      ? 'thread-message-icon thread-message-icon-user'
-      : 'thread-message-icon thread-message-icon-agent';
-  const queuedLikeStatus =
-    item.kind === 'userMessage' &&
-    (
-      item.status === 'Steering' ||
-      item.status === 'Accepted' ||
-      item.status === 'Awaiting response'
-    );
-  const queuedBadgeClassName =
-    item.status === 'Steering'
-      ? 'ui-status-warning'
-      : item.status === 'Accepted'
-        ? 'ui-status-success'
-        : 'ui-status-info';
-
-  useEffect(() => {
-    return () => {
-      if (resetTimerRef.current !== null) {
-        window.clearTimeout(resetTimerRef.current);
-      }
-    };
-  }, []);
-
-  async function handleCopy() {
-    try {
-      await navigator.clipboard.writeText(item.text);
-      setCopyState('copied');
-      if (resetTimerRef.current !== null) {
-        window.clearTimeout(resetTimerRef.current);
-      }
-      resetTimerRef.current = window.setTimeout(() => setCopyState('idle'), 1200);
-    } catch {
-      setCopyState('failed');
-      if (resetTimerRef.current !== null) {
-        window.clearTimeout(resetTimerRef.current);
-      }
-      resetTimerRef.current = window.setTimeout(() => setCopyState('idle'), 1600);
-    }
-  }
-
-  return (
-    <div
-      className={`timeline-item-frame ${item.kind === 'agentMessage' ? 'timeline-has-corner-copy' : ''} relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
-    >
-      {queuedLikeStatus && (
-        <span className={`absolute right-2.5 top-2.5 z-[1] inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-medium tracking-[0.12em] shadow-sm shadow-stone-950/20 ${queuedBadgeClassName}`}>
-          <svg
-            aria-hidden="true"
-            viewBox="0 0 16 16"
-            className="h-3.5 w-3.5 fill-none stroke-current"
-            strokeWidth="1.45"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M3.25 8A4.75 4.75 0 0 1 8 3.25h2.75" />
-            <path d="m9.5 1.75 1.75 1.5-1.75 1.5" />
-            <path d="M12.75 8A4.75 4.75 0 0 1 8 12.75H5.25" />
-            <path d="m6.5 14.25-1.75-1.5 1.75-1.5" />
-          </svg>
-          <span>{item.status}</span>
-        </span>
-      )}
-      <span
-        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${iconToneClassName}`}
-      >
-        <span className="scale-[0.78]">
-          <CompactMessageIcon kind={item.kind} />
-        </span>
-      </span>
-      <div className="timeline-message-content timeline-mobile-bubble-content flex min-w-0 items-start gap-0 pt-2 sm:gap-2.5 sm:pt-0">
-        <div className="hidden">
-          <span
-            className={`hidden h-6 w-6 items-center justify-center rounded-full border sm:inline-flex ${iconToneClassName}`}
-          >
-            <CompactMessageIcon kind={item.kind} />
-          </span>
-          {streaming && item.kind === 'agentMessage' && (
-            <span className="hidden sm:inline-flex">
-              <RunningDots tone="emerald" />
-            </span>
-          )}
-        </div>
-        <div className="min-w-0 flex-1">
-          {item.kind === 'agentMessage' ? (
-            <>
-              {reasoningText ? (
-                <div className="timeline-attached-reasoning mb-2">
-                  <button
-                    type="button"
-                    aria-expanded={reasoningOpen}
-                    onClick={() => setReasoningOpen((current) => !current)}
-                    className="timeline-attached-reasoning-toggle"
-                  >
-                    <span
-                      aria-hidden="true"
-                      className="timeline-attached-reasoning-chevron inline-flex h-5 w-5 items-center justify-center rounded-full"
-                    >
-                      <svg
-                        viewBox="0 0 16 16"
-                        className={`h-3.5 w-3.5 fill-none stroke-current transition ${
-                          reasoningOpen ? 'rotate-90' : ''
-                        }`}
-                        strokeWidth="1.65"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="m6 4.75 3.25 3.25L6 11.25" />
-                      </svg>
-                    </span>
-                    <span
-                      aria-hidden="true"
-                      className="timeline-attached-reasoning-icon inline-flex h-5 w-5 items-center justify-center rounded-full"
-                    >
-                      <BrainIcon />
-                    </span>
-                    <span className="timeline-attached-reasoning-label">
-                      Thinking
-                    </span>
-                    {reasoningItems.some((entry) => isRunningHistoryStatus(entry.status)) ? (
-                      <RunningDots tone="sky" />
-                    ) : null}
-                  </button>
-                  {reasoningOpen ? (
-                    <pre className="timeline-attached-reasoning-body mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-[0.7rem] px-3 py-2 text-[12px] leading-5">
-                      <LinkifiedPlainText text={reasoningText} />
-                    </pre>
-                  ) : null}
-                </div>
-              ) : null}
-              <AgentMessageBody
-                text={item.text}
-                scrollRootRef={scrollRootRef}
-                streaming={streaming}
-              />
-            </>
-          ) : (
-            <UserMessageBody
-              threadId={threadId}
-              text={item.text}
-              getImageAssetUrl={adapter?.getImageAssetUrl}
-            />
-          )}
-          {item.status && !queuedLikeStatus && (
-            <p className="timeline-meta-text mt-1 text-xs">{item.status}</p>
-          )}
-        </div>
-      </div>
-      {streaming && item.kind === 'agentMessage' && (
-        <span className="absolute left-5 top-0 inline-flex sm:hidden">
-          <RunningDots tone="emerald" />
-        </span>
-      )}
-      {item.kind === 'agentMessage' && (
-        <button
-          type="button"
-          aria-label="Copy agent reply"
-          title={
-            copyState === 'copied'
-              ? 'Copied'
-              : copyState === 'failed'
-                ? 'Copy failed'
-                : 'Copy agent reply'
-          }
-          onClick={() => void handleCopy()}
-          className="timeline-corner-copy absolute bottom-0 right-0 inline-flex h-5 w-5 items-center justify-center transition"
-        >
-          <span
-            className={`timeline-corner-copy-visual inline-flex items-center justify-center border shadow-sm shadow-stone-950/25 backdrop-blur transition ${
-              copyState === 'copied'
-                ? 'ui-status-info'
-                : copyState === 'failed'
-                  ? 'ui-status-danger'
-                  : 'border-stone-700/90 bg-stone-900/60 text-stone-300 hover:bg-stone-800/92'
-            }`}
-          >
-            <CopyIcon />
-          </span>
-        </button>
-      )}
-    </div>
-  );
-});
-
-const CommandItem = memo(function CommandItem({
-  item,
-  onOpen,
-}: {
-  item: ThreadHistoryItemDto & { kind: 'commandExecution' };
-  onOpen: (
-    item: ThreadHistoryItemDto & { kind: 'commandExecution' },
-    title: string,
-  ) => void;
-}) {
-  const summary = summarizeInlinePreviewText(item.previewText ?? item.text);
-
-  return (
-    <div
-      className={`timeline-item-frame timeline-mobile-dense-event timeline-mobile-dense-command relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
-    >
-      <span
-        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('command')}`}
-      >
-        <span className="scale-[0.78]">
-          <CommandIcon />
-        </span>
-      </span>
-      {isRunningHistoryStatus(item.status) && (
-        <span className="absolute left-5 top-0 inline-flex sm:hidden">
-          <RunningDots />
-        </span>
-      )}
-      <div className="flex items-start gap-2.5">
-        <div className="mt-0.5 hidden shrink-0 items-center sm:flex">
-          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-amber-300/25 bg-amber-300/10 text-amber-200">
-            <CommandIcon />
-          </span>
-          {isRunningHistoryStatus(item.status) && <RunningDots />}
-        </div>
-        <div className="timeline-item-inner timeline-mobile-dense-inner timeline-mobile-bubble-content relative min-w-0 w-full flex-1 rounded-[0.9rem] border px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2">
-            <button
-              type="button"
-              aria-label={item.status ? `Command status: ${item.status}` : 'Command status'}
-              title={item.status ?? 'Command status'}
-              onClick={() => onOpen(item, 'Command Output')}
-              className={`absolute right-0 top-0 inline-flex h-5 w-5 items-center justify-center rounded-bl-[0.7rem] rounded-tr-[0.9rem] border shadow-sm shadow-stone-950/25 transition sm:right-2 sm:top-2 sm:h-7 sm:w-7 sm:rounded-full ${commandStatusBadgeClassName(item.status)} hover:brightness-110`}
-            >
-              <span className="scale-[0.72] sm:scale-100">
-                <CommandStatusIcon status={item.status} />
-              </span>
-            </button>
-            <button
-              type="button"
-              aria-label="Open full command"
-              onClick={() => onOpen(item, 'Command Output')}
-              className="block w-full text-left"
-            >
-              <div className="timeline-mobile-dense-line flex min-w-0 items-center gap-2 text-sm leading-6">
-                  <p className="timeline-primary-text min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip">
-                  {summary.firstLine}
-                </p>
-                {summary.showGap ? (
-                    <span className="timeline-meta-text shrink-0 text-[11px] font-medium tracking-[0.28em]">
-                    ...
-                  </span>
-                ) : null}
-              </div>
-            </button>
-        </div>
-      </div>
-    </div>
-  );
-});
-
-const ToolCallItem = memo(function ToolCallItem({
-  item,
-  onOpen,
-}: {
-  item: ThreadHistoryItemDto & { kind: 'toolCall' };
-  onOpen: (
-    item: ThreadHistoryItemDto & { kind: 'toolCall' },
-    title: string,
-  ) => void;
-}) {
-  const summary = summarizeInlinePreviewText(item.text);
-
-  return (
-    <div
-      className={`timeline-item-frame relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
-    >
-      <span
-        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('action')}`}
-      >
-        <span className="scale-[0.78]">
-          <ToolCallIcon />
-        </span>
-      </span>
-      {isRunningHistoryStatus(item.status) && (
-        <span className="absolute left-5 top-0 inline-flex sm:hidden">
-          <RunningDots />
-        </span>
-      )}
-      <div className="flex items-start gap-2.5">
-        <div className="mt-0.5 hidden shrink-0 items-center sm:flex">
-          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-fuchsia-300/25 bg-fuchsia-300/10 text-fuchsia-100">
-            <ToolCallIcon />
-          </span>
-          {isRunningHistoryStatus(item.status) && <RunningDots />}
-        </div>
-        <div className="timeline-item-inner relative min-w-0 w-full flex-1 rounded-[0.9rem] border px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2">
-          <button
-            type="button"
-            aria-label={item.status ? `Tool status: ${item.status}` : 'Tool status'}
-            title={item.status ?? 'Tool status'}
-            onClick={() => onOpen(item, 'Tool Call Details')}
-            className={`absolute right-0 top-0 inline-flex h-5 w-5 items-center justify-center rounded-bl-[0.7rem] rounded-tr-[0.9rem] border shadow-sm shadow-stone-950/25 transition sm:right-2 sm:top-2 sm:h-7 sm:w-7 sm:rounded-full ${commandStatusBadgeClassName(item.status)} hover:brightness-110`}
-          >
-            <span className="scale-[0.72] sm:scale-100">
-              <CommandStatusIcon status={item.status} />
-            </span>
-          </button>
-          <button
-            type="button"
-            aria-label="Open full tool call"
-            onClick={() => onOpen(item, 'Tool Call Details')}
-            className="block w-full text-left"
-          >
-            <div className="flex min-w-0 items-center gap-2 text-sm leading-6">
-                <p className="timeline-primary-text min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip">
-                {summary.firstLine}
-              </p>
-              {summary.showGap ? (
-                <span className="timeline-meta-text shrink-0 text-[11px] font-medium tracking-[0.28em]">
-                  ...
-                </span>
-              ) : null}
-            </div>
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-});
-
-const AgentToolCallItem = memo(function AgentToolCallItem({
-  item,
-  onOpen,
-}: {
-  item: ThreadHistoryItemDto & { kind: 'agentToolCall' };
-  onOpen: (
-    item: ThreadHistoryItemDto & { kind: 'agentToolCall' },
-    title: string,
-  ) => void;
-}) {
-  const summary = summarizeInlinePreviewText(item.text);
-
-  return (
-    <div
-      className={`timeline-item-frame timeline-mobile-dense-event relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
-    >
-      <span
-        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('agentTool')}`}
-      >
-        <span className="scale-[0.78]">
-          <AgentToolIcon />
-        </span>
-      </span>
-      {isRunningHistoryStatus(item.status) && (
-        <span className="absolute left-5 top-0 inline-flex sm:hidden">
-          <RunningDots tone="emerald" />
-        </span>
-      )}
-      <div className="flex items-start gap-2.5">
-        <div className="mt-0.5 hidden shrink-0 items-center sm:flex">
-          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-teal-300/25 bg-teal-300/10 text-teal-100">
-            <AgentToolIcon />
-          </span>
-          {isRunningHistoryStatus(item.status) && <RunningDots tone="emerald" />}
-        </div>
-        <div className="timeline-item-inner timeline-mobile-dense-inner timeline-mobile-bubble-content relative min-w-0 w-full flex-1 rounded-[0.9rem] border px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2">
-          <button
-            type="button"
-            aria-label={item.status ? `Agent status: ${item.status}` : 'Agent status'}
-            title={item.status ?? 'Agent status'}
-            onClick={() => onOpen(item, 'Agent Details')}
-            className={`absolute right-0 top-0 inline-flex h-5 w-5 items-center justify-center rounded-bl-[0.7rem] rounded-tr-[0.9rem] border shadow-sm shadow-stone-950/25 transition sm:right-2 sm:top-2 sm:h-7 sm:w-7 sm:rounded-full ${commandStatusBadgeClassName(item.status)} hover:brightness-110`}
-          >
-            <span className="scale-[0.72] sm:scale-100">
-              <CommandStatusIcon status={item.status} />
-            </span>
-          </button>
-          <button
-            type="button"
-            aria-label="Open agent details"
-            onClick={() => onOpen(item, 'Agent Details')}
-            className="block w-full text-left"
-          >
-            <div className="timeline-mobile-dense-line flex min-w-0 items-center gap-2 text-sm leading-6">
-              <p className="timeline-primary-text min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip">
-                {summary.firstLine}
-              </p>
-              {summary.showGap ? (
-                <span className="timeline-meta-text shrink-0 text-[11px] font-medium tracking-[0.28em]">
-                  ...
-                </span>
-              ) : null}
-            </div>
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-});
-
-const SkillToolCallItem = memo(function SkillToolCallItem({
-  item,
-  onOpen,
-}: {
-  item: ThreadHistoryItemDto & { kind: 'skillToolCall' };
-  onOpen: (
-    item: ThreadHistoryItemDto & { kind: 'skillToolCall' },
-    title: string,
-  ) => void;
-}) {
-  const summary = summarizeInlinePreviewText(item.text);
-
-  return (
-    <div
-      className={`timeline-item-frame timeline-mobile-dense-event relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
-    >
-      <span
-        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('skillTool')}`}
-      >
-        <span className="scale-[0.78]">
-          <SkillToolIcon />
-        </span>
-      </span>
-      {isRunningHistoryStatus(item.status) && (
-        <span className="absolute left-5 top-0 inline-flex sm:hidden">
-          <RunningDots tone="sky" />
-        </span>
-      )}
-      <div className="flex items-start gap-2.5">
-        <div className="mt-0.5 hidden shrink-0 items-center sm:flex">
-          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-indigo-300/25 bg-indigo-300/10 text-indigo-100">
-            <SkillToolIcon />
-          </span>
-          {isRunningHistoryStatus(item.status) && <RunningDots tone="sky" />}
-        </div>
-        <div className="timeline-item-inner timeline-mobile-dense-inner timeline-mobile-bubble-content relative min-w-0 w-full flex-1 rounded-[0.9rem] border px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2">
-          <button
-            type="button"
-            aria-label={item.status ? `Skill status: ${item.status}` : 'Skill status'}
-            title={item.status ?? 'Skill status'}
-            onClick={() => onOpen(item, 'Skill Details')}
-            className={`absolute right-0 top-0 inline-flex h-5 w-5 items-center justify-center rounded-bl-[0.7rem] rounded-tr-[0.9rem] border shadow-sm shadow-stone-950/25 transition sm:right-2 sm:top-2 sm:h-7 sm:w-7 sm:rounded-full ${commandStatusBadgeClassName(item.status)} hover:brightness-110`}
-          >
-            <span className="scale-[0.72] sm:scale-100">
-              <CommandStatusIcon status={item.status} />
-            </span>
-          </button>
-          <button
-            type="button"
-            aria-label="Open skill details"
-            onClick={() => onOpen(item, 'Skill Details')}
-            className="block w-full text-left"
-          >
-            <div className="timeline-mobile-dense-line flex min-w-0 items-center gap-2 text-sm leading-6">
-              <p className="timeline-primary-text min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip">
-                {summary.firstLine}
-              </p>
-              {summary.showGap ? (
-                <span className="timeline-meta-text shrink-0 text-[11px] font-medium tracking-[0.28em]">
-                  ...
-                </span>
-              ) : null}
-            </div>
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-});
-
-const CommandGroupItem = memo(function CommandGroupItem({
-  items,
-  expanded,
-  onToggleExpanded,
-  onOpen,
-}: {
-  items: CommandHistoryItem[];
-  expanded: boolean;
-  onToggleExpanded: () => void;
-  onOpen: (item: CommandHistoryItem, title: string) => void;
-}) {
-  const runningCount = items.filter((item) => isRunningHistoryStatus(item.status)).length;
-  const countLabel = items.length === 1 ? '1 command' : `${items.length} commands`;
-
-  return (
-    <div className="timeline-mobile-dense-event timeline-mobile-dense-command relative min-w-0 w-full overflow-hidden rounded-[1rem] border timeline-special-warning px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3">
-      <span
-        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('command')}`}
-      >
-        <span className="scale-[0.78]">
-          <CommandBatchIcon />
-        </span>
-      </span>
-      <div className="flex items-start gap-2.5">
-        <div className="mt-0.5 hidden shrink-0 items-center sm:flex">
-          <span className="relative inline-flex h-8 w-8 items-center justify-center rounded-[0.9rem] border border-amber-300/30 bg-amber-300/[0.14] text-amber-100 shadow-sm shadow-stone-950/20">
-            <CommandBatchIcon />
-            <span className="absolute -right-1 -top-1 inline-flex min-w-[1.1rem] items-center justify-center rounded-full border border-amber-200/35 bg-stone-950/90 px-1 text-[9px] font-semibold leading-4 text-amber-100">
-              {items.length}
-            </span>
-          </span>
-          {runningCount > 0 && <RunningDots />}
-        </div>
-        <div className="timeline-batch-inner timeline-mobile-dense-batch timeline-mobile-bubble-content min-w-0 flex-1 rounded-[0.9rem] border px-2 py-1.5 sm:rounded-xl sm:px-3 sm:py-2">
-          <button
-            type="button"
-            aria-expanded={expanded}
-            aria-label={`${expanded ? 'Collapse' : 'Expand'} ${items.length} command entries`}
-            onClick={onToggleExpanded}
-            className="timeline-mobile-dense-toggle flex w-full min-w-0 items-center justify-between gap-3 text-left"
-          >
-            <div className="timeline-mobile-dense-summary min-w-0 flex flex-1 flex-wrap items-center gap-2 pr-1">
-              <span className="rounded-full border border-amber-300/28 bg-amber-300/12 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.24em] text-amber-100">
-                Batch
-              </span>
-              <span className="rounded-full border border-stone-700/90 bg-stone-900/80 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-stone-300">
-                {countLabel}
-              </span>
-              {runningCount > 0 && (
-                <span className="inline-flex items-center text-xs text-amber-100/90">
-                  <RunningDots />
-                </span>
-              )}
-            </div>
-          </button>
-
-          {expanded && (
-            <div className="timeline-mobile-section-list mt-3 space-y-0 border-t border-amber-300/12 pt-3 sm:space-y-2">
-              {items.map((item, index) => {
-                const summary = summarizeInlinePreviewText(item.text);
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    aria-label={`Open grouped command ${index + 1}`}
-                    onClick={() => onOpen(item, `Command Output ${index + 1}`)}
-                    className="timeline-detail-row block w-full rounded-xl border px-3 py-2 text-left transition"
-                  >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-full border border-amber-300/18 bg-amber-300/[0.07] px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-amber-100">
-                        Step {index + 1}
-                      </span>
-                      {item.status && (
-                        <span className="timeline-meta-text text-xs">{item.status}</span>
-                      )}
-                    </div>
-                    <div className="mt-1 flex min-w-0 items-center gap-2 text-sm leading-6">
-                      <p className="timeline-primary-text min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip">
-                        {summary.firstLine}
-                      </p>
-                      {summary.showGap ? (
-                        <span className="timeline-meta-text shrink-0 text-[11px] font-medium tracking-[0.28em]">
-                          ...
-                        </span>
-                      ) : null}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-});
-
-const SearchGroupItem = memo(function SearchGroupItem({
-  items,
-  expanded,
-  onToggleExpanded,
-  onOpen,
-}: {
-  items: SearchHistoryItem[];
-  expanded: boolean;
-  onToggleExpanded: () => void;
-  onOpen: (title: string, text: string) => void;
-}) {
-  const countLabel = items.length === 1 ? '1 search' : `${items.length} searches`;
-
-  return (
-    <div className="timeline-mobile-dense-event timeline-mobile-dense-search relative min-w-0 w-full overflow-hidden rounded-[1rem] border timeline-special-info px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3">
-      <span
-        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('search')}`}
-      >
-        <span className="scale-[0.78]">
-          <SearchBatchIcon />
-        </span>
-      </span>
-      <div className="flex items-start gap-2.5">
-        <div className="mt-0.5 hidden shrink-0 items-center sm:flex">
-          <span className="relative inline-flex h-8 w-8 items-center justify-center rounded-[0.9rem] border border-sky-300/30 bg-sky-300/[0.14] text-sky-100 shadow-sm shadow-stone-950/20">
-            <SearchBatchIcon />
-            <span className="absolute -right-1 -top-1 inline-flex min-w-[1.1rem] items-center justify-center rounded-full border border-sky-200/35 bg-stone-950/90 px-1 text-[9px] font-semibold leading-4 text-sky-100">
-              {items.length}
-            </span>
-          </span>
-        </div>
-        <div className="timeline-batch-inner timeline-mobile-dense-batch timeline-mobile-bubble-content min-w-0 flex-1 rounded-[0.9rem] border px-2 py-1.5 sm:rounded-xl sm:px-3 sm:py-2">
-          <button
-            type="button"
-            aria-expanded={expanded}
-            aria-label={`${expanded ? 'Collapse' : 'Expand'} ${items.length} web search entries`}
-            onClick={onToggleExpanded}
-            className="timeline-mobile-dense-toggle flex w-full min-w-0 items-center justify-between gap-3 text-left"
-          >
-            <div className="timeline-mobile-dense-summary min-w-0 flex flex-1 flex-wrap items-center gap-2 pr-1">
-              <span className="rounded-full border border-sky-300/28 bg-sky-300/12 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.24em] text-sky-100">
-                Batch
-              </span>
-              <span className="rounded-full border border-stone-700/90 bg-stone-900/80 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-stone-300">
-                {countLabel}
-              </span>
-            </div>
-          </button>
-
-          {expanded && (
-            <div className="timeline-mobile-section-list mt-3 space-y-0 border-t border-sky-300/12 pt-3 sm:space-y-2">
-              {items.map((item, index) => {
-                const previewText = item.previewText?.trim() || item.text || 'Web search';
-                const summary = summarizeInlinePreviewText(previewText);
-                const detailText = item.detailText?.trim() || item.text || 'Web search';
-
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    aria-label={`Open grouped web search ${index + 1}`}
-                    onClick={() => onOpen(`Web Search ${index + 1}`, detailText)}
-                    className="timeline-detail-row block w-full rounded-xl border px-3 py-2 text-left transition"
-                  >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-full border border-sky-300/18 bg-sky-300/[0.07] px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-sky-100">
-                        Search {index + 1}
-                      </span>
-                      {item.status && (
-                        <span className="timeline-meta-text text-xs">{item.status}</span>
-                      )}
-                    </div>
-                    <div className="mt-1 flex min-w-0 items-center gap-2 text-sm leading-6">
-                      <p className="timeline-primary-text min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip">
-                        {summary.firstLine}
-                      </p>
-                      {summary.showGap ? (
-                        <span className="timeline-meta-text shrink-0 text-[11px] font-medium tracking-[0.28em]">
-                          ...
-                        </span>
-                      ) : null}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-});
-
-const FileReadGroupItem = memo(function FileReadGroupItem({
-  items,
-  expanded,
-  onToggleExpanded,
-  onOpen,
-}: {
-  items: FileReadHistoryItem[];
-  expanded: boolean;
-  onToggleExpanded: () => void;
-  onOpen: (title: string, text: string) => void;
-}) {
-  const countLabel = items.length === 1 ? '1 file read' : `${items.length} file reads`;
-
-  return (
-    <div className="timeline-mobile-dense-event timeline-mobile-dense-file-read relative min-w-0 w-full overflow-hidden rounded-[1rem] border timeline-special-file-read px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3">
-      <span
-        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('fileRead')}`}
-      >
-        <span className="scale-[0.78]">
-          <FileReadIcon />
-        </span>
-      </span>
-      <div className="flex items-start gap-2.5">
-        <div className="mt-0.5 hidden shrink-0 items-center sm:flex">
-          <span className="relative inline-flex h-8 w-8 items-center justify-center rounded-[0.9rem] border border-cyan-300/30 bg-cyan-300/[0.14] text-cyan-100 shadow-sm shadow-stone-950/20">
-            <FileReadIcon />
-            <span className="absolute -right-1 -top-1 inline-flex min-w-[1.1rem] items-center justify-center rounded-full border border-cyan-200/35 bg-stone-950/90 px-1 text-[9px] font-semibold leading-4 text-cyan-100">
-              {items.length}
-            </span>
-          </span>
-        </div>
-        <div className="timeline-batch-inner timeline-mobile-dense-batch timeline-mobile-bubble-content min-w-0 flex-1 rounded-[0.9rem] border px-2 py-1.5 sm:rounded-xl sm:px-3 sm:py-2">
-          <button
-            type="button"
-            aria-expanded={expanded}
-            aria-label={`${expanded ? 'Collapse' : 'Expand'} ${items.length} file read entries`}
-            onClick={onToggleExpanded}
-            className="timeline-mobile-dense-toggle flex w-full min-w-0 items-center justify-between gap-3 text-left"
-          >
-            <div className="timeline-mobile-dense-summary min-w-0 flex flex-1 flex-wrap items-center gap-2 pr-1">
-              <span className="rounded-full border border-cyan-300/28 bg-cyan-300/12 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.24em] text-cyan-100">
-                Batch
-              </span>
-              <span className="rounded-full border border-stone-700/90 bg-stone-900/80 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-stone-300">
-                {countLabel}
-              </span>
-            </div>
-          </button>
-
-          {expanded && (
-            <div className="timeline-mobile-section-list mt-3 space-y-0 border-t border-cyan-300/12 pt-3 sm:space-y-2">
-              {items.map((item, index) => {
-                const previewText = item.previewText?.trim() || item.text || 'File read';
-                const summary = summarizeInlinePreviewText(previewText);
-                const detailText = item.detailText?.trim() || item.text || 'File read';
-
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    aria-label={`Open grouped file read ${index + 1}`}
-                    onClick={() => onOpen(`File Read ${index + 1}`, detailText)}
-                    className="timeline-detail-row block w-full rounded-xl border px-3 py-2 text-left transition"
-                  >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-full border border-cyan-300/18 bg-cyan-300/[0.07] px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-cyan-100">
-                        Read {index + 1}
-                      </span>
-                      {item.status && (
-                        <span className="timeline-meta-text text-xs">{item.status}</span>
-                      )}
-                    </div>
-                    <div className="mt-1 flex min-w-0 items-center gap-2 text-sm leading-6">
-                      <p className="timeline-primary-text min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip">
-                        {summary.firstLine}
-                      </p>
-                      {summary.showGap ? (
-                        <span className="timeline-meta-text shrink-0 text-[11px] font-medium tracking-[0.28em]">
-                          ...
-                        </span>
-                      ) : null}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-});
-
-const PlanHistoryItem = memo(function PlanHistoryItem({
-  item,
-  scrollRootRef,
-}: {
-  item: ThreadHistoryItemDto & { kind: 'plan' };
-  scrollRootRef: RefObject<HTMLDivElement | null>;
-}) {
-  return (
-    <div
-      className={`timeline-item-frame relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
-    >
-      <span
-        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('search')}`}
-      >
-        <span className="scale-[0.78]">
-          <PlanIcon />
-        </span>
-      </span>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="timeline-meta-text text-[11px] uppercase tracking-[0.2em]">
-          {historyItemLabel(item.kind)}
-        </span>
-        {item.status && (
-          <span className="timeline-meta-text text-xs">{item.status}</span>
-        )}
-      </div>
-      <div className="mt-1.5">
-        <MarkdownAwareBody
-          text={item.text}
-          scrollRootRef={scrollRootRef}
-          plainTextClassName="whitespace-pre-wrap break-words text-sm leading-6 text-stone-300"
-          markdownClassName="agent-markdown text-sm"
-        />
-      </div>
-    </div>
-  );
-});
-
-const ContextCompactionItem = memo(function ContextCompactionItem({
-  item,
-}: {
-  item: ContextCompactionHistoryItem;
-}) {
-  const isRunning = isRunningHistoryStatus(item.status) || item.text === 'Compacting context';
-  const primaryText = isRunning ? 'Compacting context' : 'Context compacted';
-  const secondaryText =
-    item.detailText && item.detailText !== primaryText ? item.detailText : null;
-
-  return (
-    <div
-      className={`timeline-item-frame relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2 sm:rounded-[1.2rem] sm:px-3`}
-    >
-      <span
-        className="absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border border-teal-300/30 bg-teal-300/12 text-[10px] text-teal-100 shadow-sm shadow-stone-950/20 sm:hidden"
-      >
-        <span className="scale-[0.78]">
-          <ContextCompactionIcon />
-        </span>
-      </span>
-      <div className="flex min-w-0 items-center gap-2 pt-2 sm:pt-0">
-        <div className="mt-0.5 hidden shrink-0 sm:flex">
-          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-teal-300/25 bg-teal-300/10 text-teal-100">
-            <ContextCompactionIcon />
-          </span>
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2">
-            <p className="timeline-primary-text truncate text-[13px] font-medium sm:text-sm">
-              {primaryText}
-            </p>
-            {isRunning ? <RunningDots tone="emerald" /> : null}
-          </div>
-          {secondaryText ? (
-            <p
-              className="timeline-meta-text mt-0.5 truncate text-[11px] sm:text-xs"
-              title={secondaryText}
-            >
-              {secondaryText}
-            </p>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-});
-
-const WebSearchItem = memo(function WebSearchItem({
-  item,
-  onOpen,
-}: {
-  item: ThreadHistoryItemDto & { kind: 'webSearch' };
-  onOpen: (title: string, text: string) => void;
-}) {
-  const previewText = item.previewText?.trim() || item.text || 'Web search';
-  const detailText = item.detailText?.trim() || item.text || 'Web search';
-  const summary = summarizeInlinePreviewText(previewText);
-
-  return (
-    <div
-      className={`timeline-item-frame timeline-mobile-dense-event timeline-mobile-dense-search relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
-    >
-      <span
-        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('search')}`}
-      >
-        <span className="scale-[0.78]">
-          <SearchIcon />
-        </span>
-      </span>
-      <div className="flex items-start gap-2.5">
-        <div className="mt-0.5 hidden shrink-0 items-center sm:flex">
-          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-sky-300/25 bg-sky-300/10 text-sky-100">
-            <SearchIcon />
-          </span>
-        </div>
-        <div className="timeline-item-inner timeline-mobile-dense-inner timeline-mobile-bubble-content relative min-w-0 w-full flex-1 rounded-[0.9rem] border px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2">
-          <button
-            type="button"
-            aria-label="Expand web search"
-            title="Expand web search"
-            onClick={() => onOpen('Web Search Details', detailText)}
-            className={`absolute right-0 top-0 inline-flex h-5 w-5 items-center justify-center rounded-bl-[0.7rem] rounded-tr-[0.9rem] border shadow-sm shadow-stone-950/25 transition sm:right-2 sm:top-2 sm:h-7 sm:w-7 sm:rounded-full ${overlayBadgeClassName('action')} hover:bg-stone-800`}
-          >
-            <span className="scale-[0.72] sm:scale-100">
-              <ExpandIcon />
-            </span>
-          </button>
-          {item.status && (
-            <p className="timeline-meta-text pr-8 text-xs sm:pr-10">{item.status}</p>
-          )}
-          <button
-            type="button"
-            aria-label="Open full web search"
-            onClick={() => onOpen('Web Search Details', detailText)}
-            className="block w-full text-left"
-          >
-            <div className="timeline-mobile-dense-line flex min-w-0 items-center gap-2 text-sm leading-6">
-              <p className="timeline-primary-text min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip">
-                {summary.firstLine}
-              </p>
-              {summary.showGap ? (
-                <span className="timeline-meta-text shrink-0 text-[11px] font-medium tracking-[0.28em]">
-                  ...
-                </span>
-              ) : null}
-            </div>
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-});
-
-const FileReadItem = memo(function FileReadItem({
-  item,
-  onOpen,
-}: {
-  item: ThreadHistoryItemDto & { kind: 'fileRead' };
-  onOpen: (title: string, text: string) => void;
-}) {
-  const previewText = item.previewText?.trim() || item.text || 'File read';
-  const detailText = item.detailText?.trim() || item.text || 'File read';
-  const summary = summarizeInlinePreviewText(previewText);
-
-  return (
-    <div
-      className={`timeline-item-frame timeline-mobile-dense-event timeline-mobile-dense-file-read relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
-    >
-      <span
-        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('fileRead')}`}
-      >
-        <span className="scale-[0.78]">
-          <FileReadIcon />
-        </span>
-      </span>
-      <div className="flex items-start gap-2.5">
-        <div className="mt-0.5 hidden shrink-0 items-center sm:flex">
-          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-cyan-300/25 bg-cyan-300/10 text-cyan-100">
-            <FileReadIcon />
-          </span>
-        </div>
-        <div className="timeline-item-inner timeline-mobile-dense-inner timeline-mobile-bubble-content relative min-w-0 w-full flex-1 rounded-[0.9rem] border px-2.5 py-2.5 sm:rounded-xl sm:px-3 sm:py-2">
-          <button
-            type="button"
-            aria-label="Expand file read"
-            title="Expand file read"
-            onClick={() => onOpen('File Read Details', detailText)}
-            className={`absolute right-0 top-0 inline-flex h-5 w-5 items-center justify-center rounded-bl-[0.7rem] rounded-tr-[0.9rem] border shadow-sm shadow-stone-950/25 transition sm:right-2 sm:top-2 sm:h-7 sm:w-7 sm:rounded-full ${overlayBadgeClassName('action')} hover:bg-stone-800`}
-          >
-            <span className="scale-[0.72] sm:scale-100">
-              <ExpandIcon />
-            </span>
-          </button>
-          <button
-            type="button"
-            aria-label="Open full file read"
-            onClick={() => onOpen('File Read Details', detailText)}
-            className="block w-full pr-8 text-left sm:pr-10"
-          >
-            <div className="timeline-mobile-dense-line flex min-w-0 items-center gap-2 text-sm leading-6">
-              <p className="timeline-primary-text min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip">
-                {summary.firstLine}
-              </p>
-              {summary.showGap ? (
-                <span className="timeline-meta-text shrink-0 text-[11px] font-medium tracking-[0.28em]">
-                  ...
-                </span>
-              ) : null}
-            </div>
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-});
-
-const ImageItem = memo(function ImageItem({
-  threadId,
-  item,
-  onOpen,
-  getImageAssetUrl,
-}: {
-  threadId: string | undefined;
-  item: ThreadHistoryItemDto & { kind: 'image' };
-  onOpen: (title: string, text: string) => void;
-  getImageAssetUrl?: ThreadTimelineAdapter['getImageAssetUrl'] | undefined;
-}) {
-  const assetPath = item.assetPath ?? item.detailText ?? null;
-  const imageUrl =
-    threadId && assetPath
-      ? getImageAssetUrl?.({ threadId, path: assetPath }) ?? null
-      : null;
-
-  return (
-    <div
-      className={`timeline-item-frame relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
-    >
-      <span
-        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('search')}`}
-      >
-        <span className="scale-[0.78]">
-          <ImageIcon />
-        </span>
-      </span>
-      <div className="flex items-start gap-2.5">
-        <div className="mt-0.5 hidden shrink-0 items-center sm:flex">
-          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-indigo-300/25 bg-indigo-300/10 text-indigo-100">
-            <ImageIcon />
-          </span>
-        </div>
-        <div className="min-w-0 w-full flex-1">
-          {imageUrl ? (
-            <button
-              type="button"
-              onClick={() => onOpen('Image Path', assetPath ?? item.text)}
-              className="block w-full text-left"
-            >
-              <img
-                src={imageUrl}
-                alt={item.text || 'Image preview'}
-                className="max-h-[24rem] w-full rounded-xl border border-stone-700/80 bg-stone-950 object-contain"
-                loading="lazy"
-              />
-            </button>
-          ) : (
-            <div className="timeline-item-inner rounded-xl border px-3 py-3 text-sm">
-              {item.text}
-            </div>
-          )}
-          {assetPath && (
-            <button
-              type="button"
-              onClick={() => onOpen('Image Path', assetPath)}
-              className="timeline-meta-text mt-2 block max-w-full truncate text-left text-xs hover:text-[var(--theme-fg)]"
-              title={assetPath}
-            >
-              {assetPath}
-            </button>
-          )}
-          {item.status && (
-            <p className="timeline-meta-text mt-1 text-xs">{item.status}</p>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-});
-
-const FileChangeItem = memo(function FileChangeItem({
-  item,
-  onOpen,
-}: {
-  item: ThreadHistoryItemDto & { kind: 'fileChange' };
-  onOpen: (title: string, text: string) => void;
-}) {
-  const pathSummary =
-    item.previewText?.trim() && item.text.trim() !== item.previewText.trim()
-      ? item.text.trim()
-      : null;
-  const detailText = item.detailText?.trim() || null;
-  const displayedPath = formatTrailingPathLabel(
-    pathSummary ?? item.previewText?.trim() ?? item.text,
-    48,
-  );
-  const summarySegments = fileChangeSummarySegments(item);
-  const canOpen = Boolean(detailText || item.hasDeferredDetail);
-  const ContainerTag = canOpen ? 'button' : 'div';
-
-  return (
-    <div
-      className={`timeline-item-frame timeline-mobile-dense-event timeline-mobile-dense-file relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
-    >
-      <span
-        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('action')}`}
-      >
-        <span className="scale-[0.78]">
-          <FileChangeIcon />
-        </span>
-      </span>
-      <div className="flex items-start gap-2.5">
-        <div className="mt-0.5 hidden shrink-0 items-center sm:flex">
-          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-lime-300/25 bg-lime-300/10 text-lime-100">
-            <FileChangeIcon />
-          </span>
-        </div>
-        <ContainerTag
-          {...(canOpen
-            ? {
-                type: 'button' as const,
-                'aria-label': 'Open file change details',
-                onClick: () =>
-                  onOpen('File Change Details', detailText ?? item.text),
-              }
-            : {})}
-          className={`timeline-item-inner timeline-mobile-dense-inner timeline-mobile-bubble-content min-w-0 flex-1 rounded-[0.9rem] border px-2.5 py-2 text-left sm:rounded-xl sm:px-3 ${
-            canOpen ? 'transition hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)]' : ''
-          }`}
-        >
-          <div className="timeline-mobile-file-line flex min-w-0 items-center gap-2">
-            <span
-              className="timeline-primary-text min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip text-sm"
-              title={pathSummary ?? displayedPath}
-            >
-              {displayedPath}
-            </span>
-            {summarySegments.length > 0 && (
-              <div className="inline-flex shrink-0 items-center justify-end gap-1.5 text-xs">
-                {summarySegments.map((segment) => (
-                  <span
-                    key={segment}
-                    className={`timeline-delta-badge border ${
-                      segment.startsWith('+')
-                        ? 'timeline-delta-badge-add text-emerald-300'
-                        : segment.startsWith('-')
-                          ? 'timeline-delta-badge-remove text-rose-300'
-                          : 'timeline-delta-badge-neutral'
-                    }`}
-                  >
-                    {segment}
-                  </span>
-                ))}
-              </div>
-            )}
-        </div>
-      </ContainerTag>
-      </div>
-    </div>
-  );
-});
-
-const FileChangeGroupItem = memo(function FileChangeGroupItem({
-  items,
-  expanded,
-  onToggleExpanded,
-  onOpen,
-}: {
-  items: FileChangeHistoryItem[];
-  expanded: boolean;
-  onToggleExpanded: () => void;
-  onOpen: (title: string, text: string) => void;
-}) {
-  const changedFiles = items.reduce(
-    (sum, item) => sum + (item.changedFiles ?? 0),
-    0,
-  );
-  const addedLines = items.reduce((sum, item) => sum + (item.addedLines ?? 0), 0);
-  const removedLines = items.reduce((sum, item) => sum + (item.removedLines ?? 0), 0);
-  const batchLabel =
-    items.length === 1 ? '1 file change' : `${items.length} file changes`;
-
-  return (
-    <div className="timeline-mobile-dense-event timeline-mobile-dense-file relative min-w-0 w-full overflow-hidden rounded-[1rem] border timeline-special-success px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3">
-      <span
-        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('action')}`}
-      >
-        <span className="scale-[0.78]">
-          <FileChangeIcon />
-        </span>
-      </span>
-      <div className="flex items-start gap-2.5">
-        <div className="mt-0.5 hidden shrink-0 items-center sm:flex">
-          <span className="relative inline-flex h-8 w-8 items-center justify-center rounded-[0.9rem] border border-lime-300/30 bg-lime-300/[0.14] text-lime-100 shadow-sm shadow-stone-950/20">
-            <FileChangeIcon />
-            <span className="absolute -right-1 -top-1 inline-flex min-w-[1.1rem] items-center justify-center rounded-full border border-lime-200/35 bg-stone-950/90 px-1 text-[9px] font-semibold leading-4 text-lime-100">
-              {items.length}
-            </span>
-          </span>
-        </div>
-        <div className="timeline-batch-inner timeline-mobile-dense-batch timeline-mobile-bubble-content min-w-0 flex-1 rounded-[0.9rem] border px-2 py-1.5 sm:rounded-xl sm:px-3 sm:py-2">
-          <button
-            type="button"
-            aria-expanded={expanded}
-            aria-label={`${expanded ? 'Collapse' : 'Expand'} ${items.length} file change entries`}
-            onClick={onToggleExpanded}
-            className="timeline-mobile-dense-toggle flex w-full min-w-0 items-center justify-between gap-3 text-left"
-          >
-            <div className="timeline-mobile-dense-summary min-w-0 flex flex-1 flex-wrap items-center gap-2 pr-1">
-              <span className="rounded-full border border-lime-300/28 bg-lime-300/12 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.24em] text-lime-100">
-                Batch
-              </span>
-              <span className="rounded-full border border-stone-700/90 bg-stone-900/80 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-stone-300">
-                {batchLabel}
-              </span>
-              {changedFiles > 0 && (
-                <span className="timeline-meta-text text-xs">{changedFiles} files</span>
-              )}
-            </div>
-            <span className="inline-flex shrink-0 items-center gap-1.5">
-              {addedLines > 0 && (
-                <span className="timeline-delta-badge timeline-delta-badge-add rounded-full border px-1.5 py-0.5 text-[11px] font-medium">
-                  +{addedLines}
-                </span>
-              )}
-              {removedLines > 0 && (
-                <span className="timeline-delta-badge timeline-delta-badge-remove rounded-full border px-1.5 py-0.5 text-[11px] font-medium">
-                  -{removedLines}
-                </span>
-              )}
-            </span>
-          </button>
-
-          {expanded && (
-            <div className="timeline-mobile-section-list mt-3 space-y-0 border-t border-lime-300/12 pt-3 sm:space-y-2">
-              {items.map((item, index) => {
-                const detailText = item.detailText?.trim() || item.previewText?.trim() || item.text;
-                const pathSummary =
-                  item.previewText?.trim() && item.text.trim() !== item.previewText.trim()
-                    ? item.text.trim()
-                    : item.previewText?.trim() || item.text;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    aria-label={`Open grouped file change ${index + 1}`}
-                    onClick={() => onOpen(`File Change ${index + 1}`, detailText)}
-                    className="timeline-detail-row block w-full rounded-xl border px-3 py-2 text-left transition"
-                  >
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className="timeline-primary-text min-w-0 flex-1 text-sm leading-6" title={pathSummary}>
-                        {formatTrailingPathLabel(pathSummary, 34)}
-                      </span>
-                      <span className="inline-flex shrink-0 items-center gap-1.5">
-                        {(item.addedLines ?? 0) > 0 && (
-                          <span className="timeline-delta-badge timeline-delta-badge-add rounded-full border px-1.5 py-0.5 text-[11px] font-medium">
-                            +{item.addedLines}
-                          </span>
-                        )}
-                        {(item.removedLines ?? 0) > 0 && (
-                          <span className="timeline-delta-badge timeline-delta-badge-remove rounded-full border px-1.5 py-0.5 text-[11px] font-medium">
-                            -{item.removedLines}
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-});
-
-const GenericHistoryItem = memo(function GenericHistoryItem({
-  item,
-}: {
-  item: ThreadHistoryItemDto;
-}) {
-  return (
-    <div
-      className={`timeline-item-frame relative min-w-0 w-full overflow-hidden rounded-[1rem] border border-stone-800/80 ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2 sm:rounded-[1.2rem] sm:px-3`}
-    >
-      <span
-        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('action')}`}
-      >
-        <span className="scale-[0.78]">
-          <ToolCallIcon />
-        </span>
-      </span>
-      <div className="flex flex-wrap items-center justify-between gap-1.5 leading-none">
-        <span className="timeline-meta-text text-[10px] uppercase tracking-[0.16em]">
-          {historyItemLabel(item.kind)}
-        </span>
-        {item.status && (
-          <span className="timeline-meta-text text-[10px]">{item.status}</span>
-        )}
-      </div>
-      <pre
-        className={`timeline-soft-text mt-1 whitespace-pre-wrap break-words text-[13px] leading-5 ${
-          isScrollableHistoryItem(item.kind) ? 'max-h-56 overflow-auto' : ''
-        }`}
-      >
-        <LinkifiedPlainText text={item.text} />
-      </pre>
-    </div>
-  );
-});
-
-const ArtifactHistoryItem = memo(function ArtifactHistoryItem({
-  item,
-}: {
-  item: ThreadHistoryItemDto & { kind: 'artifact' };
-}) {
-  const plugins = usePlugins();
-  const [expanded, setExpanded] = useState(false);
-  const artifact = item.artifact;
-  const rendered = artifact
-    ? plugins.renderArtifact({
-        artifact,
-        expanded,
-        onToggleExpanded: () => setExpanded((current) => !current),
-      })
-    : null;
-
-  return (
-    <div
-      className={`timeline-item-frame relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
-    >
-      <div className="flex flex-wrap items-center justify-between gap-1.5 leading-none">
-        <span className="timeline-meta-text text-[10px] uppercase tracking-[0.16em]">
-          {artifact?.type ?? historyItemLabel(item.kind)}
-        </span>
-        {artifact && !plugins.hasRendererForArtifact(artifact) && (
-          <span className="timeline-meta-text text-[10px]">No renderer</span>
-        )}
-      </div>
-      <div className="mt-2">
-        {rendered ?? (
-          <div className="space-y-2">
-            <button
-              type="button"
-              onClick={() => setExpanded((current) => !current)}
-              className="flex w-full items-center justify-between gap-3 text-left"
-            >
-              <span>
-                <span className="block text-sm font-medium text-[var(--theme-fg)]">
-                  {artifact?.title ?? item.text}
-                </span>
-                <span className="mt-1 block text-xs text-[var(--theme-fg-muted)]">
-                  {artifact?.summaryText ?? item.previewText ?? item.text}
-                </span>
-              </span>
-              <span className="rounded-full border border-[var(--theme-border)] px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-[var(--theme-fg-muted)]">
-                {expanded ? 'Hide' : 'Open'}
-              </span>
-            </button>
-            {expanded && (
-              <pre className="max-h-80 overflow-auto rounded-[0.9rem] border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] p-3 text-xs text-[var(--theme-fg-soft)]">
-                {JSON.stringify(artifact?.payload ?? item, null, 2)}
-              </pre>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-});
-
-const HookItem = memo(function HookItem({
-  item,
-}: {
-  item: ThreadHistoryItemDto & { kind: 'hook' };
-}) {
-  const outputText =
-    item.hookOutputEntries
-      ?.map((entry) => entry.text.trim())
-      .filter(Boolean)
-      .join('\n')
-      .trim() ?? '';
-  const hookLabel = item.hookEventLabel ? `${item.hookEventLabel} hook` : item.text;
-  const fallbackText =
-    item.hookStatusMessage?.trim() ||
-    (item.previewText && item.previewText !== item.hookStatusMessage
-      ? item.previewText.trim()
-      : '') ||
-    item.text.trim();
-  const summaryText = outputText || (fallbackText && fallbackText !== hookLabel ? fallbackText : hookLabel);
-  const summary = summarizeInlinePreviewText(summaryText);
-  const showGap = Boolean(outputText && summary.showGap);
-
-  return (
-    <div
-      className={`timeline-item-frame timeline-mobile-dense-event relative min-w-0 w-full overflow-hidden rounded-[1rem] border ${historyItemAccentClassName(item.kind)} ${itemSurfaceClassName(item.kind)} px-2.5 py-2.5 sm:rounded-[1.2rem] sm:px-3`}
-    >
-      <span
-        className={`absolute left-0 top-0 z-[1] inline-flex h-5 w-5 items-center justify-center rounded-br-[0.7rem] rounded-tl-[0.95rem] border text-[10px] shadow-sm shadow-stone-950/20 sm:hidden ${overlayBadgeClassName('action')}`}
-      >
-        <span className="scale-[0.78]">
-          <HookIcon />
-        </span>
-      </span>
-      {isRunningHistoryStatus(item.status) && (
-        <span className="absolute left-5 top-0 inline-flex sm:hidden">
-          <RunningDots />
-        </span>
-      )}
-      <div className="flex items-start gap-2.5">
-        <div className="mt-0.5 hidden shrink-0 items-center sm:flex">
-          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-fuchsia-300/25 bg-fuchsia-300/10 text-fuchsia-200">
-            <HookIcon />
-          </span>
-          {isRunningHistoryStatus(item.status) && <RunningDots />}
-        </div>
-        <div className="timeline-item-inner timeline-mobile-dense-inner timeline-mobile-bubble-content relative min-w-0 w-full flex-1 rounded-[0.9rem] border px-2.5 py-2.5 pt-6 sm:rounded-xl sm:px-3 sm:py-2">
-          <div className="flex flex-wrap items-center justify-between gap-1.5 leading-none">
-            <span className="timeline-meta-text min-w-0 truncate text-[10px] uppercase tracking-[0.16em]">
-              Hook · {item.hookEventLabel ?? item.text}
-            </span>
-            {item.status && (
-              <span className="timeline-meta-text text-[10px]">{item.status}</span>
-            )}
-          </div>
-          <div className="timeline-mobile-dense-line mt-1.5 flex min-w-0 items-center gap-2 text-sm leading-6">
-            <p className="timeline-primary-text min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip">
-              {outputText ? (
-                <>
-                  <span className="timeline-meta-text mr-2 font-sans text-[11px] uppercase tracking-[0.12em]">
-                    {hookLabel}
-                  </span>
-                  <LinkifiedPlainText text={summary.firstLine} />
-                </>
-              ) : (
-                <LinkifiedPlainText
-                  text={
-                    summary.firstLine && summary.firstLine !== hookLabel
-                      ? `${hookLabel} · ${summary.firstLine}`
-                      : hookLabel
-                  }
-                />
-              )}
-            </p>
-            {showGap ? (
-              <span className="timeline-meta-text shrink-0 text-[11px] font-medium tracking-[0.28em]">
-                ...
-              </span>
-            ) : null}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-});
-
 const HistoryItemRow = memo(function HistoryItemRow({
   threadId,
   item,
@@ -3919,11 +1537,16 @@ const HistoryItemRow = memo(function HistoryItemRow({
   onOpenCommandDetail,
   onOpenToolCallDetail,
   onOpenDeferredHistoryItemDetail,
+  onSelectArtifact,
   adapter,
+  timeLabel,
+  timeTitle,
 }: {
   threadId: string | undefined;
   item: ThreadHistoryItemDto;
   scrollRootRef: RefObject<HTMLDivElement | null>;
+  timeLabel?: string | null | undefined;
+  timeTitle?: string | null | undefined;
   onOpenExpandedText: (title: string, text: string) => void;
   onOpenCommandDetail: (
     item: ThreadHistoryItemDto & { kind: 'commandExecution' },
@@ -3942,6 +1565,7 @@ const HistoryItemRow = memo(function HistoryItemRow({
     loadingText: string,
     errorText: string,
   ) => void;
+  onSelectArtifact?: ThreadTimelineProps['onSelectArtifact'];
   adapter?: ThreadTimelineAdapter | undefined;
 }) {
   if (isCompactChatItem(item.kind)) {
@@ -3954,6 +1578,8 @@ const HistoryItemRow = memo(function HistoryItemRow({
           }
         }
         scrollRootRef={scrollRootRef}
+        timeLabel={timeLabel}
+        timeTitle={timeTitle}
         {...(adapter ? { adapter } : {})}
       />
     );
@@ -3967,6 +1593,12 @@ const HistoryItemRow = memo(function HistoryItemRow({
             kind: 'artifact';
           }
         }
+        {...(onSelectArtifact
+          ? {
+              onSelect: (nextItem, artifact) =>
+                onSelectArtifact({ item: nextItem, artifact }),
+            }
+          : {})}
       />
     );
   }
@@ -4541,6 +2173,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
   onOpenCommandDetail,
   onOpenToolCallDetail,
   onOpenDeferredHistoryItemDetail,
+  onSelectArtifact,
   scrollRootRef,
   articleRef,
   isLatestVisibleTurn = false,
@@ -4579,6 +2212,7 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
     loadingText: string,
     errorText: string,
   ) => void;
+  onSelectArtifact?: ThreadTimelineProps['onSelectArtifact'];
   scrollRootRef: RefObject<HTMLDivElement | null>;
   articleRef?: RefCallback<HTMLElement> | undefined;
   isLatestVisibleTurn?: boolean;
@@ -4613,6 +2247,8 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
     [activeForRendering, mergedItems],
   );
   const groupedItems = useMemo(() => groupTimelineHistoryItems(preparedItems), [preparedItems]);
+  const turnTimeLabel = formatShortTimestamp(turn.startedAt);
+  const turnTimeTitle = formatLongTimestamp(turn.startedAt);
   const visibleLiveHookPrompt = useMemo(
     () => parseHookPromptText(visibleLiveOutput),
     [visibleLiveOutput],
@@ -4628,124 +2264,80 @@ const ThreadTurnRow = memo(function ThreadTurnRow({
     }));
   }, []);
 
+  const historyNode = (
+    <TimelineHistoryEntries
+        entries={groupedItems}
+        expandedGroups={expandedGroups}
+        onToggleGroupedItem={toggleGroupedItem}
+        threadId={threadId}
+        scrollRootRef={scrollRootRef}
+        onOpenExpandedText={onOpenExpandedText}
+        onOpenCommandDetail={onOpenCommandDetail}
+        onOpenToolCallDetail={onOpenToolCallDetail}
+        onOpenDeferredHistoryItemDetail={onOpenDeferredHistoryItemDetail}
+        timeLabel={turnTimeLabel}
+        timeTitle={turnTimeTitle}
+        {...(onSelectArtifact ? { onSelectArtifact } : {})}
+        {...(adapter ? { adapter } : {})}
+      />
+  );
+  const liveHookPromptNode = visibleLiveHookPrompt ? (
+    <HistoryItemRow
+      threadId={threadId}
+      item={visibleLiveHookPrompt}
+      scrollRootRef={scrollRootRef}
+      onOpenExpandedText={onOpenExpandedText}
+      onOpenCommandDetail={onOpenCommandDetail}
+      onOpenToolCallDetail={onOpenToolCallDetail}
+      onOpenDeferredHistoryItemDetail={onOpenDeferredHistoryItemDetail}
+      timeLabel={turnTimeLabel}
+      timeTitle={turnTimeTitle}
+      {...(onSelectArtifact ? { onSelectArtifact } : {})}
+      {...(adapter ? { adapter } : {})}
+    />
+  ) : null;
+  const liveOutputNode =
+    !visibleLiveHookPrompt && visibleLiveOutput ? (
+      <CompactMessageItem
+        item={{
+          id: 'live-agent-message',
+          kind: 'agentMessage',
+          text: visibleLiveOutput,
+        }}
+        scrollRootRef={scrollRootRef}
+        timeLabel={turnTimeLabel}
+        timeTitle={turnTimeTitle}
+        streaming
+      />
+    ) : null;
+  const footerNode = activeForRendering ? (
+    <TurnStatusBar turn={activeFooterTurn} variant="footer" />
+  ) : null;
+  const turnBody = (
+    <GraphChatTurnBody
+      footer={footerNode}
+      history={historyNode}
+      liveHookPrompt={liveHookPromptNode}
+      liveOutput={liveOutputNode}
+      livePlan={displayedLivePlan}
+    />
+  );
+
   return (
-    <article ref={articleRef} className="px-2 py-1.5 sm:px-6 sm:py-2">
-        <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex flex-1 items-start gap-1.5">
-          <div className="min-w-0 flex flex-1 items-center gap-1.5 overflow-hidden">
-            <span className="timeline-meta-text rounded-[0.6rem] border border-stone-700 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.16em]">
-              Turn {absoluteIndex}
-            </span>
-            <time
-              dateTime={turn.startedAt ?? undefined}
-              title={formatLongTimestamp(turn.startedAt)}
-              className="timeline-meta-text shrink-0 text-[10px] sm:text-[11px]"
-            >
-              {formatShortTimestamp(turn.startedAt)}
-            </time>
-            <TurnStatusBar turn={turn} />
-            {turn.error && (
-              <p className="hidden truncate text-[11px] text-rose-200 sm:block">
-                {turn.error}
-              </p>
-            )}
-          </div>
-          <TurnTokenSummary turn={turn} />
-        </div>
-        <button
-          type="button"
-          aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} turn ${absoluteIndex}`}
-          title={isCollapsed ? 'Expand turn' : 'Collapse turn'}
-          onClick={() => onToggleCollapse(turn.id)}
-          className="timeline-compact-action timeline-meta-text inline-flex h-5 w-5 shrink-0 items-center justify-center transition hover:text-[var(--theme-fg)]"
-        >
-          <svg
-            aria-hidden="true"
-            viewBox="0 0 16 16"
-            className="h-3.5 w-3.5 fill-none stroke-current"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            {isCollapsed ? (
-              <path d="m4.5 10 3.5-3.5L11.5 10" />
-            ) : (
-              <path d="m4.5 6 3.5 3.5L11.5 6" />
-            )}
-          </svg>
-        </button>
-      </div>
-
-      {turn.error && (
-        <p className="mt-1 text-[11px] text-rose-200 sm:hidden">{turn.error}</p>
-      )}
-
-      {!isCollapsed && (
-        <div className="mt-1.5 space-y-1.5">
-          <TimelineHistoryEntries
-            entries={groupedItems}
-            expandedGroups={expandedGroups}
-            onToggleGroupedItem={toggleGroupedItem}
-            threadId={threadId}
-            scrollRootRef={scrollRootRef}
-            onOpenExpandedText={onOpenExpandedText}
-            onOpenCommandDetail={onOpenCommandDetail}
-            onOpenToolCallDetail={onOpenToolCallDetail}
-            onOpenDeferredHistoryItemDetail={onOpenDeferredHistoryItemDetail}
-            {...(adapter ? { adapter } : {})}
-          />
-          {displayedLivePlan && (
-            <div className="timeline-live-plan-card rounded-[1rem] border px-3 py-3 sm:rounded-[1.2rem]">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="timeline-primary-text text-sm font-medium">Plan update</p>
-                <span className="rounded-full border border-sky-300/40 px-2 py-1 text-[11px] uppercase tracking-[0.2em] text-sky-200">
-                  Live
-                </span>
-              </div>
-              {displayedLivePlan.explanation && (
-                <p className="timeline-soft-text mt-3 text-sm">{displayedLivePlan.explanation}</p>
-              )}
-              <div className="mt-3 space-y-2">
-                {displayedLivePlan.plan.map((step, index) => (
-                  <div
-                    key={`${displayedLivePlan.turnId}-${index}`}
-                    className="timeline-live-plan-step flex items-center justify-between gap-3 rounded-xl border px-3 py-2 text-sm"
-                  >
-                    <span className="timeline-primary-text min-w-0 flex-1">{step.step}</span>
-                    <PlanStepStatusIcon status={step.status} />
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          {visibleLiveHookPrompt ? (
-            <HistoryItemRow
-              threadId={threadId}
-              item={visibleLiveHookPrompt}
-              scrollRootRef={scrollRootRef}
-              onOpenExpandedText={onOpenExpandedText}
-              onOpenCommandDetail={onOpenCommandDetail}
-              onOpenToolCallDetail={onOpenToolCallDetail}
-              onOpenDeferredHistoryItemDetail={onOpenDeferredHistoryItemDetail}
-              {...(adapter ? { adapter } : {})}
-            />
-          ) : visibleLiveOutput ? (
-            <CompactMessageItem
-              item={{
-                id: 'live-agent-message',
-                kind: 'agentMessage',
-                text: visibleLiveOutput,
-              }}
-              scrollRootRef={scrollRootRef}
-              streaming
-            />
-          ) : null}
-          {activeForRendering && (
-            <TurnStatusBar turn={activeFooterTurn} variant="footer" />
-          )}
-        </div>
-      )}
-    </article>
+    <GraphChatTurnFrame
+      absoluteIndex={absoluteIndex}
+      body={turnBody}
+      collapsed={isCollapsed}
+      error={turn.error}
+      headerStatus={<TurnStatusBar turn={turn} />}
+      isActive={activeForRendering}
+      onToggleCollapse={() => onToggleCollapse(turn.id)}
+      refCallback={articleRef}
+      startedAt={turn.startedAt}
+      timeLabel={turnTimeLabel}
+      timeTitle={turnTimeTitle}
+      tokenSummary={<TurnTokenSummary turn={turn} />}
+    />
   );
 });
 
@@ -4759,13 +2351,18 @@ function TimelineHistoryEntries({
   onOpenCommandDetail,
   onOpenToolCallDetail,
   onOpenDeferredHistoryItemDetail,
+  onSelectArtifact,
   adapter,
+  timeLabel,
+  timeTitle,
 }: {
   entries: TimelineHistoryEntry[];
   expandedGroups: Record<string, boolean>;
   onToggleGroupedItem: (groupKey: string) => void;
   threadId: string | undefined;
   scrollRootRef: RefObject<HTMLDivElement | null>;
+  timeLabel?: string | null | undefined;
+  timeTitle?: string | null | undefined;
   onOpenExpandedText: (title: string, text: string) => void;
   onOpenCommandDetail: (
     item: ThreadHistoryItemDto & { kind: 'commandExecution' },
@@ -4784,58 +2381,67 @@ function TimelineHistoryEntries({
     loadingText: string,
     errorText: string,
   ) => void;
+  onSelectArtifact?: ThreadTimelineProps['onSelectArtifact'];
   adapter?: ThreadTimelineAdapter | undefined;
 }) {
   return (
-    <>
-      {entries.map((entry) =>
-        entry.kind === 'commandGroup' ? (
-          <CommandGroupItem
-            key={entry.key}
-            items={entry.items}
-            expanded={expandedGroups[entry.key] ?? false}
-            onToggleExpanded={() => onToggleGroupedItem(entry.key)}
-            onOpen={onOpenCommandDetail}
-          />
-        ) : entry.kind === 'fileChangeGroup' ? (
-          <FileChangeGroupItem
-            key={entry.key}
-            items={entry.items}
-            expanded={expandedGroups[entry.key] ?? false}
-            onToggleExpanded={() => onToggleGroupedItem(entry.key)}
-            onOpen={onOpenExpandedText}
-          />
-        ) : entry.kind === 'searchGroup' ? (
-          <SearchGroupItem
-            key={entry.key}
-            items={entry.items}
-            expanded={expandedGroups[entry.key] ?? false}
-            onToggleExpanded={() => onToggleGroupedItem(entry.key)}
-            onOpen={onOpenExpandedText}
-          />
-        ) : entry.kind === 'fileReadGroup' ? (
-          <FileReadGroupItem
-            key={entry.key}
-            items={entry.items}
-            expanded={expandedGroups[entry.key] ?? false}
-            onToggleExpanded={() => onToggleGroupedItem(entry.key)}
-            onOpen={onOpenExpandedText}
-          />
-        ) : (
-          <HistoryItemRow
-            key={entry.key}
-            threadId={threadId}
-            item={entry.item}
-            scrollRootRef={scrollRootRef}
-            onOpenExpandedText={onOpenExpandedText}
-            onOpenCommandDetail={onOpenCommandDetail}
-            onOpenToolCallDetail={onOpenToolCallDetail}
-            onOpenDeferredHistoryItemDetail={onOpenDeferredHistoryItemDetail}
-            {...(adapter ? { adapter } : {})}
-          />
-        ),
+    <GraphChatHistoryEntries<TimelineHistoryEntry>
+      entries={entries}
+      expandedGroups={expandedGroups}
+      onToggleGroupedItem={onToggleGroupedItem}
+      renderCommandGroup={(entry, expanded, onToggleExpanded) => (
+        <CommandGroupItem
+          key={entry.key}
+          items={entry.items}
+          expanded={expanded}
+          onToggleExpanded={onToggleExpanded}
+          onOpen={onOpenCommandDetail}
+        />
       )}
-    </>
+      renderFileChangeGroup={(entry, expanded, onToggleExpanded) => (
+        <FileChangeGroupItem
+          key={entry.key}
+          items={entry.items}
+          expanded={expanded}
+          onToggleExpanded={onToggleExpanded}
+          onOpen={onOpenExpandedText}
+        />
+      )}
+      renderSearchGroup={(entry, expanded, onToggleExpanded) => (
+        <SearchGroupItem
+          key={entry.key}
+          items={entry.items}
+          expanded={expanded}
+          onToggleExpanded={onToggleExpanded}
+          onOpen={onOpenExpandedText}
+        />
+      )}
+      renderFileReadGroup={(entry, expanded, onToggleExpanded) => (
+        <FileReadGroupItem
+          key={entry.key}
+          items={entry.items}
+          expanded={expanded}
+          onToggleExpanded={onToggleExpanded}
+          onOpen={onOpenExpandedText}
+        />
+      )}
+      renderItem={(entry) => (
+        <HistoryItemRow
+          key={entry.key}
+          threadId={threadId}
+          item={entry.item}
+          scrollRootRef={scrollRootRef}
+          timeLabel={timeLabel}
+          timeTitle={timeTitle}
+          onOpenExpandedText={onOpenExpandedText}
+          onOpenCommandDetail={onOpenCommandDetail}
+          onOpenToolCallDetail={onOpenToolCallDetail}
+          onOpenDeferredHistoryItemDetail={onOpenDeferredHistoryItemDetail}
+          {...(onSelectArtifact ? { onSelectArtifact } : {})}
+          {...(adapter ? { adapter } : {})}
+        />
+      )}
+    />
   );
 }
 
@@ -4865,6 +2471,8 @@ function ThreadTimelineComponent({
   optimisticTurn = null,
   onLoadHistoryItemDetail,
   onOpenThread,
+  onSelectArtifact,
+  onSelectHistoryItemDetail,
   adapter,
 }: ThreadTimelineProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -4873,10 +2481,12 @@ function ThreadTimelineComponent({
   const previousContentRevisionRef = useRef<number | null>(null);
   const previousBottomSpacerRef = useRef(bottomSpacer);
   const lastObservedScrollHeightRef = useRef(0);
+  const lastScrollTopRef = useRef(0);
   const tailSentinelRef = useRef<HTMLDivElement | null>(null);
   const topSentinelRef = useRef<HTMLDivElement | null>(null);
   const isTailVisibleRef = useRef(true);
   const shouldStickToBottomRef = useRef(true);
+  const userScrolledAwayFromTailRef = useRef(false);
   const userScrolledHistoryRef = useRef(false);
   const autoLoadedEarlierRef = useRef(false);
   const expandedTextRequestIdRef = useRef(0);
@@ -4932,6 +2542,17 @@ function ThreadTimelineComponent({
     setExpandedText({ title, text });
   }, []);
 
+  const handleResolvedHistoryItemDetail = useCallback(
+    (item: ThreadHistoryItemDto, detail: ThreadHistoryItemDetailDto) => {
+      if (onSelectHistoryItemDetail) {
+        onSelectHistoryItemDetail({ item, detail });
+        return;
+      }
+      setExpandedText({ title: detail.title, text: detail.text });
+    },
+    [onSelectHistoryItemDetail],
+  );
+
   const handleOpenCommandDetail = useCallback(
     async (
       item: ThreadHistoryItemDto & { kind: 'commandExecution' },
@@ -4939,19 +2560,26 @@ function ThreadTimelineComponent({
     ) => {
       const inlineText = item.detailText?.trim() || item.text || 'Command output';
       if (!item.hasDeferredDetail || !loadHistoryItemDetail) {
-        setExpandedText({ title: fallbackTitle, text: inlineText });
+        handleResolvedHistoryItemDetail(item, {
+          id: item.id,
+          kind: item.kind,
+          title: fallbackTitle,
+          text: inlineText,
+        });
         return;
       }
 
       const cached = deferredDetailCacheRef.current.get(item.id);
       if (cached) {
-        setExpandedText({ title: cached.title, text: cached.text });
+        handleResolvedHistoryItemDetail(item, cached);
         return;
       }
 
       const requestId = expandedTextRequestIdRef.current + 1;
       expandedTextRequestIdRef.current = requestId;
-      setExpandedText({ title: fallbackTitle, text: 'Loading full command output...' });
+      if (!onSelectHistoryItemDetail) {
+        setExpandedText({ title: fallbackTitle, text: 'Loading full command output...' });
+      }
 
       try {
         const detail = await loadHistoryItemDetail(item.id);
@@ -4959,21 +2587,24 @@ function ThreadTimelineComponent({
         if (expandedTextRequestIdRef.current !== requestId) {
           return;
         }
-        setExpandedText({ title: detail.title, text: detail.text });
+        handleResolvedHistoryItemDetail(item, detail);
       } catch (caught) {
         if (expandedTextRequestIdRef.current !== requestId) {
           return;
         }
-        setExpandedText({
+        const text =
+          caught instanceof Error
+            ? caught.message
+            : 'Unable to load full command output.';
+        handleResolvedHistoryItemDetail(item, {
+          id: item.id,
+          kind: item.kind,
           title: fallbackTitle,
-          text:
-            caught instanceof Error
-              ? caught.message
-              : 'Unable to load full command output.',
+          text,
         });
       }
     },
-    [loadHistoryItemDetail],
+    [handleResolvedHistoryItemDetail, loadHistoryItemDetail, onSelectHistoryItemDetail],
   );
 
   const handleOpenToolCallDetail = useCallback(
@@ -4985,19 +2616,26 @@ function ThreadTimelineComponent({
     ) => {
       const inlineText = item.detailText?.trim() || item.text || 'Tool call';
       if (!item.hasDeferredDetail || !loadHistoryItemDetail) {
-        setExpandedText({ title: fallbackTitle, text: inlineText });
+        handleResolvedHistoryItemDetail(item, {
+          id: item.id,
+          kind: item.kind,
+          title: fallbackTitle,
+          text: inlineText,
+        });
         return;
       }
 
       const cached = deferredDetailCacheRef.current.get(item.id);
       if (cached) {
-        setExpandedText({ title: cached.title, text: cached.text });
+        handleResolvedHistoryItemDetail(item, cached);
         return;
       }
 
       const requestId = expandedTextRequestIdRef.current + 1;
       expandedTextRequestIdRef.current = requestId;
-      setExpandedText({ title: fallbackTitle, text: 'Loading full tool call details...' });
+      if (!onSelectHistoryItemDetail) {
+        setExpandedText({ title: fallbackTitle, text: 'Loading full tool call details...' });
+      }
 
       try {
         const detail = await loadHistoryItemDetail(item.id);
@@ -5005,21 +2643,24 @@ function ThreadTimelineComponent({
         if (expandedTextRequestIdRef.current !== requestId) {
           return;
         }
-        setExpandedText({ title: detail.title, text: detail.text });
+        handleResolvedHistoryItemDetail(item, detail);
       } catch (caught) {
         if (expandedTextRequestIdRef.current !== requestId) {
           return;
         }
-        setExpandedText({
+        const text =
+          caught instanceof Error
+            ? caught.message
+            : 'Unable to load full tool call details.';
+        handleResolvedHistoryItemDetail(item, {
+          id: item.id,
+          kind: item.kind,
           title: fallbackTitle,
-          text:
-            caught instanceof Error
-              ? caught.message
-              : 'Unable to load full tool call details.',
+          text,
         });
       }
     },
-    [loadHistoryItemDetail],
+    [handleResolvedHistoryItemDetail, loadHistoryItemDetail, onSelectHistoryItemDetail],
   );
 
   const handleOpenDeferredHistoryItemDetail = useCallback(
@@ -5086,7 +2727,22 @@ function ThreadTimelineComponent({
     const container = scrollContainerRef.current;
     if (container) {
       userScrolledHistoryRef.current = true;
-      shouldStickToBottomRef.current = isNearBottom(container, FOLLOW_TAIL_THRESHOLD_PX);
+      const nextScrollTop = container.scrollTop;
+      const previousScrollTop = lastScrollTopRef.current;
+      const delta = nextScrollTop - previousScrollTop;
+      lastScrollTopRef.current = nextScrollTop;
+
+      if (isNearBottom(container, 1)) {
+        userScrolledAwayFromTailRef.current = false;
+        shouldStickToBottomRef.current = true;
+      } else if (delta < -1) {
+        userScrolledAwayFromTailRef.current = true;
+        shouldStickToBottomRef.current = false;
+      } else if (delta > 1) {
+        shouldStickToBottomRef.current =
+          !userScrolledAwayFromTailRef.current &&
+          isNearBottom(container, FOLLOW_TAIL_THRESHOLD_PX);
+      }
     }
     recomputeTailVisibility();
   }, [recomputeTailVisibility]);
@@ -5098,9 +2754,11 @@ function ThreadTimelineComponent({
     }
 
     container.scrollTop = container.scrollHeight;
+    lastScrollTopRef.current = container.scrollTop;
     lastObservedScrollHeightRef.current = container.scrollHeight;
     isTailVisibleRef.current = true;
     setIsTailVisible((current) => (current ? current : true));
+    userScrolledAwayFromTailRef.current = false;
     shouldStickToBottomRef.current = true;
   }, []);
 
@@ -5133,7 +2791,16 @@ function ThreadTimelineComponent({
     const container = scrollContainerRef.current;
     if (container) {
       lastObservedScrollHeightRef.current = container.scrollHeight;
-      shouldStickToBottomRef.current = isNearBottom(container, FOLLOW_TAIL_THRESHOLD_PX);
+      lastScrollTopRef.current = container.scrollTop;
+      if (isNearBottom(container, 1)) {
+        userScrolledAwayFromTailRef.current = false;
+        shouldStickToBottomRef.current = true;
+      } else if (
+        userScrolledAwayFromTailRef.current ||
+        !isNearBottom(container, FOLLOW_TAIL_THRESHOLD_PX)
+      ) {
+        shouldStickToBottomRef.current = false;
+      }
     }
     recomputeTailVisibility();
   }, [
@@ -5156,7 +2823,11 @@ function ThreadTimelineComponent({
     previousContentRevisionRef.current = contentRevision;
     const shouldAutoScroll =
       shouldForceScroll ||
-      (contentChanged && (isTailVisible || shouldStickToBottomRef.current));
+      (
+        contentChanged &&
+        shouldStickToBottomRef.current &&
+        !userScrolledAwayFromTailRef.current
+      );
 
     if (!shouldAutoScroll) {
       return;
@@ -5197,7 +2868,17 @@ function ThreadTimelineComponent({
         return;
       }
 
-      if (!(shouldStickToBottomRef.current || isTailVisibleRef.current)) {
+      const wasAtBottomBeforeResize =
+        previousScrollHeight > 0 &&
+        previousScrollHeight - container.scrollTop - container.clientHeight <= 1;
+      if (
+        userScrolledAwayFromTailRef.current ||
+        !(
+          shouldStickToBottomRef.current ||
+          wasAtBottomBeforeResize ||
+          isTailVisibleRef.current
+        )
+      ) {
         return;
       }
 
@@ -5213,7 +2894,7 @@ function ThreadTimelineComponent({
   }, [scrollToBottom]);
 
   useEffect(() => {
-    if (!isTailVisible) {
+    if (!shouldStickToBottomRef.current || userScrolledAwayFromTailRef.current) {
       previousBottomSpacerRef.current = bottomSpacer;
       return;
     }
@@ -5230,7 +2911,7 @@ function ThreadTimelineComponent({
     return () => {
       window.cancelAnimationFrame(frame);
     };
-  }, [bottomSpacer, isTailVisible, scrollToBottom]);
+  }, [bottomSpacer, scrollToBottom]);
 
   useEffect(() => {
     onTailVisibilityChange?.(isTailVisible);
@@ -5556,15 +3237,15 @@ function ThreadTimelineComponent({
       <section className={`flex min-h-0 flex-1 flex-col ${className}`.trim()}>
         <div
           ref={scrollContainerRef}
-          data-testid="thread-scroll-container"
+          data-testid="chat-scroll-container"
           onScroll={handleScroll}
-          className="thread-scroll-container min-h-0 flex-1 overflow-y-auto overscroll-contain"
+          className="thread-graph-scroll-container min-h-0 flex-1 overflow-y-auto overscroll-contain"
           style={bottomSpacer > 0 ? { paddingBottom: bottomSpacer } : undefined}
         >
-          <div ref={scrollContentRef}>
+          <div ref={scrollContentRef} className="thread-graph-scroll-content">
           <div ref={topSentinelRef} aria-hidden="true" className="h-px" />
           {turns.length > 0 && (
-            <div className="px-2.5 pb-1 pt-2 sm:px-6 sm:pb-1.5 sm:pt-3">
+            <div className="thread-graph-history-control px-3 pb-1 pt-2 sm:px-5 sm:pb-1.5 sm:pt-3">
               <div className="flex flex-wrap items-center gap-2.5 text-xs sm:text-sm">
                 {hiddenCount > 0 && (
                   <button
@@ -5581,7 +3262,7 @@ function ThreadTimelineComponent({
                       setLoadMoreClicks((current) => current + 1);
                     }}
                     disabled={loadingEarlier}
-                    className="rounded-full border border-stone-700 px-2.5 py-1.5 text-stone-300 transition hover:bg-stone-800"
+                    className="thread-graph-history-button rounded-full border px-2.5 py-1.5 transition"
                   >
                     {loadingEarlier ? 'Loading earlier...' : 'Load 10 earlier'}
                   </button>
@@ -5610,7 +3291,7 @@ function ThreadTimelineComponent({
           )}
 
           {turns.length === 0 && !liveOutput && !optimisticTurn && (
-            <div className="timeline-meta-text px-2.5 py-8 text-sm sm:px-6">
+            <div className="thread-graph-empty-state px-3 py-8 text-sm sm:px-5">
               Send the first prompt to start the thread.
             </div>
           )}
@@ -5619,9 +3300,9 @@ function ThreadTimelineComponent({
             optimisticTurn ||
             activityNoteAnchors.leading.length > 0 ||
             activityNoteAnchors.trailing.length > 0) && (
-            <div className="divide-y divide-stone-800/80">
+            <div className="thread-graph-message-list">
               {activityNoteAnchors.leading.length > 0 ? (
-                <div className="space-y-3 border-b border-stone-800/80 px-2.5 py-4 sm:px-6">
+                <div className="thread-graph-message-section space-y-3 px-3 py-4 sm:px-5">
                   {activityNoteAnchors.leading.map((note) => (
                     <ActivityNoteCard key={note.id} note={note} onOpenThread={onOpenThread} onOpenLinkedThread={openLinkedThread} />
                   ))}
@@ -5630,14 +3311,14 @@ function ThreadTimelineComponent({
               {visibleTurns.map((turn, visibleIndex) => (
                 <div key={turn.id}>
                   {(activityNoteAnchors.beforeTurnId.get(turn.id)?.length ?? 0) > 0 ? (
-                    <div className="space-y-3 border-b border-stone-800/80 px-2.5 py-4 sm:px-6">
+                    <div className="thread-graph-message-section space-y-3 px-3 py-4 sm:px-5">
                       {(activityNoteAnchors.beforeTurnId.get(turn.id) ?? []).map((note) => (
                         <ActivityNoteCard key={note.id} note={note} onOpenThread={onOpenThread} onOpenLinkedThread={openLinkedThread} />
                       ))}
                     </div>
                   ) : null}
                   {(requestEntryAnchors.beforeTurnId.get(turn.id)?.length ?? 0) > 0 ? (
-                    <div className="space-y-3 border-b border-stone-800/80 px-2.5 py-4 sm:px-6">
+                    <div className="thread-graph-message-section space-y-3 px-3 py-4 sm:px-5">
                       {(requestEntryAnchors.beforeTurnId.get(turn.id) ?? []).map((entry) =>
                         entry.kind === 'note' ? (
                           <AnsweredRequestNote key={entry.id} note={entry.note} />
@@ -5673,18 +3354,19 @@ function ThreadTimelineComponent({
                     onOpenCommandDetail={handleOpenCommandDetail}
                     onOpenToolCallDetail={handleOpenToolCallDetail}
                     onOpenDeferredHistoryItemDetail={handleOpenDeferredHistoryItemDetail}
+                    {...(onSelectArtifact ? { onSelectArtifact } : {})}
                     scrollRootRef={scrollContainerRef}
                     articleRef={undefined}
                   />
                   {(activityNoteAnchors.afterTurnId.get(turn.id)?.length ?? 0) > 0 ? (
-                    <div className="space-y-3 border-t border-stone-800/80 px-2.5 py-4 sm:px-6">
+                    <div className="thread-graph-message-section space-y-3 px-3 py-4 sm:px-5">
                       {(activityNoteAnchors.afterTurnId.get(turn.id) ?? []).map((note) => (
                         <ActivityNoteCard key={note.id} note={note} onOpenThread={onOpenThread} onOpenLinkedThread={openLinkedThread} />
                       ))}
                     </div>
                   ) : null}
                   {(notesByTurnId.get(turn.id)?.length || pendingRequestsByTurnId.get(turn.id)?.length) ? (
-                    <div className="space-y-3 border-t border-stone-800/80 px-2.5 py-4 sm:px-6">
+                    <div className="thread-graph-message-section space-y-3 px-3 py-4 sm:px-5">
                       {[
                         ...(notesByTurnId.get(turn.id) ?? []).map((note) => ({
                           kind: 'note' as const,
@@ -5721,7 +3403,7 @@ function ThreadTimelineComponent({
               {optimisticTurn && visibleTurns.every((turn) => turn.id !== optimisticTurn.id) && (
                 <>
                   {(activityNoteAnchors.beforeTurnId.get(optimisticTurn.id)?.length ?? 0) > 0 ? (
-                    <div className="space-y-3 border-b border-stone-800/80 px-2.5 py-4 sm:px-6">
+                    <div className="thread-graph-message-section space-y-3 px-3 py-4 sm:px-5">
                       {(activityNoteAnchors.beforeTurnId.get(optimisticTurn.id) ?? []).map(
                         (note) => (
                           <ActivityNoteCard key={note.id} note={note} onOpenThread={onOpenThread} onOpenLinkedThread={openLinkedThread} />
@@ -5730,7 +3412,7 @@ function ThreadTimelineComponent({
                     </div>
                   ) : null}
                   {(requestEntryAnchors.beforeTurnId.get(optimisticTurn.id)?.length ?? 0) > 0 ? (
-                    <div className="space-y-3 border-b border-stone-800/80 px-2.5 py-4 sm:px-6">
+                    <div className="thread-graph-message-section space-y-3 px-3 py-4 sm:px-5">
                       {(requestEntryAnchors.beforeTurnId.get(optimisticTurn.id) ?? []).map(
                         (entry) =>
                           entry.kind === 'note' ? (
@@ -5767,10 +3449,11 @@ function ThreadTimelineComponent({
                     onOpenCommandDetail={handleOpenCommandDetail}
                     onOpenToolCallDetail={handleOpenToolCallDetail}
                     onOpenDeferredHistoryItemDetail={handleOpenDeferredHistoryItemDetail}
+                    {...(onSelectArtifact ? { onSelectArtifact } : {})}
                     scrollRootRef={scrollContainerRef}
                   />
                   {(activityNoteAnchors.afterTurnId.get(optimisticTurn.id)?.length ?? 0) > 0 ? (
-                    <div className="space-y-3 border-t border-stone-800/80 px-2.5 py-4 sm:px-6">
+                    <div className="thread-graph-message-section space-y-3 px-3 py-4 sm:px-5">
                       {(activityNoteAnchors.afterTurnId.get(optimisticTurn.id) ?? []).map(
                         (note) => (
                           <ActivityNoteCard key={note.id} note={note} onOpenThread={onOpenThread} onOpenLinkedThread={openLinkedThread} />
@@ -5784,7 +3467,7 @@ function ThreadTimelineComponent({
           )}
 
           {queuedSteers.length > 0 && (
-            <div className="space-y-3 border-t border-stone-800/80 px-2.5 py-4 sm:px-6">
+            <div className="thread-graph-message-section space-y-3 px-3 py-4 sm:px-5">
               {queuedSteers.map((steer) => (
                 <CompactMessageItem
                   key={steer.id}
@@ -5804,7 +3487,7 @@ function ThreadTimelineComponent({
 
           {(requestEntryAnchors.trailing.length > 0 ||
             activityNoteAnchors.trailing.length > 0) && (
-            <div className="space-y-3 border-t border-stone-800/80 px-2.5 py-4 sm:px-6">
+            <div className="thread-graph-message-section space-y-3 px-3 py-4 sm:px-5">
               {[
                 ...activityNoteAnchors.trailing.map((note) => ({
                   kind: 'activity' as const,
@@ -5833,7 +3516,7 @@ function ThreadTimelineComponent({
           )}
 
           {ephemeralUserNote && (
-            <div className="border-t border-stone-800/80 px-2.5 py-2.5 sm:px-6">
+            <div className="thread-graph-message-section px-3 py-2.5 sm:px-5">
               <CompactMessageItem
                 threadId={threadId}
                 item={{
@@ -5847,7 +3530,7 @@ function ThreadTimelineComponent({
           )}
 
           {unattachedLiveItems && unattachedLiveItems.length > 0 && (
-            <div className="space-y-3 border-t border-stone-800/80 px-2.5 py-2.5 sm:px-6">
+            <div className="thread-graph-message-section space-y-3 px-3 py-2.5 sm:px-5">
               <TimelineHistoryEntries
                 entries={unattachedLiveEntries}
                 expandedGroups={expandedLooseGroups}
@@ -5858,6 +3541,7 @@ function ThreadTimelineComponent({
                 onOpenCommandDetail={handleOpenCommandDetail}
                 onOpenToolCallDetail={handleOpenToolCallDetail}
                 onOpenDeferredHistoryItemDetail={handleOpenDeferredHistoryItemDetail}
+                {...(onSelectArtifact ? { onSelectArtifact } : {})}
                 {...(adapter ? { adapter } : {})}
               />
             </div>
@@ -5867,7 +3551,7 @@ function ThreadTimelineComponent({
             !liveOutputAttachedToVisibleTurn &&
             !liveOutputAttachedToOptimisticTurn &&
             !hasStructuredLiveItems && (
-            <div className="border-t border-stone-800/80 px-2.5 py-2.5 sm:px-6">
+            <div className="thread-graph-message-section px-3 py-2.5 sm:px-5">
               {parseHookPromptText(liveOutput) ? (
                 <HistoryItemRow
                   threadId={threadId}
@@ -5877,6 +3561,7 @@ function ThreadTimelineComponent({
                   onOpenCommandDetail={handleOpenCommandDetail}
                   onOpenToolCallDetail={handleOpenToolCallDetail}
                   onOpenDeferredHistoryItemDetail={handleOpenDeferredHistoryItemDetail}
+                  {...(onSelectArtifact ? { onSelectArtifact } : {})}
                   {...(adapter ? { adapter } : {})}
                 />
               ) : (
