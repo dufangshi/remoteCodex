@@ -554,7 +554,6 @@ function ControlPlaneSessionSurface() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
   const [scrollRequestKey, setScrollRequestKey] = useState(0);
   const [activeView, setActiveView] = useState<'chat' | 'shell'>('chat');
   const [followTail, setFollowTail] = useState(true);
@@ -655,7 +654,6 @@ function ControlPlaneSessionSurface() {
           const thread = await fetchControlPlaneWorkerThread(token, resumed.session.workerSessionId);
           applyDetailResponse(thread);
           setScrollRequestKey((current) => current + 1);
-          setMessage('Chat session connected.');
           return { session: resumed.session, token, detail: thread };
         }
       }
@@ -740,7 +738,6 @@ function ControlPlaneSessionSurface() {
       if (isDisconnectedWorkerThreadError(caught) && !reconnectingRef.current) {
         reconnectingRef.current = true;
         try {
-          setMessage('Worker thread was not found. Reconnecting this session...');
           await loadSession();
           return;
         } finally {
@@ -780,7 +777,6 @@ function ControlPlaneSessionSurface() {
     }
     setSending(true);
     setError(null);
-    setMessage(null);
     try {
       await sendControlPlaneWorkerThreadPrompt(routeToken, session.workerSessionId, {
         prompt: trimmed,
@@ -812,7 +808,6 @@ function ControlPlaneSessionSurface() {
       if (isDisconnectedWorkerThreadError(caught) && !reconnectingRef.current) {
         reconnectingRef.current = true;
         try {
-          setMessage('Worker thread was not found. Reconnecting this session...');
           const reconnected = await loadSession();
           if (!reconnected?.session.workerSessionId) {
             throw caught;
@@ -1069,12 +1064,6 @@ function ControlPlaneSessionSurface() {
     </span>
   );
 
-  const beforeTimelineContent = message && !error ? (
-    <div className="shrink-0 border-b border-emerald-500/20 bg-emerald-500/10 px-5 py-3 text-sm text-emerald-100 sm:px-6">
-      {message}
-    </div>
-  ) : null;
-
   const shellUnavailableContent = (
     <div className="flex min-h-0 flex-1 items-center justify-center p-4 sm:p-6">
       <div className="thread-empty-surface max-w-md rounded-[1.6rem] border px-6 py-8 text-center">
@@ -1133,7 +1122,6 @@ function ControlPlaneSessionSurface() {
         metaContent={metaContent}
         settingsContent={settingsContent}
         surfaceActions={surfaceActions}
-        beforeTimelineContent={beforeTimelineContent}
         appMenuButton={<AppShellMenuButton />}
         appNavigationMenu={
           <AppShellNavigationMenu

@@ -4577,6 +4577,122 @@ input {
   color: rgb(120 53 15);
 }
 
+.thread-ui-shell[data-theme-effective='light'] .timeline-meta-text,
+.thread-ui-shell[data-theme-effective='light'] .thread-graph-message-time,
+.thread-ui-shell[data-theme-effective='light'] .thread-graph-message-header-actions {
+  color: rgb(87 83 78);
+}
+
+.thread-ui-shell[data-theme-effective='light'] .timeline-soft-text {
+  color: rgb(68 64 60);
+}
+
+.thread-ui-shell[data-theme-effective='light'] .timeline-meta-text.rounded-full,
+.thread-ui-shell[data-theme-effective='light'] .timeline-meta-text.rounded-\[0\.6rem\] {
+  border-color: rgb(176 166 153 / 0.72);
+  background: rgb(249 246 240 / 0.86);
+}
+
+.thread-ui-shell[data-theme-effective='light'] .ui-status-neutral,
+.thread-ui-shell[data-theme-effective='light'] .ui-status-info,
+.thread-ui-shell[data-theme-effective='light'] .ui-status-success,
+.thread-ui-shell[data-theme-effective='light'] .ui-status-warning,
+.thread-ui-shell[data-theme-effective='light'] .ui-status-danger {
+  color: var(--theme-fg);
+}
+
+.thread-ui-shell[data-theme-effective='light'] .token-badge-in {
+  border-color: rgb(22 101 52 / 0.32);
+  background: rgb(220 252 231 / 0.72);
+  color: rgb(20 83 45);
+}
+
+.thread-ui-shell[data-theme-effective='light'] .token-badge-cache {
+  border-color: rgb(3 105 161 / 0.32);
+  background: rgb(224 242 254 / 0.76);
+  color: rgb(7 89 133);
+}
+
+.thread-ui-shell[data-theme-effective='light'] .token-badge-out {
+  border-color: rgb(109 40 217 / 0.28);
+  background: rgb(237 233 254 / 0.76);
+  color: rgb(91 33 182);
+}
+
+.thread-ui-shell[data-theme-effective='light'] .token-badge-reason {
+  border-color: rgb(146 64 14 / 0.28);
+  background: rgb(254 243 199 / 0.72);
+  color: rgb(120 53 15);
+}
+
+.thread-ui-shell[data-theme-effective='light'] .token-badge-total {
+  border-color: rgb(77 124 15 / 0.3);
+  background: rgb(236 252 203 / 0.72);
+  color: rgb(63 98 18);
+}
+
+.thread-ui-shell[data-theme-effective='light'] .token-badge-empty {
+  border-color: rgb(176 166 153 / 0.82);
+  background: rgb(249 246 240 / 0.82);
+  color: rgb(87 83 78);
+}
+
+.thread-ui-shell[data-theme-effective='light'] .thread-token-popover {
+  border-color: rgb(176 166 153 / 0.78);
+  background: rgb(249 246 240 / 0.98);
+}
+
+.thread-ui-shell[data-theme-effective='light'] .thread-token-popover-row {
+  border-color: rgb(196 187 175 / 0.82);
+  background: rgb(244 239 231 / 0.86);
+}
+
+.thread-ui-shell[data-theme-effective='light'] .thread-token-popover-text {
+  color: rgb(68 64 60);
+}
+
+.thread-ui-shell[data-theme-effective='light'] .thread-token-popover-strong {
+  color: rgb(28 25 23);
+}
+
+.thread-ui-shell .thread-graph-composer-input [data-segment-type='attachment'] {
+  max-width: min(100%, 9.5rem);
+  vertical-align: middle;
+}
+
+.thread-ui-shell .thread-graph-composer-input [data-segment-type='attachment'] img,
+.thread-ui-shell .thread-graph-composer-input [data-segment-type='attachment'] span[aria-hidden='true'] {
+  width: 3.5rem !important;
+  height: 2.75rem !important;
+  border-radius: 0.6rem !important;
+  object-fit: cover;
+}
+
+.thread-ui-shell .thread-graph-composer-input [data-segment-type='attachment'] > span:last-child {
+  max-width: 4.75rem !important;
+  margin-left: 0.375rem !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: 0;
+}
+
+@media (min-width: 640px) {
+  .thread-ui-shell .thread-graph-composer-input [data-segment-type='attachment'] {
+    max-width: min(100%, 10.75rem);
+  }
+
+  .thread-ui-shell .thread-graph-composer-input [data-segment-type='attachment'] img,
+  .thread-ui-shell .thread-graph-composer-input [data-segment-type='attachment'] span[aria-hidden='true'] {
+    width: 4rem !important;
+    height: 3rem !important;
+  }
+
+  .thread-ui-shell .thread-graph-composer-input [data-segment-type='attachment'] > span:last-child {
+    max-width: 5.75rem !important;
+  }
+}
+
 .mobile-shell-selectable .xterm,
 .mobile-shell-selectable .xterm-screen,
 .mobile-shell-selectable .xterm-rows,
