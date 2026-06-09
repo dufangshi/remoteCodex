@@ -24,6 +24,7 @@ const MANAGED_CODEX_MCP_BEGIN =
   '# BEGIN remote-codex managed plugin MCP servers';
 const MANAGED_CODEX_MCP_END =
   '# END remote-codex managed plugin MCP servers';
+const REMOTE_CODEX_MOLECULE_MCP_TOOL_NAME = 'remote_codex_render_molecule';
 
 function jsonString(value: string) {
   return JSON.stringify(value);
@@ -49,6 +50,42 @@ function stripManagedCodexMcpBlock(content: string) {
     'g',
   );
   return content.replace(pattern, '\n').replace(/\n{3,}/g, '\n\n').trimEnd();
+}
+
+function stripCodexMcpServerTables(content: string, serverNames: string[]) {
+  const names = new Set(serverNames);
+  if (names.size === 0) {
+    return content.trimEnd();
+  }
+
+  const output: string[] = [];
+  let current: string[] = [];
+  let shouldDropCurrentTable = false;
+
+  function flushCurrent() {
+    if (!shouldDropCurrentTable) {
+      output.push(...current);
+    }
+    current = [];
+    shouldDropCurrentTable = false;
+  }
+
+  for (const line of content.split('\n')) {
+    const tableMatch = line.match(/^\s*\[([^\]]+)\]\s*$/);
+    if (tableMatch) {
+      flushCurrent();
+      const tablePath = tableMatch[1] ?? '';
+      shouldDropCurrentTable = [...names].some(
+        (name) =>
+          tablePath === `mcp_servers.${name}` ||
+          tablePath.startsWith(`mcp_servers.${name}.`),
+      );
+    }
+    current.push(line);
+  }
+  flushCurrent();
+
+  return output.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd();
 }
 
 function buildManagedCodexMcpBlock(servers: PluginMcpServerDto[], repoRoot: string) {
@@ -85,8 +122,12 @@ function upsertManagedCodexMcpBlock(
   content: string,
   servers: PluginMcpServerDto[],
   repoRoot: string,
+  managedServerNames: string[] = servers.map((server) => server.name),
 ) {
-  const stripped = stripManagedCodexMcpBlock(content);
+  const stripped = stripCodexMcpServerTables(
+    stripManagedCodexMcpBlock(content),
+    managedServerNames,
+  );
   const managedBlock = buildManagedCodexMcpBlock(servers, repoRoot);
   if (!managedBlock) {
     return stripped ? `${stripped}\n` : '';
@@ -162,6 +203,18 @@ export class PluginService {
     }));
   }
 
+  managedMcpServerNames(): string[] {
+    return [
+      ...new Set(
+        this.registry
+          .list()
+          .flatMap((plugin) =>
+            (plugin.capabilities.mcpServers ?? []).map((server) => server.name),
+          ),
+      ),
+    ].sort();
+  }
+
   async syncManagedCodexMcpConfig(input: {
     codexHome?: string | null;
     repoRoot: string;
@@ -184,6 +237,7 @@ export class PluginService {
       current,
       this.enabledMcpServers(),
       input.repoRoot,
+      this.managedMcpServerNames(),
     );
     if (next === current) {
       return;
@@ -349,7 +403,16 @@ function materializeDeferredDetailsForArtifactExtraction(
   return turns.map((turn) => {
     let changed = false;
     const items = turn.items.map((item): ThreadHistoryItemDto => {
-      if (!item.hasDeferredDetail || item.detailText) {
+      if (
+        !item.hasDeferredDetail ||
+        item.detailText ||
+        item.kind !== 'toolCall' ||
+        ![item.text, item.previewText].some(
+          (value) =>
+            typeof value === 'string' &&
+            value.includes(REMOTE_CODEX_MOLECULE_MCP_TOOL_NAME),
+        )
+      ) {
         return item;
       }
 

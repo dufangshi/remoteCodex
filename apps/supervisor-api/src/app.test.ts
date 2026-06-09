@@ -923,6 +923,38 @@ describe('supervisor api', () => {
     );
   });
 
+  it('replaces stale plugin MCP tables instead of duplicating config keys', async () => {
+    await app.close();
+    await fs.writeFile(
+      path.join(codexHome, 'config.toml'),
+      [
+        'model = "gpt-5.4"',
+        '',
+        '[mcp_servers.remote_codex_plugins]',
+        'command = "/home/u/.nvm/versions/node/v22.14.0/bin/node"',
+        'args = ["/home/u/dev/remoteCodex-main/bin/remote-codex-plugin-mcp.mjs"]',
+        '[mcp_servers.remote_codex_plugins.env]',
+        'REMOTE_CODEX_ENABLED_PLUGIN_IDS = "remote-codex.xyz-viewer"',
+        '',
+        '[mcp_servers.local_docs]',
+        'command = "npx"',
+        'args = ["-y", "@openai/example-mcp"]',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+
+    app = buildTestApp(fakeCodexManager);
+    await app.ready();
+
+    const config = await fs.readFile(path.join(codexHome, 'config.toml'), 'utf8');
+    expect(config.match(/^\[mcp_servers\.remote_codex_plugins\]$/gm)).toHaveLength(1);
+    expect(config.match(/^\[mcp_servers\.remote_codex_plugins\.env\]$/gm)).toHaveLength(1);
+    expect(config).toContain('[mcp_servers.local_docs]');
+    expect(config).toContain('command = "npx"');
+    expect(config).toContain('REMOTE_CODEX_ENABLED_PLUGIN_IDS = "remote-codex.xyz-viewer"');
+  });
+
   it('injects enabled plugin developer instructions into Codex turns', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',

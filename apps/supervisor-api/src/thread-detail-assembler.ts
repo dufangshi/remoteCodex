@@ -32,6 +32,11 @@ export interface ThreadDetailCacheEntry {
   isPaged: boolean;
 }
 
+interface ThreadDetailCacheBucket {
+  full: ThreadDetailCacheEntry | null;
+  latestPages: Map<string, ThreadDetailCacheEntry>;
+}
+
 export interface ThreadTurnMetadataRecord {
   model: string | null;
   reasoningEffort: string | null;
@@ -80,7 +85,7 @@ interface ThreadDetailAssemblerCallbacks {
 const THREAD_DETAIL_CACHE_TTL_MS = 5_000;
 
 export class ThreadDetailAssembler {
-  private readonly threadDetailCache = new Map<string, ThreadDetailCacheEntry>();
+  private readonly threadDetailCache = new Map<string, ThreadDetailCacheBucket>();
 
   constructor(
     private readonly input: {
@@ -89,25 +94,62 @@ export class ThreadDetailAssembler {
     },
   ) {}
 
-  getCache(localThreadId: string): ThreadDetailCacheEntry | null {
-    const cached = this.threadDetailCache.get(localThreadId);
-    if (!cached) {
+  getCache(
+    localThreadId: string,
+    options: { limit?: number; beforeTurnId?: string } = {},
+  ): ThreadDetailCacheEntry | null {
+    const bucket = this.threadDetailCache.get(localThreadId);
+    if (!bucket) {
       return null;
     }
 
-    if (Date.now() - cached.cachedAt > THREAD_DETAIL_CACHE_TTL_MS) {
+    const key = cacheKeyForDetailOptions(options);
+    if (key === 'uncached') {
+      return null;
+    }
+
+    const cached = key === 'full' ? bucket.full : bucket.latestPages.get(key) ?? null;
+    if (cached && !isExpiredThreadDetailCacheEntry(cached)) {
+      return cached;
+    }
+
+    if (key === 'full') {
+      bucket.full = null;
+    } else {
+      bucket.latestPages.delete(key);
+    }
+
+    if (!bucket.full && bucket.latestPages.size === 0) {
       this.threadDetailCache.delete(localThreadId);
-      return null;
     }
 
-    return cached;
+    return null;
   }
 
-  setCache(localThreadId: string, entry: Omit<ThreadDetailCacheEntry, 'cachedAt'>) {
-    this.threadDetailCache.set(localThreadId, {
+  setCache(
+    localThreadId: string,
+    options: { limit?: number; beforeTurnId?: string } = {},
+    entry: Omit<ThreadDetailCacheEntry, 'cachedAt'>,
+  ) {
+    const bucket = this.threadDetailCache.get(localThreadId) ?? {
+      full: null,
+      latestPages: new Map<string, ThreadDetailCacheEntry>(),
+    };
+    const nextEntry = {
       ...entry,
       cachedAt: Date.now(),
-    });
+    };
+    const key = cacheKeyForDetailOptions(options);
+    if (key === 'uncached') {
+      return;
+    }
+
+    if (key === 'full') {
+      bucket.full = nextEntry;
+    } else {
+      bucket.latestPages.set(key, nextEntry);
+    }
+    this.threadDetailCache.set(localThreadId, bucket);
   }
 
   invalidate(localThreadId: string) {
@@ -115,7 +157,31 @@ export class ThreadDetailAssembler {
   }
 
   cachedTurns(localThreadId: string) {
-    return this.threadDetailCache.get(localThreadId)?.turns ?? [];
+    const bucket = this.threadDetailCache.get(localThreadId);
+    if (!bucket) {
+      return [];
+    }
+
+    if (bucket.full && !isExpiredThreadDetailCacheEntry(bucket.full)) {
+      return bucket.full.turns;
+    }
+
+    let newest: ThreadDetailCacheEntry | null = null;
+    for (const [key, entry] of bucket.latestPages.entries()) {
+      if (isExpiredThreadDetailCacheEntry(entry)) {
+        bucket.latestPages.delete(key);
+        continue;
+      }
+      if (!newest || entry.cachedAt > newest.cachedAt) {
+        newest = entry;
+      }
+    }
+
+    if (!bucket.full && bucket.latestPages.size === 0) {
+      this.threadDetailCache.delete(localThreadId);
+    }
+
+    return newest?.turns ?? [];
   }
 
   async buildCacheEntry(input: {
@@ -127,9 +193,10 @@ export class ThreadDetailAssembler {
     const options = input.options ?? {};
     const shouldCacheFullDetail =
       options.limit === undefined && options.beforeTurnId === undefined;
+    const cacheKey = cacheKeyForDetailOptions(options);
     const isPaged = !shouldCacheFullDetail;
-    const cached = this.getCache(input.localThreadId);
-    if (cached && shouldCacheFullDetail) {
+    const cached = this.getCache(input.localThreadId, options);
+    if (cached) {
       return cached;
     }
 
@@ -141,6 +208,7 @@ export class ThreadDetailAssembler {
     if (!remoteSession) {
       return this.buildLocalFallbackEntry({
         ...input,
+        options,
         shouldCacheFullDetail,
       });
     }
@@ -203,13 +271,13 @@ export class ThreadDetailAssembler {
       turns,
       totalTurnCount: shouldCacheFullDetail
         ? turns.length
-        : remoteSession.totalTurnCount ?? Math.max(cached?.totalTurnCount ?? 0, turns.length),
+        : remoteSession.totalTurnCount ?? turns.length,
       deferredDetails,
       isPaged,
     };
-    if (shouldCacheFullDetail) {
-      this.setCache(input.localThreadId, entry);
-      return this.threadDetailCache.get(input.localThreadId)!;
+    if (cacheKey !== 'uncached') {
+      this.setCache(input.localThreadId, options, entry);
+      return this.getCache(input.localThreadId, options)!;
     }
     return entry;
   }
@@ -226,6 +294,7 @@ export class ThreadDetailAssembler {
     record: ThreadDetailRecord;
     turnMetadataById: Map<string, ThreadTurnMetadataRecord>;
     shouldCacheFullDetail: boolean;
+    options: { limit?: number; beforeTurnId?: string };
   }): Promise<ThreadDetailCacheEntry> {
     const localSession = await this.input.callbacks.findLocalSession(
       input.record.providerSessionId!,
@@ -267,12 +336,31 @@ export class ThreadDetailAssembler {
       deferredDetails,
       isPaged: !input.shouldCacheFullDetail,
     };
-    if (input.shouldCacheFullDetail) {
-      this.setCache(input.localThreadId, entry);
-      return this.threadDetailCache.get(input.localThreadId)!;
+    const cacheOptions = input.shouldCacheFullDetail
+      ? {}
+      : input.options;
+    if (cacheKeyForDetailOptions(cacheOptions) !== 'uncached') {
+      this.setCache(input.localThreadId, cacheOptions, entry);
+      return this.getCache(input.localThreadId, cacheOptions)!;
     }
     return entry;
   }
+}
+
+function isExpiredThreadDetailCacheEntry(entry: ThreadDetailCacheEntry) {
+  return Date.now() - entry.cachedAt > THREAD_DETAIL_CACHE_TTL_MS;
+}
+
+function cacheKeyForDetailOptions(options: { limit?: number; beforeTurnId?: string }) {
+  if (options.beforeTurnId !== undefined) {
+    return 'uncached' as const;
+  }
+
+  if (options.limit === undefined) {
+    return 'full' as const;
+  }
+
+  return `latest:${options.limit}` as const;
 }
 
 function applyLiveAgentMessageOrderingHints(

@@ -11,6 +11,7 @@ import type {
 } from './types';
 
 const artifactFenceLanguages = new Set(['artifact', 'remote-codex-artifact']);
+const remoteCodexMoleculeMcpToolName = 'remote_codex_render_molecule';
 
 interface FencedBlock {
   language: string;
@@ -168,47 +169,120 @@ function readBalancedJsonFragment(text: string, startIndex: number) {
   return null;
 }
 
-function collectStringValues(value: unknown, output: string[]) {
+function containsArtifactFence(text: string) {
+  return (
+    text.includes('```artifact') ||
+    text.includes('```remote-codex-artifact') ||
+    text.includes('~~~artifact') ||
+    text.includes('~~~remote-codex-artifact')
+  );
+}
+
+function collectArtifactCandidateStrings(
+  value: unknown,
+  output: string[],
+  budget: { nodes: number },
+  depth = 0,
+) {
+  if (output.length >= 20 || depth > 12 || budget.nodes <= 0) {
+    return;
+  }
+  budget.nodes -= 1;
+
   if (typeof value === 'string') {
-    output.push(value);
+    if (containsArtifactFence(value)) {
+      output.push(value);
+    }
     return;
   }
 
   if (Array.isArray(value)) {
     for (const entry of value) {
-      collectStringValues(entry, output);
+      collectArtifactCandidateStrings(entry, output, budget, depth + 1);
+      if (output.length >= 20 || budget.nodes <= 0) {
+        break;
+      }
     }
     return;
   }
 
   if (value && typeof value === 'object') {
     for (const entry of Object.values(value)) {
-      collectStringValues(entry, output);
+      collectArtifactCandidateStrings(entry, output, budget, depth + 1);
+      if (output.length >= 20 || budget.nodes <= 0) {
+        break;
+      }
     }
   }
 }
 
-function extractJsonStringValues(text: string) {
+function parseJsonArtifactCandidateStrings(fragment: string, output: string[]) {
+  try {
+    collectArtifactCandidateStrings(JSON.parse(fragment), output, { nodes: 2_000 });
+  } catch {
+    // Ignore non-JSON fragments. Artifact extraction is opportunistic.
+  }
+}
+
+function findJsonFragmentAt(text: string, index: number) {
+  let startIndex = index;
+  while (startIndex < text.length && /\s/.test(text[startIndex] ?? '')) {
+    startIndex += 1;
+  }
+  const char = text[startIndex];
+  if (char !== '{' && char !== '[') {
+    return null;
+  }
+  return readBalancedJsonFragment(text, startIndex);
+}
+
+function extractToolJsonArtifactCandidateStrings(text: string) {
   const values: string[] = [];
   const seenFragments = new Set<string>();
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index];
-    if (char !== '{' && char !== '[') {
-      continue;
-    }
 
-    const fragment = readBalancedJsonFragment(text, index);
+  const addFragment = (fragment: string | null) => {
     if (!fragment || seenFragments.has(fragment)) {
-      continue;
+      return;
     }
-
     seenFragments.add(fragment);
-    try {
-      collectStringValues(JSON.parse(fragment), values);
-    } catch {
-      continue;
+    parseJsonArtifactCandidateStrings(fragment, values);
+  };
+
+  addFragment(findJsonFragmentAt(text, 0));
+
+  const labelPattern = /(?:^|\n)(?:Arguments|Result)\n/g;
+  for (const match of text.matchAll(labelPattern)) {
+    addFragment(findJsonFragmentAt(text, match.index + match[0].length));
+    if (seenFragments.size >= 4 || values.length >= 20) {
+      break;
     }
   }
+
+  return values;
+}
+
+function extractArtifactCandidateTexts(item: ThreadHistoryItemDto, text: string) {
+  const values = [text];
+  if (
+    item.kind !== 'toolCall' ||
+    ![item.text, item.previewText, text].some(
+      (value) =>
+        typeof value === 'string' &&
+        value.includes(remoteCodexMoleculeMcpToolName),
+    )
+  ) {
+    return values;
+  }
+
+  const seen = new Set(values);
+  for (const value of extractToolJsonArtifactCandidateStrings(text)) {
+    if (seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    values.push(value);
+  }
+
   return values;
 }
 
@@ -307,7 +381,7 @@ export class ManifestArtifactExtractor implements ArtifactExtractor {
     text: string,
   ): ThreadArtifactDto[] {
     const artifacts: ThreadArtifactDto[] = [];
-    const extractableTexts = [text, ...extractJsonStringValues(text)];
+    const extractableTexts = extractArtifactCandidateTexts(item, text);
     const seenBlocks = new Set<string>();
     for (const extractableText of extractableTexts) {
       for (const block of findFencedBlocks(extractableText, artifactFenceLanguages)) {

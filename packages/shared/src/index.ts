@@ -290,6 +290,40 @@ export interface WorkspaceTreeDto {
   nodes: WorkspaceTreeNodeDto[];
 }
 
+export interface ThreadWorkspaceTreeNodeDto {
+  name: string;
+  path: string;
+  kind: 'file' | 'directory';
+  size?: number;
+  children?: ThreadWorkspaceTreeNodeDto[];
+}
+
+export interface ThreadWorkspaceFilePreviewDto {
+  path: string;
+  name: string;
+  content: string;
+  language: string;
+  size: number;
+  truncated: boolean;
+  nextOffset: number;
+}
+
+export type ThreadWorkspaceUploadResultDto =
+  | {
+      kind: 'file';
+      file: {
+        path: string;
+        name: string;
+        size: number;
+      };
+    }
+  | {
+      kind: 'archive';
+      archiveName: string;
+      extractedCount: number;
+      paths: string[];
+    };
+
 export type ApprovalMode = 'yolo' | 'guarded';
 export type ReasoningEffortDto = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 export type CollaborationModeDto = 'default' | 'plan';
