@@ -55,21 +55,19 @@ import {
   ResizablePanelGroup,
 } from './GraphResizablePanels';
 
-const PREVIEW_CHUNK_BYTES = 50_000;
+const PREVIEW_CHUNK_BYTES = 24_000;
 const EXPANDED_PATHS_STORAGE_PREFIX = 'remote-codex:graphchat:workspace:expanded:';
 
 const explorerPanelClassName =
-  'thread-graph-explorer h-full min-h-0 overflow-hidden rounded-[12px] bg-[#fcfdff] dark:bg-[#151820]';
+  'thread-graph-explorer h-full min-h-0 overflow-hidden rounded-[12px]';
 const explorerHeaderClassName =
-  'thread-graph-explorer-header flex h-[60px] shrink-0 items-center justify-between border-b border-slate-200 bg-[#fcfdff] px-4 dark:border-[#2a2f3a] dark:bg-[#151820]';
+  'thread-graph-explorer-header flex h-[60px] shrink-0 items-center justify-between border-b px-4';
 const explorerHeadingClassName =
   'text-[18px] font-semibold text-slate-900 dark:text-slate-100';
 const explorerIconButtonClassName =
-  'thread-graph-explorer-icon-button flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-none transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#303642] dark:bg-[#1d222c] dark:text-slate-300 dark:hover:bg-[#222733]';
+  'thread-graph-explorer-icon-button flex h-8 w-8 items-center justify-center rounded-lg border shadow-none transition disabled:cursor-not-allowed disabled:opacity-50';
 const collapseGhostButtonClassName =
   'thread-graph-explorer-collapse-button flex h-8 w-8 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-[#222733] dark:hover:text-slate-100';
-const collapsedRailButtonClassName =
-  'thread-graph-collapsed-rail-button flex h-full min-h-0 flex-col items-center justify-center gap-2 rounded-[12px] border border-slate-200 bg-[#fcfdff] text-slate-500 transition hover:border-slate-300 hover:text-slate-900 dark:border-[#2a2f3a] dark:bg-[#151820] dark:text-slate-400 dark:hover:border-[#475063] dark:hover:text-slate-100';
 const workspaceLabelClassName =
   'thread-graph-workspace-label px-3 pb-1 pt-2 text-[11px] font-semibold tracking-normal text-slate-500 dark:text-slate-400';
 const workspaceLoadingClassName =
@@ -231,7 +229,7 @@ function WorkspaceTreeRow({
     <div
       className={`thread-graph-tree-row group flex items-center text-sm transition ${
         selected
-          ? 'is-selected bg-slate-950 text-white dark:bg-slate-100 dark:text-[#11141a]'
+          ? 'is-selected'
           : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-[#222733] dark:hover:text-slate-100'
       }`}
     >
@@ -250,7 +248,7 @@ function WorkspaceTreeRow({
           onClick={() => onDownload(node)}
           className={`thread-graph-tree-action mr-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-md transition sm:h-7 sm:w-7 sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100 ${
             selected
-              ? 'text-white/70 hover:bg-white/10 hover:text-white dark:text-[#11141a]/65 dark:hover:bg-[#11141a]/10 dark:hover:text-[#11141a]'
+              ? 'is-selected'
               : 'text-slate-400 hover:bg-white hover:text-slate-900 dark:text-slate-500 dark:hover:bg-[#1d222c] dark:hover:text-slate-100'
           }`}
           title={`Download ${node.name}`}
@@ -293,14 +291,14 @@ function LiveWorkspaceSection({
               onClick={() => onSelect(node.id)}
               className={`thread-graph-tree-row flex min-h-9 w-full items-center gap-2 px-3 py-2 text-left text-sm transition sm:min-h-0 sm:py-1.5 ${
                 selected
-                  ? 'is-selected bg-slate-950 text-white dark:bg-slate-100 dark:text-[#11141a]'
+                  ? 'is-selected'
                   : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-[#222733] dark:hover:text-slate-100'
               }`}
             >
               <FileCode2
                 className={`h-4 w-4 shrink-0 ${
                   selected
-                    ? 'text-white dark:text-[#11141a]'
+                    ? 'text-current'
                     : 'text-emerald-600 dark:text-emerald-300'
                 }`}
               />
@@ -456,12 +454,18 @@ export function GraphWorkspaceExplorer({
   status: AgentRuntimeStatusDto | null;
   workspaceAdapter?: ThreadWorkspaceAdapter | null;
 }) {
-  const fallbackTree = useMemo(
-    () => collectWorkspaceItems(detail, artifacts, status, activeView),
-    [activeView, artifacts, detail, status],
-  );
   const [adapterTree, setAdapterTree] = useState<WorkspaceTreeNode | null>(null);
-  const tree = adapterTree ?? fallbackTree;
+  const fallbackTree = useMemo(
+    () =>
+      workspaceAdapter && adapterTree
+        ? null
+        : collectWorkspaceItems(detail, artifacts, status, activeView),
+    [activeView, adapterTree, artifacts, detail, status, workspaceAdapter],
+  );
+  const tree =
+    adapterTree ??
+    fallbackTree ??
+    collectWorkspaceItems(detail, artifacts, status, activeView);
   const nodeMap = useMemo(() => flattenWorkspaceNodes(tree), [tree]);
   const liveNodes = useMemo(
     () => tree.children.find((node) => node.path === 'live')?.children ?? [],
@@ -497,6 +501,7 @@ export function GraphWorkspaceExplorer({
   const [workspaceVersion, setWorkspaceVersion] = useState(0);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const workspaceChangeTimerRef = useRef<number | null>(null);
   const activeNode =
     (selectedNodeId ? nodeMap.get(selectedNodeId) : null) ??
     firstSelectableNode ??
@@ -520,6 +525,14 @@ export function GraphWorkspaceExplorer({
     // firstSelectableNode should only seed state for this identity change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceIdentity.threadId, workspaceIdentity.workspaceId]);
+
+  useEffect(() => {
+    return () => {
+      if (workspaceChangeTimerRef.current !== null) {
+        window.clearTimeout(workspaceChangeTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
@@ -593,10 +606,20 @@ export function GraphWorkspaceExplorer({
     const unsubscribe = workspaceAdapter.subscribeWorkspaceChanged(
       workspaceIdentity,
       () => {
-        void refreshWorkspaceTree(activeNode?.path ?? null);
+        if (workspaceChangeTimerRef.current !== null) {
+          window.clearTimeout(workspaceChangeTimerRef.current);
+        }
+        workspaceChangeTimerRef.current = window.setTimeout(() => {
+          workspaceChangeTimerRef.current = null;
+          void refreshWorkspaceTree(activeNode?.path ?? null);
+        }, 240);
       },
     );
     return () => {
+      if (workspaceChangeTimerRef.current !== null) {
+        window.clearTimeout(workspaceChangeTimerRef.current);
+        workspaceChangeTimerRef.current = null;
+      }
       unsubscribe?.();
     };
     // refreshWorkspaceTree intentionally uses the current selected path as a
@@ -852,17 +875,17 @@ export function GraphWorkspaceExplorer({
     return (
       <div
         data-testid="workspace-panel"
-        className="grid h-full min-h-0 w-full grid-cols-[44px_minmax(0,1fr)] gap-2 p-2"
+        className="relative h-full min-h-0 w-full overflow-hidden p-2"
       >
         <button
           type="button"
           data-testid="expand-explorer"
           onClick={() => setCollapsedPanel(null)}
-          className={collapsedRailButtonClassName}
+          className="thread-graph-panel-expand-fab left-3"
           title="Expand Explorer"
+          aria-label="Expand Explorer"
         >
           <ChevronsRight className="h-4 w-4" />
-          <span className="sr-only">Expand Explorer</span>
         </button>
         {viewerPanel}
       </div>
@@ -873,18 +896,18 @@ export function GraphWorkspaceExplorer({
     return (
       <div
         data-testid="workspace-panel"
-        className="grid h-full min-h-0 w-full grid-cols-[minmax(0,1fr)_44px] gap-2 p-2"
+        className="relative h-full min-h-0 w-full overflow-hidden p-2"
       >
         {explorerPanel}
         <button
           type="button"
           data-testid="expand-viewer"
           onClick={() => setCollapsedPanel(null)}
-          className={collapsedRailButtonClassName}
+          className="thread-graph-panel-expand-fab right-3"
           title="Expand Viewer"
+          aria-label="Expand Viewer"
         >
           <ChevronsLeft className="h-4 w-4" />
-          <span className="sr-only">Expand Viewer</span>
         </button>
       </div>
     );

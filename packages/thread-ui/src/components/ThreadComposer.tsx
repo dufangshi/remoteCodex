@@ -169,6 +169,13 @@ type SlashPanelView =
   | 'forkTurns';
 type McpPanelMode = 'list' | 'add' | 'http' | 'stdio';
 type HooksPanelMode = 'list' | 'add' | 'edit';
+type ComposerDraft = {
+  prompt: string;
+  attachments: ComposerAttachmentDraft[];
+};
+type DraftSyncMode = 'deferred' | 'immediate';
+
+const DRAFT_SYNC_DELAY_MS = 180;
 
 const HOOK_EVENT_OPTIONS: Array<{
   value: AgentHookEventNameDto;
@@ -265,6 +272,15 @@ function tokenizePrompt(
   }
 
   return segments;
+}
+
+function draftSignature(draft: ComposerDraft) {
+  return `${draft.prompt}\u001f${draft.attachments
+    .map(
+      (attachment) =>
+        `${attachment.clientId}\u001e${attachment.kind}\u001e${attachment.placeholder}\u001e${attachment.originalName}`,
+    )
+    .join('\u001d')}`;
 }
 
 function formatReasoningEffortLabel(
@@ -901,6 +917,11 @@ export function ThreadComposer({
     prompt: '',
     attachments: [],
   });
+  const [localControlledDraft, setLocalControlledDraft] =
+    useState<ComposerDraft>(() => ({
+      prompt: draftPrompt ?? '',
+      attachments: (draftAttachments ?? []) as ComposerAttachmentDraft[],
+    }));
   const [openMenu, setOpenMenu] = useState<SettingsMenu>(null);
   const [slashPanelView, setSlashPanelView] = useState<SlashPanelView>('root');
   const [mcpPanelMode, setMcpPanelMode] = useState<McpPanelMode>('list');
@@ -1018,6 +1039,12 @@ export function ThreadComposer({
   const previewUrlCacheRef = useRef<Map<string, string>>(new Map());
   const renderedPreviewSignatureRef = useRef('');
   const renderedSanitizeNonceRef = useRef(0);
+  const draftSyncTimerRef = useRef<number | null>(null);
+  const latestLocalDraftRef = useRef<ComposerDraft>(localControlledDraft);
+  const lastHostDraftSignatureRef = useRef(
+    draftSignature(localControlledDraft),
+  );
+  const lastSentDraftSignatureRef = useRef(lastHostDraftSignatureRef.current);
   const isShellView = activeView === 'shell';
   const canToggleShellView = shellAvailable || isShellView;
   const isMobileShell = Boolean(
@@ -1033,12 +1060,61 @@ export function ThreadComposer({
     draftPrompt !== undefined &&
     draftAttachments !== undefined &&
     typeof onDraftChange === 'function';
-  const prompt = isDraftControlled ? draftPrompt : internalDraft.prompt;
+  const controlledPropsSignature = isDraftControlled
+    ? draftSignature({
+        prompt: draftPrompt ?? '',
+        attachments: (draftAttachments ?? []) as ComposerAttachmentDraft[],
+      })
+    : '';
+  const lastRenderedControlledPropsSignatureRef = useRef(
+    controlledPropsSignature,
+  );
+  const prompt = isDraftControlled
+    ? localControlledDraft.prompt
+    : internalDraft.prompt;
   const attachments = (
-    isDraftControlled ? draftAttachments : internalDraft.attachments
+    isDraftControlled
+      ? localControlledDraft.attachments
+      : internalDraft.attachments
   ) as ComposerAttachmentDraft[];
   const displayedCollaborationMode =
     optimisticCollaborationMode ?? collaborationMode;
+
+  useEffect(() => {
+    return () => {
+      sendDraftToHost(latestLocalDraftRef.current);
+      if (draftSyncTimerRef.current !== null) {
+        window.clearTimeout(draftSyncTimerRef.current);
+      }
+    };
+  }, [isDraftControlled, onDraftChange]);
+
+  useEffect(() => {
+    if (!isDraftControlled) {
+      lastRenderedControlledPropsSignatureRef.current = '';
+      return;
+    }
+
+    const hostDraft: ComposerDraft = {
+      prompt: draftPrompt ?? '',
+      attachments: (draftAttachments ?? []) as ComposerAttachmentDraft[],
+    };
+    const hostSignature = draftSignature(hostDraft);
+
+    if (hostSignature === lastRenderedControlledPropsSignatureRef.current) {
+      return;
+    }
+
+    lastRenderedControlledPropsSignatureRef.current = hostSignature;
+    lastHostDraftSignatureRef.current = hostSignature;
+    lastSentDraftSignatureRef.current = hostSignature;
+    latestLocalDraftRef.current = hostDraft;
+    if (draftSyncTimerRef.current !== null) {
+      window.clearTimeout(draftSyncTimerRef.current);
+      draftSyncTimerRef.current = null;
+    }
+    setLocalControlledDraft(hostDraft);
+  }, [draftAttachments, draftPrompt, isDraftControlled]);
 
   useEffect(() => {
     setOptimisticCollaborationMode(null);
@@ -1120,6 +1196,52 @@ export function ThreadComposer({
     };
   }, [copiedSkillName]);
 
+  function sendDraftToHost(nextDraft: ComposerDraft) {
+    if (!isDraftControlled || !onDraftChange) {
+      return;
+    }
+
+    const signature = draftSignature(nextDraft);
+    if (signature === lastSentDraftSignatureRef.current) {
+      return;
+    }
+
+    lastSentDraftSignatureRef.current = signature;
+    lastHostDraftSignatureRef.current = signature;
+    onDraftChange(() => ({
+      prompt: nextDraft.prompt,
+      attachments: nextDraft.attachments as PromptAttachmentUpload[],
+    }));
+  }
+
+  function syncControlledDraftToHost(
+    nextDraft: ComposerDraft,
+    mode: DraftSyncMode,
+  ) {
+    if (!isDraftControlled) {
+      return;
+    }
+
+    if (draftSyncTimerRef.current !== null) {
+      window.clearTimeout(draftSyncTimerRef.current);
+      draftSyncTimerRef.current = null;
+    }
+
+    if (mode === 'immediate') {
+      sendDraftToHost(nextDraft);
+      return;
+    }
+
+    draftSyncTimerRef.current = window.setTimeout(() => {
+      draftSyncTimerRef.current = null;
+      sendDraftToHost(latestLocalDraftRef.current);
+    }, DRAFT_SYNC_DELAY_MS);
+  }
+
+  function flushControlledDraftToHost(nextDraft = latestLocalDraftRef.current) {
+    syncControlledDraftToHost(nextDraft, 'immediate');
+  }
+
   function updateDraft(
     updater: (current: {
       prompt: string;
@@ -1128,14 +1250,13 @@ export function ThreadComposer({
       prompt: string;
       attachments: ComposerAttachmentDraft[];
     },
+    syncMode: DraftSyncMode = 'immediate',
   ) {
     if (isDraftControlled) {
-      onDraftChange?.((current) =>
-        updater({
-          prompt: current.prompt,
-          attachments: current.attachments as ComposerAttachmentDraft[],
-        }),
-      );
+      const nextDraft = updater(latestLocalDraftRef.current);
+      latestLocalDraftRef.current = nextDraft;
+      setLocalControlledDraft(nextDraft);
+      syncControlledDraftToHost(nextDraft, syncMode);
       return;
     }
 
@@ -2212,10 +2333,12 @@ export function ThreadComposer({
         token.dataset.clientId = attachment.clientId;
         token.dataset.placeholder = attachment.placeholder;
         token.contentEditable = 'false';
-        token.className = 'mx-[0.12rem] inline-flex max-w-full align-baseline';
+        token.className =
+          'thread-composer-attachment-chip mx-[0.12rem] inline-flex max-w-full align-baseline';
 
         if (attachment.kind === 'photo') {
           token.classList.add(
+            'thread-composer-attachment-chip-photo',
             'rounded-[0.95rem]',
             'border',
             'border-sky-300/35',
@@ -2231,20 +2354,20 @@ export function ThreadComposer({
             image.src = previewUrl;
             image.alt = attachment.originalName || 'Pasted image';
             image.className =
-              'h-[4.5rem] w-[6rem] rounded-[0.7rem] bg-stone-950 object-contain';
+              'thread-composer-attachment-thumb h-[4.5rem] w-[6rem] rounded-[0.7rem] bg-stone-950 object-contain';
             image.draggable = false;
             token.append(image);
           } else {
             const imagePlaceholder = document.createElement('span');
             imagePlaceholder.className =
-              'inline-block h-[4.5rem] w-[6rem] rounded-[0.7rem] bg-stone-900/80';
+              'thread-composer-attachment-thumb inline-block h-[4.5rem] w-[6rem] rounded-[0.7rem] bg-stone-900/80';
             imagePlaceholder.setAttribute('aria-hidden', 'true');
             token.append(imagePlaceholder);
           }
 
           const caption = document.createElement('span');
           caption.className =
-            'ml-2 inline-flex max-w-[8rem] items-center text-[10px] font-medium tracking-[0.08em] text-sky-50';
+            'thread-composer-attachment-caption ml-2 inline-flex max-w-[8rem] items-center text-[10px] font-medium tracking-[0.08em] text-sky-50';
           caption.textContent = attachmentDisplayLabel(attachment);
 
           token.append(caption);
@@ -2336,6 +2459,10 @@ export function ThreadComposer({
   }
 
   async function submitPrompt() {
+    if (isDraftControlled) {
+      flushControlledDraftToHost();
+    }
+
     if (goalComposeMode && !isShellView) {
       await handleSetGoal();
       return;
@@ -2390,7 +2517,7 @@ export function ThreadComposer({
       attachments: current.attachments.filter((attachment) =>
         nextPrompt.includes(attachment.placeholder),
       ),
-    }));
+    }), 'deferred');
   }
 
   function handlePromptPaste(event: ClipboardEvent<HTMLDivElement>) {
@@ -2545,7 +2672,7 @@ export function ThreadComposer({
         : `${composerFormBaseClassName} relative z-20 shrink-0 border-t border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] sm:px-4 sm:py-3`
       : `${composerFormBaseClassName} ${
           edgeToEdgeMobile ? composerFloatingFormClassName : ''
-        } relative z-20 shrink-0 border-t border-slate-200 bg-[#fcfdff] px-3 py-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] sm:px-4 sm:py-3 dark:border-[#2a2f3a] dark:bg-[#151820]`;
+        } relative z-20 shrink-0 border-t px-3 py-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] sm:px-4 sm:py-3`;
   const composerShellClassName = isShellView
     ? 'thread-composer-shell'
     : 'thread-graph-composer-shell';
@@ -2693,6 +2820,9 @@ export function ThreadComposer({
                   onBlur={() => {
                     selectionSnapshotRef.current = snapshotSelection();
                     setIsDragTargetActive(false);
+                    if (isDraftControlled) {
+                      flushControlledDraftToHost();
+                    }
                   }}
                   onDragEnter={handlePromptDragEnter}
                   onDragOver={handlePromptDragOver}
@@ -3518,7 +3648,7 @@ export function ThreadComposer({
                 {openMenu === 'attachments' && (
                   <div
                     data-composer-menu-surface="true"
-                    className={`${composerMenuClassName} absolute left-0 top-full mt-2 w-32 overflow-hidden rounded-2xl border bg-stone-900/72 shadow-2xl shadow-stone-950/20`}
+                    className={`${composerMenuClassName} absolute bottom-full left-0 mb-2 w-32 overflow-hidden rounded-2xl border bg-stone-900/72 shadow-2xl shadow-stone-950/20`}
                   >
                     <div className="p-2">
                       <button
@@ -3927,11 +4057,11 @@ export function ThreadComposer({
         </InputGroup>
 
         {goalComposeMode && !isShellView && (
-          <div className="relative z-20 mb-1.5 flex flex-wrap items-center gap-2 rounded-2xl border border-sky-300/25 bg-sky-300/[0.07] px-3 py-2 text-xs text-sky-50 shadow-sm shadow-stone-950/10">
-            <span className="font-medium uppercase tracking-[0.16em] text-sky-100/90">
+          <div className="thread-goal-compose-card relative z-20 mb-1.5 flex flex-wrap items-center gap-2 rounded-2xl border px-3 py-2 text-xs shadow-sm">
+            <span className="thread-goal-compose-label font-medium uppercase tracking-[0.16em]">
               Goal
             </span>
-            <label className="flex items-center gap-2 text-stone-300">
+            <label className="thread-goal-compose-field flex items-center gap-2">
               <span>Max tokens (k)</span>
               <input
                 aria-label="Goal token budget"
@@ -3939,18 +4069,18 @@ export function ThreadComposer({
                 onChange={(event) => setGoalTokenBudget(event.target.value)}
                 inputMode="numeric"
                 placeholder="Optional"
-                className="h-7 w-24 rounded-full border border-sky-300/25 bg-stone-950/60 px-3 text-xs text-stone-100 outline-none placeholder:text-stone-500 focus:border-sky-300/70"
+                className="thread-goal-compose-input h-7 w-24 rounded-full border px-3 text-xs outline-none"
               />
             </label>
             {goalLocalError ? (
-              <span className="min-w-0 flex-1 text-rose-200">
+              <span className="thread-goal-compose-error min-w-0 flex-1">
                 {goalLocalError}
               </span>
             ) : null}
             <button
               type="button"
               onClick={exitGoalComposeMode}
-              className="rounded-full border border-stone-700/80 px-2.5 py-1 text-[11px] text-stone-300 transition hover:bg-stone-800"
+              className="thread-goal-compose-cancel rounded-full border px-2.5 py-1 text-[11px] transition"
             >
               Cancel
             </button>

@@ -72,6 +72,12 @@ export function ExportTranscriptDialog({
   );
   const [includeTokenAndPrice, setIncludeTokenAndPrice] = useState(true);
   const [format, setFormat] = useState<ExportFormat>('pdf');
+  const [effectiveTheme, setEffectiveTheme] = useState<'light' | 'dark'>(() =>
+    typeof document !== 'undefined' &&
+    !document.documentElement.classList.contains('dark')
+      ? 'light'
+      : 'dark',
+  );
 
   useEffect(() => {
     if (!open) {
@@ -104,6 +110,38 @@ export function ExportTranscriptDialog({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [busy, onCancel, open]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const shell = document.querySelector<HTMLElement>('.thread-ui-shell');
+    const readTheme = () => {
+      if (!shell) {
+        return document.documentElement.classList.contains('dark')
+          ? 'dark'
+          : 'light';
+      }
+      return shell.getAttribute('data-theme-effective') === 'dark' ||
+        shell.classList.contains('dark') ||
+        shell.classList.contains('thread-ui-theme-dark')
+        ? 'dark'
+        : 'light';
+    };
+
+    setEffectiveTheme(readTheme());
+    if (!shell) {
+      return;
+    }
+
+    const observer = new MutationObserver(() => setEffectiveTheme(readTheme()));
+    observer.observe(shell, {
+      attributes: true,
+      attributeFilter: ['class', 'data-theme-effective'],
+    });
+    return () => observer.disconnect();
+  }, [open]);
 
   if (!open) {
     return null;
@@ -141,24 +179,27 @@ export function ExportTranscriptDialog({
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[96] flex items-center justify-center p-3 sm:p-6">
+    <div
+      className={`thread-export-dialog-root thread-ui-theme-${effectiveTheme} fixed inset-0 z-[96] flex items-center justify-center p-3 sm:p-6`}
+      data-theme-effective={effectiveTheme}
+    >
       <button
         type="button"
         aria-label="Close export dialog"
         onClick={onCancel}
         disabled={busy}
-        className="absolute inset-0 bg-stone-950/78 backdrop-blur-sm disabled:cursor-not-allowed"
+        className="thread-export-dialog-backdrop absolute inset-0 backdrop-blur-sm disabled:cursor-not-allowed"
       />
       <div
         role="dialog"
         aria-modal="true"
         aria-label="Export transcript"
-        className="relative z-[1] flex max-h-[min(46rem,calc(100vh-2rem))] w-full max-w-2xl flex-col rounded-[1.6rem] border border-stone-700 bg-stone-900 shadow-2xl shadow-stone-950/40"
+        className="thread-export-dialog-panel relative z-[1] flex max-h-[min(46rem,calc(100vh-2rem))] w-full max-w-2xl flex-col rounded-[1.6rem] border shadow-2xl"
       >
-        <div className="flex items-start justify-between gap-3 border-b border-stone-800 px-5 py-4">
+        <div className="thread-export-dialog-header flex items-start justify-between gap-3 border-b px-5 py-4">
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-stone-100">Export transcript</p>
-            <p className="mt-1 text-xs text-stone-500">
+            <p className="thread-export-dialog-title text-sm font-semibold">Export transcript</p>
+            <p className="thread-export-dialog-subtitle mt-1 text-xs">
               Default review copy summarizes command batches and file changes.
             </p>
           </div>
@@ -167,7 +208,7 @@ export function ExportTranscriptDialog({
             aria-label="Close dialog"
             onClick={onCancel}
             disabled={busy}
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-stone-700 text-stone-300 transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-60"
+            className="thread-export-dialog-icon-button inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition disabled:cursor-not-allowed disabled:opacity-60"
           >
             <svg aria-hidden="true" viewBox="0 0 16 16" className="h-4 w-4 fill-current">
               <path d="M3.22 2.47 8 7.25l4.78-4.78 1.06 1.06L9.06 8.31l4.78 4.78-1.06 1.06L8 9.37l-4.78 4.78-1.06-1.06 4.78-4.78-4.78-4.78 1.06-1.06Z" />
@@ -176,7 +217,7 @@ export function ExportTranscriptDialog({
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
-          <div className="inline-flex rounded-full border border-stone-700 bg-stone-950/60 p-1">
+          <div className="thread-export-dialog-segment inline-flex rounded-full border p-1">
             {[
               ['latest', 'Latest 10'],
               ['selected', 'Custom selection'],
@@ -188,7 +229,7 @@ export function ExportTranscriptDialog({
                 className={`rounded-full px-3 py-1.5 text-sm transition ${
                   mode === entryMode
                     ? 'ui-status-warning'
-                    : 'text-stone-400 hover:text-stone-100'
+                    : 'thread-export-dialog-muted-action'
                 }`}
               >
                 {label}
@@ -196,7 +237,7 @@ export function ExportTranscriptDialog({
             ))}
           </div>
 
-          <div className="mt-4 inline-flex rounded-full border border-stone-700 bg-stone-950/60 p-1">
+          <div className="thread-export-dialog-segment mt-4 inline-flex rounded-full border p-1">
             {[
               ['pdf', 'PDF'],
               ['html', 'HTML'],
@@ -208,7 +249,7 @@ export function ExportTranscriptDialog({
                 className={`rounded-full px-3 py-1.5 text-sm transition ${
                   format === entryFormat
                     ? 'ui-status-warning'
-                    : 'text-stone-400 hover:text-stone-100'
+                    : 'thread-export-dialog-muted-action'
                 }`}
               >
                 {label}
@@ -217,55 +258,55 @@ export function ExportTranscriptDialog({
           </div>
 
           {mode === 'selected' ? (
-            <div className="mt-4 rounded-2xl border border-stone-800 bg-stone-950/40">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-800 px-3 py-2.5">
-                <p className="text-xs text-stone-400">
+            <div className="thread-export-dialog-box mt-4 rounded-2xl border">
+              <div className="thread-export-dialog-box-header flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2.5">
+                <p className="thread-export-dialog-subtitle text-xs">
                   Selected {selectedTurnIds.size} of {turnsState.data?.totalTurnCount ?? turns.length}
                 </p>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => setSelectedTurnIds(new Set(turns.map((turn) => turn.turnId)))}
-                    className="rounded-full border border-stone-700 px-2.5 py-1 text-xs text-stone-300 transition hover:bg-stone-800"
+                    className="thread-export-dialog-secondary-button rounded-full border px-2.5 py-1 text-xs transition"
                   >
                     Select all
                   </button>
                   <button
                     type="button"
                     onClick={() => setSelectedTurnIds(new Set())}
-                    className="rounded-full border border-stone-700 px-2.5 py-1 text-xs text-stone-300 transition hover:bg-stone-800"
+                    className="thread-export-dialog-secondary-button rounded-full border px-2.5 py-1 text-xs transition"
                   >
                     Clear
                   </button>
                 </div>
               </div>
               {turnsState.status === 'loading' ? (
-                <p className="px-3 py-6 text-sm text-stone-400">Loading turns...</p>
+                <p className="thread-export-dialog-subtitle px-3 py-6 text-sm">Loading turns...</p>
               ) : turnsState.status === 'failed' ? (
-                <p className="px-3 py-6 text-sm text-rose-100">{turnsState.error}</p>
+                <p className="px-3 py-6 text-sm text-rose-500 dark:text-rose-200">{turnsState.error}</p>
               ) : (
                 <div className="max-h-80 overflow-auto p-2">
                   {turns.map((turn) => (
                     <label
                       key={turn.turnId}
-                      className="flex cursor-pointer items-center gap-3 rounded-xl px-2.5 py-2 text-sm transition hover:bg-stone-800/70"
+                      className="thread-export-dialog-turn-row flex cursor-pointer items-center gap-3 rounded-xl px-2.5 py-2 text-sm transition"
                     >
                       <input
                         type="checkbox"
                         checked={selectedTurnIds.has(turn.turnId)}
                         onChange={() => toggleTurn(turn.turnId)}
-                        className="h-4 w-4 accent-amber-300"
+                        className="thread-export-dialog-checkbox h-4 w-4"
                       />
-                      <span className="shrink-0 text-xs font-medium text-stone-300">
+                      <span className="thread-export-dialog-strong shrink-0 text-xs font-medium">
                         Turn {turn.turnNumber}
                       </span>
-                      <span className="shrink-0 text-xs text-stone-500">
+                      <span className="thread-export-dialog-subtitle shrink-0 text-xs">
                         {formatTurnTime(turn.startedAt)}
                       </span>
-                      <span className="min-w-0 flex-1 truncate text-left text-stone-200">
+                      <span className="thread-export-dialog-body-text min-w-0 flex-1 truncate text-left">
                         {turn.userPromptPreview}
                       </span>
-                      <span className="hidden shrink-0 rounded-full border border-stone-700 px-2 py-0.5 text-[10px] text-stone-400 sm:inline">
+                      <span className="thread-export-dialog-status-pill hidden shrink-0 rounded-full border px-2 py-0.5 text-[10px] sm:inline">
                         {statusLabel(turn.status)}
                       </span>
                     </label>
@@ -274,22 +315,22 @@ export function ExportTranscriptDialog({
               )}
             </div>
           ) : (
-            <p className="mt-4 rounded-2xl border border-stone-800 bg-stone-950/40 px-3 py-3 text-sm text-stone-300">
+            <p className="thread-export-dialog-box thread-export-dialog-body-text mt-4 rounded-2xl border px-3 py-3 text-sm">
               Exports the latest 10 turns in chronological order.
             </p>
           )}
 
-          <div className="mt-4 grid gap-2 text-sm text-stone-300 sm:grid-cols-2">
-            <label className="flex items-center gap-2 rounded-xl border border-stone-800 bg-stone-950/35 px-3 py-2">
+          <div className="thread-export-dialog-body-text mt-4 grid gap-2 text-sm sm:grid-cols-2">
+            <label className="thread-export-dialog-box flex items-center gap-2 rounded-xl border px-3 py-2">
               <input
                 type="checkbox"
                 checked={includeTokenAndPrice}
                 onChange={(event) => setIncludeTokenAndPrice(event.target.checked)}
-                className="h-4 w-4 accent-amber-300"
+                className="thread-export-dialog-checkbox h-4 w-4"
               />
               Token and price
             </label>
-            <p className="flex items-center rounded-xl border border-stone-800 bg-stone-950/35 px-3 py-2 text-xs text-stone-500">
+            <p className="thread-export-dialog-box thread-export-dialog-subtitle flex items-center rounded-xl border px-3 py-2 text-xs">
               {format === 'html'
                 ? 'HTML keeps the chat timeline styling and omits raw command output.'
                 : 'Review exports keep message text readable and omit tool activity.'}
@@ -297,8 +338,8 @@ export function ExportTranscriptDialog({
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-3 border-t border-stone-800 px-5 py-4">
-          <p className="min-w-0 text-xs text-stone-500">
+        <div className="thread-export-dialog-footer flex items-center justify-between gap-3 border-t px-5 py-4">
+          <p className="thread-export-dialog-subtitle min-w-0 text-xs">
             {selectedCount} {selectedCount === 1 ? 'turn' : 'turns'} will be exported.
           </p>
           <div className="flex items-center gap-2">
@@ -306,7 +347,7 @@ export function ExportTranscriptDialog({
               type="button"
               onClick={onCancel}
               disabled={busy}
-              className="rounded-full border border-stone-700 px-4 py-2 text-sm font-medium text-stone-300 transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-60"
+              className="thread-export-dialog-secondary-button rounded-full border px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
             >
               Cancel
             </button>

@@ -16,15 +16,15 @@ export function LandingPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-stone-950 px-4 py-8 text-stone-100 sm:px-6">
+    <div className="min-h-screen bg-[var(--app-bg)] px-4 py-8 text-[var(--app-fg)] sm:px-6">
       <div className="mx-auto max-w-7xl">
         <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-          <section className="rounded-[2rem] border border-stone-800 bg-stone-900 p-8 shadow-2xl shadow-stone-950/20 sm:p-10">
-            <p className="text-xs uppercase tracking-[0.35em] text-amber-300">Local Supervisor</p>
-            <h1 className="mt-4 max-w-3xl text-4xl font-semibold tracking-tight text-stone-100 sm:text-6xl">
+          <section className="host-card rounded-[2rem] border p-8 sm:p-10">
+            <p className="text-xs uppercase tracking-[0.35em] text-[var(--theme-accent-strong)]">Local Supervisor</p>
+            <h1 className="host-page-title mt-4 max-w-3xl text-4xl font-semibold tracking-tight sm:text-6xl">
               Bring your local workspaces into a mobile-ready control surface.
             </h1>
-            <p className="mt-6 max-w-2xl text-base leading-7 text-stone-400 sm:text-lg">
+            <p className="host-page-description mt-6 max-w-2xl text-base leading-7 sm:text-lg">
               Phase 1 focuses on a stable supervisor shell: runtime config, workspace onboarding,
               database bootstrap, and a read-only file tree that already respects workspace root
               boundaries.
@@ -32,13 +32,13 @@ export function LandingPage() {
             <div className="mt-8 flex flex-wrap gap-4">
               <Link
                 to="/workspaces"
-                className="rounded-full bg-amber-300 px-5 py-3 font-medium text-stone-950 transition hover:bg-amber-200"
+                className="ui-action-primary rounded-full px-5 py-3 font-medium transition"
               >
                 Enter Workspace Console
               </Link>
               <Link
                 to="/workspaces/new"
-                className="rounded-full border border-stone-700 px-5 py-3 font-medium text-stone-200 transition hover:border-stone-500 hover:bg-stone-800"
+                className="host-secondary-button rounded-full border px-5 py-3 font-medium transition"
               >
                 Add First Workspace
               </Link>

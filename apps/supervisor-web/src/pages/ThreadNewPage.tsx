@@ -180,21 +180,21 @@ export function ThreadNewPage() {
   return (
     <div className="space-y-6">
       <div>
-        <p className="text-xs uppercase tracking-[0.3em] text-stone-500">New Thread</p>
-        <h2 className="mt-2 text-3xl font-semibold text-stone-100">Start a backend session</h2>
-        <p className="mt-3 max-w-2xl text-sm leading-6 text-stone-400">
+        <p className="host-page-eyebrow text-xs uppercase tracking-[0.3em]">New Thread</p>
+        <h2 className="host-page-title mt-2 text-3xl font-semibold">Start a backend session</h2>
+        <p className="host-page-description mt-3 max-w-2xl text-sm leading-6">
           Choose the workspace, model, and approval mode that should back the new thread.
         </p>
       </div>
 
       {loading ? (
-        <div className="rounded-3xl border border-stone-800 bg-stone-900 px-6 py-12 text-center text-stone-400">
+        <div className="host-empty-state rounded-3xl border px-6 py-12 text-center">
           Loading creation form...
         </div>
       ) : (
-        <form onSubmit={handleSubmit} className="space-y-5 rounded-3xl border border-stone-800 bg-stone-900 p-6">
+        <form onSubmit={handleSubmit} className="host-panel space-y-5 rounded-3xl border p-6">
           <div>
-            <label className="text-sm font-medium text-stone-200" htmlFor="thread-backend">
+            <label className="host-form-label text-sm font-medium" htmlFor="thread-backend">
               Backend
             </label>
             <select
@@ -204,7 +204,7 @@ export function ThreadNewPage() {
                 const next = event.target.value as AgentBackendIdDto;
                 setProvider(next);
               }}
-              className="mt-2 w-full rounded-2xl border border-stone-700 bg-stone-950 px-4 py-3 text-stone-100 outline-none transition focus:border-amber-300"
+              className="host-form-control mt-2 w-full rounded-2xl border px-4 py-3 outline-none transition"
             >
               {backends.map((backend) => (
                 <option
@@ -219,14 +219,14 @@ export function ThreadNewPage() {
             </select>
           </div>
           <div>
-            <label className="text-sm font-medium text-stone-200" htmlFor="thread-workspace">
+            <label className="host-form-label text-sm font-medium" htmlFor="thread-workspace">
               Workspace
             </label>
             <select
               id="thread-workspace"
               value={workspaceId}
               onChange={(event) => setWorkspaceId(event.target.value)}
-              className="mt-2 w-full rounded-2xl border border-stone-700 bg-stone-950 px-4 py-3 text-stone-100 outline-none transition focus:border-amber-300"
+              className="host-form-control mt-2 w-full rounded-2xl border px-4 py-3 outline-none transition"
             >
               {workspaces.map((workspace) => (
                 <option key={workspace.id} value={workspace.id}>
@@ -236,7 +236,7 @@ export function ThreadNewPage() {
             </select>
           </div>
           <div>
-            <label className="text-sm font-medium text-stone-200" htmlFor="thread-model">
+            <label className="host-form-label text-sm font-medium" htmlFor="thread-model">
               Model
             </label>
             <select
@@ -244,7 +244,7 @@ export function ThreadNewPage() {
               value={model}
               onChange={(event) => setModel(event.target.value)}
               disabled={models.length === 0}
-              className="mt-2 w-full rounded-2xl border border-stone-700 bg-stone-950 px-4 py-3 text-stone-100 outline-none transition focus:border-amber-300"
+              className="host-form-control mt-2 w-full rounded-2xl border px-4 py-3 outline-none transition"
             >
               {models.length === 0 ? (
                 <option value="">No models available</option>
@@ -257,7 +257,7 @@ export function ThreadNewPage() {
             </select>
           </div>
           <div>
-            <label className="text-sm font-medium text-stone-200" htmlFor="thread-title">
+            <label className="host-form-label text-sm font-medium" htmlFor="thread-title">
               Title
             </label>
             <input
@@ -265,25 +265,25 @@ export function ThreadNewPage() {
               value={title}
               onChange={(event) => setTitle(event.target.value)}
               placeholder="Optional. Falls back to first prompt."
-              className="mt-2 w-full rounded-2xl border border-stone-700 bg-stone-950 px-4 py-3 text-stone-100 outline-none transition focus:border-amber-300"
+              className="host-form-control mt-2 w-full rounded-2xl border px-4 py-3 outline-none transition"
             />
           </div>
           <div>
-            <label className="text-sm font-medium text-stone-200" htmlFor="thread-approval-mode">
+            <label className="host-form-label text-sm font-medium" htmlFor="thread-approval-mode">
               Approval mode
             </label>
             <select
               id="thread-approval-mode"
               value={approvalMode}
               onChange={(event) => setApprovalMode(event.target.value as 'yolo' | 'guarded')}
-              className="mt-2 w-full rounded-2xl border border-stone-700 bg-stone-950 px-4 py-3 text-stone-100 outline-none transition focus:border-amber-300"
+              className="host-form-control mt-2 w-full rounded-2xl border px-4 py-3 outline-none transition"
             >
               <option value="yolo">yolo</option>
               <option value="guarded">guarded</option>
             </select>
           </div>
           {error && (
-            <div className="rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+            <div className="host-error rounded-2xl border px-4 py-3 text-sm">
               {error}
             </div>
           )}
@@ -291,7 +291,7 @@ export function ThreadNewPage() {
             <button
               type="submit"
               disabled={busy || !workspaceId || !model}
-              className="rounded-full bg-amber-300 px-5 py-3 font-medium text-stone-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:bg-stone-700 disabled:text-stone-300"
+              className="ui-action-primary rounded-full px-5 py-3 font-medium transition disabled:cursor-not-allowed"
             >
               {busy ? 'Creating...' : 'Create Thread'}
             </button>
@@ -299,7 +299,7 @@ export function ThreadNewPage() {
               type="button"
               onClick={handleCancel}
               disabled={busy}
-              className="rounded-full border border-stone-700 px-5 py-3 font-medium text-stone-200 transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:border-stone-800 disabled:text-stone-500"
+              className="host-secondary-button rounded-full border px-5 py-3 font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
             >
               Cancel
             </button>

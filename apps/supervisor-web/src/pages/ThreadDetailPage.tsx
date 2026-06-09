@@ -2912,8 +2912,8 @@ export function ThreadDetailPage() {
   const metaContent = detail ? (
     <dl className="space-y-4 text-sm">
       <div className="relative pr-9">
-        <dt className="text-stone-500">Session ID</dt>
-        <dd className="mt-1 break-all text-stone-100">
+        <dt className="text-[var(--theme-fg-muted)]">Session ID</dt>
+        <dd className="mt-1 break-all text-[var(--theme-fg)]">
           {detail.thread.providerSessionId ?? 'Unavailable'}
         </dd>
         {(detail.thread.providerSessionId) && (
@@ -2933,7 +2933,7 @@ export function ThreadDetailPage() {
                 ? 'ui-status-info'
                 : metaSessionCopyState === 'failed'
                   ? 'ui-status-danger'
-                  : 'border-stone-700/90 bg-stone-900/60 text-stone-300 hover:bg-stone-800/92'
+                  : 'border-[var(--theme-border)] bg-[var(--theme-surface-strong)] text-[var(--theme-fg-soft)] hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)]'
             }`}
           >
             <span className="scale-[0.72]">
@@ -2943,40 +2943,40 @@ export function ThreadDetailPage() {
         )}
       </div>
       <div>
-        <dt className="text-stone-500">Source</dt>
-        <dd className="mt-1 text-stone-100">
+        <dt className="text-[var(--theme-fg-muted)]">Source</dt>
+        <dd className="mt-1 text-[var(--theme-fg)]">
           {detail.thread.source === 'local_codex_import'
             ? `Imported local ${detail.thread.provider} session`
             : `${detail.thread.provider} supervisor thread`}
         </dd>
       </div>
       <div>
-        <dt className="text-stone-500">Status</dt>
-        <dd className="mt-1 text-stone-100">
+        <dt className="text-[var(--theme-fg-muted)]">Status</dt>
+        <dd className="mt-1 text-[var(--theme-fg)]">
           {threadStatusLabel(detail.thread.status)}
         </dd>
       </div>
       <div>
-        <dt className="text-stone-500">Created</dt>
-        <dd className="mt-1 text-stone-100">
+        <dt className="text-[var(--theme-fg-muted)]">Created</dt>
+        <dd className="mt-1 text-[var(--theme-fg)]">
           {formatLongTimestamp(detail.thread.createdAt)}
         </dd>
       </div>
       <div>
-        <dt className="text-stone-500">Workspace</dt>
-        <dd className="mt-1 break-words text-stone-100">
+        <dt className="text-[var(--theme-fg-muted)]">Workspace</dt>
+        <dd className="mt-1 break-words text-[var(--theme-fg)]">
           {detail.workspace.absPath}
         </dd>
       </div>
       <div>
-        <dt className="text-stone-500">Workspace path</dt>
-        <dd className="mt-1 text-stone-100">
+        <dt className="text-[var(--theme-fg-muted)]">Workspace path</dt>
+        <dd className="mt-1 text-[var(--theme-fg)]">
           {detail.workspacePathStatus === 'present' ? 'Present' : 'Missing on this machine'}
         </dd>
       </div>
       <div>
-        <dt className="text-stone-500">Active turn</dt>
-        <dd className="mt-1 text-stone-100">
+        <dt className="text-[var(--theme-fg-muted)]">Active turn</dt>
+        <dd className="mt-1 text-[var(--theme-fg)]">
           {detail.thread.activeTurnId ?? 'None'}
         </dd>
       </div>
@@ -2986,7 +2986,7 @@ export function ThreadDetailPage() {
   const settingsContent = detail && backendCapabilities?.controls.sandboxMode ? (
     <div className="space-y-3">
       <div>
-        <p className="text-xs uppercase tracking-[0.2em] text-stone-500">
+        <p className="text-xs uppercase tracking-[0.2em] text-[var(--theme-fg-muted)]">
           Sandbox Mode
         </p>
         <div className="mt-2 space-y-1.5">
@@ -3001,7 +3001,7 @@ export function ThreadDetailPage() {
                 className={`block w-full rounded-xl border px-3 py-2 text-left text-sm transition ${
                   selected
                     ? 'ui-status-warning'
-                    : 'border-stone-800 bg-stone-950/40 text-stone-300 hover:bg-stone-800/80'
+                    : 'border-[var(--theme-border)] bg-[var(--theme-surface-strong)] text-[var(--theme-fg-soft)] hover:bg-[var(--theme-hover)] hover:text-[var(--theme-fg)]'
                 } disabled:cursor-not-allowed disabled:opacity-60`}
               >
                 {entry}
@@ -3071,7 +3071,7 @@ export function ThreadDetailPage() {
   const threadLoaded = detail?.thread.isLoaded ?? false;
   const realtimeConnectionIndicatorClassName =
     !threadLoaded
-      ? 'border border-stone-700/90 bg-stone-900/85 text-stone-400 shadow-lg shadow-stone-950/20'
+      ? 'host-icon-button border shadow-lg shadow-black/10'
     : realtimeConnection.status === 'connected'
       ? 'ui-action-success shadow-lg shadow-stone-950/20'
       : realtimeConnection.status === 'reconnecting'
@@ -3154,28 +3154,28 @@ export function ThreadDetailPage() {
     </svg>
   );
   const goalMonitorPanel = goalMonitorOpen && supportsGoals ? (
-    <div className="w-96 max-w-[calc(100vw-1.5rem)] rounded-3xl border border-stone-700/80 bg-stone-950/92 p-3 text-left text-stone-100 shadow-2xl shadow-stone-950/35 backdrop-blur-xl">
+    <div className="host-dialog w-96 max-w-[calc(100vw-1.5rem)] rounded-3xl border p-3 text-left shadow-2xl shadow-black/20 backdrop-blur-xl">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold">Goal monitor</p>
-          <p className="text-xs text-stone-500">Current thread only</p>
+          <p className="host-page-title text-sm font-semibold">Goal monitor</p>
+          <p className="host-muted text-xs">Current thread only</p>
         </div>
         <button
           type="button"
           onClick={() => setGoalMonitorOpen(false)}
-          className="rounded-full border border-stone-700 px-2.5 py-1 text-xs text-stone-300 transition hover:bg-stone-800"
+          className="host-secondary-button rounded-full border px-2.5 py-1 text-xs transition"
         >
           Close
         </button>
       </div>
       {goalState.error ? (
-        <p className="mt-3 rounded-2xl border border-rose-400/30 bg-rose-400/10 px-3 py-2 text-xs text-rose-100">
+        <p className="host-error mt-3 rounded-2xl border px-3 py-2 text-xs">
           {goalState.error}
         </p>
       ) : null}
       <div className="mt-3 max-h-[28rem] space-y-2 overflow-auto pr-1">
         {monitorGoals.length === 0 ? (
-          <p className="rounded-2xl border border-stone-800 bg-stone-900/60 px-3 py-3 text-sm text-stone-400">
+          <p className="host-empty-state rounded-2xl border px-3 py-3 text-sm">
             No goals in this thread yet.
           </p>
         ) : (
@@ -3189,7 +3189,7 @@ export function ThreadDetailPage() {
                 className={`rounded-2xl border px-3 py-3 ${
                   active
                     ? 'ui-status-info'
-                    : 'border-stone-800 bg-stone-900/60'
+                    : 'host-surface-strong'
                 }`}
               >
                 <div className="flex items-start justify-between gap-3">
@@ -3216,11 +3216,11 @@ export function ThreadDetailPage() {
                       {goal.objective}
                     </p>
                   </button>
-                  <span className="shrink-0 rounded-full border border-stone-700 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-stone-300">
+                  <span className="host-muted shrink-0 rounded-full border border-[var(--theme-border)] px-2 py-1 text-[10px] uppercase tracking-[0.14em]">
                     {goal.status}
                   </span>
                 </div>
-                <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-stone-400">
+                <div className="host-muted mt-2 flex flex-wrap gap-2 text-[11px]">
                   <span>{formatGoalRuntime(goal.timeUsedSeconds)}</span>
                   <span>{formatGoalTokenUsage(goal)}</span>
                   <span title={formatLongTimestamp(goal.updatedAt)}>
@@ -3241,7 +3241,7 @@ export function ThreadDetailPage() {
                       type="button"
                       disabled={goalActionBusy || goal.status === 'paused'}
                       onClick={() => void handleGoalStatusAction('paused')}
-                      className="rounded-full border border-stone-700 px-3 py-1.5 text-xs text-stone-300 transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="host-secondary-button rounded-full border px-3 py-1.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       Pause
                     </button>
@@ -3249,7 +3249,7 @@ export function ThreadDetailPage() {
                       type="button"
                       disabled={goalActionBusy}
                       onClick={() => void handleTerminateGoal()}
-                      className="rounded-full border border-rose-400/35 px-3 py-1.5 text-xs text-rose-100 transition hover:bg-rose-400/10 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-full border border-[var(--status-danger-border)] px-3 py-1.5 text-xs text-[var(--status-danger-fg)] transition hover:bg-[var(--status-danger-bg)] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       Terminate
                     </button>
@@ -3283,7 +3283,7 @@ export function ThreadDetailPage() {
       title="Export transcript"
       onClick={() => setExportDialogOpen(true)}
       disabled={!detail}
-      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-stone-700/90 bg-stone-900/85 text-stone-300 shadow-lg shadow-stone-950/20 transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50 lg:h-9 lg:w-9"
+      className="host-icon-button inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border shadow-lg shadow-black/10 transition disabled:cursor-not-allowed disabled:opacity-50 lg:h-9 lg:w-9"
     >
       <ExportIcon />
     </button>
@@ -3577,12 +3577,12 @@ export function ThreadDetailPage() {
         : {})}
       onShellStateChange={setShellControlState}
       loadingContent={
-        <div className="flex flex-1 items-center justify-center px-6 py-12 text-center text-stone-400">
+        <div className="host-muted flex flex-1 items-center justify-center px-6 py-12 text-center">
           Loading thread detail...
         </div>
       }
       emptyContent={
-        <div className="flex flex-1 items-center justify-center px-6 py-12 text-center text-stone-400">
+        <div className="host-muted flex flex-1 items-center justify-center px-6 py-12 text-center">
           Unable to resolve this thread.
         </div>
       }

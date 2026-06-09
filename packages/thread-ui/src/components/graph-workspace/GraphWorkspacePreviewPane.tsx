@@ -1,10 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo } from 'react';
 import { ChevronsRight } from 'lucide-react';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import {
-  oneDark,
-  oneLight,
-} from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 import type { ThreadArtifactDto } from '@remote-codex/shared';
 import type { ThreadWorkspaceFilePreview } from '../../adapters';
@@ -57,65 +52,19 @@ export function graphWorkspacePreviewTargetFromNode(
   }
 }
 
-function GraphWorkspaceCodePreview({
+const GraphWorkspaceCodePreview = memo(function GraphWorkspaceCodePreview({
   content,
-  language,
 }: {
   content: string;
-  language: string;
 }) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const [dark, setDark] = useState(() =>
-    typeof document !== 'undefined'
-      ? document.documentElement.classList.contains('dark')
-      : false,
-  );
-
-  useEffect(() => {
-    const container = containerRef.current;
-    const shell = container?.closest<HTMLElement>('.thread-ui-shell');
-    if (!shell) {
-      setDark(document.documentElement.classList.contains('dark'));
-      return;
-    }
-
-    const readShellTheme = () =>
-      shell.getAttribute('data-theme-effective') === 'dark' ||
-      shell.classList.contains('dark') ||
-      shell.classList.contains('thread-ui-theme-dark');
-
-    setDark(readShellTheme());
-    const observer = new MutationObserver(() => setDark(readShellTheme()));
-    observer.observe(shell, {
-      attributeFilter: ['class', 'data-theme-effective'],
-      attributes: true,
-    });
-    return () => observer.disconnect();
-  }, []);
-
-  const syntaxTheme = dark ? oneDark : oneLight;
-
   return (
-    <div
-      ref={containerRef}
-      className="thread-graph-code-preview min-h-0 flex-1 overflow-auto"
-    >
-      <SyntaxHighlighter
-        language={language}
-        style={syntaxTheme}
-        customStyle={{
-          margin: 0,
-          minHeight: '100%',
-          background: 'transparent',
-          padding: '1rem',
-        }}
-        showLineNumbers
-      >
-        {content}
-      </SyntaxHighlighter>
+    <div className="thread-graph-code-preview min-h-0 flex-1 overflow-auto">
+      <pre className="thread-graph-plain-code-preview">
+        <code>{content}</code>
+      </pre>
     </div>
   );
-}
+});
 
 export function GraphWorkspacePreviewPane({
   error,
@@ -162,10 +111,10 @@ export function GraphWorkspacePreviewPane({
 
   return (
     <section
-      className="thread-graph-viewer flex h-full min-h-0 flex-col overflow-hidden rounded-[12px] bg-[#fcfdff] dark:bg-[#151820]"
+      className="thread-graph-viewer flex h-full min-h-0 flex-col overflow-hidden rounded-[12px]"
       data-preview-target-kind={selectedTarget?.kind ?? 'none'}
     >
-      <div className="thread-graph-viewer-header flex h-12 shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-[#fcfdff] px-3 sm:h-[60px] sm:px-5 dark:border-[#2a2f3a] dark:bg-[#151820]">
+      <div className="thread-graph-viewer-header flex h-12 shrink-0 items-center justify-between gap-3 border-b px-3 sm:h-[60px] sm:px-5">
         <div className="flex min-w-0 items-center gap-3">
           <h2 className="text-base font-semibold text-slate-900 sm:text-[18px] dark:text-slate-100">
             Viewer
@@ -221,7 +170,7 @@ export function GraphWorkspacePreviewPane({
             />
           </div>
         ) : selectedTarget.kind === 'workspace-file' && pdfUrl ? (
-          <div className="min-h-0 flex-1 overflow-hidden bg-slate-100 dark:bg-[#101217]">
+          <div className="thread-graph-file-preview-frame min-h-0 flex-1 overflow-hidden">
             <iframe
               src={pdfUrl}
               title={`PDF preview: ${
@@ -232,7 +181,7 @@ export function GraphWorkspacePreviewPane({
           </div>
         ) : selectedTarget.kind === 'workspace-file' && previewFile ? (
           <div className="flex min-h-0 flex-1 flex-col">
-            <div className="thread-graph-file-preview-header border-b border-slate-200 px-4 py-3 text-xs uppercase tracking-[0.12em] text-slate-400 dark:border-[#2a2f3a] dark:text-slate-500">
+            <div className="thread-graph-file-preview-header border-b px-4 py-3 text-xs uppercase tracking-[0.12em]">
               {selectedFileIsMolecule
                 ? 'molecule'
                 : fileLanguage || extension || 'text'} |{' '}
@@ -245,15 +194,14 @@ export function GraphWorkspacePreviewPane({
             </div>
             <GraphWorkspaceCodePreview
               content={previewFile.content}
-              language={fileLanguage || extension || 'text'}
             />
             {previewFile.truncated && onLoadMore ? (
-              <div className="thread-graph-file-preview-footer flex justify-center border-t border-slate-200 bg-slate-50 px-4 py-3 dark:border-[#2a2f3a] dark:bg-[#101217]">
+              <div className="thread-graph-file-preview-footer flex justify-center border-t px-4 py-3">
                 <button
                   type="button"
                   onClick={onLoadMore}
                   disabled={loadingMore}
-                  className="rounded-md bg-slate-100 px-4 py-1.5 text-xs text-slate-600 hover:bg-slate-200 disabled:opacity-50 dark:bg-[#1d222c] dark:text-slate-300 dark:hover:bg-[#222733]"
+                  className="thread-graph-load-more-button rounded-md px-4 py-1.5 text-xs disabled:opacity-50"
                 >
                   {loadingMore
                     ? 'Loading...'
@@ -282,14 +230,13 @@ export function GraphWorkspacePreviewPane({
             <WorkspaceInfoCard label="Workspace Data">
               <GraphWorkspaceCodePreview
                 content={selectedTarget.node.detail ?? ''}
-                language="json"
               />
             </WorkspaceInfoCard>
             </div>
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">
-            <div className="thread-graph-file-preview-header border-b border-slate-200 px-4 py-3 text-xs uppercase tracking-[0.12em] text-slate-400 dark:border-[#2a2f3a] dark:text-slate-500">
+            <div className="thread-graph-file-preview-header border-b px-4 py-3 text-xs uppercase tracking-[0.12em]">
               {selectedTarget.node.kind}
             </div>
             <GraphWorkspaceCodePreview
@@ -297,9 +244,6 @@ export function GraphWorkspacePreviewPane({
                 selectedTarget.node.detail ??
                 selectedTarget.node.preview ??
                 selectedTarget.node.name
-              }
-              language={
-                selectedTarget.node.kind === 'event' ? 'json' : 'text'
               }
             />
           </div>

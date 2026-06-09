@@ -85,9 +85,9 @@ export function WorkspaceForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5 rounded-3xl border border-stone-800 bg-stone-900 p-6">
+    <form onSubmit={handleSubmit} className="host-panel space-y-5 rounded-3xl border p-6">
       <div>
-        <label htmlFor="workspace-path" className="text-sm font-medium text-stone-200">
+        <label htmlFor="workspace-path" className="host-form-label text-sm font-medium">
           Path or Git URL
         </label>
         <input
@@ -96,14 +96,14 @@ export function WorkspaceForm({
           value={absPath}
           onChange={(event) => setAbsPath(event.target.value)}
           placeholder="/Users/name/project or https://github.com/owner/repo.git"
-          className="mt-2 w-full rounded-2xl border border-stone-700 bg-stone-950 px-4 py-3 text-stone-100 outline-none transition focus:border-amber-300"
+          className="host-form-control mt-2 w-full rounded-2xl border px-4 py-3 outline-none transition"
         />
-        <p className="mt-2 text-xs text-stone-500">
+        <p className="host-muted mt-2 text-xs">
           Absolute paths register local directories. Git URLs clone into the configured dev home.
         </p>
       </div>
       <div>
-        <label htmlFor="workspace-label" className="text-sm font-medium text-stone-200">
+        <label htmlFor="workspace-label" className="host-form-label text-sm font-medium">
           Display label
         </label>
         <input
@@ -112,21 +112,21 @@ export function WorkspaceForm({
           value={label}
           onChange={(event) => setLabel(event.target.value)}
           placeholder="Optional override"
-          className="mt-2 w-full rounded-2xl border border-stone-700 bg-stone-950 px-4 py-3 text-stone-100 outline-none transition focus:border-amber-300"
+          className="host-form-control mt-2 w-full rounded-2xl border px-4 py-3 outline-none transition"
         />
-        <p className="mt-2 text-xs text-stone-500">
+        <p className="host-muted mt-2 text-xs">
           Defaults to the last folder name. You can override it.
         </p>
       </div>
       {(localError || error) && (
-        <div className="rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+        <div className="host-error rounded-2xl border px-4 py-3 text-sm">
           {localError ?? error}
         </div>
       )}
       <button
         type="submit"
         disabled={busy}
-        className="rounded-full bg-amber-300 px-5 py-3 font-medium text-stone-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:bg-stone-700 disabled:text-stone-300"
+        className="ui-action-primary rounded-full px-5 py-3 font-medium transition disabled:cursor-not-allowed"
       >
         {busy ? 'Saving...' : submitLabel}
       </button>

@@ -30,9 +30,9 @@ export function WorkspaceNewPage() {
   return (
     <div className="space-y-6">
       <div>
-        <p className="text-xs uppercase tracking-[0.3em] text-stone-500">Add Workspace</p>
-        <h2 className="mt-2 text-3xl font-semibold text-stone-100">Create a workspace</h2>
-        <p className="mt-3 max-w-2xl text-sm leading-6 text-stone-400">
+        <p className="host-page-eyebrow text-xs uppercase tracking-[0.3em]">Add Workspace</p>
+        <h2 className="host-page-title mt-2 text-3xl font-semibold">Create a workspace</h2>
+        <p className="host-page-description mt-3 max-w-2xl text-sm leading-6">
           Register an existing local directory, create one missing child directory under dev home,
           or clone a Git repository into dev home.
         </p>

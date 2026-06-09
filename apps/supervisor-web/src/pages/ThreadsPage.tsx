@@ -214,18 +214,18 @@ export function ThreadsPage() {
       onDeleteThread={setDeletingThread}
     >
       <>
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[2rem] border border-stone-800 bg-stone-900/85 shadow-2xl shadow-stone-950/20">
-          <div className="border-b border-stone-800 px-4 py-3 sm:px-6 sm:py-4">
+        <div className="host-panel flex min-h-0 flex-1 flex-col overflow-hidden rounded-[2rem] border shadow-2xl shadow-black/10">
+          <div className="border-b border-[var(--theme-border)] px-4 py-3 sm:px-6 sm:py-4">
             <div className="flex items-center justify-between gap-3">
               <h2
-                className="min-w-0 truncate text-base font-semibold text-stone-100 sm:text-lg"
+                className="host-page-title min-w-0 truncate text-base font-semibold sm:text-lg"
                 title={selectedWorkspace ? `${selectedWorkspace.label} threads` : 'All threads'}
               >
                 {selectedWorkspace ? selectedWorkspace.label : 'All Threads'}
               </h2>
               <Link
                 to={newThreadHref}
-                className="inline-flex h-9 shrink-0 items-center rounded-full bg-amber-300 px-3.5 text-xs font-medium uppercase tracking-[0.18em] text-stone-950 transition hover:bg-amber-200"
+                className="ui-action-primary inline-flex h-9 shrink-0 items-center rounded-full px-3.5 text-xs font-medium uppercase tracking-[0.18em] transition"
               >
                 New Thread
               </Link>
@@ -233,16 +233,16 @@ export function ThreadsPage() {
           </div>
 
           <div className="px-4 py-3 sm:px-6 sm:py-4">
-            <article className="inline-flex min-w-[12rem] max-w-full items-center gap-3 rounded-[1.25rem] border border-stone-800 bg-stone-950/70 px-3.5 py-2.5">
+            <article className="host-surface-strong inline-flex min-w-[12rem] max-w-full items-center gap-3 rounded-[1.25rem] border px-3.5 py-2.5">
               <span
                 aria-hidden="true"
                 className={`h-2.5 w-2.5 shrink-0 rounded-full ${supervisorDotClassName()}`}
               />
               <div className="min-w-0">
-                <p className="truncate text-[11px] uppercase tracking-[0.22em] text-stone-500">
+                <p className="host-muted truncate text-[11px] uppercase tracking-[0.22em]">
                   Supervisor
                 </p>
-                <p className="truncate text-sm text-stone-200">
+                <p className="host-soft truncate text-sm">
                   {status?.lastError ?? (status?.state === 'ready' ? 'Ready' : status?.state ?? 'Checking')}
                 </p>
               </div>
@@ -250,16 +250,16 @@ export function ThreadsPage() {
           </div>
 
           {!loading && !error && visibleThreads.length > 0 && (
-            <div className="flex min-h-0 flex-1 flex-col border-t border-stone-800 px-4 py-4 sm:px-6 sm:py-5">
+            <div className="flex min-h-0 flex-1 flex-col border-t border-[var(--theme-border)] px-4 py-4 sm:px-6 sm:py-5">
               <div className="flex items-center gap-2">
-                <p className="text-xs uppercase tracking-[0.28em] text-stone-500">
+                <p className="host-muted text-xs uppercase tracking-[0.28em]">
                   Recent Threads
                 </p>
-                <span className="rounded-full border border-amber-300/30 bg-amber-300/10 px-2 py-0.5 text-[11px] font-medium uppercase tracking-[0.18em] text-amber-200">
+                <span className="host-warning-pill rounded-full border px-2 py-0.5 text-[11px] font-medium uppercase tracking-[0.18em]">
                   {visibleThreads.length} total
                 </span>
                 {runningThreads > 0 && (
-                  <span className="text-xs text-stone-500">
+                  <span className="host-muted text-xs">
                     · {runningThreads} running
                   </span>
                 )}
@@ -285,7 +285,7 @@ export function ThreadsPage() {
           )}
 
           {!loading && !error && visibleThreads.length === 0 && (
-            <div className="border-t border-stone-800 px-4 py-6 text-sm text-stone-500 sm:px-6">
+            <div className="host-muted border-t border-[var(--theme-border)] px-4 py-6 text-sm sm:px-6">
               No threads available in this workspace.
             </div>
           )}
