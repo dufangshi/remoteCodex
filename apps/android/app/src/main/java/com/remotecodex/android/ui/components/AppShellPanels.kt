@@ -548,7 +548,6 @@ private fun PluginSettingsRow(plugin: PluginPreview) {
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        ToggleDot(enabled = plugin.enabled)
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 text = plugin.name,
@@ -566,12 +565,27 @@ private fun PluginSettingsRow(plugin: PluginPreview) {
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = "${plugin.capabilities} · ${plugin.source}",
+                text = plugin.capabilities,
                 color = ThreadColors.ForegroundMuted,
                 style = MaterialTheme.typography.labelSmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+        Column(
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            GraphBadge(
+                label = plugin.source,
+                modifier = Modifier.widthIn(max = 132.dp),
+                variant = if (plugin.source.contains("Imported", ignoreCase = true)) {
+                    GraphBadgeVariant.Secondary
+                } else {
+                    GraphBadgeVariant.Outline
+                },
+            )
+            ToggleDot(enabled = plugin.enabled)
         }
     }
 }
