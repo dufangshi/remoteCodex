@@ -1127,56 +1127,50 @@ private data class HistoryItemColors(
 
 @Composable
 private fun ToolCallCard(toolCall: ToolCallPreview) {
-    Column(
+    val parametersText = formatToolCallParameters(toolCall.parameters)
+    val shouldOpen = toolCall.status == ToolStatus.Running || !toolCall.result.isNullOrBlank()
+    GraphAccordion(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(ThreadColors.Surface)
-            .border(1.dp, ThreadColors.Border, RoundedCornerShape(8.dp))
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(8.dp)),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        GraphAccordionItem(
+            title = toolCall.name,
+            subtitle = "Tool call",
+            defaultExpanded = shouldOpen,
+            showDivider = false,
+            backgroundColor = ThreadColors.Surface,
+            leading = {
+                Text(
+                    text = "⌘",
+                    color = ThreadColors.ForegroundMuted,
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            },
+            trailing = {
+                ToolStatusBadge(
+                    label = toolResultStatusLabel(toolCall.status),
+                    status = toolCall.status,
+                )
+            },
         ) {
-            Text(
-                text = "⌘",
-                color = ThreadColors.ForegroundMuted,
-                style = MaterialTheme.typography.titleMedium,
+            JsonBlock(
+                title = "Parameters",
+                entries = toolCall.parameters,
+                copyText = parametersText,
             )
-            Text(
-                text = toolCall.name,
-                modifier = Modifier.weight(1f),
-                color = ThreadColors.Foreground,
-                style = MaterialTheme.typography.bodyMedium,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            ToolStatusBadge(
-                label = toolResultStatusLabel(toolCall.status),
-                status = toolCall.status,
-            )
-        }
-        JsonBlock(title = "Parameters", entries = toolCall.parameters)
-        toolCall.result?.let {
-            CodeBlock(title = "Result", code = it)
+            toolCall.result?.let {
+                CodeBlock(title = "Result", code = it)
+            }
         }
     }
 }
 
 @Composable
-private fun JsonBlock(title: String, entries: List<Pair<String, String>>) {
+private fun JsonBlock(title: String, entries: List<Pair<String, String>>, copyText: String) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(
-            text = title,
-            color = ThreadColors.ForegroundMuted,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-        )
+        SectionHeaderWithCopy(title = title, copyText = copyText)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1187,6 +1181,14 @@ private fun JsonBlock(title: String, entries: List<Pair<String, String>>) {
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Text("{", color = ThreadColors.ForegroundMuted, fontFamily = FontFamily.Monospace)
+            if (entries.isEmpty()) {
+                Text(
+                    text = "  empty",
+                    color = ThreadColors.ForegroundSoft,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
             entries.forEachIndexed { index, entry ->
                 Text(
                     text = "  \"${entry.first}\": \"${entry.second}\"${if (index < entries.lastIndex) "," else ""}",
@@ -1203,12 +1205,7 @@ private fun JsonBlock(title: String, entries: List<Pair<String, String>>) {
 @Composable
 private fun CodeBlock(title: String, code: String) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(
-            text = title,
-            color = ThreadColors.ForegroundMuted,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-        )
+        SectionHeaderWithCopy(title = title, copyText = code)
         Text(
             text = code,
             modifier = Modifier
@@ -1221,5 +1218,47 @@ private fun CodeBlock(title: String, code: String) {
             style = MaterialTheme.typography.bodyMedium,
             fontFamily = FontFamily.Monospace,
         )
+    }
+}
+
+@Composable
+private fun SectionHeaderWithCopy(title: String, copyText: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = title,
+            modifier = Modifier.weight(1f),
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        CopyTextButton(
+            value = copyText,
+            idleLabel = "Copy",
+            copiedLabel = "Copied",
+            contentDescription = "Copy $title",
+        )
+    }
+}
+
+private fun formatToolCallParameters(entries: List<Pair<String, String>>): String {
+    if (entries.isEmpty()) return "{}"
+    return buildString {
+        appendLine("{")
+        entries.forEachIndexed { index, entry ->
+            append("  \"")
+            append(entry.first)
+            append("\": \"")
+            append(entry.second)
+            append("\"")
+            if (index < entries.lastIndex) {
+                append(",")
+            }
+            appendLine()
+        }
+        append("}")
     }
 }
