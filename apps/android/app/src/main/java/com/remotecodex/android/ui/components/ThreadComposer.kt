@@ -1,5 +1,6 @@
 package com.remotecodex.android.ui.components
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,6 +25,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -61,17 +65,17 @@ fun ThreadComposer(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ComposerIcon(
-                label = "⌁",
+                icon = ComposerToolIcon.Slash,
                 selected = openMenu == ComposerMenu.Slash,
                 onClick = { openMenu = openMenu.toggle(ComposerMenu.Slash) },
             )
             ComposerIcon(
-                label = "+",
+                icon = ComposerToolIcon.Plus,
                 selected = openMenu == ComposerMenu.Attachments,
                 onClick = { openMenu = openMenu.toggle(ComposerMenu.Attachments) },
             )
             ComposerIcon(
-                label = "›_",
+                icon = ComposerToolIcon.Terminal,
                 selected = openMenu == ComposerMenu.ShellTools,
                 onClick = { openMenu = openMenu.toggle(ComposerMenu.ShellTools) },
             )
@@ -265,24 +269,65 @@ private fun AttachmentPreviewStrip() {
 
 @Composable
 private fun ComposerIcon(
-    label: String,
+    icon: ComposerToolIcon,
     selected: Boolean,
     onClick: () -> Unit,
 ) {
     val background = if (selected) ThreadColors.Primary else ThreadColors.Panel
     val foreground = if (selected) ThreadColors.PrimaryForeground else ThreadColors.ForegroundSoft
-    Text(
-        text = label,
+    Box(
         modifier = Modifier
+            .size(34.dp)
             .clip(CircleShape)
             .background(background)
             .border(1.dp, if (selected) ThreadColors.Primary else ThreadColors.Border, CircleShape)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 7.dp),
-        color = foreground,
-        style = MaterialTheme.typography.labelMedium,
-        fontWeight = FontWeight.SemiBold,
-    )
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        ComposerToolGlyph(icon = icon, color = foreground)
+    }
+}
+
+@Composable
+private fun ComposerToolGlyph(icon: ComposerToolIcon, color: Color) {
+    Canvas(modifier = Modifier.size(16.dp)) {
+        val strokeWidth = 1.5.dp.toPx()
+        val terminalStrokeWidth = 1.35.dp.toPx()
+        val w = size.width
+        val h = size.height
+        fun line(
+            startX: Float,
+            startY: Float,
+            endX: Float,
+            endY: Float,
+            width: Float = strokeWidth,
+        ) {
+            drawLine(
+                color = color,
+                start = Offset(w * startX, h * startY),
+                end = Offset(w * endX, h * endY),
+                strokeWidth = width,
+                cap = StrokeCap.Round,
+            )
+        }
+
+        when (icon) {
+            ComposerToolIcon.Slash -> {
+                line(0.67f, 0.16f, 0.33f, 0.84f)
+                line(0.27f, 0.33f, 0.41f, 0.33f)
+                line(0.59f, 0.67f, 0.73f, 0.67f)
+            }
+            ComposerToolIcon.Plus -> {
+                line(0.50f, 0.20f, 0.50f, 0.80f)
+                line(0.20f, 0.50f, 0.80f, 0.50f)
+            }
+            ComposerToolIcon.Terminal -> {
+                line(0.25f, 0.31f, 0.38f, 0.44f, terminalStrokeWidth)
+                line(0.38f, 0.44f, 0.25f, 0.56f, terminalStrokeWidth)
+                line(0.48f, 0.59f, 0.75f, 0.59f, terminalStrokeWidth)
+            }
+        }
+    }
 }
 
 @Composable
@@ -548,4 +593,10 @@ private enum class ComposerMenu {
     Model,
     Effort,
     ShellTools,
+}
+
+private enum class ComposerToolIcon {
+    Slash,
+    Plus,
+    Terminal,
 }
