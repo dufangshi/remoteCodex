@@ -36,6 +36,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -486,6 +488,36 @@ private fun WorkspaceRow(node: WorkspaceNodePreview) {
             style = MaterialTheme.typography.bodyMedium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+        )
+        WorkspaceRowActionButton(
+            icon = WorkspaceActionIcon.Download,
+            selected = node.selected,
+            contentDescription = "Download ${node.name}",
+        )
+    }
+}
+
+@Composable
+private fun WorkspaceRowActionButton(
+    icon: WorkspaceActionIcon,
+    selected: Boolean,
+    contentDescription: String,
+) {
+    val background = if (selected) ThreadColors.Surface else ThreadColors.Panel
+    val border = if (selected) ThreadColors.BorderStrong else ThreadColors.Border.copy(alpha = 0.72f)
+    Box(
+        modifier = Modifier
+            .size(26.dp)
+            .clip(RoundedCornerShape(7.dp))
+            .background(background)
+            .border(1.dp, border, RoundedCornerShape(7.dp))
+            .semantics { this.contentDescription = contentDescription },
+        contentAlignment = Alignment.Center,
+    ) {
+        WorkspaceActionGlyph(
+            icon = icon,
+            color = ThreadColors.ForegroundMuted,
+            modifier = Modifier.size(13.dp),
         )
     }
 }
@@ -1138,6 +1170,14 @@ private fun WorkspaceActionGlyph(
                 line(0.82f, 0.22f, 0.82f, 0.54f)
                 line(0.48f, 0.56f, 0.82f, 0.22f)
             }
+            WorkspaceActionIcon.Download -> {
+                line(0.50f, 0.18f, 0.50f, 0.58f)
+                line(0.34f, 0.42f, 0.50f, 0.58f)
+                line(0.66f, 0.42f, 0.50f, 0.58f)
+                line(0.22f, 0.68f, 0.22f, 0.82f)
+                line(0.22f, 0.82f, 0.78f, 0.82f)
+                line(0.78f, 0.82f, 0.78f, 0.68f)
+            }
         }
     }
 }
@@ -1285,6 +1325,7 @@ private enum class WorkspaceActionIcon {
     Trash,
     Copy,
     Open,
+    Download,
 }
 
 private fun DrawScope.drawDirectoryGlyph(
