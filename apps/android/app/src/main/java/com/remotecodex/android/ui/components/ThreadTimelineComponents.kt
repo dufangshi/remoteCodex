@@ -22,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,6 +31,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -56,6 +59,7 @@ import com.remotecodex.android.ui.presentation.threadStatusLabel
 import com.remotecodex.android.ui.presentation.toolResultStatusLabel
 import com.remotecodex.android.ui.presentation.toolStatusLabel
 import com.remotecodex.android.ui.theme.ThreadColors
+import kotlinx.coroutines.delay
 
 @Composable
 fun ThreadTimeline(
@@ -492,6 +496,12 @@ private fun MessageBubble(
                     ThreadStatusBadge(label = threadStatusLabel(it), status = it)
                 }
                 Spacer(modifier = Modifier.weight(1f))
+                CopyTextButton(
+                    value = message.text,
+                    idleLabel = "Copy",
+                    copiedLabel = "Copied",
+                    contentDescription = "Copy assistant reply",
+                )
                 Text(
                     text = message.timeLabel,
                     color = ThreadColors.ForegroundMuted,
@@ -556,6 +566,7 @@ private fun MessageBubble(
 @Composable
 private fun ReasoningAccordion(items: List<ReasoningPreview>) {
     val running = items.any { it.status == ToolStatus.Running }
+    val reasoningText = items.joinToString(separator = "\n\n") { it.text.trim() }
     GraphAccordion(
         modifier = Modifier
             .clip(RoundedCornerShape(10.dp)),
@@ -593,8 +604,19 @@ private fun ReasoningAccordion(items: List<ReasoningPreview>) {
                 }
             },
         ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                CopyTextButton(
+                    value = reasoningText,
+                    idleLabel = "Copy thoughts",
+                    copiedLabel = "Copied",
+                    contentDescription = "Copy reasoning text",
+                )
+            }
             Text(
-                text = items.joinToString(separator = "\n\n") { it.text.trim() },
+                text = reasoningText,
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(max = 224.dp)
@@ -607,6 +629,35 @@ private fun ReasoningAccordion(items: List<ReasoningPreview>) {
             )
         }
     }
+}
+
+@Composable
+private fun CopyTextButton(
+    value: String,
+    idleLabel: String,
+    copiedLabel: String,
+    contentDescription: String,
+) {
+    val clipboard = LocalClipboardManager.current
+    var copied by remember(value) { mutableStateOf(false) }
+
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1200)
+            copied = false
+        }
+    }
+
+    GraphButton(
+        label = if (copied) copiedLabel else idleLabel,
+        size = GraphButtonSize.Small,
+        variant = if (copied) GraphButtonVariant.Secondary else GraphButtonVariant.Ghost,
+        contentDescription = contentDescription,
+        onClick = {
+            clipboard.setText(AnnotatedString(value))
+            copied = true
+        },
+    )
 }
 
 @Composable

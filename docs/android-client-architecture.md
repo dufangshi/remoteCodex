@@ -122,13 +122,13 @@ The visual direction is close to the web mobile thread view, but not a literal D
 | `ThreadTimeline.tsx` top-level controls | `ThreadTimelineComponents.kt` + `TimelineAuxiliaryPreview` | Native preview rows for loading earlier history, activity notes, answered request notes, pending steers, ephemeral user prompt, and optimistic turn labeling. |
 | `GraphChatThreadChatPanel.tsx` | `ThreadDetailPreviewScreen.kt` + `ThreadTimelineComponents.kt` | Chat surface with timeline padding and fixed composer behavior. |
 | `GraphChatTurnFrame.tsx` | `ThreadTimelineComponents.kt` | Turn header, status, time, token summary, and body grouping. |
-| `GraphChatMessageFrame.tsx` | `ThreadTimelineComponents.kt` | User/assistant message surfaces, sender label, status, and time treatment. |
+| `GraphChatMessageFrame.tsx` | `ThreadTimelineComponents.kt` | User/assistant message surfaces, sender label, status, time treatment, and assistant reply copy action. |
 | `GraphChatMessageBody.tsx` and `GraphChatMessageContent.tsx` | `RichMessageContent.kt` | Native rich message rendering for paragraphs, headings, bullets, inline code, fenced code blocks, tool blocks, and code-copy feedback. |
 | `markdownHeuristics.ts` | `MarkdownHeuristics.kt` + `RichMessageContent.kt` | Native markdown syntax heuristic chooses between lightweight plain text blocks and richer markdown-like parsing. |
 | `graphChatToolBlocks.ts` | `GraphChatToolBlocks.kt` + `RichMessageContent.kt` | Native preprocessing for `tool-call`, `tool-result`, and merged tool blocks, with dedicated tool block rendering inside rich messages. |
 | `graphChatShiki.ts` | `GraphChatSyntaxHighlighting.kt` + `RichMessageContent.kt` | Lightweight native syntax styling for fenced code blocks. This improves code readability without embedding Shiki or a JavaScript highlighter runtime. |
 | `threadPresentation.ts` | `ThreadPresentation.kt` + timeline/rooms/workspace components | Central native labels for thread status, export status, tool status, plan steps, history item labels, and scrollable history kinds. |
-| `GraphChatCompactMessageItem.tsx` reasoning section | `ThreadTimelineComponents.kt` + `GraphAccordion.kt` + `ReasoningPreview` | Assistant messages show a native collapsible Thought Process/Thinking block with bounded monospace content and running state through the shared accordion primitive. |
+| `GraphChatCompactMessageItem.tsx` reasoning section | `ThreadTimelineComponents.kt` + `GraphAccordion.kt` + `ReasoningPreview` | Assistant messages show a native collapsible Thought Process/Thinking block with bounded monospace content, running state, and reasoning copy action through the shared accordion primitive. |
 | `GraphAccordion.tsx` | `GraphAccordion.kt` + `ThreadTimelineComponents.kt` + `WorkspacePanel.kt` | Native accordion root/item/trigger/content primitive with chevron, separator, disabled state, custom colors, trailing content, and expanded content. Used by workspace guide/extensions, timeline reasoning, and history groups. |
 | `GraphChatToolCall.tsx` | `ThreadTimelineComponents.kt` | Tool call card with monospaced name, status badge, parameters, and result block. |
 | `GraphChatTurnBody.tsx` live plan branch | `ThreadTimelineComponents.kt` + `LivePlanPreview` | Native live plan card rendered inside the turn frame with explanation, ordered steps, and semantic status pills. |
@@ -186,7 +186,7 @@ Still open:
 - Full history entry ordering parity with persisted server events; current native dispatcher preserves the preview item/group stream but does not yet consume server event cursors.
 - Full `ThreadTimeline.tsx` behavior: scroll anchoring, tail visibility, server-managed history paging, deferred history detail cache, request anchoring by turn id, and live output attachment are still not implemented.
 - Full history item interactions: deferred detail loading, real image asset loading, clipboard actions, and richer full-detail content types.
-- Real copy feedback for assistant compact messages and reasoning text; current Android coverage is visual/disclosure only.
+- Broader copy affordances for non-message history items; assistant replies, reasoning text, fenced code, and tool blocks already have native clipboard feedback.
 - Real thread action wiring behind native dialogs: rename, export PDF/HTML, delete, busy/error states, and confirmation callbacks.
 - Full artifact-specific viewers, including interactive molecule and graph panels.
 - Real molecule viewer behavior behind the current native control chips: 3D renderer, robust bond perception, frame slider/playback, atom selection, camera updates, copy/download/screenshot actions, and unit-cell toggling.
