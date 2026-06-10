@@ -2,6 +2,7 @@ package com.remotecodex.android.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.buildAnnotatedString
@@ -47,6 +49,8 @@ private sealed interface RichBlock {
     data class Bullet(val text: String) : RichBlock
     data class Code(val language: String, val code: String) : RichBlock
 }
+
+private const val UrlAnnotationTag = "URL"
 
 @Composable
 fun RichMessageContent(
@@ -195,10 +199,9 @@ private fun RichHeading(block: RichBlock.Heading) {
 
 @Composable
 private fun RichParagraph(text: String) {
-    Text(
-        text = inlineCodeAndLinkAnnotatedString(text),
-        color = ThreadColors.Foreground,
-        style = MaterialTheme.typography.bodyLarge,
+    RichClickableText(
+        text = text,
+        modifier = Modifier.fillMaxWidth(),
     )
 }
 
@@ -213,11 +216,9 @@ private fun RichBullet(text: String) {
             color = ThreadColors.ForegroundMuted,
             style = MaterialTheme.typography.bodyLarge,
         )
-        Text(
-            text = inlineCodeAndLinkAnnotatedString(text),
+        RichClickableText(
+            text = text,
             modifier = Modifier.weight(1f),
-            color = ThreadColors.Foreground,
-            style = MaterialTheme.typography.bodyLarge,
         )
     }
 }
@@ -285,6 +286,26 @@ private fun CopyCodeButton(value: String) {
 }
 
 @Composable
+private fun RichClickableText(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    val uriHandler = LocalUriHandler.current
+    val annotated = inlineCodeAndLinkAnnotatedString(text)
+    ClickableText(
+        text = annotated,
+        modifier = modifier,
+        style = MaterialTheme.typography.bodyLarge.copy(color = ThreadColors.Foreground),
+        onClick = { offset ->
+            annotated
+                .getStringAnnotations(tag = UrlAnnotationTag, start = offset, end = offset)
+                .firstOrNull()
+                ?.let { annotation -> uriHandler.openUri(annotation.item) }
+        },
+    )
+}
+
+@Composable
 private fun inlineCodeAndLinkAnnotatedString(text: String): AnnotatedString {
     val segments = graphChatPlainTextSegments(text)
     return buildAnnotatedString {
@@ -292,6 +313,7 @@ private fun inlineCodeAndLinkAnnotatedString(text: String): AnnotatedString {
             when (segment) {
                 is GraphChatPlainTextSegment.Text -> appendInlineCode(segment.text)
                 is GraphChatPlainTextSegment.Url -> {
+                    pushStringAnnotation(tag = UrlAnnotationTag, annotation = segment.href)
                     withStyle(
                         SpanStyle(
                             color = ThreadColors.Info,
@@ -301,6 +323,7 @@ private fun inlineCodeAndLinkAnnotatedString(text: String): AnnotatedString {
                     ) {
                         append(segment.text)
                     }
+                    pop()
                 }
             }
         }
