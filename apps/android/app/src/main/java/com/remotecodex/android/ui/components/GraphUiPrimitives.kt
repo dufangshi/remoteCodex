@@ -158,6 +158,54 @@ fun GraphBadge(
     )
 }
 
+@Composable
+fun GraphSelectionGlyph(
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    contentDescription: String? = null,
+) {
+    val shape = RoundedCornerShape(6.dp)
+    val foreground = if (selected) ThreadColors.Success else ThreadColors.ForegroundMuted
+    val background = if (selected) ThreadColors.SuccessSoft else ThreadColors.SurfaceStrong
+    Box(
+        modifier = modifier
+            .size(22.dp)
+            .clip(shape)
+            .background(background)
+            .border(1.dp, if (selected) ThreadColors.Success.copy(alpha = 0.48f) else ThreadColors.Border, shape)
+            .then(if (contentDescription != null) Modifier.semantics { this.contentDescription = contentDescription } else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(modifier = Modifier.size(13.dp)) {
+            val strokeWidth = 1.65.dp.toPx()
+            if (selected) {
+                drawLine(
+                    color = foreground,
+                    start = Offset(size.width * 0.18f, size.height * 0.54f),
+                    end = Offset(size.width * 0.42f, size.height * 0.76f),
+                    strokeWidth = strokeWidth,
+                    cap = StrokeCap.Round,
+                )
+                drawLine(
+                    color = foreground,
+                    start = Offset(size.width * 0.42f, size.height * 0.76f),
+                    end = Offset(size.width * 0.82f, size.height * 0.26f),
+                    strokeWidth = strokeWidth,
+                    cap = StrokeCap.Round,
+                )
+            } else {
+                drawLine(
+                    color = foreground,
+                    start = Offset(size.width * 0.28f, size.height * 0.50f),
+                    end = Offset(size.width * 0.72f, size.height * 0.50f),
+                    strokeWidth = strokeWidth,
+                    cap = StrokeCap.Round,
+                )
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun GraphButtonGroup(

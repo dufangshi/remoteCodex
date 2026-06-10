@@ -165,15 +165,9 @@ private fun ExportTranscriptDialogPreview(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(
-                    text = "On",
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(ThreadColors.SuccessSoft)
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    color = ThreadColors.Success,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.SemiBold,
+                GraphSelectionGlyph(
+                    selected = true,
+                    contentDescription = "Token and price summary enabled",
                 )
                 Text(
                     text = "Token and price summary",
@@ -257,11 +251,9 @@ private fun ExportTurnRow(turn: ExportTurnPreview) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(
-            text = if (turn.selected) "On" else "Off",
-            color = if (turn.selected) ThreadColors.Success else ThreadColors.ForegroundMuted,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
+        GraphSelectionGlyph(
+            selected = turn.selected,
+            contentDescription = if (turn.selected) "Turn selected" else "Turn not selected",
         )
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
