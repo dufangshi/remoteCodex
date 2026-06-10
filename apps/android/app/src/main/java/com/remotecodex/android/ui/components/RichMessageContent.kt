@@ -300,7 +300,11 @@ private fun ToolSection(title: String, body: String) {
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.SemiBold,
         )
-        if (entries.size == 1 && entries.first().key == "value") {
+        if (
+            entries.size == 1 &&
+            entries.first().key == "value" &&
+            entries.first().kind == GraphChatToolValueKind.Raw
+        ) {
             ToolRawValue(body = entries.first().value)
         } else {
             Column(

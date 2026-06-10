@@ -114,6 +114,14 @@ class GraphChatToolBlocksTest {
     }
 
     @Test
+    fun readsTopLevelJsonArrayAsStructuredValueEntry() {
+        assertEquals(
+            listOf(GraphChatToolEntry("value", """["a",2]""", GraphChatToolValueKind.Object)),
+            graphChatToolEntries("""["a",2]"""),
+        )
+    }
+
+    @Test
     fun prettyPrintsToolJsonValues() {
         assertEquals(
             """
@@ -126,6 +134,19 @@ class GraphChatToolBlocksTest {
             }
             """.trimIndent(),
             prettyGraphChatToolJsonValue("""{"ok":true,"items":["a,b",2]}"""),
+        )
+    }
+
+    @Test
+    fun prettyPrintsTopLevelToolJsonArrays() {
+        assertEquals(
+            """
+            [
+              "a",
+              2
+            ]
+            """.trimIndent(),
+            prettyGraphChatToolJsonValue("""["a",2]"""),
         )
     }
 

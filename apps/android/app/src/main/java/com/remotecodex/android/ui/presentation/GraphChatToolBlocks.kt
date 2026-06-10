@@ -118,6 +118,15 @@ fun graphChatToolEntries(body: String): List<GraphChatToolEntry> {
     if (objectEntries.isNotEmpty() || isJsonObjectLiteral(body)) {
         return objectEntries
     }
+    if (isJsonArrayLiteral(body)) {
+        return listOf(
+            GraphChatToolEntry(
+                key = "value",
+                value = body.trim(),
+                kind = GraphChatToolValueKind.Object,
+            ),
+        )
+    }
 
     val colonEntries = body
         .lineSequence()
@@ -210,6 +219,11 @@ fun prettyGraphChatToolJsonValue(value: String): String {
 private fun isJsonObjectLiteral(body: String): Boolean {
     val trimmed = body.trim()
     return trimmed.startsWith("{") && trimmed.endsWith("}")
+}
+
+private fun isJsonArrayLiteral(body: String): Boolean {
+    val trimmed = body.trim()
+    return trimmed.startsWith("[") && trimmed.endsWith("]")
 }
 
 private fun readFlatJsonObjectEntries(body: String): List<GraphChatToolEntry> {
