@@ -1188,34 +1188,37 @@ private fun GraphEmptyGarbageDialogPreview(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Box(
-        modifier = modifier
-            .background(ThreadColors.Primary.copy(alpha = 0.42f))
-            .padding(14.dp),
-        contentAlignment = Alignment.Center,
+    GraphDialogOverlay(
+        onDismiss = onClose,
+        modifier = modifier,
     ) {
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .clickable(onClick = onClose),
-        )
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .widthIn(max = 390.dp)
-                .heightIn(max = 520.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .background(ThreadColors.Panel)
-                .border(1.dp, ThreadColors.Border, RoundedCornerShape(20.dp))
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+        GraphDialogFrame(
+            title = "Empty garbage?",
+            subtitle = "Permanently delete files in the garbage/ folder.",
+            onClose = onClose,
+            footer = {
+                if (files.isEmpty()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        GraphButton(
+                            label = "Cancel",
+                            variant = GraphButtonVariant.Ghost,
+                            size = GraphButtonSize.Default,
+                            icon = GraphActionIcon.Cancel,
+                            onClick = onClose,
+                        )
+                    }
+                } else {
+                    GraphDialogFooter(
+                        primaryLabel = "Empty garbage",
+                        primaryTone = GraphDialogActionTone.Danger,
+                        onCancel = onClose,
+                    )
+                }
+            },
         ) {
-            Text(
-                text = "Empty garbage?",
-                color = ThreadColors.Foreground,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1274,38 +1277,6 @@ private fun GraphEmptyGarbageDialogPreview(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "Cancel",
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
-                        .clickable(onClick = onClose)
-                        .padding(horizontal = 13.dp, vertical = 8.dp),
-                    color = ThreadColors.ForegroundSoft,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                if (files.isNotEmpty()) {
-                    Text(
-                        text = "Empty garbage",
-                        modifier = Modifier
-                            .padding(start = 8.dp)
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(ThreadColors.DangerSoft)
-                            .border(1.dp, ThreadColors.Danger.copy(alpha = 0.45f), RoundedCornerShape(999.dp))
-                            .clickable(onClick = onClose)
-                            .padding(horizontal = 13.dp, vertical = 8.dp),
-                        color = ThreadColors.Danger,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
                 }
             }
         }
