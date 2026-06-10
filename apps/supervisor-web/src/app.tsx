@@ -24,6 +24,8 @@ import {
 } from './components/AppShellNavigation';
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
+import { RelayAdminPage } from './pages/RelayAdminPage';
+import { RelayPortalPage } from './pages/RelayPortalPage';
 import { ThreadDetailPage } from './pages/ThreadDetailPage';
 import { ThreadImportPage } from './pages/ThreadImportPage';
 import { ThreadNewPage } from './pages/ThreadNewPage';
@@ -36,6 +38,7 @@ import {
   fetchPlugins,
   importPlugin,
   login,
+  relayModeActive,
   updatePlugin,
 } from './lib/api';
 
@@ -295,6 +298,38 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   return children;
 }
 
+function SupervisorRoutes({
+  themeMode,
+  setThemeMode,
+  effectiveTheme,
+}: {
+  themeMode: ThemeMode;
+  setThemeMode: (mode: ThemeMode) => void;
+  effectiveTheme: 'light' | 'dark';
+}) {
+  return (
+    <Routes>
+      <Route path="/" element={relayModeActive() ? <RelayPortalPage /> : <LandingPage />} />
+      <Route
+        element={
+          <AppShell
+            themeMode={themeMode}
+            setThemeMode={setThemeMode}
+            effectiveTheme={effectiveTheme}
+          />
+        }
+      >
+        <Route path="/workspaces" element={<WorkspacesPage />} />
+        <Route path="/workspaces/new" element={<WorkspaceNewPage />} />
+        <Route path="/threads" element={<ThreadsPage />} />
+        <Route path="/threads/import" element={<ThreadImportPage />} />
+        <Route path="/threads/new" element={<ThreadNewPage />} />
+        <Route path="/threads/:id" element={<ThreadDetailPage />} />
+      </Route>
+    </Routes>
+  );
+}
+
 export function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => readInitialThemeMode());
   const [systemTheme, setSystemTheme] = useState<'light' | 'dark'>(() =>
@@ -351,29 +386,32 @@ export function App() {
           updatePlugin,
         }}
       >
-        <AuthGate>
-          <BrowserRouter>
-            <Routes>
-              <Route path="/" element={<LandingPage />} />
-              <Route
-                element={
-                  <AppShell
+        <BrowserRouter>
+          <Routes>
+            <Route path="/relay-portal" element={<RelayPortalPage />} />
+            <Route path="/relay-admin" element={<RelayAdminPage />} />
+            <Route
+              path="/*"
+              element={
+                relayModeActive() ? (
+                  <SupervisorRoutes
                     themeMode={themeMode}
                     setThemeMode={setThemeMode}
                     effectiveTheme={effectiveTheme}
                   />
-                }
-              >
-                <Route path="/workspaces" element={<WorkspacesPage />} />
-                <Route path="/workspaces/new" element={<WorkspaceNewPage />} />
-                <Route path="/threads" element={<ThreadsPage />} />
-                <Route path="/threads/import" element={<ThreadImportPage />} />
-                <Route path="/threads/new" element={<ThreadNewPage />} />
-                <Route path="/threads/:id" element={<ThreadDetailPage />} />
-              </Route>
-            </Routes>
-          </BrowserRouter>
-        </AuthGate>
+                ) : (
+                  <AuthGate>
+                    <SupervisorRoutes
+                      themeMode={themeMode}
+                      setThemeMode={setThemeMode}
+                      effectiveTheme={effectiveTheme}
+                    />
+                  </AuthGate>
+                )
+              }
+            />
+          </Routes>
+        </BrowserRouter>
       </PluginProvider>
     </div>
   );
