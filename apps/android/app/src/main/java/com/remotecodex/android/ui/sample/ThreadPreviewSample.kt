@@ -212,11 +212,13 @@ object ThreadPreviewSample {
                             I am moving the skeleton to Compose and matching the graph-chat message surface:
 
                             - reusable console components first
+                              - nested list levels stay visible on mobile
                             - native token parity for light and dark mode
                             - stable `ThreadDetailDto` projection later
                             - Inline **strong**, *emphasis*, ~~stale copy~~, and `code` match the web renderer.
 
                             1. Compare the web renderer.
+                              1. Preserve the mobile-first structure.
                             2. Keep the native mobile surface compact.
 
                             - [x] Preserve clickable plain links.

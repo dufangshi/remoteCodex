@@ -3,8 +3,8 @@ package com.remotecodex.android.ui.presentation
 sealed interface RichMessageBlock {
     data class Paragraph(val text: String) : RichMessageBlock
     data class Heading(val level: Int, val text: String) : RichMessageBlock
-    data class Bullet(val text: String, val checked: Boolean? = null) : RichMessageBlock
-    data class OrderedItem(val number: Int, val text: String) : RichMessageBlock
+    data class Bullet(val text: String, val checked: Boolean? = null, val level: Int = 0) : RichMessageBlock
+    data class OrderedItem(val number: Int, val text: String, val level: Int = 0) : RichMessageBlock
     data class Quote(val text: String) : RichMessageBlock
     data object HorizontalRule : RichMessageBlock
     data class Table(
@@ -135,12 +135,15 @@ fun parseRichMessageBlocks(content: String): List<RichMessageBlock> {
             continue
         }
 
+        val listIndentLevel = listIndentLevel(line)
+
         val taskBullet = Regex("^[-*+]\\s+\\[([ xX])]\\s+(.+)$").matchEntire(trimmed.trim())
         if (taskBullet != null) {
             flushParagraph()
             blocks += RichMessageBlock.Bullet(
                 text = taskBullet.groupValues[2],
                 checked = taskBullet.groupValues[1].equals("x", ignoreCase = true),
+                level = listIndentLevel,
             )
             index += 1
             continue
@@ -149,7 +152,10 @@ fun parseRichMessageBlocks(content: String): List<RichMessageBlock> {
         val bullet = Regex("^[-*+]\\s+(.+)$").matchEntire(trimmed.trim())
         if (bullet != null) {
             flushParagraph()
-            blocks += RichMessageBlock.Bullet(bullet.groupValues[1])
+            blocks += RichMessageBlock.Bullet(
+                text = bullet.groupValues[1],
+                level = listIndentLevel,
+            )
             index += 1
             continue
         }
@@ -160,6 +166,7 @@ fun parseRichMessageBlocks(content: String): List<RichMessageBlock> {
             blocks += RichMessageBlock.OrderedItem(
                 number = ordered.groupValues[1].toIntOrNull() ?: 1,
                 text = ordered.groupValues[2],
+                level = listIndentLevel,
             )
             index += 1
             continue
@@ -174,6 +181,11 @@ fun parseRichMessageBlocks(content: String): List<RichMessageBlock> {
     }
     flushParagraph()
     return blocks
+}
+
+private fun listIndentLevel(line: String): Int {
+    val leadingSpaces = line.takeWhile { it == ' ' }.length
+    return (leadingSpaces / 2).coerceIn(0, 4)
 }
 
 private data class TableReadResult(

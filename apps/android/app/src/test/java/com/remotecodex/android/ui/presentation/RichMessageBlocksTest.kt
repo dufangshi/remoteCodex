@@ -22,8 +22,8 @@ class RichMessageBlocksTest {
         assertEquals(
             listOf(
                 RichMessageBlock.Heading(level = 2, text = "Summary"),
-                RichMessageBlock.Bullet("first"),
-                RichMessageBlock.Bullet("second"),
+                RichMessageBlock.Bullet("first", level = 0),
+                RichMessageBlock.Bullet("second", level = 0),
                 RichMessageBlock.Code(language = "kotlin", code = "val value = 1\n"),
             ),
             blocks,
@@ -55,10 +55,10 @@ class RichMessageBlocksTest {
         assertEquals(
             listOf(
                 RichMessageBlock.Quote("Keep this visible\nacross lines"),
-                RichMessageBlock.OrderedItem(number = 1, text = "Read web renderer"),
-                RichMessageBlock.OrderedItem(number = 2, text = "Port native behavior"),
-                RichMessageBlock.Bullet(text = "shipped", checked = true),
-                RichMessageBlock.Bullet(text = "pending", checked = false),
+                RichMessageBlock.OrderedItem(number = 1, text = "Read web renderer", level = 0),
+                RichMessageBlock.OrderedItem(number = 2, text = "Port native behavior", level = 0),
+                RichMessageBlock.Bullet(text = "shipped", checked = true, level = 0),
+                RichMessageBlock.Bullet(text = "pending", checked = false, level = 0),
                 RichMessageBlock.HorizontalRule,
                 RichMessageBlock.Table(
                     columns = listOf(
@@ -97,6 +97,28 @@ class RichMessageBlocksTest {
                         listOf("Links", "3", "Done"),
                     ),
                 ),
+            ),
+            blocks,
+        )
+    }
+
+    @Test
+    fun preservesNestedListLevels() {
+        val blocks = parseRichMessageBlocks(
+            """
+            - top
+              - child
+                1. ordered child
+                  - deep child
+            """.trimIndent(),
+        )
+
+        assertEquals(
+            listOf(
+                RichMessageBlock.Bullet("top", level = 0),
+                RichMessageBlock.Bullet("child", level = 1),
+                RichMessageBlock.OrderedItem(number = 1, text = "ordered child", level = 2),
+                RichMessageBlock.Bullet("deep child", level = 3),
             ),
             blocks,
         )

@@ -84,8 +84,16 @@ fun RichMessageContent(
             when (block) {
                 is RichMessageBlock.Paragraph -> RichParagraph(text = block.text)
                 is RichMessageBlock.Heading -> RichHeading(block = block)
-                is RichMessageBlock.Bullet -> RichBullet(text = block.text, checked = block.checked)
-                is RichMessageBlock.OrderedItem -> RichOrderedItem(number = block.number, text = block.text)
+                is RichMessageBlock.Bullet -> RichBullet(
+                    text = block.text,
+                    checked = block.checked,
+                    level = block.level,
+                )
+                is RichMessageBlock.OrderedItem -> RichOrderedItem(
+                    number = block.number,
+                    text = block.text,
+                    level = block.level,
+                )
                 is RichMessageBlock.Quote -> RichQuote(text = block.text)
                 RichMessageBlock.HorizontalRule -> RichHorizontalRule()
                 is RichMessageBlock.Table -> RichTable(columns = block.columns, rows = block.rows)
@@ -203,9 +211,11 @@ private fun RichParagraph(text: String) {
 }
 
 @Composable
-private fun RichBullet(text: String, checked: Boolean? = null) {
+private fun RichBullet(text: String, checked: Boolean? = null, level: Int = 0) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = listIndentPadding(level)),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
@@ -226,9 +236,11 @@ private fun RichBullet(text: String, checked: Boolean? = null) {
 }
 
 @Composable
-private fun RichOrderedItem(number: Int, text: String) {
+private fun RichOrderedItem(number: Int, text: String, level: Int = 0) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = listIndentPadding(level)),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
@@ -243,6 +255,8 @@ private fun RichOrderedItem(number: Int, text: String) {
         )
     }
 }
+
+private fun listIndentPadding(level: Int) = (level.coerceIn(0, 4) * 16).dp
 
 @Composable
 private fun RichQuote(text: String) {
