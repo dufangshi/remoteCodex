@@ -94,6 +94,7 @@ Android equivalents are intentionally native Compose components:
 - `MarkdownHeuristics.kt`
 - `GraphChatToolBlocks.kt`
 - `GraphChatSyntaxHighlighting.kt`
+- `UserMessageSegments.kt`
 - `ThreadColors.kt`
 - `PendingRequestCard.kt`
 - `ThreadRoomsPanel.kt`
@@ -123,7 +124,7 @@ The visual direction is close to the web mobile thread view, but not a literal D
 | `GraphChatThreadChatPanel.tsx` | `ThreadDetailPreviewScreen.kt` + `ThreadTimelineComponents.kt` | Chat surface with timeline padding and fixed composer behavior. |
 | `GraphChatTurnFrame.tsx` | `ThreadTimelineComponents.kt` | Turn header, status, time, token summary, and body grouping. |
 | `GraphChatMessageFrame.tsx` | `ThreadTimelineComponents.kt` | User/assistant message surfaces, sender label, status, time treatment, and assistant reply copy action. |
-| `GraphChatMessageBody.tsx` and `GraphChatMessageContent.tsx` | `ThreadTimelineComponents.kt` + `RichMessageContent.kt` | Native assistant rich message rendering for paragraphs, headings, bullets, inline code, fenced code blocks, tool blocks, and code-copy feedback. User messages parse `[PHOTO path]` and `[FILE path]` tokens into native attachment chips/placeholders. |
+| `GraphChatMessageBody.tsx` and `GraphChatMessageContent.tsx` | `UserMessageSegments.kt` + `ThreadTimelineComponents.kt` + `RichMessageContent.kt` | Native assistant rich message rendering for paragraphs, headings, bullets, inline code, fenced code blocks, tool blocks, and code-copy feedback. User messages parse `[PHOTO path]` and `[FILE path]` tokens into native attachment chips/placeholders through a tested presentation helper. |
 | `markdownHeuristics.ts` | `MarkdownHeuristics.kt` + `RichMessageContent.kt` | Native markdown syntax heuristic chooses between lightweight plain text blocks and richer markdown-like parsing. |
 | `graphChatToolBlocks.ts` | `GraphChatToolBlocks.kt` + `RichMessageContent.kt` | Native preprocessing for `tool-call`, `tool-result`, and merged tool blocks, with dedicated tool block rendering inside rich messages. |
 | `graphChatShiki.ts` | `GraphChatSyntaxHighlighting.kt` + `RichMessageContent.kt` | Lightweight native syntax styling for fenced code blocks. This improves code readability without embedding Shiki or a JavaScript highlighter runtime. |

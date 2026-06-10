@@ -56,10 +56,13 @@ import com.remotecodex.android.ui.model.ToolCallPreview
 import com.remotecodex.android.ui.model.ToolStatus
 import com.remotecodex.android.ui.model.TurnPreview
 import com.remotecodex.android.ui.presentation.historyItemShortLabel
+import com.remotecodex.android.ui.presentation.basenameFromAssetPath
+import com.remotecodex.android.ui.presentation.parseUserMessageSegments
 import com.remotecodex.android.ui.presentation.planStepStatusLabel
 import com.remotecodex.android.ui.presentation.threadStatusLabel
 import com.remotecodex.android.ui.presentation.toolResultStatusLabel
 import com.remotecodex.android.ui.presentation.toolStatusLabel
+import com.remotecodex.android.ui.presentation.UserMessageSegment
 import com.remotecodex.android.ui.theme.ThreadColors
 import kotlinx.coroutines.delay
 
@@ -564,7 +567,7 @@ private fun MessageBubble(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun UserMessageBody(text: String) {
-    val segments = remember(text) { tokenizeUserMessageText(text) }
+    val segments = remember(text) { parseUserMessageSegments(text) }
     FlowRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -650,46 +653,6 @@ private fun UserFileAttachment(path: String) {
             overflow = TextOverflow.Ellipsis,
         )
     }
-}
-
-private sealed interface UserMessageSegment {
-    data class Text(val text: String) : UserMessageSegment
-    data class Photo(val path: String) : UserMessageSegment
-    data class File(val path: String) : UserMessageSegment
-}
-
-private fun tokenizeUserMessageText(text: String): List<UserMessageSegment> {
-    if (text.isEmpty()) return emptyList()
-
-    val matcher = Regex("\\[(PHOTO|FILE)\\s+([^\\]]+)]")
-    val segments = mutableListOf<UserMessageSegment>()
-    var cursor = 0
-    for (match in matcher.findAll(text)) {
-        val start = match.range.first
-        if (start > cursor) {
-            segments += UserMessageSegment.Text(text.substring(cursor, start))
-        }
-        val kind = match.groupValues.getOrNull(1).orEmpty()
-        val path = match.groupValues.getOrNull(2).orEmpty().trim()
-        if (path.isBlank()) {
-            segments += UserMessageSegment.Text(match.value)
-        } else if (kind == "PHOTO") {
-            segments += UserMessageSegment.Photo(path)
-        } else {
-            segments += UserMessageSegment.File(path)
-        }
-        cursor = match.range.last + 1
-    }
-    if (cursor < text.length) {
-        segments += UserMessageSegment.Text(text.substring(cursor))
-    }
-    return segments
-}
-
-private fun basenameFromAssetPath(value: String): String {
-    val normalized = value.replace(Regex("[/\\\\]+$"), "").trim()
-    if (normalized.isBlank()) return ""
-    return normalized.split(Regex("[/\\\\]+")).filter { it.isNotBlank() }.lastOrNull() ?: normalized
 }
 
 @Composable
