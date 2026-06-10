@@ -488,17 +488,9 @@ private fun RendererSettingsRow(renderer: RendererPreview) {
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text(
-            text = renderer.status,
-            modifier = Modifier
-                .clip(RoundedCornerShape(999.dp))
-                .background(ThreadColors.Panel)
-                .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
-                .padding(horizontal = 9.dp, vertical = 5.dp),
-            color = ThreadColors.ForegroundSoft,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
+        GraphBadge(
+            label = renderer.status,
+            variant = GraphBadgeVariant.Outline,
         )
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
