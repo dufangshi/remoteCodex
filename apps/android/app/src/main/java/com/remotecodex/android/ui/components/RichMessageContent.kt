@@ -27,11 +27,16 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import com.remotecodex.android.ui.presentation.GraphChatPlainTextSegment
 import com.remotecodex.android.ui.presentation.hasLikelyMarkdownSyntax
 import com.remotecodex.android.ui.presentation.graphChatHighlightedCode
+import com.remotecodex.android.ui.presentation.graphChatMessagePreviewText
+import com.remotecodex.android.ui.presentation.graphChatPlainTextSegments
 import com.remotecodex.android.ui.presentation.preprocessGraphChatToolBlocks
+import com.remotecodex.android.ui.presentation.shouldShowGraphChatMessageExpansion
 import com.remotecodex.android.ui.presentation.toolBlockStatus
 import com.remotecodex.android.ui.theme.ThreadColors
 import kotlinx.coroutines.delay
@@ -49,10 +54,16 @@ fun RichMessageContent(
     modifier: Modifier = Modifier,
 ) {
     val processedContent = preprocessGraphChatToolBlocks(content).processedContent
-    val blocks = if (hasLikelyMarkdownSyntax(processedContent)) {
-        parseRichBlocks(processedContent)
+    var expanded by remember(processedContent) { mutableStateOf(false) }
+    val shouldShowExpansion = shouldShowGraphChatMessageExpansion(processedContent)
+    val displayContent = graphChatMessagePreviewText(
+        text = processedContent,
+        expanded = expanded,
+    )
+    val blocks = if (hasLikelyMarkdownSyntax(displayContent)) {
+        parseRichBlocks(displayContent)
     } else {
-        parsePlainBlocks(processedContent)
+        parsePlainBlocks(displayContent)
     }
     Column(
         modifier = modifier,
@@ -71,6 +82,20 @@ fun RichMessageContent(
                     }
                 }
             }
+        }
+        if (shouldShowExpansion) {
+            GraphButton(
+                label = if (expanded) {
+                    "Show less"
+                } else {
+                    "Show more (${processedContent.length} chars)"
+                },
+                modifier = Modifier.fillMaxWidth(),
+                size = GraphButtonSize.Small,
+                variant = GraphButtonVariant.Outline,
+                contentDescription = if (expanded) "Collapse message" else "Expand full message",
+                onClick = { expanded = !expanded },
+            )
         }
     }
 }
@@ -171,7 +196,7 @@ private fun RichHeading(block: RichBlock.Heading) {
 @Composable
 private fun RichParagraph(text: String) {
     Text(
-        text = inlineCodeAnnotatedString(text),
+        text = inlineCodeAndLinkAnnotatedString(text),
         color = ThreadColors.Foreground,
         style = MaterialTheme.typography.bodyLarge,
     )
@@ -189,7 +214,7 @@ private fun RichBullet(text: String) {
             style = MaterialTheme.typography.bodyLarge,
         )
         Text(
-            text = inlineCodeAnnotatedString(text),
+            text = inlineCodeAndLinkAnnotatedString(text),
             modifier = Modifier.weight(1f),
             color = ThreadColors.Foreground,
             style = MaterialTheme.typography.bodyLarge,
@@ -260,7 +285,30 @@ private fun CopyCodeButton(value: String) {
 }
 
 @Composable
-private fun inlineCodeAnnotatedString(text: String) = buildAnnotatedString {
+private fun inlineCodeAndLinkAnnotatedString(text: String): AnnotatedString {
+    val segments = graphChatPlainTextSegments(text)
+    return buildAnnotatedString {
+        segments.forEach { segment ->
+            when (segment) {
+                is GraphChatPlainTextSegment.Text -> appendInlineCode(segment.text)
+                is GraphChatPlainTextSegment.Url -> {
+                    withStyle(
+                        SpanStyle(
+                            color = ThreadColors.Info,
+                            fontWeight = FontWeight.Medium,
+                            textDecoration = TextDecoration.Underline,
+                        ),
+                    ) {
+                        append(segment.text)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AnnotatedString.Builder.appendInlineCode(text: String) {
     val pattern = Regex("`([^`\\n]+)`")
     var cursor = 0
     for (match in pattern.findAll(text)) {

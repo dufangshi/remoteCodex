@@ -34,6 +34,15 @@ import com.remotecodex.android.ui.presentation.WorkspaceTreePath
 import com.remotecodex.android.ui.presentation.buildWorkspaceTreeNodes
 
 object ThreadPreviewSample {
+    private val largePlainTextMessage = buildString {
+        append("Large message preview check. Open www.example.com/remote-codex/status, then expand this log when more detail is needed.\n\n")
+        repeat(110) { index ->
+            append("line ")
+            append(index + 1)
+            append(": native timeline body keeps long output collapsed until the operator asks for the full text.\n")
+        }
+    }
+
     val exportTurns = listOf(
         ExportTurnPreview(
             id = "turn-12",
@@ -205,6 +214,8 @@ object ThreadPreviewSample {
                             - reusable console components first
                             - native token parity for light and dark mode
                             - stable `ThreadDetailDto` projection later
+
+                            Plain links stay readable in native text: www.example.com/remote-codex/status.
 
                             ```kotlin
                             @Composable
@@ -431,6 +442,13 @@ object ThreadPreviewSample {
                                 ),
                             ),
                         ),
+                    ),
+                    MessagePreview(
+                        author = MessageAuthor.Assistant,
+                        status = ThreadStatus.Complete,
+                        timeLabel = "13:42",
+                        text = "Large assistant output preview.",
+                        richText = largePlainTextMessage,
                     ),
                 ),
             ),
