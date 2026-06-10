@@ -18,6 +18,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.ui.model.ThreadStatus
 import com.remotecodex.android.ui.model.ToolStatus
+import com.remotecodex.android.ui.presentation.MessageStatusModel
+import com.remotecodex.android.ui.presentation.MessageStatusTone
 import com.remotecodex.android.ui.theme.ThreadColors
 
 @Composable
@@ -63,6 +65,26 @@ fun ThreadStatusBadge(
 }
 
 @Composable
+fun MessageStatusBadge(
+    model: MessageStatusModel,
+    modifier: Modifier = Modifier,
+) {
+    val colors = messageStatusBadgeColors(model.tone)
+    PillBadge(
+        label = model.label,
+        colors = colors,
+        modifier = modifier,
+        leading = {
+            if (model.tone == MessageStatusTone.Running) {
+                RunningDots(color = colors.foreground)
+            } else {
+                Dot(color = colors.foreground)
+            }
+        },
+    )
+}
+
+@Composable
 fun ToolStatusBadge(
     label: String,
     status: ToolStatus,
@@ -97,6 +119,32 @@ fun ToolStatusBadge(
             }
         },
     )
+}
+
+@Composable
+private fun messageStatusBadgeColors(tone: MessageStatusTone): BadgeColors {
+    return when (tone) {
+        MessageStatusTone.Running -> BadgeColors(
+            background = ThreadColors.WarningSoft,
+            border = Color(0xFFFACC15),
+            foreground = ThreadColors.Warning,
+        )
+        MessageStatusTone.Success -> BadgeColors(
+            background = ThreadColors.SuccessSoft,
+            border = Color(0xFF86EFAC),
+            foreground = ThreadColors.Success,
+        )
+        MessageStatusTone.Danger -> BadgeColors(
+            background = ThreadColors.DangerSoft,
+            border = Color(0xFFFDA4AF),
+            foreground = ThreadColors.Danger,
+        )
+        MessageStatusTone.Neutral -> BadgeColors(
+            background = ThreadColors.SurfaceStrong,
+            border = ThreadColors.BorderStrong,
+            foreground = ThreadColors.ForegroundMuted,
+        )
+    }
 }
 
 @Composable

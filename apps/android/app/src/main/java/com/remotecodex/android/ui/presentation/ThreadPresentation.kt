@@ -5,6 +5,18 @@ import com.remotecodex.android.ui.model.PlanStepStatus
 import com.remotecodex.android.ui.model.ThreadStatus
 import com.remotecodex.android.ui.model.ToolStatus
 
+enum class MessageStatusTone {
+    Neutral,
+    Running,
+    Success,
+    Danger,
+}
+
+data class MessageStatusModel(
+    val label: String,
+    val tone: MessageStatusTone,
+)
+
 fun threadStatusLabel(status: ThreadStatus): String {
     return when (status) {
         ThreadStatus.Running -> "Running"
@@ -12,6 +24,26 @@ fun threadStatusLabel(status: ThreadStatus): String {
         ThreadStatus.Failed -> "Failed"
         ThreadStatus.Waiting -> "Waiting"
     }
+}
+
+fun graphChatMessageStatusModel(status: String?): MessageStatusModel? {
+    val label = status?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    val normalized = label.lowercase()
+    val tone = when {
+        normalized.contains("running") ||
+            normalized.contains("generating") ||
+            normalized.contains("steering") -> MessageStatusTone.Running
+        normalized.contains("failed") ||
+            normalized.contains("error") -> MessageStatusTone.Danger
+        normalized.contains("accepted") ||
+            normalized.contains("complete") -> MessageStatusTone.Success
+        else -> MessageStatusTone.Neutral
+    }
+    return MessageStatusModel(label = label, tone = tone)
+}
+
+fun graphChatMessageStatusModel(status: ThreadStatus?): MessageStatusModel? {
+    return status?.let { graphChatMessageStatusModel(threadStatusLabel(it)) }
 }
 
 fun exportStatusLabel(status: ThreadStatus): String {

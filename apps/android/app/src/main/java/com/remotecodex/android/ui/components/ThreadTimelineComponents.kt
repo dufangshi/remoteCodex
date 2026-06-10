@@ -57,6 +57,7 @@ import com.remotecodex.android.ui.model.ToolStatus
 import com.remotecodex.android.ui.model.TurnPreview
 import com.remotecodex.android.ui.presentation.historyItemShortLabel
 import com.remotecodex.android.ui.presentation.basenameFromAssetPath
+import com.remotecodex.android.ui.presentation.graphChatMessageStatusModel
 import com.remotecodex.android.ui.presentation.parseUserMessageSegments
 import com.remotecodex.android.ui.presentation.planStepStatusLabel
 import com.remotecodex.android.ui.presentation.threadStatusLabel
@@ -476,6 +477,8 @@ private fun MessageBubble(
     onOpenDetail: (DetailPreview) -> Unit,
 ) {
     val isUser = message.author == MessageAuthor.User
+    val messageStatus = graphChatMessageStatusModel(message.status)
+    val assistantStatus = if (isUser) null else messageStatus ?: graphChatMessageStatusModel("Complete")
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -505,8 +508,8 @@ private fun MessageBubble(
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
-                message.status?.let {
-                    ThreadStatusBadge(label = threadStatusLabel(it), status = it)
+                assistantStatus?.let {
+                    MessageStatusBadge(model = it)
                 }
                 Spacer(modifier = Modifier.weight(1f))
                 CopyTextButton(
@@ -560,7 +563,7 @@ private fun MessageBubble(
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                message.status?.let { ThreadStatusBadge(label = threadStatusLabel(it), status = it) }
+                messageStatus?.let { MessageStatusBadge(model = it) }
                 Text(
                     text = message.timeLabel,
                     modifier = Modifier.padding(start = 8.dp),
