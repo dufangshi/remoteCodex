@@ -27,6 +27,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -152,14 +154,30 @@ private fun ThreadRoomCard(room: ThreadRoomPreview) {
             )
         }
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = room.title,
-                color = ThreadColors.Foreground,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Text(
+                    text = room.title,
+                    modifier = Modifier.weight(1f),
+                    color = ThreadColors.Foreground,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                RoomQuietButton(
+                    kind = RoomsGlyphKind.Rename,
+                    contentDescription = "Rename thread ${room.title}",
+                )
+                if (room.sessionId != null) {
+                    RoomQuietButton(
+                        kind = RoomsGlyphKind.Copy,
+                        contentDescription = "Copy session ID",
+                    )
+                }
+            }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(7.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -183,12 +201,51 @@ private fun ThreadRoomCard(room: ThreadRoomPreview) {
                 )
             }
         }
+        if (!room.active) {
+            RoomQuietButton(
+                kind = RoomsGlyphKind.Delete,
+                danger = true,
+                contentDescription = "Delete thread ${room.title}",
+            )
+        }
     }
 }
 
 @Composable
-private fun RoomsGlyph(kind: RoomsGlyphKind, color: Color) {
-    Canvas(modifier = Modifier.size(16.dp)) {
+private fun RoomQuietButton(
+    kind: RoomsGlyphKind,
+    contentDescription: String,
+    danger: Boolean = false,
+) {
+    val color = if (danger) ThreadColors.Danger else ThreadColors.ForegroundMuted
+    Box(
+        modifier = Modifier
+            .size(26.dp)
+            .clip(CircleShape)
+            .background(if (danger) ThreadColors.DangerSoft else ThreadColors.Panel.copy(alpha = 0.72f))
+            .border(
+                1.dp,
+                if (danger) ThreadColors.Danger.copy(alpha = 0.36f) else ThreadColors.Border.copy(alpha = 0.72f),
+                CircleShape,
+            )
+            .semantics { this.contentDescription = contentDescription },
+        contentAlignment = Alignment.Center,
+    ) {
+        RoomsGlyph(
+            kind = kind,
+            color = color,
+            modifier = Modifier.size(14.dp),
+        )
+    }
+}
+
+@Composable
+private fun RoomsGlyph(
+    kind: RoomsGlyphKind,
+    color: Color,
+    modifier: Modifier = Modifier.size(16.dp),
+) {
+    Canvas(modifier = modifier) {
         val strokeWidth = 1.45.dp.toPx()
         val w = size.width
         val h = size.height
@@ -200,6 +257,12 @@ private fun RoomsGlyph(kind: RoomsGlyphKind, color: Color) {
                 strokeWidth = strokeWidth,
                 cap = StrokeCap.Round,
             )
+        }
+        fun rect(left: Float, top: Float, right: Float, bottom: Float) {
+            line(left, top, right, top)
+            line(right, top, right, bottom)
+            line(right, bottom, left, bottom)
+            line(left, bottom, left, top)
         }
 
         when (kind) {
@@ -219,6 +282,27 @@ private fun RoomsGlyph(kind: RoomsGlyphKind, color: Color) {
                 line(0.50f, 0.22f, 0.50f, 0.78f)
                 line(0.22f, 0.50f, 0.78f, 0.50f)
             }
+            RoomsGlyphKind.Rename -> {
+                line(0.22f, 0.78f, 0.34f, 0.58f)
+                line(0.34f, 0.58f, 0.70f, 0.22f)
+                line(0.70f, 0.22f, 0.82f, 0.34f)
+                line(0.82f, 0.34f, 0.46f, 0.70f)
+                line(0.46f, 0.70f, 0.22f, 0.78f)
+                line(0.62f, 0.30f, 0.74f, 0.42f)
+            }
+            RoomsGlyphKind.Copy -> {
+                rect(0.32f, 0.24f, 0.72f, 0.72f)
+                line(0.24f, 0.36f, 0.24f, 0.84f)
+                line(0.24f, 0.84f, 0.60f, 0.84f)
+                line(0.60f, 0.84f, 0.60f, 0.72f)
+            }
+            RoomsGlyphKind.Delete -> {
+                line(0.30f, 0.28f, 0.70f, 0.28f)
+                line(0.42f, 0.18f, 0.58f, 0.18f)
+                rect(0.34f, 0.34f, 0.66f, 0.82f)
+                line(0.45f, 0.44f, 0.45f, 0.72f)
+                line(0.55f, 0.44f, 0.55f, 0.72f)
+            }
         }
     }
 }
@@ -226,4 +310,7 @@ private fun RoomsGlyph(kind: RoomsGlyphKind, color: Color) {
 private enum class RoomsGlyphKind {
     Message,
     Plus,
+    Rename,
+    Copy,
+    Delete,
 }
