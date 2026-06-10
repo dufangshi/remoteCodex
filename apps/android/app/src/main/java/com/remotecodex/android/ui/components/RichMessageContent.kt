@@ -42,6 +42,7 @@ import com.remotecodex.android.ui.presentation.hasLikelyMarkdownSyntax
 import com.remotecodex.android.ui.presentation.graphChatHighlightedCode
 import com.remotecodex.android.ui.presentation.graphChatInlineSegments
 import com.remotecodex.android.ui.presentation.graphChatMessagePreviewText
+import com.remotecodex.android.ui.presentation.graphChatToolEntries
 import com.remotecodex.android.ui.presentation.looksLikeMoleculeStructure
 import com.remotecodex.android.ui.presentation.RichMessageBlock
 import com.remotecodex.android.ui.presentation.TableAlignment
@@ -231,6 +232,7 @@ private fun RichToolBlock(language: String, code: String) {
 
 @Composable
 private fun ToolSection(title: String, body: String) {
+    val entries = remember(body) { graphChatToolEntries(body) }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
             text = title,
@@ -238,21 +240,62 @@ private fun ToolSection(title: String, body: String) {
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.SemiBold,
         )
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .clip(RoundedCornerShape(7.dp))
-                .background(ThreadColors.CodeBackground)
-                .padding(10.dp),
-        ) {
-            Text(
-                text = body,
-                color = ThreadColors.CodeForeground,
-                style = MaterialTheme.typography.bodyMedium,
-                fontFamily = FontFamily.Monospace,
-            )
+        if (entries.size == 1 && entries.first().key == "value") {
+            ToolRawValue(body = entries.first().value)
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(ThreadColors.CodeBackground)
+                    .padding(10.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                entries.forEach { entry ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            text = "\"${entry.key}\"",
+                            modifier = Modifier.weight(0.34f),
+                            color = ThreadColors.Info,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                        )
+                        Text(
+                            text = entry.value,
+                            modifier = Modifier
+                                .weight(0.66f)
+                                .horizontalScroll(rememberScrollState()),
+                            color = ThreadColors.CodeForeground,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun ToolRawValue(body: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .clip(RoundedCornerShape(7.dp))
+            .background(ThreadColors.CodeBackground)
+            .padding(10.dp),
+    ) {
+        Text(
+            text = body,
+            color = ThreadColors.CodeForeground,
+            style = MaterialTheme.typography.bodyMedium,
+            fontFamily = FontFamily.Monospace,
+        )
     }
 }
 

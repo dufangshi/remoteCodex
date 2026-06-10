@@ -65,4 +65,33 @@ class GraphChatToolBlocksTest {
         assertEquals("""{"cmd":"test"}""", preview.parameters)
         assertEquals("stdout:\nline 1\nstderr:\nwarn", preview.result)
     }
+
+    @Test
+    fun readsFlatJsonToolEntries() {
+        assertEquals(
+            listOf(
+                GraphChatToolEntry("cmd", """"./gradlew test""""),
+                GraphChatToolEntry("cwd", """"apps/android""""),
+                GraphChatToolEntry("timeout", "120"),
+                GraphChatToolEntry("env", """{"CI":true}"""),
+            ),
+            graphChatToolEntries("""{"cmd":"./gradlew test","cwd":"apps/android","timeout":120,"env":{"CI":true}}"""),
+        )
+    }
+
+    @Test
+    fun readsColonToolEntries() {
+        assertEquals(
+            listOf(
+                GraphChatToolEntry("stdout", "BUILD SUCCESSFUL"),
+                GraphChatToolEntry("stderr", "warn"),
+            ),
+            graphChatToolEntries(
+                """
+                stdout: BUILD SUCCESSFUL
+                stderr: warn
+                """.trimIndent(),
+            ),
+        )
+    }
 }

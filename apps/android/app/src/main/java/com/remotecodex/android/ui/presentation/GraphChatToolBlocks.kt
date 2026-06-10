@@ -18,6 +18,11 @@ data class GraphChatToolBlockPreview(
     val result: String?,
 )
 
+data class GraphChatToolEntry(
+    val key: String,
+    val value: String,
+)
+
 fun preprocessGraphChatToolBlocks(content: String): ToolBlockPreprocessResult {
     val resultMap = linkedMapOf<String, MutableToolResultState>()
     val resultRegex = Regex("```tool-result\\s*([\\s\\S]*?)\\s*```")
@@ -96,6 +101,112 @@ fun parseGraphChatToolBlock(language: String, body: String): GraphChatToolBlockP
         parameters = sections["args"]?.trim().orEmpty().ifBlank { "{}" },
         result = sections["result"]?.trim(),
     )
+}
+
+fun graphChatToolEntries(body: String): List<GraphChatToolEntry> {
+    val objectEntries = readFlatJsonObjectEntries(body)
+    if (objectEntries.isNotEmpty()) {
+        return objectEntries
+    }
+
+    val colonEntries = body
+        .lineSequence()
+        .mapNotNull { line ->
+            val match = Regex("^([A-Za-z_][A-Za-z0-9_-]*)\\s*:\\s*(.+)$").matchEntire(line.trim())
+            match?.let {
+                GraphChatToolEntry(
+                    key = it.groupValues[1],
+                    value = it.groupValues[2],
+                )
+            }
+        }
+        .toList()
+    if (colonEntries.isNotEmpty()) {
+        return colonEntries
+    }
+
+    return body.takeIf { it.isNotBlank() }?.let {
+        listOf(GraphChatToolEntry(key = "value", value = it.trim()))
+    }.orEmpty()
+}
+
+private fun readFlatJsonObjectEntries(body: String): List<GraphChatToolEntry> {
+    val trimmed = body.trim()
+    if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+        return emptyList()
+    }
+
+    val inner = trimmed.removePrefix("{").removeSuffix("}")
+    return splitTopLevelJsonFields(inner).mapNotNull { field ->
+        val separator = topLevelColonIndex(field)
+        if (separator <= 0) return@mapNotNull null
+        val rawKey = field.substring(0, separator).trim().trim('"')
+        val rawValue = field.substring(separator + 1).trim()
+        if (rawKey.isBlank()) {
+            null
+        } else {
+            GraphChatToolEntry(key = rawKey, value = rawValue)
+        }
+    }
+}
+
+private fun splitTopLevelJsonFields(value: String): List<String> {
+    val fields = mutableListOf<String>()
+    var depth = 0
+    var inString = false
+    var escaped = false
+    var start = 0
+
+    value.forEachIndexed { index, char ->
+        if (escaped) {
+            escaped = false
+            return@forEachIndexed
+        }
+        if (char == '\\' && inString) {
+            escaped = true
+            return@forEachIndexed
+        }
+        if (char == '"') {
+            inString = !inString
+            return@forEachIndexed
+        }
+        if (inString) {
+            return@forEachIndexed
+        }
+        when (char) {
+            '{', '[' -> depth += 1
+            '}', ']' -> depth -= 1
+            ',' -> if (depth == 0) {
+                fields += value.substring(start, index).trim()
+                start = index + 1
+            }
+        }
+    }
+    fields += value.substring(start).trim()
+    return fields.filter { it.isNotBlank() }
+}
+
+private fun topLevelColonIndex(value: String): Int {
+    var inString = false
+    var escaped = false
+    value.forEachIndexed { index, char ->
+        if (escaped) {
+            escaped = false
+            return@forEachIndexed
+        }
+        if (char == '\\' && inString) {
+            escaped = true
+            return@forEachIndexed
+        }
+        if (char == '"') {
+            inString = !inString
+            return@forEachIndexed
+        }
+        if (!inString && char == ':') {
+            return index
+        }
+    }
+    return -1
 }
 
 private fun readMergedToolSections(body: String): Map<String, String> {
