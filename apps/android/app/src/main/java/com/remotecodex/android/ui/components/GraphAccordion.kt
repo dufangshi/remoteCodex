@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -63,6 +64,7 @@ fun GraphAccordionItem(
     defaultExpanded: Boolean = false,
     showDivider: Boolean = true,
     titleColor: Color = ThreadColors.Foreground,
+    titleFontFamily: FontFamily? = null,
     subtitleColor: Color = ThreadColors.ForegroundMuted,
     backgroundColor: Color = ThreadColors.Panel,
     contentBackgroundColor: Color? = null,
@@ -106,6 +108,7 @@ fun GraphAccordionItem(
                     text = title,
                     color = titleColor.copy(alpha = triggerAlpha),
                     style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = titleFontFamily,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,

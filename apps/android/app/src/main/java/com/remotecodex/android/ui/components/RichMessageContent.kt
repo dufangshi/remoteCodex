@@ -215,6 +215,7 @@ private fun RichToolBlock(language: String, code: String) {
             defaultExpanded = status != "completed" || !preview.result.isNullOrBlank(),
             showDivider = false,
             titleColor = foreground,
+            titleFontFamily = FontFamily.Monospace,
             subtitleColor = ThreadColors.ForegroundMuted,
             backgroundColor = background,
             contentBackgroundColor = ThreadColors.Surface,
