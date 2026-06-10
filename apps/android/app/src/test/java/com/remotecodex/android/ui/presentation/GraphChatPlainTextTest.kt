@@ -31,13 +31,15 @@ class GraphChatPlainTextTest {
 
     @Test
     fun linkifiesMarkdownInlineLinksBeforePlainUrls() {
-        val segments = graphChatPlainTextSegments("Read [architecture docs](docs/android-client-architecture.md) or www.example.com.")
+        val segments = graphChatPlainTextSegments("Read [architecture docs](docs/android-client-architecture.md), not ![chart](image.png), or www.example.com.")
 
         assertEquals(
             listOf(
                 GraphChatPlainTextSegment.Text("Read "),
                 GraphChatPlainTextSegment.Url("architecture docs", "docs/android-client-architecture.md"),
-                GraphChatPlainTextSegment.Text(" or "),
+                GraphChatPlainTextSegment.Text(", not "),
+                GraphChatPlainTextSegment.Text("![chart](image.png)"),
+                GraphChatPlainTextSegment.Text(", or "),
                 GraphChatPlainTextSegment.Url("www.example.com", "https://www.example.com"),
                 GraphChatPlainTextSegment.Text("."),
             ),
@@ -62,6 +64,22 @@ class GraphChatPlainTextTest {
                 GraphChatInlineSegment.Text(", "),
                 GraphChatInlineSegment.Strikethrough("old"),
                 GraphChatInlineSegment.Text(", and "),
+                GraphChatInlineSegment.Url("docs", "https://example.com"),
+                GraphChatInlineSegment.Text("."),
+            ),
+            segments,
+        )
+    }
+
+    @Test
+    fun parsesMarkdownImagesAsInlineImageSegments() {
+        val segments = graphChatInlineSegments("Before ![shell preview](apps/android/output/shell-preview.png) after [docs](https://example.com).")
+
+        assertEquals(
+            listOf(
+                GraphChatInlineSegment.Text("Before "),
+                GraphChatInlineSegment.Image("shell preview", "apps/android/output/shell-preview.png"),
+                GraphChatInlineSegment.Text(" after "),
                 GraphChatInlineSegment.Url("docs", "https://example.com"),
                 GraphChatInlineSegment.Text("."),
             ),

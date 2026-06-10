@@ -35,6 +35,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.ui.presentation.GraphChatInlineSegment
+import com.remotecodex.android.ui.presentation.basenameFromAssetPath
 import com.remotecodex.android.ui.presentation.hasLikelyMarkdownSyntax
 import com.remotecodex.android.ui.presentation.graphChatHighlightedCode
 import com.remotecodex.android.ui.presentation.graphChatInlineSegments
@@ -49,6 +50,11 @@ import com.remotecodex.android.ui.theme.ThreadColors
 import kotlinx.coroutines.delay
 
 private const val UrlAnnotationTag = "URL"
+
+private sealed interface RichInlineRun {
+    data class Text(val segments: List<GraphChatInlineSegment>) : RichInlineRun
+    data class Image(val segment: GraphChatInlineSegment.Image) : RichInlineRun
+}
 
 @Composable
 fun RichMessageContent(
@@ -362,8 +368,61 @@ private fun RichClickableText(
     text: String,
     modifier: Modifier = Modifier,
 ) {
+    val segments = graphChatInlineSegments(text)
+    if (segments.none { it is GraphChatInlineSegment.Image }) {
+        RichAnnotatedText(
+            segments = segments,
+            modifier = modifier,
+        )
+        return
+    }
+
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        richInlineRuns(segments).forEach { run ->
+            when (run) {
+                is RichInlineRun.Text -> RichAnnotatedText(
+                    segments = run.segments,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                is RichInlineRun.Image -> RichInlineImage(segment = run.segment)
+            }
+        }
+    }
+}
+
+private fun richInlineRuns(segments: List<GraphChatInlineSegment>): List<RichInlineRun> {
+    val runs = mutableListOf<RichInlineRun>()
+    val pending = mutableListOf<GraphChatInlineSegment>()
+
+    fun flushText() {
+        if (pending.isNotEmpty()) {
+            runs += RichInlineRun.Text(pending.toList())
+            pending.clear()
+        }
+    }
+
+    segments.forEach { segment ->
+        if (segment is GraphChatInlineSegment.Image) {
+            flushText()
+            runs += RichInlineRun.Image(segment)
+        } else {
+            pending += segment
+        }
+    }
+    flushText()
+    return runs
+}
+
+@Composable
+private fun RichAnnotatedText(
+    segments: List<GraphChatInlineSegment>,
+    modifier: Modifier = Modifier,
+) {
     val uriHandler = LocalUriHandler.current
-    val annotated = inlineCodeAndLinkAnnotatedString(text)
+    val annotated = inlineSegmentsAnnotatedString(segments)
     ClickableText(
         text = annotated,
         modifier = modifier,
@@ -379,7 +438,11 @@ private fun RichClickableText(
 
 @Composable
 private fun inlineCodeAndLinkAnnotatedString(text: String): AnnotatedString {
-    val segments = graphChatInlineSegments(text)
+    return inlineSegmentsAnnotatedString(graphChatInlineSegments(text))
+}
+
+@Composable
+private fun inlineSegmentsAnnotatedString(segments: List<GraphChatInlineSegment>): AnnotatedString {
     return buildAnnotatedString {
         segments.forEach { segment ->
             when (segment) {
@@ -413,8 +476,49 @@ private fun inlineCodeAndLinkAnnotatedString(text: String): AnnotatedString {
                         append(segment.text)
                     }
                 }
+                is GraphChatInlineSegment.Image -> {
+                    append(segment.label)
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun RichInlineImage(segment: GraphChatInlineSegment.Image) {
+    Column(
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(ThreadColors.InfoSoft.copy(alpha = 0.34f))
+            .border(1.dp, ThreadColors.Info.copy(alpha = 0.34f), RoundedCornerShape(10.dp))
+            .padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(ThreadColors.CodeBackground)
+                .padding(horizontal = 40.dp, vertical = 24.dp),
+        ) {
+            Text(
+                text = "IMAGE",
+                color = ThreadColors.Info,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        Text(
+            text = segment.label.ifBlank { "Attached image" },
+            color = ThreadColors.Foreground,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = basenameFromAssetPath(segment.source).ifBlank { segment.source },
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+        )
     }
 }
 

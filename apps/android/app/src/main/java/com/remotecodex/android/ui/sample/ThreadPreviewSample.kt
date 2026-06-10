@@ -234,6 +234,7 @@ object ThreadPreviewSample {
 
                             Plain links stay readable in native text: www.example.com/remote-codex/status.
                             Markdown links are native too: [architecture docs](docs/android-client-architecture.md).
+                            Markdown images render as native placeholders: ![Shell preview](apps/android/output/shell-preview.png).
 
                             ```kotlin
                             @Composable

@@ -10,6 +10,7 @@ sealed interface GraphChatPlainTextSegment {
 sealed interface GraphChatInlineSegment {
     data class Text(val text: String) : GraphChatInlineSegment
     data class Url(val text: String, val href: String) : GraphChatInlineSegment
+    data class Image(val label: String, val source: String) : GraphChatInlineSegment
     data class Code(val text: String) : GraphChatInlineSegment
     data class Strong(val text: String) : GraphChatInlineSegment
     data class Emphasis(val text: String) : GraphChatInlineSegment
@@ -34,7 +35,7 @@ fun shouldShowGraphChatMessageExpansion(text: String, streaming: Boolean = false
 fun graphChatPlainTextSegments(text: String): List<GraphChatPlainTextSegment> {
     if (text.isEmpty()) return emptyList()
 
-    val markdownLinkPattern = Regex("!?\\[([^\\]\\n]+)]\\(([^)\\s]+)\\)")
+    val markdownLinkPattern = Regex("(!?)\\[([^\\]\\n]+)]\\(([^)\\s]+)\\)")
     val segments = mutableListOf<GraphChatPlainTextSegment>()
     var cursor = 0
 
@@ -44,13 +45,13 @@ fun graphChatPlainTextSegments(text: String): List<GraphChatPlainTextSegment> {
             segments += plainUrlSegments(text.substring(cursor, start))
         }
 
-        val label = match.groupValues.getOrNull(1).orEmpty()
-        val href = match.groupValues.getOrNull(2).orEmpty()
-        if (label.isNotBlank() && href.isNotBlank()) {
-            segments += GraphChatPlainTextSegment.Url(
-                text = label,
-                href = normalizeGraphChatHref(href),
-            )
+        val imagePrefix = match.groupValues.getOrNull(1).orEmpty()
+        val label = match.groupValues.getOrNull(2).orEmpty()
+        val href = match.groupValues.getOrNull(3).orEmpty()
+        if (imagePrefix.isNotEmpty()) {
+            segments += GraphChatPlainTextSegment.Text(match.value)
+        } else if (label.isNotBlank() && href.isNotBlank()) {
+            segments += GraphChatPlainTextSegment.Url(text = label, href = normalizeGraphChatHref(href))
         } else {
             segments += GraphChatPlainTextSegment.Text(match.value)
         }
@@ -65,12 +66,40 @@ fun graphChatPlainTextSegments(text: String): List<GraphChatPlainTextSegment> {
 }
 
 fun graphChatInlineSegments(text: String): List<GraphChatInlineSegment> {
+    if (text.isEmpty()) return emptyList()
+
+    val imagePattern = Regex("!\\[([^\\]\\n]+)]\\(([^)\\s]+)\\)")
+    val segments = mutableListOf<GraphChatInlineSegment>()
+    var cursor = 0
+
+    for (match in imagePattern.findAll(text)) {
+        val start = match.range.first
+        if (start > cursor) {
+            segments += nonImageInlineSegments(text.substring(cursor, start))
+        }
+
+        val label = match.groupValues.getOrNull(1).orEmpty()
+        val source = match.groupValues.getOrNull(2).orEmpty()
+        if (label.isNotBlank() && source.isNotBlank()) {
+            segments += GraphChatInlineSegment.Image(label = label, source = source)
+        } else {
+            segments += GraphChatInlineSegment.Text(match.value)
+        }
+        cursor = match.range.last + 1
+    }
+
+    if (cursor < text.length) {
+        segments += nonImageInlineSegments(text.substring(cursor))
+    }
+
+    return segments
+}
+
+private fun nonImageInlineSegments(text: String): List<GraphChatInlineSegment> {
     return graphChatPlainTextSegments(text).flatMap { segment ->
         when (segment) {
             is GraphChatPlainTextSegment.Text -> inlineStyleSegments(segment.text)
-            is GraphChatPlainTextSegment.Url -> listOf(
-                GraphChatInlineSegment.Url(text = segment.text, href = segment.href),
-            )
+            is GraphChatPlainTextSegment.Url -> listOf(GraphChatInlineSegment.Url(segment.text, segment.href))
         }
     }
 }
