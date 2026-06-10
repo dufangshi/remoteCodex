@@ -31,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -468,19 +469,15 @@ private fun WorkspaceRow(node: WorkspaceNodePreview) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(
-            text = if (node.kind == WorkspaceNodeKind.Directory) {
-                if (node.expanded) "▾" else "▸"
-            } else {
-                " "
-            },
+        WorkspaceDisclosureGlyph(
+            visible = node.kind == WorkspaceNodeKind.Directory,
+            expanded = node.expanded,
             color = ThreadColors.ForegroundMuted,
-            style = MaterialTheme.typography.labelMedium,
         )
-        Text(
-            text = iconFor(node.kind),
+        WorkspaceNodeGlyph(
+            kind = node.kind,
+            expanded = node.expanded,
             color = ThreadColors.ForegroundMuted,
-            style = MaterialTheme.typography.labelMedium,
         )
         Text(
             text = node.name,
@@ -490,6 +487,58 @@ private fun WorkspaceRow(node: WorkspaceNodePreview) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+@Composable
+private fun WorkspaceDisclosureGlyph(
+    visible: Boolean,
+    expanded: Boolean,
+    color: Color,
+) {
+    Canvas(modifier = Modifier.size(12.dp)) {
+        if (!visible) {
+            return@Canvas
+        }
+        val strokeWidth = 1.45.dp.toPx()
+        val path = Path().apply {
+            if (expanded) {
+                moveTo(size.width * 0.24f, size.height * 0.38f)
+                lineTo(size.width * 0.50f, size.height * 0.64f)
+                lineTo(size.width * 0.76f, size.height * 0.38f)
+            } else {
+                moveTo(size.width * 0.38f, size.height * 0.24f)
+                lineTo(size.width * 0.64f, size.height * 0.50f)
+                lineTo(size.width * 0.38f, size.height * 0.76f)
+            }
+        }
+        drawPath(
+            path = path,
+            color = color,
+            style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
+        )
+    }
+}
+
+@Composable
+private fun WorkspaceNodeGlyph(
+    kind: WorkspaceNodeKind,
+    expanded: Boolean,
+    color: Color,
+) {
+    Canvas(modifier = Modifier.size(16.dp)) {
+        val strokeWidth = 1.35.dp.toPx()
+        val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+        when (kind) {
+            WorkspaceNodeKind.Directory -> drawDirectoryGlyph(
+                expanded = expanded,
+                color = color,
+                stroke = stroke,
+            )
+            WorkspaceNodeKind.File -> drawFileGlyph(color = color, stroke = stroke)
+            WorkspaceNodeKind.Artifact -> drawArtifactGlyph(color = color, stroke = stroke)
+            WorkspaceNodeKind.Event -> drawEventGlyph(color = color, stroke = stroke)
+        }
     }
 }
 
@@ -1148,21 +1197,111 @@ private fun GraphEmptyGarbageDialogPreview(
     }
 }
 
-private fun iconFor(kind: WorkspaceNodeKind): String {
-    return when (kind) {
-        WorkspaceNodeKind.Directory -> "□"
-        WorkspaceNodeKind.File -> "◇"
-        WorkspaceNodeKind.Artifact -> "⬡"
-        WorkspaceNodeKind.Event -> "◌"
-    }
-}
-
 private enum class WorkspaceTab(val label: String) {
     Workspace("Workspace"),
     Tools("Tool Usage"),
     Guide("Guide"),
     Graph("Graph"),
     Extensions("Extensions"),
+}
+
+private fun DrawScope.drawDirectoryGlyph(
+    expanded: Boolean,
+    color: Color,
+    stroke: Stroke,
+) {
+    val top = if (expanded) 0.34f else 0.38f
+    val bottom = if (expanded) 0.78f else 0.74f
+    val path = Path().apply {
+        moveTo(size.width * 0.12f, size.height * 0.34f)
+        lineTo(size.width * 0.36f, size.height * 0.34f)
+        lineTo(size.width * 0.44f, size.height * top)
+        lineTo(size.width * 0.88f, size.height * top)
+        lineTo(size.width * 0.88f, size.height * bottom)
+        lineTo(size.width * 0.12f, size.height * bottom)
+        close()
+    }
+    drawPath(path = path, color = color, style = stroke)
+}
+
+private fun DrawScope.drawFileGlyph(
+    color: Color,
+    stroke: Stroke,
+) {
+    val path = Path().apply {
+        moveTo(size.width * 0.26f, size.height * 0.12f)
+        lineTo(size.width * 0.58f, size.height * 0.12f)
+        lineTo(size.width * 0.76f, size.height * 0.30f)
+        lineTo(size.width * 0.76f, size.height * 0.88f)
+        lineTo(size.width * 0.26f, size.height * 0.88f)
+        close()
+        moveTo(size.width * 0.58f, size.height * 0.12f)
+        lineTo(size.width * 0.58f, size.height * 0.30f)
+        lineTo(size.width * 0.76f, size.height * 0.30f)
+    }
+    drawPath(path = path, color = color, style = stroke)
+}
+
+private fun DrawScope.drawArtifactGlyph(
+    color: Color,
+    stroke: Stroke,
+) {
+    val cx = size.width * 0.50f
+    val cy = size.height * 0.50f
+    val radius = size.minDimension * 0.36f
+    val path = Path()
+    repeat(6) { index ->
+        val angle = Math.toRadians((60.0 * index) - 30.0)
+        val point = Offset(
+            x = cx + (cos(angle) * radius).toFloat(),
+            y = cy + (sin(angle) * radius).toFloat(),
+        )
+        if (index == 0) {
+            path.moveTo(point.x, point.y)
+        } else {
+            path.lineTo(point.x, point.y)
+        }
+    }
+    path.close()
+    drawPath(path = path, color = color, style = stroke)
+    drawCircle(
+        color = color,
+        radius = size.minDimension * 0.08f,
+        center = Offset(cx, cy),
+    )
+}
+
+private fun DrawScope.drawEventGlyph(
+    color: Color,
+    stroke: Stroke,
+) {
+    val center = Offset(size.width * 0.50f, size.height * 0.50f)
+    drawCircle(
+        color = color,
+        radius = size.minDimension * 0.28f,
+        center = center,
+        style = stroke,
+    )
+    drawCircle(
+        color = color,
+        radius = size.minDimension * 0.07f,
+        center = center,
+    )
+    val strokeWidth = stroke.width
+    listOf(
+        Offset(0.50f, 0.10f) to Offset(0.50f, 0.22f),
+        Offset(0.50f, 0.78f) to Offset(0.50f, 0.90f),
+        Offset(0.10f, 0.50f) to Offset(0.22f, 0.50f),
+        Offset(0.78f, 0.50f) to Offset(0.90f, 0.50f),
+    ).forEach { (start, end) ->
+        drawLine(
+            color = color,
+            start = Offset(size.width * start.x, size.height * start.y),
+            end = Offset(size.width * end.x, size.height * end.y),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round,
+        )
+    }
 }
 
 private fun DrawScope.drawFloatingEdge(
