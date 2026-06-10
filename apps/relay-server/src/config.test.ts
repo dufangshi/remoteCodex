@@ -47,6 +47,31 @@ describe('relay server config', () => {
     expect(config.webDistDir).toBe(configuredDist);
   });
 
+  it('treats blank optional environment variables as unset', () => {
+    const config = loadRelayServerConfig({
+      HOST: '',
+      PORT: '',
+      REMOTE_CODEX_ADMIN_USERNAME: 'admin',
+      REMOTE_CODEX_ADMIN_PASSWORD: 'password123',
+      REMOTE_CODEX_ADMIN_EMAIL: '',
+      REMOTE_CODEX_RELAY_SUPERVISOR_TOKEN: '',
+      REMOTE_CODEX_RELAY_CLIENT_TOKEN: '',
+      REMOTE_CODEX_RELAY_DATA_DIR: '',
+      REMOTE_CODEX_RELAY_SESSION_SECRET: '',
+      REMOTE_CODEX_RELAY_REGISTRATION_ENABLED: '',
+      REMOTE_CODEX_RELAY_WEB_DIST_DIR: '',
+    } as any);
+
+    expect(config.host).toBe('0.0.0.0');
+    expect(config.port).toBe(8788);
+    expect(config.supervisorToken).toBeNull();
+    expect(config.clientToken).toBeNull();
+    expect(config.adminEmail).toBe('admin@relay.local');
+    expect(config.dataDir).toBe('.local/relay-server');
+    expect(config.sessionSecret).toBe('password123');
+    expect(config.registrationEnabled).toBe(true);
+  });
+
   it('finds the repo web dist when the relay cwd is the relay package', () => {
     const config = loadRelayServerConfig({
       REMOTE_CODEX_ADMIN_USERNAME: 'admin',

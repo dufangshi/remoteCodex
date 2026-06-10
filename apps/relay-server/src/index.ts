@@ -35,6 +35,10 @@ app
     app.log.info(`Remote Codex relay listening on http://${config.host}:${config.port}`);
   })
   .catch((error) => {
+    console.error(
+      `Failed to start Remote Codex relay on http://${config.host}:${config.port}.`,
+    );
+    console.error(error instanceof Error ? error.message : String(error));
     app.log.error(error);
     process.exit(1);
   });

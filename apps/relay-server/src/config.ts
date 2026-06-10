@@ -31,10 +31,40 @@ const envSchema = z.object({
   REMOTE_CODEX_RELAY_WEB_DIST_DIR: z.string().min(1).optional(),
 });
 
+function optionalNonEmpty(value: string | undefined) {
+  const normalized = value?.trim();
+  return normalized ? normalized : undefined;
+}
+
+function normalizeOptionalEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return {
+    ...env,
+    HOST: optionalNonEmpty(env.HOST),
+    PORT: optionalNonEmpty(env.PORT),
+    REMOTE_CODEX_RELAY_SUPERVISOR_TOKEN: optionalNonEmpty(
+      env.REMOTE_CODEX_RELAY_SUPERVISOR_TOKEN,
+    ),
+    REMOTE_CODEX_RELAY_CLIENT_TOKEN: optionalNonEmpty(
+      env.REMOTE_CODEX_RELAY_CLIENT_TOKEN,
+    ),
+    REMOTE_CODEX_ADMIN_EMAIL: optionalNonEmpty(env.REMOTE_CODEX_ADMIN_EMAIL),
+    REMOTE_CODEX_RELAY_DATA_DIR: optionalNonEmpty(env.REMOTE_CODEX_RELAY_DATA_DIR),
+    REMOTE_CODEX_RELAY_SESSION_SECRET: optionalNonEmpty(
+      env.REMOTE_CODEX_RELAY_SESSION_SECRET,
+    ),
+    REMOTE_CODEX_RELAY_REGISTRATION_ENABLED: optionalNonEmpty(
+      env.REMOTE_CODEX_RELAY_REGISTRATION_ENABLED,
+    ),
+    REMOTE_CODEX_RELAY_WEB_DIST_DIR: optionalNonEmpty(
+      env.REMOTE_CODEX_RELAY_WEB_DIST_DIR,
+    ),
+  };
+}
+
 export function loadRelayServerConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): RelayServerConfig {
-  const parsed = envSchema.parse(env);
+  const parsed = envSchema.parse(normalizeOptionalEnv(env));
   return {
     host: parsed.HOST ?? '0.0.0.0',
     port: parsed.PORT ?? 8788,

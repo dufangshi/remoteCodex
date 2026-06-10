@@ -63,7 +63,7 @@ REMOTE_CODEX_MODE=relay
 REMOTE_CODEX_ADMIN_USERNAME=admin
 REMOTE_CODEX_ADMIN_PASSWORD=change-me
 REMOTE_CODEX_SESSION_SECRET=at-least-16-characters
-REMOTE_CODEX_RELAY_SERVER_URL=https://relay.example.com
+REMOTE_CODEX_RELAY_SERVER_URL=wss://relay.example.com
 REMOTE_CODEX_RELAY_AGENT_TOKEN=rcd_device_token_from_relay_portal
 ```
 
@@ -75,7 +75,7 @@ asked to send the private supervisor admin password over the public edge.
 The public relay server is packaged in the main `remote-codex` npm package and
 is started with `remote-codex relay`.
 
-On the public server:
+On the public server, run the relay server:
 
 ```bash
 npm install -g remote-codex
@@ -88,6 +88,54 @@ HOST=0.0.0.0
 PORT=8788
 remote-codex relay
 ```
+
+`remote-codex relay` requires:
+
+- `REMOTE_CODEX_ADMIN_USERNAME`
+- `REMOTE_CODEX_ADMIN_PASSWORD`
+
+It should normally also be given:
+
+- `REMOTE_CODEX_RELAY_SESSION_SECRET`
+- `REMOTE_CODEX_RELAY_DATA_DIR`
+- `REMOTE_CODEX_RELAY_REGISTRATION_ENABLED`
+- `HOST`
+- `PORT`
+
+On the private machine that will run Codex and access local workspaces, run the
+relay-connected supervisor backend:
+
+```bash
+npm install -g remote-codex
+REMOTE_CODEX_ADMIN_USERNAME=admin
+REMOTE_CODEX_ADMIN_PASSWORD=change-me-locally
+REMOTE_CODEX_SESSION_SECRET=at-least-16-characters
+REMOTE_CODEX_RELAY_SERVER_URL=wss://relay.example.com
+REMOTE_CODEX_RELAY_AGENT_TOKEN=rcd_device_token_from_relay_portal
+HOST=127.0.0.1
+PORT=8787
+remote-codex relay-supervisor
+```
+
+`remote-codex relay-supervisor` sets `REMOTE_CODEX_MODE=relay` for the child
+supervisor process. It requires:
+
+- `REMOTE_CODEX_ADMIN_USERNAME`
+- `REMOTE_CODEX_ADMIN_PASSWORD`
+- `REMOTE_CODEX_SESSION_SECRET`
+- `REMOTE_CODEX_RELAY_SERVER_URL`
+- `REMOTE_CODEX_RELAY_AGENT_TOKEN`
+
+When running a relay-connected supervisor beside another local Remote Codex
+service, also set separate values for:
+
+- `PORT`
+- `DATABASE_URL`
+- `WORKSPACE_ROOT`
+
+`REMOTE_CODEX_RELAY_SERVER_URL` is a websocket base URL. Use `ws://host:port`
+for a plain relay port, or `wss://relay.example.com` when the relay is behind
+TLS.
 
 In a source checkout, the same relay can still be developed and tested through
 `pnpm --filter @remote-codex/relay-server dev`.
