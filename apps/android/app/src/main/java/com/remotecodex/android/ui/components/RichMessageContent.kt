@@ -41,6 +41,7 @@ import com.remotecodex.android.ui.presentation.hasLikelyMarkdownSyntax
 import com.remotecodex.android.ui.presentation.graphChatHighlightedCode
 import com.remotecodex.android.ui.presentation.graphChatInlineSegments
 import com.remotecodex.android.ui.presentation.graphChatMessagePreviewText
+import com.remotecodex.android.ui.presentation.looksLikeMoleculeStructure
 import com.remotecodex.android.ui.presentation.RichMessageBlock
 import com.remotecodex.android.ui.presentation.TableAlignment
 import com.remotecodex.android.ui.presentation.TableColumn
@@ -101,6 +102,12 @@ fun RichMessageContent(
                 is RichMessageBlock.Code -> {
                     if (block.language.startsWith("tool-")) {
                         RichToolBlock(language = block.language, code = block.code)
+                    } else if (isMoleculeCodeBlock(block.language, block.code)) {
+                        InlineMoleculePreviewCard(
+                            language = block.language,
+                            code = block.code,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     } else {
                         RichCodeBlock(language = block.language, code = block.code)
                     }
@@ -122,6 +129,14 @@ fun RichMessageContent(
             )
         }
     }
+}
+
+private fun isMoleculeCodeBlock(language: String, code: String): Boolean {
+    val normalized = language.trim().lowercase()
+    if (normalized !in setOf("xyz", "extxyz", "cif", "pdb")) {
+        return false
+    }
+    return looksLikeMoleculeStructure(code, normalized)
 }
 
 @Composable

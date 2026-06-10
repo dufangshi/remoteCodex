@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.ui.model.ArtifactPreview
 import com.remotecodex.android.ui.presentation.MoleculeAtomPreview
+import com.remotecodex.android.ui.presentation.normalizeMoleculeFormat
 import com.remotecodex.android.ui.presentation.parseXyzAtoms
 import com.remotecodex.android.ui.presentation.readGraphMoleculeViewerData
 import com.remotecodex.android.ui.theme.ThreadColors
@@ -101,6 +102,91 @@ fun ArtifactPreviewCard(
             style = MaterialTheme.typography.bodyMedium,
             fontFamily = FontFamily.Monospace,
         )
+    }
+}
+
+@Composable
+fun InlineMoleculePreviewCard(
+    code: String,
+    language: String,
+    modifier: Modifier = Modifier,
+) {
+    val normalizedFormat = remember(language) { normalizeMoleculeFormat(language) }
+    val moleculeData = remember(code, normalizedFormat) {
+        readGraphMoleculeViewerData(
+            source = code.trimEnd() + "\n",
+            format = normalizedFormat,
+        )
+    }
+    val atoms = remember(moleculeData.frames) {
+        moleculeData.frames.firstOrNull()?.let(::parseXyzAtoms).orEmpty()
+    }
+    val sourcePreview = remember(code) {
+        code.trimEnd().lineSequence().take(10).joinToString("\n")
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(ThreadColors.Surface)
+            .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(12.dp)),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(ThreadColors.Panel)
+                .padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "${normalizedFormat.uppercase()} molecule",
+                    color = ThreadColors.Foreground,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "Rendered from message source",
+                    color = ThreadColors.ForegroundMuted,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            GraphBadge(
+                label = if (moleculeData.frames.size == 1) {
+                    "1 frame"
+                } else {
+                    "${moleculeData.frames.size} frames"
+                },
+                variant = GraphBadgeVariant.Outline,
+            )
+            atoms.size.takeIf { it > 0 }?.let { atomCount ->
+                GraphBadge(label = "$atomCount atoms", variant = GraphBadgeVariant.Secondary)
+            }
+        }
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            MoleculeSchematicCanvas(atoms = atoms)
+            Text(
+                text = sourcePreview,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(ThreadColors.CodeBackground)
+                    .padding(10.dp),
+                color = ThreadColors.CodeForeground,
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
     }
 }
 

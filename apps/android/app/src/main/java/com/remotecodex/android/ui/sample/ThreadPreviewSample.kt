@@ -243,6 +243,14 @@ object ThreadPreviewSample {
                             latency = queue + model + tool
                             ${'$'}${'$'}
 
+                            ```xyz
+                            3
+                            water fragment
+                            O 0.000 0.000 0.000
+                            H 0.000 0.758 0.586
+                            H 0.000 -0.758 0.586
+                            ```
+
                             ```kotlin
                             @Composable
                             fun ThreadTimeline(turns: List<TurnPreview>) {

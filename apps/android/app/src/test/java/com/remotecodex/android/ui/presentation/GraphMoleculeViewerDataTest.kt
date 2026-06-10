@@ -65,4 +65,26 @@ class GraphMoleculeViewerDataTest {
         assertEquals("O", atoms[2].element)
         assertEquals(0.5f, atoms[2].z)
     }
+
+    @Test
+    fun recognizesLikelyMoleculeStructures() {
+        val xyz = """
+            2
+            water
+            O 0.0 0.0 0.0
+            H 0.0 0.0 0.9
+        """.trimIndent()
+        val pdb = "ATOM      1  N   GLY A   1      11.104  13.207   9.723"
+        val cif = """
+            data_example
+            _atom_site.label_atom_id
+        """.trimIndent()
+
+        assertEquals(true, looksLikeMoleculeStructure(xyz, "xyz"))
+        assertEquals(true, looksLikeMoleculeStructure(xyz, "extxyz"))
+        assertEquals(true, looksLikeMoleculeStructure(pdb, "pdb"))
+        assertEquals(true, looksLikeMoleculeStructure(cif, "cif"))
+        assertEquals(false, looksLikeMoleculeStructure("file contents...", "xyz"))
+        assertEquals(false, looksLikeMoleculeStructure("...", "xyz"))
+    }
 }

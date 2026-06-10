@@ -71,6 +71,15 @@ fun readGraphMoleculeViewerData(
     )
 }
 
+fun looksLikeMoleculeStructure(content: String, format: String?): Boolean {
+    return when (normalizeMoleculeFormat(format)) {
+        "xyz" -> looksLikeXyzMolecule(content)
+        "pdb" -> looksLikePdbMolecule(content)
+        "cif" -> looksLikeCifMolecule(content)
+        else -> false
+    }
+}
+
 private fun joinFramesForExport(frames: List<String>): String {
     return frames.joinToString("\n") { it.trim() }.trimEnd() + "\n"
 }
@@ -107,4 +116,40 @@ fun parseXyzAtoms(frame: String): List<MoleculeAtomPreview> {
             z = z,
         )
     }
+}
+
+private fun looksLikeXyzMolecule(content: String): Boolean {
+    val lines = content
+        .replace("\r\n", "\n")
+        .replace('\r', '\n')
+        .lines()
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+    if (lines.size < 3) return false
+
+    val atomCount = lines.first().toIntOrNull() ?: return false
+    if (atomCount <= 0 || lines.size < atomCount + 2) return false
+
+    return lines
+        .drop(2)
+        .take(atomCount)
+        .all { line ->
+            val parts = line.split(Regex("\\s+"))
+            parts.size >= 4 &&
+                Regex("^([A-Za-z][A-Za-z]?|\\d+)$").matches(parts[0]) &&
+                parts[1].toFloatOrNull() != null &&
+                parts[2].toFloatOrNull() != null &&
+                parts[3].toFloatOrNull() != null
+        }
+}
+
+private fun looksLikePdbMolecule(content: String): Boolean {
+    return content.lines().any { line ->
+        Regex("^(ATOM|HETATM)\\s+", RegexOption.IGNORE_CASE).containsMatchIn(line)
+    }
+}
+
+private fun looksLikeCifMolecule(content: String): Boolean {
+    return Regex("\\bdata_[^\\s]*", RegexOption.IGNORE_CASE).containsMatchIn(content) &&
+        Regex("_atom_site\\.", RegexOption.IGNORE_CASE).containsMatchIn(content)
 }
