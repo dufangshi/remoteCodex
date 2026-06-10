@@ -58,6 +58,7 @@ fun GraphAccordionItem(
     title: String,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
+    stateKey: String = title,
     enabled: Boolean = true,
     defaultExpanded: Boolean = false,
     showDivider: Boolean = true,
@@ -69,7 +70,7 @@ fun GraphAccordionItem(
     trailing: @Composable (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    var expanded by rememberSaveable(title) { mutableStateOf(defaultExpanded) }
+    var expanded by rememberSaveable(stateKey) { mutableStateOf(defaultExpanded) }
     val triggerAlpha = if (enabled) 1f else 0.48f
     Column(
         modifier = modifier

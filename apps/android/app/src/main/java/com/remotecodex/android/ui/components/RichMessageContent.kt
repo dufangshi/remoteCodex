@@ -23,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.SpanStyle
@@ -181,56 +182,45 @@ private fun RichToolBlock(language: String, code: String) {
         "pending" -> ThreadColors.WarningSoft
         else -> ThreadColors.SuccessSoft
     }
-    Column(
+    val statusLabel = when (status) {
+        "completed" -> "Completed"
+        "failed" -> "Failed"
+        else -> "Running"
+    }
+    GraphAccordion(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(9.dp))
-            .background(ThreadColors.Surface)
             .border(1.dp, foreground.copy(alpha = 0.38f), RoundedCornerShape(9.dp)),
-        verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(background)
-                .padding(horizontal = 10.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        GraphAccordionItem(
+            title = preview.title,
+            subtitle = preview.callId,
+            stateKey = "tool:${preview.title}:${preview.callId.orEmpty()}:$status:${code.length}",
+            defaultExpanded = status != "completed" || !preview.result.isNullOrBlank(),
+            showDivider = false,
+            titleColor = foreground,
+            subtitleColor = ThreadColors.ForegroundMuted,
+            backgroundColor = background,
+            contentBackgroundColor = ThreadColors.Surface,
+            leading = {
+                GraphAccordionIcon(label = "Tool", color = foreground)
+            },
+            trailing = {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = statusLabel,
+                        color = foreground,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    CopyCodeButton(value = code.trimEnd())
+                }
+            },
         ) {
-            Text(
-                text = preview.title,
-                modifier = Modifier.weight(1f),
-                color = foreground,
-                style = MaterialTheme.typography.labelMedium,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = when (status) {
-                    "completed" -> "Completed"
-                    "failed" -> "Failed"
-                    else -> "Running"
-                },
-                color = foreground,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
-            CopyCodeButton(value = code.trimEnd())
-        }
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            preview.callId?.let { callId ->
-                Text(
-                    text = callId,
-                    color = ThreadColors.ForegroundMuted,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = FontFamily.Monospace,
-                    maxLines = 1,
-                )
-            }
             ToolSection(title = "Parameters", body = preview.parameters.ifBlank { "{}" })
             preview.result?.takeIf { it.isNotBlank() }?.let { result ->
                 ToolSection(title = "Result", body = result)
