@@ -329,6 +329,12 @@ private fun TopBarGlyph(
                 cap = StrokeCap.Round,
             )
         }
+        fun rect(left: Float, top: Float, right: Float, bottom: Float) {
+            line(left, top, right, top)
+            line(right, top, right, bottom)
+            line(right, bottom, left, bottom)
+            line(left, bottom, left, top)
+        }
 
         when (icon) {
             TopBarIcon.Menu -> {
@@ -374,6 +380,30 @@ private fun TopBarGlyph(
                 line(0.24f, 0.62f, 0.50f, 0.36f)
                 line(0.50f, 0.36f, 0.76f, 0.62f)
             }
+            TopBarIcon.Rename -> {
+                line(0.22f, 0.78f, 0.34f, 0.58f)
+                line(0.34f, 0.58f, 0.70f, 0.22f)
+                line(0.70f, 0.22f, 0.82f, 0.34f)
+                line(0.82f, 0.34f, 0.46f, 0.70f)
+                line(0.46f, 0.70f, 0.22f, 0.78f)
+                line(0.62f, 0.30f, 0.74f, 0.42f)
+            }
+            TopBarIcon.Export -> {
+                line(0.50f, 0.18f, 0.50f, 0.58f)
+                line(0.34f, 0.42f, 0.50f, 0.58f)
+                line(0.66f, 0.42f, 0.50f, 0.58f)
+                line(0.22f, 0.68f, 0.22f, 0.82f)
+                line(0.22f, 0.82f, 0.78f, 0.82f)
+                line(0.78f, 0.82f, 0.78f, 0.68f)
+            }
+            TopBarIcon.Delete -> {
+                line(0.30f, 0.28f, 0.70f, 0.28f)
+                line(0.42f, 0.18f, 0.58f, 0.18f)
+                line(0.38f, 0.18f, 0.62f, 0.18f)
+                rect(0.34f, 0.34f, 0.66f, 0.82f)
+                line(0.45f, 0.44f, 0.45f, 0.72f)
+                line(0.55f, 0.44f, 0.55f, 0.72f)
+            }
         }
     }
 }
@@ -385,6 +415,9 @@ private enum class TopBarIcon {
     Threads,
     ChevronDown,
     ChevronUp,
+    Rename,
+    Export,
+    Delete,
 }
 
 @Composable
@@ -403,16 +436,19 @@ private fun ThreadActionMenu(
     ) {
         ActionMenuButton(
             label = "Rename",
+            icon = TopBarIcon.Rename,
             onClick = { onOpenThreadAction(ThreadActionDialog.Rename) },
             modifier = Modifier.weight(1f),
         )
         ActionMenuButton(
             label = "Export",
+            icon = TopBarIcon.Export,
             onClick = { onOpenThreadAction(ThreadActionDialog.Export) },
             modifier = Modifier.weight(1f),
         )
         ActionMenuButton(
             label = "Delete",
+            icon = TopBarIcon.Delete,
             onClick = { onOpenThreadAction(ThreadActionDialog.Delete) },
             modifier = Modifier.weight(1f),
             danger = true,
@@ -423,13 +459,13 @@ private fun ThreadActionMenu(
 @Composable
 private fun ActionMenuButton(
     label: String,
+    icon: TopBarIcon,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     danger: Boolean = false,
 ) {
     val foreground = if (danger) ThreadColors.Danger else ThreadColors.ForegroundSoft
-    Text(
-        text = label,
+    Row(
         modifier = modifier
             .height(36.dp)
             .clip(RoundedCornerShape(8.dp))
@@ -441,11 +477,18 @@ private fun ActionMenuButton(
             )
             .clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 9.dp),
-        color = foreground,
-        style = MaterialTheme.typography.labelMedium,
-        fontWeight = FontWeight.SemiBold,
-        maxLines = 1,
-    )
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        TopBarGlyph(icon = icon, color = foreground, modifier = Modifier.size(14.dp))
+        Text(
+            text = label,
+            color = foreground,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+        )
+    }
 }
 
 @Composable
