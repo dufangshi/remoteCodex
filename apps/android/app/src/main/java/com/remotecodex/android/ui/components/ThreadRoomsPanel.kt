@@ -1,8 +1,10 @@
 package com.remotecodex.android.ui.components
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -21,6 +24,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -86,17 +92,23 @@ fun ThreadRoomsPanel(
             )
         }
 
-        Text(
-            text = "New thread",
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(11.dp))
                 .background(ThreadColors.Primary)
                 .padding(horizontal = 14.dp, vertical = 12.dp),
-            color = ThreadColors.PrimaryForeground,
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            RoomsGlyph(kind = RoomsGlyphKind.Plus, color = ThreadColors.PrimaryForeground)
+            Text(
+                text = "New thread",
+                color = ThreadColors.PrimaryForeground,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
 
         LazyColumn(
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -122,15 +134,23 @@ private fun ThreadRoomCard(room: ThreadRoomPreview) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text(
-            text = "□",
+        Box(
             modifier = Modifier
+                .size(32.dp)
                 .clip(CircleShape)
                 .background(ThreadColors.Panel)
-                .padding(horizontal = 9.dp, vertical = 7.dp),
-            color = ThreadColors.ForegroundMuted,
-            style = MaterialTheme.typography.labelMedium,
-        )
+                .border(
+                    1.dp,
+                    if (room.active) ThreadColors.Primary.copy(alpha = 0.42f) else ThreadColors.Border,
+                    CircleShape,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            RoomsGlyph(
+                kind = RoomsGlyphKind.Message,
+                color = if (room.active) ThreadColors.Primary else ThreadColors.ForegroundMuted,
+            )
+        }
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = room.title,
@@ -164,4 +184,46 @@ private fun ThreadRoomCard(room: ThreadRoomPreview) {
             }
         }
     }
+}
+
+@Composable
+private fun RoomsGlyph(kind: RoomsGlyphKind, color: Color) {
+    Canvas(modifier = Modifier.size(16.dp)) {
+        val strokeWidth = 1.45.dp.toPx()
+        val w = size.width
+        val h = size.height
+        fun line(x1: Float, y1: Float, x2: Float, y2: Float) {
+            drawLine(
+                color = color,
+                start = Offset(w * x1, h * y1),
+                end = Offset(w * x2, h * y2),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round,
+            )
+        }
+
+        when (kind) {
+            RoomsGlyphKind.Message -> {
+                line(0.22f, 0.28f, 0.22f, 0.56f)
+                line(0.22f, 0.28f, 0.34f, 0.18f)
+                line(0.34f, 0.18f, 0.72f, 0.18f)
+                line(0.72f, 0.18f, 0.82f, 0.30f)
+                line(0.82f, 0.30f, 0.82f, 0.56f)
+                line(0.82f, 0.56f, 0.70f, 0.66f)
+                line(0.70f, 0.66f, 0.50f, 0.66f)
+                line(0.50f, 0.66f, 0.32f, 0.82f)
+                line(0.32f, 0.82f, 0.32f, 0.66f)
+                line(0.32f, 0.66f, 0.22f, 0.56f)
+            }
+            RoomsGlyphKind.Plus -> {
+                line(0.50f, 0.22f, 0.50f, 0.78f)
+                line(0.22f, 0.50f, 0.78f, 0.50f)
+            }
+        }
+    }
+}
+
+private enum class RoomsGlyphKind {
+    Message,
+    Plus,
 }
