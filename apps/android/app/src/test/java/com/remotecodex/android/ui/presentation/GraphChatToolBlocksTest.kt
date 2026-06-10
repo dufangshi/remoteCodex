@@ -108,6 +108,12 @@ class GraphChatToolBlocksTest {
     }
 
     @Test
+    fun keepsEmptyJsonObjectAsStructuredEntries() {
+        assertEquals(emptyList<GraphChatToolEntry>(), graphChatToolEntries("{}"))
+        assertEquals(emptyList<GraphChatToolEntry>(), graphChatToolEntries("{   }"))
+    }
+
+    @Test
     fun fallsBackToRawValueEntry() {
         assertEquals(
             listOf(GraphChatToolEntry("value", "plain output", GraphChatToolValueKind.Raw)),

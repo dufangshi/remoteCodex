@@ -115,7 +115,7 @@ fun parseGraphChatToolBlock(language: String, body: String): GraphChatToolBlockP
 
 fun graphChatToolEntries(body: String): List<GraphChatToolEntry> {
     val objectEntries = readFlatJsonObjectEntries(body)
-    if (objectEntries.isNotEmpty()) {
+    if (objectEntries.isNotEmpty() || isJsonObjectLiteral(body)) {
         return objectEntries
     }
 
@@ -145,9 +145,14 @@ fun graphChatToolEntries(body: String): List<GraphChatToolEntry> {
     }.orEmpty()
 }
 
+private fun isJsonObjectLiteral(body: String): Boolean {
+    val trimmed = body.trim()
+    return trimmed.startsWith("{") && trimmed.endsWith("}")
+}
+
 private fun readFlatJsonObjectEntries(body: String): List<GraphChatToolEntry> {
     val trimmed = body.trim()
-    if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+    if (!isJsonObjectLiteral(trimmed)) {
         return emptyList()
     }
 
