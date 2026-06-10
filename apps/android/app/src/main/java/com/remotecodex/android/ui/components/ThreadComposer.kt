@@ -112,16 +112,7 @@ fun ThreadComposer(
                 icon = ComposerToolIcon.Terminal,
                 label = "Shell",
             )
-            Text(
-                text = "Send",
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(ThreadColors.Primary)
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                color = ThreadColors.PrimaryForeground,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
+            ComposerSendButton()
         }
     }
 }
@@ -342,7 +333,26 @@ private fun ComposerToolGlyph(icon: ComposerToolIcon, color: Color) {
                 line(0.31f, 0.82f, 0.31f, 0.65f, terminalStrokeWidth)
                 line(0.31f, 0.65f, 0.19f, 0.55f, terminalStrokeWidth)
             }
+            ComposerToolIcon.Send -> {
+                line(0.50f, 0.82f, 0.50f, 0.18f, 1.8.dp.toPx())
+                line(0.25f, 0.43f, 0.50f, 0.18f, 1.8.dp.toPx())
+                line(0.75f, 0.43f, 0.50f, 0.18f, 1.8.dp.toPx())
+            }
         }
+    }
+}
+
+@Composable
+private fun ComposerSendButton() {
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(ThreadColors.Primary)
+            .border(1.dp, ThreadColors.Primary, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        ComposerToolGlyph(icon = ComposerToolIcon.Send, color = ThreadColors.PrimaryForeground)
     }
 }
 
@@ -641,4 +651,5 @@ private enum class ComposerToolIcon {
     Plus,
     Terminal,
     Chat,
+    Send,
 }
