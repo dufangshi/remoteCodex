@@ -9,6 +9,8 @@ const binDir = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(binDir, '..');
 const packageJsonPath = path.join(packageRoot, 'package.json');
 const serviceManagerPath = path.join(packageRoot, 'scripts', 'service-manager.mjs');
+const relayDistEntry = path.join(packageRoot, 'apps', 'relay-server', 'dist', 'index.js');
+const relaySourceEntry = path.join(packageRoot, 'apps', 'relay-server', 'src', 'index.ts');
 const sourceCheckout =
   fs.existsSync(path.join(packageRoot, 'pnpm-workspace.yaml')) &&
   fs.existsSync(path.join(packageRoot, 'scripts', 'service-restart.mjs'));
@@ -33,30 +35,74 @@ if (command === 'version') {
   process.exit(0);
 }
 
-if (!['start', 'stop', 'status'].includes(command)) {
+if (command === 'relay') {
+  runRelayServer();
+} else if (!['start', 'stop', 'status'].includes(command)) {
   printHelp();
   process.exit(command ? 1 : 0);
+} else {
+  const child = spawn(process.execPath, [serviceManagerPath, command], {
+    cwd: packageRoot,
+    env: process.env,
+    stdio: 'inherit',
+  });
+
+  child.on('exit', (code, signal) => {
+    if (signal) {
+      process.kill(process.pid, signal);
+      return;
+    }
+
+    process.exit(code ?? 1);
+  });
+
+  child.on('error', (error) => {
+    console.error(`Failed to run remote-codex ${command}: ${error.message}`);
+    process.exit(1);
+  });
 }
 
-const child = spawn(process.execPath, [serviceManagerPath, command], {
-  cwd: packageRoot,
-  env: process.env,
-  stdio: 'inherit',
-});
+function runRelayServer() {
+  const relayEntry = fs.existsSync(relayDistEntry) ? relayDistEntry : relaySourceEntry;
+  let commandToRun = process.execPath;
+  let args = [relayEntry];
 
-child.on('exit', (code, signal) => {
-  if (signal) {
-    process.kill(process.pid, signal);
-    return;
+  if (!fs.existsSync(relayEntry)) {
+    console.error('Relay server build artifacts are missing. Run `pnpm build` before using `remote-codex relay`.');
+    console.error(`Missing: ${path.relative(packageRoot, relayDistEntry)}`);
+    process.exit(1);
   }
 
-  process.exit(code ?? 1);
-});
+  if (relayEntry === relaySourceEntry) {
+    const tsxEntry = path.join(packageRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
+    if (!fs.existsSync(tsxEntry)) {
+      console.error('Relay server build artifacts are missing and tsx is not installed for source execution.');
+      console.error('Run `pnpm build` or install dependencies with `pnpm install`.');
+      process.exit(1);
+    }
+    args = [tsxEntry, relaySourceEntry];
+  }
 
-child.on('error', (error) => {
-  console.error(`Failed to run remote-codex ${command}: ${error.message}`);
-  process.exit(1);
-});
+  const relay = spawn(commandToRun, args, {
+    cwd: packageRoot,
+    env: process.env,
+    stdio: 'inherit',
+  });
+
+  relay.on('exit', (code, signal) => {
+    if (signal) {
+      process.kill(process.pid, signal);
+      return;
+    }
+
+    process.exit(code ?? 1);
+  });
+
+  relay.on('error', (error) => {
+    console.error(`Failed to run remote-codex relay: ${error.message}`);
+    process.exit(1);
+  });
+}
 
 function normalizeCommand(value) {
   if (!value || value === '-h' || value === '--help') {
@@ -86,6 +132,7 @@ Usage:
   remote-codex start
   remote-codex status
   remote-codex stop
+  remote-codex relay
 
 Environment:
   SERVICE_HOST              Web listen host, default 127.0.0.1
@@ -93,5 +140,11 @@ Environment:
   SERVICE_API_HOST          API listen host, default 127.0.0.1
   SERVICE_API_PORT          API listen port, default ${defaultApiPort}
   REMOTE_CODEX_SERVICE_DIR  Service state and log directory, default ~/.remote-codex/service
+
+Relay:
+  REMOTE_CODEX_RELAY_SUPERVISOR_TOKEN  Required token for the home supervisor tunnel
+  REMOTE_CODEX_RELAY_CLIENT_TOKEN      Optional token required from relay clients
+  HOST                                 Relay listen host, default 0.0.0.0
+  PORT                                 Relay listen port, default 8788
 `);
 }

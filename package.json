@@ -12,6 +12,7 @@
     "scripts/service-manager.mjs",
     "scripts/run-web-service.mjs",
     "apps/supervisor-api/dist/",
+    "apps/relay-server/dist/",
     "apps/supervisor-web/dist/",
     "config/codex-model-pricing.json",
     "packages/agent-runtime/src/",

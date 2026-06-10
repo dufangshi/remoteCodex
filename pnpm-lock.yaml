@@ -112,6 +112,18 @@ importers:
         specifier: ^3.1.1
         version: 3.2.6(@types/debug@4.1.13)(@types/node@22.19.20)(jiti@2.7.0)(jsdom@26.1.0)(lightningcss@1.32.0)(tsx@4.22.4)
 
+  apps/relay-server:
+    dependencies:
+      '@fastify/websocket':
+        specifier: ^11.0.2
+        version: 11.2.0
+      fastify:
+        specifier: ^5.2.1
+        version: 5.8.5
+      zod:
+        specifier: ^3.24.2
+        version: 3.25.76
+
   apps/supervisor-api:
     dependencies:
       '@fastify/multipart':
