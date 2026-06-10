@@ -222,7 +222,7 @@ object ThreadPreviewSample {
                             2. Keep the native mobile surface compact.
 
                             - [x] Preserve clickable plain links.
-                            - [ ] Add full math rendering later.
+                            - [x] Keep math notation readable in native markdown.
 
                             > Long agent output needs structure on mobile.
                             > Blockquotes stay framed without taking over the thread.
@@ -237,6 +237,11 @@ object ThreadPreviewSample {
                             Plain links stay readable in native text: www.example.com/remote-codex/status.
                             Markdown links are native too: [architecture docs](docs/android-client-architecture.md).
                             Markdown images render as native placeholders: ![Shell preview](apps/android/output/shell-preview.png).
+                            Inline formulas stay compact: ${'$'}tokens_{in} + tokens_{out}${'$'}.
+
+                            ${'$'}${'$'}
+                            latency = queue + model + tool
+                            ${'$'}${'$'}
 
                             ```kotlin
                             @Composable

@@ -12,6 +12,7 @@ sealed interface GraphChatInlineSegment {
     data class Url(val text: String, val href: String) : GraphChatInlineSegment
     data class Image(val label: String, val source: String) : GraphChatInlineSegment
     data class Code(val text: String) : GraphChatInlineSegment
+    data class Math(val expression: String) : GraphChatInlineSegment
     data class Strong(val text: String) : GraphChatInlineSegment
     data class Emphasis(val text: String) : GraphChatInlineSegment
     data class Strikethrough(val text: String) : GraphChatInlineSegment
@@ -107,7 +108,7 @@ private fun nonImageInlineSegments(text: String): List<GraphChatInlineSegment> {
 private fun inlineStyleSegments(text: String): List<GraphChatInlineSegment> {
     if (text.isEmpty()) return emptyList()
 
-    val pattern = Regex("(`[^`\\n]+`|~~[^~\\n]+~~|\\*\\*[^*\\n]+\\*\\*|__[^_\\n]+__|(?<!\\w)\\*[^*\\n]+\\*(?!\\w)|(?<!\\w)_[^_\\n]+_(?!\\w))")
+    val pattern = Regex("(\\\\\\([^\\n]+?\\\\\\)|\\$(?!\\s)[^$\\n]+?(?<!\\s)\\$|`[^`\\n]+`|~~[^~\\n]+~~|\\*\\*[^*\\n]+\\*\\*|__[^_\\n]+__|(?<!\\w)\\*[^*\\n]+\\*(?!\\w)|(?<!\\w)_[^_\\n]+_(?!\\w))")
     val segments = mutableListOf<GraphChatInlineSegment>()
     var cursor = 0
 
@@ -129,6 +130,12 @@ private fun inlineStyleSegments(text: String): List<GraphChatInlineSegment> {
 
 private fun styledInlineSegment(raw: String): GraphChatInlineSegment {
     return when {
+        raw.startsWith("\\(") && raw.endsWith("\\)") -> {
+            GraphChatInlineSegment.Math(raw.substring(2, raw.length - 2))
+        }
+        raw.startsWith("$") && raw.endsWith("$") -> {
+            GraphChatInlineSegment.Math(raw.substring(1, raw.length - 1))
+        }
         raw.startsWith("`") && raw.endsWith("`") -> {
             GraphChatInlineSegment.Code(raw.substring(1, raw.length - 1))
         }

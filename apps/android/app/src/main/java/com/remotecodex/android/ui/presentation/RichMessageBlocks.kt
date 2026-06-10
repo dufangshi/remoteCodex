@@ -7,6 +7,7 @@ sealed interface RichMessageBlock {
     data class OrderedItem(val number: Int, val text: String, val level: Int = 0) : RichMessageBlock
     data class Quote(val text: String) : RichMessageBlock
     data object HorizontalRule : RichMessageBlock
+    data class Math(val expression: String) : RichMessageBlock
     data class Table(
         val columns: List<TableColumn>,
         val rows: List<List<String>>,
@@ -74,6 +75,32 @@ fun parseRichMessageBlocks(content: String): List<RichMessageBlock> {
                 code.appendLine(line)
             }
             index += 1
+            continue
+        }
+
+        val dollarMath = readDelimitedMathBlock(
+            lines = lines,
+            startIndex = index,
+            opening = "$$",
+            closing = "$$",
+        )
+        if (dollarMath != null) {
+            flushParagraph()
+            blocks += RichMessageBlock.Math(dollarMath.expression)
+            index = dollarMath.nextIndex
+            continue
+        }
+
+        val bracketMath = readDelimitedMathBlock(
+            lines = lines,
+            startIndex = index,
+            opening = "\\[",
+            closing = "\\]",
+        )
+        if (bracketMath != null) {
+            flushParagraph()
+            blocks += RichMessageBlock.Math(bracketMath.expression)
+            index = bracketMath.nextIndex
             continue
         }
 
@@ -193,6 +220,59 @@ private data class TableReadResult(
     val rows: List<List<String>>,
     val nextIndex: Int,
 )
+
+private data class MathReadResult(
+    val expression: String,
+    val nextIndex: Int,
+)
+
+private fun readDelimitedMathBlock(
+    lines: List<String>,
+    startIndex: Int,
+    opening: String,
+    closing: String,
+): MathReadResult? {
+    val startLine = lines[startIndex].trim()
+    if (!startLine.startsWith(opening)) {
+        return null
+    }
+
+    val firstBody = startLine.removePrefix(opening)
+    if (firstBody.endsWith(closing) && firstBody.length >= closing.length) {
+        return MathReadResult(
+            expression = firstBody.removeSuffix(closing).trim(),
+            nextIndex = startIndex + 1,
+        )
+    }
+
+    val body = StringBuilder()
+    if (firstBody.isNotBlank()) {
+        body.appendLine(firstBody)
+    }
+
+    var index = startIndex + 1
+    while (index < lines.size) {
+        val line = lines[index]
+        val trimmed = line.trim()
+        if (trimmed.endsWith(closing)) {
+            val beforeClosing = line.substringBeforeLast(closing).trimEnd()
+            if (beforeClosing.isNotBlank()) {
+                body.appendLine(beforeClosing)
+            }
+            return MathReadResult(
+                expression = body.toString().trim(),
+                nextIndex = index + 1,
+            )
+        }
+        body.appendLine(line)
+        index += 1
+    }
+
+    return MathReadResult(
+        expression = body.toString().trim(),
+        nextIndex = lines.size,
+    )
+}
 
 private fun readSimpleMarkdownTable(lines: List<String>, startIndex: Int): TableReadResult? {
     if (startIndex + 1 >= lines.size) return null

@@ -13,6 +13,8 @@ private val tableMarkdownPattern = Regex(
 )
 private val inlineLinkPattern = Regex("!?\\[[^\\]\\n]+\\]\\([^)]+\\)")
 private val inlineCodePattern = Regex("`[^`\\n]+`")
+private val blockMathPattern = Regex("(?ms)(^|\\n)\\s*(?:\\$\\$.*?\\$\\$|\\\\\\[.*?\\\\])\\s*($|\\n)")
+private val inlineMathPattern = Regex("(?:\\\\\\([^\\n]+?\\\\\\)|\\$(?!\\s)[^$\\n]+?(?<!\\s)\\$)")
 private val strongEmphasisPattern = Regex("(?:\\*\\*[^*\\n]+\\*\\*|__[^_\\n]+__)")
 private val emphasisPattern = Regex("(^|[^\\w])(?:\\*[^*\\n]+\\*|_[^_\\n]+_)(?=[^\\w]|$)")
 private val strikethroughPattern = Regex("~~[^~\\n]+~~")
@@ -30,12 +32,14 @@ fun hasLikelyMarkdownSyntax(text: String): Boolean {
         return true
     }
 
-    if (!Regex("[`\\[\\]*_~!]").containsMatchIn(trimmed)) {
+    if (!Regex("[`\\[\\]*_~!$]").containsMatchIn(trimmed)) {
         return false
     }
 
     return inlineLinkPattern.containsMatchIn(trimmed) ||
         inlineCodePattern.containsMatchIn(trimmed) ||
+        blockMathPattern.containsMatchIn(trimmed) ||
+        inlineMathPattern.containsMatchIn(trimmed) ||
         strongEmphasisPattern.containsMatchIn(trimmed) ||
         emphasisPattern.containsMatchIn(trimmed) ||
         strikethroughPattern.containsMatchIn(trimmed)

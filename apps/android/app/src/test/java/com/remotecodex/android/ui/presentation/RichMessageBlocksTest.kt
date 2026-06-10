@@ -123,4 +123,72 @@ class RichMessageBlocksTest {
             blocks,
         )
     }
+
+    @Test
+    fun parsesDisplayMathBlocks() {
+        val blocks = parseRichMessageBlocks(
+            """
+            Before
+
+            ${'$'}${'$'}
+            E = mc^2
+            ${'$'}${'$'}
+
+            \[
+            \int_0^1 x^2 dx
+            \]
+
+            After
+            """.trimIndent(),
+        )
+
+        assertEquals(
+            listOf(
+                RichMessageBlock.Paragraph("Before"),
+                RichMessageBlock.Math("E = mc^2"),
+                RichMessageBlock.Math("\\int_0^1 x^2 dx"),
+                RichMessageBlock.Paragraph("After"),
+            ),
+            blocks,
+        )
+    }
+
+    @Test
+    fun parsesSingleLineDisplayMathBlocks() {
+        val blocks = parseRichMessageBlocks(
+            """
+            ${'$'}${'$'}a^2 + b^2 = c^2${'$'}${'$'}
+
+            \[x = y + z\]
+            """.trimIndent(),
+        )
+
+        assertEquals(
+            listOf(
+                RichMessageBlock.Math("a^2 + b^2 = c^2"),
+                RichMessageBlock.Math("x = y + z"),
+            ),
+            blocks,
+        )
+    }
+
+    @Test
+    fun detectsMathAsMarkdownSyntax() {
+        assertEquals(true, hasLikelyMarkdownSyntax("Use ${'$'}x + y${'$'} inline."))
+        assertEquals(true, hasLikelyMarkdownSyntax("\\[x = y\\]"))
+    }
+
+    @Test
+    fun parsesInlineMathSegments() {
+        assertEquals(
+            listOf(
+                GraphChatInlineSegment.Text("Use "),
+                GraphChatInlineSegment.Math("x + y"),
+                GraphChatInlineSegment.Text(" and "),
+                GraphChatInlineSegment.Math("\\alpha"),
+                GraphChatInlineSegment.Text("."),
+            ),
+            graphChatInlineSegments("Use ${'$'}x + y${'$'} and \\(\\alpha\\)."),
+        )
+    }
 }

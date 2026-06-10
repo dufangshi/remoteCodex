@@ -96,6 +96,7 @@ fun RichMessageContent(
                 )
                 is RichMessageBlock.Quote -> RichQuote(text = block.text)
                 RichMessageBlock.HorizontalRule -> RichHorizontalRule()
+                is RichMessageBlock.Math -> RichMathBlock(expression = block.expression)
                 is RichMessageBlock.Table -> RichTable(columns = block.columns, rows = block.rows)
                 is RichMessageBlock.Code -> {
                     if (block.language.startsWith("tool-")) {
@@ -120,6 +121,33 @@ fun RichMessageContent(
                 onClick = { expanded = !expanded },
             )
         }
+    }
+}
+
+@Composable
+private fun RichMathBlock(expression: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(9.dp))
+            .background(ThreadColors.InfoSoft.copy(alpha = 0.34f))
+            .border(1.dp, ThreadColors.Info.copy(alpha = 0.30f), RoundedCornerShape(9.dp))
+            .padding(horizontal = 11.dp, vertical = 9.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = "Formula",
+            color = ThreadColors.Info,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = expression.ifBlank { "empty" },
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            color = ThreadColors.Foreground,
+            style = MaterialTheme.typography.bodyMedium,
+            fontFamily = FontFamily.Monospace,
+        )
     }
 }
 
@@ -503,6 +531,7 @@ private fun inlineSegmentsAnnotatedString(segments: List<GraphChatInlineSegment>
                     pop()
                 }
                 is GraphChatInlineSegment.Code -> appendInlineCodeSegment(segment.text)
+                is GraphChatInlineSegment.Math -> appendInlineMathSegment(segment.expression)
                 is GraphChatInlineSegment.Strong -> {
                     withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) {
                         append(segment.text)
@@ -561,6 +590,20 @@ private fun RichInlineImage(segment: GraphChatInlineSegment.Image) {
             style = MaterialTheme.typography.labelSmall,
             fontFamily = FontFamily.Monospace,
         )
+    }
+}
+
+@Composable
+private fun AnnotatedString.Builder.appendInlineMathSegment(expression: String) {
+    withStyle(
+        SpanStyle(
+            color = ThreadColors.Info,
+            background = ThreadColors.InfoSoft.copy(alpha = 0.58f),
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Medium,
+        ),
+    ) {
+        append(expression)
     }
 }
 
