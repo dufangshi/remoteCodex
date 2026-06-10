@@ -145,6 +145,68 @@ fun graphChatToolEntries(body: String): List<GraphChatToolEntry> {
     }.orEmpty()
 }
 
+fun prettyGraphChatToolJsonValue(value: String): String {
+    val trimmed = value.trim()
+    if (trimmed.isEmpty()) return trimmed
+    val output = StringBuilder()
+    var indent = 0
+    var inString = false
+    var escaped = false
+
+    fun appendIndent() {
+        repeat(indent.coerceAtLeast(0)) {
+            output.append("  ")
+        }
+    }
+
+    trimmed.forEach { char ->
+        if (escaped) {
+            output.append(char)
+            escaped = false
+            return@forEach
+        }
+        if (char == '\\' && inString) {
+            output.append(char)
+            escaped = true
+            return@forEach
+        }
+        if (char == '"') {
+            output.append(char)
+            inString = !inString
+            return@forEach
+        }
+        if (inString) {
+            output.append(char)
+            return@forEach
+        }
+        when (char) {
+            '{', '[' -> {
+                output.append(char)
+                output.append('\n')
+                indent += 1
+                appendIndent()
+            }
+            '}', ']' -> {
+                output.append('\n')
+                indent -= 1
+                appendIndent()
+                output.append(char)
+            }
+            ',' -> {
+                output.append(char)
+                output.append('\n')
+                appendIndent()
+            }
+            ':' -> output.append(": ")
+            else -> if (!char.isWhitespace()) {
+                output.append(char)
+            }
+        }
+    }
+
+    return output.toString()
+}
+
 private fun isJsonObjectLiteral(body: String): Boolean {
     val trimmed = body.trim()
     return trimmed.startsWith("{") && trimmed.endsWith("}")

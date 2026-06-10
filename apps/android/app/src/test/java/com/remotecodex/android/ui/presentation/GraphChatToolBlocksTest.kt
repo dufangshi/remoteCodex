@@ -114,6 +114,22 @@ class GraphChatToolBlocksTest {
     }
 
     @Test
+    fun prettyPrintsToolJsonValues() {
+        assertEquals(
+            """
+            {
+              "ok": true,
+              "items": [
+                "a,b",
+                2
+              ]
+            }
+            """.trimIndent(),
+            prettyGraphChatToolJsonValue("""{"ok":true,"items":["a,b",2]}"""),
+        )
+    }
+
+    @Test
     fun fallsBackToRawValueEntry() {
         assertEquals(
             listOf(GraphChatToolEntry("value", "plain output", GraphChatToolValueKind.Raw)),

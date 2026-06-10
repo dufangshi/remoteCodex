@@ -59,6 +59,7 @@ import com.remotecodex.android.ui.presentation.parsePlainRichMessageBlocks
 import com.remotecodex.android.ui.presentation.parseRichMessageBlocks
 import com.remotecodex.android.ui.presentation.parseGraphChatToolBlock
 import com.remotecodex.android.ui.presentation.preprocessGraphChatToolBlocks
+import com.remotecodex.android.ui.presentation.prettyGraphChatToolJsonValue
 import com.remotecodex.android.ui.presentation.shouldShowGraphChatMessageExpansion
 import com.remotecodex.android.ui.presentation.toolBlockStatus
 import com.remotecodex.android.ui.model.ToolStatus
@@ -318,6 +319,7 @@ private fun ToolSection(title: String, body: String) {
                         ToolEntryRow(
                             entry = entry,
                             trailingComma = index < entries.lastIndex,
+                            renderObjectAsBlock = title == "Result",
                         )
                     }
                 }
@@ -331,9 +333,13 @@ private fun ToolSection(title: String, body: String) {
 private fun ToolEntryRow(
     entry: GraphChatToolEntry,
     trailingComma: Boolean,
+    renderObjectAsBlock: Boolean,
 ) {
-    val shouldUseOutputBlock = entry.kind == GraphChatToolValueKind.Raw &&
-        (entry.key in setOf("stdout", "stderr", "result") || entry.value.contains('\n'))
+    val shouldUseOutputBlock = (
+        entry.kind == GraphChatToolValueKind.Raw &&
+            (entry.key in setOf("stdout", "stderr", "result") || entry.value.contains('\n'))
+        ) ||
+        (renderObjectAsBlock && entry.kind == GraphChatToolValueKind.Object)
     if (shouldUseOutputBlock) {
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -344,7 +350,13 @@ private fun ToolEntryRow(
                 ToolEntryKey(key = entry.key)
                 ToolPunctuation(text = ":")
             }
-            ToolRawValue(body = entry.value.ifBlank { "(empty)" })
+            ToolRawValue(
+                body = if (entry.kind == GraphChatToolValueKind.Object) {
+                    prettyGraphChatToolJsonValue(entry.value)
+                } else {
+                    entry.value.ifBlank { "(empty)" }
+                },
+            )
             if (trailingComma) {
                 ToolPunctuation(text = ",")
             }
