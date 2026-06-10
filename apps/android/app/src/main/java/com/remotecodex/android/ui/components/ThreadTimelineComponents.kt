@@ -573,7 +573,6 @@ private fun Modifier.messageBubbleContainer(isUser: Boolean): Modifier {
         base
             .clip(RoundedCornerShape(12.dp))
             .background(ThreadColors.UserBubble)
-            .border(1.dp, ThreadColors.UserBubbleBorder, RoundedCornerShape(12.dp))
             .padding(horizontal = 12.dp, vertical = 8.dp)
     } else {
         base.padding(vertical = 2.dp)

@@ -55,9 +55,9 @@ val LightThreadColors = ThreadColorTokens(
     infoSoft = Color(0xFFE0F2FE),
     codeBackground = Color(0xFF111827),
     codeForeground = Color(0xFFE5E7EB),
-    userBubble = Color(0xFFCFEFF7),
-    userBubbleText = Color(0xFF0F172A),
-    userBubbleBorder = Color(0xFFBAE6FD),
+    userBubble = Color(0xFFEEF5F9),
+    userBubbleText = Color(0xFF334155),
+    userBubbleBorder = Color(0xFFEEF5F9),
 )
 
 val DarkThreadColors = ThreadColorTokens(
@@ -83,9 +83,9 @@ val DarkThreadColors = ThreadColorTokens(
     infoSoft = Color(0xFF122B3A),
     codeBackground = Color(0xFF0C1117),
     codeForeground = Color(0xFFD6DDE6),
-    userBubble = Color(0xFF1E3A46),
-    userBubbleText = Color(0xFFE6F7FB),
-    userBubbleBorder = Color(0xFF2E5A6B),
+    userBubble = Color(0xFF212B35),
+    userBubbleText = Color(0xFFE2E8F0),
+    userBubbleBorder = Color(0xFF212B35),
 )
 
 val LocalThreadColors = staticCompositionLocalOf { LightThreadColors }
