@@ -473,8 +473,8 @@ private fun ShellToolsPanel() {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            listOf("Paste", "Copy", "Clear", "Ctrl-C", "Ctrl-D", "Esc", "Tab", "Up", "Down").forEach { label ->
-                ShellToolPill(label = label)
+            shellToolPreviewItems.forEach { item ->
+                ShellToolPill(label = item.label, tone = item.tone)
             }
         }
     }
@@ -620,15 +620,30 @@ private fun SelectionRow(label: String, detail: String, selected: Boolean) {
 }
 
 @Composable
-private fun ShellToolPill(label: String) {
+private fun ShellToolPill(label: String, tone: ShellToolTone) {
+    val foreground = when (tone) {
+        ShellToolTone.Neutral -> ThreadColors.ForegroundSoft
+        ShellToolTone.Info -> ThreadColors.Info
+        ShellToolTone.Danger -> ThreadColors.Danger
+    }
+    val background = when (tone) {
+        ShellToolTone.Neutral -> ThreadColors.Surface
+        ShellToolTone.Info -> ThreadColors.InfoSoft.copy(alpha = 0.50f)
+        ShellToolTone.Danger -> ThreadColors.DangerSoft.copy(alpha = 0.52f)
+    }
+    val border = when (tone) {
+        ShellToolTone.Neutral -> ThreadColors.Border
+        ShellToolTone.Info -> ThreadColors.Info.copy(alpha = 0.36f)
+        ShellToolTone.Danger -> ThreadColors.Danger.copy(alpha = 0.40f)
+    }
     Text(
         text = label,
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
-            .background(ThreadColors.Surface)
-            .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
+            .background(background)
+            .border(1.dp, border, RoundedCornerShape(999.dp))
             .padding(horizontal = 12.dp, vertical = 8.dp),
-        color = ThreadColors.ForegroundSoft,
+        color = foreground,
         style = MaterialTheme.typography.labelSmall,
         fontWeight = FontWeight.Bold,
     )
@@ -645,6 +660,29 @@ private enum class ComposerMenu {
     Effort,
     ShellTools,
 }
+
+private data class ShellToolPreviewItem(
+    val label: String,
+    val tone: ShellToolTone = ShellToolTone.Neutral,
+)
+
+private enum class ShellToolTone {
+    Neutral,
+    Info,
+    Danger,
+}
+
+private val shellToolPreviewItems = listOf(
+    ShellToolPreviewItem(label = "PASTE"),
+    ShellToolPreviewItem(label = "COPY"),
+    ShellToolPreviewItem(label = "CLEAR", tone = ShellToolTone.Info),
+    ShellToolPreviewItem(label = "CTRL-C", tone = ShellToolTone.Danger),
+    ShellToolPreviewItem(label = "CTRL-D"),
+    ShellToolPreviewItem(label = "ESC"),
+    ShellToolPreviewItem(label = "TAB"),
+    ShellToolPreviewItem(label = "UP"),
+    ShellToolPreviewItem(label = "DOWN"),
+)
 
 private enum class ComposerToolIcon {
     Slash,
