@@ -232,15 +232,26 @@ private fun RichToolBlock(language: String, code: String) {
                         status = toolStatus,
                         compact = true,
                     )
-                    CopyCodeButton(value = code.trimEnd())
                 }
             },
         ) {
+            ToolBlockActions(copyValue = code.trimEnd())
             ToolSection(title = "Parameters", body = preview.parameters.ifBlank { "{}" })
             preview.result?.takeIf { it.isNotBlank() }?.let { result ->
                 ToolSection(title = "Result", body = result)
             }
         }
+    }
+}
+
+@Composable
+private fun ToolBlockActions(copyValue: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CopyCodeButton(value = copyValue)
     }
 }
 
