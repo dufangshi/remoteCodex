@@ -16,6 +16,7 @@ export type {
 
 export type ApiErrorCode =
   | 'bad_request'
+  | 'unauthorized'
   | 'not_found'
   | 'conflict'
   | 'provider_goal_error'
@@ -53,10 +54,88 @@ export function truncateAutoThreadTitle(value: string) {
 export interface RuntimeConfigDto {
   appName: string;
   appVersion: string;
+  mode: 'local' | 'server' | 'relay';
   host: string;
   port: number;
   workspaceRoot: string;
   environment: string;
+}
+
+export interface AuthSessionDto {
+  authenticated: boolean;
+  username: string | null;
+  expiresAt: string | null;
+  mode: 'local' | 'server' | 'relay';
+  authRequired: boolean;
+}
+
+export interface AuthLoginResultDto {
+  token: string | null;
+  session: AuthSessionDto;
+}
+
+export interface RelayHealthDto {
+  status: 'ok';
+  supervisorConnected: boolean;
+  supervisorConnectedAt: string | null;
+  lastSupervisorHeartbeatAt: string | null;
+}
+
+export type RelaySupervisorEnvelope =
+  | {
+      type: 'relay.connected';
+      timestamp: string;
+    }
+  | {
+      type: 'relay.heartbeat';
+      timestamp: string;
+    }
+  | {
+      type: 'relay.request';
+      timestamp: string;
+      requestId: string;
+      payload: RelayHttpRequestPayload;
+    }
+  | {
+      type: 'relay.response';
+      timestamp: string;
+      requestId: string;
+      payload: RelayHttpResponsePayload;
+    }
+  | {
+      type: 'relay.client.connected';
+      timestamp: string;
+      clientId: string;
+    }
+  | {
+      type: 'relay.client.disconnected';
+      timestamp: string;
+      clientId: string;
+    }
+  | {
+      type: 'relay.client.message';
+      timestamp: string;
+      clientId: string;
+      payload: SupervisorSocketClientEnvelope;
+    }
+  | {
+      type: 'relay.server.message';
+      timestamp: string;
+      clientId: string;
+      payload: SupervisorSocketServerEnvelope;
+    };
+
+export interface RelayHttpRequestPayload {
+  method: string;
+  path: string;
+  headers: Record<string, string>;
+  body: string | null;
+}
+
+export interface RelayHttpResponsePayload {
+  statusCode: number;
+  headers: Record<string, string>;
+  body: string;
 }
 
 export interface AgentRuntimeStatusDto {

@@ -72,6 +72,7 @@ export async function registerSystemRoutes(app: FastifyInstance) {
     return {
       appName: app.services.config.appName,
       appVersion: app.services.config.appVersion,
+      mode: app.services.config.mode,
       host: app.services.config.host,
       port: app.services.config.port,
       workspaceRoot: app.services.config.workspaceRoot,

@@ -21,6 +21,8 @@ import {
 } from '../../../packages/db/src/index';
 import {
   ApiErrorShape,
+  RelayHttpRequestPayload,
+  RelayHttpResponsePayload,
   SupervisorSocketClientEnvelope,
   SupervisorSocketServerEnvelope,
 } from '../../../packages/shared/src/index';
@@ -36,6 +38,7 @@ import { registerSystemRoutes } from './routes/system';
 import { registerThreadRoutes } from './routes/threads';
 import { registerWorkspaceRoutes } from './routes/workspaces';
 import { registerPluginRoutes } from './routes/plugins';
+import { registerAuthRoutes } from './routes/auth';
 import { ProviderHostConfigService } from './provider-host-config-service';
 import { ShellServiceError, ShellSessionService } from './shell/shell-session-service';
 import { builtinPlugins } from './plugins/builtin-plugins';
@@ -46,6 +49,8 @@ import {
   createTerminalShellBackend,
   createTerminalPluginBackendContribution,
 } from './plugins/terminal-plugin-backend';
+import { AuthService, unauthorizedPayload } from './auth';
+import { RelayTunnelClient } from './relay-tunnel-client';
 
 const MAX_PROMPT_ATTACHMENTS = 10;
 const MAX_PROMPT_ATTACHMENT_BYTES = 25 * 1024 * 1024;
@@ -72,6 +77,8 @@ export interface AppServices {
   providerHostConfigService: ProviderHostConfigService;
   pluginRegistry: PluginRegistry;
   pluginService: PluginService;
+  authService: AuthService;
+  relayTunnelClient: RelayTunnelClient | null;
   repoRoot: string;
 }
 
@@ -143,6 +150,7 @@ export function buildApp(
     runtimeBootstrap?: AgentRuntimeBootstrap;
     shellService?: ShellSessionService;
     serviceLifecycle?: AppServices['serviceLifecycle'];
+    relayTunnelClient?: RelayTunnelClient;
   } = {}
 ): FastifyInstance {
   const config = loadRuntimeConfig(options.env);
@@ -154,6 +162,7 @@ export function buildApp(
   const pluginRegistry = new PluginRegistry(builtinPlugins);
   const pluginSettingsStore = new PluginSettingsStore(database.db);
   const pluginService = new PluginService(pluginRegistry, pluginSettingsStore);
+  const authService = new AuthService(config);
   const runtimeBootstrap = options.runtimeBootstrap ?? createAgentRuntimeBootstrap(config);
   const repoRoot = findRepoRoot();
   const agentRuntimes = options.agentRuntimes ?? runtimeBootstrap.agentRuntimes;
@@ -195,6 +204,22 @@ export function buildApp(
     },
   });
 
+  const backendPluginHost = new BackendPluginHost(app);
+  backendPluginHost.register(createTerminalPluginBackendContribution());
+  const relaySocketBridge = createRelaySocketBridge(app, eventBus, backendPluginHost);
+  const relayTunnelClient =
+    config.mode === 'relay'
+      ? (options.relayTunnelClient ??
+          new RelayTunnelClient(
+            config.relay,
+            createRelayRequestHandler(app),
+            relaySocketBridge.handleConnected,
+            relaySocketBridge.handleMessage,
+          )
+        )
+      : null;
+  relayTunnelClient?.validateConfig();
+
   app.decorate('services', {
     config,
     database,
@@ -206,11 +231,35 @@ export function buildApp(
     providerHostConfigService,
     pluginRegistry,
     pluginService,
+    authService,
+    relayTunnelClient,
     repoRoot
   });
 
-  const backendPluginHost = new BackendPluginHost(app);
-  backendPluginHost.register(createTerminalPluginBackendContribution());
+  app.addHook('onRequest', async (request, reply) => {
+    if (!authService.required) {
+      return;
+    }
+
+    const requestPath = new URL(request.url, 'http://localhost').pathname;
+
+    if (!requestPath.startsWith('/api/')) {
+      return;
+    }
+
+    if (
+      requestPath === '/api/auth/login' ||
+      requestPath === '/api/auth/logout' ||
+      requestPath === '/api/auth/session'
+    ) {
+      return;
+    }
+
+    const session = authService.verifyRequest(request);
+    if (!session.authenticated) {
+      return reply.status(401).send(unauthorizedPayload());
+    }
+  });
 
   app.register(async (realtimeApp) => {
     await realtimeApp.register(websocket);
@@ -224,78 +273,36 @@ export function buildApp(
           message: 'Upgrade to websocket is required.'
         } satisfies ApiErrorShape);
       },
-      wsHandler: (socket) => {
-        const closeHandlers: Array<() => void> = [];
-        const socketState = new Map<string, unknown>();
-        const onClose = (handler: () => void) => {
-          closeHandlers.push(handler);
-        };
-
-        function send(message: SupervisorSocketServerEnvelope) {
-          if (socket.readyState === 1) {
-            socket.send(JSON.stringify(message));
-          }
+      wsHandler: (socket, request) => {
+        const session = authService.verifyRequest(request);
+        if (!session.authenticated) {
+          socket.close(1008, 'Authentication is required.');
+          return;
         }
 
-        send({
-          type: 'supervisor.connected',
-          timestamp: new Date().toISOString()
-        });
-
-        const unsubscribe = eventBus.onThreadEvent((event) => {
-          send(event);
-        });
-        const unsubscribeShell = eventBus.onShellEvent((event) => {
-          send(event);
+        const supervisorSession = createSupervisorSocketSession({
+          app,
+          eventBus,
+          backendPluginHost,
+          send(message) {
+            if (socket.readyState === 1) {
+              socket.send(JSON.stringify(message));
+            }
+          },
         });
 
         socket.on('message', async (rawMessage: Buffer) => {
-          let parsed: SupervisorSocketClientEnvelope;
-          try {
-            parsed = JSON.parse(rawMessage.toString()) as SupervisorSocketClientEnvelope;
-          } catch {
-            return;
-          }
-
-          try {
-            if (parsed.type === 'supervisor.ping') {
-              send({
-                type: 'supervisor.pong',
-                timestamp: new Date().toISOString(),
-                payload: {
-                  requestTimestamp:
-                    typeof parsed.timestamp === 'string' ? parsed.timestamp : null,
-                },
-              });
-              return;
-            }
-
-            const handled = await backendPluginHost.handleSocketMessage({
-              app,
-              send,
-              onClose,
-              state: socketState,
-              message: parsed,
-            });
-            if (!handled) {
-              return;
-            }
-          } catch {
-            return;
-          }
+          await supervisorSession.handleMessage(rawMessage.toString());
         });
 
         socket.on('close', () => {
-          for (const handler of closeHandlers.splice(0)) {
-            handler();
-          }
-          unsubscribe();
-          unsubscribeShell();
+          supervisorSession.close();
         });
       }
     });
   });
 
+  app.register(registerAuthRoutes);
   app.register(registerSystemRoutes);
   app.register(registerAgentRuntimeRoutes);
   app.register(registerPluginRoutes);
@@ -453,6 +460,7 @@ export function buildApp(
 
   app.addHook('onClose', async () => {
     await shellService.stop();
+    relayTunnelClient?.stop();
     await Promise.all(agentRuntimes.all().map((runtime) => runtime.stop()));
     database.sqlite.close();
   });
@@ -463,6 +471,7 @@ export function buildApp(
         codexHome: runtimeBootstrap.providerHostHomes.codex ?? null,
         repoRoot,
       });
+      relayTunnelClient?.start();
       await Promise.all(agentRuntimes.all().map((runtime) => runtime.start()));
       await shellService.syncShellStateOnStartup();
     } catch (error) {
@@ -480,6 +489,185 @@ function requestLog(app: FastifyInstance, error: unknown) {
   }
 
   app.log.error({ error }, 'Non-error value reached Fastify error handler.');
+}
+
+export function createRelayRequestHandler(app: FastifyInstance) {
+  return async function handleRelayRequest(
+    request: RelayHttpRequestPayload,
+  ): Promise<RelayHttpResponsePayload> {
+    const response = await app.inject({
+      method: request.method as any,
+      url: request.path,
+      headers: request.headers,
+      ...(request.body !== null ? { payload: request.body } : {}),
+    });
+
+    return {
+      statusCode: response.statusCode,
+      headers: relayResponseHeaders(response.headers),
+      body: response.body,
+    };
+  };
+}
+
+export function createRelayClientConnectedHandler(eventBus: SupervisorEventBus) {
+  return function handleRelayClientConnected(
+    _clientId: string,
+    send: (message: SupervisorSocketServerEnvelope) => void,
+  ) {
+    send({
+      type: 'supervisor.connected',
+      timestamp: new Date().toISOString(),
+    });
+
+    const unsubscribeThread = eventBus.onThreadEvent((event) => {
+      send(event);
+    });
+    const unsubscribeShell = eventBus.onShellEvent((event) => {
+      send(event);
+    });
+
+    return () => {
+      unsubscribeThread();
+      unsubscribeShell();
+    };
+  };
+}
+
+export function createSupervisorSocketSession(input: {
+  app: FastifyInstance;
+  eventBus: SupervisorEventBus;
+  backendPluginHost: BackendPluginHost;
+  send: (message: SupervisorSocketServerEnvelope) => void;
+}) {
+  const closeHandlers: Array<() => void> = [];
+  const socketState = new Map<string, unknown>();
+  const onClose = (handler: () => void) => {
+    closeHandlers.push(handler);
+  };
+
+  input.send({
+    type: 'supervisor.connected',
+    timestamp: new Date().toISOString(),
+  });
+
+  const unsubscribeThread = input.eventBus.onThreadEvent((event) => {
+    input.send(event);
+  });
+  const unsubscribeShell = input.eventBus.onShellEvent((event) => {
+    input.send(event);
+  });
+
+  return {
+    async handleMessage(rawMessage: string) {
+      let parsed: SupervisorSocketClientEnvelope;
+      try {
+        parsed = JSON.parse(rawMessage) as SupervisorSocketClientEnvelope;
+      } catch {
+        return;
+      }
+
+      try {
+        if (parsed.type === 'supervisor.ping') {
+          input.send({
+            type: 'supervisor.pong',
+            timestamp: new Date().toISOString(),
+            payload: {
+              requestTimestamp:
+                typeof parsed.timestamp === 'string' ? parsed.timestamp : null,
+            },
+          });
+          return;
+        }
+
+        await input.backendPluginHost.handleSocketMessage({
+          app: input.app,
+          send: input.send,
+          onClose,
+          state: socketState,
+          message: parsed,
+        });
+      } catch {
+        return;
+      }
+    },
+    close() {
+      for (const handler of closeHandlers.splice(0)) {
+        handler();
+      }
+      unsubscribeThread();
+      unsubscribeShell();
+    },
+  };
+}
+
+export function createRelaySocketBridge(
+  app: FastifyInstance,
+  eventBus: SupervisorEventBus,
+  backendPluginHost: BackendPluginHost,
+) {
+  const sessions = new Map<string, ReturnType<typeof createSupervisorSocketSession>>();
+
+  return {
+    handleConnected(
+      clientId: string,
+      send: (message: SupervisorSocketServerEnvelope) => void,
+    ) {
+      const existing = sessions.get(clientId);
+      existing?.close();
+      const session = createSupervisorSocketSession({
+        app,
+        eventBus,
+        backendPluginHost,
+        send,
+      });
+      sessions.set(clientId, session);
+      return () => {
+        session.close();
+        sessions.delete(clientId);
+      };
+    },
+    async handleMessage(clientId: string, message: unknown) {
+      const session = sessions.get(clientId);
+      if (!session) {
+        return;
+      }
+      await session.handleMessage(JSON.stringify(message));
+    },
+  };
+}
+
+export function handleRelayClientMessage(
+  _clientId: string,
+  message: unknown,
+  send: (message: SupervisorSocketServerEnvelope) => void,
+) {
+  const parsed = message as Partial<SupervisorSocketClientEnvelope>;
+  if (parsed.type !== 'supervisor.ping') {
+    return;
+  }
+
+  send({
+    type: 'supervisor.pong',
+    timestamp: new Date().toISOString(),
+    payload: {
+      requestTimestamp: typeof parsed.timestamp === 'string' ? parsed.timestamp : null,
+    },
+  });
+}
+
+function relayResponseHeaders(
+  headers: Record<string, string | string[] | number | undefined>,
+) {
+  const output: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers)) {
+    if (Array.isArray(value)) {
+      output[name] = value.join(', ');
+    } else if (value !== undefined) {
+      output[name] = String(value);
+    }
+  }
+  return output;
 }
 
 export { HttpError };
