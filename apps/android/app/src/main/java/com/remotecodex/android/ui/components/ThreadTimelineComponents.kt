@@ -833,19 +833,13 @@ private fun HistoryGroupCard(
             backgroundColor = colors.background,
             contentBackgroundColor = colors.background,
             leading = {
-                HistoryKindGlyph(kind = group.kind, color = colors.foreground)
+                HistoryGroupGlyph(group = group, color = colors.foreground)
             },
             trailing = {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = group.countLabel,
-                        color = ThreadColors.ForegroundMuted,
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 1,
-                    )
                     if (isRunningStatusLabel(group.statusLabel)) {
                         RunningDots(color = colors.foreground, dotSize = 4.dp, spacing = 2.dp)
                     }
@@ -1250,6 +1244,30 @@ private fun HistoryKindGlyph(kind: HistoryItemKind, color: Color) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun HistoryGroupGlyph(group: HistoryGroupPreview, color: Color) {
+    Box(
+        modifier = Modifier
+            .widthIn(min = 30.dp)
+            .height(30.dp),
+    ) {
+        HistoryKindGlyph(kind = group.kind, color = color)
+        Text(
+            text = graphChatHistoryGroupCountLabel(group.countLabel),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .clip(RoundedCornerShape(999.dp))
+                .background(ThreadColors.CodeBackground)
+                .border(1.dp, color.copy(alpha = 0.38f), RoundedCornerShape(999.dp))
+                .padding(horizontal = 4.dp, vertical = 1.dp),
+            color = color,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
     }
 }
 

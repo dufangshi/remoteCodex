@@ -68,6 +68,10 @@ fun buildGraphChatHistoryEntries(
     }
 }
 
+fun graphChatHistoryGroupCountLabel(countLabel: String): String {
+    return Regex("\\d+").find(countLabel)?.value ?: countLabel.trim().take(2).uppercase()
+}
+
 private fun HistoryGroupPreview.toGraphChatHistoryEntry(index: Int): GraphChatHistoryEntry {
     val key = "group:$kind:$title:$index"
     return when (kind) {
