@@ -18,9 +18,19 @@ data class GraphChatToolBlockPreview(
     val result: String?,
 )
 
+enum class GraphChatToolValueKind {
+    String,
+    Number,
+    Boolean,
+    Null,
+    Object,
+    Raw,
+}
+
 data class GraphChatToolEntry(
     val key: String,
     val value: String,
+    val kind: GraphChatToolValueKind,
 )
 
 fun preprocessGraphChatToolBlocks(content: String): ToolBlockPreprocessResult {
@@ -117,6 +127,11 @@ fun graphChatToolEntries(body: String): List<GraphChatToolEntry> {
                 GraphChatToolEntry(
                     key = it.groupValues[1],
                     value = it.groupValues[2],
+                    kind = graphChatToolValueKind(
+                        key = it.groupValues[1],
+                        rawValue = it.groupValues[2],
+                        fromJson = false,
+                    ),
                 )
             }
         }
@@ -126,7 +141,7 @@ fun graphChatToolEntries(body: String): List<GraphChatToolEntry> {
     }
 
     return body.takeIf { it.isNotBlank() }?.let {
-        listOf(GraphChatToolEntry(key = "value", value = it.trim()))
+        listOf(GraphChatToolEntry(key = "value", value = it.trim(), kind = GraphChatToolValueKind.Raw))
     }.orEmpty()
 }
 
@@ -145,9 +160,43 @@ private fun readFlatJsonObjectEntries(body: String): List<GraphChatToolEntry> {
         if (rawKey.isBlank()) {
             null
         } else {
-            GraphChatToolEntry(key = rawKey, value = rawValue)
+            GraphChatToolEntry(
+                key = rawKey,
+                value = rawValue,
+                kind = graphChatToolValueKind(key = rawKey, rawValue = rawValue, fromJson = true),
+            )
         }
     }
+}
+
+private fun graphChatToolValueKind(
+    key: String,
+    rawValue: String,
+    fromJson: Boolean,
+): GraphChatToolValueKind {
+    val trimmed = rawValue.trim()
+    if (!fromJson && key in setOf("stdout", "stderr", "result")) {
+        return GraphChatToolValueKind.Raw
+    }
+    if (trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
+        return GraphChatToolValueKind.String
+    }
+    if (trimmed == "true" || trimmed == "false") {
+        return GraphChatToolValueKind.Boolean
+    }
+    if (trimmed == "null") {
+        return GraphChatToolValueKind.Null
+    }
+    if (Regex("-?(0|[1-9][0-9]*)(\\.[0-9]+)?([eE][+-]?[0-9]+)?").matches(trimmed)) {
+        return GraphChatToolValueKind.Number
+    }
+    if (
+        (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+        (trimmed.startsWith("[") && trimmed.endsWith("]"))
+    ) {
+        return GraphChatToolValueKind.Object
+    }
+    return if (fromJson) GraphChatToolValueKind.Raw else GraphChatToolValueKind.String
 }
 
 private fun splitTopLevelJsonFields(value: String): List<String> {

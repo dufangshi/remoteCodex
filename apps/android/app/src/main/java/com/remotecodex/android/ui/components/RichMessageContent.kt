@@ -24,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.SpanStyle
@@ -37,6 +38,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.ui.presentation.GraphChatInlineSegment
+import com.remotecodex.android.ui.presentation.GraphChatToolEntry
+import com.remotecodex.android.ui.presentation.GraphChatToolValueKind
 import com.remotecodex.android.ui.presentation.basenameFromAssetPath
 import com.remotecodex.android.ui.presentation.hasLikelyMarkdownSyntax
 import com.remotecodex.android.ui.presentation.graphChatHighlightedCode
@@ -252,31 +255,84 @@ private fun ToolSection(title: String, body: String) {
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 entries.forEach { entry ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(
-                            text = "\"${entry.key}\"",
-                            modifier = Modifier.weight(0.34f),
-                            color = ThreadColors.Info,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontFamily = FontFamily.Monospace,
-                            maxLines = 1,
-                        )
-                        Text(
-                            text = entry.value,
-                            modifier = Modifier
-                                .weight(0.66f)
-                                .horizontalScroll(rememberScrollState()),
-                            color = ThreadColors.CodeForeground,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontFamily = FontFamily.Monospace,
-                        )
-                    }
+                    ToolEntryRow(entry = entry)
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ToolEntryRow(entry: GraphChatToolEntry) {
+    val shouldUseOutputBlock = entry.kind == GraphChatToolValueKind.Raw &&
+        (entry.key in setOf("stdout", "stderr", "result") || entry.value.contains('\n'))
+    if (shouldUseOutputBlock) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            ToolEntryKey(key = entry.key)
+            ToolRawValue(body = entry.value.ifBlank { "(empty)" })
+        }
+        return
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        ToolEntryKey(
+            key = entry.key,
+            modifier = Modifier.weight(0.34f),
+        )
+        Text(
+            text = toolEntryDisplayValue(entry),
+            modifier = Modifier
+                .weight(0.66f)
+                .horizontalScroll(rememberScrollState()),
+            color = toolEntryValueColor(entry.kind),
+            style = MaterialTheme.typography.labelMedium,
+            fontFamily = FontFamily.Monospace,
+        )
+    }
+}
+
+@Composable
+private fun ToolEntryKey(
+    key: String,
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text = "\"$key\"",
+        modifier = modifier,
+        color = ThreadColors.Info,
+        style = MaterialTheme.typography.labelMedium,
+        fontFamily = FontFamily.Monospace,
+        maxLines = 1,
+    )
+}
+
+private fun toolEntryDisplayValue(entry: GraphChatToolEntry): String {
+    return when (entry.kind) {
+        GraphChatToolValueKind.String -> {
+            val value = entry.value.trim()
+            if (value.startsWith("\"") && value.endsWith("\"")) value else "\"$value\""
+        }
+        GraphChatToolValueKind.Null -> "null"
+        else -> entry.value.ifBlank { "(empty)" }
+    }
+}
+
+@Composable
+private fun toolEntryValueColor(kind: GraphChatToolValueKind): Color {
+    return when (kind) {
+        GraphChatToolValueKind.String -> ThreadColors.Success
+        GraphChatToolValueKind.Number -> ThreadColors.Warning
+        GraphChatToolValueKind.Boolean -> ThreadColors.Info
+        GraphChatToolValueKind.Null -> ThreadColors.ForegroundMuted
+        GraphChatToolValueKind.Object,
+        GraphChatToolValueKind.Raw,
+        -> ThreadColors.CodeForeground
     }
 }
 

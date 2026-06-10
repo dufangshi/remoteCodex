@@ -70,10 +70,10 @@ class GraphChatToolBlocksTest {
     fun readsFlatJsonToolEntries() {
         assertEquals(
             listOf(
-                GraphChatToolEntry("cmd", """"./gradlew test""""),
-                GraphChatToolEntry("cwd", """"apps/android""""),
-                GraphChatToolEntry("timeout", "120"),
-                GraphChatToolEntry("env", """{"CI":true}"""),
+                GraphChatToolEntry("cmd", """"./gradlew test"""", GraphChatToolValueKind.String),
+                GraphChatToolEntry("cwd", """"apps/android"""", GraphChatToolValueKind.String),
+                GraphChatToolEntry("timeout", "120", GraphChatToolValueKind.Number),
+                GraphChatToolEntry("env", """{"CI":true}""", GraphChatToolValueKind.Object),
             ),
             graphChatToolEntries("""{"cmd":"./gradlew test","cwd":"apps/android","timeout":120,"env":{"CI":true}}"""),
         )
@@ -83,8 +83,8 @@ class GraphChatToolBlocksTest {
     fun readsColonToolEntries() {
         assertEquals(
             listOf(
-                GraphChatToolEntry("stdout", "BUILD SUCCESSFUL"),
-                GraphChatToolEntry("stderr", "warn"),
+                GraphChatToolEntry("stdout", "BUILD SUCCESSFUL", GraphChatToolValueKind.Raw),
+                GraphChatToolEntry("stderr", "warn", GraphChatToolValueKind.Raw),
             ),
             graphChatToolEntries(
                 """
@@ -92,6 +92,26 @@ class GraphChatToolBlocksTest {
                 stderr: warn
                 """.trimIndent(),
             ),
+        )
+    }
+
+    @Test
+    fun readsJsonPrimitiveToolEntryKinds() {
+        assertEquals(
+            listOf(
+                GraphChatToolEntry("ok", "true", GraphChatToolValueKind.Boolean),
+                GraphChatToolEntry("missing", "null", GraphChatToolValueKind.Null),
+                GraphChatToolEntry("items", """["a","b"]""", GraphChatToolValueKind.Object),
+            ),
+            graphChatToolEntries("""{"ok":true,"missing":null,"items":["a","b"]}"""),
+        )
+    }
+
+    @Test
+    fun fallsBackToRawValueEntry() {
+        assertEquals(
+            listOf(GraphChatToolEntry("value", "plain output", GraphChatToolValueKind.Raw)),
+            graphChatToolEntries("plain output"),
         )
     }
 }
