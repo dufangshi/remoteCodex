@@ -214,6 +214,7 @@ object ThreadPreviewSample {
                             - reusable console components first
                             - native token parity for light and dark mode
                             - stable `ThreadDetailDto` projection later
+                            - Inline **strong**, *emphasis*, ~~stale copy~~, and `code` match the web renderer.
 
                             1. Compare the web renderer.
                             2. Keep the native mobile surface compact.

@@ -46,6 +46,30 @@ class GraphChatPlainTextTest {
     }
 
     @Test
+    fun parsesInlineCodeAndEmphasisAroundLinks() {
+        val segments = graphChatInlineSegments(
+            "Use `code`, **strong**, *emphasis*, ~~old~~, and [docs](https://example.com).",
+        )
+
+        assertEquals(
+            listOf(
+                GraphChatInlineSegment.Text("Use "),
+                GraphChatInlineSegment.Code("code"),
+                GraphChatInlineSegment.Text(", "),
+                GraphChatInlineSegment.Strong("strong"),
+                GraphChatInlineSegment.Text(", "),
+                GraphChatInlineSegment.Emphasis("emphasis"),
+                GraphChatInlineSegment.Text(", "),
+                GraphChatInlineSegment.Strikethrough("old"),
+                GraphChatInlineSegment.Text(", and "),
+                GraphChatInlineSegment.Url("docs", "https://example.com"),
+                GraphChatInlineSegment.Text("."),
+            ),
+            segments,
+        )
+    }
+
+    @Test
     fun previewsLargeNonStreamingMessagesAtWebThreshold() {
         val text = "a".repeat(LargeMessagePreviewChars + 20)
 

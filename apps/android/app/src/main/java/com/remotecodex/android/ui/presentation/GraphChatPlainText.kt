@@ -7,6 +7,15 @@ sealed interface GraphChatPlainTextSegment {
     data class Url(val text: String, val href: String) : GraphChatPlainTextSegment
 }
 
+sealed interface GraphChatInlineSegment {
+    data class Text(val text: String) : GraphChatInlineSegment
+    data class Url(val text: String, val href: String) : GraphChatInlineSegment
+    data class Code(val text: String) : GraphChatInlineSegment
+    data class Strong(val text: String) : GraphChatInlineSegment
+    data class Emphasis(val text: String) : GraphChatInlineSegment
+    data class Strikethrough(val text: String) : GraphChatInlineSegment
+}
+
 fun graphChatMessagePreviewText(
     text: String,
     expanded: Boolean,
@@ -53,6 +62,64 @@ fun graphChatPlainTextSegments(text: String): List<GraphChatPlainTextSegment> {
     }
 
     return segments
+}
+
+fun graphChatInlineSegments(text: String): List<GraphChatInlineSegment> {
+    return graphChatPlainTextSegments(text).flatMap { segment ->
+        when (segment) {
+            is GraphChatPlainTextSegment.Text -> inlineStyleSegments(segment.text)
+            is GraphChatPlainTextSegment.Url -> listOf(
+                GraphChatInlineSegment.Url(text = segment.text, href = segment.href),
+            )
+        }
+    }
+}
+
+private fun inlineStyleSegments(text: String): List<GraphChatInlineSegment> {
+    if (text.isEmpty()) return emptyList()
+
+    val pattern = Regex("(`[^`\\n]+`|~~[^~\\n]+~~|\\*\\*[^*\\n]+\\*\\*|__[^_\\n]+__|(?<!\\w)\\*[^*\\n]+\\*(?!\\w)|(?<!\\w)_[^_\\n]+_(?!\\w))")
+    val segments = mutableListOf<GraphChatInlineSegment>()
+    var cursor = 0
+
+    for (match in pattern.findAll(text)) {
+        val start = match.range.first
+        if (start > cursor) {
+            segments += GraphChatInlineSegment.Text(text.substring(cursor, start))
+        }
+        segments += styledInlineSegment(match.value)
+        cursor = match.range.last + 1
+    }
+
+    if (cursor < text.length) {
+        segments += GraphChatInlineSegment.Text(text.substring(cursor))
+    }
+
+    return segments
+}
+
+private fun styledInlineSegment(raw: String): GraphChatInlineSegment {
+    return when {
+        raw.startsWith("`") && raw.endsWith("`") -> {
+            GraphChatInlineSegment.Code(raw.substring(1, raw.length - 1))
+        }
+        raw.startsWith("~~") && raw.endsWith("~~") -> {
+            GraphChatInlineSegment.Strikethrough(raw.substring(2, raw.length - 2))
+        }
+        raw.startsWith("**") && raw.endsWith("**") -> {
+            GraphChatInlineSegment.Strong(raw.substring(2, raw.length - 2))
+        }
+        raw.startsWith("__") && raw.endsWith("__") -> {
+            GraphChatInlineSegment.Strong(raw.substring(2, raw.length - 2))
+        }
+        raw.startsWith("*") && raw.endsWith("*") -> {
+            GraphChatInlineSegment.Emphasis(raw.substring(1, raw.length - 1))
+        }
+        raw.startsWith("_") && raw.endsWith("_") -> {
+            GraphChatInlineSegment.Emphasis(raw.substring(1, raw.length - 1))
+        }
+        else -> GraphChatInlineSegment.Text(raw)
+    }
 }
 
 private fun plainUrlSegments(text: String): List<GraphChatPlainTextSegment> {

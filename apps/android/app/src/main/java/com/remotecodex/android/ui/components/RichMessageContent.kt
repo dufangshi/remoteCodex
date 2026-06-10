@@ -30,14 +30,15 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import com.remotecodex.android.ui.presentation.GraphChatPlainTextSegment
+import com.remotecodex.android.ui.presentation.GraphChatInlineSegment
 import com.remotecodex.android.ui.presentation.hasLikelyMarkdownSyntax
 import com.remotecodex.android.ui.presentation.graphChatHighlightedCode
+import com.remotecodex.android.ui.presentation.graphChatInlineSegments
 import com.remotecodex.android.ui.presentation.graphChatMessagePreviewText
-import com.remotecodex.android.ui.presentation.graphChatPlainTextSegments
 import com.remotecodex.android.ui.presentation.RichMessageBlock
 import com.remotecodex.android.ui.presentation.parsePlainRichMessageBlocks
 import com.remotecodex.android.ui.presentation.parseRichMessageBlocks
@@ -378,12 +379,12 @@ private fun RichClickableText(
 
 @Composable
 private fun inlineCodeAndLinkAnnotatedString(text: String): AnnotatedString {
-    val segments = graphChatPlainTextSegments(text)
+    val segments = graphChatInlineSegments(text)
     return buildAnnotatedString {
         segments.forEach { segment ->
             when (segment) {
-                is GraphChatPlainTextSegment.Text -> appendInlineCode(segment.text)
-                is GraphChatPlainTextSegment.Url -> {
+                is GraphChatInlineSegment.Text -> append(segment.text)
+                is GraphChatInlineSegment.Url -> {
                     pushStringAnnotation(tag = UrlAnnotationTag, annotation = segment.href)
                     withStyle(
                         SpanStyle(
@@ -396,33 +397,37 @@ private fun inlineCodeAndLinkAnnotatedString(text: String): AnnotatedString {
                     }
                     pop()
                 }
+                is GraphChatInlineSegment.Code -> appendInlineCodeSegment(segment.text)
+                is GraphChatInlineSegment.Strong -> {
+                    withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) {
+                        append(segment.text)
+                    }
+                }
+                is GraphChatInlineSegment.Emphasis -> {
+                    withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
+                        append(segment.text)
+                    }
+                }
+                is GraphChatInlineSegment.Strikethrough -> {
+                    withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) {
+                        append(segment.text)
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun AnnotatedString.Builder.appendInlineCode(text: String) {
-    val pattern = Regex("`([^`\\n]+)`")
-    var cursor = 0
-    for (match in pattern.findAll(text)) {
-        if (match.range.first > cursor) {
-            append(text.substring(cursor, match.range.first))
-        }
-        val value = match.groupValues.getOrNull(1).orEmpty()
-        withStyle(
-            SpanStyle(
-                color = ThreadColors.ForegroundSoft,
-                background = ThreadColors.SurfaceStrong,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Medium,
-            ),
-        ) {
-            append(value)
-        }
-        cursor = match.range.last + 1
-    }
-    if (cursor < text.length) {
-        append(text.substring(cursor))
+private fun AnnotatedString.Builder.appendInlineCodeSegment(text: String) {
+    withStyle(
+        SpanStyle(
+            color = ThreadColors.ForegroundSoft,
+            background = ThreadColors.SurfaceStrong,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Medium,
+        ),
+    ) {
+        append(text)
     }
 }
