@@ -57,6 +57,7 @@ export class RelayTunnelClient {
 
     const url = new URL('/supervisor/tunnel', this.config.serverUrl ?? undefined);
     url.searchParams.set('token', this.config.agentToken ?? '');
+    url.searchParams.set('deviceToken', this.config.agentToken ?? '');
     this.socket = new WebSocket(url);
 
     this.socket.addEventListener('open', () => {

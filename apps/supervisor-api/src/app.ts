@@ -54,6 +54,7 @@ import { RelayTunnelClient } from './relay-tunnel-client';
 
 const MAX_PROMPT_ATTACHMENTS = 10;
 const MAX_PROMPT_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+const RELAY_FORWARD_HEADER = 'x-remote-codex-relay-forwarded';
 
 class HttpError extends Error {
   constructor(
@@ -252,6 +253,10 @@ export function buildApp(
       requestPath === '/api/auth/logout' ||
       requestPath === '/api/auth/session'
     ) {
+      return;
+    }
+
+    if (config.mode === 'relay' && request.headers[RELAY_FORWARD_HEADER] === '1') {
       return;
     }
 
@@ -498,7 +503,10 @@ export function createRelayRequestHandler(app: FastifyInstance) {
     const response = await app.inject({
       method: request.method as any,
       url: request.path,
-      headers: request.headers,
+      headers: {
+        ...request.headers,
+        [RELAY_FORWARD_HEADER]: '1',
+      },
       ...(request.body !== null ? { payload: request.body } : {}),
     });
 

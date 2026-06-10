@@ -64,7 +64,7 @@ describe('RelayTunnelClient', () => {
     client.start();
     expect(FakeWebSocket.instances).toHaveLength(1);
     expect(String(FakeWebSocket.instances[0]!.url)).toBe(
-      'wss://relay.example.test/supervisor/tunnel?token=agent-token',
+      'wss://relay.example.test/supervisor/tunnel?token=agent-token&deviceToken=agent-token',
     );
 
     FakeWebSocket.instances[0]!.emit('message', {

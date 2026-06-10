@@ -79,27 +79,102 @@ export interface RelayHealthDto {
   supervisorConnected: boolean;
   supervisorConnectedAt: string | null;
   lastSupervisorHeartbeatAt: string | null;
+  supervisorCount?: number;
+}
+
+export type RelayUserRoleDto = 'admin' | 'user';
+
+export interface RelayUserDto {
+  id: string;
+  email: string;
+  username: string;
+  role: RelayUserRoleDto;
+  enabled: boolean;
+  createdAt: string;
+}
+
+export interface RelayDeviceDto {
+  id: string;
+  ownerUserId: string;
+  name: string;
+  tokenPreview: string;
+  connected: boolean;
+  connectedAt: string | null;
+  lastHeartbeatAt: string | null;
+  createdAt: string;
+}
+
+export interface RelaySessionShareDto {
+  id: string;
+  ownerUserId: string;
+  ownerUsername: string;
+  targetUsername: string;
+  targetUserId: string;
+  deviceId: string;
+  deviceName: string;
+  threadId: string;
+  label: string | null;
+  createdAt: string;
+  revokedAt: string | null;
+}
+
+export interface RelaySessionDto {
+  authenticated: boolean;
+  user: RelayUserDto | null;
+  registrationEnabled: boolean;
+}
+
+export interface RelayLoginResultDto {
+  token: string;
+  session: RelaySessionDto;
+}
+
+export interface RelayRegisterResultDto {
+  token: string;
+  session: RelaySessionDto;
+}
+
+export interface RelayCreateDeviceResultDto {
+  device: RelayDeviceDto;
+  token: string;
+}
+
+export interface RelayPortalSummaryDto {
+  user: RelayUserDto;
+  devices: RelayDeviceDto[];
+  sharedWithMe: RelaySessionShareDto[];
+  sharedByMe: RelaySessionShareDto[];
+}
+
+export interface RelayAdminSummaryDto {
+  users: RelayUserDto[];
+  devices: RelayDeviceDto[];
+  registrationEnabled: boolean;
 }
 
 export type RelaySupervisorEnvelope =
   | {
       type: 'relay.connected';
       timestamp: string;
+      deviceId?: string;
     }
   | {
       type: 'relay.heartbeat';
       timestamp: string;
+      deviceId?: string;
     }
   | {
       type: 'relay.request';
       timestamp: string;
       requestId: string;
+      deviceId?: string;
       payload: RelayHttpRequestPayload;
     }
   | {
       type: 'relay.response';
       timestamp: string;
       requestId: string;
+      deviceId?: string;
       payload: RelayHttpResponsePayload;
     }
   | {

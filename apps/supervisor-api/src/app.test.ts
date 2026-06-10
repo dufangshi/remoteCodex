@@ -673,6 +673,44 @@ describe('supervisor api', () => {
     expect(response.headers['content-type']).toContain('application/json');
   });
 
+  it('accepts relayed HTTP requests in relay mode without supervisor admin auth', async () => {
+    await app.close();
+    const relayTunnelClient = {
+      validateConfig: vi.fn(),
+      start: vi.fn(),
+      stop: vi.fn(),
+    };
+    app = buildTestApp(fakeCodexManager, {
+      env: {
+        REMOTE_CODEX_MODE: 'relay',
+        REMOTE_CODEX_ADMIN_USERNAME: 'admin',
+        REMOTE_CODEX_ADMIN_PASSWORD: 'password',
+        REMOTE_CODEX_SESSION_SECRET: 'test-session-secret',
+        REMOTE_CODEX_RELAY_SERVER_URL: 'wss://relay.example.test',
+        REMOTE_CODEX_RELAY_AGENT_TOKEN: 'relay-token',
+      },
+      relayTunnelClient: relayTunnelClient as any,
+    });
+    await app.ready();
+    const directResponse = await app.inject({
+      method: 'GET',
+      url: '/api/version',
+    });
+    expect(directResponse.statusCode).toBe(401);
+
+    const relayResponse = await createRelayRequestHandler(app)({
+      method: 'GET',
+      path: '/api/version',
+      headers: {},
+      body: null,
+    });
+    expect(relayResponse.statusCode).toBe(200);
+    expect(JSON.parse(relayResponse.body)).toEqual({
+      name: 'Test Supervisor',
+      version: '0.1.0-test',
+    });
+  });
+
   it('bridges supervisor websocket events to relay clients', async () => {
     const sent: any[] = [];
     const unsubscribe = createRelayClientConnectedHandler(app.services.eventBus)(
