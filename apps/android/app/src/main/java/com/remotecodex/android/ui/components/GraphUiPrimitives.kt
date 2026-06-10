@@ -92,6 +92,11 @@ enum class GraphActionIcon {
     Delete,
 }
 
+enum class GraphSelectionTone {
+    Success,
+    Warning,
+}
+
 @Composable
 fun GraphButton(
     label: String,
@@ -193,17 +198,26 @@ fun GraphBadge(
 fun GraphSelectionGlyph(
     selected: Boolean,
     modifier: Modifier = Modifier,
+    tone: GraphSelectionTone = GraphSelectionTone.Success,
     contentDescription: String? = null,
 ) {
     val shape = RoundedCornerShape(6.dp)
-    val foreground = if (selected) ThreadColors.Success else ThreadColors.ForegroundMuted
-    val background = if (selected) ThreadColors.SuccessSoft else ThreadColors.SurfaceStrong
+    val toneForeground = when (tone) {
+        GraphSelectionTone.Success -> ThreadColors.Success
+        GraphSelectionTone.Warning -> ThreadColors.Warning
+    }
+    val toneBackground = when (tone) {
+        GraphSelectionTone.Success -> ThreadColors.SuccessSoft
+        GraphSelectionTone.Warning -> ThreadColors.WarningSoft
+    }
+    val foreground = if (selected) toneForeground else ThreadColors.ForegroundMuted
+    val background = if (selected) toneBackground else ThreadColors.SurfaceStrong
     Box(
         modifier = modifier
             .size(22.dp)
             .clip(shape)
             .background(background)
-            .border(1.dp, if (selected) ThreadColors.Success.copy(alpha = 0.48f) else ThreadColors.Border, shape)
+            .border(1.dp, if (selected) toneForeground.copy(alpha = 0.48f) else ThreadColors.Border, shape)
             .then(if (contentDescription != null) Modifier.semantics { this.contentDescription = contentDescription } else Modifier),
         contentAlignment = Alignment.Center,
     ) {

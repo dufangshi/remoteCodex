@@ -598,11 +598,10 @@ private fun SelectionRow(label: String, detail: String, selected: Boolean) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Box(
-            modifier = Modifier
-                .size(8.dp)
-                .clip(CircleShape)
-                .background(if (selected) ThreadColors.Warning else ThreadColors.BorderStrong),
+        GraphSelectionGlyph(
+            selected = selected,
+            tone = GraphSelectionTone.Warning,
+            contentDescription = if (selected) "$label selected" else "$label available",
         )
         Text(
             text = label,
