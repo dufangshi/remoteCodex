@@ -148,31 +148,17 @@ fun ThreadTopBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             MetadataPill(label = detail.usage)
-            Text(
-                text = "Actions",
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(ThreadColors.Surface)
-                    .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
-                    .clickable { actionsOpen = !actionsOpen }
-                    .padding(horizontal = 9.dp, vertical = 5.dp),
-                color = ThreadColors.ForegroundSoft,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
+            TopBarActionPill(
+                label = "Actions",
+                icon = TopBarIcon.Actions,
+                contentDescription = if (actionsOpen) "Close thread actions" else "Open thread actions",
+                onClick = { actionsOpen = !actionsOpen },
             )
-            Text(
-                text = "Threads",
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(ThreadColors.Surface)
-                    .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
-                    .clickable(onClick = onOpenRooms)
-                    .padding(horizontal = 9.dp, vertical = 5.dp),
-                color = ThreadColors.ForegroundSoft,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
+            TopBarActionPill(
+                label = "Threads",
+                icon = TopBarIcon.Threads,
+                contentDescription = "Open thread list",
+                onClick = onOpenRooms,
             )
             Text(
                 text = detail.items,
@@ -182,6 +168,35 @@ fun ThreadTopBar(
                 overflow = TextOverflow.Ellipsis,
             )
         }
+    }
+}
+
+@Composable
+private fun TopBarActionPill(
+    label: String,
+    icon: TopBarIcon,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(ThreadColors.Surface)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
+            .semantics { this.contentDescription = contentDescription }
+            .clickable(onClick = onClick)
+            .padding(horizontal = 9.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        TopBarGlyph(icon = icon, color = ThreadColors.ForegroundSoft, modifier = Modifier.size(13.dp))
+        Text(
+            text = label,
+            color = ThreadColors.ForegroundSoft,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+        )
     }
 }
 
@@ -207,8 +222,12 @@ private fun TopBarIconButton(
 }
 
 @Composable
-private fun TopBarGlyph(icon: TopBarIcon, color: Color) {
-    Canvas(modifier = Modifier.size(16.dp)) {
+private fun TopBarGlyph(
+    icon: TopBarIcon,
+    color: Color,
+    modifier: Modifier = Modifier.size(16.dp),
+) {
+    Canvas(modifier = modifier) {
         val strokeWidth = 1.5.dp.toPx()
         val w = size.width
         val h = size.height
@@ -244,6 +263,20 @@ private fun TopBarGlyph(icon: TopBarIcon, color: Color) {
                 line(0.76f, 0.24f, 0.68f, 0.32f)
                 line(0.32f, 0.68f, 0.24f, 0.76f)
             }
+            TopBarIcon.Actions -> {
+                line(0.18f, 0.30f, 0.82f, 0.30f)
+                line(0.18f, 0.50f, 0.82f, 0.50f)
+                line(0.18f, 0.70f, 0.82f, 0.70f)
+            }
+            TopBarIcon.Threads -> {
+                line(0.20f, 0.25f, 0.80f, 0.25f)
+                line(0.80f, 0.25f, 0.80f, 0.68f)
+                line(0.80f, 0.68f, 0.56f, 0.68f)
+                line(0.56f, 0.68f, 0.42f, 0.82f)
+                line(0.42f, 0.82f, 0.42f, 0.68f)
+                line(0.42f, 0.68f, 0.20f, 0.68f)
+                line(0.20f, 0.68f, 0.20f, 0.25f)
+            }
         }
     }
 }
@@ -251,6 +284,8 @@ private fun TopBarGlyph(icon: TopBarIcon, color: Color) {
 private enum class TopBarIcon {
     Menu,
     Settings,
+    Actions,
+    Threads,
 }
 
 @Composable
