@@ -269,8 +269,8 @@ private fun WorkspaceExplorerCard(
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(modifier = Modifier.weight(1f))
-            ActionChip(label = "Garbage", onClick = onOpenGarbage)
-            ActionChip(label = "Refresh")
+            ActionChip(label = "Garbage", icon = WorkspaceActionIcon.Trash, onClick = onOpenGarbage)
+            ActionChip(label = "Refresh", icon = WorkspaceActionIcon.Refresh)
         }
         workspace.nodes.take(10).forEach { node ->
             WorkspaceRow(node = node)
@@ -351,7 +351,7 @@ private fun ToolCallLogCard(
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(modifier = Modifier.weight(1f))
-            ActionChip(label = "Reload")
+            ActionChip(label = "Reload", icon = WorkspaceActionIcon.Refresh)
         }
         Column(
             modifier = Modifier
@@ -575,8 +575,8 @@ private fun WorkspaceViewerCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            ActionChip(label = "Copy")
-            ActionChip(label = "Open")
+            ActionChip(label = "Copy", icon = WorkspaceActionIcon.Copy)
+            ActionChip(label = "Open", icon = WorkspaceActionIcon.Open)
         }
         Text(
             text = "${workspace.selectedFile.language} | ${workspace.selectedFile.sizeLabel}" +
@@ -1045,6 +1045,7 @@ private fun CallSection(label: String, value: String) {
 @Composable
 private fun ActionChip(
     label: String,
+    icon: WorkspaceActionIcon? = null,
     onClick: (() -> Unit)? = null,
 ) {
     val clickModifier = if (onClick == null) {
@@ -1052,19 +1053,93 @@ private fun ActionChip(
     } else {
         Modifier.clickable(onClick = onClick)
     }
-    Text(
-        text = label,
+    Row(
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
             .background(ThreadColors.Surface)
             .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
             .then(clickModifier)
             .padding(horizontal = 9.dp, vertical = 5.dp),
-        color = ThreadColors.ForegroundSoft,
-        style = MaterialTheme.typography.labelSmall,
-        fontWeight = FontWeight.SemiBold,
-        maxLines = 1,
-    )
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        if (icon != null) {
+            WorkspaceActionGlyph(
+                icon = icon,
+                color = ThreadColors.ForegroundSoft,
+                modifier = Modifier.size(13.dp),
+            )
+        }
+        Text(
+            text = label,
+            color = ThreadColors.ForegroundSoft,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun WorkspaceActionGlyph(
+    icon: WorkspaceActionIcon,
+    color: Color,
+    modifier: Modifier = Modifier.size(14.dp),
+) {
+    Canvas(modifier = modifier) {
+        val strokeWidth = 1.45.dp.toPx()
+        val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+        fun line(x1: Float, y1: Float, x2: Float, y2: Float) {
+            drawLine(
+                color = color,
+                start = Offset(size.width * x1, size.height * y1),
+                end = Offset(size.width * x2, size.height * y2),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round,
+            )
+        }
+        fun rect(left: Float, top: Float, right: Float, bottom: Float) {
+            line(left, top, right, top)
+            line(right, top, right, bottom)
+            line(right, bottom, left, bottom)
+            line(left, bottom, left, top)
+        }
+
+        when (icon) {
+            WorkspaceActionIcon.Refresh -> {
+                drawArc(
+                    color = color,
+                    startAngle = 42f,
+                    sweepAngle = 250f,
+                    useCenter = false,
+                    topLeft = Offset(size.width * 0.18f, size.height * 0.18f),
+                    size = androidx.compose.ui.geometry.Size(size.width * 0.64f, size.height * 0.64f),
+                    style = stroke,
+                )
+                line(0.70f, 0.18f, 0.82f, 0.18f)
+                line(0.82f, 0.18f, 0.82f, 0.30f)
+            }
+            WorkspaceActionIcon.Trash -> {
+                line(0.30f, 0.28f, 0.70f, 0.28f)
+                line(0.42f, 0.18f, 0.58f, 0.18f)
+                rect(0.34f, 0.34f, 0.66f, 0.82f)
+                line(0.45f, 0.44f, 0.45f, 0.72f)
+                line(0.55f, 0.44f, 0.55f, 0.72f)
+            }
+            WorkspaceActionIcon.Copy -> {
+                rect(0.32f, 0.24f, 0.72f, 0.72f)
+                line(0.24f, 0.36f, 0.24f, 0.84f)
+                line(0.24f, 0.84f, 0.60f, 0.84f)
+                line(0.60f, 0.84f, 0.60f, 0.72f)
+            }
+            WorkspaceActionIcon.Open -> {
+                rect(0.22f, 0.32f, 0.68f, 0.78f)
+                line(0.50f, 0.22f, 0.82f, 0.22f)
+                line(0.82f, 0.22f, 0.82f, 0.54f)
+                line(0.48f, 0.56f, 0.82f, 0.22f)
+            }
+        }
+    }
 }
 
 @Composable
@@ -1203,6 +1278,13 @@ private enum class WorkspaceTab(val label: String) {
     Guide("Guide"),
     Graph("Graph"),
     Extensions("Extensions"),
+}
+
+private enum class WorkspaceActionIcon {
+    Refresh,
+    Trash,
+    Copy,
+    Open,
 }
 
 private fun DrawScope.drawDirectoryGlyph(
