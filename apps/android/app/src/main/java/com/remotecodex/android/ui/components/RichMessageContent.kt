@@ -14,9 +14,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -27,6 +34,7 @@ import com.remotecodex.android.ui.presentation.graphChatHighlightedCode
 import com.remotecodex.android.ui.presentation.preprocessGraphChatToolBlocks
 import com.remotecodex.android.ui.presentation.toolBlockStatus
 import com.remotecodex.android.ui.theme.ThreadColors
+import kotlinx.coroutines.delay
 
 private sealed interface RichBlock {
     data class Paragraph(val text: String) : RichBlock
@@ -127,6 +135,7 @@ private fun RichToolBlock(language: String, code: String) {
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.SemiBold,
             )
+            CopyCodeButton(value = code.trimEnd())
         }
         Box(
             modifier = Modifier
@@ -197,18 +206,22 @@ private fun RichCodeBlock(language: String, code: String) {
             .background(ThreadColors.CodeBackground)
             .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(8.dp)),
     ) {
-        if (language.isNotBlank()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(ThreadColors.Surface.copy(alpha = 0.18f))
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             Text(
-                text = language,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(ThreadColors.Surface.copy(alpha = 0.18f))
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                text = language.ifBlank { "text" },
+                modifier = Modifier.weight(1f),
                 color = ThreadColors.ForegroundMuted,
                 style = MaterialTheme.typography.labelSmall,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.SemiBold,
             )
+            CopyCodeButton(value = code.trimEnd())
         }
         Text(
             text = graphChatHighlightedCode(language = language, code = code),
@@ -220,6 +233,30 @@ private fun RichCodeBlock(language: String, code: String) {
             fontFamily = FontFamily.Monospace,
         )
     }
+}
+
+@Composable
+private fun CopyCodeButton(value: String) {
+    val clipboard = LocalClipboardManager.current
+    var copied by remember(value) { mutableStateOf(false) }
+
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1200)
+            copied = false
+        }
+    }
+
+    GraphButton(
+        label = if (copied) "Copied" else "Copy",
+        size = GraphButtonSize.Small,
+        variant = if (copied) GraphButtonVariant.Secondary else GraphButtonVariant.Ghost,
+        contentDescription = "Copy code",
+        onClick = {
+            clipboard.setText(AnnotatedString(value))
+            copied = true
+        },
+    )
 }
 
 @Composable

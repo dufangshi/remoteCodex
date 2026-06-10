@@ -123,7 +123,7 @@ The visual direction is close to the web mobile thread view, but not a literal D
 | `GraphChatThreadChatPanel.tsx` | `ThreadDetailPreviewScreen.kt` + `ThreadTimelineComponents.kt` | Chat surface with timeline padding and fixed composer behavior. |
 | `GraphChatTurnFrame.tsx` | `ThreadTimelineComponents.kt` | Turn header, status, time, token summary, and body grouping. |
 | `GraphChatMessageFrame.tsx` | `ThreadTimelineComponents.kt` | User/assistant message surfaces, sender label, status, and time treatment. |
-| `GraphChatMessageBody.tsx` and `GraphChatMessageContent.tsx` | `RichMessageContent.kt` | Native rich message rendering for paragraphs, headings, bullets, inline code, and fenced code blocks. |
+| `GraphChatMessageBody.tsx` and `GraphChatMessageContent.tsx` | `RichMessageContent.kt` | Native rich message rendering for paragraphs, headings, bullets, inline code, fenced code blocks, tool blocks, and code-copy feedback. |
 | `markdownHeuristics.ts` | `MarkdownHeuristics.kt` + `RichMessageContent.kt` | Native markdown syntax heuristic chooses between lightweight plain text blocks and richer markdown-like parsing. |
 | `graphChatToolBlocks.ts` | `GraphChatToolBlocks.kt` + `RichMessageContent.kt` | Native preprocessing for `tool-call`, `tool-result`, and merged tool blocks, with dedicated tool block rendering inside rich messages. |
 | `graphChatShiki.ts` | `GraphChatSyntaxHighlighting.kt` + `RichMessageContent.kt` | Lightweight native syntax styling for fenced code blocks. This improves code readability without embedding Shiki or a JavaScript highlighter runtime. |
@@ -179,8 +179,8 @@ Still open:
 
 - Desktop-style collapsed rooms rail from `ThreadWorkspaceLayout.tsx`; current native shell layout covers the mobile rail/scrim path, not a tablet/desktop rail collapse mode.
 - Real app shell navigation destinations: workspace home, thread list, shell list, import plugin, and backend settings are still preview-only.
-- Full markdown/GFM parity, tables, math, syntax highlighting, copy buttons, and plugin-rendered inline artifacts.
-- Full Shiki parity for code blocks: language grammars, themes, token scopes, line metadata, and copy actions are still open. Current Android highlighting is intentionally lightweight.
+- Full markdown/GFM parity, tables, math, advanced syntax highlighting, and plugin-rendered inline artifacts.
+- Full Shiki parity for code blocks: language grammars, themes, token scopes, and line metadata are still open. Current Android highlighting is intentionally lightweight, with native copy affordances already present on fenced code and tool blocks.
 - Full graph-ui primitive behavior: pressed/loading states, focus polish, icon slots, real editable input controls, long-press tooltip popovers, Dialog trigger/portal parity, and broader reuse outside molecule controls, accordion surfaces, input groups, sliders, and thread action dialogs.
 - Full graph-chat tool block parity: robust JSON parsing, streaming result reconciliation, copy actions, and plugin-aware renderers. Current Android support is lightweight and preview-oriented.
 - Full history entry ordering parity with persisted server events; current native dispatcher preserves the preview item/group stream but does not yet consume server event cursors.
