@@ -802,6 +802,17 @@ private fun HistoryGroupRow(
         if (item.kind == HistoryItemKind.FileChange) {
             FileChangeDeltaRow(item = item)
         }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            CopyTextButton(
+                value = historyItemCopyText(item),
+                idleLabel = "Copy",
+                copiedLabel = "Copied",
+                contentDescription = "Copy history item details",
+            )
+        }
     }
 }
 
@@ -880,20 +891,46 @@ private fun HistoryItemCard(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        item.actionLabel?.let { label ->
-            Text(
-                text = label,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(7.dp))
-                    .border(1.dp, colors.border, RoundedCornerShape(7.dp))
-                    .clickable { openHistoryItemDetail(item, null, onOpenDetail) }
-                    .padding(horizontal = 10.dp, vertical = 7.dp),
-                color = colors.foreground,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.SemiBold,
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            item.actionLabel?.let { label ->
+                Text(
+                    text = label,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(7.dp))
+                        .border(1.dp, colors.border, RoundedCornerShape(7.dp))
+                        .clickable { openHistoryItemDetail(item, null, onOpenDetail) }
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                    color = colors.foreground,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            Spacer(modifier = Modifier.weight(1f))
+            CopyTextButton(
+                value = historyItemCopyText(item),
+                idleLabel = "Copy",
+                copiedLabel = "Copied",
+                contentDescription = "Copy history item details",
             )
         }
     }
+}
+
+private fun historyItemCopyText(item: HistoryItemPreview): String {
+    return buildString {
+        appendLine(item.title)
+        item.meta?.takeIf { it.isNotBlank() }?.let { appendLine(it) }
+        item.status?.let { appendLine(toolStatusLabel(it)) }
+        item.summary.takeIf { it.isNotBlank() }?.let { appendLine(it) }
+        item.detail?.takeIf { it.isNotBlank() }?.let {
+            if (isNotEmpty()) appendLine()
+            appendLine(it)
+        }
+    }.trim()
 }
 
 private fun openHistoryItemDetail(
