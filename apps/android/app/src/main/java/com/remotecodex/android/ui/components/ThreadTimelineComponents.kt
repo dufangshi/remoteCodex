@@ -494,7 +494,7 @@ private fun MessageBubble(
             ) {
                 AssistantSenderPill()
                 assistantStatus?.let {
-                    MessageStatusBadge(model = it)
+                    MessageStatusBadge(model = it, compact = true)
                 }
                 Spacer(modifier = Modifier.weight(1f))
                 AssistantCopyButton(
@@ -545,7 +545,7 @@ private fun MessageBubble(
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                messageStatus?.let { MessageStatusBadge(model = it) }
+                messageStatus?.let { MessageStatusBadge(model = it, compact = true) }
                 Text(
                     text = message.timeLabel,
                     modifier = Modifier.padding(start = 8.dp),

@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -68,12 +69,14 @@ fun ThreadStatusBadge(
 fun MessageStatusBadge(
     model: MessageStatusModel,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
 ) {
     val colors = messageStatusBadgeColors(model.tone)
     PillBadge(
         label = model.label,
         colors = colors,
-        modifier = modifier,
+        modifier = if (compact) modifier.defaultMinSize(minWidth = 24.dp) else modifier,
+        showLabel = !compact,
         leading = {
             if (model.tone == MessageStatusTone.Running) {
                 RunningDots(color = colors.foreground)
@@ -169,6 +172,7 @@ private fun PillBadge(
     label: String,
     colors: BadgeColors,
     modifier: Modifier = Modifier,
+    showLabel: Boolean = true,
     leading: @Composable () -> Unit,
 ) {
     Row(
@@ -184,15 +188,18 @@ private fun PillBadge(
             horizontalArrangement = Arrangement.spacedBy(5.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(modifier = Modifier.size(8.dp))
+            val edgeSize = if (showLabel) 8.dp else 4.dp
+            Box(modifier = Modifier.size(edgeSize))
             leading()
-            Text(
-                text = label,
-                color = colors.foreground,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Medium,
-            )
-            Box(modifier = Modifier.size(8.dp))
+            if (showLabel) {
+                Text(
+                    text = label,
+                    color = colors.foreground,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+            Box(modifier = Modifier.size(edgeSize))
         }
     }
 }
