@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -510,11 +512,7 @@ private fun MessageBubble(
             }
         }
         if (isUser) {
-            Text(
-                text = message.richText,
-                color = ThreadColors.UserBubbleText,
-                style = MaterialTheme.typography.bodyLarge,
-            )
+            UserMessageBody(text = message.richText)
         } else {
             RichMessageContent(content = message.richText)
         }
@@ -561,6 +559,137 @@ private fun MessageBubble(
             }
         }
     }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun UserMessageBody(text: String) {
+    val segments = remember(text) { tokenizeUserMessageText(text) }
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        segments.forEach { segment ->
+            when (segment) {
+                is UserMessageSegment.Text -> Text(
+                    text = segment.text,
+                    color = ThreadColors.UserBubbleText,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                is UserMessageSegment.Photo -> UserPhotoAttachment(path = segment.path)
+                is UserMessageSegment.File -> UserFileAttachment(path = segment.path)
+            }
+        }
+    }
+}
+
+@Composable
+private fun UserPhotoAttachment(path: String) {
+    Column(
+        modifier = Modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(ThreadColors.InfoSoft.copy(alpha = 0.38f))
+            .border(1.dp, ThreadColors.Info.copy(alpha = 0.34f), RoundedCornerShape(14.dp))
+            .padding(6.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .background(ThreadColors.CodeBackground)
+                .padding(horizontal = 28.dp, vertical = 22.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = "PHOTO",
+                color = ThreadColors.Info,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        Text(
+            text = basenameFromAssetPath(path).ifBlank { "Attached image" },
+            color = ThreadColors.UserBubbleText,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun UserFileAttachment(path: String) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(ThreadColors.SuccessSoft.copy(alpha = 0.36f))
+            .border(1.dp, ThreadColors.Success.copy(alpha = 0.34f), RoundedCornerShape(14.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = "FILE",
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .background(ThreadColors.SuccessSoft)
+                .border(1.dp, ThreadColors.Success.copy(alpha = 0.32f), RoundedCornerShape(999.dp))
+                .padding(horizontal = 7.dp, vertical = 4.dp),
+            color = ThreadColors.Success,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            text = basenameFromAssetPath(path).ifBlank { "Attached file" },
+            color = ThreadColors.UserBubbleText,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+private sealed interface UserMessageSegment {
+    data class Text(val text: String) : UserMessageSegment
+    data class Photo(val path: String) : UserMessageSegment
+    data class File(val path: String) : UserMessageSegment
+}
+
+private fun tokenizeUserMessageText(text: String): List<UserMessageSegment> {
+    if (text.isEmpty()) return emptyList()
+
+    val matcher = Regex("\\[(PHOTO|FILE)\\s+([^\\]]+)]")
+    val segments = mutableListOf<UserMessageSegment>()
+    var cursor = 0
+    for (match in matcher.findAll(text)) {
+        val start = match.range.first
+        if (start > cursor) {
+            segments += UserMessageSegment.Text(text.substring(cursor, start))
+        }
+        val kind = match.groupValues.getOrNull(1).orEmpty()
+        val path = match.groupValues.getOrNull(2).orEmpty().trim()
+        if (path.isBlank()) {
+            segments += UserMessageSegment.Text(match.value)
+        } else if (kind == "PHOTO") {
+            segments += UserMessageSegment.Photo(path)
+        } else {
+            segments += UserMessageSegment.File(path)
+        }
+        cursor = match.range.last + 1
+    }
+    if (cursor < text.length) {
+        segments += UserMessageSegment.Text(text.substring(cursor))
+    }
+    return segments
+}
+
+private fun basenameFromAssetPath(value: String): String {
+    val normalized = value.replace(Regex("[/\\\\]+$"), "").trim()
+    if (normalized.isBlank()) return ""
+    return normalized.split(Regex("[/\\\\]+")).filter { it.isNotBlank() }.lastOrNull() ?: normalized
 }
 
 @Composable

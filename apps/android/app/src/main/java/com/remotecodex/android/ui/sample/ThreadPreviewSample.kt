@@ -192,7 +192,7 @@ object ThreadPreviewSample {
                         author = MessageAuthor.User,
                         status = ThreadStatus.Complete,
                         timeLabel = "13:39",
-                        text = "Continue Android app development. Align native components with thread-ui and keep the visual language close to the web version.",
+                        text = "Continue Android app development. Align native components with thread-ui and keep the visual language close to the web version.\n\n[PHOTO apps/android/output/shell-preview.png]\n[FILE docs/android-client-architecture.md]",
                     ),
                     MessagePreview(
                         author = MessageAuthor.Assistant,

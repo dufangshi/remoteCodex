@@ -123,7 +123,7 @@ The visual direction is close to the web mobile thread view, but not a literal D
 | `GraphChatThreadChatPanel.tsx` | `ThreadDetailPreviewScreen.kt` + `ThreadTimelineComponents.kt` | Chat surface with timeline padding and fixed composer behavior. |
 | `GraphChatTurnFrame.tsx` | `ThreadTimelineComponents.kt` | Turn header, status, time, token summary, and body grouping. |
 | `GraphChatMessageFrame.tsx` | `ThreadTimelineComponents.kt` | User/assistant message surfaces, sender label, status, time treatment, and assistant reply copy action. |
-| `GraphChatMessageBody.tsx` and `GraphChatMessageContent.tsx` | `RichMessageContent.kt` | Native rich message rendering for paragraphs, headings, bullets, inline code, fenced code blocks, tool blocks, and code-copy feedback. |
+| `GraphChatMessageBody.tsx` and `GraphChatMessageContent.tsx` | `ThreadTimelineComponents.kt` + `RichMessageContent.kt` | Native assistant rich message rendering for paragraphs, headings, bullets, inline code, fenced code blocks, tool blocks, and code-copy feedback. User messages parse `[PHOTO path]` and `[FILE path]` tokens into native attachment chips/placeholders. |
 | `markdownHeuristics.ts` | `MarkdownHeuristics.kt` + `RichMessageContent.kt` | Native markdown syntax heuristic chooses between lightweight plain text blocks and richer markdown-like parsing. |
 | `graphChatToolBlocks.ts` | `GraphChatToolBlocks.kt` + `RichMessageContent.kt` | Native preprocessing for `tool-call`, `tool-result`, and merged tool blocks, with dedicated tool block rendering inside rich messages. |
 | `graphChatShiki.ts` | `GraphChatSyntaxHighlighting.kt` + `RichMessageContent.kt` | Lightweight native syntax styling for fenced code blocks. This improves code readability without embedding Shiki or a JavaScript highlighter runtime. |
@@ -185,7 +185,7 @@ Still open:
 - Full graph-chat tool block parity: robust JSON parsing, streaming result reconciliation, and plugin-aware renderers. Current Android support is lightweight and preview-oriented, with native copy actions on tool parameters/results.
 - Full history entry ordering parity with persisted server events; current native dispatcher preserves the preview item/group stream but does not yet consume server event cursors.
 - Full `ThreadTimeline.tsx` behavior: scroll anchoring, tail visibility, server-managed history paging, deferred history detail cache, request anchoring by turn id, and live output attachment are still not implemented.
-- Full history item interactions: deferred detail loading, real image asset loading, clipboard actions, and richer full-detail content types.
+- Full history item and user attachment interactions: deferred detail loading, real image asset loading, clipboard actions, and richer full-detail content types.
 - Broader copy affordances for deferred-detail history items; assistant replies, reasoning text, fenced code, tool blocks, native history item summaries/details, and image paths already have clipboard feedback.
 - Real thread action wiring behind native dialogs: rename, export PDF/HTML, delete, busy/error states, and confirmation callbacks.
 - Full artifact-specific viewers, including interactive molecule and graph panels.
