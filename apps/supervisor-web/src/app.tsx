@@ -8,7 +8,11 @@ import {
 import { useEffect, useState } from 'react';
 import { PluginProvider } from '@remote-codex/thread-ui';
 
-import type { AgentBackendIdDto, AuthSessionDto } from '../../../packages/shared/src/index';
+import type {
+  AgentBackendIdDto,
+  AuthSessionDto,
+  RelaySessionDto,
+} from '../../../packages/shared/src/index';
 import {
   defaultAgentBackendId,
   normalizeAgentBackendId,
@@ -36,6 +40,7 @@ import {
   ApiError,
   fetchAuthSession,
   fetchPlugins,
+  fetchRelaySession,
   importPlugin,
   login,
   relayModeActive,
@@ -298,6 +303,51 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   return children;
 }
 
+function RelayGate({ children }: { children: React.ReactNode }) {
+  const [state, setState] = useState<
+    | { status: 'checking' }
+    | { status: 'authenticated'; session: RelaySessionDto }
+    | { status: 'loginRequired' }
+  >({ status: 'checking' });
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchRelaySession()
+      .then((session) => {
+        if (cancelled) {
+          return;
+        }
+        setState(
+          session.authenticated
+            ? { status: 'authenticated', session }
+            : { status: 'loginRequired' },
+        );
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setState({ status: 'loginRequired' });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (state.status === 'checking') {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[var(--app-bg)] px-4 text-sm text-[var(--theme-muted)]">
+        Checking relay access...
+      </main>
+    );
+  }
+
+  if (state.status === 'loginRequired') {
+    return <RelayPortalPage />;
+  }
+
+  return children;
+}
+
 function SupervisorRoutes({
   themeMode,
   setThemeMode,
@@ -394,11 +444,13 @@ export function App() {
               path="/*"
               element={
                 relayModeActive() ? (
-                  <SupervisorRoutes
-                    themeMode={themeMode}
-                    setThemeMode={setThemeMode}
-                    effectiveTheme={effectiveTheme}
-                  />
+                  <RelayGate>
+                    <SupervisorRoutes
+                      themeMode={themeMode}
+                      setThemeMode={setThemeMode}
+                      effectiveTheme={effectiveTheme}
+                    />
+                  </RelayGate>
                 ) : (
                   <AuthGate>
                     <SupervisorRoutes
