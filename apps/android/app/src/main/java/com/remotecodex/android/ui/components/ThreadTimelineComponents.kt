@@ -1082,18 +1082,39 @@ private fun ImageHistoryPreview(
             )
         }
         item.assetPath?.let { path ->
-            Text(
-                text = path,
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(ThreadColors.Panel.copy(alpha = 0.74f))
                     .padding(horizontal = 10.dp, vertical = 8.dp),
-                color = ThreadColors.ForegroundMuted,
-                style = MaterialTheme.typography.labelSmall,
-                fontFamily = FontFamily.Monospace,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = path,
+                    modifier = Modifier.weight(1f),
+                    color = ThreadColors.ForegroundMuted,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                GraphButton(
+                    label = "Open",
+                    size = GraphButtonSize.Small,
+                    variant = GraphButtonVariant.Ghost,
+                    contentDescription = "Open image path",
+                    onClick = {
+                        onOpenDetail(DetailPreview(title = "Image Path", text = path))
+                    },
+                )
+                CopyTextButton(
+                    value = path,
+                    idleLabel = "Copy",
+                    copiedLabel = "Copied",
+                    contentDescription = "Copy image path",
+                )
+            }
         }
     }
 }

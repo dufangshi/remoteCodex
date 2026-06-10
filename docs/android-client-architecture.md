@@ -135,7 +135,7 @@ The visual direction is close to the web mobile thread view, but not a literal D
 | `GraphChatHistoryEntries.tsx` | `GraphChatHistoryEntries.kt` + `ThreadTimelineComponents.kt` | Native history entry dispatcher maps item, command group, file-change group, file-read group, and search group entries to timeline renderers. |
 | `GraphChatHistoryItems.tsx` | `ThreadTimelineComponents.kt` + `HistoryItemPreview` | Native typed history cards for plan, context, command, tool, agent, skill, web search, file read, file change, image, artifact, hook, and generic events, with detail and copy actions. |
 | `GraphChatHistoryGroupFrame.tsx` and grouped history items | `ThreadTimelineComponents.kt` + `GraphAccordion.kt` + `HistoryGroupPreview` | Expandable native batch cards for command, web-search, file-read, and file-change groups, with count badges, running status, child rows, delta summaries, and copy actions through the shared accordion primitive. |
-| `GraphChatImageItem.tsx` | `ThreadTimelineComponents.kt` + `HistoryItemPreview` | Native image event placeholder with fixed-ratio preview block, asset path row, and detail overlay action. |
+| `GraphChatImageItem.tsx` | `ThreadTimelineComponents.kt` + `HistoryItemPreview` | Native image event placeholder with fixed-ratio preview block, asset path row, open detail action, and path copy feedback. |
 | `LongTextDialog.tsx` | `LongTextDialog.kt` + `DetailPreview` | Native full-detail overlay for history actions such as Command Output, File Read Details, File Change Details, and Artifact inspection, backed by shared dialog overlay primitives. |
 | `RenameDialog.tsx` | `ThreadActionDialogs.kt` | Native rename-thread dialog skeleton with preview field, cancel, and save actions. |
 | `ExportTranscriptDialog.tsx` | `ThreadActionDialogs.kt` + `ExportTurnPreview` | Native export transcript dialog skeleton with latest/custom mode, PDF/HTML format controls, selected turn rows, token/price option, and export footer. |
@@ -186,7 +186,7 @@ Still open:
 - Full history entry ordering parity with persisted server events; current native dispatcher preserves the preview item/group stream but does not yet consume server event cursors.
 - Full `ThreadTimeline.tsx` behavior: scroll anchoring, tail visibility, server-managed history paging, deferred history detail cache, request anchoring by turn id, and live output attachment are still not implemented.
 - Full history item interactions: deferred detail loading, real image asset loading, clipboard actions, and richer full-detail content types.
-- Broader copy affordances for rich media and deferred-detail history items; assistant replies, reasoning text, fenced code, tool blocks, and native history item summaries/details already have clipboard feedback.
+- Broader copy affordances for deferred-detail history items; assistant replies, reasoning text, fenced code, tool blocks, native history item summaries/details, and image paths already have clipboard feedback.
 - Real thread action wiring behind native dialogs: rename, export PDF/HTML, delete, busy/error states, and confirmation callbacks.
 - Full artifact-specific viewers, including interactive molecule and graph panels.
 - Real molecule viewer behavior behind the current native control chips: 3D renderer, robust bond perception, frame slider/playback, atom selection, camera updates, copy/download/screenshot actions, and unit-cell toggling.
