@@ -12,3 +12,7 @@ coverage
 test-results/
 apps/supervisor-web/test-results/
 apps/supervisor-api/.tmp/
+apps/android/.gradle/
+apps/android/build/
+apps/android/**/build/
+apps/android/local.properties
