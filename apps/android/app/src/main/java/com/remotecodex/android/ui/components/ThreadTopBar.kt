@@ -51,6 +51,9 @@ fun ThreadTopBar(
     modifier: Modifier = Modifier,
 ) {
     var actionsOpen by remember { mutableStateOf(false) }
+    var detailsOpen by remember { mutableStateOf(false) }
+    val activeRoom = detail.rooms.firstOrNull { it.active } ?: detail.rooms.firstOrNull()
+    val sessionLabel = activeRoom?.sessionId ?: detail.runtime
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -78,18 +81,11 @@ fun ThreadTopBar(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(
-                    text = "Workspace ${detail.workspace}",
-                    color = ThreadColors.ForegroundMuted,
-                    style = MaterialTheme.typography.labelSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = "Runtime ready",
-                    color = ThreadColors.ForegroundMuted,
-                    style = MaterialTheme.typography.labelSmall,
-                    maxLines = 1,
+                TopBarMetaRow(
+                    label = "Workspace",
+                    value = detail.workspace,
+                    expanded = detailsOpen,
+                    onClick = { detailsOpen = !detailsOpen },
                 )
             }
             Text(
@@ -117,6 +113,13 @@ fun ThreadTopBar(
                     actionsOpen = false
                     onOpenThreadAction(action)
                 },
+            )
+        }
+        if (detailsOpen) {
+            ThreadTopBarDetails(
+                workspace = detail.workspace,
+                session = sessionLabel,
+                usage = detail.usage,
             )
         }
         Row(
@@ -168,6 +171,92 @@ fun ThreadTopBar(
                 overflow = TextOverflow.Ellipsis,
             )
         }
+    }
+}
+
+@Composable
+private fun TopBarMetaRow(
+    label: String,
+    value: String,
+    expanded: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .padding(top = 2.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .semantics { contentDescription = if (expanded) "Hide session and usage" else "Show session and usage" }
+            .clickable(onClick = onClick)
+            .padding(horizontal = 0.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Text(
+            text = label,
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+        )
+        Text(
+            text = value,
+            modifier = Modifier.weight(1f, fill = false),
+            color = ThreadColors.ForegroundSoft,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        TopBarGlyph(
+            icon = if (expanded) TopBarIcon.ChevronUp else TopBarIcon.ChevronDown,
+            color = ThreadColors.ForegroundMuted,
+            modifier = Modifier.size(11.dp),
+        )
+    }
+}
+
+@Composable
+private fun ThreadTopBarDetails(
+    workspace: String,
+    session: String,
+    usage: String,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(11.dp))
+            .background(ThreadColors.Surface)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(11.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        TopBarDetailRow(label = "Workspace", value = workspace)
+        TopBarDetailRow(label = "Session", value = session)
+        TopBarDetailRow(label = "Usage", value = usage)
+    }
+}
+
+@Composable
+private fun TopBarDetailRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.weight(0.34f),
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+        )
+        Text(
+            text = value,
+            modifier = Modifier.weight(1f),
+            color = ThreadColors.ForegroundSoft,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -277,6 +366,14 @@ private fun TopBarGlyph(
                 line(0.42f, 0.68f, 0.20f, 0.68f)
                 line(0.20f, 0.68f, 0.20f, 0.25f)
             }
+            TopBarIcon.ChevronDown -> {
+                line(0.24f, 0.38f, 0.50f, 0.64f)
+                line(0.50f, 0.64f, 0.76f, 0.38f)
+            }
+            TopBarIcon.ChevronUp -> {
+                line(0.24f, 0.62f, 0.50f, 0.36f)
+                line(0.50f, 0.36f, 0.76f, 0.62f)
+            }
         }
     }
 }
@@ -286,6 +383,8 @@ private enum class TopBarIcon {
     Settings,
     Actions,
     Threads,
+    ChevronDown,
+    ChevronUp,
 }
 
 @Composable
