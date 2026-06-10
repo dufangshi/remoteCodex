@@ -127,8 +127,8 @@ private fun ComposerInputGroupPreview() {
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                AttachmentChip(kind = "PHOTO", name = "shell-preview.png")
-                AttachmentChip(kind = "FILE", name = "android-client-architecture.md")
+                AttachmentChip(icon = AttachmentTileIcon.Photo, name = "shell-preview.png")
+                AttachmentChip(icon = AttachmentTileIcon.File, name = "android-client-architecture.md")
             }
         },
         control = {
@@ -165,7 +165,7 @@ private fun ContextProgressPreview() {
 
 @Composable
 private fun AttachmentChip(
-    kind: String,
+    icon: AttachmentTileIcon,
     name: String,
 ) {
     Row(
@@ -177,13 +177,7 @@ private fun AttachmentChip(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
-        Text(
-            text = kind,
-            color = ThreadColors.Info,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-        )
+        AttachmentTileGlyph(icon = icon, color = ThreadColors.Info)
         Text(
             text = name,
             color = ThreadColors.ForegroundSoft,
@@ -256,8 +250,8 @@ private fun AttachmentPreviewStrip() {
             fontWeight = FontWeight.SemiBold,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            AttachmentChip(kind = "PHOTO", name = "shell-preview.png")
-            AttachmentChip(kind = "FILE", name = "architecture.md")
+            AttachmentChip(icon = AttachmentTileIcon.Photo, name = "shell-preview.png")
+            AttachmentChip(icon = AttachmentTileIcon.File, name = "architecture.md")
         }
     }
 }
