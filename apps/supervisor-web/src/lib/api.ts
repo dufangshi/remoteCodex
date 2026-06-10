@@ -3,6 +3,8 @@ import type {
   AgentBackendDto,
   AgentBackendIdDto,
   ApiErrorShape,
+  AuthLoginResultDto,
+  AuthSessionDto,
   ProviderHostConfigArchiveDto,
   ProviderHostFileDto,
   CreateProviderHostConfigArchiveInput,
@@ -70,6 +72,29 @@ export class ApiError extends Error {
   }
 }
 
+const AUTH_TOKEN_STORAGE_KEY = 'remote-codex-auth-token';
+
+function readStoredAuthToken() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  return window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+}
+
+export function setStoredAuthToken(token: string | null) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  if (token) {
+    window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
+    return;
+  }
+
+  window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+}
+
 export interface FileDownloadResult {
   blob: Blob;
   filename: string;
@@ -78,6 +103,10 @@ export interface FileDownloadResult {
 function apiErrorCodeForStatus(status: number): ApiErrorShape['code'] {
   if (status === 400) {
     return 'bad_request';
+  }
+
+  if (status === 401) {
+    return 'unauthorized';
   }
 
   if (status === 403) {
@@ -195,10 +224,10 @@ async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
     headers.set('Content-Type', 'application/json');
   }
 
-  const response = await fetch(input, {
+  const response = await fetch(input, withAuthInit({
+    ...init,
     headers,
-    ...init
-  });
+  }));
 
   if (!response.ok) {
     const payload = await readApiErrorPayload(response);
@@ -243,7 +272,7 @@ function parseContentDispositionFilename(value: string | null) {
 }
 
 async function downloadFile(input: RequestInfo | URL, init?: RequestInit): Promise<FileDownloadResult> {
-  const response = await fetch(input, init);
+  const response = await fetch(input, withAuthInit(init));
 
   if (!response.ok) {
     const payload = await readApiErrorPayload(response);
@@ -257,6 +286,20 @@ async function downloadFile(input: RequestInfo | URL, init?: RequestInit): Promi
   return {
     blob: await response.blob(),
     filename,
+  };
+}
+
+function withAuthInit(init: RequestInit = {}): RequestInit {
+  const headers = new Headers(init.headers);
+  const token = readStoredAuthToken();
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  return {
+    ...init,
+    credentials: init.credentials ?? 'same-origin',
+    headers,
   };
 }
 
@@ -280,6 +323,29 @@ function normalizedUploadFileName(attachment: PromptAttachmentUpload, index: num
 
 export function fetchRuntimeConfig() {
   return request<RuntimeConfigDto>('/api/config/runtime');
+}
+
+export function fetchAuthSession() {
+  return request<AuthSessionDto>('/api/auth/session', {
+    cache: 'no-store',
+  });
+}
+
+export async function login(input: { username: string; password: string }) {
+  const result = await request<AuthLoginResultDto>('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  setStoredAuthToken(result.token ?? null);
+  return result;
+}
+
+export async function logout() {
+  const result = await request<AuthSessionDto>('/api/auth/logout', {
+    method: 'POST',
+  });
+  setStoredAuthToken(null);
+  return result;
 }
 
 export function fetchWorkspaceSettings() {
@@ -844,7 +910,7 @@ export function updateWorkspaceFavorite(id: string, input: UpdateWorkspaceFavori
 
 export function connectSupervisorEvents(onEvent: (event: ThreadEventEnvelope) => void) {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
+  const socket = new WebSocket(buildSocketUrl(protocol));
 
   socket.addEventListener('message', (message) => {
     try {
@@ -867,7 +933,7 @@ export function connectShellSocket(
   } = {}
 ) {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
+  const socket = new WebSocket(buildSocketUrl(protocol));
 
   socket.addEventListener('message', (message) => {
     try {
@@ -890,6 +956,15 @@ export function connectShellSocket(
       socket.send(JSON.stringify(message));
     }
   };
+}
+
+function buildSocketUrl(protocol: 'ws:' | 'wss:') {
+  const url = new URL(`${protocol}//${window.location.host}/ws`);
+  const token = readStoredAuthToken();
+  if (token) {
+    url.searchParams.set('token', token);
+  }
+  return url.toString();
 }
 
 function isThreadEventEnvelope(

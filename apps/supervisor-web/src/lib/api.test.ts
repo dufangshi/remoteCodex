@@ -8,10 +8,12 @@ import {
   disconnectThread,
   fetchAgentBackendModels,
   fetchAgentBackendStatus,
+  fetchAuthSession,
   fetchProviderHostConfigArchives,
   fetchProviderHostFile,
   importThread,
   buildAndRestartService,
+  login,
   renameProviderHostConfigArchive,
   restartAgentBackend,
   resumeThread,
@@ -22,6 +24,7 @@ import {
 
 describe('api request helper', () => {
   beforeEach(() => {
+    window.localStorage.clear();
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -29,6 +32,44 @@ describe('api request helper', () => {
         json: async () => ({ ok: true })
       })
     );
+  });
+
+  it('sends same-origin credentials and a stored bearer token', async () => {
+    window.localStorage.setItem('remote-codex-auth-token', 'token-1');
+
+    await fetchAuthSession();
+
+    const call = vi.mocked(fetch).mock.calls.at(-1);
+    expect(call?.[0]).toBe('/api/auth/session');
+    expect(call?.[1]?.credentials).toBe('same-origin');
+    const headers = new Headers(call?.[1]?.headers);
+    expect(headers.get('Authorization')).toBe('Bearer token-1');
+  });
+
+  it('stores the login token for follow-up requests', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          token: 'token-2',
+          session: {
+            authenticated: true,
+            username: 'admin',
+            expiresAt: '2026-06-10T00:00:00.000Z',
+            mode: 'server',
+            authRequired: true,
+          },
+        }),
+      }),
+    );
+
+    await login({ username: 'admin', password: 'secret' });
+
+    expect(window.localStorage.getItem('remote-codex-auth-token')).toBe('token-2');
+    const call = vi.mocked(fetch).mock.calls.at(-1);
+    expect(call?.[0]).toBe('/api/auth/login');
+    expect(call?.[1]?.credentials).toBe('same-origin');
   });
 
   it('does not force a JSON content type for body-less post requests', async () => {
