@@ -171,7 +171,7 @@ export function RelayPortalPage() {
         ) : null}
 
         <section className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]">
-          <Panel title="Devices" description="Each device is one connected Remote Codex backend.">
+          <Panel title="Devices" description="Owned devices and sessions shared with you.">
             <DeviceCreateForm onCreate={handleCreateDevice} />
             <div className="mt-4 divide-y divide-[var(--theme-border)] rounded-lg border border-[var(--theme-border)]">
               {portal?.devices.length ? (
@@ -213,6 +213,44 @@ export function RelayPortalPage() {
                 <p className="p-3 text-sm text-[var(--theme-fg-muted)]">No devices yet.</p>
               )}
             </div>
+
+            <div className="mt-5">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold text-[var(--theme-fg)]">Shared</h3>
+                <span className="rounded-full border border-[var(--theme-border)] px-2 py-0.5 text-[11px] text-[var(--theme-fg-muted)]">
+                  {portal?.sharedWithMe.length ?? 0}
+                </span>
+              </div>
+              <div className="mt-3 space-y-3">
+                {portal?.sharedWithMe.length ? (
+                  portal.sharedWithMe.map((share) => (
+                    <article key={share.id} className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-3">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-[var(--theme-fg)]">
+                            {share.label || share.threadId}
+                          </p>
+                          <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
+                            {share.ownerUsername} / {share.deviceName}
+                          </p>
+                        </div>
+                        <button
+                          className="relay-button-primary"
+                          onClick={() => openSharedSession(share.deviceId, share.threadId)}
+                          type="button"
+                        >
+                          Continue
+                        </button>
+                      </div>
+                    </article>
+                  ))
+                ) : (
+                  <p className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-3 text-sm text-[var(--theme-fg-muted)]">
+                    No shared sessions.
+                  </p>
+                )}
+              </div>
+            </div>
           </Panel>
 
           <Panel title="Invite" description="Share a single thread with another relay user.">
@@ -223,33 +261,7 @@ export function RelayPortalPage() {
           </Panel>
         </section>
 
-        <section className="grid gap-4 lg:grid-cols-2">
-          <Panel title="Shared With Me" description="Sessions another user invited you into.">
-            <div className="space-y-3">
-              {portal?.sharedWithMe.length ? (
-                portal.sharedWithMe.map((share) => (
-                  <article key={share.id} className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)] p-3">
-                    <p className="text-sm font-medium text-[var(--theme-fg)]">
-                      {share.label || share.threadId}
-                    </p>
-                    <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
-                      {share.ownerUsername} / {share.deviceName}
-                    </p>
-                    <button
-                      className="relay-button-primary mt-3"
-                      onClick={() => openSharedSession(share.deviceId, share.threadId)}
-                      type="button"
-                    >
-                      Continue
-                    </button>
-                  </article>
-                ))
-              ) : (
-                <p className="text-sm text-[var(--theme-fg-muted)]">No shared sessions.</p>
-              )}
-            </div>
-          </Panel>
-
+        <section>
           <Panel title="Shared By Me" description="Active invitations you created.">
             <div className="space-y-3">
               {portal?.sharedByMe.length ? (

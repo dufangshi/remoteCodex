@@ -85,7 +85,6 @@ REMOTE_CODEX_ADMIN_PASSWORD=change-me-now
 REMOTE_CODEX_RELAY_SESSION_SECRET=at-least-16-characters
 REMOTE_CODEX_RELAY_DATA_DIR=/var/lib/remote-codex-relay
 REMOTE_CODEX_RELAY_REGISTRATION_ENABLED=true
-REMOTE_CODEX_RELAY_WEB_DIST_DIR=/path/to/supervisor-web/dist
 HOST=0.0.0.0
 PORT=8788
 remote-codex relay
@@ -94,9 +93,10 @@ remote-codex relay
 In a source checkout, the same relay can still be developed and tested through
 `pnpm --filter @remote-codex/relay-server dev`.
 
-The relay server can also serve the built web frontend. When
-`REMOTE_CODEX_RELAY_WEB_DIST_DIR` points to the `supervisor-web` build output,
-the relay injects a bootstrap config into `index.html` so the browser uses
+The relay server also serves the built web frontend when
+`apps/supervisor-web/dist/index.html` is present in the installed package or
+source checkout. `REMOTE_CODEX_RELAY_WEB_DIST_DIR` can override that path. The
+relay injects a bootstrap config into `index.html` so the browser uses
 `/relay/...` APIs instead of trying to contact a local supervisor directly.
 
 Relay mode is a separate transport layer from the normal supervisor API. The relay should:

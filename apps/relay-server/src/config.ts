@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { z } from 'zod';
 
 export interface RelayServerConfig {
@@ -52,6 +54,14 @@ export function loadRelayServerConfig(
         : ['1', 'true', 'yes', 'on'].includes(
             parsed.REMOTE_CODEX_RELAY_REGISTRATION_ENABLED.toLowerCase(),
           ),
-    webDistDir: parsed.REMOTE_CODEX_RELAY_WEB_DIST_DIR ?? null,
+    webDistDir: parsed.REMOTE_CODEX_RELAY_WEB_DIST_DIR ?? defaultRelayWebDistDir(),
   };
+}
+
+function defaultRelayWebDistDir() {
+  const candidate = path.resolve('apps/supervisor-web/dist');
+  if (fs.existsSync(path.join(candidate, 'index.html'))) {
+    return candidate;
+  }
+  return null;
 }

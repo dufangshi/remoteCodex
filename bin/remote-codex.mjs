@@ -142,9 +142,13 @@ Environment:
   REMOTE_CODEX_SERVICE_DIR  Service state and log directory, default ~/.remote-codex/service
 
 Relay:
-  REMOTE_CODEX_RELAY_SUPERVISOR_TOKEN  Required token for the home supervisor tunnel
-  REMOTE_CODEX_RELAY_CLIENT_TOKEN      Optional token required from relay clients
-  HOST                                 Relay listen host, default 0.0.0.0
-  PORT                                 Relay listen port, default 8788
+  REMOTE_CODEX_RELAY_SUPERVISOR_TOKEN       Legacy bootstrap token for supervisor tunnels
+  REMOTE_CODEX_ADMIN_USERNAME               Relay admin username
+  REMOTE_CODEX_ADMIN_PASSWORD               Relay admin password
+  REMOTE_CODEX_RELAY_DATA_DIR               Relay user/device store, default .local/relay-server
+  REMOTE_CODEX_RELAY_WEB_DIST_DIR           Web dist override, defaults to packaged supervisor-web/dist
+  REMOTE_CODEX_RELAY_REGISTRATION_ENABLED   true/false, default true
+  HOST                                      Relay listen host, default 0.0.0.0
+  PORT                                      Relay listen port, default 8788
 `);
 }
