@@ -2,6 +2,7 @@ package com.remotecodex.android.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
@@ -33,7 +34,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -58,7 +63,6 @@ import com.remotecodex.android.ui.model.ThreadStatus
 import com.remotecodex.android.ui.model.ToolCallPreview
 import com.remotecodex.android.ui.model.ToolStatus
 import com.remotecodex.android.ui.model.TurnPreview
-import com.remotecodex.android.ui.presentation.historyItemShortLabel
 import com.remotecodex.android.ui.presentation.basenameFromAssetPath
 import com.remotecodex.android.ui.presentation.graphChatMessageStatusModel
 import com.remotecodex.android.ui.presentation.parseUserMessageSegments
@@ -829,7 +833,7 @@ private fun HistoryGroupCard(
             backgroundColor = colors.background,
             contentBackgroundColor = colors.background,
             leading = {
-                HistoryIcon(label = "BATCH", color = colors.foreground)
+                HistoryKindGlyph(kind = group.kind, color = colors.foreground)
             },
             trailing = {
                 Row(
@@ -995,7 +999,7 @@ private fun HistoryItemCard(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            HistoryIcon(label = historyItemShortLabel(item.kind), color = colors.foreground)
+            HistoryKindGlyph(kind = item.kind, color = colors.foreground)
             Text(
                 text = item.title,
                 modifier = Modifier.weight(1f),
@@ -1117,20 +1121,135 @@ private fun openHistoryItemDetail(
 }
 
 @Composable
-private fun HistoryIcon(label: String, color: Color) {
+private fun HistoryKindGlyph(kind: HistoryItemKind, color: Color) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(7.dp))
             .background(color.copy(alpha = 0.12f))
             .border(1.dp, color.copy(alpha = 0.35f), RoundedCornerShape(7.dp))
-            .padding(horizontal = 7.dp, vertical = 5.dp),
+            .padding(6.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = label,
-            color = color,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-        )
+        Canvas(modifier = Modifier.size(16.dp)) {
+            val stroke = Stroke(width = 1.45.dp.toPx(), cap = StrokeCap.Round)
+            val w = size.width
+            val h = size.height
+            fun line(x1: Float, y1: Float, x2: Float, y2: Float) {
+                drawLine(color, Offset(w * x1, h * y1), Offset(w * x2, h * y2), stroke.width, StrokeCap.Round)
+            }
+            fun document() {
+                val path = Path().apply {
+                    moveTo(w * 0.28f, h * 0.16f)
+                    lineTo(w * 0.62f, h * 0.16f)
+                    lineTo(w * 0.78f, h * 0.32f)
+                    lineTo(w * 0.78f, h * 0.84f)
+                    lineTo(w * 0.28f, h * 0.84f)
+                    close()
+                    moveTo(w * 0.62f, h * 0.16f)
+                    lineTo(w * 0.62f, h * 0.32f)
+                    lineTo(w * 0.78f, h * 0.32f)
+                }
+                drawPath(path, color, style = stroke)
+            }
+
+            when (kind) {
+                HistoryItemKind.Command -> {
+                    line(0.18f, 0.28f, 0.82f, 0.28f)
+                    line(0.18f, 0.28f, 0.18f, 0.78f)
+                    line(0.18f, 0.78f, 0.82f, 0.78f)
+                    line(0.82f, 0.28f, 0.82f, 0.78f)
+                    line(0.30f, 0.44f, 0.43f, 0.53f)
+                    line(0.43f, 0.53f, 0.30f, 0.62f)
+                    line(0.50f, 0.62f, 0.68f, 0.62f)
+                }
+                HistoryItemKind.WebSearch -> {
+                    drawCircle(color, radius = w * 0.23f, center = Offset(w * 0.43f, h * 0.43f), style = stroke)
+                    line(0.60f, 0.60f, 0.80f, 0.80f)
+                    line(0.28f, 0.43f, 0.58f, 0.43f)
+                    line(0.43f, 0.26f, 0.43f, 0.60f)
+                }
+                HistoryItemKind.FileRead -> {
+                    document()
+                    line(0.38f, 0.50f, 0.67f, 0.50f)
+                    line(0.38f, 0.64f, 0.58f, 0.64f)
+                }
+                HistoryItemKind.FileChange -> {
+                    document()
+                    line(0.34f, 0.64f, 0.58f, 0.40f)
+                    line(0.58f, 0.40f, 0.68f, 0.50f)
+                }
+                HistoryItemKind.Image -> {
+                    line(0.18f, 0.24f, 0.82f, 0.24f)
+                    line(0.18f, 0.24f, 0.18f, 0.78f)
+                    line(0.18f, 0.78f, 0.82f, 0.78f)
+                    line(0.82f, 0.24f, 0.82f, 0.78f)
+                    drawCircle(color, radius = w * 0.05f, center = Offset(w * 0.66f, h * 0.38f))
+                    line(0.26f, 0.70f, 0.44f, 0.52f)
+                    line(0.44f, 0.52f, 0.58f, 0.66f)
+                    line(0.58f, 0.66f, 0.70f, 0.54f)
+                }
+                HistoryItemKind.Artifact -> {
+                    line(0.26f, 0.34f, 0.50f, 0.20f)
+                    line(0.50f, 0.20f, 0.74f, 0.34f)
+                    line(0.74f, 0.34f, 0.74f, 0.64f)
+                    line(0.74f, 0.64f, 0.50f, 0.80f)
+                    line(0.50f, 0.80f, 0.26f, 0.64f)
+                    line(0.26f, 0.64f, 0.26f, 0.34f)
+                    line(0.26f, 0.34f, 0.50f, 0.50f)
+                    line(0.74f, 0.34f, 0.50f, 0.50f)
+                    line(0.50f, 0.50f, 0.50f, 0.80f)
+                }
+                HistoryItemKind.AgentTool -> {
+                    drawCircle(color, radius = w * 0.25f, center = Offset(w * 0.50f, h * 0.52f), style = stroke)
+                    line(0.36f, 0.46f, 0.36f, 0.46f)
+                    line(0.64f, 0.46f, 0.64f, 0.46f)
+                    line(0.42f, 0.62f, 0.58f, 0.62f)
+                    line(0.50f, 0.18f, 0.50f, 0.28f)
+                    drawCircle(color, radius = w * 0.04f, center = Offset(w * 0.50f, h * 0.16f))
+                }
+                HistoryItemKind.SkillTool -> {
+                    line(0.50f, 0.14f, 0.57f, 0.42f)
+                    line(0.57f, 0.42f, 0.84f, 0.50f)
+                    line(0.84f, 0.50f, 0.57f, 0.58f)
+                    line(0.57f, 0.58f, 0.50f, 0.86f)
+                    line(0.50f, 0.86f, 0.43f, 0.58f)
+                    line(0.43f, 0.58f, 0.16f, 0.50f)
+                    line(0.16f, 0.50f, 0.43f, 0.42f)
+                    line(0.43f, 0.42f, 0.50f, 0.14f)
+                }
+                HistoryItemKind.Hook -> {
+                    line(0.30f, 0.22f, 0.30f, 0.78f)
+                    line(0.70f, 0.22f, 0.70f, 0.78f)
+                    line(0.30f, 0.40f, 0.70f, 0.40f)
+                    line(0.30f, 0.60f, 0.70f, 0.60f)
+                    line(0.18f, 0.32f, 0.30f, 0.40f)
+                    line(0.82f, 0.68f, 0.70f, 0.60f)
+                }
+                HistoryItemKind.Plan -> {
+                    line(0.26f, 0.26f, 0.74f, 0.26f)
+                    line(0.26f, 0.50f, 0.74f, 0.50f)
+                    line(0.26f, 0.74f, 0.74f, 0.74f)
+                    drawCircle(color, radius = w * 0.035f, center = Offset(w * 0.16f, h * 0.26f))
+                    drawCircle(color, radius = w * 0.035f, center = Offset(w * 0.16f, h * 0.50f))
+                    drawCircle(color, radius = w * 0.035f, center = Offset(w * 0.16f, h * 0.74f))
+                }
+                HistoryItemKind.Context -> {
+                    line(0.24f, 0.26f, 0.66f, 0.18f)
+                    line(0.24f, 0.26f, 0.24f, 0.76f)
+                    line(0.24f, 0.76f, 0.66f, 0.84f)
+                    line(0.66f, 0.18f, 0.66f, 0.84f)
+                    line(0.66f, 0.32f, 0.78f, 0.38f)
+                    line(0.66f, 0.68f, 0.78f, 0.62f)
+                }
+                HistoryItemKind.ToolCall,
+                HistoryItemKind.Generic,
+                -> {
+                    line(0.24f, 0.68f, 0.66f, 0.26f)
+                    drawCircle(color, radius = w * 0.12f, center = Offset(w * 0.70f, h * 0.22f), style = stroke)
+                    drawCircle(color, radius = w * 0.07f, center = Offset(w * 0.22f, h * 0.72f))
+                }
+            }
+        }
     }
 }
 
