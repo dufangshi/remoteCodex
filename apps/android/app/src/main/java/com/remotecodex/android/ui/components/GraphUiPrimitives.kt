@@ -2,6 +2,7 @@ package com.remotecodex.android.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -27,7 +29,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -79,6 +85,13 @@ enum class GraphDialogActionTone {
     Danger,
 }
 
+enum class GraphActionIcon {
+    Cancel,
+    Save,
+    Export,
+    Delete,
+}
+
 @Composable
 fun GraphButton(
     label: String,
@@ -86,13 +99,13 @@ fun GraphButton(
     enabled: Boolean = true,
     variant: GraphButtonVariant = GraphButtonVariant.Outline,
     size: GraphButtonSize = GraphButtonSize.Small,
+    icon: GraphActionIcon? = null,
     contentDescription: String? = null,
     onClick: () -> Unit = {},
 ) {
     val colors = graphButtonColors(variant = variant)
     val shape = RoundedCornerShape(8.dp)
-    Text(
-        text = label,
+    Row(
         modifier = modifier
             .defaultMinSize(minHeight = size.minHeight)
             .clip(shape)
@@ -102,12 +115,25 @@ fun GraphButton(
             .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier)
             .alpha(if (enabled) 1f else 0.52f)
             .padding(horizontal = size.horizontalPadding, vertical = size.verticalPadding),
-        color = colors.foreground,
-        style = MaterialTheme.typography.labelSmall,
-        fontWeight = FontWeight.SemiBold,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-    )
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (icon != null) {
+            GraphActionGlyph(
+                icon = icon,
+                color = colors.foreground,
+                modifier = Modifier.size(14.dp),
+            )
+        }
+        Text(
+            text = label,
+            color = colors.foreground,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
 }
 
 @Composable
@@ -341,22 +367,98 @@ fun GraphDialogFooter(
             label = "Cancel",
             variant = GraphButtonVariant.Ghost,
             size = if (compact) GraphButtonSize.Small else GraphButtonSize.Default,
+            icon = GraphActionIcon.Cancel,
             onClick = onCancel,
         )
-        Text(
-            text = primaryLabel,
+        Row(
             modifier = Modifier
                 .clip(RoundedCornerShape(999.dp))
                 .background(primaryTone.background())
                 .border(1.dp, primaryTone.foreground().copy(alpha = 0.45f), RoundedCornerShape(999.dp))
                 .clickable(onClick = onPrimary)
                 .padding(horizontal = if (compact) 11.dp else 14.dp, vertical = 8.dp),
-            color = primaryTone.foreground(),
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            GraphActionGlyph(
+                icon = primaryTone.icon(),
+                color = primaryTone.foreground(),
+                modifier = Modifier.size(14.dp),
+            )
+            Text(
+                text = primaryLabel,
+                color = primaryTone.foreground(),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun GraphActionGlyph(
+    icon: GraphActionIcon,
+    color: Color,
+    modifier: Modifier = Modifier.size(14.dp),
+) {
+    Canvas(modifier = modifier) {
+        val strokeWidth = 1.45.dp.toPx()
+        val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+        fun line(x1: Float, y1: Float, x2: Float, y2: Float) {
+            drawLine(
+                color = color,
+                start = Offset(size.width * x1, size.height * y1),
+                end = Offset(size.width * x2, size.height * y2),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round,
+            )
+        }
+        fun rect(left: Float, top: Float, right: Float, bottom: Float) {
+            line(left, top, right, top)
+            line(right, top, right, bottom)
+            line(right, bottom, left, bottom)
+            line(left, bottom, left, top)
+        }
+
+        when (icon) {
+            GraphActionIcon.Cancel -> {
+                line(0.28f, 0.28f, 0.72f, 0.72f)
+                line(0.72f, 0.28f, 0.28f, 0.72f)
+            }
+            GraphActionIcon.Save -> {
+                val path = Path().apply {
+                    moveTo(size.width * 0.22f, size.height * 0.24f)
+                    lineTo(size.width * 0.78f, size.height * 0.24f)
+                    lineTo(size.width * 0.78f, size.height * 0.78f)
+                    lineTo(size.width * 0.22f, size.height * 0.78f)
+                    close()
+                    moveTo(size.width * 0.34f, size.height * 0.24f)
+                    lineTo(size.width * 0.34f, size.height * 0.44f)
+                    lineTo(size.width * 0.66f, size.height * 0.44f)
+                    lineTo(size.width * 0.66f, size.height * 0.24f)
+                    moveTo(size.width * 0.34f, size.height * 0.66f)
+                    lineTo(size.width * 0.66f, size.height * 0.66f)
+                }
+                drawPath(path = path, color = color, style = stroke)
+            }
+            GraphActionIcon.Export -> {
+                line(0.50f, 0.18f, 0.50f, 0.58f)
+                line(0.34f, 0.42f, 0.50f, 0.58f)
+                line(0.66f, 0.42f, 0.50f, 0.58f)
+                line(0.22f, 0.68f, 0.22f, 0.82f)
+                line(0.22f, 0.82f, 0.78f, 0.82f)
+                line(0.78f, 0.82f, 0.78f, 0.68f)
+            }
+            GraphActionIcon.Delete -> {
+                line(0.30f, 0.28f, 0.70f, 0.28f)
+                line(0.42f, 0.18f, 0.58f, 0.18f)
+                rect(0.34f, 0.34f, 0.66f, 0.82f)
+                line(0.45f, 0.44f, 0.45f, 0.72f)
+                line(0.55f, 0.44f, 0.55f, 0.72f)
+            }
+        }
     }
 }
 
@@ -435,4 +537,11 @@ private fun GraphDialogActionTone.background() = when (this) {
     GraphDialogActionTone.Success -> ThreadColors.SuccessSoft
     GraphDialogActionTone.Warning -> ThreadColors.WarningSoft
     GraphDialogActionTone.Danger -> ThreadColors.DangerSoft
+}
+
+private fun GraphDialogActionTone.icon() = when (this) {
+    GraphDialogActionTone.Default -> GraphActionIcon.Save
+    GraphDialogActionTone.Success -> GraphActionIcon.Save
+    GraphDialogActionTone.Warning -> GraphActionIcon.Export
+    GraphDialogActionTone.Danger -> GraphActionIcon.Delete
 }
