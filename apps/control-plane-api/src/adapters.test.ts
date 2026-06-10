@@ -58,6 +58,7 @@ function mockKubernetesClient(
       namespace: string;
       podName: string;
       serviceName: string;
+      waitForPodDeletion?: boolean;
     }>;
     endpointRequests: Array<{ namespace: string; serviceName: string }>;
   } = {
@@ -659,6 +660,7 @@ describe('sandbox manager adapters', () => {
         namespace: 'remote-codex-sandboxes',
         podName: 'remote-codex-worker-sbx-test',
         serviceName: 'remote-codex-worker-sbx-test',
+        waitForPodDeletion: false,
       },
     ]);
   });
@@ -676,6 +678,20 @@ describe('sandbox manager adapters', () => {
       lastFailureCode: null,
       lastFailureMessage: null,
     });
+
+    const deleting = new AwsEksFargateSandboxManager(
+      awsConfig(),
+      mockKubernetesClient({
+        podStatus: { phase: 'Running', ready: true, deleting: true },
+      }).client,
+    );
+    await expect(deleting.getSandboxStatus(sandboxInput)).resolves.toMatchObject(
+      {
+        state: 'stopping',
+        statusReason: 'Worker Pod deletion is in progress.',
+        startupProgress: 25,
+      },
+    );
 
     const pending = new AwsEksFargateSandboxManager(
       awsConfig(),

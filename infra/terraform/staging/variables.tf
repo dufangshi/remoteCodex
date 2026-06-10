@@ -150,6 +150,18 @@ variable "default_resource_profile" {
   }
 }
 
+variable "efs_csi_driver_role_name" {
+  description = "IAM role name used by the EKS aws-efs-csi-driver addon."
+  type        = string
+  default     = "remote-codex-staging-efs-csi-driver"
+}
+
+variable "efs_csi_driver_addon_version" {
+  description = "EKS addon version for aws-efs-csi-driver."
+  type        = string
+  default     = "v3.2.0-eksbuild.1"
+}
+
 variable "workspace_pvc_name" {
   description = "Kubernetes PVC name mounted by sandbox worker Pods at /workspace."
   type        = string

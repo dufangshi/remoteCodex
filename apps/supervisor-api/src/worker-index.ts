@@ -24,6 +24,36 @@ validateWorkerEntrypointEnvironment();
 
 const app = buildApp();
 const { host, port } = app.services.config;
+let shutdownStarted = false;
+
+async function shutdown(signal: NodeJS.Signals) {
+  if (shutdownStarted) {
+    return;
+  }
+  shutdownStarted = true;
+  const hardExit = setTimeout(() => {
+    app.log.error({ signal }, 'Remote Codex Worker graceful shutdown timed out.');
+    process.exit(1);
+  }, 55_000);
+  hardExit.unref();
+
+  try {
+    app.log.info({ signal }, 'Remote Codex Worker shutting down.');
+    await app.close();
+    process.exit(0);
+  } catch (error) {
+    app.log.error({ error, signal }, 'Remote Codex Worker shutdown failed.');
+    process.exit(1);
+  }
+}
+
+process.once('SIGTERM', () => {
+  void shutdown('SIGTERM');
+});
+
+process.once('SIGINT', () => {
+  void shutdown('SIGINT');
+});
 
 app
   .listen({ host, port })

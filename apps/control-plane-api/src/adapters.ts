@@ -422,6 +422,7 @@ export interface AwsWorkerPodSpec {
 export interface AwsWorkerPodStatus {
   phase: 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Unknown' | string;
   ready: boolean;
+  deleting?: boolean;
   reason?: string | null;
   message?: string | null;
 }
@@ -453,6 +454,7 @@ export interface AwsSandboxKubernetesClient {
     namespace: string;
     podName: string;
     serviceName: string;
+    waitForPodDeletion?: boolean;
   }): Promise<{ deleted: boolean }>;
   getWorkerPod(input: {
     namespace: string;
@@ -552,6 +554,7 @@ function workerPodManifest(spec: AwsWorkerPodSpec) {
     spec: {
       serviceAccountName: spec.serviceAccountName,
       restartPolicy: 'Never',
+      terminationGracePeriodSeconds: 60,
       ...(workspaceInitContainer
         ? { initContainers: workspaceInitContainer }
         : {}),
@@ -758,6 +761,7 @@ export class KubectlAwsSandboxKubernetesClient implements AwsSandboxKubernetesCl
     namespace: string;
     podName: string;
     serviceName: string;
+    waitForPodDeletion?: boolean;
   }): Promise<{ deleted: boolean }> {
     const podExists = await this.exists([
       'get',
@@ -780,6 +784,7 @@ export class KubectlAwsSandboxKubernetesClient implements AwsSandboxKubernetesCl
       '-n',
       input.namespace,
       '--ignore-not-found=true',
+      ...(input.waitForPodDeletion === false ? ['--wait=false'] : []),
     ]);
     await this.kubectl([
       'delete',
@@ -809,6 +814,7 @@ export class KubectlAwsSandboxKubernetesClient implements AwsSandboxKubernetesCl
     return {
       phase: pod?.status?.phase ?? 'Unknown',
       ready: podReadyFromStatus(pod),
+      deleting: typeof pod?.metadata?.deletionTimestamp === 'string',
       reason: reason.reason,
       message: reason.message,
     };
@@ -1197,6 +1203,7 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
       namespace: this.config.namespace,
       podName,
       serviceName: workerServiceName,
+      waitForPodDeletion: false,
     });
     return {
       state: result.deleted ? 'stopping' : 'stopped',
@@ -1429,6 +1436,16 @@ export class AwsEksFargateSandboxManager implements SandboxManager {
     const reason = input.podStatus.reason ?? undefined;
     const message = input.podStatus.message ?? undefined;
     const statusReason = message ?? reason ?? undefined;
+
+    if (input.podStatus.deleting) {
+      return {
+        ...base,
+        state: 'stopping',
+        statusReason:
+          statusReason ?? 'Worker Pod deletion is in progress.',
+        startupProgress: 25,
+      };
+    }
 
     if (input.podStatus.phase === 'Running' && input.podStatus.ready) {
       return {

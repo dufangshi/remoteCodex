@@ -25,6 +25,10 @@ data "aws_eks_cluster_auth" "staging" {
   name = var.eks_cluster_name
 }
 
+data "aws_iam_openid_connect_provider" "staging" {
+  url = data.aws_eks_cluster.staging.identity[0].oidc[0].issuer
+}
+
 provider "kubernetes" {
   host                   = data.aws_eks_cluster.staging.endpoint
   cluster_ca_certificate = base64decode(data.aws_eks_cluster.staging.certificate_authority[0].data)
@@ -62,6 +66,7 @@ locals {
   }
 
   worker_image_repository_url = aws_ecr_repository.worker.repository_url
+  eks_oidc_provider_host      = replace(data.aws_eks_cluster.staging.identity[0].oidc[0].issuer, "https://", "")
 
   control_plane_env = {
     SANDBOX_AWS_REGION                      = var.aws_region
@@ -102,6 +107,55 @@ locals {
     AWS_STAGING_CONFIG_REVIEWED          = tostring(var.aws_staging_config_reviewed)
     AWS_STAGING_CREDENTIAL_REVIEW_PASSED = tostring(var.aws_staging_credential_review_passed)
   }
+}
+
+data "aws_iam_policy_document" "efs_csi_driver_assume_role" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [data.aws_iam_openid_connect_provider.staging.arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${local.eks_oidc_provider_host}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${local.eks_oidc_provider_host}:sub"
+      values   = ["system:serviceaccount:kube-system:efs-csi-controller-sa"]
+    }
+  }
+}
+
+resource "aws_iam_role" "efs_csi_driver" {
+  name               = var.efs_csi_driver_role_name
+  assume_role_policy = data.aws_iam_policy_document.efs_csi_driver_assume_role.json
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "efs_csi_driver" {
+  role       = aws_iam_role.efs_csi_driver.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEFSCSIDriverPolicy"
+}
+
+resource "aws_eks_addon" "efs_csi_driver" {
+  cluster_name                = data.aws_eks_cluster.staging.name
+  addon_name                  = "aws-efs-csi-driver"
+  addon_version               = var.efs_csi_driver_addon_version
+  service_account_role_arn    = aws_iam_role.efs_csi_driver.arn
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  tags = local.common_tags
+
+  depends_on = [aws_iam_role_policy_attachment.efs_csi_driver]
 }
 
 resource "aws_ecr_repository" "worker" {
