@@ -1,5 +1,6 @@
 package com.remotecodex.android.ui.components
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -28,6 +29,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -416,16 +421,34 @@ private fun ThemeChoice(
             .border(1.dp, if (selected) ThreadColors.Warning else ThreadColors.Border, RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 9.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text(
-            text = mode.label,
-            color = foreground,
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            ThemeModeGlyph(
+                mode = mode,
+                color = foreground,
+                modifier = Modifier.size(15.dp),
+            )
+            Text(
+                text = mode.label,
+                modifier = Modifier.weight(1f),
+                color = foreground,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (selected) {
+                GraphBadge(
+                    label = "Active",
+                    variant = GraphBadgeVariant.Outline,
+                )
+            }
+        }
         Text(
             text = themeModeDetail(mode),
             color = ThreadColors.ForegroundMuted,
@@ -433,6 +456,71 @@ private fun ThemeChoice(
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+@Composable
+private fun ThemeModeGlyph(
+    mode: ThemeMode,
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    val cutoutColor = ThreadColors.SurfaceStrong
+
+    Canvas(modifier = modifier) {
+        val strokeWidth = 1.45.dp.toPx()
+        val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+        val w = size.width
+        val h = size.height
+        fun line(x1: Float, y1: Float, x2: Float, y2: Float) {
+            drawLine(
+                color = color,
+                start = Offset(w * x1, h * y1),
+                end = Offset(w * x2, h * y2),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round,
+            )
+        }
+
+        when (mode) {
+            ThemeMode.System -> {
+                line(0.18f, 0.28f, 0.82f, 0.28f)
+                line(0.82f, 0.28f, 0.82f, 0.68f)
+                line(0.82f, 0.68f, 0.18f, 0.68f)
+                line(0.18f, 0.68f, 0.18f, 0.28f)
+                line(0.38f, 0.82f, 0.62f, 0.82f)
+                line(0.50f, 0.68f, 0.50f, 0.82f)
+            }
+            ThemeMode.Light -> {
+                drawCircle(
+                    color = color,
+                    radius = w * 0.18f,
+                    center = Offset(w * 0.50f, h * 0.50f),
+                    style = stroke,
+                )
+                line(0.50f, 0.08f, 0.50f, 0.20f)
+                line(0.50f, 0.80f, 0.50f, 0.92f)
+                line(0.08f, 0.50f, 0.20f, 0.50f)
+                line(0.80f, 0.50f, 0.92f, 0.50f)
+                line(0.20f, 0.20f, 0.28f, 0.28f)
+                line(0.72f, 0.72f, 0.80f, 0.80f)
+                line(0.80f, 0.20f, 0.72f, 0.28f)
+                line(0.28f, 0.72f, 0.20f, 0.80f)
+            }
+            ThemeMode.Dark -> {
+                drawCircle(
+                    color = color,
+                    radius = w * 0.30f,
+                    center = Offset(w * 0.48f, h * 0.46f),
+                    style = stroke,
+                )
+                drawCircle(
+                    color = cutoutColor,
+                    radius = w * 0.26f,
+                    center = Offset(w * 0.62f, h * 0.34f),
+                )
+            }
+        }
     }
 }
 

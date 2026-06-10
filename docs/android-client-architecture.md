@@ -118,7 +118,7 @@ The visual direction is close to the web mobile thread view, but not a literal D
 | --- | --- | --- |
 | `AppShellNavigation.tsx` | `AppShellPanels.kt` + `ThreadTopBar.kt` | Native app shell drawer with Workspaces/Threads/Shells sample navigation, supervisor summary, and settings entry. |
 | `AppShellNavContext.tsx` | `ThreadDetailPreviewScreen.kt` state + `ThemeMode.kt` | Local Compose state for nav/settings visibility plus persisted System/Light/Dark theme mode. |
-| `AppShellSettingsDialog` appearance section | `AppShellSettingsPanel` + `AppSettingsRepository.kt` | Settings panel with explicit System/Light/Dark theme selection persisted through shared preferences. |
+| `AppShellSettingsDialog` appearance section | `AppShellSettingsPanel` + `AppSettingsRepository.kt` | Settings panel with explicit System/Light/Dark theme selection, native theme glyphs, Active badges, and shared-preferences persistence. |
 | `AppShellSettingsDialog` plugin section | `AppShellSettingsPanel` + `AppShellPreview` | Read-only native plugin/renderers skeleton showing enabled state with shared selection glyphs, renderer status with graph badges, capabilities, source, and import-policy placeholder. |
 | `ThreadDetailSurface.tsx` | `ThreadDetailPreviewScreen.kt` | Preview shell with topbar, chat, workspace, shell, and fixed composer. |
 | `ThreadWorkspaceLayout.tsx` | `ThreadTopBar.kt` + `ThreadRoomsPanel.kt` | Mobile topbar with Web-like app menu/settings glyph buttons, workspace/session/usage details disclosure, action/thread glyph pills, native rename/export/delete action glyphs, segmented Chat/Workspace/Shell navigation, and rooms drawer with Web-like thread message, new-thread, rename, copy-session, and delete glyphs. |
