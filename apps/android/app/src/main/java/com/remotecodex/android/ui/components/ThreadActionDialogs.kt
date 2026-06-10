@@ -10,8 +10,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -66,6 +72,8 @@ fun ThreadActionDialogOverlay(
 private fun CreateThreadDialogPreview(
     onClose: () -> Unit,
 ) {
+    var titleDraft by rememberSaveable { mutableStateOf("") }
+    val titleReady = titleDraft.trim().isNotEmpty()
     GraphDialogFrame(
         title = "Create New Chat",
         subtitle = "Name the room so it is easy to find later.",
@@ -85,24 +93,41 @@ private fun CreateThreadDialogPreview(
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
             )
-            Text(
-                text = "Android parity spike",
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(ThreadColors.CodeBackground)
-                    .border(1.dp, ThreadColors.Border, RoundedCornerShape(14.dp))
-                    .padding(horizontal = 13.dp, vertical = 12.dp),
-                color = ThreadColors.CodeForeground,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+            OutlinedTextField(
+                value = titleDraft,
+                onValueChange = { titleDraft = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                placeholder = {
+                    Text(
+                        text = "Chat name",
+                        color = ThreadColors.ForegroundMuted,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                },
+                textStyle = MaterialTheme.typography.bodyMedium.copy(color = ThreadColors.Foreground),
+                shape = RoundedCornerShape(14.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = ThreadColors.Foreground,
+                    unfocusedTextColor = ThreadColors.Foreground,
+                    focusedContainerColor = ThreadColors.SurfaceStrong,
+                    unfocusedContainerColor = ThreadColors.SurfaceStrong,
+                    cursorColor = ThreadColors.Primary,
+                    focusedBorderColor = ThreadColors.Primary.copy(alpha = 0.58f),
+                    unfocusedBorderColor = ThreadColors.Border,
+                    focusedPlaceholderColor = ThreadColors.ForegroundMuted,
+                    unfocusedPlaceholderColor = ThreadColors.ForegroundMuted,
+                ),
             )
             Text(
-                text = "Preview only: native creation will call the supervisor thread-start API after the client layer is wired.",
+                text = if (titleReady) {
+                    "Will create: ${titleDraft.trim()}"
+                } else {
+                    "Leave blank to start an untitled chat."
+                },
                 color = ThreadColors.ForegroundMuted,
                 style = MaterialTheme.typography.labelSmall,
-                maxLines = 3,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }

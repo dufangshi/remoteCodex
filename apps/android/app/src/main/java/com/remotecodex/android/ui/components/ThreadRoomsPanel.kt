@@ -83,15 +83,12 @@ fun ThreadRoomsPanel(
                     style = MaterialTheme.typography.labelSmall,
                 )
             }
-            Text(
-                text = "Close",
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
-                    .clickable(onClick = onClose)
-                    .padding(horizontal = 12.dp, vertical = 7.dp),
-                color = ThreadColors.ForegroundSoft,
-                style = MaterialTheme.typography.labelMedium,
+            GraphIconButton(
+                icon = GraphActionIcon.Cancel,
+                contentDescription = "Close thread rooms",
+                variant = GraphButtonVariant.Outline,
+                size = GraphButtonSize.Default,
+                onClick = onClose,
             )
         }
 
