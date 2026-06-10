@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -34,6 +35,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -494,11 +497,8 @@ private fun MessageBubble(
                     MessageStatusBadge(model = it)
                 }
                 Spacer(modifier = Modifier.weight(1f))
-                CopyTextButton(
+                AssistantCopyButton(
                     value = message.text,
-                    idleLabel = "Copy",
-                    copiedLabel = "Copied",
-                    contentDescription = "Copy assistant reply",
                 )
                 Text(
                     text = message.timeLabel,
@@ -554,6 +554,47 @@ private fun MessageBubble(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun AssistantCopyButton(value: String) {
+    val clipboard = LocalClipboardManager.current
+    var copied by remember(value) { mutableStateOf(false) }
+
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1200)
+            copied = false
+        }
+    }
+
+    val shape = RoundedCornerShape(7.dp)
+    val foreground = if (copied) ThreadColors.Info else ThreadColors.ForegroundMuted
+    val background = if (copied) ThreadColors.InfoSoft else ThreadColors.Panel
+    val border = if (copied) ThreadColors.Info.copy(alpha = 0.44f) else ThreadColors.Border
+    Box(
+        modifier = Modifier
+            .size(28.dp)
+            .clip(shape)
+            .background(background)
+            .border(1.dp, border, shape)
+            .semantics {
+                contentDescription = if (copied) "Assistant reply copied" else "Copy assistant reply"
+            }
+            .clickable {
+                clipboard.setText(AnnotatedString(value))
+                copied = true
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = if (copied) "OK" else "C",
+            color = foreground,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+        )
     }
 }
 
