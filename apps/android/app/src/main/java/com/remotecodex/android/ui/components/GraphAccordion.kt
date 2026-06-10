@@ -61,7 +61,12 @@ fun GraphAccordionItem(
     enabled: Boolean = true,
     defaultExpanded: Boolean = false,
     showDivider: Boolean = true,
+    titleColor: Color = ThreadColors.Foreground,
+    subtitleColor: Color = ThreadColors.ForegroundMuted,
+    backgroundColor: Color = ThreadColors.Panel,
+    contentBackgroundColor: Color? = null,
     leading: @Composable (() -> Unit)? = null,
+    trailing: @Composable (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     var expanded by rememberSaveable(title) { mutableStateOf(defaultExpanded) }
@@ -69,7 +74,7 @@ fun GraphAccordionItem(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(ThreadColors.Panel),
+            .background(backgroundColor),
     ) {
         Row(
             modifier = Modifier
@@ -98,7 +103,7 @@ fun GraphAccordionItem(
             ) {
                 Text(
                     text = title,
-                    color = ThreadColors.Foreground.copy(alpha = triggerAlpha),
+                    color = titleColor.copy(alpha = triggerAlpha),
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
@@ -107,23 +112,32 @@ fun GraphAccordionItem(
                 subtitle?.let {
                     Text(
                         text = it,
-                        color = ThreadColors.ForegroundMuted.copy(alpha = triggerAlpha),
+                        color = subtitleColor.copy(alpha = triggerAlpha),
                         style = MaterialTheme.typography.labelSmall,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
+            trailing?.invoke()
             GraphAccordionChevron(
                 expanded = expanded,
-                color = ThreadColors.ForegroundMuted.copy(alpha = triggerAlpha),
+                color = subtitleColor.copy(alpha = triggerAlpha),
             )
         }
         AnimatedVisibility(visible = expanded) {
-            Column(
-                modifier = Modifier
+            val contentModifier = if (contentBackgroundColor == null) {
+                Modifier
                     .fillMaxWidth()
-                    .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                    .padding(start = 12.dp, end = 12.dp, bottom = 12.dp)
+            } else {
+                Modifier
+                    .fillMaxWidth()
+                    .background(contentBackgroundColor)
+                    .padding(12.dp)
+            }
+            Column(
+                modifier = contentModifier,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 content()

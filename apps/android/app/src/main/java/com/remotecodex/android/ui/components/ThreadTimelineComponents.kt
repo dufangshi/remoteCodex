@@ -555,64 +555,44 @@ private fun MessageBubble(
 
 @Composable
 private fun ReasoningAccordion(items: List<ReasoningPreview>) {
-    var expanded by remember(items) { mutableStateOf(false) }
     val running = items.any { it.status == ToolStatus.Running }
-    Column(
+    GraphAccordion(
         modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(ThreadColors.Surface)
-            .border(1.dp, ThreadColors.Border, RoundedCornerShape(10.dp)),
+            .clip(RoundedCornerShape(10.dp)),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { expanded = !expanded }
-                .padding(horizontal = 11.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = "Brain",
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(if (running) ThreadColors.InfoSoft else ThreadColors.SurfaceStrong)
-                    .border(
-                        1.dp,
-                        if (running) ThreadColors.Info.copy(alpha = 0.36f) else ThreadColors.Border,
-                        RoundedCornerShape(999.dp),
-                    )
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                color = if (running) ThreadColors.Info else ThreadColors.ForegroundMuted,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = if (running) "Thinking" else "Thought Process",
-                modifier = Modifier.weight(1f),
-                color = ThreadColors.ForegroundSoft,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (running) {
+        GraphAccordionItem(
+            title = if (running) "Thinking" else "Thought Process",
+            subtitle = "${items.size} reasoning item${if (items.size == 1) "" else "s"}",
+            backgroundColor = ThreadColors.Surface,
+            showDivider = false,
+            leading = {
                 Text(
-                    text = "...",
-                    color = ThreadColors.Info,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
+                    text = "Brain",
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(if (running) ThreadColors.InfoSoft else ThreadColors.SurfaceStrong)
+                        .border(
+                            1.dp,
+                            if (running) ThreadColors.Info.copy(alpha = 0.36f) else ThreadColors.Border,
+                            RoundedCornerShape(999.dp),
+                        )
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    color = if (running) ThreadColors.Info else ThreadColors.ForegroundMuted,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
                 )
-            }
-            Text(
-                text = if (expanded) "Hide" else "Show",
-                color = ThreadColors.ForegroundMuted,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-            )
-        }
-        if (expanded) {
+            },
+            trailing = {
+                if (running) {
+                    Text(
+                        text = "...",
+                        color = ThreadColors.Info,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            },
+        ) {
             Text(
                 text = items.joinToString(separator = "\n\n") { it.text.trim() },
                 modifier = Modifier
@@ -634,101 +614,59 @@ private fun HistoryGroupCard(
     group: HistoryGroupPreview,
     onOpenDetail: (DetailPreview) -> Unit,
 ) {
-    var expanded by remember(group.title) { mutableStateOf(group.expandedByDefault) }
     val colors = historyItemColors(group.kind)
-    Column(
+    GraphAccordion(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .background(colors.background)
             .border(1.dp, colors.border, RoundedCornerShape(10.dp))
-            .padding(11.dp),
-        verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            HistoryIcon(label = "BATCH", color = colors.foreground)
-            Column(modifier = Modifier.weight(1f)) {
+        GraphAccordionItem(
+            title = group.title,
+            subtitle = group.statusLabel ?: "${group.items.size} entries",
+            defaultExpanded = group.expandedByDefault,
+            showDivider = false,
+            titleColor = colors.foreground,
+            backgroundColor = colors.background,
+            contentBackgroundColor = colors.background,
+            leading = {
+                HistoryIcon(label = "BATCH", color = colors.foreground)
+            },
+            trailing = {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = group.title,
-                        color = colors.foreground,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
                     Text(
                         text = group.countLabel,
                         color = ThreadColors.ForegroundMuted,
                         style = MaterialTheme.typography.labelSmall,
                         maxLines = 1,
                     )
+                    if (group.kind == HistoryItemKind.FileChange) {
+                        FileChangeGroupSummary(group = group)
+                    }
                 }
+            },
+        ) {
+            group.items.firstOrNull()?.summary?.let { summary ->
                 Text(
-                    text = group.statusLabel ?: "${group.items.size} entries",
-                    color = ThreadColors.ForegroundMuted,
-                    style = MaterialTheme.typography.labelSmall,
-                    maxLines = 1,
+                    text = summary,
+                    color = ThreadColors.ForegroundSoft,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            if (group.kind == HistoryItemKind.FileChange) {
-                FileChangeGroupSummary(group = group)
-            }
-            Text(
-                text = if (expanded) "Collapse" else "Expand",
-                modifier = Modifier
-                    .clip(RoundedCornerShape(7.dp))
-                    .background(ThreadColors.Panel.copy(alpha = 0.62f))
-                    .border(1.dp, colors.border, RoundedCornerShape(7.dp))
-                    .clickable { expanded = !expanded }
-                    .padding(horizontal = 9.dp, vertical = 6.dp),
-                color = colors.foreground,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
-        if (!expanded) {
-            Text(
-                text = group.items.firstOrNull()?.summary ?: group.countLabel,
-                color = ThreadColors.ForegroundSoft,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        } else {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                group.items.forEachIndexed { index, item ->
-                    HistoryGroupRow(
-                        index = index,
-                        item = item,
-                        colors = colors,
-                        onOpenDetail = onOpenDetail,
-                    )
-                }
+            group.items.forEachIndexed { index, item ->
+                HistoryGroupRow(
+                    index = index,
+                    item = item,
+                    colors = colors,
+                    onOpenDetail = onOpenDetail,
+                )
             }
         }
-        Text(
-            text = if (expanded) "Hide details" else "Show details",
-            modifier = Modifier
-                .clip(RoundedCornerShape(7.dp))
-                .border(1.dp, colors.border.copy(alpha = 0.65f), RoundedCornerShape(7.dp))
-                .clickable { expanded = !expanded }
-                .padding(horizontal = 10.dp, vertical = 7.dp),
-            color = colors.foreground,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-        )
     }
 }
 
