@@ -121,7 +121,7 @@ The visual direction is close to the web mobile thread view, but not a literal D
 | `AppShellSettingsDialog` appearance section | `AppShellSettingsPanel` + `AppSettingsRepository.kt` | Settings panel with explicit System/Light/Dark theme selection persisted through shared preferences. |
 | `AppShellSettingsDialog` plugin section | `AppShellSettingsPanel` + `AppShellPreview` | Read-only native plugin/renderers skeleton showing enabled state, capabilities, source, and import-policy placeholder. |
 | `ThreadDetailSurface.tsx` | `ThreadDetailPreviewScreen.kt` | Preview shell with topbar, chat, workspace, shell, and fixed composer. |
-| `ThreadWorkspaceLayout.tsx` | `ThreadTopBar.kt` + `ThreadRoomsPanel.kt` | Mobile topbar, segmented Chat/Workspace/Shell navigation, and rooms drawer with Web-like thread message and new-thread glyphs. |
+| `ThreadWorkspaceLayout.tsx` | `ThreadTopBar.kt` + `ThreadRoomsPanel.kt` | Mobile topbar with Web-like app menu/settings glyph buttons, segmented Chat/Workspace/Shell navigation, and rooms drawer with Web-like thread message and new-thread glyphs. |
 | `GraphChatShellLayout.tsx` | `GraphChatShellLayout.kt` + `ThreadDetailPreviewScreen.kt` | Native shell root, frame, main panel, topbar shell, split region, mobile scrim, and rooms rail shell now wrap the preview screen. |
 | `ThreadTimeline.tsx` top-level controls | `ThreadTimelineComponents.kt` + `TimelineAuxiliaryPreview` | Native preview rows for loading earlier history, activity notes, answered request notes, pending steers, ephemeral user prompt, and optimistic turn labeling. |
 | `GraphChatThreadChatPanel.tsx` | `ThreadDetailPreviewScreen.kt` + `ThreadTimelineComponents.kt` | Chat surface with timeline padding and fixed composer behavior. |

@@ -1,8 +1,10 @@
 package com.remotecodex.android.ui.components
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,6 +24,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -55,14 +63,11 @@ fun ThreadTopBar(
             verticalAlignment = Alignment.Top,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(
-                text = "☰",
-                modifier = Modifier
-                    .padding(top = 12.dp)
-                    .size(28.dp)
-                    .clickable(onClick = onOpenAppNav),
-                color = ThreadColors.ForegroundSoft,
-                style = MaterialTheme.typography.titleMedium,
+            TopBarIconButton(
+                icon = TopBarIcon.Menu,
+                contentDescription = "Open app navigation",
+                onClick = onOpenAppNav,
+                modifier = Modifier.padding(top = 7.dp),
             )
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -99,18 +104,11 @@ fun ThreadTopBar(
                 style = MaterialTheme.typography.labelSmall,
                 maxLines = 1,
             )
-            Text(
-                text = "Settings",
-                modifier = Modifier
-                    .padding(top = 8.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(ThreadColors.Surface)
-                    .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
-                    .clickable(onClick = onOpenSettings)
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                color = ThreadColors.ForegroundSoft,
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
+            TopBarIconButton(
+                icon = TopBarIcon.Settings,
+                contentDescription = "Open settings",
+                onClick = onOpenSettings,
+                modifier = Modifier.padding(top = 7.dp),
             )
         }
         if (actionsOpen) {
@@ -185,6 +183,74 @@ fun ThreadTopBar(
             )
         }
     }
+}
+
+@Composable
+private fun TopBarIconButton(
+    icon: TopBarIcon,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .size(32.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(ThreadColors.Surface)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
+            .semantics { this.contentDescription = contentDescription }
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        TopBarGlyph(icon = icon, color = ThreadColors.ForegroundSoft)
+    }
+}
+
+@Composable
+private fun TopBarGlyph(icon: TopBarIcon, color: Color) {
+    Canvas(modifier = Modifier.size(16.dp)) {
+        val strokeWidth = 1.5.dp.toPx()
+        val w = size.width
+        val h = size.height
+        fun line(x1: Float, y1: Float, x2: Float, y2: Float) {
+            drawLine(
+                color = color,
+                start = Offset(w * x1, h * y1),
+                end = Offset(w * x2, h * y2),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round,
+            )
+        }
+
+        when (icon) {
+            TopBarIcon.Menu -> {
+                line(0.22f, 0.32f, 0.78f, 0.32f)
+                line(0.22f, 0.50f, 0.78f, 0.50f)
+                line(0.22f, 0.68f, 0.78f, 0.68f)
+            }
+            TopBarIcon.Settings -> {
+                drawCircle(
+                    color = color,
+                    radius = w * 0.17f,
+                    center = Offset(w * 0.50f, h * 0.50f),
+                    style = Stroke(width = strokeWidth),
+                )
+                line(0.50f, 0.13f, 0.50f, 0.25f)
+                line(0.50f, 0.75f, 0.50f, 0.87f)
+                line(0.13f, 0.50f, 0.25f, 0.50f)
+                line(0.75f, 0.50f, 0.87f, 0.50f)
+                line(0.24f, 0.24f, 0.32f, 0.32f)
+                line(0.68f, 0.68f, 0.76f, 0.76f)
+                line(0.76f, 0.24f, 0.68f, 0.32f)
+                line(0.32f, 0.68f, 0.24f, 0.76f)
+            }
+        }
+    }
+}
+
+private enum class TopBarIcon {
+    Menu,
+    Settings,
 }
 
 @Composable
