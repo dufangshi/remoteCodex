@@ -522,19 +522,10 @@ private fun RendererSettingsRow(renderer: RendererPreview) {
 
 @Composable
 private fun ToggleDot(enabled: Boolean) {
-    val background = if (enabled) ThreadColors.SuccessSoft else ThreadColors.Surface
-    val foreground = if (enabled) ThreadColors.Success else ThreadColors.ForegroundMuted
-    Text(
-        text = if (enabled) "On" else "Off",
-        modifier = Modifier
-            .clip(RoundedCornerShape(999.dp))
-            .background(background)
-            .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
-            .padding(horizontal = 8.dp, vertical = 5.dp),
-        color = foreground,
-        style = MaterialTheme.typography.labelSmall,
-        fontWeight = FontWeight.SemiBold,
-        maxLines = 1,
+    GraphSelectionGlyph(
+        selected = enabled,
+        tone = GraphSelectionTone.Success,
+        contentDescription = if (enabled) "Plugin enabled" else "Plugin disabled",
     )
 }
 
