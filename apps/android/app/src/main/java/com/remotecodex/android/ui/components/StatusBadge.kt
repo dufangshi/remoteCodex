@@ -92,6 +92,7 @@ fun ToolStatusBadge(
     label: String,
     status: ToolStatus,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
 ) {
     val colors = when (status) {
         ToolStatus.Running -> BadgeColors(
@@ -113,7 +114,8 @@ fun ToolStatusBadge(
     PillBadge(
         label = label,
         colors = colors,
-        modifier = modifier,
+        modifier = if (compact) modifier.defaultMinSize(minWidth = 24.dp) else modifier,
+        showLabel = !compact,
         leading = {
             if (status == ToolStatus.Running) {
                 RunningDots(color = colors.foreground)

@@ -56,6 +56,7 @@ import com.remotecodex.android.ui.presentation.parseGraphChatToolBlock
 import com.remotecodex.android.ui.presentation.preprocessGraphChatToolBlocks
 import com.remotecodex.android.ui.presentation.shouldShowGraphChatMessageExpansion
 import com.remotecodex.android.ui.presentation.toolBlockStatus
+import com.remotecodex.android.ui.model.ToolStatus
 import com.remotecodex.android.ui.theme.ThreadColors
 import kotlinx.coroutines.delay
 
@@ -191,6 +192,11 @@ private fun RichToolBlock(language: String, code: String) {
         "failed" -> "Failed"
         else -> "Running"
     }
+    val toolStatus = when (status) {
+        "failed" -> ToolStatus.Failed
+        "pending" -> ToolStatus.Running
+        else -> ToolStatus.Completed
+    }
     GraphAccordion(
         modifier = Modifier
             .fillMaxWidth()
@@ -215,11 +221,10 @@ private fun RichToolBlock(language: String, code: String) {
                     horizontalArrangement = Arrangement.spacedBy(7.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = statusLabel,
-                        color = foreground,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.SemiBold,
+                    ToolStatusBadge(
+                        label = statusLabel,
+                        status = toolStatus,
+                        compact = true,
                     )
                     CopyCodeButton(value = code.trimEnd())
                 }
