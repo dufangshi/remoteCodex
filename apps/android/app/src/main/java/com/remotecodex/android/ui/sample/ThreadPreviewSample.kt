@@ -215,6 +215,22 @@ object ThreadPreviewSample {
                             - native token parity for light and dark mode
                             - stable `ThreadDetailDto` projection later
 
+                            1. Compare the web renderer.
+                            2. Keep the native mobile surface compact.
+
+                            - [x] Preserve clickable plain links.
+                            - [ ] Add full math rendering later.
+
+                            > Long agent output needs structure on mobile.
+                            > Blockquotes stay framed without taking over the thread.
+
+                            ---
+
+                            | Area | Native status |
+                            | --- | --- |
+                            | Links | Clickable |
+                            | Tables | Simple |
+
                             Plain links stay readable in native text: www.example.com/remote-codex/status.
 
                             ```kotlin
