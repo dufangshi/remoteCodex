@@ -113,6 +113,10 @@ fun ThreadDetailPreviewScreen(
                 workspaceLabel = detail.workspacePreview.rootLabel,
                 rooms = detail.rooms,
                 onClose = { roomsOpen = false },
+                onCreateThread = {
+                    roomsOpen = false
+                    threadActionDialog = ThreadActionDialog.Create
+                },
                 modifier = Modifier.fillMaxSize(),
             )
         }

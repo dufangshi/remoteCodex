@@ -27,6 +27,7 @@ enum class ThreadActionDialog {
     Rename,
     Export,
     Delete,
+    Create,
 }
 
 @Composable
@@ -42,6 +43,9 @@ fun ThreadActionDialogOverlay(
         modifier = modifier,
     ) {
         when (dialog) {
+            ThreadActionDialog.Create -> CreateThreadDialogPreview(
+                onClose = onClose,
+            )
             ThreadActionDialog.Rename -> RenameThreadDialogPreview(
                 threadTitle = threadTitle,
                 onClose = onClose,
@@ -53,6 +57,53 @@ fun ThreadActionDialogOverlay(
             ThreadActionDialog.Delete -> DeleteThreadDialogPreview(
                 threadTitle = threadTitle,
                 onClose = onClose,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CreateThreadDialogPreview(
+    onClose: () -> Unit,
+) {
+    GraphDialogFrame(
+        title = "Create New Chat",
+        subtitle = "Name the room so it is easy to find later.",
+        onClose = onClose,
+        footer = {
+            GraphDialogFooter(
+                primaryLabel = "Create",
+                primaryTone = GraphDialogActionTone.Default,
+                onCancel = onClose,
+            )
+        },
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "Chat name",
+                color = ThreadColors.ForegroundSoft,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "Android parity spike",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(ThreadColors.CodeBackground)
+                    .border(1.dp, ThreadColors.Border, RoundedCornerShape(14.dp))
+                    .padding(horizontal = 13.dp, vertical = 12.dp),
+                color = ThreadColors.CodeForeground,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "Preview only: native creation will call the supervisor thread-start API after the client layer is wired.",
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }

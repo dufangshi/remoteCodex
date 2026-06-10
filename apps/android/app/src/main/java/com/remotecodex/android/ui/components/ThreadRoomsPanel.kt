@@ -41,6 +41,7 @@ fun ThreadRoomsPanel(
     workspaceLabel: String,
     rooms: List<ThreadRoomPreview>,
     onClose: () -> Unit,
+    onCreateThread: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -99,13 +100,14 @@ fun ThreadRoomsPanel(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(11.dp))
                 .background(ThreadColors.Primary)
+                .clickable(onClick = onCreateThread)
                 .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             RoomsGlyph(kind = RoomsGlyphKind.Plus, color = ThreadColors.PrimaryForeground)
             Text(
-                text = "New thread",
+                text = "New Chat",
                 color = ThreadColors.PrimaryForeground,
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
