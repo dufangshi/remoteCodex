@@ -57,6 +57,33 @@ describe('loadRuntimeConfig', () => {
     expect(config.agentProviders.opencode.enabled).toBe(false);
   });
 
+  it('treats blank optional environment variables as unset', () => {
+    const config = loadRuntimeConfig({
+      REMOTE_CODEX_MODE: 'local',
+      WORKSPACE_ROOT: '',
+      DATABASE_URL: '',
+      REMOTE_CODEX_RELAY_SERVER_URL: '',
+      REMOTE_CODEX_RELAY_AGENT_TOKEN: '',
+      CODEX_HOME: '',
+      CODEX_COMMAND: '',
+      CLAUDE_HOME: '',
+      CLAUDE_COMMAND: '',
+      OPENCODE_HOME: '',
+      OPENCODE_COMMAND: '',
+    });
+
+    expect(config.mode).toBe('local');
+    expect(config.relay).toEqual({
+      serverUrl: null,
+      agentToken: null,
+    });
+    expect(config.workspaceRoot).toBe(os.homedir());
+    expect(config.databaseUrl).toBe(path.resolve('.local', 'supervisor-dev.sqlite'));
+    expect(config.agentProviders.codex.command).toBe('codex');
+    expect(config.agentProviders.claude.command).toBe('claude');
+    expect(config.agentProviders.opencode.command).toBe('opencode');
+  });
+
   it('resolves production database to user home', () => {
     expect(resolveDatabaseUrl('production')).toBe(
       path.join(os.homedir(), '.remote-codex', 'supervisor.sqlite')

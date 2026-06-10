@@ -90,6 +90,33 @@ const envSchema = z.object({
   REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: z.string().optional()
 });
 
+function optionalNonEmpty(value: string | undefined) {
+  const normalized = value?.trim();
+  return normalized ? normalized : undefined;
+}
+
+function normalizeOptionalEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return {
+    ...env,
+    WORKSPACE_ROOT: optionalNonEmpty(env.WORKSPACE_ROOT),
+    DATABASE_URL: optionalNonEmpty(env.DATABASE_URL),
+    REMOTE_CODEX_ADMIN_USERNAME: optionalNonEmpty(env.REMOTE_CODEX_ADMIN_USERNAME),
+    REMOTE_CODEX_ADMIN_PASSWORD: optionalNonEmpty(env.REMOTE_CODEX_ADMIN_PASSWORD),
+    REMOTE_CODEX_SESSION_SECRET: optionalNonEmpty(env.REMOTE_CODEX_SESSION_SECRET),
+    REMOTE_CODEX_RELAY_SERVER_URL: optionalNonEmpty(env.REMOTE_CODEX_RELAY_SERVER_URL),
+    REMOTE_CODEX_RELAY_AGENT_TOKEN: optionalNonEmpty(env.REMOTE_CODEX_RELAY_AGENT_TOKEN),
+    CODEX_HOME: optionalNonEmpty(env.CODEX_HOME),
+    CODEX_COMMAND: optionalNonEmpty(env.CODEX_COMMAND),
+    CLAUDE_HOME: optionalNonEmpty(env.CLAUDE_HOME),
+    CLAUDE_COMMAND: optionalNonEmpty(env.CLAUDE_COMMAND),
+    OPENCODE_HOME: optionalNonEmpty(env.OPENCODE_HOME),
+    OPENCODE_COMMAND: optionalNonEmpty(env.OPENCODE_COMMAND),
+    REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: optionalNonEmpty(
+      env.REMOTE_CODEX_ENABLED_AGENT_PROVIDERS,
+    ),
+  };
+}
+
 export function resolveDatabaseUrl(
   nodeEnv: RuntimeConfig['nodeEnv'],
   value?: string
@@ -106,7 +133,7 @@ export function resolveDatabaseUrl(
 }
 
 export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig {
-  const parsed = envSchema.parse(env);
+  const parsed = envSchema.parse(normalizeOptionalEnv(env));
   const nodeEnv = parsed.NODE_ENV ?? 'development';
   const mode = parsed.REMOTE_CODEX_MODE ?? 'local';
   const workspaceRoot = parsed.WORKSPACE_ROOT?.trim()
