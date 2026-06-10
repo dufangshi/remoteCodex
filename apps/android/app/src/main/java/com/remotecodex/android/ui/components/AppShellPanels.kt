@@ -366,11 +366,9 @@ private fun NavigationItemRow(item: AppShellNavigationItemPreview) {
             )
         }
         if (item.active) {
-            Text(
-                text = "Active",
-                color = ThreadColors.ForegroundMuted,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.SemiBold,
+            GraphBadge(
+                label = "Active",
+                variant = GraphBadgeVariant.Outline,
             )
         }
     }
