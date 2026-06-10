@@ -154,7 +154,7 @@ The visual direction is close to the web mobile thread view, but not a literal D
 | `ButtonGroup.tsx` | `GraphUiPrimitives.kt` + `ArtifactPreviewCard.kt` | Native grouped control surface used by molecule viewer actions, with horizontal flow and vertical group support. |
 | `Separator.tsx` | `GraphUiPrimitives.kt` + `ArtifactPreviewCard.kt` | Native horizontal/vertical separator primitive used inside grouped molecule controls. |
 | `Tooltip.tsx` | `GraphUiPrimitives.kt` + `ArtifactPreviewCard.kt` | Android equivalent uses semantic content descriptions for compact controls. Pointer hover popovers are intentionally not part of the first mobile pass. |
-| `Dialog.tsx` | `GraphUiPrimitives.kt` + `ThreadActionDialogs.kt` | Native dialog overlay, frame, header, scrollable content body, close action, and icon-labeled footer actions now back rename/export/delete thread dialogs. |
+| `Dialog.tsx` | `GraphUiPrimitives.kt` + `ThreadActionDialogs.kt` | Native dialog overlay, frame, header, scrollable content body, icon-only close action, and icon-labeled footer actions now back rename/export/delete thread dialogs. |
 | `ConfirmDialog.tsx` and pending request flows | `PendingRequestCard.kt` | Inline mobile permission card with risk label, command preview, deny, and approve actions. |
 | `ThreadGraphWorkspacePanel.tsx` | `WorkspacePanel.kt` | Native Workspace/Tool Usage/Guide/Graph/Extensions tabs inside the mobile Workspace surface. |
 | `GraphWorkspaceExplorer.tsx` | `WorkspacePanel.kt` | Workspace file tree, selected row state, root label, row-level download glyph action, refresh/garbage action glyph chips, workspace summary strip, and Web-like native folder/file/artifact/event glyphs. |

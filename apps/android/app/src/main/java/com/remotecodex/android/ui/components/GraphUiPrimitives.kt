@@ -137,6 +137,37 @@ fun GraphButton(
 }
 
 @Composable
+fun GraphIconButton(
+    icon: GraphActionIcon,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    variant: GraphButtonVariant = GraphButtonVariant.Ghost,
+    size: GraphButtonSize = GraphButtonSize.Icon,
+    onClick: () -> Unit = {},
+) {
+    val colors = graphButtonColors(variant = variant)
+    val shape = RoundedCornerShape(8.dp)
+    Box(
+        modifier = modifier
+            .size(size.minHeight)
+            .clip(shape)
+            .background(colors.background)
+            .border(1.dp, colors.border, shape)
+            .semantics { this.contentDescription = contentDescription }
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier)
+            .alpha(if (enabled) 1f else 0.52f),
+        contentAlignment = Alignment.Center,
+    ) {
+        GraphActionGlyph(
+            icon = icon,
+            color = colors.foreground,
+            modifier = Modifier.size(15.dp),
+        )
+    }
+}
+
+@Composable
 fun GraphBadge(
     label: String,
     modifier: Modifier = Modifier,
@@ -369,8 +400,9 @@ fun GraphDialogFrame(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            GraphButton(
-                label = "Close",
+            GraphIconButton(
+                icon = GraphActionIcon.Cancel,
+                contentDescription = "Close dialog",
                 variant = GraphButtonVariant.Ghost,
                 size = GraphButtonSize.Default,
                 onClick = onClose,
