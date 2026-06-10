@@ -1,0 +1,283 @@
+# Android Client Architecture
+
+The Android client lives in `apps/android` as an independent Gradle build. It is intentionally separate from the root pnpm workspace so the Node/TypeScript supervisor and the native Android toolchain can evolve without making the default repository build slower or more fragile.
+
+## Scope
+
+This skeleton is the first step for a Kotlin Android client targeting Android 10 and newer.
+
+- Minimum SDK: 29, Android 10.
+- Target SDK: 34.
+- Language: Kotlin.
+- Build system: Gradle with the Android Gradle Plugin.
+- UI framework: Jetpack Compose and Material 3.
+- Initial module: `:app`.
+
+The first APK is a launchable native preview of the thread detail surface. It does not connect to the supervisor API yet.
+
+## Directory Layout
+
+```text
+apps/android
+  settings.gradle.kts
+  build.gradle.kts
+  gradle.properties
+  app
+    build.gradle.kts
+    src/main
+      AndroidManifest.xml
+      java/com/remotecodex/android
+        settings
+        ui/components
+        ui/model
+        ui/presentation
+        ui/sample
+        ui/screen
+        ui/theme
+```
+
+Future code should keep clear package boundaries:
+
+- `api`: REST and WebSocket transport for the supervisor API.
+- `auth`: device pairing, token storage, and revocation flows.
+- `settings`: persistent local app settings such as theme mode, future base URL, and pairing preferences.
+- `thread`: thread projection state, event reducers, optimistic sends, and reconnect reconciliation.
+- `workspace`: workspace list and file-preview models.
+- `voice`: native audio session orchestration.
+- `ui`: Android screens and view models.
+
+When these areas become large, split them into Gradle modules such as `:core:api`, `:core:thread-state`, and feature modules. The first skeleton stays single-module to keep the build simple while the API contract is still moving.
+
+## Relationship To The Web Client
+
+The Android app should not duplicate the React page orchestration from `apps/supervisor-web`. Long-term maintainability depends on moving stable protocol logic into shared contracts before native screens become complex:
+
+- typed REST and WebSocket client behavior,
+- thread event ordering and projection rules,
+- optimistic prompt and pending confirmation lifecycle,
+- reconnect and foreground resume reconciliation.
+
+Until those contracts exist, Android screens should stay narrow and should prefer server aggregate DTOs over reconstructing state from many low-level calls.
+
+## Current Thread UI Alignment
+
+The first native pass aligns with the mobile graph-chat thread surface from `/home/u/dev/remote-codex-thread-ui`, especially:
+
+- `ThreadDetailSurface.tsx`: thread detail as a topbar, chat timeline, workspace/shell switch, and composer surface.
+- `GraphChatThreadChatPanel.tsx`: mobile chat layout with fixed composer and bottom timeline padding.
+- `GraphChatTurnFrame.tsx`: compact turn header with turn index, time, status, and token summary.
+- `GraphChatMessageFrame.tsx`: assistant/user message frames, sender label, status badge, and time treatment.
+- `GraphChatToolCall.tsx`: tool call frame with monospaced tool name, status badge, parameters, and result block.
+- `ThreadComposer.tsx`: rounded input group, slash toolbox, attachment menu, model/effort controls, plan chip, shell tools, and primary send action.
+- `ThreadGraphWorkspacePanel.tsx`: right-side workspace surface with Workspace, Tool Usage, Guide, Graph, and Extensions tabs.
+- `GraphGuidePanel.tsx`: compact operational guide content for workspace and viewer behavior.
+- `styles.css`: light and dark graph-chat tokens, restrained neutral surfaces, slate foregrounds, and semantic status colors.
+
+Android equivalents are intentionally native Compose components:
+
+- `AppShellPanels.kt`
+- `ThreadTopBar.kt`
+- `ThreadActionDialogs.kt`
+- `ThreadTimelineComponents.kt`
+- `GraphChatHistoryEntries.kt`
+- `GraphAccordion.kt`
+- `ThreadComposer.kt`
+- `GraphChatShellLayout.kt`
+- `GraphResizablePanels.kt`
+- `GraphUiPrimitives.kt`
+- `LongTextDialog.kt`
+- `StatusBadge.kt`
+- `ThreadPresentation.kt`
+- `WorkspaceTree.kt`
+- `MarkdownHeuristics.kt`
+- `GraphChatToolBlocks.kt`
+- `GraphChatSyntaxHighlighting.kt`
+- `ThreadColors.kt`
+- `PendingRequestCard.kt`
+- `ThreadRoomsPanel.kt`
+- `WorkspacePanel.kt`
+- `WorkspaceInfoCard.kt`
+- `ArtifactPreviewCard.kt`
+- `ShellPanel.kt`
+- `RemoteCodexTheme.kt`
+- `RichMessageContent.kt`
+
+The current screen is sample-data driven through `ThreadPreviewSample.kt`. This keeps visual iteration independent from the API client while the protocol layer is still being shaped.
+
+The visual direction is close to the web mobile thread view, but not a literal DOM port. Native screens should preserve the information architecture and state vocabulary while using Android touch targets, safe areas, and Compose layout primitives.
+
+## Component Coverage Matrix
+
+| Web thread-ui source | Android native equivalent | Current status |
+| --- | --- | --- |
+| `AppShellNavigation.tsx` | `AppShellPanels.kt` + `ThreadTopBar.kt` | Native app shell drawer with Workspaces/Threads/Shells sample navigation, supervisor summary, and settings entry. |
+| `AppShellNavContext.tsx` | `ThreadDetailPreviewScreen.kt` state + `ThemeMode.kt` | Local Compose state for nav/settings visibility plus persisted System/Light/Dark theme mode. |
+| `AppShellSettingsDialog` appearance section | `AppShellSettingsPanel` + `AppSettingsRepository.kt` | Settings panel with explicit System/Light/Dark theme selection persisted through shared preferences. |
+| `AppShellSettingsDialog` plugin section | `AppShellSettingsPanel` + `AppShellPreview` | Read-only native plugin/renderers skeleton showing enabled state, capabilities, source, and import-policy placeholder. |
+| `ThreadDetailSurface.tsx` | `ThreadDetailPreviewScreen.kt` | Preview shell with topbar, chat, workspace, shell, and fixed composer. |
+| `ThreadWorkspaceLayout.tsx` | `ThreadTopBar.kt` + `ThreadRoomsPanel.kt` | Mobile topbar, segmented Chat/Workspace/Shell navigation, and rooms drawer. |
+| `GraphChatShellLayout.tsx` | `GraphChatShellLayout.kt` + `ThreadDetailPreviewScreen.kt` | Native shell root, frame, main panel, topbar shell, split region, mobile scrim, and rooms rail shell now wrap the preview screen. |
+| `ThreadTimeline.tsx` top-level controls | `ThreadTimelineComponents.kt` + `TimelineAuxiliaryPreview` | Native preview rows for loading earlier history, activity notes, answered request notes, pending steers, ephemeral user prompt, and optimistic turn labeling. |
+| `GraphChatThreadChatPanel.tsx` | `ThreadDetailPreviewScreen.kt` + `ThreadTimelineComponents.kt` | Chat surface with timeline padding and fixed composer behavior. |
+| `GraphChatTurnFrame.tsx` | `ThreadTimelineComponents.kt` | Turn header, status, time, token summary, and body grouping. |
+| `GraphChatMessageFrame.tsx` | `ThreadTimelineComponents.kt` | User/assistant message surfaces, sender label, status, and time treatment. |
+| `GraphChatMessageBody.tsx` and `GraphChatMessageContent.tsx` | `RichMessageContent.kt` | Native rich message rendering for paragraphs, headings, bullets, inline code, and fenced code blocks. |
+| `markdownHeuristics.ts` | `MarkdownHeuristics.kt` + `RichMessageContent.kt` | Native markdown syntax heuristic chooses between lightweight plain text blocks and richer markdown-like parsing. |
+| `graphChatToolBlocks.ts` | `GraphChatToolBlocks.kt` + `RichMessageContent.kt` | Native preprocessing for `tool-call`, `tool-result`, and merged tool blocks, with dedicated tool block rendering inside rich messages. |
+| `graphChatShiki.ts` | `GraphChatSyntaxHighlighting.kt` + `RichMessageContent.kt` | Lightweight native syntax styling for fenced code blocks. This improves code readability without embedding Shiki or a JavaScript highlighter runtime. |
+| `threadPresentation.ts` | `ThreadPresentation.kt` + timeline/rooms/workspace components | Central native labels for thread status, export status, tool status, plan steps, history item labels, and scrollable history kinds. |
+| `GraphChatCompactMessageItem.tsx` reasoning section | `ThreadTimelineComponents.kt` + `ReasoningPreview` | Assistant messages can show a native collapsible Thought Process/Thinking block with bounded monospace content and running state. |
+| `GraphAccordion.tsx` | `GraphAccordion.kt` + `ThreadTimelineComponents.kt` + `WorkspacePanel.kt` | Native accordion root/item/trigger/content primitive with chevron, separator, disabled state, and expanded content. Used by workspace guide/extensions and still represented by local disclosure behavior inside timeline reasoning. |
+| `GraphChatToolCall.tsx` | `ThreadTimelineComponents.kt` | Tool call card with monospaced name, status badge, parameters, and result block. |
+| `GraphChatTurnBody.tsx` live plan branch | `ThreadTimelineComponents.kt` + `LivePlanPreview` | Native live plan card rendered inside the turn frame with explanation, ordered steps, and semantic status pills. |
+| `GraphChatHistoryEntries.tsx` | `GraphChatHistoryEntries.kt` + `ThreadTimelineComponents.kt` | Native history entry dispatcher maps item, command group, file-change group, file-read group, and search group entries to timeline renderers. |
+| `GraphChatHistoryItems.tsx` | `ThreadTimelineComponents.kt` + `HistoryItemPreview` | Native typed history cards for plan, context, command, tool, agent, skill, web search, file read, file change, image, artifact, hook, and generic events. |
+| `GraphChatHistoryGroupFrame.tsx` and grouped history items | `ThreadTimelineComponents.kt` + `HistoryGroupPreview` | Expandable native batch cards for command, web-search, file-read, and file-change groups, with count badges, running status, child rows, and delta summaries. |
+| `GraphChatImageItem.tsx` | `ThreadTimelineComponents.kt` + `HistoryItemPreview` | Native image event placeholder with fixed-ratio preview block, asset path row, and detail overlay action. |
+| `LongTextDialog.tsx` | `LongTextDialog.kt` + `DetailPreview` | Native full-detail overlay for history actions such as Command Output, File Read Details, File Change Details, and Artifact inspection, backed by shared dialog overlay primitives. |
+| `RenameDialog.tsx` | `ThreadActionDialogs.kt` | Native rename-thread dialog skeleton with preview field, cancel, and save actions. |
+| `ExportTranscriptDialog.tsx` | `ThreadActionDialogs.kt` + `ExportTurnPreview` | Native export transcript dialog skeleton with latest/custom mode, PDF/HTML format controls, selected turn rows, token/price option, and export footer. |
+| `ConfirmDialog.tsx` | `ThreadActionDialogs.kt` | Native destructive confirmation skeleton for delete-thread flow. |
+| `ThreadComposer.tsx` | `ThreadComposer.kt` | Bottom input surface with native slash toolbox, attachment picker, model and effort menus, plan chip, shell tools, and send action. |
+| `ThreadComposer.tsx` context usage and attachment draft UI | `ThreadComposer.kt` | Native context progress bar, context usage row, queued attachment chips, and attachment preview strip. |
+| `InputGroup.tsx` | `ThreadComposer.kt` | Native grouped prompt input surface with block-start attachment chips, prompt body, context progress, and block-end metadata/addon pills. |
+| `Slider.tsx` | `ThreadComposer.kt` | Native slider-like effort budget indicator in the reasoning effort panel. It is visual-only until settings wiring lands. |
+| `Button.tsx` | `GraphUiPrimitives.kt` | Native graph button primitive with default, destructive, outline, secondary, ghost, disabled, and compact size variants. |
+| `Badge.tsx` | `GraphUiPrimitives.kt` | Native graph badge primitive with default, secondary, destructive, and outline variants. |
+| `ButtonGroup.tsx` | `GraphUiPrimitives.kt` + `ArtifactPreviewCard.kt` | Native grouped control surface used by molecule viewer actions, with horizontal flow and vertical group support. |
+| `Separator.tsx` | `GraphUiPrimitives.kt` + `ArtifactPreviewCard.kt` | Native horizontal/vertical separator primitive used inside grouped molecule controls. |
+| `Tooltip.tsx` | `GraphUiPrimitives.kt` + `ArtifactPreviewCard.kt` | Android equivalent uses semantic content descriptions for compact controls. Pointer hover popovers are intentionally not part of the first mobile pass. |
+| `Dialog.tsx` | `GraphUiPrimitives.kt` + `ThreadActionDialogs.kt` | Native dialog overlay, frame, header, scrollable content body, close action, and footer actions now back rename/export/delete thread dialogs. |
+| `ConfirmDialog.tsx` and pending request flows | `PendingRequestCard.kt` | Inline mobile permission card with risk label, command preview, deny, and approve actions. |
+| `ThreadGraphWorkspacePanel.tsx` | `WorkspacePanel.kt` | Native Workspace/Tool Usage/Guide/Graph/Extensions tabs inside the mobile Workspace surface. |
+| `GraphWorkspaceExplorer.tsx` | `WorkspacePanel.kt` | Workspace file tree, selected row state, root label, refresh affordance, and workspace summary strip. |
+| `workspaceTree.ts` | `WorkspaceTree.kt` + `WorkspacePanel.kt` | Native path helpers for extension/name extraction, ancestor expansion, directory-first sorting, and flat preview nodes used by the workspace explorer. |
+| `GraphWorkspacePreviewPane.tsx` | `WorkspacePanel.kt` | Code preview pane with metadata bar, copy/open actions, and scrollable monospaced content. |
+| `GraphWorkspacePreviewPane.tsx` artifact branch | `ArtifactPreviewCard.kt` | Native fallback card with artifact metadata, source preview, and molecule-specific summary. |
+| `GraphMoleculeViewerData.ts` | `GraphMoleculeViewerData.kt` + `ArtifactPreviewCard.kt` | Native molecule data normalization for XYZ/extxyz, trajectory frame splitting, export-content joining, and first-frame atom parsing for the compact schematic preview. |
+| `GraphWorkspaceCards.tsx` | `WorkspaceInfoCard.kt` + `WorkspacePanel.kt` | Native workspace info card used by guide and extension surfaces, with compact label treatment and panel styling. |
+| `GraphResizablePanels.tsx` | `GraphResizablePanels.kt` + `WorkspacePanel.kt` | Native vertical panel group, panel, and handle primitives divide workspace explorer, artifact preview, and file viewer sections. Drag resizing is not implemented on mobile. |
+| `GraphEmptyGarbageDialog.tsx` | `WorkspacePanel.kt` + `WorkspacePreview.garbageFiles` | Native empty-garbage confirmation skeleton with file list, empty state, cancel, and destructive action. |
+| `XyzArtifactRenderer.tsx` and `InlineXyzRenderer.tsx` | `ArtifactPreviewCard.kt` + `GraphMoleculeViewerData.kt` | Minimal native 2D molecule fallback for XYZ-like artifacts, using parsed first-frame atom coordinates when available. Full 3D rendering is not implemented yet. |
+| `GraphMoleculeViewer.tsx` | `ArtifactPreviewCard.kt` + `GraphMoleculeViewerData.kt` | Coverage is intentionally partial: Android shows a parsed compact schematic and metadata rather than an interactive 3D viewer. |
+| `GraphMoleculeViewerControls.tsx` | `ArtifactPreviewCard.kt` | Native molecule control chips for copy/download/screenshot, zoom/reset, measurement, selection, staging, and unit-cell affordances. |
+| `GraphMoleculeViewerUpperButtonGroup.tsx` | `ArtifactPreviewCard.kt` | Upper molecule control group represented as native chips above the schematic preview. |
+| `GraphMoleculeViewerLowerButtonGroup.tsx` | `ArtifactPreviewCard.kt` | Lower molecule control group represented as measurement and selection/staging rows with disabled unavailable actions. |
+| `GraphToolUsagePanel.tsx` | `WorkspacePanel.kt` | Compact tool usage summary rows plus a native call log with input and output sections. |
+| `GraphGuidePanel.tsx` | `WorkspacePanel.kt` | Mobile guide tab covering getting started, workspace explorer, previews, and tool usage. |
+| `GraphVisualization.tsx` | `WorkspacePanel.kt` | Native graph summary with static relationship sketch and node list. Full interactive graph is still open. |
+| `FloatingEdge.tsx` | `WorkspacePanel.kt` graph canvas | Native graph canvas draws curved directed edges with arrowheads between summary nodes. |
+| `FloatingConnectionLine.tsx` | `WorkspacePanel.kt` graph canvas | Native graph canvas includes target markers on directed graph connections. Interactive drag-to-connect is not implemented. |
+| `FloatingHelper.tsx` | `WorkspacePanel.kt` graph helper strip | Native graph helper strip and legend summarize Bezier edges, arrow targets, live nodes, and node categories. |
+| Thread panel extension cards | `WorkspacePanel.kt` | Extensions tab summarizing plugin panels, renderers, and Remote Codex tool surfaces. |
+| `ThreadShellPanel.tsx` | `ShellPanel.kt` | Terminal shell frame with connection/terminate header, active process bar, mobile process drawer, floating shell toolbox, output, and command bar. |
+| `styles.css` graph-chat tokens | `ThreadColors.kt` + `RemoteCodexTheme.kt` + `ThemeMode.kt` | Light/dark token sets with persisted System/Light/Dark theme mode. |
+
+Still open:
+
+- Desktop-style collapsed rooms rail from `ThreadWorkspaceLayout.tsx`; current native shell layout covers the mobile rail/scrim path, not a tablet/desktop rail collapse mode.
+- Real app shell navigation destinations: workspace home, thread list, shell list, import plugin, and backend settings are still preview-only.
+- Full markdown/GFM parity, tables, math, syntax highlighting, copy buttons, and plugin-rendered inline artifacts.
+- Full Shiki parity for code blocks: language grammars, themes, token scopes, line metadata, and copy actions are still open. Current Android highlighting is intentionally lightweight.
+- Full graph-ui primitive behavior: pressed/loading states, focus polish, icon slots, long-press tooltip popovers, Dialog trigger/portal parity, and broader reuse outside molecule controls, accordion surfaces, and thread action dialogs.
+- Full graph-chat tool block parity: robust JSON parsing, streaming result reconciliation, copy actions, and plugin-aware renderers. Current Android support is lightweight and preview-oriented.
+- Full history entry ordering parity with persisted server events; current native dispatcher preserves the preview item/group stream but does not yet consume server event cursors.
+- Full `ThreadTimeline.tsx` behavior: scroll anchoring, tail visibility, server-managed history paging, deferred history detail cache, request anchoring by turn id, and live output attachment are still not implemented.
+- Full history item interactions: deferred detail loading, real image asset loading, clipboard actions, and richer full-detail content types.
+- Real copy feedback for assistant compact messages and reasoning text; current Android coverage is visual/disclosure only. Timeline reasoning and history groups should also move onto `GraphAccordion.kt` rather than retaining local disclosure implementations.
+- Real thread action wiring behind native dialogs: rename, export PDF/HTML, delete, busy/error states, and confirmation callbacks.
+- Full artifact-specific viewers, including interactive molecule and graph panels.
+- Real molecule viewer behavior behind the current native control chips: 3D renderer, robust bond perception, frame slider/playback, atom selection, camera updates, copy/download/screenshot actions, and unit-cell toggling.
+- Real graph editor behavior behind the current native graph summary: React Flow layout parity, draggable nodes, live connection preview, selectable edges, and graph pan/zoom.
+- Real composer actions behind the current native sample menus: goal update, fork, skills, MCP, hooks, attachments, model updates, effort updates, plan mode, and shell controls.
+- Real composer input behavior behind the current grouped prompt surface: editable rich text, clipboard paste sanitization, drag/drop extraction, attachment file picker, context usage from the backend, and slider value persistence.
+- Real workspace actions behind the current native action chips: refresh, copy, open, load more, upload, download, and file mutation.
+- Full workspace tree parity with backend `ThreadWorkspaceTreeNode`, artifact/event/live roots, preview source selection, and molecule snapshot generation.
+- Broader workspace card reuse across file previews, graph node detail, and future plugin panels.
+- Real resizable workspace panel behavior on tablet/desktop form factors; current Android coverage keeps stable panel boundaries and handle visuals without drag resizing.
+- Real garbage folder mutation behind the current empty-garbage confirmation skeleton.
+- Real shell adapter actions behind the current native shell controls: create, attach, terminate, rename, split pane, copy visible output, PTY input, and control sequences.
+- Real API, WebSocket, reducer, pairing, and shell integration.
+- Real plugin management behind the current native settings skeleton: refresh, import, enable/disable, uninstall, and trusted renderer policy.
+- Screenshot-based E2E after emulator access is available.
+
+## Build
+
+Use JDK 17 or newer.
+
+```bash
+cd apps/android
+./gradlew :app:assembleDebug
+```
+
+The debug APK is written to:
+
+```text
+apps/android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+Local Android SDK paths should stay outside git. Use `local.properties` if the SDK is not discoverable from `ANDROID_HOME` or `ANDROID_SDK_ROOT`.
+
+## Emulator And E2E Verification
+
+The local SDK is expected at `/home/u/Android/Sdk` in this environment. The emulator package and an API 34 Google APIs x86_64 system image can be installed with:
+
+```bash
+JAVA_HOME=/home/u/.jdks/jdk-17 \
+ANDROID_HOME=/home/u/Android/Sdk \
+ANDROID_SDK_ROOT=/home/u/Android/Sdk \
+/home/u/Android/Sdk/cmdline-tools/latest/bin/sdkmanager \
+  "emulator" \
+  "system-images;android-34;google_apis;x86_64"
+```
+
+Create the current test AVD with:
+
+```bash
+printf 'no\n' | JAVA_HOME=/home/u/.jdks/jdk-17 \
+ANDROID_HOME=/home/u/Android/Sdk \
+ANDROID_SDK_ROOT=/home/u/Android/Sdk \
+/home/u/Android/Sdk/cmdline-tools/latest/bin/avdmanager create avd \
+  --force \
+  --name remote_codex_api34 \
+  --package 'system-images;android-34;google_apis;x86_64' \
+  --device pixel_6
+```
+
+Headless emulator launch command:
+
+```bash
+JAVA_HOME=/home/u/.jdks/jdk-17 \
+ANDROID_HOME=/home/u/Android/Sdk \
+ANDROID_SDK_ROOT=/home/u/Android/Sdk \
+/home/u/Android/Sdk/emulator/emulator @remote_codex_api34 \
+  -no-window \
+  -no-audio \
+  -no-boot-anim \
+  -gpu swiftshader_indirect \
+  -accel auto
+```
+
+This environment currently builds the APK but does not rely on emulator execution. The x86_64 emulator needs `/dev/kvm` access in the active Linux login session. Add the user to the `kvm` group and start a new login session before relying on screenshot-based E2E:
+
+```bash
+sudo gpasswd -a "$USER" kvm
+```
+
+Once the emulator boots, install and capture with:
+
+```bash
+adb install -r apps/android/app/build/outputs/apk/debug/app-debug.apk
+adb shell am start -n com.remotecodex.android/.MainActivity
+adb exec-out screencap -p > output/android-thread-preview.png
+```
+
+## Near-Term Roadmap
+
+1. Add screenshot E2E after emulator access is available.
+2. Add a typed Kotlin supervisor API client with configurable base URL.
+3. Add pairing/token storage before enabling remote network access.
+4. Add a minimal home screen: active threads, workspaces, and pending confirmations.
+5. Replace sample data with thread detail fetch plus WebSocket updates.
+6. Add voice mode as a native feature instead of mirroring the web composer.
+7. Replace artifact fallbacks with richer native renderers where they are worth maintaining.
