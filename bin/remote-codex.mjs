@@ -30,9 +30,15 @@ if (fs.existsSync(path.join(packageRoot, '.env'))) {
 }
 
 const command = normalizeCommand(process.argv[2]);
+const commandHelpTarget =
+  command === 'help'
+    ? normalizeHelpTarget(process.argv[3])
+    : hasHelpFlag(process.argv.slice(3))
+      ? command
+      : null;
 
-if (command === 'help') {
-  printHelp();
+if (commandHelpTarget) {
+  printCommandHelp(commandHelpTarget);
   process.exit(0);
 }
 
@@ -352,6 +358,18 @@ function normalizeCommand(value) {
   return aliases.get(value) ?? value;
 }
 
+function normalizeHelpTarget(value) {
+  if (!value || value === '-h' || value === '--help') {
+    return 'help';
+  }
+
+  return normalizeCommand(value);
+}
+
+function hasHelpFlag(values) {
+  return values.includes('-h') || values.includes('--help');
+}
+
 function readPackageVersion() {
   try {
     const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
@@ -361,34 +379,291 @@ function readPackageVersion() {
   }
 }
 
+function printCommandHelp(target) {
+  switch (target) {
+    case 'start':
+      printStartHelp();
+      return;
+    case 'status':
+      printStatusHelp();
+      return;
+    case 'stop':
+      printStopHelp();
+      return;
+    case 'relay':
+      printRelayHelp();
+      return;
+    case 'relay-supervisor':
+      printRelaySupervisorHelp();
+      return;
+    case 'version':
+      printVersionHelp();
+      return;
+    case 'help':
+    default:
+      printHelp();
+  }
+}
+
 function printHelp() {
   console.log(`remote-codex ${readPackageVersion()}
 
+Local and relayable web supervisor for Codex workspaces and threads.
+
+Usage:
+  remote-codex <command>
+  remote-codex <command> --help
+
+Commands:
+  start             Start the normal local web app and supervisor API.
+  status            Print status for the normal local service.
+  stop              Stop the normal local service.
+  relay             Run the public relay server for browsers/apps.
+  relay-supervisor  Run the private supervisor backend that connects to a relay.
+  version           Print the installed remote-codex package version.
+  help [command]    Show global help or help for a command.
+
+Common workflows:
+  Local/LAN or Tailscale:
+    remote-codex start
+
+  Public relay server:
+    remote-codex relay
+
+  Private machine connecting outward to that relay:
+    remote-codex relay-supervisor
+
+Command help:
+  remote-codex start --help
+  remote-codex relay --help
+  remote-codex relay-supervisor --help
+
+Modes:
+  local             Default supervisor mode. No Remote Codex login is required.
+  server            Directly reachable supervisor. Requires admin auth.
+  relay             Private supervisor connects outward to public relay.
+
+Files and defaults:
+  .env is loaded from the installed package/source root when present.
+  Source checkout service dir defaults to .local/service.
+  npm-installed service dir defaults to ~/.remote-codex/service.
+
+Docs:
+  docs/auth-and-connectivity-modes.md
+`);
+}
+
+function printStartHelp() {
+  console.log(`remote-codex start
+
+Start the normal local Remote Codex service: one supervisor API process plus one
+web process. This is the recommended command for local development, LAN access,
+or Tailscale access.
+
 Usage:
   remote-codex start
-  remote-codex status
-  remote-codex stop
-  remote-codex relay
-  remote-codex relay-supervisor
+  remote-codex service:start
+
+What it starts:
+  Web UI       http://SERVICE_HOST:SERVICE_PORT
+  API          http://SERVICE_API_HOST:SERVICE_API_PORT
 
 Environment:
-  SERVICE_HOST              Web listen host, default 127.0.0.1
-  SERVICE_PORT              Web listen port, default ${defaultServicePort}
-  SERVICE_API_HOST          API listen host, default 127.0.0.1
-  SERVICE_API_PORT          API listen port, default ${defaultApiPort}
-  REMOTE_CODEX_SERVICE_DIR  Service state and log directory, default ~/.remote-codex/service
+  SERVICE_HOST              Web listen host. Default 127.0.0.1.
+  SERVICE_PORT              Web listen port. Default ${defaultServicePort}.
+  SERVICE_API_HOST          API listen host. Default 127.0.0.1.
+  SERVICE_API_PORT          API listen port. Default ${defaultApiPort}.
+  REMOTE_CODEX_SERVICE_DIR  Service state/log directory.
+  LOG_LEVEL                 API log level. Default warn for service mode.
+  DISABLE_REQUEST_LOGGING   true/false. Default true for service mode.
 
-Relay:
-  remote-codex relay runs the public relay server.
-  Required: REMOTE_CODEX_ADMIN_USERNAME, REMOTE_CODEX_ADMIN_PASSWORD
-  Recommended: REMOTE_CODEX_RELAY_SESSION_SECRET, REMOTE_CODEX_RELAY_DATA_DIR,
-               REMOTE_CODEX_RELAY_REGISTRATION_ENABLED, HOST, PORT
+Supervisor configuration forwarded to the API:
+  REMOTE_CODEX_MODE         local, server, or relay. Default local.
+  WORKSPACE_ROOT            Root directory for workspaces. Default home dir.
+  DATABASE_URL              SQLite database path.
+  CODEX_HOME                Codex config directory. Default ~/.codex.
+  CODEX_COMMAND             Codex executable. Default codex.
+  CLAUDE_HOME               Claude config directory. Default ~/.claude.
+  CLAUDE_COMMAND            Claude executable. Default claude.
+  OPENCODE_HOME             OpenCode config directory. Default ~/.opencode.
+  OPENCODE_COMMAND          OpenCode executable. Default opencode.
 
-Relay supervisor:
-  remote-codex relay-supervisor runs the private backend that connects to the relay.
-  Required: REMOTE_CODEX_ADMIN_USERNAME, REMOTE_CODEX_ADMIN_PASSWORD,
-            REMOTE_CODEX_SESSION_SECRET, REMOTE_CODEX_RELAY_SERVER_URL,
-            REMOTE_CODEX_RELAY_AGENT_TOKEN
-  Recommended: HOST, PORT, DATABASE_URL, WORKSPACE_ROOT, CODEX_HOME
+Example:
+  SERVICE_HOST=127.0.0.1 SERVICE_PORT=4173 remote-codex start
+
+Expose over Tailscale after start:
+  tailscale serve --bg http://127.0.0.1:${defaultServicePort}
+`);
+}
+
+function printStatusHelp() {
+  console.log(`remote-codex status
+
+Print status for the normal local service started by remote-codex start.
+
+Usage:
+  remote-codex status
+  remote-codex service:status
+
+Output includes:
+  API process pid and health
+  Web process pid and health
+  Service URLs
+  Log directory
+
+Environment:
+  REMOTE_CODEX_SERVICE_DIR  Service state/log directory to inspect.
+`);
+}
+
+function printStopHelp() {
+  console.log(`remote-codex stop
+
+Stop the normal local service started by remote-codex start.
+
+Usage:
+  remote-codex stop
+  remote-codex service:stop
+
+Environment:
+  REMOTE_CODEX_SERVICE_DIR  Service state/log directory to stop.
+`);
+}
+
+function printRelayHelp() {
+  console.log(`remote-codex relay
+
+Run the public relay server. This command is intended for a VPS or server that
+browsers and mobile apps can reach. It serves the relay portal/admin UI and
+forwards allowed API/WebSocket traffic to private machines connected with
+remote-codex relay-supervisor.
+
+Usage:
+  remote-codex relay
+
+Required environment:
+  REMOTE_CODEX_ADMIN_USERNAME
+    Initial relay admin username, for example admin.
+  REMOTE_CODEX_ADMIN_PASSWORD
+    Initial relay admin password. Must be at least 8 characters.
+
+Recommended environment:
+  REMOTE_CODEX_RELAY_SESSION_SECRET
+    Relay session signing secret. Must be at least 16 characters. Defaults to
+    REMOTE_CODEX_ADMIN_PASSWORD when omitted.
+  REMOTE_CODEX_RELAY_DATA_DIR
+    Persistent user/device/share store. Default .local/relay-server.
+  REMOTE_CODEX_RELAY_REGISTRATION_ENABLED
+    true/false. Default true. Use false when only admins should create users.
+  HOST
+    Relay listen host. Default 0.0.0.0. Use 0.0.0.0 on a public server.
+  PORT
+    Relay listen port. Default 8788.
+  REMOTE_CODEX_ADMIN_EMAIL
+    Optional seeded admin email. Defaults to <username>@relay.local.
+  REMOTE_CODEX_RELAY_WEB_DIST_DIR
+    Optional web dist override. Defaults to packaged supervisor-web/dist.
+  REMOTE_CODEX_RELAY_SUPERVISOR_TOKEN
+    Optional legacy bootstrap token. Prefer per-device tokens from the portal.
+  REMOTE_CODEX_RELAY_CLIENT_TOKEN
+    Optional legacy client token. Prefer relay user sessions.
+
+Example:
+  REMOTE_CODEX_ADMIN_USERNAME=admin \\
+  REMOTE_CODEX_ADMIN_PASSWORD=change-me-now \\
+  REMOTE_CODEX_RELAY_SESSION_SECRET=at-least-16-characters \\
+  REMOTE_CODEX_RELAY_DATA_DIR=/var/lib/remote-codex-relay \\
+  REMOTE_CODEX_RELAY_REGISTRATION_ENABLED=false \\
+  HOST=0.0.0.0 PORT=8788 \\
+  remote-codex relay
+
+After start:
+  Relay health:  GET /healthz
+  Portal:        /relay-portal
+  Admin:         /relay-admin
+  Device API:    /relay/devices/:deviceId/api/...
+  Device WS:     /relay/devices/:deviceId/ws
+
+Typical flow:
+  1. Start remote-codex relay on the public server.
+  2. Log in to /relay-portal as the seeded admin.
+  3. Create a device and copy its rcd_... token.
+  4. Put that token into REMOTE_CODEX_RELAY_AGENT_TOKEN on the private machine.
+  5. Start remote-codex relay-supervisor on the private machine.
+`);
+}
+
+function printRelaySupervisorHelp() {
+  console.log(`remote-codex relay-supervisor
+
+Run the private-machine supervisor backend in relay mode. This is the process
+that has local workspace access and runs Codex. It does not expose itself to the
+public internet; it connects outward to a public relay server.
+
+Usage:
+  remote-codex relay-supervisor
+
+This command automatically sets for the child supervisor:
+  REMOTE_CODEX_MODE=relay
+
+Required environment:
+  REMOTE_CODEX_ADMIN_USERNAME
+    Private supervisor admin username. Required because relay mode enables API auth.
+  REMOTE_CODEX_ADMIN_PASSWORD
+    Private supervisor admin password.
+  REMOTE_CODEX_SESSION_SECRET
+    Private supervisor session signing secret. Must be at least 16 characters.
+  REMOTE_CODEX_RELAY_SERVER_URL
+    Public relay websocket base URL. Use ws://host:port for plain relay ports or
+    wss://relay.example.com behind TLS.
+  REMOTE_CODEX_RELAY_AGENT_TOKEN
+    Device token created in the relay portal. This is not the relay admin password.
+
+Recommended environment:
+  HOST
+    Private supervisor listen host. Default 127.0.0.1.
+  PORT
+    Private supervisor listen port. Default 8787.
+  DATABASE_URL
+    SQLite database path. Set this when running beside another Remote Codex.
+  WORKSPACE_ROOT
+    Root directory that workspace paths must live under. Default home directory.
+  CODEX_HOME
+    Codex config directory. Default ~/.codex.
+  CODEX_COMMAND
+    Codex executable. Default codex.
+  REMOTE_CODEX_ENABLED_AGENT_PROVIDERS
+    Comma-separated provider ids, for example codex,claude.
+
+Example:
+  REMOTE_CODEX_ADMIN_USERNAME=admin \\
+  REMOTE_CODEX_ADMIN_PASSWORD=change-me-locally \\
+  REMOTE_CODEX_SESSION_SECRET=at-least-16-characters \\
+  REMOTE_CODEX_RELAY_SERVER_URL=wss://relay.example.com \\
+  REMOTE_CODEX_RELAY_AGENT_TOKEN=rcd_device_token_from_relay_portal \\
+  HOST=127.0.0.1 PORT=8787 \\
+  DATABASE_URL=$HOME/.remote-codex/relay-supervisor.sqlite \\
+  remote-codex relay-supervisor
+
+When running a separate test backend beside an existing Remote Codex service,
+set separate values for:
+  PORT
+  DATABASE_URL
+  WORKSPACE_ROOT
+
+The relay server will report supervisorConnected=true on /healthz after this
+process connects successfully.
+`);
+}
+
+function printVersionHelp() {
+  console.log(`remote-codex version
+
+Print the installed remote-codex package version.
+
+Usage:
+  remote-codex version
+  remote-codex --version
+  remote-codex -v
 `);
 }
