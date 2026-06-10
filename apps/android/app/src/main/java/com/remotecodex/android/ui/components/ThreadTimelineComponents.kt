@@ -448,18 +448,26 @@ private fun PlanStepStatusPill(status: PlanStepStatus) {
         PlanStepStatus.Pending -> ThreadColors.InfoSoft
         PlanStepStatus.Unknown -> ThreadColors.SurfaceStrong
     }
-    Text(
-        text = planStepStatusLabel(status),
+    Row(
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
             .background(background)
             .border(1.dp, foreground.copy(alpha = 0.42f), RoundedCornerShape(999.dp))
             .padding(horizontal = 8.dp, vertical = 4.dp),
-        color = foreground,
-        style = MaterialTheme.typography.labelSmall,
-        fontWeight = FontWeight.SemiBold,
-        maxLines = 1,
-    )
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (status == PlanStepStatus.Running) {
+            RunningDots(color = foreground, dotSize = 4.dp, spacing = 2.dp)
+        }
+        Text(
+            text = planStepStatusLabel(status),
+            color = foreground,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+        )
+    }
 }
 
 @Composable
@@ -687,12 +695,7 @@ private fun ReasoningAccordion(items: List<ReasoningPreview>) {
             },
             trailing = {
                 if (running) {
-                    Text(
-                        text = "...",
-                        color = ThreadColors.Info,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                    )
+                    RunningDots(color = ThreadColors.Info)
                 }
             },
         ) {
@@ -786,6 +789,9 @@ private fun HistoryGroupCard(
                         style = MaterialTheme.typography.labelSmall,
                         maxLines = 1,
                     )
+                    if (isRunningStatusLabel(group.statusLabel)) {
+                        RunningDots(color = colors.foreground, dotSize = 4.dp, spacing = 2.dp)
+                    }
                     if (group.kind == HistoryItemKind.FileChange) {
                         FileChangeGroupSummary(group = group)
                     }
@@ -876,12 +882,20 @@ private fun HistoryGroupRow(
                 overflow = TextOverflow.Ellipsis,
             )
             item.status?.let { status ->
-                Text(
-                    text = status.name.lowercase(),
-                    color = ThreadColors.ForegroundMuted,
-                    style = MaterialTheme.typography.labelSmall,
-                    maxLines = 1,
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (status == ToolStatus.Running) {
+                        RunningDots(color = colors.foreground, dotSize = 4.dp, spacing = 2.dp)
+                    }
+                    Text(
+                        text = status.name.lowercase(),
+                        color = ThreadColors.ForegroundMuted,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                    )
+                }
             }
         }
         Text(
@@ -1023,6 +1037,16 @@ private fun historyItemCopyText(item: HistoryItemPreview): String {
             appendLine(it)
         }
     }.trim()
+}
+
+private fun isRunningStatusLabel(statusLabel: String?): Boolean {
+    if (statusLabel == null) {
+        return false
+    }
+    val normalized = statusLabel.lowercase()
+    return normalized.contains("running") ||
+        normalized.contains("inprogress") ||
+        normalized.contains("in_progress")
 }
 
 private fun openHistoryItemDetail(

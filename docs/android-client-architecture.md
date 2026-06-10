@@ -88,6 +88,7 @@ Android equivalents are intentionally native Compose components:
 - `GraphInputGroup.kt`
 - `GraphSlider.kt`
 - `LongTextDialog.kt`
+- `RunningDots.kt`
 - `StatusBadge.kt`
 - `ThreadPresentation.kt`
 - `WorkspaceTree.kt`
@@ -126,6 +127,7 @@ The visual direction is close to the web mobile thread view, but not a literal D
 | `GraphChatThreadChatPanel.tsx` | `ThreadDetailPreviewScreen.kt` + `ThreadTimelineComponents.kt` | Chat surface with timeline padding and fixed composer behavior. |
 | `GraphChatTurnFrame.tsx` | `ThreadTimelineComponents.kt` | Turn header, status, time, token summary, and body grouping. |
 | `GraphChatMessageFrame.tsx` | `ThreadTimelineComponents.kt` | User/assistant message surfaces, sender label, status, time treatment, and assistant reply copy action. |
+| `GraphChatRunningDots` usage in message/history frames | `RunningDots.kt` + `StatusBadge.kt` + `ThreadTimelineComponents.kt` | Shared native running-dot primitive now backs thread/tool status badges, thinking accordions, running live-plan steps, and running history group/row indicators. Metadata pills keep a static dot treatment. |
 | `GraphChatMessageBody.tsx` and `GraphChatMessageContent.tsx` | `RichMessageBlocks.kt` + `GraphChatPlainText.kt` + `UserMessageSegments.kt` + `ThreadTimelineComponents.kt` + `RichMessageContent.kt` | Native assistant rich message rendering for paragraphs, headings, nested unordered/ordered/task lists, blockquotes, horizontal rules, aligned simple tables, inline code, strong/emphasis/strikethrough spans, markdown inline links, markdown image placeholders, fenced code blocks, tool blocks, code-copy feedback, clickable plain URLs, and 4,000-character Show more/less previews. User messages parse `[PHOTO path]` and `[FILE path]` tokens into native attachment chips/placeholders through tested presentation helpers. |
 | `markdownHeuristics.ts` | `MarkdownHeuristics.kt` + `RichMessageContent.kt` | Native markdown syntax heuristic chooses between lightweight plain text blocks and richer markdown-like parsing. |
 | `graphChatToolBlocks.ts` | `GraphChatToolBlocks.kt` + `RichMessageContent.kt` | Native preprocessing for `tool-call`, `tool-result`, and merged tool blocks, with dedicated tool block rendering inside rich messages. |

@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -90,7 +89,13 @@ fun ToolStatusBadge(
         label = label,
         colors = colors,
         modifier = modifier,
-        leading = { Dot(color = colors.foreground) },
+        leading = {
+            if (status == ToolStatus.Running) {
+                RunningDots(color = colors.foreground)
+            } else {
+                Dot(color = colors.foreground)
+            }
+        },
     )
 }
 
@@ -107,7 +112,7 @@ fun MetadataPill(
             foreground = ThreadColors.ForegroundMuted,
         ),
         modifier = modifier,
-        leading = { RunningDots(color = Color(0xFF7DD3FC)) },
+        leading = { RunningDots(color = Color(0xFF7DD3FC), active = false) },
     )
 }
 
@@ -142,25 +147,6 @@ private fun PillBadge(
             Box(modifier = Modifier.size(8.dp))
         }
     }
-}
-
-@Composable
-private fun RunningDots(color: Color) {
-    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-        repeat(3) {
-            Dot(color = color.copy(alpha = 0.55f))
-        }
-    }
-}
-
-@Composable
-private fun Dot(color: Color) {
-    Box(
-        modifier = Modifier
-            .size(5.dp)
-            .clip(CircleShape)
-            .background(color),
-    )
 }
 
 private data class BadgeColors(
