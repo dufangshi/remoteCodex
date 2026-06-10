@@ -489,16 +489,7 @@ private fun MessageBubble(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = "Assistant",
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(ThreadColors.SurfaceStrong)
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
-                    color = ThreadColors.ForegroundSoft,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
+                AssistantSenderPill()
                 assistantStatus?.let {
                     MessageStatusBadge(model = it)
                 }
@@ -564,6 +555,20 @@ private fun MessageBubble(
             }
         }
     }
+}
+
+@Composable
+private fun AssistantSenderPill() {
+    Text(
+        text = "Assistant",
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(ThreadColors.SuccessSoft.copy(alpha = 0.48f))
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        color = ThreadColors.Success,
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.SemiBold,
+    )
 }
 
 @Composable
