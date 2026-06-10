@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .codex/stop-hook.mjs",
+            "timeout": 30,
+            "statusMessage": "Running hook"
+          }
+        ]
+      }
+    ]
+  }
+}

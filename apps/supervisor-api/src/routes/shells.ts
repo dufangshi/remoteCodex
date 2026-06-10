@@ -1,7 +1,8 @@
-import { FastifyInstance, RouteShorthandOptions } from 'fastify';
+import { FastifyInstance, FastifyRequest, RouteShorthandOptions } from 'fastify';
 import { z } from 'zod';
 
 import { ShellCreateInput, UpdateShellInput } from '../../../../packages/shared/src/index';
+import { requireWorkerScope } from '../worker-identity';
 
 export async function registerShellRoutes(
   app: FastifyInstance,
@@ -23,13 +24,25 @@ export async function registerShellRoutes(
   const routeOptions: RouteShorthandOptions = options.preHandler
     ? { preHandler: options.preHandler }
     : {};
+  const writeRouteOptions: RouteShorthandOptions = {
+    preHandler: [
+      ...(Array.isArray(options.preHandler)
+        ? options.preHandler
+        : options.preHandler
+          ? [options.preHandler]
+          : []),
+      async (request: FastifyRequest) => {
+        requireWorkerScope(request, 'shell:write');
+      },
+    ],
+  };
 
   app.get('/api/threads/:id/shell', routeOptions, async (request) => {
     const params = threadIdParams.parse(request.params);
     return app.services.shellService.getThreadShellState(params.id);
   });
 
-  app.post('/api/threads/:id/shell', routeOptions, async (request) => {
+  app.post('/api/threads/:id/shell', writeRouteOptions, async (request) => {
     const params = threadIdParams.parse(request.params);
     const body = createShellSchema.parse(request.body ?? {});
     const input: ShellCreateInput = {
@@ -40,12 +53,12 @@ export async function registerShellRoutes(
     return app.services.shellService.createShellForThread(params.id, input);
   });
 
-  app.post('/api/shells/:id/terminate', routeOptions, async (request) => {
+  app.post('/api/shells/:id/terminate', writeRouteOptions, async (request) => {
     const params = shellIdParams.parse(request.params);
     return app.services.shellService.terminateShell(params.id);
   });
 
-  app.patch('/api/shells/:id', routeOptions, async (request) => {
+  app.patch('/api/shells/:id', writeRouteOptions, async (request) => {
     const params = shellIdParams.parse(request.params);
     const body = updateShellSchema.parse(request.body ?? {});
     const input: UpdateShellInput = {

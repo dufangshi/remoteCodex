@@ -606,6 +606,9 @@ export class CodexRuntimeAdapter extends EventEmitter implements AgentRuntime {
       model: input.model,
       approvalPolicy: input.approvalMode === 'guarded' ? 'on-request' : 'never',
     };
+    if (input.reasoningEffort !== undefined) {
+      startInput.effort = input.reasoningEffort as ReasoningEffort | null;
+    }
     if (input.sandboxMode !== undefined) {
       startInput.sandbox = input.sandboxMode as SandboxMode | null;
     }
@@ -658,6 +661,9 @@ export class CodexRuntimeAdapter extends EventEmitter implements AgentRuntime {
       threadId: input.providerSessionId,
       prompt: input.prompt,
     };
+    if (input.developerInstructions !== undefined) {
+      turnInput.developerInstructions = input.developerInstructions;
+    }
     if (input.model !== undefined) {
       turnInput.model = input.model;
     }

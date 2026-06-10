@@ -1,4 +1,9 @@
-import Fastify, { FastifyInstance } from 'fastify';
+import Fastify, {
+  FastifyInstance,
+  type FastifyPluginCallback,
+  type FastifyRequest,
+  type RouteOptions,
+} from 'fastify';
 import multipart from '@fastify/multipart';
 import websocket from '@fastify/websocket';
 import { spawn } from 'node:child_process';
@@ -41,14 +46,48 @@ import { ShellServiceError, ShellSessionService } from './shell/shell-session-se
 import { builtinPlugins } from './plugins/builtin-plugins';
 import { PluginService } from './plugins/plugin-service';
 import { PluginSettingsStore } from './plugins/plugin-settings-store';
+import { configureWorkerProviderGateway } from './worker-bootstrap';
 import { BackendPluginHost } from './plugins/backend-plugin-host';
 import {
   createTerminalShellBackend,
   createTerminalPluginBackendContribution,
 } from './plugins/terminal-plugin-backend';
+import { WorkerIdentityError } from './worker-identity';
+import { WorkerHarnessClient } from './worker-harness-client';
+import { WorkerControlPlaneSyncClient } from './worker-control-plane-sync';
+
+type WebsocketLike = {
+  readyState: number;
+  send: (message: string) => void;
+  on(event: 'message', handler: (message: Buffer) => void): void;
+  on(event: 'close', handler: () => void): void;
+};
+
+type WebsocketRouteOptions = RouteOptions & {
+  wsHandler: (socket: WebsocketLike, request: FastifyRequest) => void | Promise<void>;
+};
 
 const MAX_PROMPT_ATTACHMENTS = 10;
 const MAX_PROMPT_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+const WORKER_AUTH_EXEMPT_PATHS = new Set(['/healthz', '/readyz']);
+export const SUPERVISOR_LOG_REDACTION_PATHS = [
+  'req.headers.authorization',
+  'req.headers.cookie',
+  'req.headers["x-remote-codex-worker-token"]',
+  'res.headers["set-cookie"]',
+  'REMOTE_CODEX_WORKER_AUTH_TOKEN',
+  'REMOTE_CODEX_WORKER_IDENTITY_SECRET',
+  'REMOTE_CODEX_CONTROL_PLANE_SERVICE_TOKEN',
+  'REMOTE_CODEX_LLM_GATEWAY_TOKEN',
+  'ANTHROPIC_AUTH_TOKEN',
+  'INACT_X_APP_KEY',
+  'workerAuthToken',
+  'workerIdentitySecret',
+  'controlPlaneServiceToken',
+  'llmGatewayToken',
+  'keyCiphertext',
+  '*.keyCiphertext',
+];
 
 class HttpError extends Error {
   constructor(
@@ -72,6 +111,9 @@ export interface AppServices {
   providerHostConfigService: ProviderHostConfigService;
   pluginRegistry: PluginRegistry;
   pluginService: PluginService;
+  harnessClient: WorkerHarnessClient;
+  controlPlaneSyncClient: Pick<WorkerControlPlaneSyncClient, 'checkpointSession' | 'recordHarnessUsageEvent'> &
+    Partial<Pick<WorkerControlPlaneSyncClient, 'checkHarnessQuota'>>;
   repoRoot: string;
 }
 
@@ -143,6 +185,7 @@ export function buildApp(
     runtimeBootstrap?: AgentRuntimeBootstrap;
     shellService?: ShellSessionService;
     serviceLifecycle?: AppServices['serviceLifecycle'];
+    controlPlaneSyncClient?: AppServices['controlPlaneSyncClient'];
   } = {}
 ): FastifyInstance {
   const config = loadRuntimeConfig(options.env);
@@ -165,6 +208,7 @@ export function buildApp(
     config.workspaceRoot,
     runtimeBootstrap.codexManagement,
     pluginService,
+    config,
   );
   const shellService =
     options.shellService ??
@@ -177,23 +221,53 @@ export function buildApp(
     agentRuntimes,
     runtimeBootstrap.providerHostHomes,
   );
+  const harnessClient = new WorkerHarnessClient(config, {
+    env: options.env ?? process.env,
+  });
+  const controlPlaneSyncClient =
+    options.controlPlaneSyncClient ?? new WorkerControlPlaneSyncClient(config);
 
   const app = Fastify({
     logger:
       config.nodeEnv === 'test'
         ? false
         : {
-            level: config.logLevel
+            level: config.logLevel,
+            redact: {
+              paths: SUPERVISOR_LOG_REDACTION_PATHS,
+              censor: '[redacted]',
+            },
           },
     disableRequestLogging: config.disableRequestLogging
   });
 
-  app.register(multipart, {
+  app.addHook('onRequest', async (request) => {
+    if (
+      config.runtimeRole !== 'worker' ||
+      !config.workerAuthToken ||
+      WORKER_AUTH_EXEMPT_PATHS.has(request.url.split('?')[0] ?? request.url)
+    ) {
+      return;
+    }
+
+    const headerToken = request.headers['x-remote-codex-worker-token'];
+    const authorization = request.headers.authorization;
+    const bearer = authorization?.match(/^Bearer\s+(.+)$/i)?.[1] ?? null;
+    const token = typeof headerToken === 'string' ? headerToken : bearer;
+    if (token !== config.workerAuthToken) {
+      throw new HttpError(401, {
+        code: 'forbidden',
+        message: 'Worker access requires a valid router token.',
+      });
+    }
+  });
+
+  app.register(multipart as unknown as FastifyPluginCallback<Record<string, unknown>>, {
     limits: {
       files: MAX_PROMPT_ATTACHMENTS,
       fileSize: MAX_PROMPT_ATTACHMENT_BYTES,
     },
-  });
+  } as Record<string, unknown>);
 
   app.decorate('services', {
     config,
@@ -206,6 +280,8 @@ export function buildApp(
     providerHostConfigService,
     pluginRegistry,
     pluginService,
+    harnessClient,
+    controlPlaneSyncClient,
     repoRoot
   });
 
@@ -213,9 +289,9 @@ export function buildApp(
   backendPluginHost.register(createTerminalPluginBackendContribution());
 
   app.register(async (realtimeApp) => {
-    await realtimeApp.register(websocket);
+    await realtimeApp.register(websocket as unknown as FastifyPluginCallback);
 
-    realtimeApp.route({
+    const websocketRoute = {
       method: 'GET',
       url: '/ws',
       handler: (_request, reply) => {
@@ -292,8 +368,10 @@ export function buildApp(
           unsubscribe();
           unsubscribeShell();
         });
-      }
-    });
+      },
+    } satisfies WebsocketRouteOptions;
+
+    realtimeApp.route(websocketRoute as RouteOptions);
   });
 
   app.register(registerSystemRoutes);
@@ -311,6 +389,11 @@ export function buildApp(
 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof HttpError) {
+      reply.status(error.statusCode).send(error.payload);
+      return;
+    }
+
+    if (error instanceof WorkerIdentityError) {
       reply.status(error.statusCode).send(error.payload);
       return;
     }
@@ -459,6 +542,7 @@ export function buildApp(
 
   app.addHook('onReady', async () => {
     try {
+      await configureWorkerProviderGateway(config);
       await pluginService.syncManagedCodexMcpConfig({
         codexHome: runtimeBootstrap.providerHostHomes.codex ?? null,
         repoRoot,

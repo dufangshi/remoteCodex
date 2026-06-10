@@ -191,6 +191,10 @@ function summarizeToolCallText(text: string) {
   return lines.find((line) => line.trim().length > 0) ?? lines[0] ?? 'Tool call';
 }
 
+function containsRemoteCodexArtifact(text: string | null | undefined) {
+  return /```(?:artifact|remote-codex-artifact)\b/i.test(text ?? '');
+}
+
 function deferCommandHistoryItem(
   item: ThreadHistoryItemDto & { kind: 'commandExecution' },
   deferredDetails: Map<string, ThreadHistoryItemDetailDto>,
@@ -305,6 +309,19 @@ function valueFromNestedRecords(
   return null;
 }
 
+function textContentFromMcpToolResult(value: unknown) {
+  if (!isRecord(value) || !Array.isArray(value.content)) {
+    return null;
+  }
+
+  const texts = value.content
+    .map((entry) =>
+      isRecord(entry) && entry.type === 'text' ? stringOrNull(entry.text) : null,
+    )
+    .filter((entry): entry is string => Boolean(entry));
+  return texts.length > 0 ? texts.join('\n\n') : null;
+}
+
 function formatToolCallHistoryItem(
   item: CodexTurnItem,
   deferredDetails?: Map<string, ThreadHistoryItemDetailDto>,
@@ -356,12 +373,16 @@ function formatToolCallHistoryItem(
   const resultPayload = output ?? result;
   const argumentText = safeJsonStringify(argumentPayload);
   const resultText = safeJsonStringify(resultPayload);
+  const resultContentText = textContentFromMcpToolResult(resultPayload);
 
   if (argumentText) {
     detailLines.push('', 'Arguments', argumentText);
   }
   if (resultText) {
     detailLines.push('', 'Result', resultText);
+  }
+  if (resultContentText && resultContentText !== resultText) {
+    detailLines.push('', 'Result Text', resultContentText);
   }
 
   const historyItem: ThreadHistoryItemDto = {
@@ -375,6 +396,7 @@ function formatToolCallHistoryItem(
 
   if (
     deferredDetails &&
+    !containsRemoteCodexArtifact(historyItem.detailText) &&
     (Boolean(argumentText) ||
       Boolean(resultText) ||
       (historyItem.detailText?.length ?? 0) > 240)

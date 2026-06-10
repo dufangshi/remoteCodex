@@ -1,0 +1,68 @@
+{
+  "generatedAt": "",
+  "reviewedBy": "",
+  "reviewSource": "",
+  "harness": {
+    "adminBaseUrl": "https://elagenteharness-production.up.railway.app",
+    "adminSmokePath": "",
+    "adminSmokeOk": false,
+    "requiredAdminSteps": [
+      "unauthenticated POST /admin/members/ensure",
+      "unauthenticated GET /admin/usage/export?limit=1",
+      "authenticated ensure creates or returns member",
+      "authenticated ensure is idempotent",
+      "authenticated reconcile returns existing external key",
+      "authenticated rekey returns a new key",
+      "authenticated usage export returns Remote Codex shape",
+      "authenticated revoke marks key revoked"
+    ]
+  },
+  "remoteCodex": {
+    "controlPlaneBaseUrl": "",
+    "stagingSmokePath": "",
+    "stagingSmokeOk": false,
+    "requiredStagingSteps": [
+      "sandbox_ready",
+      "browser_to_router_to_worker",
+      "harness_worker_status",
+      "harness_worker_discovery",
+      "harness_control_plane_invoke",
+      "harness_usage_summary_after_invoke",
+      "harness_mcp_worker_api_smoke",
+      "harness_thread_artifact_ui_smoke"
+    ]
+  },
+  "kubernetes": {
+    "namespace": "",
+    "secretName": "",
+    "secretKey": "",
+    "k8sSecretSmokePath": "",
+    "k8sSecretSmokeOk": false,
+    "requiredK8sSteps": [
+      "harness_k8s_secret_rbac_get",
+      "harness_k8s_secret_rbac_patch",
+      "harness_k8s_secret_key_present"
+    ],
+    "secretDataValuesPrinted": false
+  },
+  "combinedVerifier": {
+    "path": "",
+    "ok": false,
+    "requiredGates": [
+      "harness-admin-contract",
+      "harness-worker-runtime",
+      "harness-secret-safety",
+      "harness-usage-attribution",
+      "harness-mcp-worker-api",
+      "harness-thread-artifact-ui"
+    ]
+  },
+  "secretSafety": {
+    "valuesPrinted": false,
+    "frontendBundleContainsHarnessKey": false,
+    "apiResponseContainsHarnessKey": false,
+    "threadMessageContainsHarnessKey": false,
+    "logsContainHarnessKey": false,
+    "notes": "Do not paste ADMIN_KEY, INACT_X_APP_KEY, X-Api-Key values, sub2api keys, or route tokens into this template."
+  }
+}

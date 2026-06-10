@@ -1,0 +1,140 @@
+name: Phase 0-6 Staging Evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      evidence_mode:
+        description: Evidence collection scope.
+        required: true
+        default: full
+        type: choice
+        options:
+          - full
+          - aws-only
+      force_diagnostics:
+        description: Continue after env readiness failure for diagnostic artifacts.
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase-zero-six-staging-evidence-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    name: Collect staging evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: staging
+
+    env:
+      AWS_STAGING_REVIEWED_BY: ${{ vars.AWS_STAGING_REVIEWED_BY }}
+      AWS_STAGING_REGION: ${{ vars.AWS_STAGING_REGION }}
+      AWS_STAGING_ACCOUNT_ID: ${{ vars.AWS_STAGING_ACCOUNT_ID }}
+      AWS_STAGING_EKS_CLUSTER_NAME: ${{ vars.AWS_STAGING_EKS_CLUSTER_NAME }}
+      AWS_STAGING_K8S_NAMESPACE: ${{ vars.AWS_STAGING_K8S_NAMESPACE }}
+      AWS_STAGING_FARGATE_PROFILE_NAME: ${{ vars.AWS_STAGING_FARGATE_PROFILE_NAME }}
+      AWS_STAGING_K8S_SERVICE_ACCOUNT: ${{ vars.AWS_STAGING_K8S_SERVICE_ACCOUNT }}
+      AWS_STAGING_K8S_ROLE_ARN: ${{ vars.AWS_STAGING_K8S_ROLE_ARN }}
+      AWS_STAGING_WORKER_IMAGE_REPOSITORY: ${{ vars.AWS_STAGING_WORKER_IMAGE_REPOSITORY }}
+      AWS_STAGING_WORKER_IMAGE_TAG: ${{ vars.AWS_STAGING_WORKER_IMAGE_TAG }}
+      AWS_STAGING_LOG_GROUP_NAMES: ${{ vars.AWS_STAGING_LOG_GROUP_NAMES }}
+      AWS_STAGING_VPC_ID: ${{ vars.AWS_STAGING_VPC_ID }}
+      AWS_STAGING_SUBNET_IDS: ${{ vars.AWS_STAGING_SUBNET_IDS }}
+      AWS_STAGING_SECURITY_GROUP_IDS: ${{ vars.AWS_STAGING_SECURITY_GROUP_IDS }}
+      AWS_STAGING_CONFIG_REVIEWED: ${{ vars.AWS_STAGING_CONFIG_REVIEWED }}
+      AWS_STAGING_CREDENTIAL_REVIEW_PASSED: ${{ vars.AWS_STAGING_CREDENTIAL_REVIEW_PASSED }}
+      STAGING_CONTROL_PLANE_BASE_URL: ${{ vars.STAGING_CONTROL_PLANE_BASE_URL }}
+      STAGING_SMOKE_EMAIL: ${{ vars.STAGING_SMOKE_EMAIL }}
+      STAGING_SANDBOX_READY_TIMEOUT_MS: ${{ vars.STAGING_SANDBOX_READY_TIMEOUT_MS }}
+      STAGING_SANDBOX_STOP_TIMEOUT_MS: ${{ vars.STAGING_SANDBOX_STOP_TIMEOUT_MS }}
+      STAGING_IDEMPOTENT_LIFECYCLE_SMOKE: ${{ vars.STAGING_IDEMPOTENT_LIFECYCLE_SMOKE }}
+      STAGING_STOP_SANDBOX_AFTER_SMOKE: ${{ vars.STAGING_STOP_SANDBOX_AFTER_SMOKE }}
+      STAGING_DIRECT_WORKER_BASE_URL: ${{ vars.STAGING_DIRECT_WORKER_BASE_URL }}
+      STAGING_DIRECT_WORKER_PRIVATE_REVIEWED_BY: ${{ vars.STAGING_DIRECT_WORKER_PRIVATE_REVIEWED_BY }}
+      STAGING_DIRECT_WORKER_NETWORK_MODE: ${{ vars.STAGING_DIRECT_WORKER_NETWORK_MODE }}
+      STAGING_DIRECT_WORKER_INGRESS_POLICY: ${{ vars.STAGING_DIRECT_WORKER_INGRESS_POLICY }}
+      STAGING_DIRECT_WORKER_PRIVATE_PROOF: ${{ vars.STAGING_DIRECT_WORKER_PRIVATE_PROOF }}
+      STAGING_CODEX_GATEWAY_SMOKE_COMMAND_JSON: ${{ vars.STAGING_CODEX_GATEWAY_SMOKE_COMMAND_JSON }}
+      STAGING_CODEX_GATEWAY_SMOKE_COMMAND_ENV_JSON: ${{ secrets.STAGING_CODEX_GATEWAY_SMOKE_COMMAND_ENV_JSON }}
+      STAGING_CLAUDE_GATEWAY_SMOKE_COMMAND_JSON: ${{ vars.STAGING_CLAUDE_GATEWAY_SMOKE_COMMAND_JSON }}
+      STAGING_CLAUDE_GATEWAY_SMOKE_COMMAND_ENV_JSON: ${{ secrets.STAGING_CLAUDE_GATEWAY_SMOKE_COMMAND_ENV_JSON }}
+      STAGING_OPENCODE_GATEWAY_SMOKE_COMMAND_JSON: ${{ vars.STAGING_OPENCODE_GATEWAY_SMOKE_COMMAND_JSON }}
+      STAGING_OPENCODE_GATEWAY_SMOKE_COMMAND_ENV_JSON: ${{ secrets.STAGING_OPENCODE_GATEWAY_SMOKE_COMMAND_ENV_JSON }}
+      STAGING_PRODUCT_JWT: ${{ secrets.STAGING_PRODUCT_JWT }}
+      STAGING_ADMIN_JWT: ${{ secrets.STAGING_ADMIN_JWT }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      STAGING_KUBECONFIG: ${{ secrets.STAGING_KUBECONFIG }}
+      STAGING_KUBECONFIG_B64: ${{ secrets.STAGING_KUBECONFIG_B64 }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.11.1
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Configure thread-ui package access
+        env:
+          REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64: ${{ secrets.REMOTE_CODEX_THREAD_UI_DEPLOY_KEY_B64 }}
+        run: bash scripts/setup-thread-ui-git-auth.sh
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare kubeconfig
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/remote-codex"
+          if [[ -n "${STAGING_KUBECONFIG_B64:-}" ]]; then
+            printf '%s' "$STAGING_KUBECONFIG_B64" | base64 -d > "$RUNNER_TEMP/remote-codex/kubeconfig"
+            chmod 600 "$RUNNER_TEMP/remote-codex/kubeconfig"
+            echo "KUBECONFIG=$RUNNER_TEMP/remote-codex/kubeconfig" >> "$GITHUB_ENV"
+          elif [[ -n "${STAGING_KUBECONFIG:-}" ]]; then
+            printf '%s' "$STAGING_KUBECONFIG" > "$RUNNER_TEMP/remote-codex/kubeconfig"
+            chmod 600 "$RUNNER_TEMP/remote-codex/kubeconfig"
+            echo "KUBECONFIG=$RUNNER_TEMP/remote-codex/kubeconfig" >> "$GITHUB_ENV"
+          fi
+
+      - name: Verify runner tools
+        run: |
+          aws --version
+          kubectl version --client=true
+
+      - name: Collect evidence bundle
+        continue-on-error: ${{ inputs.force_diagnostics }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(--output-dir ./.temp/phase-zero-six-evidence/gha)
+          if [[ "${{ inputs.evidence_mode }}" == "aws-only" ]]; then
+            args+=(--skip-staging-smoke)
+          fi
+          if [[ "${{ inputs.force_diagnostics }}" == "true" ]]; then
+            args+=(--force)
+          fi
+          pnpm collect:phase-zero-six-evidence -- "${args[@]}"
+
+      - name: Upload evidence artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase-zero-six-staging-evidence-${{ github.run_id }}
+          path: ./.temp/phase-zero-six-evidence/gha
+          if-no-files-found: warn
+          retention-days: 14

@@ -9,6 +9,10 @@ import type {
 const DEFERRED_COMMAND_DETAIL_TITLE = 'Command Output';
 const DEFERRED_TOOL_DETAIL_TITLE = 'Tool Call Details';
 const DEFERRED_AGENT_TOOL_DETAIL_TITLE = 'Agent Details';
+const DEFERRED_FILE_CHANGE_DETAIL_TITLE = 'File Change Details';
+const DEFERRED_FILE_READ_DETAIL_TITLE = 'File Read Details';
+const DEFERRED_WEB_SEARCH_DETAIL_TITLE = 'Web Search Details';
+const DEFERRED_HOOK_DETAIL_TITLE = 'Hook Details';
 
 export type TurnItemOrderSnapshot = Map<string, Map<string, number>>;
 
@@ -32,6 +36,10 @@ function summarizeText(text: string, fallback: string) {
     lines.pop();
   }
   return lines.find((line) => line.trim().length > 0) ?? lines[0] ?? fallback;
+}
+
+function containsRemoteCodexArtifact(text: string | null | undefined) {
+  return /```(?:artifact|remote-codex-artifact)\b/i.test(text ?? '');
 }
 
 function deferCommandHistoryItem(
@@ -80,29 +88,165 @@ function deferToolCallHistoryItem(
   };
 }
 
+function deferredDetailTitleForItem(item: ThreadHistoryItemDto) {
+  switch (item.kind) {
+    case 'commandExecution':
+      return DEFERRED_COMMAND_DETAIL_TITLE;
+    case 'toolCall':
+      return DEFERRED_TOOL_DETAIL_TITLE;
+    case 'agentToolCall':
+      return DEFERRED_AGENT_TOOL_DETAIL_TITLE;
+    case 'skillToolCall':
+      return 'Skill Details';
+    case 'fileChange':
+      return DEFERRED_FILE_CHANGE_DETAIL_TITLE;
+    case 'fileRead':
+      return DEFERRED_FILE_READ_DETAIL_TITLE;
+    case 'webSearch':
+      return DEFERRED_WEB_SEARCH_DETAIL_TITLE;
+    case 'hook':
+      return item.hookEventLabel
+        ? `${item.hookEventLabel} ${DEFERRED_HOOK_DETAIL_TITLE}`
+        : DEFERRED_HOOK_DETAIL_TITLE;
+    default:
+      return 'Details';
+  }
+}
+
+function fallbackDetailTextForItem(item: ThreadHistoryItemDto) {
+  switch (item.kind) {
+    case 'fileChange':
+      return 'File changes';
+    case 'fileRead':
+      return 'File read';
+    case 'webSearch':
+      return 'Web search';
+    case 'hook':
+      return 'Hook output';
+    default:
+      return 'Details';
+  }
+}
+
+function fullDetailTextForItem(item: ThreadHistoryItemDto, fallback: string) {
+  const detailText = item.detailText?.trim();
+  const hookOutputText =
+    item.kind === 'hook'
+      ? item.hookOutputEntries
+        ?.map((entry) => entry.text.trim())
+        .filter(Boolean)
+        .join('\n')
+        .trim() ?? ''
+      : '';
+
+  if (detailText && hookOutputText && !detailText.includes(hookOutputText)) {
+    return [detailText, 'Output:', hookOutputText].join('\n\n');
+  }
+
+  return detailText || hookOutputText || item.text || fallback;
+}
+
+function deferInlineDetailHistoryItem(
+  item: ThreadHistoryItemDto & {
+    kind: 'fileChange' | 'fileRead' | 'webSearch' | 'hook';
+  },
+  deferredDetails: Map<string, ThreadHistoryItemDetailDto>,
+): ThreadHistoryItemDto {
+  const fallback = fallbackDetailTextForItem(item);
+  const fullText = fullDetailTextForItem(item, fallback);
+  deferredDetails.set(item.id, {
+    id: item.id,
+    kind: item.kind,
+    title: deferredDetailTitleForItem(item),
+    text: fullText,
+  });
+
+  const previewText = item.previewText?.trim();
+  const text = item.text.trim() || summarizeText(previewText || fullText, fallback);
+
+  const deferredItem: ThreadHistoryItemDto = {
+    ...item,
+    text,
+    detailText: null,
+    hasDeferredDetail: true,
+  };
+
+  if (item.kind === 'hook') {
+    return {
+      ...deferredItem,
+      hookOutputEntries: null,
+    };
+  }
+
+  return deferredItem;
+}
+
+export function deferHistoryItemDetail(
+  item: ThreadHistoryItemDto,
+  deferredDetails: Map<string, ThreadHistoryItemDetailDto>,
+): ThreadHistoryItemDto {
+  if (item.kind === 'commandExecution') {
+    return deferCommandHistoryItem(
+      item as ThreadHistoryItemDto & { kind: 'commandExecution' },
+      deferredDetails,
+    );
+  }
+
+  if (
+    item.kind === 'toolCall' ||
+    item.kind === 'agentToolCall' ||
+    item.kind === 'skillToolCall'
+  ) {
+    return containsRemoteCodexArtifact(item.detailText)
+      ? item
+      : deferToolCallHistoryItem(
+          item as ThreadHistoryItemDto & {
+            kind: 'toolCall' | 'agentToolCall' | 'skillToolCall';
+          },
+          deferredDetails,
+        );
+  }
+
+  if (
+    item.kind === 'fileChange' ||
+    item.kind === 'fileRead' ||
+    item.kind === 'webSearch' ||
+    item.kind === 'hook'
+  ) {
+    if (
+      !item.detailText?.trim() &&
+      !(
+        item.kind === 'hook' &&
+        item.hookOutputEntries?.some((entry) => entry.text.trim().length > 0)
+      )
+    ) {
+      return item;
+    }
+
+    return deferInlineDetailHistoryItem(
+      item as ThreadHistoryItemDto & {
+        kind: 'fileChange' | 'fileRead' | 'webSearch' | 'hook';
+      },
+      deferredDetails,
+    );
+  }
+
+  return item;
+}
+
+export function deferHistoryItemDetailForTransport(
+  item: ThreadHistoryItemDto,
+): ThreadHistoryItemDto {
+  return deferHistoryItemDetail(item, new Map());
+}
+
 export function deferLargeHistoryItemDetails(
   turn: ThreadTurnDto,
   deferredDetails: Map<string, ThreadHistoryItemDetailDto>,
 ): ThreadTurnDto {
   return {
     ...turn,
-    items: turn.items.map((item) =>
-      item.kind === 'commandExecution'
-        ? deferCommandHistoryItem(
-            item as ThreadHistoryItemDto & { kind: 'commandExecution' },
-            deferredDetails,
-          )
-        : item.kind === 'toolCall'
-          || item.kind === 'agentToolCall'
-          || item.kind === 'skillToolCall'
-          ? deferToolCallHistoryItem(
-              item as ThreadHistoryItemDto & {
-                kind: 'toolCall' | 'agentToolCall' | 'skillToolCall';
-              },
-              deferredDetails,
-            )
-        : item,
-    ),
+    items: turn.items.map((item) => deferHistoryItemDetail(item, deferredDetails)),
   };
 }
 
@@ -401,54 +545,23 @@ export function mergePersistedHistoryItemsIntoTurns(
         changed = true;
       }
 
-      if (
-        persistedItem.kind === 'commandExecution' ||
-        persistedItem.kind === 'toolCall' ||
-        persistedItem.kind === 'agentToolCall' ||
-        persistedItem.kind === 'skillToolCall'
-      ) {
+      if (shouldPersistLiveHistoryItem(persistedItem)) {
         const existingText = item.detailText?.trim() || item.text.trim();
         const persistedText = persistedItem.detailText?.trim() || persistedItem.text.trim();
         if (persistedText.length > existingText.length) {
           changed = true;
-          return persistedItemWithTranscriptOrder.kind === 'commandExecution'
-            ? deferCommandHistoryItem(
-                persistedItemWithTranscriptOrder as ThreadHistoryItemDto & { kind: 'commandExecution' },
-                deferredDetails,
-              )
-            : deferToolCallHistoryItem(
-                persistedItemWithTranscriptOrder as ThreadHistoryItemDto & {
-                  kind: 'toolCall' | 'agentToolCall' | 'skillToolCall';
-                },
-                deferredDetails,
-              );
+          return deferHistoryItemDetail(persistedItemWithTranscriptOrder, deferredDetails);
         }
       }
 
-      return sequencedItem;
+      return deferHistoryItemDetail(sequencedItem, deferredDetails);
     });
 
     const existingItemIds = new Set(nextItems.map((item) => item.id));
     const missingItems = [...persistedItemsById.values()]
       .filter((item) => !existingItemIds.has(item.id))
       .filter((item) => shouldAppendPersistedMissingItem(turn, item))
-      .map((item) =>
-        item.kind === 'commandExecution'
-          ? deferCommandHistoryItem(
-              item as ThreadHistoryItemDto & { kind: 'commandExecution' },
-              deferredDetails,
-            )
-          : item.kind === 'toolCall'
-            || item.kind === 'agentToolCall'
-            || item.kind === 'skillToolCall'
-            ? deferToolCallHistoryItem(
-                item as ThreadHistoryItemDto & {
-                  kind: 'toolCall' | 'agentToolCall' | 'skillToolCall';
-                },
-                deferredDetails,
-              )
-            : item,
-      );
+      .map((item) => deferHistoryItemDetail(item, deferredDetails));
     if (missingItems.length === 0 && !changed) {
       return turn;
     }

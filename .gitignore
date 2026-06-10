@@ -4,6 +4,8 @@ coverage
 .DS_Store
 .local
 .env
+.env.local
+.env.*.local
 .npmrc
 *.log
 .temp/
@@ -12,3 +14,8 @@ coverage
 test-results/
 apps/supervisor-web/test-results/
 apps/supervisor-api/.tmp/
+artifacts/phase-zero-six-evidence/
+aws-staging-preflight.json
+staging-phase-one-smoke.json
+phase-zero-six-verification.json
+artifact-secret-scan.json

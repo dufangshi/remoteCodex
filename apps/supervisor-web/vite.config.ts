@@ -98,7 +98,10 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       host: '0.0.0.0',
-      allowedHosts: ['fonshs-macbook-pro.tailaf4fa.ts.net'],
+      allowedHosts: [
+        'fonshs-macbook-pro.tailaf4fa.ts.net',
+        'debug.lnz-study.com',
+      ],
       fs: {
         allow: [
           path.resolve(__dirname, '../..'),
@@ -120,6 +123,16 @@ export default defineConfig(({ mode }) => {
     test: {
       environment: 'jsdom',
       setupFiles: './src/test/setup.ts',
+      server: {
+        deps: {
+          inline: [
+            '@remote-codex/thread-ui',
+            '@remote-codex/plugin-runtime',
+            '@remote-codex/plugin-terminal',
+            '@remote-codex/plugin-xyz-viewer',
+          ],
+        },
+      },
       env: {
         NODE_ENV: 'test',
       },

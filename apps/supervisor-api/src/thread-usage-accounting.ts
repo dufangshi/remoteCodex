@@ -157,6 +157,30 @@ export function buildThreadContextUsageFromPayload(
   };
 }
 
+export function mergeThreadContextUsageFromPayload(
+  current: ThreadContextUsageDto | null | undefined,
+  payload: ThreadContextTokenUsagePayload | null | undefined,
+  model: string | null | undefined = null,
+  timestamp = new Date().toISOString(),
+): ThreadContextUsageDto {
+  const next = buildThreadContextUsageFromPayload(payload, model, timestamp);
+  if (next.availability === 'available') {
+    return next;
+  }
+
+  if (current?.availability === 'available') {
+    return current;
+  }
+
+  return next;
+}
+
+export function shouldResetThreadContextUsageForTurnStart(
+  current: ThreadContextUsageDto | null | undefined,
+) {
+  return current?.availability !== 'available';
+}
+
 export function buildTurnTokenBreakdown(
   payload: Record<string, unknown> | null | undefined,
 ): ThreadTurnTokenUsageBreakdown | null {

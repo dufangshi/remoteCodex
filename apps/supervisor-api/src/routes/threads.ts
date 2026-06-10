@@ -28,12 +28,32 @@ import {
 } from '../../../../packages/shared/src/index';
 import { HttpError } from '../app';
 import { agentBackendIdSchema } from '../provider-schemas';
+import { requireWorkerScope } from '../worker-identity';
+
+type MultipartFilePart = {
+  type: 'file';
+  fieldname: string;
+  filename?: string;
+  toBuffer: () => Promise<Buffer>;
+};
+
+type MultipartFieldPart = {
+  type: 'field';
+  fieldname: string;
+  value: unknown;
+};
+
+type MultipartPromptRequest = FastifyRequest & {
+  parts: () => AsyncIterableIterator<MultipartFilePart | MultipartFieldPart>;
+  isMultipart: () => boolean;
+};
 
 const createThreadSchema = z.object({
   workspaceId: z.string().uuid(),
   title: z.string().optional(),
   provider: agentBackendIdSchema.optional(),
   model: z.string().min(1),
+  reasoningEffort: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as [ReasoningEffortDto, ...ReasoningEffortDto[]]).nullable().optional(),
   approvalMode: z.enum(['yolo', 'guarded']).default('yolo')
 });
 
@@ -244,7 +264,7 @@ function toSendThreadPromptInput(body: {
 }
 
 async function parseMultipartPromptRequest(
-  request: FastifyRequest,
+  request: MultipartPromptRequest,
 ) {
   const fields = new Map<string, string>();
   const uploadedFiles: Array<{ buffer: Buffer; filename: string | null }> = [];
@@ -382,6 +402,7 @@ export async function registerThreadRoutes(app: FastifyInstance) {
     const input = {
       workspaceId: body.workspaceId,
       model: body.model,
+      ...(body.reasoningEffort !== undefined ? { reasoningEffort: body.reasoningEffort } : {}),
       approvalMode: body.approvalMode,
       ...(body.provider !== undefined ? { provider: body.provider } : {}),
       ...(body.title ? { title: body.title } : {}),
@@ -710,9 +731,11 @@ export async function registerThreadRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/threads/:id/prompt', async (request) => {
+    requireWorkerScope(request, 'provider:turn:create');
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
-    const parsed = request.isMultipart()
-      ? await parseMultipartPromptRequest(request)
+    const multipartRequest = request as MultipartPromptRequest;
+    const parsed = multipartRequest.isMultipart()
+      ? await parseMultipartPromptRequest(multipartRequest)
       : {
           input: (() => {
             const parsedBody = promptSchema.parse(request.body);
@@ -750,6 +773,7 @@ export async function registerThreadRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/threads/:id/interrupt', async (request) => {
+    requireWorkerScope(request, 'provider:turn:interrupt');
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const body = interruptSchema.parse(request.body ?? {});
     return app.services.threadService.interruptThread(params.id, body.turnId);

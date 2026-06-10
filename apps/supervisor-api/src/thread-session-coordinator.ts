@@ -142,7 +142,7 @@ export class ThreadSessionCoordinator {
     const reasoningEffort = this.providerRuntime.normalizeReasoningForModel(
       modelRecords,
       input.threadInput.model,
-      null,
+      input.threadInput.reasoningEffort ?? null,
     );
     const sandboxMode = defaultSandboxModeForApprovalMode(input.threadInput.approvalMode);
     const fastMode = this.providerRuntime.runtimeSupportsFastMode(provider)
@@ -154,6 +154,7 @@ export class ThreadSessionCoordinator {
     const response = await runtime.startSession({
       cwd: input.workspacePath,
       model: input.threadInput.model,
+      reasoningEffort,
       approvalMode: input.threadInput.approvalMode,
       sandboxMode,
       performanceMode: performanceModeForFastMode(fastMode),

@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { AgentBackendDto, AgentBackendIdDto } from '../../../../packages/shared/src/index';
+import type { AgentBackendDto, AgentBackendIdDto } from '@remote-codex/shared';
 import { AppShellNavContext } from '../components/AppShellNavContext';
 import { ThreadNewPage } from './ThreadNewPage';
 

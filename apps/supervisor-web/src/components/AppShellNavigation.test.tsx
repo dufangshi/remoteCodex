@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { AgentBackendDto, AgentBackendIdDto } from '../../../../packages/shared/src/index';
+import type { AgentBackendDto, AgentBackendIdDto } from '@remote-codex/shared';
 import { AppShellNavContext } from './AppShellNavContext';
 import {
   AppShellNavigationMenu,
@@ -409,7 +409,7 @@ describe('AppShellNavigation', () => {
     );
   });
 
-  it('shows only workspaces and settings, with workspaces disabled on the workspaces route', () => {
+  it('shows product routes and settings, with workspaces disabled on the workspaces route', () => {
     render(
       <MemoryRouter initialEntries={['/workspaces']}>
         <NavigationHarness />
@@ -417,9 +417,21 @@ describe('AppShellNavigation', () => {
     );
 
     expect(screen.getByRole('button', { name: 'Workspaces' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Control Plane' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Threads' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'New Thread' })).not.toBeInTheDocument();
+  });
+
+  it('disables the control-plane menu item on the control-plane route', () => {
+    render(
+      <MemoryRouter initialEntries={['/control-plane']}>
+        <NavigationHarness />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('button', { name: 'Workspaces' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Control Plane' })).toBeDisabled();
   });
 
   it('closes the navigation menu when clicking outside it', () => {

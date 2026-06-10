@@ -57,7 +57,7 @@ import type {
   UpdateWorkspaceFavoriteInput,
   WorkspaceDto,
   WorkspaceSettingsDto,
-} from '../../../../packages/shared/src/index';
+} from '@remote-codex/shared';
 export type { PromptAttachmentUpload } from '@remote-codex/thread-ui';
 import type { PromptAttachmentUpload } from '@remote-codex/thread-ui';
 
@@ -196,8 +196,8 @@ async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   }
 
   const response = await fetch(input, {
+    ...init,
     headers,
-    ...init
   });
 
   if (!response.ok) {
@@ -262,6 +262,696 @@ async function downloadFile(input: RequestInfo | URL, init?: RequestInit): Promi
 
 export interface SendThreadPromptRequestInput extends SendThreadPromptInput {
   attachments?: PromptAttachmentUpload[];
+}
+
+export interface ControlPlaneAuth {
+  baseUrl: string;
+  token: string;
+}
+
+export interface ControlPlaneSessionToken {
+  token: string;
+  expiresAt: string;
+}
+
+export interface ControlPlaneAuthResult {
+  user: ControlPlaneUser;
+  sandbox: ControlPlaneSandbox;
+  session: ControlPlaneSessionToken;
+}
+
+export interface ControlPlaneUser {
+  id: string;
+  authProvider: string;
+  authSubject: string;
+  email: string;
+  displayName: string | null;
+  status: string;
+  plan: string;
+  billingCustomerId?: string | null;
+  quotaProfile?: string;
+  createdAt: string;
+  updatedAt: string;
+  lastSeenAt: string | null;
+}
+
+export interface ControlPlaneAdminUserUpdate {
+  status?: 'active' | 'suspended' | 'deleted';
+  plan?: string;
+  billingCustomerId?: string | null;
+  quotaProfile?: string;
+}
+
+export interface ControlPlaneSandbox {
+  id: string;
+  userId: string;
+  state: string;
+  image: string;
+  region: string;
+  resourceProfile: string;
+  k8sNamespace?: string | null;
+  k8sPodName?: string | null;
+  routerBaseUrl: string | null;
+  workerServiceName: string | null;
+  s3Prefix: string;
+  gatewayKeyId: string | null;
+  lastStartedAt: string | null;
+  lastSeenAt: string | null;
+  idleTimeoutAt: string | null;
+  statusReason?: string | null;
+  startupProgress?: number | null;
+  lastFailureCode?: string | null;
+  lastFailureMessage?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ControlPlaneProject {
+  id: string;
+  userId: string;
+  name: string;
+  slug: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ControlPlaneWorkspace {
+  id: string;
+  userId: string;
+  projectId: string | null;
+  sandboxId: string;
+  name: string;
+  slug: string;
+  status: string;
+  path: string;
+  sourceType: string;
+  gitUrl: string | null;
+  defaultBranch: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ControlPlaneSession {
+  id: string;
+  userId: string;
+  sandboxId: string;
+  workspaceId: string;
+  provider: AgentBackendIdDto;
+  workerSessionId: string | null;
+  title: string;
+  status: string;
+  lastActivityAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ControlPlaneRouteToken {
+  sandboxId: string;
+  routerBaseUrl: string;
+  wsBaseUrl: string;
+  token: string;
+  expiresAt: string;
+}
+
+export interface ControlPlaneUsageSummary {
+  requestCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  costUsd: number;
+}
+
+export interface ControlPlaneBillingSummary {
+  totalCostUsd: number;
+  llmCostUsd: number;
+  harnessCostUsd: number;
+}
+
+export interface ControlPlaneUsageEvent {
+  id: string;
+  userId: string;
+  sandboxId: string;
+  workspaceId: string | null;
+  sessionId: string | null;
+  gatewayKeyId: string | null;
+  provider: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  costUsd: number;
+  externalRequestId: string | null;
+  occurredAt: string;
+  importedAt: string;
+}
+
+export interface ControlPlaneHarnessUsageSummary {
+  eventCount: number;
+  computeUnits: number;
+  costUsd: number;
+}
+
+export interface ControlPlaneHarnessUsageEvent {
+  id: string;
+  userId: string;
+  sandboxId: string;
+  workspaceId: string | null;
+  sessionId: string | null;
+  provider: string;
+  module: string;
+  tool: string | null;
+  runId: string | null;
+  jobId: string | null;
+  externalEventId: string | null;
+  computeUnits: number;
+  costUsd: number;
+  status: string;
+  metadataJson: string;
+  occurredAt: string;
+  importedAt: string;
+}
+
+export interface ControlPlaneAuditLog {
+  id: string;
+  userId: string | null;
+  action: string;
+  resourceType: string;
+  resourceId: string | null;
+  metadataJson: string;
+  createdAt: string;
+}
+
+export interface ControlPlaneSandboxDetail {
+  sandbox: ControlPlaneSandbox;
+  runtimeStatus: {
+    state: string;
+    routerBaseUrl?: string | null;
+    workerServiceName?: string | null;
+    k8sNamespace?: string | null;
+    k8sPodName?: string | null;
+    statusReason?: string | null;
+    startupProgress?: number | null;
+    lastFailureCode?: string | null;
+    lastFailureMessage?: string | null;
+  };
+  endpoint: { routerBaseUrl: string | null };
+  workerBaseUrl: string | null;
+  recentLifecycleErrors: ControlPlaneAuditLog[];
+}
+
+export type ControlPlaneHarnessModule = 'estructural' | 'quntur' | 'farmaco';
+
+export interface ControlPlaneHarnessStatus {
+  enabled: boolean;
+  baseUrl: string | null;
+  keyPresent: boolean;
+  chemistryToolsEnabled: boolean;
+  modules: ControlPlaneHarnessModule[];
+  health: unknown | null;
+}
+
+export interface ControlPlaneHarnessPayload {
+  payload?: unknown;
+  text?: string;
+}
+
+function controlPlaneUrl(auth: ControlPlaneAuth, path: string) {
+  return `${auth.baseUrl.replace(/\/+$/, '')}${path}`;
+}
+
+function controlPlaneHeaders(auth: ControlPlaneAuth, init?: RequestInit) {
+  const headers = new Headers(init?.headers);
+  headers.set('Authorization', `Bearer ${auth.token}`);
+  return headers;
+}
+
+async function controlPlaneRequest<T>(
+  auth: ControlPlaneAuth,
+  path: string,
+  init?: RequestInit,
+): Promise<T> {
+  return request<T>(controlPlaneUrl(auth, path), {
+    ...init,
+    headers: controlPlaneHeaders(auth, init),
+  });
+}
+
+function controlPlaneBaseUrl(baseUrl: string, path: string) {
+  return `${baseUrl.replace(/\/+$/, '')}${path}`;
+}
+
+export function controlPlaneOAuthStartUrl(
+  baseUrl: string,
+  provider: 'google' | 'github',
+  returnTo = typeof window === 'undefined' ? undefined : window.location.href,
+) {
+  const url = new URL(controlPlaneBaseUrl(baseUrl, `/api/auth/oauth/${provider}/start`));
+  if (returnTo) {
+    url.searchParams.set('returnTo', returnTo);
+  }
+  return url.toString();
+}
+
+export function registerControlPlanePasswordAccount(
+  baseUrl: string,
+  input: { email: string; password: string; displayName?: string | null },
+) {
+  return request<ControlPlaneAuthResult>(
+    controlPlaneBaseUrl(baseUrl, '/api/auth/password/register'),
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function loginControlPlanePasswordAccount(
+  baseUrl: string,
+  input: { email: string; password: string },
+) {
+  return request<ControlPlaneAuthResult>(
+    controlPlaneBaseUrl(baseUrl, '/api/auth/password/login'),
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function bootstrapControlPlaneUser(
+  auth: ControlPlaneAuth,
+  input: { email: string; displayName?: string | null },
+) {
+  return controlPlaneRequest<{
+    user: ControlPlaneUser;
+    sandbox: ControlPlaneSandbox;
+    gatewayKey: unknown;
+  }>(auth, '/api/me/bootstrap', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function fetchControlPlaneMe(auth: ControlPlaneAuth) {
+  return controlPlaneRequest<{
+    user: ControlPlaneUser;
+    sandbox: ControlPlaneSandbox;
+    usage: ControlPlaneUsageSummary;
+    billing?: ControlPlaneBillingSummary;
+  }>(auth, '/api/me', {
+    cache: 'no-store',
+  });
+}
+
+export function fetchControlPlaneUsageEvents(auth: ControlPlaneAuth, limit = 10) {
+  const search = new URLSearchParams({ limit: String(limit) });
+  return controlPlaneRequest<{ events: ControlPlaneUsageEvent[] }>(
+    auth,
+    `/api/usage/events?${search.toString()}`,
+    {
+      cache: 'no-store',
+    },
+  );
+}
+
+export function fetchControlPlaneHarnessUsageSummary(auth: ControlPlaneAuth) {
+  return controlPlaneRequest<{ usage: ControlPlaneHarnessUsageSummary }>(
+    auth,
+    '/api/usage/harness/summary',
+    { cache: 'no-store' },
+  );
+}
+
+export function fetchControlPlaneHarnessUsageEvents(auth: ControlPlaneAuth, limit = 10) {
+  const search = new URLSearchParams({ limit: String(limit) });
+  return controlPlaneRequest<{ events: ControlPlaneHarnessUsageEvent[] }>(
+    auth,
+    `/api/usage/harness/events?${search.toString()}`,
+    { cache: 'no-store' },
+  );
+}
+
+export function updateControlPlaneMe(
+  auth: ControlPlaneAuth,
+  input: { displayName?: string | null },
+) {
+  return controlPlaneRequest<{ user: ControlPlaneUser }>(auth, '/api/me', {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export function fetchControlPlaneProjects(auth: ControlPlaneAuth) {
+  return controlPlaneRequest<{ projects: ControlPlaneProject[] }>(auth, '/api/projects', {
+    cache: 'no-store',
+  });
+}
+
+export function createControlPlaneProject(
+  auth: ControlPlaneAuth,
+  input: { name: string; slug: string },
+) {
+  return controlPlaneRequest<{ project: ControlPlaneProject }>(auth, '/api/projects', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateControlPlaneProject(
+  auth: ControlPlaneAuth,
+  projectId: string,
+  input: { name?: string; slug?: string; status?: 'active' | 'archived' },
+) {
+  return controlPlaneRequest<{ project: ControlPlaneProject }>(
+    auth,
+    `/api/projects/${encodeURIComponent(projectId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function deleteControlPlaneProject(auth: ControlPlaneAuth, projectId: string) {
+  return controlPlaneRequest<{ project: ControlPlaneProject }>(
+    auth,
+    `/api/projects/${encodeURIComponent(projectId)}`,
+    {
+      method: 'DELETE',
+    },
+  );
+}
+
+export function fetchControlPlaneWorkspaces(auth: ControlPlaneAuth, projectId?: string) {
+  const suffix = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+  return controlPlaneRequest<{ workspaces: ControlPlaneWorkspace[] }>(
+    auth,
+    `/api/workspaces${suffix}`,
+    { cache: 'no-store' },
+  );
+}
+
+export function createControlPlaneWorkspace(
+  auth: ControlPlaneAuth,
+  input: { projectId?: string | null; name: string; slug: string },
+) {
+  const path = input.projectId
+    ? `/api/projects/${encodeURIComponent(input.projectId)}/workspaces`
+    : '/api/workspaces';
+  const body = input.projectId
+    ? { name: input.name, slug: input.slug }
+    : input;
+  return controlPlaneRequest<{ workspace: ControlPlaneWorkspace }>(auth, path, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateControlPlaneWorkspace(
+  auth: ControlPlaneAuth,
+  workspaceId: string,
+  input: { name?: string; status?: 'active' | 'archived' | 'deleted' },
+) {
+  return controlPlaneRequest<{ workspace: ControlPlaneWorkspace }>(
+    auth,
+    `/api/workspaces/${encodeURIComponent(workspaceId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function fetchControlPlaneSessions(auth: ControlPlaneAuth, workspaceId: string) {
+  return controlPlaneRequest<{ sessions: ControlPlaneSession[] }>(
+    auth,
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/sessions`,
+    { cache: 'no-store' },
+  );
+}
+
+export function createControlPlaneSession(
+  auth: ControlPlaneAuth,
+  workspaceId: string,
+  input: { provider: AgentBackendIdDto; title: string },
+) {
+  return controlPlaneRequest<{ session: ControlPlaneSession }>(
+    auth,
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/sessions`,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function updateControlPlaneSession(
+  auth: ControlPlaneAuth,
+  sessionId: string,
+  input: {
+    title?: string;
+    status?: 'created' | 'active' | 'idle' | 'archived' | 'deleted';
+    workerSessionId?: string | null;
+  },
+) {
+  return controlPlaneRequest<{ session: ControlPlaneSession }>(
+    auth,
+    `/api/sessions/${encodeURIComponent(sessionId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function closeControlPlaneSession(auth: ControlPlaneAuth, sessionId: string) {
+  return controlPlaneRequest<{ session: ControlPlaneSession }>(
+    auth,
+    `/api/sessions/${encodeURIComponent(sessionId)}/close`,
+    {
+      method: 'POST',
+    },
+  );
+}
+
+export function resumeControlPlaneSession(auth: ControlPlaneAuth, sessionId: string) {
+  return controlPlaneRequest<{ session: ControlPlaneSession }>(
+    auth,
+    `/api/sessions/${encodeURIComponent(sessionId)}/resume`,
+    {
+      method: 'POST',
+    },
+  );
+}
+
+export function startControlPlaneSandbox(auth: ControlPlaneAuth) {
+  return controlPlaneRequest<{ sandbox: ControlPlaneSandbox }>(auth, '/api/sandbox/start', {
+    method: 'POST',
+  });
+}
+
+export function stopControlPlaneSandbox(auth: ControlPlaneAuth) {
+  return controlPlaneRequest<{ sandbox: ControlPlaneSandbox }>(auth, '/api/sandbox/stop', {
+    method: 'POST',
+  });
+}
+
+export function restartControlPlaneSandbox(auth: ControlPlaneAuth) {
+  return controlPlaneRequest<{ sandbox: ControlPlaneSandbox }>(auth, '/api/sandbox/restart', {
+    method: 'POST',
+  });
+}
+
+export function fetchControlPlaneSandboxHealth(auth: ControlPlaneAuth) {
+  return controlPlaneRequest<{
+    sandbox: ControlPlaneSandbox;
+    status: { state: string; routerBaseUrl?: string | null };
+    endpoint: { routerBaseUrl: string | null };
+  }>(auth, '/api/sandbox/health', {
+    cache: 'no-store',
+  });
+}
+
+export function fetchControlPlaneHarnessStatus(auth: ControlPlaneAuth) {
+  return controlPlaneRequest<ControlPlaneHarnessStatus>(auth, '/api/sandbox/harness/status', {
+    cache: 'no-store',
+  });
+}
+
+export function fetchControlPlaneHarnessModuleHelp(
+  auth: ControlPlaneAuth,
+  module: ControlPlaneHarnessModule,
+) {
+  return controlPlaneRequest<ControlPlaneHarnessPayload>(
+    auth,
+    `/api/sandbox/harness/modules/${encodeURIComponent(module)}/help`,
+    { cache: 'no-store' },
+  );
+}
+
+export function fetchControlPlaneHarnessModuleTools(
+  auth: ControlPlaneAuth,
+  module: ControlPlaneHarnessModule,
+) {
+  return controlPlaneRequest<ControlPlaneHarnessPayload>(
+    auth,
+    `/api/sandbox/harness/modules/${encodeURIComponent(module)}/tools`,
+    { cache: 'no-store' },
+  );
+}
+
+export function fetchControlPlaneHarnessModuleRuns(
+  auth: ControlPlaneAuth,
+  module: ControlPlaneHarnessModule,
+) {
+  return controlPlaneRequest<ControlPlaneHarnessPayload>(
+    auth,
+    `/api/sandbox/harness/modules/${encodeURIComponent(module)}/runs`,
+    { cache: 'no-store' },
+  );
+}
+
+export function fetchControlPlaneAdminSandboxDetail(
+  auth: ControlPlaneAuth,
+  sandboxId: string,
+) {
+  return controlPlaneRequest<ControlPlaneSandboxDetail>(
+    auth,
+    `/api/admin/sandboxes/${encodeURIComponent(sandboxId)}`,
+    { cache: 'no-store' },
+  );
+}
+
+export function fetchControlPlaneAdminUsers(auth: ControlPlaneAuth) {
+  return controlPlaneRequest<{ users: ControlPlaneUser[] }>(auth, '/api/admin/users', {
+    cache: 'no-store',
+  });
+}
+
+export function updateControlPlaneAdminUser(
+  auth: ControlPlaneAuth,
+  userId: string,
+  input: ControlPlaneAdminUserUpdate,
+) {
+  return controlPlaneRequest<{ user: ControlPlaneUser }>(
+    auth,
+    `/api/admin/users/${encodeURIComponent(userId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function createControlPlaneRouteToken(
+  auth: ControlPlaneAuth,
+  sandboxId: string,
+  input: { projectId?: string; workspaceId?: string; sessionId?: string; scopes?: string[] },
+) {
+  return controlPlaneRequest<ControlPlaneRouteToken>(
+    auth,
+    `/api/sandboxes/${encodeURIComponent(sandboxId)}/route-token`,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+function controlPlaneWorkerProxyUrl(
+  routeToken: ControlPlaneRouteToken,
+  path: string,
+  params?: Record<string, string | number | boolean | undefined | null>,
+) {
+  const proxyPath = path.replace(/^\/+/, '');
+  const url = new URL(
+    `/api/sandboxes/${encodeURIComponent(routeToken.sandboxId)}/${proxyPath}`,
+    routeToken.routerBaseUrl,
+  );
+  for (const [key, value] of Object.entries(params ?? {})) {
+    if (value !== undefined && value !== null) {
+      url.searchParams.set(key, String(value));
+    }
+  }
+  return url.toString();
+}
+
+function routeTokenHeaders(routeToken: ControlPlaneRouteToken, init?: RequestInit) {
+  const headers = new Headers(init?.headers);
+  headers.set('Authorization', `Bearer ${routeToken.token}`);
+  return headers;
+}
+
+export function fetchControlPlaneWorkerThread(
+  routeToken: ControlPlaneRouteToken,
+  workerSessionId: string,
+  input: { limit?: number; beforeTurnId?: string } = {},
+) {
+  return request<ThreadDetailDto>(
+    controlPlaneWorkerProxyUrl(
+      routeToken,
+      `/api/threads/${encodeURIComponent(workerSessionId)}`,
+      input,
+    ),
+    {
+      cache: 'no-store',
+      headers: routeTokenHeaders(routeToken),
+    },
+  );
+}
+
+export function fetchControlPlaneWorkerThreadHistoryItemDetail(
+  routeToken: ControlPlaneRouteToken,
+  workerSessionId: string,
+  itemId: string,
+) {
+  return request<ThreadHistoryItemDetailDto>(
+    controlPlaneWorkerProxyUrl(
+      routeToken,
+      `/api/threads/${encodeURIComponent(workerSessionId)}/items/${encodeURIComponent(itemId)}/detail`,
+    ),
+    {
+      cache: 'no-store',
+      headers: routeTokenHeaders(routeToken),
+    },
+  );
+}
+
+export function sendControlPlaneWorkerThreadPrompt(
+  routeToken: ControlPlaneRouteToken,
+  workerSessionId: string,
+  input: SendThreadPromptInput,
+) {
+  return request<ThreadDto>(
+    controlPlaneWorkerProxyUrl(
+      routeToken,
+      `/api/threads/${encodeURIComponent(workerSessionId)}/prompt`,
+    ),
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: routeTokenHeaders(routeToken),
+    },
+  );
+}
+
+export function interruptControlPlaneWorkerThread(
+  routeToken: ControlPlaneRouteToken,
+  workerSessionId: string,
+  input: InterruptTurnInput = {},
+) {
+  return request<ThreadDto>(
+    controlPlaneWorkerProxyUrl(
+      routeToken,
+      `/api/threads/${encodeURIComponent(workerSessionId)}/interrupt`,
+    ),
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: routeTokenHeaders(routeToken),
+    },
+  );
 }
 
 function normalizedUploadFileName(attachment: PromptAttachmentUpload, index: number) {
@@ -531,6 +1221,12 @@ export function updatePlugin(pluginId: string, input: UpdatePluginInput) {
   return request<PluginDto>(`/api/plugins/${encodeURIComponent(pluginId)}`, {
     method: 'PATCH',
     body: JSON.stringify(input),
+  });
+}
+
+export function deletePlugin(pluginId: string) {
+  return request<PluginDto>(`/api/plugins/${encodeURIComponent(pluginId)}`, {
+    method: 'DELETE',
   });
 }
 

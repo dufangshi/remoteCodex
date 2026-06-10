@@ -4,6 +4,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ThreadTimeline } from './ThreadTimeline';
 
+vi.mock('../plugins/PluginProvider', () => ({
+  usePlugins: () => ({
+    plugins: [],
+    loading: false,
+    error: null,
+    refresh: async () => undefined,
+    importPluginManifest: async () => undefined,
+    setPluginEnabled: async () => undefined,
+    uninstallPlugin: async () => undefined,
+    renderArtifact: () => null,
+    renderInlineCode: () => null,
+    hasRendererForArtifact: () => false,
+  }),
+}));
+
 class FakeIntersectionObserver {
   static instances: FakeIntersectionObserver[] = [];
 
@@ -1054,6 +1069,47 @@ describe('ThreadTimeline', () => {
     });
   });
 
+  it('sends command details to an external inspector when provided', async () => {
+    const onSelectHistoryItemDetail = vi.fn();
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        onSelectHistoryItemDetail={onSelectHistoryItemDetail}
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'command-1',
+                kind: 'commandExecution',
+                text: 'pnpm test\nmiddle output line\nfinal status: success',
+                status: 'completed',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open full command' }));
+
+    expect(onSelectHistoryItemDetail).toHaveBeenCalledWith({
+      item: expect.objectContaining({ id: 'command-1', kind: 'commandExecution' }),
+      detail: {
+        id: 'command-1',
+        kind: 'commandExecution',
+        title: 'Command Output',
+        text: 'pnpm test\nmiddle output line\nfinal status: success',
+      },
+    });
+    expect(
+      screen.queryByRole('dialog', { name: 'Command Output' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('loads deferred tool call details on demand before opening the dialog', async () => {
     const loadDetail = vi.fn(async () => ({
       id: 'tool-1',
@@ -1098,6 +1154,60 @@ describe('ThreadTimeline', () => {
       expect(
         screen.getByRole('dialog', { name: 'Tool Call Details' }),
       ).toHaveTextContent('"count": 123');
+    });
+  });
+
+  it('loads deferred tool call details before sending them to an external inspector', async () => {
+    const loadDetail = vi.fn(async () => ({
+      id: 'tool-1',
+      kind: 'toolCall' as const,
+      title: 'Tool Call Details',
+      text: 'tool_name\n\nResult\nok',
+    }));
+    const onSelectHistoryItemDetail = vi.fn();
+
+    render(
+      <ThreadTimeline
+        liveOutput=""
+        onLoadHistoryItemDetail={loadDetail}
+        onSelectHistoryItemDetail={onSelectHistoryItemDetail}
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'tool-1',
+                kind: 'toolCall',
+                text: 'tool_name',
+                detailText: null,
+                hasDeferredDetail: true,
+                status: 'completed',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open full tool call' }));
+
+    expect(loadDetail).toHaveBeenCalledWith('tool-1');
+    expect(
+      screen.queryByRole('dialog', { name: 'Tool Call Details' }),
+    ).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(onSelectHistoryItemDetail).toHaveBeenCalledWith({
+        item: expect.objectContaining({ id: 'tool-1', kind: 'toolCall' }),
+        detail: {
+          id: 'tool-1',
+          kind: 'toolCall',
+          title: 'Tool Call Details',
+          text: 'tool_name\n\nResult\nok',
+        },
+      });
     });
   });
 
@@ -1216,10 +1326,22 @@ describe('ThreadTimeline', () => {
     );
   });
 
-  it('renders file change items with compact stats and expandable details', () => {
+  it('renders file change items with compact stats and expandable deferred details', async () => {
+    const loadDetail = vi.fn(async () => ({
+      id: 'file-change-1',
+      kind: 'fileChange' as const,
+      title: 'File Change Details',
+      text: [
+        '- src/app.ts (+12 -1)',
+        '- src/routes.ts (+4 -3)',
+        '- src/ui.tsx (+3)',
+      ].join('\n'),
+    }));
+
     render(
       <ThreadTimeline
         liveOutput=""
+        onLoadHistoryItemDetail={loadDetail}
         turns={[
           {
             id: 'turn-1',
@@ -1232,11 +1354,8 @@ describe('ThreadTimeline', () => {
                 kind: 'fileChange',
                 text: 'workspace/project/src/features/release/important/app.ts, +2 more',
                 previewText: '3 files changed · +19 · -4',
-                detailText: [
-                  '- src/app.ts (+12 -1)',
-                  '- src/routes.ts (+4 -3)',
-                  '- src/ui.tsx (+3)',
-                ].join('\n'),
+                detailText: null,
+                hasDeferredDetail: true,
                 changedFiles: 3,
                 addedLines: 19,
                 removedLines: 4,
@@ -1258,9 +1377,16 @@ describe('ThreadTimeline', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Open file change details' }));
 
+    expect(loadDetail).toHaveBeenCalledWith('file-change-1');
     expect(
       screen.getByRole('dialog', { name: 'File Change Details' }),
-    ).toHaveTextContent('src/ui.tsx (+3)');
+    ).toHaveTextContent('Loading full file change details...');
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('dialog', { name: 'File Change Details' }),
+      ).toHaveTextContent('src/ui.tsx (+3)');
+    });
   });
 
   it('groups consecutive file change items into a collapsible batch', () => {
@@ -1537,9 +1663,26 @@ describe('ThreadTimeline', () => {
   });
 
   it('renders web search items as a compact one-line preview with expandable details', () => {
+    const loadDetail = vi.fn(async () => ({
+      id: 'search-1',
+      kind: 'webSearch' as const,
+      title: 'Web Search Details',
+      text: [
+        'Search query',
+        '',
+        '- latest remote codex release notes',
+        '',
+        'Sources',
+        '',
+        '- Release notes',
+        '  https://example.com/releases',
+      ].join('\n'),
+    }));
+
     render(
       <ThreadTimeline
         liveOutput=""
+        onLoadHistoryItemDetail={loadDetail}
         turns={[
           {
             id: 'turn-1',
@@ -1556,16 +1699,8 @@ describe('ThreadTimeline', () => {
                 previewText: ['latest remote codex release notes', 'site:example.com'].join(
                   '\n',
                 ),
-                detailText: [
-                  'Search query',
-                  '',
-                  '- latest remote codex release notes',
-                  '',
-                  'Sources',
-                  '',
-                  '- Release notes',
-                  '  https://example.com/releases',
-                ].join('\n'),
+                detailText: null,
+                hasDeferredDetail: true,
                 status: 'completed',
               },
             ],
@@ -1581,15 +1716,16 @@ describe('ThreadTimeline', () => {
 
     fireEvent.click(openButton);
 
+    expect(loadDetail).toHaveBeenCalledWith('search-1');
     expect(
       screen.getByRole('dialog', { name: 'Web Search Details' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('dialog', { name: 'Web Search Details' }),
-    ).toHaveTextContent('Release notes');
-    expect(
-      screen.getByRole('dialog', { name: 'Web Search Details' }),
-    ).toHaveTextContent('https://example.com/releases');
+    ).toHaveTextContent('Loading full web search details...');
+
+    return waitFor(() => {
+      expect(
+        screen.getByRole('dialog', { name: 'Web Search Details' }),
+      ).toHaveTextContent('https://example.com/releases');
+    });
   });
 
   it('groups consecutive web search items into a collapsible batch', () => {
@@ -1649,10 +1785,18 @@ describe('ThreadTimeline', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('renders Claude file inspection items separately from web search', () => {
+  it('renders Claude file inspection items separately from web search', async () => {
+    const loadDetail = vi.fn(async () => ({
+      id: 'read-1',
+      kind: 'fileRead' as const,
+      title: 'File Read Details',
+      text: 'Tool: Grep\n\nInput:\n{"pattern":"AgentRuntime"}',
+    }));
+
     render(
       <ThreadTimeline
         liveOutput=""
+        onLoadHistoryItemDetail={loadDetail}
         turns={[
           {
             id: 'turn-1',
@@ -1665,7 +1809,8 @@ describe('ThreadTimeline', () => {
                 kind: 'fileRead',
                 text: 'Search files: AgentRuntime in apps/supervisor-api/src',
                 previewText: 'Search files: AgentRuntime in apps/supervisor-api/src',
-                detailText: 'Tool: Grep\n\nInput:\n{"pattern":"AgentRuntime"}',
+                detailText: null,
+                hasDeferredDetail: true,
                 status: 'completed',
               },
             ],
@@ -1684,9 +1829,16 @@ describe('ThreadTimeline', () => {
 
     fireEvent.click(openButton);
 
+    expect(loadDetail).toHaveBeenCalledWith('read-1');
     expect(
       screen.getByRole('dialog', { name: 'File Read Details' }),
-    ).toHaveTextContent('Tool: Grep');
+    ).toHaveTextContent('Loading full file read details...');
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('dialog', { name: 'File Read Details' }),
+      ).toHaveTextContent('Tool: Grep');
+    });
   });
 
   it('does not pull file reads across unsequenced agent messages when batching', () => {
@@ -4193,6 +4345,57 @@ describe('ThreadTimeline', () => {
     expect(scrollTop).toBe(120);
   });
 
+  it('stops following the tail immediately when the user scrolls upward', () => {
+    const turns = [makeTurn(1)];
+
+    render(<ThreadTimeline turns={turns} liveOutput="" />);
+
+    const scrollContainer = screen.getByTestId('thread-scroll-container');
+    const content = scrollContainer.firstElementChild as HTMLElement | null;
+    expect(content).toBeTruthy();
+    const tailSentinel = content?.lastElementChild as HTMLElement | null;
+    expect(tailSentinel).toBeTruthy();
+
+    let scrollHeight = 1000;
+    let scrollTop = 600;
+    Object.defineProperty(scrollContainer, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeight,
+    });
+    Object.defineProperty(scrollContainer, 'clientHeight', {
+      configurable: true,
+      value: 400,
+    });
+    Object.defineProperty(scrollContainer, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value) => {
+        scrollTop = value;
+      },
+    });
+    Object.defineProperty(scrollContainer, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => mockRect({ top: 0, height: 400 }),
+    });
+
+    let tailTop = 399;
+    Object.defineProperty(tailSentinel!, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => mockRect({ top: tailTop, height: 1 }),
+    });
+
+    fireEvent.scroll(scrollContainer);
+    scrollTop = 560;
+    tailTop = 399;
+    fireEvent.scroll(scrollContainer);
+
+    scrollHeight = 1260;
+    tailTop = 659;
+    FakeResizeObserver.triggerAll(content!);
+
+    expect(scrollTop).toBe(560);
+  });
+
   it('honors one-shot jump requests even when the latest turn is offscreen', () => {
     const turns = [
       {
@@ -4897,5 +5100,53 @@ describe('ThreadTimeline', () => {
       'src',
       '/api/threads/thread-123/assets/image?path=.%2F.temp%2Fthreads%2Fthread-123%2Fscreenshot.png',
     );
+  });
+
+  it('notifies when an artifact is selected for an inspector panel', () => {
+    const onSelectArtifact = vi.fn();
+    render(
+      <ThreadTimeline
+        threadId="thread-123"
+        liveOutput=""
+        onSelectArtifact={onSelectArtifact}
+        turns={[
+          {
+            id: 'turn-1',
+            startedAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 0)).toISOString(),
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                id: 'artifact-item-1',
+                kind: 'artifact',
+                text: 'Created a molecule artifact',
+                artifact: {
+                  id: 'artifact-1',
+                  pluginId: 'remote-codex.xyz-viewer',
+                  type: 'chemistry.molecule3d',
+                  title: 'Methane',
+                  summaryText: 'XYZ molecule preview',
+                  payload: {
+                    format: 'xyz',
+                    content: ['5\nmethane\nC 0 0 0'],
+                  },
+                  assets: null,
+                  sourceTurnId: 'turn-1',
+                  sourceItemId: 'artifact-item-1',
+                  createdAt: new Date(Date.UTC(2026, 3, 9, 6, 1, 10)).toISOString(),
+                },
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open artifact inspector for Methane' }));
+
+    expect(onSelectArtifact).toHaveBeenCalledWith({
+      item: expect.objectContaining({ id: 'artifact-item-1', kind: 'artifact' }),
+      artifact: expect.objectContaining({ id: 'artifact-1', title: 'Methane' }),
+    });
   });
 });

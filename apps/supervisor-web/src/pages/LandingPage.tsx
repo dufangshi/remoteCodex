@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import type { RuntimeConfigDto } from '../../../../packages/shared/src/index';
+import type { RuntimeConfigDto } from '@remote-codex/shared';
 import { StatusCard } from '../components/StatusCard';
 import { fetchRuntimeConfig } from '../lib/api';
 

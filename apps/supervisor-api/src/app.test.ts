@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { buildApp } from './app';
+import { SUPERVISOR_LOG_REDACTION_PATHS, buildApp } from './app';
 import {
   AgentRuntime,
   AgentRuntimeEvent,
@@ -23,6 +23,16 @@ import {
   LocalCodexSessionStore,
 } from '../../../packages/codex/src/index';
 import { FakeCodexManager } from './test/fakeCodexManager';
+import {
+  signWorkerIdentityEnvelope,
+  type WorkerIdentityEnvelope,
+} from './worker-identity';
+import {
+  createThreadRecord,
+  createWorkspaceRecord,
+  updateThreadRecord,
+  upsertThreadTurnMetadata,
+} from '../../../packages/db/src/repositories';
 
 vi.mock('puppeteer-core', () => ({
   default: {
@@ -31,6 +41,29 @@ vi.mock('puppeteer-core', () => ({
 }));
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const workerIdentitySecret = 'worker-identity-secret';
+type BuildAppOptions = NonNullable<Parameters<typeof buildApp>[0]>;
+
+function makeWorkerIdentityHeaders(
+  input: Partial<WorkerIdentityEnvelope> = {},
+  secret = workerIdentitySecret,
+) {
+  const envelope: WorkerIdentityEnvelope = {
+    userId: input.userId ?? 'user_test',
+    projectId: input.projectId ?? null,
+    sandboxId: input.sandboxId ?? 'sbx_test',
+    scopes: input.scopes ?? [],
+    expiresAt: input.expiresAt ?? new Date(Date.now() + 60_000).toISOString(),
+  };
+  return {
+    'x-remote-codex-user': envelope.userId,
+    ...(envelope.projectId ? { 'x-remote-codex-project': envelope.projectId } : {}),
+    'x-remote-codex-sandbox': envelope.sandboxId,
+    'x-remote-codex-scopes': envelope.scopes.join(','),
+    'x-remote-codex-expires-at': envelope.expiresAt,
+    'x-remote-codex-signature': signWorkerIdentityEnvelope(envelope, secret),
+  };
+}
 
 class FakeClaudeRuntime extends EventEmitter implements AgentRuntime {
   readonly provider = 'claude' as const;
@@ -377,6 +410,7 @@ describe('supervisor api', () => {
     options: {
       claudeRuntime?: FakeClaudeRuntime;
       env?: Record<string, string>;
+      controlPlaneSyncClient?: BuildAppOptions['controlPlaneSyncClient'];
     } = {},
   ) {
     const runtimes: AgentRuntime[] = [
@@ -385,7 +419,7 @@ describe('supervisor api', () => {
     if (options.claudeRuntime) {
       runtimes.push(options.claudeRuntime);
     }
-    return buildApp({
+    const buildOptions: BuildAppOptions = {
       env: {
         NODE_ENV: 'test',
         APP_NAME: 'Test Supervisor',
@@ -411,8 +445,26 @@ describe('supervisor api', () => {
           return { pid: 12345 };
         },
       },
-    });
+    };
+    if (options.controlPlaneSyncClient) {
+      buildOptions.controlPlaneSyncClient = options.controlPlaneSyncClient;
+    }
+    return buildApp(buildOptions);
   }
+
+  it('configures log redaction for worker gateway credentials', () => {
+    expect(SUPERVISOR_LOG_REDACTION_PATHS).toEqual(
+      expect.arrayContaining([
+        'req.headers.authorization',
+        'req.headers["x-remote-codex-worker-token"]',
+        'REMOTE_CODEX_LLM_GATEWAY_TOKEN',
+        'ANTHROPIC_AUTH_TOKEN',
+        'INACT_X_APP_KEY',
+        'llmGatewayToken',
+        '*.keyCiphertext',
+      ]),
+    );
+  });
 
   beforeEach(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'remote-codex-api-'));
@@ -573,6 +625,1304 @@ describe('supervisor api', () => {
     });
   });
 
+  it('returns worker readiness and metadata in worker mode', async () => {
+    await app.close();
+    const manifestPath = path.join(tempDir, 'worker-runtime-manifest.json');
+    await fs.writeFile(
+      manifestPath,
+      JSON.stringify({
+        imageVersion: 'staging-test',
+        gitSha: 'abc123',
+        generatedAt: '2026-05-25T00:00:00.000Z',
+        runtimes: {
+          codex: {
+            package: '@openai/codex',
+            version: '0.133.0',
+          },
+          ignoredSecret: {
+            package: 'bad',
+            token: 'must-not-leak',
+          },
+        },
+      }),
+    );
+    app = buildTestApp(fakeCodexManager, {
+      env: {
+        REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+        REMOTE_CODEX_SANDBOX_ID: 'sbx_test',
+        REMOTE_CODEX_USER_ID: 'user_test',
+        REMOTE_CODEX_WORKER_RUNTIME_MANIFEST: manifestPath,
+        ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
+        INACT_X_APP_KEY: 'must-not-leak-harness-key',
+      },
+    });
+    await app.ready();
+
+    const ready = await app.inject({
+      method: 'GET',
+      url: '/readyz',
+    });
+    expect(ready.statusCode).toBe(200);
+    expect(ready.json()).toMatchObject({
+      status: 'ready',
+      worker: {
+        role: 'worker',
+        sandboxId: 'sbx_test',
+        userId: 'user_test',
+        workspaceRoot: tempDir,
+      },
+    });
+
+    const metadata = await app.inject({
+      method: 'GET',
+      url: '/api/worker/metadata',
+    });
+    expect(metadata.statusCode).toBe(200);
+    expect(metadata.json()).toMatchObject({
+      role: 'worker',
+      sandboxId: 'sbx_test',
+      userId: 'user_test',
+      managementRoutesEnabled: false,
+      agentRuntimeManagementEnabled: false,
+      harness: {
+        enabled: true,
+        baseUrl: 'https://harness.example.test',
+        keyPresent: true,
+        chemistryToolsEnabled: false,
+      },
+      requestDiagnostics: {
+        authorizationHeaderPresent: false,
+        workerTokenHeaderPresent: false,
+        identityEnvelopePresent: false,
+      },
+      runtimeManifest: {
+        imageVersion: 'staging-test',
+        gitSha: 'abc123',
+        runtimes: {
+          codex: {
+            package: '@openai/codex',
+            version: '0.133.0',
+          },
+        },
+      },
+    });
+    expect(JSON.stringify(metadata.json())).not.toContain('must-not-leak');
+    expect(JSON.stringify(metadata.json())).not.toContain('must-not-leak-harness-key');
+  });
+
+  it('proxies worker Harness discovery calls with the injected app key', async () => {
+    await app.close();
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      if (String(url).endsWith('/health')) {
+        return new Response('ok');
+      }
+      if (String(url) === 'https://harness.example.test/') {
+        return Response.json({
+          service: 'ElAgenteHarness',
+          links: ['/members/.help', '/farmaco/.help'],
+        });
+      }
+      if (String(url).endsWith('/members/.me')) {
+        return new Response('id = 7\nname = "worker"\n');
+      }
+      if (String(url).endsWith('/farmaco/.help')) {
+        return new Response('Farmaco help');
+      }
+      if (String(url).endsWith('/farmaco/tools')) {
+        return Response.json([{ name: 'ligand_prepare' }]);
+      }
+      if (String(url).endsWith('/farmaco/runs')) {
+        return Response.json([
+          {
+            run_id: 'run-1',
+            status: 'ok',
+            tool: 'generate_ligand_xyz',
+            job_id: 'job-1',
+            created_at: '2026-06-03T00:00:00Z',
+            artifacts: [{ path: 'result.xyz', type: 'xyz' }],
+          },
+        ]);
+      }
+      if (String(url).endsWith('/farmaco/runs/run-1')) {
+        return Response.json({
+          run_id: 'run-1',
+          status: 'ok',
+          tool: 'generate_ligand_xyz',
+          job_id: 'job-1',
+          updated_at: '2026-06-03T00:01:00Z',
+          artifacts: [{ path: 'result.xyz', type: 'xyz' }],
+        });
+      }
+      if (String(url).endsWith('/farmaco/runs/run-1/artifacts')) {
+        return Response.json([{ path: 'result.xyz', type: 'xyz', size_bytes: 128 }]);
+      }
+      if (String(url).endsWith('/farmaco/runs/run-1/download.zip')) {
+        return new Response(Buffer.from('zip-bytes'), {
+          headers: {
+            'content-type': 'application/zip',
+            'content-disposition': 'attachment; filename="farmaco-run-1.zip"',
+          },
+        });
+      }
+      if (String(url).endsWith('/farmaco/tools/generate_ligand_xyz')) {
+        return Response.json({
+          status: 'ok',
+          xyz: '3\nethanol\nC 0 0 0\nH 0 0 1\nH 1 0 0\n',
+          input: JSON.parse(String(init?.body ?? '{}')),
+        });
+      }
+      return new Response('missing harness-key-secret', { status: 503 });
+    }) as typeof fetch;
+    const usageEvents: unknown[] = [];
+    try {
+      app = buildTestApp(fakeCodexManager, {
+        env: {
+          REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+          REMOTE_CODEX_SANDBOX_ID: 'sbx_test',
+          REMOTE_CODEX_USER_ID: 'user_test',
+          ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
+          INACT_X_APP_KEY: 'harness-key-secret',
+          REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
+        },
+        controlPlaneSyncClient: {
+          async checkpointSession() {
+            throw new Error('not used');
+          },
+          async recordHarnessUsageEvent(input: Parameters<NonNullable<BuildAppOptions['controlPlaneSyncClient']>['recordHarnessUsageEvent']>[0]) {
+            usageEvents.push(input);
+            return {
+              harnessUsageEvent: {
+                id: 'usage-1',
+                userId: 'user_test',
+                sandboxId: 'sbx_test',
+                workspaceId: null,
+                sessionId: null,
+                provider: 'elagente-harness',
+                module: input.module,
+                tool: input.tool ?? null,
+                runId: input.runId ?? null,
+                jobId: input.jobId ?? null,
+                externalEventId: input.externalEventId ?? null,
+                computeUnits: input.computeUnits ?? 0,
+                costUsd: input.costUsd ?? 0,
+                status: input.status ?? 'unknown',
+                metadataJson: JSON.stringify(input.metadata ?? {}),
+                occurredAt: '2026-06-03T00:00:00.000Z',
+                importedAt: '2026-06-03T00:00:00.000Z',
+              },
+            };
+          },
+        },
+      });
+      await app.ready();
+
+      const status = await app.inject({ method: 'GET', url: '/api/harness/status' });
+      expect(status.statusCode).toBe(200);
+      expect(status.json()).toMatchObject({
+        enabled: true,
+        baseUrl: 'https://harness.example.test',
+        keyPresent: true,
+        chemistryToolsEnabled: true,
+        health: { status: 'ok' },
+      });
+
+      const me = await app.inject({ method: 'GET', url: '/api/harness/me' });
+      expect(me.statusCode).toBe(200);
+      expect(me.json()).toEqual({ text: 'id = 7\nname = "worker"\n' });
+
+      const home = await app.inject({ method: 'GET', url: '/api/harness/home' });
+      expect(home.statusCode).toBe(200);
+      expect(home.json()).toEqual({
+        payload: {
+          service: 'ElAgenteHarness',
+          links: ['/members/.help', '/farmaco/.help'],
+        },
+      });
+
+      const help = await app.inject({ method: 'GET', url: '/api/harness/modules/farmaco/help' });
+      expect(help.statusCode).toBe(200);
+      expect(help.json()).toEqual({ text: 'Farmaco help' });
+
+      const tools = await app.inject({ method: 'GET', url: '/api/harness/modules/farmaco/tools' });
+      expect(tools.statusCode).toBe(200);
+      expect(tools.json()).toEqual({ payload: [{ name: 'ligand_prepare' }] });
+
+      const runs = await app.inject({ method: 'GET', url: '/api/harness/modules/farmaco/runs' });
+      expect(runs.statusCode).toBe(200);
+      expect(runs.json()).toMatchObject({
+        payload: [
+          {
+            run_id: 'run-1',
+            status: 'ok',
+          },
+        ],
+        normalized: {
+          runs: [
+            {
+              module: 'farmaco',
+              runId: 'run-1',
+              status: 'ok',
+              tool: 'generate_ligand_xyz',
+              jobId: 'job-1',
+              artifactCount: 1,
+              artifactRefs: [{ path: 'result.xyz', type: 'xyz' }],
+            },
+          ],
+        },
+      });
+
+      const runDetail = await app.inject({ method: 'GET', url: '/api/harness/modules/farmaco/runs/run-1' });
+      expect(runDetail.statusCode).toBe(200);
+      expect(runDetail.json()).toMatchObject({
+        payload: { run_id: 'run-1', status: 'ok' },
+        normalized: {
+          run: {
+            module: 'farmaco',
+            runId: 'run-1',
+            status: 'ok',
+            tool: 'generate_ligand_xyz',
+            jobId: 'job-1',
+            artifactCount: 1,
+          },
+        },
+      });
+
+      const artifacts = await app.inject({ method: 'GET', url: '/api/harness/modules/farmaco/runs/run-1/artifacts' });
+      expect(artifacts.statusCode).toBe(200);
+      expect(artifacts.json()).toEqual({
+        payload: [{ path: 'result.xyz', type: 'xyz', size_bytes: 128 }],
+        normalized: {
+          artifacts: [
+            {
+              module: 'farmaco',
+              runId: 'run-1',
+              title: 'result.xyz',
+              path: 'result.xyz',
+              type: 'xyz',
+              format: 'xyz',
+              mimeType: null,
+              sizeBytes: 128,
+              downloadUrl: null,
+              previewKind: 'molecule',
+            },
+          ],
+        },
+      });
+
+      const download = await app.inject({ method: 'GET', url: '/api/harness/modules/farmaco/runs/run-1/download.zip' });
+      expect(download.statusCode).toBe(200);
+      expect(download.headers['content-type']).toContain('application/zip');
+      expect(download.headers['content-disposition']).toBe('attachment; filename="farmaco-run-1.zip"');
+      expect(download.body).toBe('zip-bytes');
+
+      const invoke = await app.inject({
+        method: 'POST',
+        url: '/api/harness/modules/farmaco/tools/generate_ligand_xyz/invoke',
+        payload: {
+          smiles: 'CCO',
+          _remoteCodexContext: {
+            workspaceId: '00000000-0000-4000-8000-000000000010',
+            sessionId: '00000000-0000-4000-8000-000000000011',
+            threadId: 'thread-1',
+            turnId: 'turn-1',
+          },
+        },
+      });
+      expect(invoke.statusCode).toBe(200);
+      expect(invoke.json()).toEqual({
+        payload: {
+          status: 'ok',
+          xyz: '3\nethanol\nC 0 0 0\nH 0 0 1\nH 1 0 0\n',
+          input: { smiles: 'CCO' },
+        },
+      });
+      expect(usageEvents).toEqual([
+        expect.objectContaining({
+          workspaceId: '00000000-0000-4000-8000-000000000010',
+          sessionId: '00000000-0000-4000-8000-000000000011',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          module: 'farmaco',
+          tool: 'generate_ligand_xyz',
+          status: 'ok',
+          metadata: expect.objectContaining({
+            attributionSource: 'request-context',
+            resultStatus: 'ok',
+          }),
+        }),
+      ]);
+
+      const authHeaders = requests
+        .filter((request) => !request.url.endsWith('/health'))
+        .map((request) => new Headers(request.init?.headers).get('x-api-key'));
+      expect(authHeaders).toEqual([
+        'harness-key-secret',
+        'harness-key-secret',
+        'harness-key-secret',
+        'harness-key-secret',
+        'harness-key-secret',
+        'harness-key-secret',
+        'harness-key-secret',
+        'harness-key-secret',
+        'harness-key-secret',
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('injects compact Harness API guidance into worker Codex turns without leaking the app key', async () => {
+    await app.close();
+    app = buildTestApp(fakeCodexManager, {
+      env: {
+        REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+        REMOTE_CODEX_SANDBOX_ID: 'sbx_test',
+        REMOTE_CODEX_USER_ID: 'user_test',
+        ELAGENTE_HARNESS_BASE_URL: 'https://elagenteharness-production.up.railway.app/',
+        INACT_X_APP_KEY: 'must-not-leak-harness-key',
+        REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
+      },
+    });
+    await app.ready();
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Harness guidance thread',
+      },
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'use harness',
+      },
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    const developerInstructions = fakeCodexManager.startTurnCalls.at(-1)?.developerInstructions;
+    expect(developerInstructions).toContain('https://elagenteharness-production.up.railway.app');
+    expect(developerInstructions).toContain('INACT_X_APP_KEY');
+    expect(developerInstructions).toContain('x-api-key');
+    expect(developerInstructions).toContain('/farmaco/tools');
+    expect(developerInstructions).toContain('POST /{module}/tools/{tool}');
+    expect(developerInstructions).toContain('remote_codex_render_molecule');
+    expect(developerInstructions).toContain('must call remote_codex_render_molecule');
+    expect(developerInstructions).toContain('do not output plain xyz, pdb, cif, or extxyz text');
+    expect(developerInstructions).not.toContain('must-not-leak-harness-key');
+  });
+
+  it('does not inject Harness guidance when the worker Harness path is not fully enabled', async () => {
+    await app.close();
+    app = buildTestApp(fakeCodexManager, {
+      env: {
+        REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+        REMOTE_CODEX_SANDBOX_ID: 'sbx_test',
+        REMOTE_CODEX_USER_ID: 'user_test',
+        ELAGENTE_HARNESS_BASE_URL: 'https://elagenteharness-production.up.railway.app',
+        INACT_X_APP_KEY: 'must-not-leak-harness-key',
+        REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'false',
+      },
+    });
+    await app.ready();
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Harness disabled guidance thread',
+      },
+    });
+    const createdThread = createResponse.json();
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'use harness',
+      },
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    const developerInstructions = fakeCodexManager.startTurnCalls.at(-1)?.developerInstructions;
+    expect(developerInstructions).toContain('remote_codex_render_molecule');
+    expect(developerInstructions).toContain('must call remote_codex_render_molecule');
+    expect(developerInstructions).toContain('do not output plain xyz, pdb, cif, or extxyz text');
+    expect(developerInstructions).not.toContain('elagenteharness-production');
+    expect(developerInstructions).not.toContain('must-not-leak-harness-key');
+  });
+
+  it('redacts the Harness key from worker Harness errors', async () => {
+    await app.close();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response('invalid key harness-key-secret', { status: 403 })) as typeof fetch;
+    try {
+      app = buildTestApp(fakeCodexManager, {
+        env: {
+          REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+          REMOTE_CODEX_SANDBOX_ID: 'sbx_test',
+          REMOTE_CODEX_USER_ID: 'user_test',
+          ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
+          INACT_X_APP_KEY: 'harness-key-secret',
+        },
+      });
+      await app.ready();
+
+      const response = await app.inject({ method: 'GET', url: '/api/harness/me' });
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toMatchObject({
+        code: 'harness_unavailable',
+        message: 'ElAgenteHarness request failed with status 403: invalid key [redacted]',
+      });
+      expect(JSON.stringify(response.json())).not.toContain('harness-key-secret');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('infers Harness usage thread context from the single running worker thread', async () => {
+    await app.close();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          status: 'ok',
+          run_id: 'run-inferred',
+          job_id: 'job-inferred',
+          request_id: 'request-inferred',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )) as typeof fetch;
+    const usageEvents: unknown[] = [];
+    try {
+      app = buildTestApp(fakeCodexManager, {
+        env: {
+          REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+          REMOTE_CODEX_SANDBOX_ID: 'sbx_test',
+          REMOTE_CODEX_USER_ID: 'user_test',
+          ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
+          INACT_X_APP_KEY: 'harness-key-secret',
+          REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
+        },
+        controlPlaneSyncClient: {
+          async checkpointSession() {
+            throw new Error('not used');
+          },
+          async recordHarnessUsageEvent(input: Parameters<NonNullable<BuildAppOptions['controlPlaneSyncClient']>['recordHarnessUsageEvent']>[0]) {
+            usageEvents.push(input);
+            return {
+              harnessUsageEvent: {
+                id: 'usage-inferred',
+                userId: 'user_test',
+                sandboxId: 'sbx_test',
+                workspaceId: input.workspaceId ?? null,
+                sessionId: input.sessionId ?? null,
+                provider: 'elagente-harness',
+                module: input.module,
+                tool: input.tool ?? null,
+                runId: input.runId ?? null,
+                jobId: input.jobId ?? null,
+                externalEventId: input.externalEventId ?? null,
+                computeUnits: input.computeUnits ?? 0,
+                costUsd: input.costUsd ?? 0,
+                status: input.status ?? 'unknown',
+                metadataJson: JSON.stringify(input.metadata ?? {}),
+                occurredAt: '2026-06-03T00:00:00.000Z',
+                importedAt: '2026-06-03T00:00:00.000Z',
+              },
+            };
+          },
+        },
+      });
+      await app.ready();
+      const workspace = createWorkspaceRecord(app.services.database.db, {
+        absPath: path.join(tempDir, 'inferred-workspace'),
+        label: 'Inferred Workspace',
+      });
+      const thread = createThreadRecord(app.services.database.db, {
+        workspaceId: workspace.id,
+        title: 'Running Harness Thread',
+        providerSessionId: 'provider-session-inferred',
+        providerTurnId: 'runtime-turn-inferred',
+        approvalMode: 'yolo',
+      });
+      updateThreadRecord(app.services.database.db, thread.id, {
+        status: 'running',
+        providerTurnId: 'runtime-turn-inferred',
+      });
+      upsertThreadTurnMetadata(app.services.database.db, {
+        threadId: thread.id,
+        turnId: 'display-turn-inferred',
+      });
+
+      const invoke = await app.inject({
+        method: 'POST',
+        url: '/api/harness/modules/farmaco/tools/generate_ligand_xyz/invoke',
+        payload: {
+          smiles: 'CCO',
+        },
+      });
+
+      expect(invoke.statusCode).toBe(200);
+      expect(usageEvents).toEqual([
+        expect.objectContaining({
+          workspaceId: workspace.id,
+          sessionId: null,
+          threadId: thread.id,
+          turnId: 'display-turn-inferred',
+          module: 'farmaco',
+          tool: 'generate_ligand_xyz',
+          runId: 'run-inferred',
+          jobId: 'job-inferred',
+          externalEventId: 'request-inferred',
+          metadata: expect.objectContaining({
+            attributionSource: 'worker-inferred',
+          }),
+        }),
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('does not infer Harness usage thread context when multiple threads are running', async () => {
+    await app.close();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ status: 'ok' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })) as typeof fetch;
+    const usageEvents: unknown[] = [];
+    try {
+      app = buildTestApp(fakeCodexManager, {
+        env: {
+          REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+          REMOTE_CODEX_SANDBOX_ID: 'sbx_test',
+          REMOTE_CODEX_USER_ID: 'user_test',
+          ELAGENTE_HARNESS_BASE_URL: 'https://harness.example.test',
+          INACT_X_APP_KEY: 'harness-key-secret',
+          REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: 'true',
+        },
+        controlPlaneSyncClient: {
+          async checkpointSession() {
+            throw new Error('not used');
+          },
+          async recordHarnessUsageEvent(input: Parameters<NonNullable<BuildAppOptions['controlPlaneSyncClient']>['recordHarnessUsageEvent']>[0]) {
+            usageEvents.push(input);
+            return {
+              harnessUsageEvent: {
+                id: 'usage-no-inference',
+                userId: 'user_test',
+                sandboxId: 'sbx_test',
+                workspaceId: input.workspaceId ?? null,
+                sessionId: input.sessionId ?? null,
+                provider: 'elagente-harness',
+                module: input.module,
+                tool: input.tool ?? null,
+                runId: input.runId ?? null,
+                jobId: input.jobId ?? null,
+                externalEventId: input.externalEventId ?? null,
+                computeUnits: input.computeUnits ?? 0,
+                costUsd: input.costUsd ?? 0,
+                status: input.status ?? 'unknown',
+                metadataJson: JSON.stringify(input.metadata ?? {}),
+                occurredAt: '2026-06-03T00:00:00.000Z',
+                importedAt: '2026-06-03T00:00:00.000Z',
+              },
+            };
+          },
+        },
+      });
+      await app.ready();
+      const firstWorkspace = createWorkspaceRecord(app.services.database.db, {
+        absPath: path.join(tempDir, 'first-running-workspace'),
+        label: 'First Running Workspace',
+      });
+      const secondWorkspace = createWorkspaceRecord(app.services.database.db, {
+        absPath: path.join(tempDir, 'second-running-workspace'),
+        label: 'Second Running Workspace',
+      });
+      for (const [workspace, suffix] of [[firstWorkspace, 'one'], [secondWorkspace, 'two']] as const) {
+        const thread = createThreadRecord(app.services.database.db, {
+          workspaceId: workspace.id,
+          title: `Running Harness Thread ${suffix}`,
+          providerSessionId: `provider-session-${suffix}`,
+          providerTurnId: `runtime-turn-${suffix}`,
+          approvalMode: 'yolo',
+        });
+        updateThreadRecord(app.services.database.db, thread.id, {
+          status: 'running',
+          providerTurnId: `runtime-turn-${suffix}`,
+        });
+      }
+
+      const invoke = await app.inject({
+        method: 'POST',
+        url: '/api/harness/modules/farmaco/tools/generate_ligand_xyz/invoke',
+        payload: {
+          smiles: 'CCO',
+        },
+      });
+
+      expect(invoke.statusCode).toBe(200);
+      expect(usageEvents).toEqual([
+        expect.objectContaining({
+          workspaceId: null,
+          sessionId: null,
+          threadId: null,
+          turnId: null,
+          module: 'farmaco',
+          tool: 'generate_ligand_xyz',
+          metadata: expect.objectContaining({
+            attributionSource: 'worker-runtime',
+          }),
+        }),
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('requires the router token for worker API access when configured', async () => {
+    await app.close();
+    app = buildTestApp(fakeCodexManager, {
+      env: {
+        REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+        REMOTE_CODEX_WORKER_AUTH_TOKEN: 'router-secret',
+      },
+    });
+    await app.ready();
+
+    const health = await app.inject({
+      method: 'GET',
+      url: '/readyz',
+    });
+    expect(health.statusCode).toBe(200);
+
+    const unauthorized = await app.inject({
+      method: 'GET',
+      url: '/api/worker/metadata',
+    });
+    expect(unauthorized.statusCode).toBe(401);
+
+    const authorized = await app.inject({
+      method: 'GET',
+      url: '/api/worker/metadata',
+      headers: {
+        'x-remote-codex-worker-token': 'router-secret',
+      },
+    });
+    expect(authorized.statusCode).toBe(200);
+    expect(authorized.json().requestDiagnostics).toMatchObject({
+      authorizationHeaderPresent: false,
+      workerTokenHeaderPresent: true,
+    });
+
+    const bearerAuthorized = await app.inject({
+      method: 'GET',
+      url: '/api/worker/metadata',
+      headers: {
+        authorization: 'Bearer router-secret',
+      },
+    });
+    expect(bearerAuthorized.statusCode).toBe(200);
+    expect(bearerAuthorized.json().requestDiagnostics).toMatchObject({
+      authorizationHeaderPresent: true,
+      workerTokenHeaderPresent: false,
+    });
+  });
+
+  it('enforces signed worker identity envelopes on scoped worker routes', async () => {
+    await app.close();
+    app = buildTestApp(fakeCodexManager, {
+      env: {
+        REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+        REMOTE_CODEX_SANDBOX_ID: 'sbx_test',
+        REMOTE_CODEX_USER_ID: 'user_test',
+        REMOTE_CODEX_WORKER_AUTH_TOKEN: 'router-secret',
+        REMOTE_CODEX_WORKER_IDENTITY_SECRET: workerIdentitySecret,
+      },
+    });
+    await app.ready();
+
+    const baseHeaders = {
+      'x-remote-codex-worker-token': 'router-secret',
+    };
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      headers: baseHeaders,
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+    expect(workspaceResponse.statusCode).toBe(200);
+    const createThreadResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      headers: baseHeaders,
+      payload: {
+        workspaceId: workspaceResponse.json().id,
+        model: 'gpt-5.4',
+        approvalMode: 'guarded',
+      },
+    });
+    expect(createThreadResponse.statusCode).toBe(200);
+    const threadId = createThreadResponse.json().id;
+
+    const missingEnvelope = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${threadId}/prompt`,
+      headers: baseHeaders,
+      payload: {
+        prompt: 'missing envelope',
+      },
+    });
+    expect(missingEnvelope.statusCode).toBe(403);
+
+    const wrongSandbox = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${threadId}/prompt`,
+      headers: {
+        ...baseHeaders,
+        ...makeWorkerIdentityHeaders({
+          sandboxId: 'sbx_other',
+          scopes: ['provider:turn:create'],
+        }),
+      },
+      payload: {
+        prompt: 'wrong sandbox',
+      },
+    });
+    expect(wrongSandbox.statusCode).toBe(403);
+
+    const expiredEnvelope = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${threadId}/prompt`,
+      headers: {
+        ...baseHeaders,
+        ...makeWorkerIdentityHeaders({
+          scopes: ['provider:turn:create'],
+          expiresAt: new Date(Date.now() - 1_000).toISOString(),
+        }),
+      },
+      payload: {
+        prompt: 'expired envelope',
+      },
+    });
+    expect(expiredEnvelope.statusCode).toBe(403);
+
+    const missingScope = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${threadId}/prompt`,
+      headers: {
+        ...baseHeaders,
+        ...makeWorkerIdentityHeaders({
+          scopes: ['provider:turn:interrupt'],
+        }),
+      },
+      payload: {
+        prompt: 'missing scope',
+      },
+    });
+    expect(missingScope.statusCode).toBe(403);
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${threadId}/prompt`,
+      headers: {
+        ...baseHeaders,
+        ...makeWorkerIdentityHeaders({
+          scopes: ['provider:turn:create'],
+        }),
+      },
+      payload: {
+        prompt: 'allowed prompt',
+      },
+    });
+    expect(promptResponse.statusCode).toBe(200);
+
+    const interruptDenied = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${threadId}/interrupt`,
+      headers: {
+        ...baseHeaders,
+        ...makeWorkerIdentityHeaders({
+          scopes: ['provider:turn:create'],
+        }),
+      },
+    });
+    expect(interruptDenied.statusCode).toBe(403);
+
+    const interruptAllowed = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${threadId}/interrupt`,
+      headers: {
+        ...baseHeaders,
+        ...makeWorkerIdentityHeaders({
+          scopes: ['provider:turn:interrupt'],
+        }),
+      },
+    });
+    expect(interruptAllowed.statusCode).toBe(200);
+
+    const shellDenied = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${threadId}/shell`,
+      headers: {
+        ...baseHeaders,
+        ...makeWorkerIdentityHeaders({
+          scopes: ['provider:turn:create'],
+        }),
+      },
+      payload: {
+        label: 'Denied shell',
+      },
+    });
+    expect(shellDenied.statusCode).toBe(403);
+
+    const shellAllowed = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${threadId}/shell`,
+      headers: {
+        ...baseHeaders,
+        ...makeWorkerIdentityHeaders({
+          scopes: ['shell:write'],
+        }),
+      },
+      payload: {
+        label: 'Allowed shell',
+      },
+    });
+    expect(shellAllowed.statusCode).toBe(200);
+    const shellId = shellAllowed.json().shell.id;
+
+    const shellRenameDenied = await app.inject({
+      method: 'PATCH',
+      url: `/api/shells/${shellId}`,
+      headers: {
+        ...baseHeaders,
+        ...makeWorkerIdentityHeaders({
+          scopes: ['provider:turn:create'],
+        }),
+      },
+      payload: {
+        label: 'Denied rename',
+      },
+    });
+    expect(shellRenameDenied.statusCode).toBe(403);
+
+    const shellTerminateDenied = await app.inject({
+      method: 'POST',
+      url: `/api/shells/${shellId}/terminate`,
+      headers: {
+        ...baseHeaders,
+        ...makeWorkerIdentityHeaders({
+          scopes: ['provider:turn:create'],
+        }),
+      },
+    });
+    expect(shellTerminateDenied.statusCode).toBe(403);
+  });
+
+  it('enforces file:write for worker workspace file mutations', async () => {
+    await app.close();
+    app = buildTestApp(fakeCodexManager, {
+      env: {
+        REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+        REMOTE_CODEX_SANDBOX_ID: 'sbx_test',
+        REMOTE_CODEX_USER_ID: 'user_test',
+        REMOTE_CODEX_WORKER_AUTH_TOKEN: 'router-secret',
+        REMOTE_CODEX_WORKER_IDENTITY_SECRET: workerIdentitySecret,
+      },
+    });
+    await app.ready();
+
+    const baseHeaders = {
+      'x-remote-codex-worker-token': 'router-secret',
+    };
+    const fileWriteHeaders = {
+      ...baseHeaders,
+      ...makeWorkerIdentityHeaders({
+        scopes: ['file:write'],
+      }),
+    };
+    const missingScopeHeaders = {
+      ...baseHeaders,
+      ...makeWorkerIdentityHeaders({
+        scopes: ['provider:turn:create'],
+      }),
+    };
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      headers: baseHeaders,
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+    expect(workspaceResponse.statusCode).toBe(200);
+    const workspaceId = workspaceResponse.json().id;
+
+    const deniedWrite = await app.inject({
+      method: 'PUT',
+      url: `/api/workspaces/${workspaceId}/files`,
+      headers: missingScopeHeaders,
+      payload: {
+        path: 'notes.txt',
+        content: 'denied',
+      },
+    });
+    expect(deniedWrite.statusCode).toBe(403);
+
+    const writeResponse = await app.inject({
+      method: 'PUT',
+      url: `/api/workspaces/${workspaceId}/files`,
+      headers: fileWriteHeaders,
+      payload: {
+        path: 'notes.txt',
+        content: 'allowed',
+      },
+    });
+    expect(writeResponse.statusCode).toBe(200);
+    expect(writeResponse.json()).toMatchObject({
+      path: 'notes.txt',
+      kind: 'file',
+    });
+    await expect(fs.readFile(path.join(tempDir, 'workspace', 'notes.txt'), 'utf8')).resolves.toBe(
+      'allowed',
+    );
+
+    const multipart = buildMultipartPayload({
+      fields: {
+        path: 'upload.bin',
+      },
+      files: [
+        {
+          fieldName: 'file',
+          fileName: 'upload.bin',
+          contentType: 'application/octet-stream',
+          content: Buffer.from('uploaded'),
+        },
+      ],
+    });
+    const uploadResponse = await app.inject({
+      method: 'POST',
+      url: `/api/workspaces/${workspaceId}/files/upload`,
+      headers: {
+        ...fileWriteHeaders,
+        'content-type': `multipart/form-data; boundary=${multipart.boundary}`,
+      },
+      payload: multipart.payload,
+    });
+    expect(uploadResponse.statusCode).toBe(200);
+    await expect(fs.readFile(path.join(tempDir, 'workspace', 'upload.bin'), 'utf8')).resolves.toBe(
+      'uploaded',
+    );
+
+    const moveDenied = await app.inject({
+      method: 'PATCH',
+      url: `/api/workspaces/${workspaceId}/files/move`,
+      headers: missingScopeHeaders,
+      payload: {
+        fromPath: 'notes.txt',
+        toPath: 'moved.txt',
+      },
+    });
+    expect(moveDenied.statusCode).toBe(403);
+
+    const moveResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/workspaces/${workspaceId}/files/move`,
+      headers: fileWriteHeaders,
+      payload: {
+        fromPath: 'notes.txt',
+        toPath: 'moved.txt',
+      },
+    });
+    expect(moveResponse.statusCode).toBe(200);
+    expect(moveResponse.json().path).toBe('moved.txt');
+
+    const outsideWrite = await app.inject({
+      method: 'PUT',
+      url: `/api/workspaces/${workspaceId}/files`,
+      headers: fileWriteHeaders,
+      payload: {
+        path: '../outside.txt',
+        content: 'escape',
+      },
+    });
+    expect(outsideWrite.statusCode).toBe(400);
+
+    const deleteDenied = await app.inject({
+      method: 'DELETE',
+      url: `/api/workspaces/${workspaceId}/files`,
+      headers: missingScopeHeaders,
+      payload: {
+        path: 'moved.txt',
+      },
+    });
+    expect(deleteDenied.statusCode).toBe(403);
+
+    const deleteResponse = await app.inject({
+      method: 'DELETE',
+      url: `/api/workspaces/${workspaceId}/files`,
+      headers: fileWriteHeaders,
+      payload: {
+        path: 'moved.txt',
+      },
+    });
+    expect(deleteResponse.statusCode).toBe(200);
+    expect(deleteResponse.json()).toMatchObject({
+      path: 'moved.txt',
+    });
+    await expect(fs.stat(path.join(tempDir, 'workspace', 'moved.txt'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it('enforces artifact read and write scopes for worker artifact routes', async () => {
+    await app.close();
+    app = buildTestApp(fakeCodexManager, {
+      env: {
+        REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+        REMOTE_CODEX_SANDBOX_ID: 'sbx_test',
+        REMOTE_CODEX_USER_ID: 'user_test',
+        REMOTE_CODEX_WORKER_AUTH_TOKEN: 'router-secret',
+        REMOTE_CODEX_WORKER_IDENTITY_SECRET: workerIdentitySecret,
+      },
+    });
+    await app.ready();
+
+    const baseHeaders = {
+      'x-remote-codex-worker-token': 'router-secret',
+    };
+    const artifactReadHeaders = {
+      ...baseHeaders,
+      ...makeWorkerIdentityHeaders({
+        scopes: ['artifact:read'],
+      }),
+    };
+    const artifactWriteHeaders = {
+      ...baseHeaders,
+      ...makeWorkerIdentityHeaders({
+        scopes: ['artifact:write'],
+      }),
+    };
+    const wrongScopeHeaders = {
+      ...baseHeaders,
+      ...makeWorkerIdentityHeaders({
+        scopes: ['file:write'],
+      }),
+    };
+
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      headers: baseHeaders,
+      payload: {
+        absPath: path.join(tempDir, 'artifact-workspace'),
+      },
+    });
+    expect(workspaceResponse.statusCode).toBe(200);
+    const workspaceId = workspaceResponse.json().id;
+
+    const missingEnvelope = await app.inject({
+      method: 'POST',
+      url: `/api/workspaces/${workspaceId}/artifacts`,
+      headers: baseHeaders,
+      payload: {
+        id: 'result.log',
+        name: 'result.log',
+        mediaType: 'text/plain',
+        contentBase64: Buffer.from('artifact content').toString('base64'),
+      },
+    });
+    expect(missingEnvelope.statusCode).toBe(403);
+
+    const wrongWriteScope = await app.inject({
+      method: 'POST',
+      url: `/api/workspaces/${workspaceId}/artifacts`,
+      headers: wrongScopeHeaders,
+      payload: {
+        id: 'result.log',
+        name: 'result.log',
+        mediaType: 'text/plain',
+        contentBase64: Buffer.from('artifact content').toString('base64'),
+      },
+    });
+    expect(wrongWriteScope.statusCode).toBe(403);
+
+    const createArtifact = await app.inject({
+      method: 'POST',
+      url: `/api/workspaces/${workspaceId}/artifacts`,
+      headers: artifactWriteHeaders,
+      payload: {
+        id: 'result.log',
+        name: '../unsafe/result.log',
+        mediaType: 'text/plain',
+        contentBase64: Buffer.from('artifact content').toString('base64'),
+        metadata: {
+          source: 'worker-test',
+        },
+      },
+    });
+    expect(createArtifact.statusCode).toBe(200);
+    expect(createArtifact.json().artifact).toMatchObject({
+      id: 'result.log',
+      name: 'result.log',
+      mediaType: 'text/plain',
+      size: 'artifact content'.length,
+      metadata: {
+        source: 'worker-test',
+      },
+    });
+
+    const wrongReadScope = await app.inject({
+      method: 'GET',
+      url: `/api/workspaces/${workspaceId}/artifacts`,
+      headers: artifactWriteHeaders,
+    });
+    expect(wrongReadScope.statusCode).toBe(403);
+
+    const listArtifacts = await app.inject({
+      method: 'GET',
+      url: `/api/workspaces/${workspaceId}/artifacts`,
+      headers: artifactReadHeaders,
+    });
+    expect(listArtifacts.statusCode).toBe(200);
+    expect(listArtifacts.json().artifacts).toHaveLength(1);
+
+    const metadata = await app.inject({
+      method: 'GET',
+      url: `/api/workspaces/${workspaceId}/artifacts/result.log`,
+      headers: artifactReadHeaders,
+    });
+    expect(metadata.statusCode).toBe(200);
+    expect(metadata.json().artifact.id).toBe('result.log');
+
+    const download = await app.inject({
+      method: 'GET',
+      url: `/api/workspaces/${workspaceId}/artifacts/result.log/download`,
+      headers: artifactReadHeaders,
+    });
+    expect(download.statusCode).toBe(200);
+    expect(download.headers['content-type']).toContain('text/plain');
+    expect(download.body).toBe('artifact content');
+
+    const deleteDenied = await app.inject({
+      method: 'DELETE',
+      url: `/api/workspaces/${workspaceId}/artifacts/result.log`,
+      headers: artifactReadHeaders,
+    });
+    expect(deleteDenied.statusCode).toBe(403);
+
+    const deleteArtifact = await app.inject({
+      method: 'DELETE',
+      url: `/api/workspaces/${workspaceId}/artifacts/result.log`,
+      headers: artifactWriteHeaders,
+    });
+    expect(deleteArtifact.statusCode).toBe(200);
+    expect(deleteArtifact.json()).toMatchObject({
+      deleted: true,
+      artifact: {
+        id: 'result.log',
+      },
+    });
+
+    const missingAfterDelete = await app.inject({
+      method: 'GET',
+      url: `/api/workspaces/${workspaceId}/artifacts/result.log`,
+      headers: artifactReadHeaders,
+    });
+    expect(missingAfterDelete.statusCode).toBe(404);
+  });
+
+  it('writes gateway-backed provider config during worker startup', async () => {
+    await app.close();
+    const claudeHome = path.join(tempDir, 'claude-home');
+    const opencodeHome = path.join(tempDir, 'opencode-home');
+    const gatewayHome = path.join(tempDir, 'agent-home');
+    app = buildTestApp(fakeCodexManager, {
+      env: {
+        REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+        REMOTE_CODEX_LLM_GATEWAY_BASE_URL: 'https://llm-gateway.example.com',
+        REMOTE_CODEX_LLM_GATEWAY_TOKEN: 'sandbox-gateway-token',
+        CLAUDE_HOME: claudeHome,
+        OPENCODE_HOME: opencodeHome,
+        HOME: gatewayHome,
+      },
+    });
+    await app.ready();
+
+    await expect(fs.readFile(path.join(codexHome, 'config.toml'), 'utf8')).resolves.toContain(
+      'model_provider = "sub2api"',
+    );
+    await expect(fs.readFile(path.join(codexHome, 'config.toml'), 'utf8')).resolves.toContain(
+      'base_url = "https://llm-gateway.example.com"',
+    );
+    const codexConfig = await fs.readFile(path.join(codexHome, 'config.toml'), 'utf8');
+    expect(codexConfig.match(/\[mcp_servers\.remote_codex_plugins\]/g)).toHaveLength(1);
+    expect(codexConfig).toContain(
+      'REMOTE_CODEX_ENABLED_PLUGIN_IDS = "remote-codex.xyz-viewer"',
+    );
+    expect(codexConfig).not.toContain('INACT_X_APP_KEY');
+    const codexAuth = JSON.parse(await fs.readFile(path.join(codexHome, 'auth.json'), 'utf8'));
+    const claudeConfig = await fs.readFile(path.join(claudeHome, 'settings.json'), 'utf8');
+    const opencodeConfig = await fs.readFile(path.join(opencodeHome, 'opencode.json'), 'utf8');
+    expect(claudeConfig).toContain(
+      '"ANTHROPIC_BASE_URL": "https://llm-gateway.example.com/anthropic"',
+    );
+    expect(claudeConfig).not.toContain('ANTHROPIC_AUTH_TOKEN');
+    expect(opencodeConfig).toContain(
+      '"baseURL": "https://llm-gateway.example.com/v1"',
+    );
+    expect(opencodeConfig).toContain(
+      '"apiKey": "{env:REMOTE_CODEX_LLM_GATEWAY_TOKEN}"',
+    );
+    for (const providerConfig of [codexConfig, claudeConfig, opencodeConfig]) {
+      expect(providerConfig).not.toContain('OPENAI_API_KEY');
+      expect(providerConfig).not.toContain('ANTHROPIC_API_KEY');
+      expect(providerConfig).not.toContain('sk-');
+      expect(providerConfig).not.toContain('real-provider-root-key');
+    }
+    expect(codexAuth).toEqual({ OPENAI_API_KEY: 'sandbox-gateway-token' });
+    expect(process.env.REMOTE_CODEX_LLM_GATEWAY_TOKEN).toBe('sandbox-gateway-token');
+    expect(process.env.ANTHROPIC_AUTH_TOKEN).toBe('sandbox-gateway-token');
+    expect(process.env.ANTHROPIC_BASE_URL).toBe('https://llm-gateway.example.com/anthropic');
+  });
+
   it('restarts the selected agent runtime on demand', async () => {
     const response = await app.inject({
       method: 'POST',
@@ -617,6 +1967,63 @@ describe('supervisor api', () => {
       message: 'Build and restart launched.',
     });
     expect(launchBuildRestartCalls).toBe(1);
+  });
+
+  it('disables host management operations in worker mode', async () => {
+    await app.close();
+    const failingRuntime = new FakeInstallRuntime();
+    app = buildTestApp(fakeCodexManager, {
+      claudeRuntime: failingRuntime,
+      env: {
+        REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+      },
+    });
+    await app.ready();
+
+    const serviceRestart = await app.inject({
+      method: 'POST',
+      url: '/api/service/build-restart',
+    });
+    expect(serviceRestart.statusCode).toBe(403);
+
+    const providerRestart = await app.inject({
+      method: 'POST',
+      url: '/api/agent-runtimes/codex/build-restart',
+    });
+    expect(providerRestart.statusCode).toBe(403);
+
+    const install = await app.inject({
+      method: 'POST',
+      url: '/api/agent-runtimes/claude/install',
+      payload: {
+        action: 'install',
+      },
+    });
+    expect(install.statusCode).toBe(403);
+
+    const workspaceSettings = await app.inject({
+      method: 'PATCH',
+      url: '/api/config/workspace-settings',
+      payload: {
+        devHome: tempDir,
+      },
+    });
+    expect(workspaceSettings.statusCode).toBe(403);
+
+    const providerConfigWrite = await app.inject({
+      method: 'PATCH',
+      url: '/api/config/providers/codex/files/config.toml',
+      payload: {
+        content: 'model = "gpt-5.4"\n',
+      },
+    });
+    expect(providerConfigWrite.statusCode).toBe(403);
+
+    const providerConfigRead = await app.inject({
+      method: 'GET',
+      url: '/api/config/providers/codex/files/config.toml',
+    });
+    expect(providerConfigRead.statusCode).toBe(403);
   });
 
   it('reads editable provider host files from CODEX_HOME', async () => {
@@ -759,9 +2166,9 @@ describe('supervisor api', () => {
         state: 'ready',
       },
     });
-    await expect(fs.readFile(path.join(codexHome, 'config.toml'), 'utf8')).resolves.toBe(
-      'model = "gpt-5.4"\n',
-    );
+    const restoredConfig = await fs.readFile(path.join(codexHome, 'config.toml'), 'utf8');
+    expect(restoredConfig).toContain('model = "gpt-5.4"');
+    expect(restoredConfig).toContain('[mcp_servers.remote_codex_plugins]');
     await expect(fs.readFile(path.join(codexHome, 'auth.json'), 'utf8')).resolves.toBe(
       '{"token":"old"}\n',
     );
@@ -792,6 +2199,65 @@ describe('supervisor api', () => {
     expect(listResponse.json()).toHaveLength(1);
   });
 
+  it('supports worker-mode workspace, thread, and prompt calls from the control plane', async () => {
+    await app.close();
+    app = buildTestApp(fakeCodexManager, {
+      env: {
+        REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+        REMOTE_CODEX_WORKER_AUTH_TOKEN: 'worker-control-token',
+        REMOTE_CODEX_SANDBOX_ID: '00000000-0000-4000-8000-000000000001',
+        REMOTE_CODEX_USER_ID: '00000000-0000-4000-8000-000000000002',
+      },
+    });
+    await app.ready();
+
+    const headers = {
+      'x-remote-codex-worker-token': 'worker-control-token',
+    };
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      headers,
+      payload: {
+        absPath: path.join(tempDir, 'worker-control-workspace'),
+        label: 'Worker Control Workspace',
+      },
+    });
+    expect(workspaceResponse.statusCode).toBe(200);
+
+    const threadResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      headers,
+      payload: {
+        workspaceId: workspaceResponse.json().id,
+        provider: 'codex',
+        model: 'gpt-5',
+        approvalMode: 'yolo',
+        title: 'Worker Control Thread',
+      },
+    });
+    expect(threadResponse.statusCode).toBe(200);
+    expect(threadResponse.json()).toMatchObject({
+      provider: 'codex',
+      title: 'Worker Control Thread',
+      model: 'gpt-5',
+    });
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${threadResponse.json().id}/prompt`,
+      headers,
+      payload: {
+        prompt: 'Reply with ok.',
+      },
+    });
+    expect(promptResponse.statusCode).toBe(200);
+    expect(promptResponse.json()).toMatchObject({
+      provider: 'codex',
+    });
+  });
+
   it('returns and saves workspace settings', async () => {
     const initialResponse = await app.inject({
       method: 'GET',
@@ -819,7 +2285,7 @@ describe('supervisor api', () => {
     });
   });
 
-  it('lists, imports, toggles, and persists plugin settings', async () => {
+  it('lists, imports, toggles, uninstalls, and persists plugin settings', async () => {
     const initialResponse = await app.inject({
       method: 'GET',
       url: '/api/plugins',
@@ -874,6 +2340,42 @@ describe('supervisor api', () => {
       enabled: false,
       source: 'imported',
     });
+
+    const uninstallResponse = await app.inject({
+      method: 'DELETE',
+      url: `/api/plugins/${encodeURIComponent(importedManifest.id)}`,
+    });
+
+    expect(uninstallResponse.statusCode).toBe(200);
+    expect(uninstallResponse.json()).toMatchObject({
+      id: importedManifest.id,
+      source: 'imported',
+    });
+
+    const afterUninstallResponse = await app.inject({
+      method: 'GET',
+      url: '/api/plugins',
+    });
+
+    expect(afterUninstallResponse.statusCode).toBe(200);
+    expect(afterUninstallResponse.json()).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: importedManifest.id,
+        }),
+      ]),
+    );
+
+    const reimportResponse = await app.inject({
+      method: 'POST',
+      url: '/api/plugins/import',
+      payload: {
+        manifestJson: JSON.stringify(importedManifest),
+        enabled: false,
+      },
+    });
+
+    expect(reimportResponse.statusCode).toBe(200);
 
     const toggleResponse = await app.inject({
       method: 'PATCH',
@@ -1019,6 +2521,64 @@ describe('supervisor api', () => {
     });
     expect(secondPromptResponse.statusCode).toBe(200);
     expect(fakeCodexManager.startTurnCalls.at(-1)?.developerInstructions).toBeNull();
+  });
+
+  it('rejects uninstalling built-in plugins', async () => {
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/api/plugins/remote-codex.xyz-viewer',
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      code: 'bad_request',
+      message: 'Built-in plugin cannot be uninstalled: remote-codex.xyz-viewer',
+    });
+  });
+
+  it('imports plugin manifests from an https URL', async () => {
+    const importedManifest = {
+      id: 'example.remote-manifest',
+      name: 'Remote Manifest',
+      version: '0.1.0',
+      description: 'Manifest imported from URL.',
+      remoteCodex: '^0.11.0',
+      capabilities: {
+        artifactTypes: [
+          {
+            type: 'remote.manifest',
+            title: 'Remote Manifest',
+          },
+        ],
+        timelineRenderers: ['remote.manifest'],
+        threadPanels: [],
+      },
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(importedManifest)));
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(fetchMock as typeof fetch);
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/plugins/import',
+        payload: {
+          manifestUrl: 'https://github.com/example/remote-plugin',
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        id: importedManifest.id,
+        source: 'imported',
+        enabled: true,
+      });
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://raw.githubusercontent.com/example/remote-plugin/main/plugin.json',
+      );
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 
   it('rejects imported manifests that replace built-in plugin ids', async () => {
@@ -2081,7 +3641,7 @@ describe('supervisor api', () => {
       startedAt: '2026-05-20T17:03:35.740Z',
       status: 'completed',
       model: 'sonnet',
-      reasoningEffort: 'medium',
+      reasoningEffort: 'high',
       reasoningEffortAvailable: true,
       tokenUsage: {
         total: {
@@ -3642,6 +5202,114 @@ describe('supervisor api', () => {
     });
   });
 
+  it('keeps context remaining visible while a Codex turn is running with partial usage updates', async () => {
+    const workspaceResponse = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: {
+        absPath: path.join(tempDir, 'workspace'),
+      },
+    });
+
+    const workspace = workspaceResponse.json();
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/threads/start',
+      payload: {
+        workspaceId: workspace.id,
+        model: 'unknown-model',
+        approvalMode: 'yolo',
+        title: 'Running Context Thread',
+      },
+    });
+
+    const createdThread = createResponse.json();
+
+    fakeCodexManager.emit('notification', {
+      method: 'thread/tokenUsage/updated',
+      params: {
+        threadId: createdThread.providerSessionId,
+        turnId: 'turn-context-baseline',
+        tokenUsage: {
+          total: {
+            totalTokens: 165200,
+            inputTokens: 140000,
+            cachedInputTokens: 0,
+            outputTokens: 25200,
+            reasoningOutputTokens: 0,
+          },
+          last: {
+            totalTokens: 165200,
+            inputTokens: 140000,
+            cachedInputTokens: 0,
+            outputTokens: 25200,
+            reasoningOutputTokens: 0,
+          },
+          modelContextWindow: 258400,
+        },
+      },
+    });
+
+    const baselineDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+    expect(baselineDetailResponse.json().thread.contextUsage).toMatchObject({
+      availability: 'available',
+      remainingPercent: 38,
+      tokensInContextWindow: 165200,
+      modelContextWindow: 258400,
+    });
+
+    const promptResponse = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${createdThread.id}/prompt`,
+      payload: {
+        prompt: 'Keep working while context is visible.',
+      },
+    });
+
+    expect(promptResponse.statusCode).toBe(200);
+    expect(promptResponse.json().contextUsage).toMatchObject({
+      availability: 'available',
+      remainingPercent: 38,
+      tokensInContextWindow: 165200,
+      modelContextWindow: 258400,
+    });
+
+    const runningTurnId = promptResponse.json().activeTurnId;
+    expect(typeof runningTurnId).toBe('string');
+
+    fakeCodexManager.emit('notification', {
+      method: 'thread/tokenUsage/updated',
+      params: {
+        threadId: createdThread.providerSessionId,
+        turnId: runningTurnId,
+        tokenUsage: {
+          total: {
+            totalTokens: 166000,
+            inputTokens: 140800,
+            cachedInputTokens: 0,
+            outputTokens: 25200,
+            reasoningOutputTokens: 0,
+          },
+        },
+      },
+    });
+
+    const runningDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}`,
+    });
+
+    expect(runningDetailResponse.json().thread.contextUsage).toMatchObject({
+      availability: 'available',
+      remainingPercent: 38,
+      tokensInContextWindow: 165200,
+      modelContextWindow: 258400,
+    });
+  });
+
   it('stores prompt attachments in the workspace temp directory and rewrites the prompt path', async () => {
     const workspaceResponse = await app.inject({
       method: 'POST',
@@ -4534,6 +6202,7 @@ describe('supervisor api', () => {
     expect(promptResponse.statusCode).toBe(200);
     expect(fakeCodexManager.startTurnCalls.at(-1)).toMatchObject({
       prompt: 'fast turn',
+      developerInstructions: expect.stringContaining('remote_codex_render_molecule'),
       serviceTier: 'fast',
     });
 
@@ -5948,21 +7617,25 @@ describe('supervisor api', () => {
       hookScope: 'turn',
       hookSource: 'project',
       hookStatusMessage: 'Checking Bash command',
-      hookOutputEntries: [
-        {
-          kind: 'context',
-          text: 'Hook printed command details.',
-        },
-        {
-          kind: 'warning',
-          text: 'Hook system message.',
-        },
-      ],
+      hookOutputEntries: null,
+      detailText: null,
+      hasDeferredDetail: true,
     });
-    expect(hookItem.detailText).toContain(
+    const hookDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}/items/hook:hook-run-1/detail`
+    });
+
+    expect(hookDetailResponse.statusCode).toBe(200);
+    expect(hookDetailResponse.json()).toMatchObject({
+      id: 'hook:hook-run-1',
+      kind: 'hook',
+      title: 'PreToolUse Hook Details',
+    });
+    expect(hookDetailResponse.json().text).toContain(
       'Hook printed command details.',
     );
-    expect(hookItem.detailText).toContain(
+    expect(hookDetailResponse.json().text).toContain(
       'Hook system message.',
     );
   });
@@ -6040,18 +7713,27 @@ describe('supervisor api', () => {
           kind: 'hook',
           text: 'Stop hook',
           hookEventLabel: 'Stop',
-          hookOutputEntries: [
-            {
-              kind: 'warning',
-              text: 'remote-codex hook ran',
-            },
-          ],
+          previewText: 'remote-codex hook ran',
+          hookOutputEntries: null,
+          detailText: null,
+          hasDeferredDetail: true,
         }),
       ]),
     );
     expect(JSON.stringify(detailResponse.json().turns.at(-1).items)).not.toContain(
       '<hook_prompt',
     );
+    const hookDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}/items/${encodeURIComponent('hook-prompt:stop:0:/tmp/demo/.codex/hooks.json')}/detail`
+    });
+
+    expect(hookDetailResponse.statusCode).toBe(200);
+    expect(hookDetailResponse.json()).toMatchObject({
+      kind: 'hook',
+      title: 'Stop Hook Details',
+      text: 'remote-codex hook ran',
+    });
   });
 
   it('uses persisted command snapshots when final history contains only command placeholders', async () => {
@@ -9190,19 +10872,29 @@ describe('supervisor api', () => {
       status: 'completed',
       items: expect.arrayContaining([
         expect.objectContaining({
+          id: 'search-item-1',
           kind: 'webSearch',
           text: 'remote codex release notes',
           previewText: 'remote codex release notes',
+          detailText: null,
+          hasDeferredDetail: true,
           status: 'completed'
         })
       ])
     });
-    expect(
-      detailResponse
-        .json()
-        .turns.at(-1)
-        .items.find((item: any) => item.kind === 'webSearch').detailText
-    ).toContain('https://example.com/releases');
+
+    const searchDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}/items/search-item-1/detail`
+    });
+
+    expect(searchDetailResponse.statusCode).toBe(200);
+    expect(searchDetailResponse.json()).toMatchObject({
+      id: 'search-item-1',
+      kind: 'webSearch',
+      title: 'Web Search Details',
+    });
+    expect(searchDetailResponse.json().text).toContain('https://example.com/releases');
   });
 
   it('maps file change turn items into compact stats and detail lines', async () => {
@@ -9290,16 +10982,31 @@ describe('supervisor api', () => {
       .items.find((item: any) => item.kind === 'fileChange');
 
     expect(fileChangeItem).toMatchObject({
+      id: 'file-change-1',
       kind: 'fileChange',
       previewText: '3 files changed · +9 · -4',
       text: 'src/app.ts, +2 more',
+      detailText: null,
+      hasDeferredDetail: true,
       status: 'completed',
       changedFiles: 3,
       addedLines: 9,
       removedLines: 4
     });
-    expect(fileChangeItem.detailText).toContain('src/app.ts (+2 -1)');
-    expect(fileChangeItem.detailText).toContain('src/ui.tsx (+3)');
+
+    const fileChangeDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${createdThread.id}/items/file-change-1/detail`
+    });
+
+    expect(fileChangeDetailResponse.statusCode).toBe(200);
+    expect(fileChangeDetailResponse.json()).toMatchObject({
+      id: 'file-change-1',
+      kind: 'fileChange',
+      title: 'File Change Details',
+    });
+    expect(fileChangeDetailResponse.json().text).toContain('src/app.ts (+2 -1)');
+    expect(fileChangeDetailResponse.json().text).toContain('src/ui.tsx (+3)');
   });
 
   it('maps context compaction turn items into dedicated history entries', async () => {

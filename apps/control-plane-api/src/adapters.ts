@@ -1,0 +1,2700 @@
+import { createHash } from 'node:crypto';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { z } from 'zod';
+
+const execFileAsync = promisify(execFile);
+
+export interface SandboxProvisionResult {
+  state: string;
+  routerBaseUrl?: string | null;
+  workerServiceName?: string | null;
+  k8sNamespace?: string | null;
+  k8sPodName?: string | null;
+  statusReason?: string | null;
+  startupProgress?: number;
+  lastFailureCode?: string | null;
+  lastFailureMessage?: string | null;
+}
+
+export interface SandboxRuntimeResource {
+  sandboxId: string;
+  userId?: string | null;
+  state?: string | null;
+  labels?: Record<string, string>;
+}
+
+export interface SandboxStartInput {
+  sandboxId: string;
+  userId: string;
+  image: string;
+  region: string;
+  s3Prefix: string;
+  enabledAgentProviders?: string;
+  gateway?:
+    | {
+        baseUrl: string;
+        keyId: string;
+        tokenSecretName?: string | null;
+        staticToken?: string | null;
+      }
+    | undefined;
+  harness?:
+    | {
+        baseUrl: string;
+        appKeySecretName?: string | null;
+        chemistryToolsEnabled?: boolean;
+      }
+    | undefined;
+}
+
+export interface SandboxEnvironment {
+  env: Record<string, string>;
+}
+
+export interface SandboxSecretEnvRef {
+  secretName: string;
+  key: string;
+}
+
+export interface SandboxEnvironmentSpec extends SandboxEnvironment {
+  secretEnv?: Record<string, SandboxSecretEnvRef>;
+}
+
+export interface SandboxSecretWriter {
+  putSecretValue(input: {
+    namespace?: string;
+    secretName: string;
+    key: string;
+    value: string;
+  }): Promise<void>;
+  hasSecretValue?(input: {
+    namespace?: string;
+    secretName: string;
+    key: string;
+  }): Promise<boolean>;
+}
+
+export type SandboxManagerErrorCode =
+  | 'quota'
+  | 'capacity'
+  | 'config'
+  | 'provider';
+
+export class SandboxManagerError extends Error {
+  constructor(
+    public readonly code: SandboxManagerErrorCode,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+export interface SandboxManager {
+  createSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult>;
+  startSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult>;
+  stopSandbox(input: {
+    sandboxId: string;
+    userId: string;
+  }): Promise<SandboxProvisionResult>;
+  restartSandbox(input: SandboxStartInput): Promise<SandboxProvisionResult>;
+  deleteSandbox(input: {
+    sandboxId: string;
+    userId: string;
+  }): Promise<SandboxProvisionResult>;
+  getSandboxStatus(input: {
+    sandboxId: string;
+    userId: string;
+  }): Promise<SandboxProvisionResult>;
+  getSandboxEndpoint(input: {
+    sandboxId: string;
+    userId: string;
+  }): Promise<{ routerBaseUrl: string | null }>;
+  prepareSandboxEnvironment(
+    input: SandboxStartInput,
+  ): Promise<SandboxEnvironment>;
+  listRuntimeResources?(): Promise<SandboxRuntimeResource[]>;
+  cleanupRuntimeResource?(input: {
+    sandboxId: string;
+    userId?: string | null;
+    reason: string;
+  }): Promise<SandboxProvisionResult>;
+}
+
+export class NoopSandboxManager implements SandboxManager {
+  constructor(private readonly routerBaseUrl: string) {}
+
+  async createSandbox(
+    input: SandboxStartInput,
+  ): Promise<SandboxProvisionResult> {
+    return this.runningResult(input);
+  }
+
+  async startSandbox(
+    input: SandboxStartInput,
+  ): Promise<SandboxProvisionResult> {
+    return this.runningResult(input);
+  }
+
+  async restartSandbox(
+    input: SandboxStartInput,
+  ): Promise<SandboxProvisionResult> {
+    return this.runningResult(input);
+  }
+
+  async stopSandbox(): Promise<SandboxProvisionResult> {
+    return { state: 'stopped' };
+  }
+
+  async deleteSandbox(): Promise<SandboxProvisionResult> {
+    return { state: 'deleted' };
+  }
+
+  async getSandboxStatus(input: {
+    sandboxId: string;
+  }): Promise<SandboxProvisionResult> {
+    return {
+      state: 'running',
+      routerBaseUrl: this.routerBaseUrl,
+      workerServiceName: `sandbox-worker-${input.sandboxId}`,
+      k8sNamespace: 'remote-codex-sandboxes',
+      k8sPodName: `sandbox-${input.sandboxId}`,
+    };
+  }
+
+  async getSandboxEndpoint(): Promise<{ routerBaseUrl: string | null }> {
+    return { routerBaseUrl: this.routerBaseUrl };
+  }
+
+  async prepareSandboxEnvironment(
+    input: SandboxStartInput,
+  ): Promise<SandboxEnvironment> {
+    return {
+      env: {
+        REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+        REMOTE_CODEX_SANDBOX_ID: input.sandboxId,
+        REMOTE_CODEX_USER_ID: input.userId,
+        WORKSPACE_ROOT: '/workspace',
+      },
+    };
+  }
+
+  async listRuntimeResources(): Promise<SandboxRuntimeResource[]> {
+    return [];
+  }
+
+  async cleanupRuntimeResource(input: {
+    sandboxId: string;
+  }): Promise<SandboxProvisionResult> {
+    return {
+      state: 'deleted',
+      k8sNamespace: 'remote-codex-sandboxes',
+      k8sPodName: `sandbox-${input.sandboxId}`,
+    };
+  }
+
+  private runningResult(input: { sandboxId: string }): SandboxProvisionResult {
+    return {
+      state: 'running',
+      routerBaseUrl: this.routerBaseUrl,
+      workerServiceName: `sandbox-worker-${input.sandboxId}`,
+      k8sNamespace: 'remote-codex-sandboxes',
+      k8sPodName: `sandbox-${input.sandboxId}`,
+    };
+  }
+}
+
+export class LocalWorkerProcessSandboxManager implements SandboxManager {
+  private readonly processes = new Map<string, ChildProcess>();
+
+  constructor(
+    private readonly input: {
+      routerBaseUrl: string;
+      workerCommand: string;
+      workerArgs?: string[];
+      workerEnv?: Record<string, string>;
+    },
+  ) {}
+
+  async createSandbox(
+    input: SandboxStartInput,
+  ): Promise<SandboxProvisionResult> {
+    return this.startSandbox(input);
+  }
+
+  async startSandbox(
+    input: SandboxStartInput,
+  ): Promise<SandboxProvisionResult> {
+    if (!this.processes.has(input.sandboxId)) {
+      const env = await this.prepareSandboxEnvironment(input);
+      const child = spawn(
+        this.input.workerCommand,
+        this.input.workerArgs ?? [],
+        {
+          env: {
+            ...process.env,
+            ...this.input.workerEnv,
+            ...env.env,
+          },
+          stdio: 'ignore',
+          detached: true,
+        },
+      );
+      child.unref();
+      this.processes.set(input.sandboxId, child);
+    }
+    return this.runningResult(input.sandboxId);
+  }
+
+  async stopSandbox(input: {
+    sandboxId: string;
+  }): Promise<SandboxProvisionResult> {
+    const child = this.processes.get(input.sandboxId);
+    if (child) {
+      child.kill();
+      this.processes.delete(input.sandboxId);
+    }
+    return { state: 'stopped' };
+  }
+
+  async restartSandbox(
+    input: SandboxStartInput,
+  ): Promise<SandboxProvisionResult> {
+    await this.stopSandbox(input);
+    return this.startSandbox(input);
+  }
+
+  async deleteSandbox(input: {
+    sandboxId: string;
+  }): Promise<SandboxProvisionResult> {
+    await this.stopSandbox(input);
+    return { state: 'deleted' };
+  }
+
+  async getSandboxStatus(input: {
+    sandboxId: string;
+  }): Promise<SandboxProvisionResult> {
+    return this.processes.has(input.sandboxId)
+      ? this.runningResult(input.sandboxId)
+      : { state: 'stopped' };
+  }
+
+  async getSandboxEndpoint(): Promise<{ routerBaseUrl: string | null }> {
+    return { routerBaseUrl: this.input.routerBaseUrl };
+  }
+
+  async prepareSandboxEnvironment(
+    input: SandboxStartInput,
+  ): Promise<SandboxEnvironment> {
+    return {
+      env: {
+        REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+        REMOTE_CODEX_SANDBOX_ID: input.sandboxId,
+        REMOTE_CODEX_USER_ID: input.userId,
+        REMOTE_CODEX_WORKER_AUTH_TOKEN:
+          this.input.workerEnv?.REMOTE_CODEX_WORKER_AUTH_TOKEN ??
+          'local-worker-token',
+        ...(input.gateway
+          ? {
+              REMOTE_CODEX_LLM_GATEWAY_BASE_URL: input.gateway.baseUrl,
+              REMOTE_CODEX_LLM_GATEWAY_KEY_ID: input.gateway.keyId,
+              ...(this.input.workerEnv?.REMOTE_CODEX_LLM_GATEWAY_TOKEN
+                ? {
+                    REMOTE_CODEX_LLM_GATEWAY_TOKEN:
+                      this.input.workerEnv.REMOTE_CODEX_LLM_GATEWAY_TOKEN,
+                  }
+                : {}),
+            }
+          : {}),
+        ...(input.harness
+          ? {
+              ELAGENTE_HARNESS_BASE_URL: input.harness.baseUrl,
+              REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: input.harness
+                .chemistryToolsEnabled
+                ? 'true'
+                : 'false',
+              ...(this.input.workerEnv?.INACT_X_APP_KEY
+                ? {
+                    INACT_X_APP_KEY: this.input.workerEnv.INACT_X_APP_KEY,
+                  }
+                : {}),
+            }
+          : {}),
+        WORKSPACE_ROOT: this.input.workerEnv?.WORKSPACE_ROOT ?? '/workspace',
+        HOME: this.input.workerEnv?.HOME ?? '/home/agent',
+      },
+    };
+  }
+
+  async listRuntimeResources(): Promise<SandboxRuntimeResource[]> {
+    return [...this.processes.keys()].map((sandboxId) => ({
+      sandboxId,
+      state: 'running',
+      labels: {
+        'remote-codex.dev/sandbox-id': sandboxId,
+      },
+    }));
+  }
+
+  async cleanupRuntimeResource(input: {
+    sandboxId: string;
+  }): Promise<SandboxProvisionResult> {
+    return this.stopSandbox({ sandboxId: input.sandboxId });
+  }
+
+  private runningResult(sandboxId: string): SandboxProvisionResult {
+    return {
+      state: 'running',
+      routerBaseUrl: this.input.routerBaseUrl,
+      workerServiceName: `local-worker-${sandboxId}`,
+    };
+  }
+}
+
+const awsSandboxAdapterEnvSchema = z.object({
+  AWS_REGION: z.string().min(1).optional(),
+  SANDBOX_AWS_REGION: z.string().min(1).optional(),
+  SANDBOX_ENVIRONMENT: z.string().min(1).optional(),
+  NODE_ENV: z.string().min(1).optional(),
+  SANDBOX_EKS_CLUSTER_NAME: z.string().min(1),
+  SANDBOX_K8S_NAMESPACE: z.string().min(1).default('remote-codex-sandboxes'),
+  SANDBOX_K8S_SERVICE_ACCOUNT: z.string().min(1),
+  SANDBOX_WORKER_IMAGE_REPOSITORY: z.string().min(1),
+  SANDBOX_WORKER_IMAGE_TAG: z.string().min(1),
+  SANDBOX_ROUTER_BASE_URL: z.string().url(),
+  SANDBOX_WORKER_AUTH_TOKEN_SECRET_NAME: z.string().min(1),
+  SANDBOX_SUBNET_IDS: z.string().min(1),
+  SANDBOX_SECURITY_GROUP_IDS: z.string().min(1),
+  SANDBOX_RESOURCE_PROFILE: z
+    .enum(['small', 'standard', 'large'])
+    .default('standard'),
+  SANDBOX_WORKER_ENABLED_AGENT_PROVIDERS: z.string().default('codex'),
+  SANDBOX_WORKSPACE_PVC_NAME: z.string().min(1).optional(),
+  SANDBOX_WORKSPACE_VOLUME_SUBPATH_PREFIX: z.string().min(1).optional(),
+});
+
+export interface AwsSandboxAdapterConfig {
+  region: string;
+  environmentName: string;
+  clusterName: string;
+  namespace: string;
+  serviceAccountName: string;
+  imageRepository: string;
+  imageTag: string;
+  routerBaseUrl: string;
+  workerAuthTokenSecretName: string;
+  subnetIds: string[];
+  securityGroupIds: string[];
+  resourceProfile: 'small' | 'standard' | 'large';
+  enabledAgentProviders: string;
+  workspacePersistence: {
+    pvcName: string;
+    subPathPrefix: string | null;
+  } | null;
+}
+
+export interface AwsWorkerPodSpec {
+  namespace: string;
+  podName: string;
+  serviceName: string;
+  image: string;
+  serviceAccountName: string;
+  labels: Record<string, string>;
+  env: Record<string, string>;
+  secretEnv: Record<string, SandboxSecretEnvRef>;
+  subnetIds: string[];
+  securityGroupIds: string[];
+  resourceProfile: AwsSandboxAdapterConfig['resourceProfile'];
+  resources: {
+    cpu: string;
+    memory: string;
+    ephemeralStorage: string;
+  };
+  workspaceVolume?: {
+    pvcName: string;
+    mountPath: string;
+    initMountPath: string;
+    subPath: string;
+  };
+}
+
+export interface AwsWorkerPodStatus {
+  phase: 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Unknown' | string;
+  ready: boolean;
+  deleting?: boolean;
+  reason?: string | null;
+  message?: string | null;
+}
+
+export interface AwsWorkerEndpoint {
+  routerBaseUrl?: string | null;
+  workerServiceName?: string | null;
+}
+
+export interface AwsWorkerRuntimeResource extends SandboxRuntimeResource {
+  podName: string;
+  serviceName?: string | null;
+}
+
+export interface AwsSandboxKubernetesClient {
+  applyWorkerPod(spec: AwsWorkerPodSpec): Promise<void>;
+  upsertSecretKey?(input: {
+    namespace: string;
+    secretName: string;
+    key: string;
+    value: string;
+  }): Promise<void>;
+  hasSecretKey?(input: {
+    namespace: string;
+    secretName: string;
+    key: string;
+  }): Promise<boolean>;
+  deleteWorkerPod(input: {
+    namespace: string;
+    podName: string;
+    serviceName: string;
+    waitForPodDeletion?: boolean;
+  }): Promise<{ deleted: boolean }>;
+  getWorkerPod(input: {
+    namespace: string;
+    podName: string;
+  }): Promise<AwsWorkerPodStatus | null>;
+  getWorkerEndpoint(input: {
+    namespace: string;
+    serviceName: string;
+  }): Promise<AwsWorkerEndpoint>;
+  listWorkerPods?(input: {
+    namespace: string;
+    selector: Record<string, string>;
+  }): Promise<AwsWorkerRuntimeResource[]>;
+}
+
+function shellJson(value: unknown) {
+  return JSON.stringify(value);
+}
+
+function labelsToSelector(selector: Record<string, string>) {
+  return Object.entries(selector)
+    .map(([key, value]) => `${key}=${value}`)
+    .join(',');
+}
+
+function workerPodManifest(spec: AwsWorkerPodSpec) {
+  const workspaceVolumeName = 'workspace-persistence';
+  const workspaceVolume = spec.workspaceVolume;
+  const workspaceVolumeMount = workspaceVolume
+    ? {
+        name: workspaceVolumeName,
+        mountPath: workspaceVolume.mountPath,
+        subPathExpr: '$(REMOTE_CODEX_WORKSPACE_VOLUME_SUBPATH)',
+      }
+    : null;
+  const workspaceInitContainer = workspaceVolume
+    ? [
+        {
+          name: 'prepare-workspace-volume',
+          image: spec.image,
+          imagePullPolicy: 'IfNotPresent',
+          command: ['/bin/sh', '-lc'],
+          args: [
+            [
+              'set -eu',
+              'mkdir -p "${REMOTE_CODEX_WORKSPACE_VOLUME_ROOT}/${REMOTE_CODEX_WORKSPACE_VOLUME_SUBPATH}"',
+              'chown 1000:1000 "${REMOTE_CODEX_WORKSPACE_VOLUME_ROOT}/${REMOTE_CODEX_WORKSPACE_VOLUME_SUBPATH}" || true',
+              'chmod 700 "${REMOTE_CODEX_WORKSPACE_VOLUME_ROOT}/${REMOTE_CODEX_WORKSPACE_VOLUME_SUBPATH}"',
+            ].join('; '),
+          ],
+          env: [
+            {
+              name: 'REMOTE_CODEX_WORKSPACE_VOLUME_ROOT',
+              value: workspaceVolume.initMountPath,
+            },
+            {
+              name: 'REMOTE_CODEX_WORKSPACE_VOLUME_SUBPATH',
+              value: workspaceVolume.subPath,
+            },
+          ],
+          volumeMounts: [
+            {
+              name: workspaceVolumeName,
+              mountPath: workspaceVolume.initMountPath,
+            },
+          ],
+          securityContext: {
+            runAsUser: 0,
+            runAsGroup: 0,
+          },
+          resources: {
+            requests: {
+              cpu: '50m',
+              memory: '64Mi',
+            },
+            limits: {
+              cpu: '100m',
+              memory: '128Mi',
+            },
+          },
+        },
+      ]
+    : undefined;
+
+  return {
+    apiVersion: 'v1',
+    kind: 'Pod',
+    metadata: {
+      name: spec.podName,
+      namespace: spec.namespace,
+      labels: spec.labels,
+      annotations: {
+        'remote-codex.dev/subnet-ids': spec.subnetIds.join(','),
+        'remote-codex.dev/security-group-ids': spec.securityGroupIds.join(','),
+      },
+    },
+    spec: {
+      serviceAccountName: spec.serviceAccountName,
+      restartPolicy: 'Never',
+      terminationGracePeriodSeconds: 60,
+      ...(workspaceInitContainer
+        ? { initContainers: workspaceInitContainer }
+        : {}),
+      containers: [
+        {
+          name: 'worker',
+          image: spec.image,
+          imagePullPolicy: 'IfNotPresent',
+          ports: [
+            {
+              name: 'http',
+              containerPort: 8787,
+            },
+          ],
+          env: [
+            ...Object.entries(spec.env).map(([name, value]) => ({
+              name,
+              value,
+            })),
+            ...Object.entries(spec.secretEnv).map(([name, ref]) => ({
+              name,
+              valueFrom: {
+                secretKeyRef: {
+                  name: ref.secretName,
+                  key: ref.key,
+                },
+              },
+            })),
+          ],
+          ...(workspaceVolumeMount
+            ? { volumeMounts: [workspaceVolumeMount] }
+            : {}),
+          resources: {
+            requests: {
+              cpu: spec.resources.cpu,
+              memory: spec.resources.memory,
+              'ephemeral-storage': spec.resources.ephemeralStorage,
+            },
+            limits: {
+              cpu: spec.resources.cpu,
+              memory: spec.resources.memory,
+              'ephemeral-storage': spec.resources.ephemeralStorage,
+            },
+          },
+          readinessProbe: {
+            httpGet: {
+              path: '/readyz',
+              port: 'http',
+            },
+            initialDelaySeconds: 5,
+            periodSeconds: 10,
+            failureThreshold: 18,
+          },
+          livenessProbe: {
+            httpGet: {
+              path: '/readyz',
+              port: 'http',
+            },
+            initialDelaySeconds: 20,
+            periodSeconds: 30,
+          },
+        },
+      ],
+      ...(workspaceVolume
+        ? {
+            volumes: [
+              {
+                name: workspaceVolumeName,
+                persistentVolumeClaim: {
+                  claimName: workspaceVolume.pvcName,
+                },
+              },
+            ],
+          }
+        : {}),
+    },
+  };
+}
+
+function workerServiceManifest(spec: AwsWorkerPodSpec) {
+  return {
+    apiVersion: 'v1',
+    kind: 'Service',
+    metadata: {
+      name: spec.serviceName,
+      namespace: spec.namespace,
+      labels: spec.labels,
+    },
+    spec: {
+      type: 'ClusterIP',
+      selector: {
+        'remote-codex.dev/sandbox-id':
+          spec.labels['remote-codex.dev/sandbox-id'],
+        'remote-codex.dev/runtime-role': 'worker',
+      },
+      ports: [
+        {
+          name: 'http',
+          port: 8787,
+          targetPort: 'http',
+        },
+      ],
+    },
+  };
+}
+
+function podReadyFromStatus(pod: any) {
+  const conditions = Array.isArray(pod?.status?.conditions)
+    ? pod.status.conditions
+    : [];
+  return conditions.some(
+    (condition: any) =>
+      condition?.type === 'Ready' && condition?.status === 'True',
+  );
+}
+
+function podReasonFromStatus(pod: any) {
+  const containerStatuses = Array.isArray(pod?.status?.containerStatuses)
+    ? pod.status.containerStatuses
+    : [];
+  const waiting = containerStatuses
+    .map((status: any) => status?.state?.waiting)
+    .find((state: any) => state?.reason || state?.message);
+  if (waiting) {
+    return {
+      reason: waiting.reason ?? null,
+      message: waiting.message ?? null,
+    };
+  }
+
+  const conditions = Array.isArray(pod?.status?.conditions)
+    ? pod.status.conditions
+    : [];
+  const notReady = conditions
+    .filter((condition: any) => condition?.status !== 'True')
+    .find((condition: any) => condition?.reason || condition?.message);
+  return {
+    reason: notReady?.reason ?? pod?.status?.reason ?? null,
+    message: notReady?.message ?? pod?.status?.message ?? null,
+  };
+}
+
+export class KubectlAwsSandboxKubernetesClient implements AwsSandboxKubernetesClient {
+  constructor(
+    private readonly input: {
+      kubectlPath?: string;
+      timeoutMs?: number;
+    } = {},
+  ) {}
+
+  async applyWorkerPod(spec: AwsWorkerPodSpec): Promise<void> {
+    await this.kubectl(
+      ['apply', '-f', '-'],
+      `${shellJson(workerServiceManifest(spec))}\n---\n${shellJson(workerPodManifest(spec))}\n`,
+    );
+  }
+
+  async upsertSecretKey(input: {
+    namespace: string;
+    secretName: string;
+    key: string;
+    value: string;
+  }): Promise<void> {
+    const manifest = {
+      apiVersion: 'v1',
+      kind: 'Secret',
+      metadata: {
+        name: input.secretName,
+        namespace: input.namespace,
+      },
+      type: 'Opaque',
+      stringData: {
+        [input.key]: input.value,
+      },
+    };
+    await this.kubectl(['apply', '-f', '-'], `${shellJson(manifest)}\n`);
+  }
+
+  async hasSecretKey(input: {
+    namespace: string;
+    secretName: string;
+    key: string;
+  }): Promise<boolean> {
+    try {
+      const result = await this.kubectl([
+        'get',
+        'secret',
+        input.secretName,
+        '-n',
+        input.namespace,
+        '-o',
+        'json',
+      ]);
+      const secret = JSON.parse(result.stdout) as {
+        data?: Record<string, unknown>;
+      };
+      return typeof secret.data?.[input.key] === 'string';
+    } catch {
+      return false;
+    }
+  }
+
+  async deleteWorkerPod(input: {
+    namespace: string;
+    podName: string;
+    serviceName: string;
+    waitForPodDeletion?: boolean;
+  }): Promise<{ deleted: boolean }> {
+    const podExists = await this.exists([
+      'get',
+      'pod',
+      input.podName,
+      '-n',
+      input.namespace,
+    ]);
+    const serviceExists = await this.exists([
+      'get',
+      'service',
+      input.serviceName,
+      '-n',
+      input.namespace,
+    ]);
+    await this.kubectl([
+      'delete',
+      'pod',
+      input.podName,
+      '-n',
+      input.namespace,
+      '--ignore-not-found=true',
+      ...(input.waitForPodDeletion === false ? ['--wait=false'] : []),
+    ]);
+    await this.kubectl([
+      'delete',
+      'service',
+      input.serviceName,
+      '-n',
+      input.namespace,
+      '--ignore-not-found=true',
+    ]);
+    return { deleted: podExists || serviceExists };
+  }
+
+  async getWorkerPod(input: {
+    namespace: string;
+    podName: string;
+  }): Promise<AwsWorkerPodStatus | null> {
+    const result = await this.kubectl(
+      ['get', 'pod', input.podName, '-n', input.namespace, '-o', 'json'],
+      undefined,
+      { allowNotFound: true },
+    );
+    if (result.notFound) {
+      return null;
+    }
+    const pod = JSON.parse(result.stdout);
+    const reason = podReasonFromStatus(pod);
+    return {
+      phase: pod?.status?.phase ?? 'Unknown',
+      ready: podReadyFromStatus(pod),
+      deleting: typeof pod?.metadata?.deletionTimestamp === 'string',
+      reason: reason.reason,
+      message: reason.message,
+    };
+  }
+
+  async getWorkerEndpoint(input: {
+    namespace: string;
+    serviceName: string;
+  }): Promise<AwsWorkerEndpoint> {
+    return {
+      workerServiceName: input.serviceName,
+    };
+  }
+
+  async listWorkerPods(input: {
+    namespace: string;
+    selector: Record<string, string>;
+  }): Promise<AwsWorkerRuntimeResource[]> {
+    const result = await this.kubectl([
+      'get',
+      'pods',
+      '-n',
+      input.namespace,
+      '-l',
+      labelsToSelector(input.selector),
+      '-o',
+      'json',
+    ]);
+    const payload = JSON.parse(result.stdout);
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    return items.map((pod: any) => ({
+      sandboxId:
+        pod?.metadata?.labels?.['remote-codex.dev/sandbox-id'] ??
+        pod?.metadata?.labels?.['remote-codex/sandbox-id'] ??
+        pod?.metadata?.name,
+      userId:
+        pod?.metadata?.labels?.['remote-codex.dev/user-id'] ??
+        pod?.metadata?.labels?.['remote-codex/user-id'] ??
+        null,
+      podName: pod?.metadata?.name,
+      serviceName: pod?.metadata?.name,
+      state: pod?.status?.phase ?? 'Unknown',
+      labels: pod?.metadata?.labels ?? {},
+    }));
+  }
+
+  private async exists(args: string[]) {
+    const result = await this.kubectl(args, undefined, { allowNotFound: true });
+    return !result.notFound;
+  }
+
+  private async kubectl(
+    args: string[],
+    stdin?: string,
+    options: { allowNotFound?: boolean } = {},
+  ): Promise<{ stdout: string; notFound: boolean }> {
+    try {
+      if (stdin !== undefined) {
+        const result = await this.spawnKubectl(args, stdin);
+        return { stdout: result.stdout, notFound: false };
+      }
+      const result = await execFileAsync(
+        this.input.kubectlPath ?? 'kubectl',
+        args,
+        {
+          timeout: this.input.timeoutMs ?? 60_000,
+          maxBuffer: 10 * 1024 * 1024,
+        },
+      );
+      return { stdout: result.stdout, notFound: false };
+    } catch (error) {
+      const failure = error as {
+        stdout?: string;
+        stderr?: string;
+        message?: string;
+      };
+      const stderr = failure.stderr ?? '';
+      if (options.allowNotFound && /not found/i.test(stderr)) {
+        return { stdout: failure.stdout ?? '', notFound: true };
+      }
+      if (options.allowNotFound && /not found/i.test(failure.message ?? '')) {
+        return { stdout: failure.stdout ?? '', notFound: true };
+      }
+      throw new SandboxManagerError(
+        'provider',
+        `kubectl ${args.join(' ')} failed: ${stderr || failure.message || String(error)}`,
+      );
+    }
+  }
+
+  private spawnKubectl(
+    args: string[],
+    stdin: string,
+  ): Promise<{ stdout: string }> {
+    return new Promise((resolve, reject) => {
+      const child = spawn(this.input.kubectlPath ?? 'kubectl', args, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      let stdout = '';
+      let stderr = '';
+      const timeout = setTimeout(() => {
+        child.kill('SIGTERM');
+        reject(new Error(`kubectl ${args.join(' ')} timed out.`));
+      }, this.input.timeoutMs ?? 60_000);
+      child.stdout.setEncoding('utf8');
+      child.stderr.setEncoding('utf8');
+      child.stdout.on('data', (chunk) => {
+        stdout += chunk;
+      });
+      child.stderr.on('data', (chunk) => {
+        stderr += chunk;
+      });
+      child.on('error', (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
+      child.on('close', (code) => {
+        clearTimeout(timeout);
+        if (code === 0) {
+          resolve({ stdout });
+          return;
+        }
+        reject(
+          new Error(
+            stderr || `kubectl ${args.join(' ')} exited with code ${code}.`,
+          ),
+        );
+      });
+      child.stdin.end(stdin);
+    });
+  }
+}
+
+export class AwsSandboxSecretWriter implements SandboxSecretWriter {
+  constructor(
+    private readonly input: {
+      namespace: string;
+      kubernetesClient: AwsSandboxKubernetesClient;
+    },
+  ) {}
+
+  async putSecretValue(input: {
+    namespace?: string;
+    secretName: string;
+    key: string;
+    value: string;
+  }): Promise<void> {
+    if (!this.input.kubernetesClient.upsertSecretKey) {
+      throw new SandboxManagerError(
+        'provider',
+        'AWS Kubernetes client cannot write sandbox secrets.',
+      );
+    }
+    await this.input.kubernetesClient.upsertSecretKey({
+      namespace: input.namespace ?? this.input.namespace,
+      secretName: input.secretName,
+      key: input.key,
+      value: input.value,
+    });
+  }
+
+  async hasSecretValue(input: {
+    namespace?: string;
+    secretName: string;
+    key: string;
+  }): Promise<boolean> {
+    if (!this.input.kubernetesClient.hasSecretKey) {
+      return false;
+    }
+    return this.input.kubernetesClient.hasSecretKey({
+      namespace: input.namespace ?? this.input.namespace,
+      secretName: input.secretName,
+      key: input.key,
+    });
+  }
+}
+
+function commaList(value: string) {
+  return value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+export function loadAwsSandboxAdapterConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): AwsSandboxAdapterConfig {
+  const parsed = awsSandboxAdapterEnvSchema.parse(env);
+  const subnetIds = commaList(parsed.SANDBOX_SUBNET_IDS);
+  const securityGroupIds = commaList(parsed.SANDBOX_SECURITY_GROUP_IDS);
+  if (subnetIds.length === 0) {
+    throw new SandboxManagerError(
+      'config',
+      'SANDBOX_SUBNET_IDS must include at least one subnet id.',
+    );
+  }
+  if (securityGroupIds.length === 0) {
+    throw new SandboxManagerError(
+      'config',
+      'SANDBOX_SECURITY_GROUP_IDS must include at least one security group id.',
+    );
+  }
+
+  return {
+    region: parsed.SANDBOX_AWS_REGION ?? parsed.AWS_REGION ?? 'us-east-1',
+    environmentName: kubernetesLabelValue(
+      parsed.SANDBOX_ENVIRONMENT ?? parsed.NODE_ENV ?? 'development',
+    ),
+    clusterName: parsed.SANDBOX_EKS_CLUSTER_NAME,
+    namespace: parsed.SANDBOX_K8S_NAMESPACE,
+    serviceAccountName: parsed.SANDBOX_K8S_SERVICE_ACCOUNT,
+    imageRepository: parsed.SANDBOX_WORKER_IMAGE_REPOSITORY,
+    imageTag: parsed.SANDBOX_WORKER_IMAGE_TAG,
+    routerBaseUrl: parsed.SANDBOX_ROUTER_BASE_URL,
+    workerAuthTokenSecretName: parsed.SANDBOX_WORKER_AUTH_TOKEN_SECRET_NAME,
+    subnetIds,
+    securityGroupIds,
+    resourceProfile: parsed.SANDBOX_RESOURCE_PROFILE,
+    enabledAgentProviders: parsed.SANDBOX_WORKER_ENABLED_AGENT_PROVIDERS,
+    workspacePersistence: parsed.SANDBOX_WORKSPACE_PVC_NAME
+      ? {
+          pvcName: parsed.SANDBOX_WORKSPACE_PVC_NAME,
+          subPathPrefix:
+            parsed.SANDBOX_WORKSPACE_VOLUME_SUBPATH_PREFIX?.trim() || null,
+        }
+      : null,
+  };
+}
+
+const awsResourceProfiles: Record<
+  AwsSandboxAdapterConfig['resourceProfile'],
+  AwsWorkerPodSpec['resources']
+> = {
+  small: {
+    cpu: '500m',
+    memory: '1Gi',
+    ephemeralStorage: '20Gi',
+  },
+  standard: {
+    cpu: '1000m',
+    memory: '2Gi',
+    ephemeralStorage: '40Gi',
+  },
+  large: {
+    cpu: '2000m',
+    memory: '4Gi',
+    ephemeralStorage: '80Gi',
+  },
+};
+
+const sandboxWorkerCleanupScope = 'sandbox-worker';
+
+function kubernetesLabelValue(value: string) {
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9_.-]/g, '-')
+    .replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '');
+  if (normalized.length > 0 && normalized.length <= 63) {
+    return normalized;
+  }
+  const digest = createHash('sha256').update(value).digest('hex').slice(0, 12);
+  const prefix = normalized
+    .replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '')
+    .slice(0, 50)
+    .replace(/[^a-z0-9]+$/g, '');
+  return prefix ? `${prefix}-${digest}` : digest;
+}
+
+function filesystemPathSegment(value: string) {
+  const normalized = value
+    .replace(/[^A-Za-z0-9_.-]/g, '-')
+    .replace(/^[.-]+|[.-]+$/g, '');
+  if (normalized.length > 0 && normalized.length <= 128) {
+    return normalized;
+  }
+  const digest = createHash('sha256').update(value).digest('hex').slice(0, 16);
+  const prefix = normalized.slice(0, 111).replace(/[.-]+$/g, '');
+  return prefix ? `${prefix}-${digest}` : digest;
+}
+
+function workspaceVolumeSubPath(input: {
+  sandboxId: string;
+  subPathPrefix: string | null;
+}) {
+  const sandboxPath = filesystemPathSegment(input.sandboxId);
+  if (!input.subPathPrefix) {
+    return sandboxPath;
+  }
+  const prefixSegments = input.subPathPrefix
+    .split('/')
+    .map((segment) => filesystemPathSegment(segment))
+    .filter(Boolean);
+  return [...prefixSegments, sandboxPath].join('/');
+}
+
+export function awsSandboxWorkerLabels(input: {
+  sandboxId: string;
+  userId: string;
+  imageTag: string;
+  resourceProfile: AwsSandboxAdapterConfig['resourceProfile'];
+  environmentName: string;
+}) {
+  const sandboxId = kubernetesLabelValue(input.sandboxId);
+  const userId = kubernetesLabelValue(input.userId);
+  const imageTag = kubernetesLabelValue(input.imageTag);
+  const environmentName = kubernetesLabelValue(input.environmentName);
+  return {
+    'app.kubernetes.io/name': 'remote-codex-worker',
+    'app.kubernetes.io/part-of': 'remote-codex',
+    'app.kubernetes.io/component': 'sandbox-worker',
+    'app.kubernetes.io/managed-by': 'remote-codex-control-plane',
+    'app.kubernetes.io/instance': sandboxId,
+    'remote-codex.dev/runtime-role': 'worker',
+    'remote-codex.dev/cleanup-scope': sandboxWorkerCleanupScope,
+    'remote-codex.dev/environment': environmentName,
+    'remote-codex.dev/sandbox-id': sandboxId,
+    'remote-codex.dev/user-id': userId,
+    'remote-codex.dev/image-tag': imageTag,
+    'remote-codex.dev/resource-profile': input.resourceProfile,
+    'remote-codex/runtime-role': 'worker',
+    'remote-codex/sandbox-id': sandboxId,
+    'remote-codex/user-id': userId,
+    'remote-codex/image-tag': imageTag,
+    'remote-codex/resource-profile': input.resourceProfile,
+  };
+}
+
+export function awsSandboxWorkerCleanupSelector(input: {
+  environmentName: string;
+  sandboxId?: string;
+}) {
+  const labels: Record<string, string> = {
+    'remote-codex.dev/cleanup-scope': sandboxWorkerCleanupScope,
+    'remote-codex.dev/environment': kubernetesLabelValue(input.environmentName),
+  };
+  if (input.sandboxId) {
+    labels['remote-codex.dev/sandbox-id'] = kubernetesLabelValue(
+      input.sandboxId,
+    );
+  }
+  return labels;
+}
+
+export class AwsEksFargateSandboxManager implements SandboxManager {
+  constructor(
+    readonly config: AwsSandboxAdapterConfig,
+    private readonly kubernetesClient?: AwsSandboxKubernetesClient,
+  ) {}
+
+  async createSandbox(
+    input: SandboxStartInput,
+  ): Promise<SandboxProvisionResult> {
+    return this.startSandbox(input);
+  }
+
+  async startSandbox(
+    input: SandboxStartInput,
+  ): Promise<SandboxProvisionResult> {
+    const podSpec = await this.buildWorkerPodSpec(input);
+    const kubernetesClient = this.requireKubernetesClient('start sandboxes');
+    await kubernetesClient.deleteWorkerPod({
+      namespace: this.config.namespace,
+      podName: podSpec.podName,
+      serviceName: podSpec.serviceName,
+    });
+    await kubernetesClient.applyWorkerPod(podSpec);
+    return {
+      state: 'starting',
+      routerBaseUrl: this.config.routerBaseUrl,
+      workerServiceName: podSpec.serviceName,
+      k8sNamespace: this.config.namespace,
+      k8sPodName: podSpec.podName,
+      statusReason: 'Worker Pod has been applied and is waiting for readiness.',
+      startupProgress: 25,
+    };
+  }
+
+  async stopSandbox(input: {
+    sandboxId: string;
+  }): Promise<SandboxProvisionResult> {
+    const podName = this.podName(input.sandboxId);
+    const workerServiceName = this.workerServiceName(input.sandboxId);
+    const result = await this.requireKubernetesClient(
+      'stop sandboxes',
+    ).deleteWorkerPod({
+      namespace: this.config.namespace,
+      podName,
+      serviceName: workerServiceName,
+      waitForPodDeletion: false,
+    });
+    return {
+      state: result.deleted ? 'stopping' : 'stopped',
+      routerBaseUrl: this.config.routerBaseUrl,
+      workerServiceName,
+      k8sNamespace: this.config.namespace,
+      k8sPodName: podName,
+      statusReason: result.deleted
+        ? 'Worker Pod deletion has been requested.'
+        : 'Worker Pod was already absent.',
+      startupProgress: result.deleted ? 25 : 0,
+    };
+  }
+
+  async restartSandbox(
+    input: SandboxStartInput,
+  ): Promise<SandboxProvisionResult> {
+    await this.stopSandbox(input);
+    return this.startSandbox(input);
+  }
+
+  async deleteSandbox(input: {
+    sandboxId: string;
+  }): Promise<SandboxProvisionResult> {
+    await this.stopSandbox(input);
+    return {
+      state: 'deleted',
+      routerBaseUrl: this.config.routerBaseUrl,
+      workerServiceName: this.workerServiceName(input.sandboxId),
+      k8sNamespace: this.config.namespace,
+      k8sPodName: this.podName(input.sandboxId),
+    };
+  }
+
+  async getSandboxStatus(input: {
+    sandboxId: string;
+  }): Promise<SandboxProvisionResult> {
+    const podName = this.podName(input.sandboxId);
+    const workerServiceName = this.workerServiceName(input.sandboxId);
+    const podStatus = await this.requireKubernetesClient(
+      'poll sandbox status',
+    ).getWorkerPod({
+      namespace: this.config.namespace,
+      podName,
+    });
+    return this.resultFromPodStatus({
+      podStatus,
+      podName,
+      workerServiceName,
+    });
+  }
+
+  async getSandboxEndpoint(input: {
+    sandboxId: string;
+  }): Promise<{ routerBaseUrl: string | null }> {
+    const endpoint = await this.requireKubernetesClient(
+      'discover sandbox endpoints',
+    ).getWorkerEndpoint({
+      namespace: this.config.namespace,
+      serviceName: this.workerServiceName(input.sandboxId),
+    });
+    return {
+      routerBaseUrl: endpoint.routerBaseUrl ?? this.config.routerBaseUrl,
+    };
+  }
+
+  async listRuntimeResources(): Promise<SandboxRuntimeResource[]> {
+    if (!this.kubernetesClient?.listWorkerPods) {
+      return [];
+    }
+    return this.kubernetesClient.listWorkerPods({
+      namespace: this.config.namespace,
+      selector: awsSandboxWorkerCleanupSelector({
+        environmentName: this.config.environmentName,
+      }),
+    });
+  }
+
+  async cleanupRuntimeResource(input: {
+    sandboxId: string;
+    userId?: string | null;
+  }): Promise<SandboxProvisionResult> {
+    return this.stopSandbox({
+      sandboxId: input.sandboxId,
+    });
+  }
+
+  async prepareSandboxEnvironment(
+    input: SandboxStartInput,
+  ): Promise<SandboxEnvironmentSpec> {
+    return {
+      env: {
+        REMOTE_CODEX_RUNTIME_ROLE: 'worker',
+        REMOTE_CODEX_SANDBOX_ID: input.sandboxId,
+        REMOTE_CODEX_USER_ID: input.userId,
+        REMOTE_CODEX_SANDBOX_REGION: input.region,
+        REMOTE_CODEX_SANDBOX_S3_PREFIX: input.s3Prefix,
+        SANDBOX_ROUTER_BASE_URL: this.config.routerBaseUrl,
+        HOST: '0.0.0.0',
+        PORT: '8787',
+        WORKSPACE_ROOT: '/workspace',
+        HOME: '/home/agent',
+        CODEX_HOME: '/home/agent/.codex',
+        CLAUDE_HOME: '/home/agent/.claude',
+        CLAUDE_CONFIG_DIR: '/home/agent/.claude',
+        OPENCODE_HOME: '/home/agent/.opencode',
+        DATABASE_URL: '/home/agent/.remote-codex/worker.sqlite',
+        REMOTE_CODEX_DISABLE_BUILD_RESTART: 'true',
+        REMOTE_CODEX_ENABLED_AGENT_PROVIDERS:
+          input.enabledAgentProviders ?? this.config.enabledAgentProviders,
+        ...(this.config.workspacePersistence
+          ? {
+              REMOTE_CODEX_WORKSPACE_PERSISTENCE: 'efs',
+              REMOTE_CODEX_WORKSPACE_VOLUME_PVC:
+                this.config.workspacePersistence.pvcName,
+              REMOTE_CODEX_WORKSPACE_VOLUME_SUBPATH: workspaceVolumeSubPath({
+                sandboxId: input.sandboxId,
+                subPathPrefix: this.config.workspacePersistence.subPathPrefix,
+              }),
+            }
+          : {}),
+        ...(input.gateway
+          ? {
+              REMOTE_CODEX_LLM_GATEWAY_BASE_URL: input.gateway.baseUrl,
+              REMOTE_CODEX_LLM_GATEWAY_KEY_ID: input.gateway.keyId,
+              ...(input.gateway.staticToken
+                ? { REMOTE_CODEX_LLM_GATEWAY_TOKEN: input.gateway.staticToken }
+                : {}),
+            }
+          : {}),
+        ...(input.harness
+          ? {
+              ELAGENTE_HARNESS_BASE_URL: input.harness.baseUrl,
+              REMOTE_CODEX_CHEMISTRY_TOOLS_ENABLED: input.harness
+                .chemistryToolsEnabled
+                ? 'true'
+                : 'false',
+            }
+          : {}),
+      },
+      secretEnv: {
+        REMOTE_CODEX_WORKER_AUTH_TOKEN: {
+          secretName: this.config.workerAuthTokenSecretName,
+          key: 'token',
+        },
+        REMOTE_CODEX_WORKER_IDENTITY_SECRET: {
+          secretName: this.config.workerAuthTokenSecretName,
+          key: 'identity-secret',
+        },
+        ...(input.gateway?.tokenSecretName && !input.gateway.staticToken
+          ? {
+              REMOTE_CODEX_LLM_GATEWAY_TOKEN: {
+                secretName: input.gateway.tokenSecretName,
+                key: input.gateway.keyId,
+              },
+            }
+          : {}),
+        ...(input.harness?.appKeySecretName
+          ? {
+              INACT_X_APP_KEY: {
+                secretName: input.harness.appKeySecretName,
+                key: input.sandboxId,
+              },
+            }
+          : {}),
+      },
+    };
+  }
+
+  private async buildWorkerPodSpec(
+    input: SandboxStartInput,
+  ): Promise<AwsWorkerPodSpec> {
+    const env = await this.prepareSandboxEnvironment(input);
+    const image = `${this.config.imageRepository}:${this.config.imageTag}`;
+    return {
+      namespace: this.config.namespace,
+      podName: this.podName(input.sandboxId),
+      serviceName: this.workerServiceName(input.sandboxId),
+      image,
+      serviceAccountName: this.config.serviceAccountName,
+      labels: awsSandboxWorkerLabels({
+        sandboxId: input.sandboxId,
+        userId: input.userId,
+        imageTag: this.config.imageTag,
+        resourceProfile: this.config.resourceProfile,
+        environmentName: this.config.environmentName,
+      }),
+      env: env.env,
+      secretEnv: env.secretEnv ?? {},
+      subnetIds: this.config.subnetIds,
+      securityGroupIds: this.config.securityGroupIds,
+      resourceProfile: this.config.resourceProfile,
+      resources: awsResourceProfiles[this.config.resourceProfile],
+      ...(this.config.workspacePersistence
+        ? {
+            workspaceVolume: {
+              pvcName: this.config.workspacePersistence.pvcName,
+              mountPath: '/workspace',
+              initMountPath: '/mnt/remote-codex-workspaces',
+              subPath: workspaceVolumeSubPath({
+                sandboxId: input.sandboxId,
+                subPathPrefix: this.config.workspacePersistence.subPathPrefix,
+              }),
+            },
+          }
+        : {}),
+    };
+  }
+
+  private resultFromPodStatus(input: {
+    podStatus: AwsWorkerPodStatus | null;
+    podName: string;
+    workerServiceName: string;
+  }): SandboxProvisionResult {
+    const base = {
+      routerBaseUrl: this.config.routerBaseUrl,
+      workerServiceName: input.workerServiceName,
+      k8sNamespace: this.config.namespace,
+      k8sPodName: input.podName,
+    };
+
+    if (!input.podStatus) {
+      return {
+        ...base,
+        state: 'stopped',
+        statusReason: 'Worker Pod is absent.',
+      };
+    }
+
+    const reason = input.podStatus.reason ?? undefined;
+    const message = input.podStatus.message ?? undefined;
+    const statusReason = message ?? reason ?? undefined;
+
+    if (input.podStatus.deleting) {
+      return {
+        ...base,
+        state: 'stopping',
+        statusReason:
+          statusReason ?? 'Worker Pod deletion is in progress.',
+        startupProgress: 25,
+      };
+    }
+
+    if (input.podStatus.phase === 'Running' && input.podStatus.ready) {
+      return {
+        ...base,
+        state: 'running',
+        statusReason: 'Worker Pod is running and ready.',
+        startupProgress: 100,
+        lastFailureCode: null,
+        lastFailureMessage: null,
+      };
+    }
+
+    if (input.podStatus.phase === 'Running') {
+      return {
+        ...base,
+        state: reason === 'ReadinessTimeout' ? 'failed' : 'degraded',
+        statusReason: statusReason ?? 'Worker Pod is running but not ready.',
+        startupProgress: reason === 'ReadinessTimeout' ? 100 : 75,
+        lastFailureCode:
+          reason === 'ReadinessTimeout' ? 'readiness_timeout' : null,
+        lastFailureMessage:
+          reason === 'ReadinessTimeout' ? (statusReason ?? null) : null,
+      };
+    }
+
+    if (input.podStatus.phase === 'Pending') {
+      if (reason === 'Unschedulable' || reason === 'FailedScheduling') {
+        return {
+          ...base,
+          state: 'failed',
+          statusReason: statusReason ?? 'Worker Pod cannot be scheduled.',
+          startupProgress: 25,
+          lastFailureCode: 'capacity',
+          lastFailureMessage: statusReason ?? null,
+        };
+      }
+      if (reason === 'ErrImagePull' || reason === 'ImagePullBackOff') {
+        return {
+          ...base,
+          state: 'failed',
+          statusReason: statusReason ?? 'Worker image cannot be pulled.',
+          startupProgress: 25,
+          lastFailureCode: 'image_pull',
+          lastFailureMessage: statusReason ?? null,
+        };
+      }
+      return {
+        ...base,
+        state: 'starting',
+        statusReason: statusReason ?? 'Worker Pod is pending.',
+        startupProgress: 50,
+      };
+    }
+
+    if (input.podStatus.phase === 'Succeeded') {
+      return {
+        ...base,
+        state: 'stopped',
+        statusReason: statusReason ?? 'Worker Pod completed.',
+        startupProgress: 0,
+      };
+    }
+
+    if (input.podStatus.phase === 'Failed') {
+      return {
+        ...base,
+        state: 'failed',
+        statusReason: statusReason ?? 'Worker Pod failed.',
+        startupProgress: 100,
+        lastFailureCode: reason ?? 'pod_failed',
+        lastFailureMessage: statusReason ?? null,
+      };
+    }
+
+    return {
+      ...base,
+      state: 'unknown',
+      statusReason: statusReason ?? 'Worker Pod state is unknown.',
+      startupProgress: 0,
+    };
+  }
+
+  private podName(sandboxId: string) {
+    const safeSandboxId = sandboxId
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, '-')
+      .replace(/^-+|-+$/g, '');
+    return `remote-codex-worker-${safeSandboxId}`.slice(0, 63);
+  }
+
+  private workerServiceName(sandboxId: string) {
+    return this.podName(sandboxId);
+  }
+
+  private requireKubernetesClient(operation: string) {
+    if (!this.kubernetesClient) {
+      throw new SandboxManagerError(
+        'config',
+        `AWS Kubernetes client is required to ${operation}.`,
+      );
+    }
+    return this.kubernetesClient;
+  }
+}
+
+export interface GatewayUserResult {
+  externalUserId: string;
+  balance?: number | null;
+}
+
+export interface GatewayKeyResult {
+  externalKeyId: string;
+  keyCiphertext?: string | null;
+}
+
+export interface GatewayUsageExportEvent {
+  eventId: string;
+  externalKeyId: string;
+  model: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedTokens?: number;
+  costUsd?: number;
+  currency?: string;
+  occurredAt?: string;
+}
+
+export interface GatewayUsageExportResult {
+  events: GatewayUsageExportEvent[];
+  nextCursor?: string | null;
+}
+
+export interface LlmGatewayAdmin {
+  ensureUser(input: {
+    userId: string;
+    email: string;
+    displayName?: string | null;
+    balance?: number | null;
+  }): Promise<GatewayUserResult>;
+  ensureUserBalance(input: {
+    externalUserId: string;
+    minimumBalance: number;
+    targetBalance: number;
+  }): Promise<
+    GatewayUserResult & { adjusted: boolean; previousBalance?: number | null }
+  >;
+  ensureSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    groupId?: number | null;
+  }): Promise<GatewayKeyResult>;
+  rotateSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId: string;
+    groupId?: number | null;
+  }): Promise<GatewayKeyResult>;
+  revokeSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId: string;
+  }): Promise<void>;
+  reconcileSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId?: string | null;
+    groupId?: number | null;
+  }): Promise<GatewayKeyResult>;
+  exportUsage(input?: {
+    cursor?: string | null;
+    limit?: number;
+  }): Promise<GatewayUsageExportResult>;
+}
+
+type GatewayFetch = typeof fetch;
+
+function trimTrailingSlash(value: string) {
+  return value.replace(/\/+$/, '');
+}
+
+async function parseGatewayResponse<T>(response: Response): Promise<T> {
+  let payload: unknown = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+  if (!response.ok) {
+    const message =
+      payload &&
+      typeof payload === 'object' &&
+      'message' in payload &&
+      typeof payload.message === 'string'
+        ? payload.message
+        : `Gateway admin request failed with status ${response.status}.`;
+    throw new SandboxManagerError('provider', message);
+  }
+  return payload as T;
+}
+
+function externalIdFromPayload(payload: unknown, fallbackName: string) {
+  if (!payload || typeof payload !== 'object') {
+    throw new SandboxManagerError(
+      'provider',
+      `Gateway admin response missing ${fallbackName}.`,
+    );
+  }
+  const candidate =
+    'externalUserId' in payload
+      ? payload.externalUserId
+      : 'externalKeyId' in payload
+        ? payload.externalKeyId
+        : 'id' in payload
+          ? payload.id
+          : null;
+  if (typeof candidate !== 'string' || !candidate.trim()) {
+    throw new SandboxManagerError(
+      'provider',
+      `Gateway admin response missing ${fallbackName}.`,
+    );
+  }
+  return candidate;
+}
+
+function gatewayKeyCiphertextFromPayload(payload: unknown) {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+  if ('keyCiphertext' in payload && typeof payload.keyCiphertext === 'string') {
+    return payload.keyCiphertext;
+  }
+  if ('key' in payload && typeof payload.key === 'string') {
+    return payload.key;
+  }
+  return null;
+}
+
+function numberFromPayload(payload: unknown, key: string) {
+  if (!payload || typeof payload !== 'object' || !(key in payload)) {
+    return null;
+  }
+  const value = payload[key as keyof typeof payload];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function gatewayUsageEventsFromPayload(
+  payload: unknown,
+): GatewayUsageExportResult {
+  if (
+    !payload ||
+    typeof payload !== 'object' ||
+    !('events' in payload) ||
+    !Array.isArray(payload.events)
+  ) {
+    throw new SandboxManagerError(
+      'provider',
+      'Gateway usage export response missing events.',
+    );
+  }
+  const nextCursor =
+    'nextCursor' in payload && typeof payload.nextCursor === 'string'
+      ? payload.nextCursor
+      : null;
+  return {
+    events: payload.events.map((entry) => {
+      if (!entry || typeof entry !== 'object') {
+        throw new SandboxManagerError(
+          'provider',
+          'Gateway usage export event is invalid.',
+        );
+      }
+      const eventId = 'eventId' in entry ? entry.eventId : null;
+      const externalKeyId =
+        'externalKeyId' in entry ? entry.externalKeyId : null;
+      const model = 'model' in entry ? entry.model : null;
+      if (typeof eventId !== 'string' || !eventId.trim()) {
+        throw new SandboxManagerError(
+          'provider',
+          'Gateway usage export event missing event id.',
+        );
+      }
+      if (typeof externalKeyId !== 'string' || !externalKeyId.trim()) {
+        throw new SandboxManagerError(
+          'provider',
+          'Gateway usage export event missing external key id.',
+        );
+      }
+      if (typeof model !== 'string' || !model.trim()) {
+        throw new SandboxManagerError(
+          'provider',
+          'Gateway usage export event missing model.',
+        );
+      }
+      return {
+        eventId,
+        externalKeyId,
+        model,
+        inputTokens:
+          'inputTokens' in entry && typeof entry.inputTokens === 'number'
+            ? entry.inputTokens
+            : undefined,
+        outputTokens:
+          'outputTokens' in entry && typeof entry.outputTokens === 'number'
+            ? entry.outputTokens
+            : undefined,
+        cachedTokens:
+          'cachedTokens' in entry && typeof entry.cachedTokens === 'number'
+            ? entry.cachedTokens
+            : undefined,
+        costUsd:
+          'costUsd' in entry && typeof entry.costUsd === 'number'
+            ? entry.costUsd
+            : undefined,
+        currency:
+          'currency' in entry && typeof entry.currency === 'string'
+            ? entry.currency
+            : undefined,
+        occurredAt:
+          'occurredAt' in entry && typeof entry.occurredAt === 'string'
+            ? entry.occurredAt
+            : undefined,
+      };
+    }),
+    nextCursor,
+  };
+}
+
+export class HttpLlmGatewayAdmin implements LlmGatewayAdmin {
+  private readonly baseUrl: string;
+
+  constructor(input: {
+    baseUrl: string;
+    adminToken: string;
+    contract?: 'sub2api' | 'generic';
+    fetchImpl?: GatewayFetch;
+  }) {
+    this.baseUrl = trimTrailingSlash(input.baseUrl);
+    this.adminToken = input.adminToken;
+    this.contract = input.contract ?? 'sub2api';
+    this.fetchImpl = input.fetchImpl ?? fetch;
+  }
+
+  private readonly adminToken: string;
+  private readonly contract: 'sub2api' | 'generic';
+  private readonly fetchImpl: GatewayFetch;
+
+  private adminHeaders(contentType = false) {
+    return {
+      authorization: `Bearer ${this.adminToken}`,
+      'x-api-key': this.adminToken,
+      ...(contentType ? { 'content-type': 'application/json' } : {}),
+    };
+  }
+
+  private adminPath(path: string) {
+    if (this.contract === 'generic') {
+      return `${this.baseUrl}${path}`;
+    }
+    return `${this.baseUrl}/api/v1/admin/integrations/remote-codex${path}`;
+  }
+
+  private usersEnsurePath() {
+    return this.contract === 'generic'
+      ? '/api/admin/users/ensure'
+      : '/users/ensure';
+  }
+
+  private userKeyEnsurePath(externalUserId: string) {
+    return this.contract === 'generic'
+      ? `/api/admin/users/${encodeURIComponent(externalUserId)}/keys/ensure`
+      : `/users/${encodeURIComponent(externalUserId)}/keys/ensure`;
+  }
+
+  private userBalanceEnsurePath(externalUserId: string) {
+    return this.contract === 'generic'
+      ? `/api/admin/users/${encodeURIComponent(externalUserId)}/balance/ensure`
+      : `/users/${encodeURIComponent(externalUserId)}/balance/ensure`;
+  }
+
+  private userKeyRotatePath(externalUserId: string, externalKeyId: string) {
+    return this.contract === 'generic'
+      ? `/api/admin/users/${encodeURIComponent(externalUserId)}/keys/${encodeURIComponent(externalKeyId)}/rotate`
+      : `/users/${encodeURIComponent(externalUserId)}/keys/${encodeURIComponent(externalKeyId)}/rotate`;
+  }
+
+  private userKeyRevokePath(externalUserId: string, externalKeyId: string) {
+    return this.contract === 'generic'
+      ? `/api/admin/users/${encodeURIComponent(externalUserId)}/keys/${encodeURIComponent(externalKeyId)}/revoke`
+      : `/users/${encodeURIComponent(externalUserId)}/keys/${encodeURIComponent(externalKeyId)}/revoke`;
+  }
+
+  private userKeyReconcilePath(externalUserId: string) {
+    return this.contract === 'generic'
+      ? `/api/admin/users/${encodeURIComponent(externalUserId)}/keys/reconcile`
+      : `/users/${encodeURIComponent(externalUserId)}/keys/ensure`;
+  }
+
+  private usageExportPath() {
+    return this.contract === 'generic'
+      ? '/api/admin/usage/export'
+      : '/usage/export';
+  }
+
+  async ensureUser(input: {
+    userId: string;
+    email: string;
+    displayName?: string | null;
+    balance?: number | null;
+  }): Promise<GatewayUserResult> {
+    const response = await this.fetchImpl(
+      this.adminPath(this.usersEnsurePath()),
+      {
+        method: 'POST',
+        headers: this.adminHeaders(true),
+        body: JSON.stringify({
+          externalId: input.userId,
+          email: input.email,
+          displayName: input.displayName ?? null,
+          balance: input.balance ?? undefined,
+        }),
+      },
+    );
+    const payload = await parseGatewayResponse<unknown>(response);
+    return {
+      externalUserId: externalIdFromPayload(payload, 'external user id'),
+      balance: numberFromPayload(payload, 'balance'),
+    };
+  }
+
+  async ensureUserBalance(input: {
+    externalUserId: string;
+    minimumBalance: number;
+    targetBalance: number;
+  }): Promise<
+    GatewayUserResult & { adjusted: boolean; previousBalance?: number | null }
+  > {
+    const response = await this.fetchImpl(
+      this.adminPath(this.userBalanceEnsurePath(input.externalUserId)),
+      {
+        method: 'POST',
+        headers: this.adminHeaders(true),
+        body: JSON.stringify({
+          minimumBalance: input.minimumBalance,
+          targetBalance: input.targetBalance,
+          notes: 'remote-codex automatic balance refill',
+        }),
+      },
+    );
+    const payload = await parseGatewayResponse<unknown>(response);
+    return {
+      externalUserId: externalIdFromPayload(payload, 'external user id'),
+      balance: numberFromPayload(payload, 'balance'),
+      previousBalance: numberFromPayload(payload, 'previousBalance'),
+      adjusted:
+        !!payload &&
+        typeof payload === 'object' &&
+        'adjusted' in payload &&
+        payload.adjusted === true,
+    };
+  }
+
+  async ensureSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    groupId?: number | null;
+  }): Promise<GatewayKeyResult> {
+    const response = await this.fetchImpl(
+      this.adminPath(this.userKeyEnsurePath(input.externalUserId)),
+      {
+        method: 'POST',
+        headers: this.adminHeaders(true),
+        body: JSON.stringify({
+          externalId: input.sandboxId,
+          userId: input.userId,
+          sandboxId: input.sandboxId,
+          group_id: input.groupId ?? undefined,
+        }),
+      },
+    );
+    const payload = await parseGatewayResponse<unknown>(response);
+    return {
+      externalKeyId: externalIdFromPayload(payload, 'external key id'),
+      keyCiphertext: gatewayKeyCiphertextFromPayload(payload),
+    };
+  }
+
+  async rotateSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId: string;
+    groupId?: number | null;
+  }): Promise<GatewayKeyResult> {
+    const response = await this.fetchImpl(
+      this.adminPath(
+        this.userKeyRotatePath(input.externalUserId, input.externalKeyId),
+      ),
+      {
+        method: 'POST',
+        headers: this.adminHeaders(true),
+        body: JSON.stringify({
+          userId: input.userId,
+          sandboxId: input.sandboxId,
+          group_id: input.groupId ?? undefined,
+        }),
+      },
+    );
+    const payload = await parseGatewayResponse<unknown>(response);
+    return {
+      externalKeyId: externalIdFromPayload(payload, 'external key id'),
+      keyCiphertext: gatewayKeyCiphertextFromPayload(payload),
+    };
+  }
+
+  async revokeSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId: string;
+  }): Promise<void> {
+    const response = await this.fetchImpl(
+      this.adminPath(
+        this.userKeyRevokePath(input.externalUserId, input.externalKeyId),
+      ),
+      {
+        method: 'POST',
+        headers: this.adminHeaders(true),
+        body: JSON.stringify({
+          userId: input.userId,
+          sandboxId: input.sandboxId,
+        }),
+      },
+    );
+    await parseGatewayResponse<unknown>(response);
+  }
+
+  async reconcileSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId?: string | null;
+    groupId?: number | null;
+  }): Promise<GatewayKeyResult> {
+    const response = await this.fetchImpl(
+      this.adminPath(this.userKeyReconcilePath(input.externalUserId)),
+      {
+        method: 'POST',
+        headers: this.adminHeaders(true),
+        body: JSON.stringify({
+          externalId: input.sandboxId,
+          userId: input.userId,
+          sandboxId: input.sandboxId,
+          externalKeyId: input.externalKeyId ?? null,
+          group_id: input.groupId ?? undefined,
+        }),
+      },
+    );
+    const payload = await parseGatewayResponse<unknown>(response);
+    return {
+      externalKeyId: externalIdFromPayload(payload, 'external key id'),
+      keyCiphertext: gatewayKeyCiphertextFromPayload(payload),
+    };
+  }
+
+  async exportUsage(
+    input: {
+      cursor?: string | null;
+      limit?: number;
+    } = {},
+  ): Promise<GatewayUsageExportResult> {
+    const search = new URLSearchParams();
+    if (input.cursor) {
+      search.set('cursor', input.cursor);
+    }
+    if (input.limit) {
+      search.set('limit', String(input.limit));
+    }
+    const query = search.toString();
+    const response = await this.fetchImpl(
+      `${this.adminPath(this.usageExportPath())}${query ? `?${query}` : ''}`,
+      {
+        method: 'GET',
+        headers: this.adminHeaders(),
+      },
+    );
+    const payload = await parseGatewayResponse<unknown>(response);
+    return gatewayUsageEventsFromPayload(payload);
+  }
+}
+
+export class NoopLlmGatewayAdmin implements LlmGatewayAdmin {
+  async ensureUser(input: { userId: string }): Promise<GatewayUserResult> {
+    return { externalUserId: `sub2api-user-${input.userId}` };
+  }
+
+  async ensureUserBalance(input: {
+    externalUserId: string;
+    targetBalance: number;
+  }): Promise<
+    GatewayUserResult & { adjusted: boolean; previousBalance?: number | null }
+  > {
+    return {
+      externalUserId: input.externalUserId,
+      balance: input.targetBalance,
+      previousBalance: input.targetBalance,
+      adjusted: false,
+    };
+  }
+
+  async ensureSandboxKey(input: {
+    sandboxId: string;
+  }): Promise<GatewayKeyResult> {
+    return {
+      externalKeyId: `sub2api-key-${input.sandboxId}`,
+      keyCiphertext: null,
+    };
+  }
+
+  async rotateSandboxKey(input: {
+    sandboxId: string;
+  }): Promise<GatewayKeyResult> {
+    return {
+      externalKeyId: `sub2api-key-${input.sandboxId}-rotated`,
+      keyCiphertext: null,
+    };
+  }
+
+  async revokeSandboxKey(): Promise<void> {}
+
+  async reconcileSandboxKey(input: {
+    sandboxId: string;
+  }): Promise<GatewayKeyResult> {
+    return {
+      externalKeyId: `sub2api-key-${input.sandboxId}`,
+      keyCiphertext: null,
+    };
+  }
+
+  async exportUsage(): Promise<GatewayUsageExportResult> {
+    return {
+      events: [],
+      nextCursor: null,
+    };
+  }
+}
+
+export interface HarnessUserResult {
+  externalUserId: string;
+}
+
+export interface HarnessKeyResult {
+  externalKeyId: string;
+  apiKey: string | null;
+  keyCiphertext?: string | null;
+}
+
+export interface HarnessUsageExportEvent {
+  eventId: string;
+  externalKeyId?: string | null;
+  userId?: string | null;
+  sandboxId?: string | null;
+  workspaceId?: string | null;
+  sessionId?: string | null;
+  module: 'estructural' | 'quntur' | 'farmaco';
+  tool?: string | null;
+  runId?: string | null;
+  jobId?: string | null;
+  computeUnits?: number | undefined;
+  costUsd?: number | undefined;
+  status?: string | undefined;
+  metadata?: Record<string, unknown> | undefined;
+  occurredAt?: string | undefined;
+}
+
+export interface HarnessUsageExportResult {
+  events: HarnessUsageExportEvent[];
+  nextCursor?: string | null;
+}
+
+export interface HarnessAdmin {
+  ensureUser(input: {
+    userId: string;
+    email: string;
+    displayName?: string | null;
+  }): Promise<HarnessUserResult>;
+  ensureSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    email?: string | null;
+    displayName?: string | null;
+  }): Promise<HarnessKeyResult>;
+  rotateSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId: string;
+  }): Promise<HarnessKeyResult>;
+  revokeSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId: string;
+  }): Promise<void>;
+  reconcileSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId?: string | null;
+  }): Promise<HarnessKeyResult>;
+  exportUsage(input?: {
+    cursor?: string | null;
+    limit?: number;
+  }): Promise<HarnessUsageExportResult>;
+}
+
+function textFieldFromHarnessResponse(text: string, name: string) {
+  const match = text.match(
+    new RegExp(`^${name}\\s*=\\s*(?:"([^"]*)"|([^\\n\\r]+))\\s*$`, 'm'),
+  );
+  return match?.[1] ?? match?.[2]?.trim() ?? null;
+}
+
+async function parseHarnessResponse(response: Response): Promise<unknown> {
+  const text = await response.text();
+  let payload: unknown = null;
+  if (text.trim()) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = text;
+    }
+  }
+  if (!response.ok) {
+    const message =
+      payload &&
+      typeof payload === 'object' &&
+      'message' in payload &&
+      typeof payload.message === 'string'
+        ? payload.message
+        : typeof payload === 'string' && payload.trim()
+          ? payload.trim().split('\n')[0]!
+          : `Harness admin request failed with status ${response.status}.`;
+    throw new SandboxManagerError('provider', message);
+  }
+  return payload;
+}
+
+function harnessExternalIdFromPayload(payload: unknown, fallbackName: string) {
+  if (payload && typeof payload === 'object') {
+    const candidate =
+      'externalKeyId' in payload
+        ? payload.externalKeyId
+        : 'id' in payload
+          ? payload.id
+          : 'externalUserId' in payload
+            ? payload.externalUserId
+            : null;
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate;
+    }
+    if (typeof candidate === 'number') {
+      return String(candidate);
+    }
+  }
+  if (typeof payload === 'string') {
+    const id = textFieldFromHarnessResponse(payload, 'id');
+    if (id) {
+      return id;
+    }
+  }
+  throw new SandboxManagerError(
+    'provider',
+    `Harness admin response missing ${fallbackName}.`,
+  );
+}
+
+function harnessApiKeyFromPayload(payload: unknown) {
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    'apiKey' in payload &&
+    typeof payload.apiKey === 'string' &&
+    payload.apiKey.trim()
+  ) {
+    return payload.apiKey;
+  }
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    'api_key' in payload &&
+    typeof payload.api_key === 'string' &&
+    payload.api_key.trim()
+  ) {
+    return payload.api_key;
+  }
+  if (typeof payload === 'string') {
+    return textFieldFromHarnessResponse(payload, 'api_key');
+  }
+  return null;
+}
+
+function harnessKeyCiphertextFromPayload(payload: unknown) {
+  return payload &&
+    typeof payload === 'object' &&
+    'keyCiphertext' in payload &&
+    typeof payload.keyCiphertext === 'string'
+    ? payload.keyCiphertext
+    : null;
+}
+
+function harnessStringField(entry: Record<string, unknown>, fields: string[]) {
+  for (const field of fields) {
+    const value = entry[field];
+    if (typeof value === 'string' && value.trim()) {
+      return value;
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value);
+    }
+  }
+  return null;
+}
+
+function harnessNumberField(entry: Record<string, unknown>, fields: string[]) {
+  for (const field of fields) {
+    const value = entry[field];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    if (
+      typeof value === 'string' &&
+      value.trim() &&
+      Number.isFinite(Number(value))
+    ) {
+      return Number(value);
+    }
+  }
+  return undefined;
+}
+
+function harnessUsageEventsFromPayload(
+  payload: unknown,
+): HarnessUsageExportResult {
+  if (
+    !payload ||
+    typeof payload !== 'object' ||
+    !('events' in payload) ||
+    !Array.isArray(payload.events)
+  ) {
+    throw new SandboxManagerError(
+      'provider',
+      'Harness usage export response missing events.',
+    );
+  }
+  const nextCursor =
+    'nextCursor' in payload && typeof payload.nextCursor === 'string'
+      ? payload.nextCursor
+      : null;
+  return {
+    events: payload.events.map((entry) => {
+      if (!entry || typeof entry !== 'object') {
+        throw new SandboxManagerError(
+          'provider',
+          'Harness usage export event is invalid.',
+        );
+      }
+      const record = entry as Record<string, unknown>;
+      const eventId = harnessStringField(record, [
+        'eventId',
+        'event_id',
+        'externalEventId',
+        'external_event_id',
+        'requestId',
+        'request_id',
+      ]);
+      const module = harnessStringField(record, ['module']);
+      if (!eventId) {
+        throw new SandboxManagerError(
+          'provider',
+          'Harness usage export event missing event id.',
+        );
+      }
+      if (
+        module !== 'estructural' &&
+        module !== 'quntur' &&
+        module !== 'farmaco'
+      ) {
+        throw new SandboxManagerError(
+          'provider',
+          'Harness usage export event missing approved module.',
+        );
+      }
+      const metadata =
+        'metadata' in record &&
+        record.metadata &&
+        typeof record.metadata === 'object' &&
+        !Array.isArray(record.metadata)
+          ? (record.metadata as Record<string, unknown>)
+          : undefined;
+      return {
+        eventId,
+        externalKeyId: harnessStringField(record, [
+          'externalKeyId',
+          'external_key_id',
+          'keyId',
+          'key_id',
+        ]),
+        userId: harnessStringField(record, ['userId', 'user_id']),
+        sandboxId: harnessStringField(record, ['sandboxId', 'sandbox_id']),
+        workspaceId: harnessStringField(record, [
+          'workspaceId',
+          'workspace_id',
+        ]),
+        sessionId: harnessStringField(record, ['sessionId', 'session_id']),
+        module,
+        tool: harnessStringField(record, ['tool', 'toolName', 'tool_name']),
+        runId: harnessStringField(record, ['runId', 'run_id']),
+        jobId: harnessStringField(record, [
+          'jobId',
+          'job_id',
+          'computeJobId',
+          'compute_job_id',
+        ]),
+        computeUnits: harnessNumberField(record, [
+          'computeUnits',
+          'compute_units',
+          'workerObservedSeconds',
+          'worker_observed_seconds',
+        ]),
+        costUsd: harnessNumberField(record, [
+          'costUsd',
+          'cost_usd',
+          'estimatedCostUsd',
+          'estimated_cost_usd',
+        ]),
+        status: harnessStringField(record, ['status', 'state']) ?? undefined,
+        metadata,
+        occurredAt:
+          harnessStringField(record, ['occurredAt', 'occurred_at']) ??
+          undefined,
+      };
+    }),
+    nextCursor,
+  };
+}
+
+export class HttpHarnessAdmin implements HarnessAdmin {
+  private readonly baseUrl: string;
+  private readonly adminKey: string;
+  private readonly fetchImpl: GatewayFetch;
+  private readonly legacyFallback: boolean;
+
+  constructor(input: {
+    baseUrl: string;
+    adminKey: string;
+    fetchImpl?: GatewayFetch;
+    legacyFallback?: boolean;
+  }) {
+    this.baseUrl = trimTrailingSlash(input.baseUrl);
+    this.adminKey = input.adminKey;
+    this.fetchImpl = input.fetchImpl ?? fetch;
+    this.legacyFallback = input.legacyFallback ?? true;
+  }
+
+  async ensureUser(input: { userId: string }): Promise<HarnessUserResult> {
+    return {
+      externalUserId: `remote-codex:user:${input.userId}`,
+    };
+  }
+
+  async ensureSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    email?: string | null;
+    displayName?: string | null;
+  }): Promise<HarnessKeyResult> {
+    const ensureResponse = await this.fetchImpl(
+      `${this.baseUrl}/admin/members/ensure`,
+      {
+        method: 'POST',
+        headers: {
+          'x-admin-key': this.adminKey,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          externalId: `remote-codex:sandbox:${input.sandboxId}`,
+          userId: input.userId,
+          sandboxId: input.sandboxId,
+          externalUserId: input.externalUserId,
+          name: `remote-codex-sandbox-${input.sandboxId.slice(0, 8)}`,
+          kind: 'agent',
+          email: input.email ?? '',
+          description: `Remote Codex sandbox ${input.sandboxId} for user ${input.userId}`,
+        }),
+      },
+    );
+    if (ensureResponse.status !== 404) {
+      const payload = await parseHarnessResponse(ensureResponse);
+      return {
+        externalKeyId: harnessExternalIdFromPayload(payload, 'external key id'),
+        apiKey: harnessApiKeyFromPayload(payload),
+        keyCiphertext: harnessKeyCiphertextFromPayload(payload),
+      };
+    }
+    if (!this.legacyFallback) {
+      await parseHarnessResponse(ensureResponse);
+    }
+
+    const createResponse = await this.fetchImpl(
+      `${this.baseUrl}/admin/create`,
+      {
+        method: 'POST',
+        headers: {
+          'x-admin-key': this.adminKey,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: `remote-codex-sandbox-${input.sandboxId.slice(0, 8)}`,
+          kind: 'agent',
+          email: input.email ?? '',
+          description: `Remote Codex sandbox ${input.sandboxId} for user ${input.userId}`,
+        }),
+      },
+    );
+    const payload = await parseHarnessResponse(createResponse);
+    return {
+      externalKeyId: harnessExternalIdFromPayload(payload, 'external key id'),
+      apiKey: harnessApiKeyFromPayload(payload),
+      keyCiphertext: harnessKeyCiphertextFromPayload(payload),
+    };
+  }
+
+  async rotateSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId: string;
+  }): Promise<HarnessKeyResult> {
+    const plannedResponse = await this.fetchImpl(
+      `${this.baseUrl}/admin/members/${encodeURIComponent(input.externalKeyId)}/rekey`,
+      {
+        method: 'POST',
+        headers: {
+          'x-admin-key': this.adminKey,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: input.userId,
+          sandboxId: input.sandboxId,
+          externalUserId: input.externalUserId,
+        }),
+      },
+    );
+    if (plannedResponse.status !== 404) {
+      const payload = await parseHarnessResponse(plannedResponse);
+      return {
+        externalKeyId: harnessExternalIdFromPayload(payload, 'external key id'),
+        apiKey: harnessApiKeyFromPayload(payload),
+        keyCiphertext: harnessKeyCiphertextFromPayload(payload),
+      };
+    }
+    if (!this.legacyFallback) {
+      await parseHarnessResponse(plannedResponse);
+    }
+
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/admin/${encodeURIComponent(input.externalKeyId)}/rekey`,
+      {
+        method: 'POST',
+        headers: {
+          'x-admin-key': this.adminKey,
+        },
+      },
+    );
+    const payload = await parseHarnessResponse(response);
+    return {
+      externalKeyId: input.externalKeyId,
+      apiKey: harnessApiKeyFromPayload(payload),
+      keyCiphertext: harnessKeyCiphertextFromPayload(payload),
+    };
+  }
+
+  async revokeSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId: string;
+  }): Promise<void> {
+    const plannedResponse = await this.fetchImpl(
+      `${this.baseUrl}/admin/members/${encodeURIComponent(input.externalKeyId)}/revoke`,
+      {
+        method: 'POST',
+        headers: {
+          'x-admin-key': this.adminKey,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: input.userId,
+          sandboxId: input.sandboxId,
+          externalUserId: input.externalUserId,
+        }),
+      },
+    );
+    if (plannedResponse.status !== 404) {
+      await parseHarnessResponse(plannedResponse);
+      return;
+    }
+    if (!this.legacyFallback) {
+      await parseHarnessResponse(plannedResponse);
+    }
+
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/admin/${encodeURIComponent(input.externalKeyId)}/delete`,
+      {
+        method: 'POST',
+        headers: {
+          'x-admin-key': this.adminKey,
+        },
+      },
+    );
+    await parseHarnessResponse(response);
+  }
+
+  async reconcileSandboxKey(input: {
+    userId: string;
+    sandboxId: string;
+    externalUserId: string;
+    externalKeyId?: string | null;
+  }): Promise<HarnessKeyResult> {
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/admin/members/reconcile`,
+      {
+        method: 'POST',
+        headers: {
+          'x-admin-key': this.adminKey,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          externalId: `remote-codex:sandbox:${input.sandboxId}`,
+          externalKeyId: input.externalKeyId ?? null,
+          userId: input.userId,
+          sandboxId: input.sandboxId,
+          externalUserId: input.externalUserId,
+          name: `remote-codex-sandbox-${input.sandboxId.slice(0, 8)}`,
+          kind: 'agent',
+          description: `Remote Codex sandbox ${input.sandboxId} for user ${input.userId}`,
+        }),
+      },
+    );
+    if (response.status !== 404) {
+      const payload = await parseHarnessResponse(response);
+      return {
+        externalKeyId: harnessExternalIdFromPayload(payload, 'external key id'),
+        apiKey: harnessApiKeyFromPayload(payload),
+        keyCiphertext: harnessKeyCiphertextFromPayload(payload),
+      };
+    }
+    if (!this.legacyFallback) {
+      await parseHarnessResponse(response);
+    }
+
+    if (input.externalKeyId) {
+      return {
+        externalKeyId: input.externalKeyId,
+        apiKey: null,
+        keyCiphertext: null,
+      };
+    }
+    return this.ensureSandboxKey(input);
+  }
+
+  async exportUsage(
+    input: {
+      cursor?: string | null;
+      limit?: number;
+    } = {},
+  ): Promise<HarnessUsageExportResult> {
+    const search = new URLSearchParams();
+    if (input.cursor) {
+      search.set('cursor', input.cursor);
+    }
+    if (input.limit) {
+      search.set('limit', String(input.limit));
+    }
+    const query = search.toString();
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/admin/usage/export${query ? `?${query}` : ''}`,
+      {
+        method: 'GET',
+        headers: {
+          'x-admin-key': this.adminKey,
+        },
+      },
+    );
+    const payload = await parseHarnessResponse(response);
+    return harnessUsageEventsFromPayload(payload);
+  }
+}
+
+export class NoopHarnessAdmin implements HarnessAdmin {
+  async ensureUser(input: { userId: string }): Promise<HarnessUserResult> {
+    return { externalUserId: `harness-user-${input.userId}` };
+  }
+
+  async ensureSandboxKey(input: {
+    sandboxId: string;
+  }): Promise<HarnessKeyResult> {
+    return {
+      externalKeyId: `harness-key-${input.sandboxId}`,
+      apiKey: `harness-api-key-${input.sandboxId}`,
+      keyCiphertext: null,
+    };
+  }
+
+  async rotateSandboxKey(input: {
+    sandboxId: string;
+    externalKeyId: string;
+  }): Promise<HarnessKeyResult> {
+    return {
+      externalKeyId: input.externalKeyId,
+      apiKey: `harness-api-key-${input.sandboxId}-rotated`,
+      keyCiphertext: null,
+    };
+  }
+
+  async revokeSandboxKey(): Promise<void> {}
+
+  async reconcileSandboxKey(input: {
+    sandboxId: string;
+    externalKeyId?: string | null;
+  }): Promise<HarnessKeyResult> {
+    return {
+      externalKeyId: input.externalKeyId ?? `harness-key-${input.sandboxId}`,
+      apiKey: null,
+      keyCiphertext: null,
+    };
+  }
+
+  async exportUsage(): Promise<HarnessUsageExportResult> {
+    return {
+      events: [],
+      nextCursor: null,
+    };
+  }
+}

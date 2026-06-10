@@ -227,6 +227,7 @@ export interface ReadAgentSessionOptions {
 export interface StartAgentSessionInput {
   cwd: string;
   model: string;
+  reasoningEffort?: string | null;
   approvalMode: 'yolo' | 'guarded';
   sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access' | null;
   performanceMode?: 'standard' | 'fast' | null;
@@ -253,6 +254,7 @@ export interface StartAgentTurnInput {
   providerSessionId: string;
   prompt: string;
   displayPrompt?: string | null;
+  developerInstructions?: string | null;
   model?: string | null;
   reasoningEffort?: string | null;
   collaborationMode?: 'default' | 'plan' | null;

@@ -1,18 +1,19 @@
 import {
   BrowserRouter,
+  Navigate,
   Outlet,
   Route,
   Routes,
   useLocation,
 } from 'react-router-dom';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { PluginProvider } from '@remote-codex/thread-ui';
 
-import type { AgentBackendIdDto } from '../../../packages/shared/src/index';
+import type { AgentBackendIdDto } from '@remote-codex/shared';
 import {
   defaultAgentBackendId,
   normalizeAgentBackendId,
-} from '../../../packages/shared/src/index';
+} from '@remote-codex/shared';
 import {
   AppShellNavContext,
   type ThemeMode,
@@ -22,6 +23,12 @@ import {
   AppShellNavigationMenu,
   AppShellSettingsDialog,
 } from './components/AppShellNavigation';
+import { ControlPlanePage } from './pages/ControlPlanePage';
+import {
+  ControlPlaneAuthGuard,
+  ControlPlaneLoginPage,
+} from './pages/ControlPlaneLoginPage';
+import { ControlPlaneSessionPage } from './pages/ControlPlaneSessionPage';
 import { LandingPage } from './pages/LandingPage';
 import { ThreadDetailPage } from './pages/ThreadDetailPage';
 import { ThreadImportPage } from './pages/ThreadImportPage';
@@ -29,10 +36,39 @@ import { ThreadNewPage } from './pages/ThreadNewPage';
 import { ThreadsPage } from './pages/ThreadsPage';
 import { WorkspaceNewPage } from './pages/WorkspaceNewPage';
 import { WorkspacesPage } from './pages/WorkspacesPage';
-import { fetchPlugins, importPlugin, updatePlugin } from './lib/api';
+import { deletePlugin, fetchPlugins, importPlugin, updatePlugin } from './lib/api';
 
 const THEME_STORAGE_KEY = 'remote-codex-theme-mode';
 const BACKEND_STORAGE_KEY = 'remote-codex-default-backend';
+
+function controlPlaneDefaultEnabled() {
+  return Boolean(import.meta.env.VITE_CONTROL_PLANE_BASE_URL);
+}
+
+function RootPage() {
+  return controlPlaneDefaultEnabled() ? <Navigate to="/control-plane" replace /> : <LandingPage />;
+}
+
+function RoutePluginProvider({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  const isControlPlaneRoute =
+    location.pathname.startsWith('/control-plane') ||
+    (location.pathname === '/' && controlPlaneDefaultEnabled());
+  const adapter = useMemo(
+    () =>
+      isControlPlaneRoute
+        ? {}
+        : {
+            fetchPlugins,
+            importPlugin,
+            updatePlugin,
+            deletePlugin,
+          },
+    [isControlPlaneRoute],
+  );
+
+  return <PluginProvider adapter={adapter}>{children}</PluginProvider>;
+}
 
 function readInitialThemeMode(): ThemeMode {
   if (typeof window === 'undefined') {
@@ -101,26 +137,26 @@ function AppShell({
     window.localStorage.setItem(BACKEND_STORAGE_KEY, backend);
   }
 
+  const shellNavValue = {
+    navOpen,
+    openNav: () => setNavOpen(true),
+    toggleNav: () => setNavOpen((current) => !current),
+    closeNav: () => setNavOpen(false),
+    settingsOpen,
+    openSettings: () => {
+      setNavOpen(false);
+      setSettingsOpen(true);
+    },
+    closeSettings: () => setSettingsOpen(false),
+    themeMode,
+    setThemeMode,
+    effectiveTheme,
+    defaultBackend,
+    setDefaultBackend,
+  };
+
   return (
-    <AppShellNavContext.Provider
-      value={{
-        navOpen,
-        openNav: () => setNavOpen(true),
-        toggleNav: () => setNavOpen((current) => !current),
-        closeNav: () => setNavOpen(false),
-        settingsOpen,
-        openSettings: () => {
-          setNavOpen(false);
-          setSettingsOpen(true);
-        },
-        closeSettings: () => setSettingsOpen(false),
-        themeMode,
-        setThemeMode,
-        effectiveTheme,
-        defaultBackend,
-        setDefaultBackend,
-      }}
-    >
+    <AppShellNavContext.Provider value={shellNavValue}>
       <div
         className={`bg-[var(--app-bg)] text-[var(--app-fg)] ${
           isViewportLockedRoute
@@ -225,16 +261,10 @@ export function App() {
 
   return (
     <div className="theme-shell theme-scrollbar">
-      <PluginProvider
-        adapter={{
-          fetchPlugins,
-          importPlugin,
-          updatePlugin,
-        }}
-      >
-        <BrowserRouter>
+      <BrowserRouter>
+        <RoutePluginProvider>
           <Routes>
-            <Route path="/" element={<LandingPage />} />
+            <Route path="/" element={<RootPage />} />
             <Route
               element={
                 <AppShell
@@ -246,14 +276,31 @@ export function App() {
             >
               <Route path="/workspaces" element={<WorkspacesPage />} />
               <Route path="/workspaces/new" element={<WorkspaceNewPage />} />
+              <Route path="/control-plane/login" element={<ControlPlaneLoginPage />} />
+              <Route
+                path="/control-plane"
+                element={
+                  <ControlPlaneAuthGuard>
+                    <ControlPlanePage />
+                  </ControlPlaneAuthGuard>
+                }
+              />
+              <Route
+                path="/control-plane/sessions/:sessionId"
+                element={
+                  <ControlPlaneAuthGuard>
+                    <ControlPlaneSessionPage />
+                  </ControlPlaneAuthGuard>
+                }
+              />
               <Route path="/threads" element={<ThreadsPage />} />
               <Route path="/threads/import" element={<ThreadImportPage />} />
               <Route path="/threads/new" element={<ThreadNewPage />} />
               <Route path="/threads/:id" element={<ThreadDetailPage />} />
             </Route>
           </Routes>
-        </BrowserRouter>
-      </PluginProvider>
+        </RoutePluginProvider>
+      </BrowserRouter>
     </div>
   );
 }

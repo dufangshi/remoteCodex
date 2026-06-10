@@ -25,6 +25,7 @@ const MANAGED_CODEX_MCP_BEGIN =
 const MANAGED_CODEX_MCP_END =
   '# END remote-codex managed plugin MCP servers';
 const REMOTE_CODEX_MOLECULE_MCP_TOOL_NAME = 'remote_codex_render_molecule';
+const MAX_REMOTE_MANIFEST_BYTES = 1024 * 1024;
 
 function jsonString(value: string) {
   return JSON.stringify(value);
@@ -133,6 +134,38 @@ function upsertManagedCodexMcpBlock(
     return stripped ? `${stripped}\n` : '';
   }
   return `${stripped ? `${stripped}\n\n` : ''}${managedBlock}\n`;
+}
+
+function normalizeManifestUrl(input: string) {
+  let url: URL;
+  try {
+    url = new URL(input.trim());
+  } catch {
+    throw new Error('Plugin manifest URL is invalid.');
+  }
+
+  if (url.protocol !== 'https:') {
+    throw new Error('Plugin manifest URL must use https.');
+  }
+
+  if (url.hostname === 'github.com') {
+    const parts = url.pathname.split('/').filter(Boolean);
+    if (parts.length >= 2) {
+      const [owner, repo] = parts;
+      if (parts[2] === 'blob' && parts[3]) {
+        const branch = parts[3];
+        const filePath = parts.slice(4).join('/') || 'plugin.json';
+        return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${filePath}`;
+      }
+
+      if (parts.length === 2 || parts[2] === 'tree') {
+        const branch = parts[3] ?? 'main';
+        return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/plugin.json`;
+      }
+    }
+  }
+
+  return url.toString();
 }
 
 export class PluginService {
@@ -247,8 +280,12 @@ export class PluginService {
     await fs.writeFile(configPath, next, 'utf8');
   }
 
-  importPlugin(input: ImportPluginInput): PluginDto {
-    const manifestInput = input.manifest ?? this.parseManifestJson(input.manifestJson);
+  async importPlugin(input: ImportPluginInput): Promise<PluginDto> {
+    const manifestInput =
+      input.manifest ??
+      (input.manifestUrl
+        ? await this.fetchManifestUrl(input.manifestUrl)
+        : this.parseManifestJson(input.manifestJson));
     const manifest = parsePluginManifest(manifestInput);
     const enabled = input.enabled ?? true;
     const existing = this.registry.getRegistered(manifest.id);
@@ -274,6 +311,16 @@ export class PluginService {
       throw new Error(`Plugin import failed: ${manifest.id}`);
     }
     return plugin;
+  }
+
+  uninstallPlugin(pluginId: string): PluginDto {
+    const removed = this.registry.unregisterImported(pluginId);
+    this.settings.imported = this.settings.imported.filter(
+      (manifest) => manifest.id !== pluginId,
+    );
+    delete this.settings.enabled[pluginId];
+    this.persistSettings();
+    return removed;
   }
 
   enrichTurnsWithArtifacts(input: {
@@ -359,10 +406,46 @@ export class PluginService {
 
   private parseManifestJson(manifestJson: string | undefined) {
     if (!manifestJson?.trim()) {
-      throw new Error('Plugin import requires a manifest object or manifestJson string.');
+      throw new Error(
+        'Plugin import requires a manifest object, manifestJson string, or manifestUrl.',
+      );
     }
 
     return JSON.parse(manifestJson);
+  }
+
+  private async fetchManifestUrl(manifestUrl: string) {
+    const url = normalizeManifestUrl(manifestUrl);
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Plugin manifest URL returned HTTP ${response.status}.`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error('Plugin manifest URL returned an unreadable response.');
+    }
+
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        totalBytes += value.byteLength;
+        if (totalBytes > MAX_REMOTE_MANIFEST_BYTES) {
+          throw new Error('Plugin manifest URL response is too large.');
+        }
+        chunks.push(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    const text = new TextDecoder().decode(Buffer.concat(chunks));
+    return JSON.parse(text);
   }
 }
 

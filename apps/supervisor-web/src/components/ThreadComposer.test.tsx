@@ -512,8 +512,10 @@ describe('ThreadComposer', () => {
 
     fireEvent.click(trigger);
 
-    const panel = screen.getByRole('button', { name: /\/fast/i }).closest('div[class*="absolute"]');
-    expect(panel).toHaveClass('bottom-full', 'mb-2', 'bg-stone-900/72', 'backdrop-blur-xl');
+    const panel = screen
+      .getByRole('button', { name: /\/fast/i })
+      .closest('[data-composer-menu-surface="true"]');
+    expect(panel).toHaveClass('absolute', 'bottom-full', 'mb-2', 'bg-stone-900/72', 'backdrop-blur-xl');
     expect(screen.getByRole('button', { name: /\/fast/i })).toHaveClass(
       'ui-status-warning',
     );

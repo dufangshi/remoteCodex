@@ -9,6 +9,7 @@ import {
   AgentSessionDetail,
   AgentTurn,
 } from '../../../packages/agent-runtime/src/index';
+import type { RuntimeConfig } from '../../../packages/config/src/index';
 import {
   createThreadRecord,
   DatabaseClient,
@@ -109,6 +110,10 @@ import {
   ProviderFeatureCoordinator,
   type ProviderGoalFeatureAdapter,
 } from './provider-feature-coordinator';
+import {
+  combineDeveloperInstructions,
+  harnessDeveloperInstructions,
+} from './harness-developer-instructions';
 import type { PluginService } from './plugins/plugin-service';
 
 const DEFAULT_THREAD_TITLE = 'Untitled thread';
@@ -120,6 +125,10 @@ const FAST_MODE_NOTE_OFF = 'Fast mode off';
 
 interface SendPromptOptions {
   displayPrompt?: string | null;
+}
+
+function pluginDeveloperInstructions(pluginService?: PluginService) {
+  return pluginService?.modelContextPrompt() ?? null;
 }
 
 async function pathExists(absPath: string) {
@@ -143,10 +152,6 @@ function canUseRuntimePagedTurns(
   }
 
   return cachedDetail.totalTurnCount > enrichedTurns.length;
-}
-
-function pluginDeveloperInstructions(pluginService?: PluginService) {
-  return pluginService?.modelContextPrompt() ?? null;
 }
 
 export class ThreadService {
@@ -179,6 +184,7 @@ export class ThreadService {
       ProviderGoalFeatureAdapter &
       ThreadPerformanceModeSettings,
     private readonly pluginService?: PluginService,
+    private readonly config?: RuntimeConfig,
   ) {
     this.providerRuntime = new ThreadProviderRuntimeCoordinator(agentRuntimes);
     this.historyPersistence = new ThreadHistoryPersistenceCoordinator(db, this.liveState);
@@ -215,6 +221,8 @@ export class ThreadService {
         runtimeForProvider: (provider) => this.runtimeForProvider(provider),
         resetThreadContextUsage: (localThreadId, emitEvent) =>
           this.resetThreadContextUsage(localThreadId, emitEvent),
+        getThreadContextUsage: (localThreadId) =>
+          this.getThreadContextUsage(localThreadId),
         invalidateThreadDetailCache: (localThreadId) =>
           this.invalidateThreadDetailCache(localThreadId),
         emitThreadUpdated: (localThreadId, payload) =>
@@ -400,6 +408,8 @@ export class ThreadService {
           this.resetThreadContextUsage(localThreadId, emitEvent),
         setThreadContextUsage: (localThreadId, usage, emitEvent) =>
           this.setThreadContextUsage(localThreadId, usage, emitEvent),
+        getThreadContextUsage: (localThreadId) =>
+          this.getThreadContextUsage(localThreadId),
         toThreadGoalDtoFromAgentGoal: (goal) =>
           this.goalCoordinator.toThreadGoalDtoFromAgentGoal(goal),
         toThreadGoalDtoFromRecord: (record) =>
@@ -897,6 +907,10 @@ export class ThreadService {
     }
 
     this.clearPendingPlanDecisionRequests(localThreadId, true);
+    const developerInstructions = combineDeveloperInstructions([
+      pluginDeveloperInstructions(this.pluginService),
+      this.config ? harnessDeveloperInstructions(this.config) : null,
+    ]);
 
     const workspace = getWorkspaceRecordById(this.db, record.workspaceId);
     if (!workspace) {
@@ -919,7 +933,6 @@ export class ThreadService {
       ...record,
       providerSessionId,
     };
-    const developerInstructions = pluginDeveloperInstructions(this.pluginService);
 
     if (record.providerTurnId && record.status === 'running') {
       if (!turnConfig.supportsRunningTurnInput) {
@@ -934,6 +947,7 @@ export class ThreadService {
       }, {
         prompt,
         displayPrompt,
+        developerInstructions,
         clientRequestId: input.clientRequestId ?? null,
         effectiveModel: turnConfig.effectiveModel,
         normalizedReasoning: turnConfig.normalizedReasoning,
@@ -941,20 +955,19 @@ export class ThreadService {
         sandboxMode: turnConfig.sandboxMode,
         performanceMode: turnConfig.performanceMode,
         workspacePath: workspace.absPath,
-        developerInstructions,
       });
     }
 
     return this.promptTurnCoordinator.startPromptTurn(localThreadId, connectedRecord, {
       prompt,
       displayPrompt,
+      developerInstructions,
       effectiveModel: turnConfig.effectiveModel,
       normalizedReasoning: turnConfig.normalizedReasoning,
       collaborationMode: turnConfig.collaborationMode,
       sandboxMode: turnConfig.sandboxMode,
       performanceMode: turnConfig.performanceMode,
       workspacePath: workspace.absPath,
-      developerInstructions,
     });
   }
 

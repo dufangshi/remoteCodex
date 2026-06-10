@@ -293,6 +293,7 @@ export interface CodexThreadGoalRecord {
 export interface ThreadStartInput {
   cwd: string;
   model: string;
+  effort?: ReasoningEffort | null;
   approvalPolicy: 'never' | 'on-request';
   sandbox?: SandboxMode | null;
   serviceTier?: ServiceTier | null;
@@ -317,6 +318,7 @@ export interface ThreadRollbackInput {
 export interface TurnStartInput {
   threadId: string;
   prompt: string;
+  developerInstructions?: string | null;
   model?: string | null;
   effort?: ReasoningEffort | null;
   collaborationMode?: CollaborationModeKind | null;

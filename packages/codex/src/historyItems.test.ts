@@ -84,6 +84,51 @@ describe('codex history item persistence policy', () => {
     });
   });
 
+  it('keeps MCP tool result text extractable for plugin artifacts', () => {
+    const artifactText = [
+      'Created a 3D molecule artifact for Methane.',
+      '',
+      '```remote-codex-artifact',
+      '{"type":"remote-codex.artifact","artifactType":"chemistry.molecule3d","title":"Methane","payload":{"format":"xyz","content":["5\\nmethane example"]}}',
+      '```',
+    ].join('\n');
+
+    const turn = codexTurnToAgentTurn({
+      id: 'turn-1',
+      status: 'completed',
+      error: null,
+      items: [
+        {
+          id: 'mcp-tool-1',
+          type: 'mcpToolCall',
+          status: 'completed',
+          action: {
+            mcpServer: 'remote_codex_plugins',
+            toolName: 'remote_codex_render_molecule',
+          },
+          result: {
+            output: {
+              content: [
+                {
+                  type: 'text',
+                  text: artifactText,
+                },
+              ],
+            },
+          },
+        },
+      ],
+    });
+
+    const toolItem = turn.items[0];
+    expect(toolItem).toMatchObject({
+      kind: 'toolCall',
+      text: 'remote_codex_plugins/remote_codex_render_molecule',
+      detailText: expect.stringContaining('```remote-codex-artifact'),
+    });
+    expect(toolItem?.detailText).toContain('\n```remote-codex-artifact\n');
+  });
+
   it('keeps Codex collab agent tool calls visible while running', () => {
     expect(
       liveCodexItemToHistoryItem(

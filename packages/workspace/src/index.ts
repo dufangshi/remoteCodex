@@ -6,11 +6,15 @@ export class WorkspaceServiceError extends Error {
   constructor(
     public readonly code:
       | 'path_not_absolute'
+      | 'path_not_relative'
+      | 'path_already_exists'
       | 'path_not_found'
       | 'path_parent_not_found'
       | 'path_not_directory'
+      | 'path_not_file'
       | 'path_not_readable'
       | 'path_outside_root'
+      | 'path_symlink_forbidden'
       | 'invalid_root',
     message: string,
     public readonly details?: Record<string, unknown>
@@ -31,6 +35,14 @@ export interface WorkspaceTreeResult {
   rootPath: string;
   currentPath: string;
   nodes: WorkspaceTreeNode[];
+}
+
+export interface WorkspaceFileResult {
+  path: string;
+  absPath: string;
+  kind: 'file' | 'directory';
+  size: number;
+  updatedAt: string;
 }
 
 async function ensureReadableDirectory(absPath: string) {
@@ -76,6 +88,113 @@ async function resolveComparablePath(absPath: string) {
     const resolvedParent = await fs.realpath(parentPath);
     return path.join(resolvedParent, path.basename(absPath));
   }
+}
+
+function normalizeRelativeWorkspacePath(relativePath: string) {
+  if (!relativePath.trim()) {
+    throw new WorkspaceServiceError('path_not_relative', 'Workspace file path is required.');
+  }
+
+  const normalized = path.posix.normalize(relativePath.replace(/\\/g, '/'));
+  if (
+    normalized === '.' ||
+    normalized.startsWith('../') ||
+    normalized === '..' ||
+    path.isAbsolute(normalized)
+  ) {
+    throw new WorkspaceServiceError(
+      'path_not_relative',
+      'Workspace file path must be a relative path inside the workspace.',
+      { path: relativePath },
+    );
+  }
+
+  return normalized;
+}
+
+async function resolveWorkspaceFilePath(workspacePath: string, relativePath: string) {
+  const workspaceRoot = await fs.realpath(workspacePath);
+  const normalized = normalizeRelativeWorkspacePath(relativePath);
+  const absPath = path.resolve(workspaceRoot, normalized);
+  const relativeToRoot = path.relative(workspaceRoot, absPath);
+  if (
+    relativeToRoot === '..' ||
+    relativeToRoot.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativeToRoot)
+  ) {
+    throw new WorkspaceServiceError(
+      'path_outside_root',
+      'Workspace file path must stay within the workspace.',
+      {
+        rootPath: workspaceRoot,
+        candidatePath: absPath,
+      },
+    );
+  }
+
+  return {
+    workspaceRoot,
+    relativePath: normalized,
+    absPath,
+  };
+}
+
+async function ensureParentDirectoryForFile(absPath: string, workspaceRoot: string) {
+  const parentPath = path.dirname(absPath);
+  const resolvedParent = await assertPathWithinRoot(workspaceRoot, parentPath);
+  try {
+    const parentStats = await fs.stat(resolvedParent);
+    if (!parentStats.isDirectory()) {
+      throw new WorkspaceServiceError(
+        'path_parent_not_found',
+        'Workspace file parent path is not a directory.',
+        { parentPath: resolvedParent },
+      );
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new WorkspaceServiceError(
+        'path_parent_not_found',
+        'Workspace file parent directory does not exist.',
+        { parentPath: resolvedParent },
+      );
+    }
+
+    throw error;
+  }
+}
+
+async function rejectSymlink(absPath: string) {
+  try {
+    const stats = await fs.lstat(absPath);
+    if (stats.isSymbolicLink()) {
+      throw new WorkspaceServiceError(
+        'path_symlink_forbidden',
+        'Workspace file operations do not follow symlinks.',
+        { absPath },
+      );
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return;
+    }
+
+    throw error;
+  }
+}
+
+function toWorkspaceFileResult(
+  workspaceRoot: string,
+  absPath: string,
+  stats: { isDirectory: () => boolean; size: number; mtime: Date },
+): WorkspaceFileResult {
+  return {
+    path: path.relative(workspaceRoot, absPath).split(path.sep).join('/'),
+    absPath,
+    kind: stats.isDirectory() ? 'directory' : 'file',
+    size: stats.size,
+    updatedAt: stats.mtime.toISOString(),
+  };
 }
 
 export async function assertPathWithinRoot(rootPath: string, candidatePath: string) {
@@ -243,5 +362,115 @@ export async function readWorkspaceTree(options: {
     rootPath,
     currentPath,
     nodes
+  };
+}
+
+export async function writeWorkspaceFile(options: {
+  workspacePath: string;
+  relativePath: string;
+  content: string | Buffer;
+}): Promise<WorkspaceFileResult> {
+  const { workspaceRoot, absPath } = await resolveWorkspaceFilePath(
+    options.workspacePath,
+    options.relativePath,
+  );
+  await ensureParentDirectoryForFile(absPath, workspaceRoot);
+  await rejectSymlink(absPath);
+
+  await fs.writeFile(absPath, options.content);
+  const stats = await fs.stat(absPath);
+  if (!stats.isFile()) {
+    throw new WorkspaceServiceError('path_not_file', 'Workspace path is not a file.', {
+      absPath,
+    });
+  }
+
+  return toWorkspaceFileResult(workspaceRoot, absPath, stats);
+}
+
+export async function moveWorkspaceFile(options: {
+  workspacePath: string;
+  fromPath: string;
+  toPath: string;
+  overwrite?: boolean;
+}): Promise<WorkspaceFileResult> {
+  const source = await resolveWorkspaceFilePath(options.workspacePath, options.fromPath);
+  const target = await resolveWorkspaceFilePath(options.workspacePath, options.toPath);
+  await rejectSymlink(source.absPath);
+  await rejectSymlink(target.absPath);
+  await ensureParentDirectoryForFile(target.absPath, target.workspaceRoot);
+
+  const sourceStats = await fs.stat(source.absPath).catch((error) => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new WorkspaceServiceError('path_not_found', 'Workspace source path does not exist.', {
+        absPath: source.absPath,
+      });
+    }
+
+    throw error;
+  });
+  if (!sourceStats.isFile()) {
+    throw new WorkspaceServiceError('path_not_file', 'Workspace source path is not a file.', {
+      absPath: source.absPath,
+    });
+  }
+
+  if (!options.overwrite) {
+    const targetExists = await fs.stat(target.absPath).then(
+      () => true,
+      (error) => {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          return false;
+        }
+        throw error;
+      },
+    );
+    if (targetExists) {
+      throw new WorkspaceServiceError(
+        'path_already_exists',
+        'Workspace target path already exists.',
+        { absPath: target.absPath },
+      );
+    }
+  }
+
+  await fs.rename(source.absPath, target.absPath);
+  const targetStats = await fs.stat(target.absPath);
+  return toWorkspaceFileResult(target.workspaceRoot, target.absPath, targetStats);
+}
+
+export async function deleteWorkspaceFile(options: {
+  workspacePath: string;
+  relativePath: string;
+  recursive?: boolean;
+}) {
+  const resolved = await resolveWorkspaceFilePath(options.workspacePath, options.relativePath);
+  await rejectSymlink(resolved.absPath);
+
+  const stats = await fs.stat(resolved.absPath).catch((error) => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new WorkspaceServiceError('path_not_found', 'Workspace path does not exist.', {
+        absPath: resolved.absPath,
+      });
+    }
+
+    throw error;
+  });
+  if (stats.isDirectory() && !options.recursive) {
+    throw new WorkspaceServiceError(
+      'path_not_file',
+      'Workspace directory deletes require recursive=true.',
+      { absPath: resolved.absPath },
+    );
+  }
+
+  await fs.rm(resolved.absPath, {
+    recursive: stats.isDirectory() && options.recursive === true,
+    force: false,
+  });
+
+  return {
+    path: resolved.relativePath,
+    absPath: resolved.absPath,
   };
 }

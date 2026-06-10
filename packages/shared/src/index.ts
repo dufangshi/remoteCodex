@@ -20,6 +20,12 @@ export type ApiErrorCode =
   | 'conflict'
   | 'provider_goal_error'
   | 'forbidden'
+  | 'unauthorized'
+  | 'invalid_route_token'
+  | 'gateway_unavailable'
+  | 'account_inactive'
+  | 'quota_exceeded'
+  | 'harness_unavailable'
   | 'goal_feature_disabled'
   | 'internal_error'
   | 'service_unavailable';
@@ -290,6 +296,30 @@ export interface WorkspaceTreeDto {
   nodes: WorkspaceTreeNodeDto[];
 }
 
+export interface WorkspaceFileDto {
+  path: string;
+  absPath: string;
+  kind: 'file' | 'directory';
+  size: number;
+  updatedAt: string;
+}
+
+export interface WriteWorkspaceFileInput {
+  path: string;
+  content: string;
+}
+
+export interface MoveWorkspaceFileInput {
+  fromPath: string;
+  toPath: string;
+  overwrite?: boolean;
+}
+
+export interface DeleteWorkspaceFileInput {
+  path: string;
+  recursive?: boolean;
+}
+
 export interface ThreadWorkspaceTreeNodeDto {
   name: string;
   path: string;
@@ -508,6 +538,7 @@ export interface UpdatePluginInput {
 export interface ImportPluginInput {
   manifest?: unknown;
   manifestJson?: string;
+  manifestUrl?: string;
   enabled?: boolean;
 }
 
@@ -918,6 +949,7 @@ export interface CreateThreadInput {
   title?: string;
   provider?: AgentBackendIdDto;
   model: string;
+  reasoningEffort?: ReasoningEffortDto | null;
   approvalMode: ApprovalMode;
 }
 

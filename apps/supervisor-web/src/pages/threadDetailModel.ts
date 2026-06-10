@@ -6,7 +6,7 @@ import {
   type ThreadHistoryItemDto,
   type ThreadTurnPriceEstimateDto,
   type ThreadTurnTokenUsageDto,
-} from '../../../../packages/shared/src/index';
+} from '@remote-codex/shared';
 
 export function effectiveSandboxMode(
   thread: Pick<ThreadDto, 'sandboxMode' | 'approvalMode'>,

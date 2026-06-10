@@ -7,7 +7,7 @@ import {
   ThreadDto,
   truncateAutoThreadTitle,
   WorkspaceDto,
-} from '../../../../packages/shared/src/index';
+} from '@remote-codex/shared';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useAppShellNav } from '../components/AppShellNavContext';
 import {

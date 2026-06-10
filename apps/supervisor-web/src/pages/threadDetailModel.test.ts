@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { ThreadDetailDto } from '../../../../packages/shared/src/index';
+import type { ThreadDetailDto } from '@remote-codex/shared';
 import {
   appendLatestTurns,
   findTurnWithUserMessage,

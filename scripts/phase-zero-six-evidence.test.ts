@@ -1,0 +1,3407 @@
+import { execFile } from 'node:child_process';
+import { chmod, mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
+import http from 'node:http';
+import { fileURLToPath } from 'node:url';
+import os from 'node:os';
+import path from 'node:path';
+import { promisify } from 'node:util';
+import { describe, expect, it } from 'vitest';
+import {
+  directWorkerPrivateVariables,
+  kubeconfigSecretAlternatives,
+  requiredSecrets,
+  requiredVariables,
+} from './phase-zero-six-github-env-contract.js';
+import { redactSecretText } from './secret-redaction.js';
+
+const execFileAsync = promisify(execFile);
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const requiredHarnessIntegrationGatesForReview = [
+  'harness-admin-contract',
+  'harness-worker-runtime',
+  'harness-secret-safety',
+  'harness-usage-attribution',
+];
+
+interface TestSmokeStep {
+  name: string;
+  ok: boolean;
+  status?: number;
+  details?: Record<string, unknown>;
+}
+
+async function runScript(script: string, args: string[] = []) {
+  return runScriptWithEnv(script, args);
+}
+
+async function runScriptWithEnv(
+  script: string,
+  args: string[] = [],
+  env: Record<string, string | undefined> = {},
+) {
+  try {
+    const result = await execFileAsync('pnpm', ['exec', 'tsx', script, ...args], {
+      cwd: repoRoot,
+      timeout: 30_000,
+      env: {
+        ...process.env,
+        ...env,
+      },
+    });
+    return {
+      exitCode: 0,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    };
+  } catch (error) {
+    const commandError = error as {
+      code?: number;
+      stdout?: string;
+      stderr?: string;
+    };
+    return {
+      exitCode: commandError.code ?? 1,
+      stdout: commandError.stdout ?? '',
+      stderr: commandError.stderr ?? '',
+    };
+  }
+}
+
+async function tempDir() {
+  return mkdtemp(path.join(os.tmpdir(), 'phase-zero-six-evidence-test-'));
+}
+
+async function fakeAwsKubectlBin(root: string) {
+  const binDir = path.join(root, 'bin');
+  await mkdir(binDir, { recursive: true });
+  const awsPath = path.join(binDir, 'aws');
+  const kubectlPath = path.join(binDir, 'kubectl');
+  await writeFile(
+    awsPath,
+    [
+      '#!/usr/bin/env node',
+      'const args = process.argv.slice(2);',
+      "if (args.join(' ') === 'sts get-caller-identity') {",
+      '  console.log(JSON.stringify({ Account: "123456789012" }));',
+      '  process.exit(0);',
+      '}',
+      "if (args[0] === 'eks' && args[1] === 'describe-cluster') {",
+      '  console.log(JSON.stringify({ cluster: { resourcesVpcConfig: { vpcId: "vpc-123", subnetIds: ["subnet-1"], securityGroupIds: ["sg-1"] } } }));',
+      '  process.exit(0);',
+      '}',
+      "if (args[0] === 'eks' && args[1] === 'describe-fargate-profile') {",
+      '  console.log(JSON.stringify({ fargateProfile: { podExecutionRoleArn: "arn:aws:iam::123456789012:role/remote-codex-sandbox-manager" } }));',
+      '  process.exit(0);',
+      '}',
+      'console.error(`unexpected aws args: ${args.join(" ")}`);',
+      'process.exit(2);',
+      '',
+    ].join('\n'),
+  );
+  await writeFile(
+    kubectlPath,
+    [
+      '#!/usr/bin/env node',
+      'const args = process.argv.slice(2);',
+      "if (args[0] === 'auth' && args[1] === 'can-i') {",
+      "  if (args.includes('--all-namespaces') || args.includes('kube-system')) {",
+      "    console.log('no');",
+      '  } else {',
+      "    console.log('yes');",
+      '  }',
+      '  process.exit(0);',
+      '}',
+      'console.error(`unexpected kubectl args: ${args.join(" ")}`);',
+      'process.exit(2);',
+      '',
+    ].join('\n'),
+  );
+  await Promise.all([
+    chmod(awsPath, 0o755),
+    chmod(kubectlPath, 0o755),
+  ]);
+  return binDir;
+}
+
+async function fakeHarnessKubectlBin(root: string) {
+  const binDir = path.join(root, 'bin-harness-kubectl');
+  await mkdir(binDir, { recursive: true });
+  const kubectlPath = path.join(binDir, 'kubectl');
+  await writeFile(
+    kubectlPath,
+    [
+      '#!/usr/bin/env node',
+      'const args = process.argv.slice(2);',
+      "if (args[0] === 'auth' && args[1] === 'can-i' && args[3] === 'secrets') {",
+      "  console.log('yes');",
+      '  process.exit(0);',
+      '}',
+      "if (args[0] === 'get' && args[1] === 'secret') {",
+      '  console.log(JSON.stringify({ data: { "sandbox-smoke": "cmVkYWN0ZWQ=" } }));',
+      '  process.exit(0);',
+      '}',
+      'console.error(`unexpected kubectl args: ${args.join(" ")}`);',
+      'process.exit(2);',
+      '',
+    ].join('\n'),
+  );
+  await chmod(kubectlPath, 0o755);
+  return binDir;
+}
+
+async function fakeHarnessEvidencePnpmBin(root: string) {
+  const binDir = path.join(root, 'bin-harness-evidence-pnpm');
+  await mkdir(binDir, { recursive: true });
+  const pnpmPath = path.join(binDir, 'pnpm');
+  await writeFile(
+    pnpmPath,
+    [
+      '#!/usr/bin/env node',
+      'const args = process.argv.slice(2);',
+      'const command = args[0];',
+      "if (command === 'smoke:harness-admin-contract') {",
+      '  console.log(JSON.stringify({ ok: true, steps: [',
+      '    "unauthenticated POST /admin/members/ensure",',
+      '    "unauthenticated GET /admin/usage/export?limit=1",',
+      '    "authenticated ensure creates or returns member",',
+      '    "authenticated ensure is idempotent",',
+      '    "authenticated reconcile returns existing external key",',
+      '    "authenticated rekey returns a new key",',
+      '    "authenticated usage export returns Remote Codex shape",',
+      '    "authenticated revoke marks key revoked"',
+      '  ].map((name) => ({ name, ok: true })) }));',
+      '  process.exit(0);',
+      '}',
+      "if (command === 'smoke:staging-phase-one') {",
+      '  console.log(JSON.stringify({ ok: true, steps: [',
+      '    "sandbox_ready",',
+      '    "browser_to_router_to_worker",',
+      '    "harness_worker_status",',
+      '    "harness_worker_home",',
+      '    "harness_worker_discovery",',
+      '    "harness_control_plane_invoke",',
+      '    "harness_usage_summary_after_invoke"',
+      '  ].map((name) => ({ name, ok: true })) }));',
+      '  process.exit(0);',
+      '}',
+      "if (command === 'smoke:harness-k8s-secret') {",
+      '  console.log(JSON.stringify({ ok: true, secretSafety: { valuePrinted: false }, steps: [',
+      '    "harness_k8s_secret_rbac_get",',
+      '    "harness_k8s_secret_rbac_patch",',
+      '    "harness_k8s_secret_key_present"',
+      '  ].map((name) => ({ name, ok: true })) }));',
+      '  process.exit(0);',
+      '}',
+      "if (command === 'verify:harness-integration-evidence') {",
+      '  console.log(JSON.stringify({ ok: true, verifications: [',
+      '    "harness-admin-contract",',
+      '    "harness-worker-runtime",',
+      '    "harness-secret-safety",',
+      '    "harness-usage-attribution"',
+      '  ].map((id) => ({ id, ok: true })) }));',
+      '  process.exit(0);',
+      '}',
+      "if (command === 'verify:harness-evidence-review') {",
+      '  console.log(JSON.stringify({ ok: true, checks: [',
+      '    "review_metadata_present",',
+      '    "admin_smoke_reviewed",',
+      '    "staging_smoke_reviewed",',
+      '    "k8s_secret_smoke_reviewed",',
+      '    "combined_verifier_reviewed",',
+      '    "secret_safety_reviewed"',
+      '  ].map((name) => ({ name, ok: true })) }));',
+      '  process.exit(0);',
+      '}',
+      'console.error(`unexpected pnpm args: ${args.join(" ")}`);',
+      'process.exit(2);',
+      '',
+    ].join('\n'),
+  );
+  await chmod(pnpmPath, 0o755);
+  return pnpmPath;
+}
+
+async function withFakeStagingServers(
+  handler: (input: { controlPlaneBaseUrl: string; directWorkerBaseUrl: string }) => Promise<void>,
+) {
+  const state = {
+    sandboxStarted: false,
+    sandboxStopped: false,
+    harnessUsageEvents: 0,
+  };
+  const directWorker = http.createServer((request, response) => {
+    if (request.url === '/api/worker/metadata') {
+      response.writeHead(403, { 'content-type': 'text/plain' });
+      response.end('forbidden without worker token');
+      return;
+    }
+    response.writeHead(404, { 'content-type': 'text/plain' });
+    response.end('not found');
+  });
+  const directWorkerBaseUrl = await listen(directWorker);
+
+  let controlPlaneBaseUrlValue = '';
+  const controlPlane = http.createServer((request, response) => {
+    const url = new URL(request.url ?? '/', 'http://127.0.0.1');
+    function json(body: unknown, status = 200) {
+      response.writeHead(status, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(body));
+    }
+    if (request.method === 'POST' && url.pathname === '/api/me/bootstrap') {
+      json({
+        user: { id: 'user-smoke' },
+        sandbox: { id: 'sandbox-smoke', state: 'stopped' },
+      });
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/api/sandbox/start') {
+      state.sandboxStarted = true;
+      json({
+        sandbox: {
+          id: 'sandbox-smoke',
+          state: 'running',
+          image: 'remote-codex-worker:staging',
+          resourceProfile: 'fargate-small',
+          routerBaseUrl: '',
+          workerServiceName: 'worker-svc',
+          k8sNamespace: 'remote-codex-sandboxes',
+          k8sPodName: 'worker-pod',
+          startupProgress: 'ready',
+        },
+      });
+      return;
+    }
+    if (request.method === 'GET' && url.pathname === '/api/sandbox/health') {
+      json({
+        sandbox: {
+          id: 'sandbox-smoke',
+          state: state.sandboxStopped ? 'stopped' : state.sandboxStarted ? 'running' : 'stopped',
+          lastSeenAt: '2026-05-25T12:00:00.000Z',
+          statusReason: 'ready',
+          routerBaseUrl: '',
+          workerServiceName: 'worker-svc',
+          k8sNamespace: 'remote-codex-sandboxes',
+          k8sPodName: 'worker-pod',
+          startupProgress: 'ready',
+        },
+      });
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/api/projects') {
+      json({ project: { id: 'project-smoke' } });
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/api/projects/project-smoke/workspaces') {
+      json({ workspace: { id: 'workspace-smoke' } });
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/api/workspaces/workspace-smoke/sessions') {
+      json({
+        session: {
+          id: 'session-smoke',
+          workerSessionId: 'worker-session-smoke',
+          status: 'active',
+        },
+      });
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/api/sandboxes/sandbox-smoke/route-token') {
+      json({
+        token: 'route-token',
+        sandboxId: 'sandbox-smoke',
+        routerBaseUrl: controlPlaneBaseUrlValue,
+        expiresAt: '2026-05-25T12:05:00.000Z',
+      });
+      return;
+    }
+    if (request.method === 'GET' && url.pathname === '/healthz') {
+      json({ ok: true, role: 'sandbox-router' });
+      return;
+    }
+    if (
+      request.method === 'GET' &&
+      url.pathname === '/api/sandboxes/sandbox-smoke/api/worker/metadata'
+    ) {
+      json({
+        role: 'worker',
+        sandboxId: 'sandbox-smoke',
+        userId: 'user-smoke',
+        managementRoutesEnabled: false,
+        requestDiagnostics: {
+          authorizationHeaderPresent: false,
+          workerTokenHeaderPresent: true,
+        },
+      });
+      return;
+    }
+    if (
+      request.method === 'GET' &&
+      url.pathname === '/api/sandboxes/sandbox-smoke/api/harness/status'
+    ) {
+      json({
+        harness: {
+          enabled: true,
+          baseUrl: 'https://elagenteharness.example.test',
+          keyPresent: true,
+          chemistryToolsEnabled: true,
+          modules: ['estructural', 'quntur', 'farmaco'],
+        },
+        health: { status: 'ok' },
+      });
+      return;
+    }
+    if (
+      request.method === 'GET' &&
+      url.pathname === '/api/sandboxes/sandbox-smoke/api/harness/home'
+    ) {
+      json({
+        payload: {
+          service: 'ElAgenteHarness',
+          modules: ['estructural', 'quntur', 'farmaco'],
+        },
+      });
+      return;
+    }
+    if (
+      request.method === 'GET' &&
+      url.pathname === '/api/sandboxes/sandbox-smoke/api/harness/modules/farmaco/tools'
+    ) {
+      json({
+        payload: {
+          tools: [
+            {
+              name: 'generate_ligand_xyz',
+            },
+          ],
+        },
+      });
+      return;
+    }
+    if (request.method === 'GET' && url.pathname === '/api/sandboxes/sandbox-smoke/readyz') {
+      json({
+        status: 'ready',
+        runtimes: [
+          {
+            provider: 'codex',
+            status: 'ready',
+          },
+        ],
+      });
+      return;
+    }
+    if (request.method === 'GET' && url.pathname === '/api/usage/harness/summary') {
+      json({
+        usage: {
+          eventCount: state.harnessUsageEvents,
+          costUsd: 0,
+        },
+      });
+      return;
+    }
+    if (
+      request.method === 'POST' &&
+      url.pathname === '/api/sandbox/harness/modules/farmaco/tools/generate_ligand_xyz/invoke'
+    ) {
+      state.harnessUsageEvents += 1;
+      json({
+        result: {
+          payload: {
+            run_id: 'run-harness-smoke',
+            status: 'completed',
+          },
+        },
+        harnessUsageEvent: {
+          id: 'harness-usage-smoke',
+          workspaceId: 'workspace-smoke',
+          sessionId: 'session-smoke',
+          module: 'farmaco',
+          tool: 'generate_ligand_xyz',
+          runId: 'run-harness-smoke',
+          jobId: null,
+          status: 'completed',
+        },
+      });
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/api/sessions/session-smoke/prompt') {
+      json({
+        turn: {
+          id: 'turn-smoke',
+          status: 'completed',
+        },
+        session: {
+          id: 'session-smoke',
+          status: 'active',
+        },
+      });
+      return;
+    }
+    response.writeHead(404, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ error: 'not_found', path: url.pathname }));
+  });
+  const controlPlaneBaseUrl = await listen(controlPlane);
+  controlPlaneBaseUrlValue = controlPlaneBaseUrl;
+
+  try {
+    await handler({ controlPlaneBaseUrl, directWorkerBaseUrl });
+  } finally {
+    await Promise.all([closeServer(controlPlane), closeServer(directWorker)]);
+  }
+}
+
+async function withFailingRouteTokenServer(
+  handler: (input: { controlPlaneBaseUrl: string }) => Promise<void>,
+) {
+  const state = {
+    sandboxStarted: false,
+  };
+  const controlPlane = http.createServer((request, response) => {
+    const url = new URL(request.url ?? '/', 'http://127.0.0.1');
+    function json(body: unknown, status = 200) {
+      response.writeHead(status, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(body));
+    }
+    if (request.method === 'POST' && url.pathname === '/api/me/bootstrap') {
+      json({
+        user: { id: 'user-smoke' },
+        sandbox: { id: 'sandbox-smoke', state: 'stopped' },
+      });
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/api/sandbox/start') {
+      state.sandboxStarted = true;
+      json({
+        sandbox: {
+          id: 'sandbox-smoke',
+          state: 'running',
+          image: 'remote-codex-worker:staging',
+          resourceProfile: 'fargate-small',
+          workerServiceName: 'worker-svc',
+          k8sNamespace: 'remote-codex-sandboxes',
+          k8sPodName: 'worker-pod',
+          startupProgress: 'ready',
+        },
+      });
+      return;
+    }
+    if (request.method === 'GET' && url.pathname === '/api/sandbox/health') {
+      json({
+        sandbox: {
+          id: 'sandbox-smoke',
+          state: state.sandboxStarted ? 'running' : 'stopped',
+          lastSeenAt: '2026-05-25T12:00:00.000Z',
+          statusReason: 'ready',
+          workerServiceName: 'worker-svc',
+          k8sNamespace: 'remote-codex-sandboxes',
+          k8sPodName: 'worker-pod',
+          startupProgress: 'ready',
+        },
+      });
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/api/projects') {
+      json({ project: { id: 'project-smoke' } });
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/api/projects/project-smoke/workspaces') {
+      json({ workspace: { id: 'workspace-smoke' } });
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/api/workspaces/workspace-smoke/sessions') {
+      json({
+        session: {
+          id: 'session-smoke',
+          workerSessionId: 'worker-session-smoke',
+          status: 'active',
+        },
+      });
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/api/sandboxes/sandbox-smoke/route-token') {
+      json({ error: 'router_unavailable' }, 500);
+      return;
+    }
+    response.writeHead(404, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ error: 'not_found', path: url.pathname }));
+  });
+  const controlPlaneBaseUrl = await listen(controlPlane);
+
+  try {
+    await handler({ controlPlaneBaseUrl });
+  } finally {
+    await closeServer(controlPlane);
+  }
+}
+
+function listen(server: http.Server) {
+  return new Promise<string>((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        throw new Error('Expected TCP server address.');
+      }
+      resolve(`http://127.0.0.1:${address.port}`);
+    });
+  });
+}
+
+function closeServer(server: http.Server) {
+  return new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+function minimalChecklist() {
+  return [
+    '- [x] D0.01 Already done.',
+    '- [ ] S3.04 Finalize AWS staging configuration.',
+    '- [ ] S3.05 Add least-privilege Kubernetes credentials.',
+    '- [ ] S3.06 Create a real worker Pod from the control plane.',
+    '- [ ] S3.07 Stop a real worker Pod from the control plane.',
+    '- [ ] S3.08 Add idempotent lifecycle smoke.',
+    '- [ ] R5.10 Deploy sandbox-router in staging.',
+    '- [ ] R5.11 Add direct-worker-denial proof.',
+    '- [ ] R5.12 Add browser-to-router-to-worker smoke.',
+    '- [ ] G6.11 Run staging Codex gateway smoke.',
+    '- [ ] G6.12 Run staging Claude Code gateway smoke.',
+    '- [ ] G6.13 Run staging OpenCode gateway smoke.',
+  ].join('\n');
+}
+
+function completeAwsEvidence() {
+  return {
+    generatedAt: '2026-05-25T12:00:00.000Z',
+    reviewedBy: 'operator@example.test',
+    reviewSource: 'synthetic test evidence',
+    aws: {
+      accountId: '123456789012',
+      region: 'us-east-1',
+      eksClusterName: 'remote-codex-staging',
+      namespace: 'remote-codex-sandboxes',
+      fargateProfileName: 'sandbox-workers',
+      vpcId: 'vpc-123',
+      subnetIds: ['subnet-1'],
+      securityGroupIds: ['sg-1'],
+      serviceAccountName: 'remote-codex-sandbox-manager',
+      workerImageRepository: 'example/remote-codex-worker',
+      workerImageTag: 'sha-abc123',
+      logGroupNames: ['/aws/eks/remote-codex-staging'],
+      awsAccessSmokePassed: true,
+      configReviewed: true,
+    },
+    kubernetesCredentials: {
+      authMode: 'aws-iam',
+      roleArn: 'arn:aws:iam::123456789012:role/remote-codex-sandbox-manager',
+      serviceAccountName: 'remote-codex-sandbox-manager',
+      namespace: 'remote-codex-sandboxes',
+      noClusterAdmin: true,
+      noWildcardVerbs: true,
+      noWildcardResources: true,
+      namespaceScoped: true,
+      ownedResourceSelector: {
+        'remote-codex.dev/cleanup-scope': 'sandbox-worker',
+      },
+      canI: [
+        ...['create', 'get', 'list', 'watch', 'patch', 'delete'].map((verb) => ({
+          verb,
+          resource: 'pods',
+          namespace: 'remote-codex-sandboxes',
+          allowed: true,
+        })),
+        ...['create', 'get', 'list', 'delete'].map((verb) => ({
+          verb,
+          resource: 'services',
+          namespace: 'remote-codex-sandboxes',
+          allowed: true,
+        })),
+      ],
+      forbiddenCanI: [
+        { verb: '*', resource: '*', namespace: '*', allowed: false },
+        { verb: 'delete', resource: 'namespaces', namespace: '*', allowed: false },
+      ],
+      credentialReviewPassed: true,
+    },
+  };
+}
+
+function completeStagingSmokeEvidence() {
+  return {
+    ok: true,
+    generatedAt: '2026-05-25T12:30:00.000Z',
+    controlPlaneBaseUrl: 'https://control-plane.example.test',
+    steps: [
+      {
+        name: 'start_sandbox',
+        ok: true,
+        details: {
+          sandboxId: 'sandbox-smoke',
+          state: 'running',
+          image: 'remote-codex-worker:sha-abc123',
+        },
+      },
+      {
+        name: 'sandbox_ready',
+        ok: true,
+        details: {
+          sandboxId: 'sandbox-smoke',
+          state: 'running',
+          k8sPodName: 'worker-pod',
+          workerServiceName: 'worker-service',
+          k8sNamespace: 'remote-codex-sandboxes',
+        },
+      },
+      {
+        name: 'admin_sandbox_runtime_detail',
+        ok: true,
+        details: {
+          sandboxId: 'sandbox-smoke',
+          runtimeState: 'running',
+          k8sPodName: 'worker-pod',
+          workerServiceName: 'worker-service',
+          k8sNamespace: 'remote-codex-sandboxes',
+        },
+      },
+      {
+        name: 'stop_sandbox',
+        ok: true,
+        details: {
+          sandboxId: 'sandbox-smoke',
+          state: 'stopping',
+          finalHealthState: 'stopped',
+          stopConverged: true,
+        },
+      },
+      {
+        name: 'idempotent_lifecycle',
+        ok: true,
+        details: {
+          sandboxId: 'sandbox-smoke',
+          firstStartState: 'running',
+          secondStartState: 'running',
+          restartState: 'running',
+        },
+      },
+      {
+        name: 'issue_route_token',
+        ok: true,
+        details: {
+          sandboxId: 'sandbox-smoke',
+          routerBaseUrl: 'https://router.example.test',
+        },
+      },
+      {
+        name: 'router_health',
+        ok: true,
+        details: {
+          routerBaseUrl: 'https://router.example.test',
+          role: 'sandbox-router',
+          status: 200,
+        },
+      },
+      {
+        name: 'browser_to_router_to_worker',
+        ok: true,
+        details: {
+          role: 'worker',
+          sandboxId: 'sandbox-smoke',
+          userId: 'user-smoke',
+          requestDiagnostics: {
+            authorizationHeaderPresent: false,
+            workerTokenHeaderPresent: true,
+          },
+        },
+      },
+      {
+        name: 'direct_worker_denial',
+        ok: true,
+        details: {
+          status: 403,
+          acceptedStatuses: [401, 403],
+        },
+      },
+      ...[
+        ['codex_gateway_smoke', 'codex'],
+        ['claude_gateway_smoke', 'claude'],
+        ['opencode_gateway_smoke', 'opencode'],
+      ].map(([name, provider]) => ({
+        name,
+        ok: true,
+        details: {
+          parsedStdout: {
+            ok: true,
+            provider,
+            gatewayUsageRecorded: true,
+            rootKeysAbsent: true,
+            workerConfigUsesGateway: true,
+            requestId: `${provider}-request-id`,
+          },
+        },
+      })),
+    ],
+  };
+}
+
+function completeHarnessStagingSteps(options: {
+  includeHome?: boolean;
+  includeUsageDetails?: boolean;
+} = {}): TestSmokeStep[] {
+  const includeHome = options.includeHome ?? true;
+  const includeUsageDetails = options.includeUsageDetails ?? true;
+  return [
+    { name: 'sandbox_ready', ok: true },
+    { name: 'browser_to_router_to_worker', ok: true },
+    {
+      name: 'harness_worker_status',
+      ok: true,
+      details: {
+        enabled: true,
+        baseUrl: 'https://elagenteharness.example.test',
+        keyPresent: true,
+        chemistryToolsEnabled: true,
+        modules: ['estructural', 'quntur', 'farmaco'],
+        health: { status: 'ok' },
+      },
+    },
+    ...(includeHome
+      ? [
+          {
+            name: 'harness_worker_home',
+            ok: true,
+            details: {
+              responseKeys: ['payload'],
+              textLength: 128,
+            },
+          },
+        ]
+      : []),
+    {
+      name: 'harness_worker_discovery',
+      ok: true,
+      details: {
+        module: 'farmaco',
+        mode: 'tools',
+        responseKeys: ['payload'],
+        textLength: 256,
+      },
+    },
+    {
+      name: 'harness_control_plane_invoke',
+      ok: true,
+      ...(includeUsageDetails
+        ? {
+            details: {
+              module: 'farmaco',
+              tool: 'generate_ligand_xyz',
+              expectedWorkspaceId: 'workspace-smoke',
+              expectedSessionId: 'session-smoke',
+              usageEventId: 'harness-usage-smoke',
+              workspaceId: 'workspace-smoke',
+              sessionId: 'session-smoke',
+              runId: 'run-harness-smoke',
+              externalEventId: 'event-harness-smoke',
+              status: 'completed',
+            },
+          }
+        : {}),
+    },
+    {
+      name: 'harness_usage_summary_after_invoke',
+      ok: true,
+      ...(includeUsageDetails
+        ? {
+            details: {
+              beforeEventCount: 0,
+              afterEventCount: 1,
+            },
+          }
+        : {}),
+    },
+  ];
+}
+
+function completeHarnessAdminSteps(): TestSmokeStep[] {
+  return [
+    {
+      name: 'unauthenticated POST /admin/members/ensure',
+      ok: true,
+      status: 401,
+      details: {
+        expectedStatus: 401,
+        message: 'ERROR 401: X-Admin-Key required',
+      },
+    },
+    {
+      name: 'unauthenticated GET /admin/usage/export?limit=1',
+      ok: true,
+      status: 401,
+      details: {
+        expectedStatus: 401,
+        message: 'ERROR 401: X-Admin-Key required',
+      },
+    },
+    {
+      name: 'authenticated ensure creates or returns member',
+      ok: true,
+      status: 200,
+      details: {
+        created: true,
+        externalKeyId: 'remote-codex:smoke:harness-admin',
+        externalUserId: 'remote-codex:user:harness-admin-smoke',
+        apiKeyPresent: true,
+        body: {
+          externalKeyId: 'remote-codex:smoke:harness-admin',
+          externalUserId: 'remote-codex:user:harness-admin-smoke',
+          apiKey: '[redacted]',
+          api_key: '[redacted]',
+          created: true,
+        },
+      },
+    },
+    {
+      name: 'authenticated ensure is idempotent',
+      ok: true,
+      status: 200,
+      details: {
+        created: false,
+        externalKeyId: 'remote-codex:smoke:harness-admin',
+        apiKeyPresent: true,
+        body: {
+          externalKeyId: 'remote-codex:smoke:harness-admin',
+          apiKey: '[redacted]',
+          created: false,
+        },
+      },
+    },
+    {
+      name: 'authenticated reconcile returns existing external key',
+      ok: true,
+      status: 200,
+      details: {
+        externalKeyId: 'remote-codex:smoke:harness-admin',
+        apiKey: '[redacted]',
+      },
+    },
+    {
+      name: 'authenticated rekey returns a new key',
+      ok: true,
+      status: 200,
+      details: {
+        externalKeyId: 'remote-codex:smoke:harness-admin',
+        apiKeyPresent: true,
+        keyChanged: true,
+        body: {
+          externalKeyId: 'remote-codex:smoke:harness-admin',
+          apiKey: '[redacted]',
+        },
+      },
+    },
+    {
+      name: 'authenticated usage export returns Remote Codex shape',
+      ok: true,
+      status: 200,
+      details: {
+        eventCount: 0,
+        nextCursorPresent: true,
+        body: {
+          events: [],
+          nextCursor: null,
+        },
+      },
+    },
+    {
+      name: 'authenticated revoke marks key revoked',
+      ok: true,
+      status: 200,
+      details: {
+        externalKeyId: 'remote-codex:smoke:harness-admin',
+        status: 'revoked',
+      },
+    },
+  ];
+}
+
+describe('phase zero-six evidence tooling', () => {
+  it('redacts obvious secrets before evidence stdout is stored', () => {
+    const fakeAwsAccessKey = `AKIA${'ABCDEFGHIJKLMNOP'}`;
+    const raw = [
+      'Authorization: Bearer eyJaaaaaaaaaaaaaaaa.eyJbbbbbbbbbbbbbbbb.cccccccccccccccccc',
+      'openai sk-testsecretvalue1234567890',
+      'anthropic sk-ant-testsecretvalue1234567890',
+      `aws ${fakeAwsAccessKey}`,
+      'github ghp_abcdefghijklmnopqrstuvwxyz',
+    ].join('\n');
+    const redacted = redactSecretText(raw);
+
+    expect(redacted).toContain('Bearer [REDACTED]');
+    expect(redacted).toContain('[REDACTED_OPENAI_KEY]');
+    expect(redacted).toContain('[REDACTED_ANTHROPIC_KEY]');
+    expect(redacted).toContain('[REDACTED_AWS_ACCESS_KEY]');
+    expect(redacted).toContain('[REDACTED_GITHUB_TOKEN]');
+    expect(redacted).not.toContain('eyJaaaaaaaaaaaaaaaa');
+    expect(redacted).not.toContain('sk-testsecretvalue1234567890');
+    expect(redacted).not.toContain('sk-ant-testsecretvalue1234567890');
+    expect(redacted).not.toContain(fakeAwsAccessKey);
+    expect(redacted).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz');
+  });
+
+  it('refuses to apply checklist changes without ready evidence', async () => {
+    const dir = await tempDir();
+    const checklistPath = path.join(dir, 'checklist.md');
+    await writeFile(checklistPath, minimalChecklist());
+
+    const result = await runScript('scripts/verify-phase-zero-six-evidence.ts', [
+      '--checklist',
+      checklistPath,
+      '--apply-ready',
+    ]);
+    const parsed = JSON.parse(result.stdout);
+    const checklist = await readFile(checklistPath, 'utf8');
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.apply.applied).toBe(false);
+    expect(parsed.readyToCheck).toHaveLength(0);
+    expect(checklist).toContain('- [ ] S3.04 Finalize AWS staging configuration.');
+  });
+
+  it('summarizes aggregate phase zero-six gaps by blocking group', async () => {
+    const dir = await tempDir();
+    const checklistPath = path.join(dir, 'checklist.md');
+    const awsPath = path.join(dir, 'aws.json');
+    const stagingPath = path.join(dir, 'staging.json');
+    const awsEvidence = completeAwsEvidence();
+    const stagingEvidence = completeStagingSmokeEvidence();
+    awsEvidence.aws.configReviewed = false;
+    stagingEvidence.steps = stagingEvidence.steps.filter((step) =>
+      !['stop_sandbox', 'direct_worker_denial', 'opencode_gateway_smoke'].includes(step.name),
+    );
+    await writeFile(checklistPath, minimalChecklist());
+    await writeFile(awsPath, JSON.stringify(awsEvidence, null, 2));
+    await writeFile(stagingPath, JSON.stringify(stagingEvidence, null, 2));
+
+    const result = await runScript('scripts/verify-phase-zero-six-evidence.ts', [
+      '--checklist',
+      checklistPath,
+      '--aws-preflight',
+      awsPath,
+      '--staging-smoke',
+      stagingPath,
+    ]);
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.stillMissing).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          item: 'S3.04',
+          groupId: 'aws-preflight',
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
+        }),
+        expect.objectContaining({
+          item: 'S3.07',
+          groupId: 'runtime-smoke',
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+        expect.objectContaining({
+          item: 'R5.11',
+          groupId: 'router-smoke',
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+        expect.objectContaining({
+          item: 'G6.13',
+          groupId: 'provider-smoke',
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+      ]),
+    );
+    expect(parsed.nextCommands).toEqual({
+      auditChecklist: 'pnpm phase-zero-six:audit',
+      writeEnvTemplate: 'pnpm phase-zero-six:template',
+      sourceEnvTemplate: 'source ./.temp/phase-zero-six-evidence/phase-zero-six.env.sh',
+      verifyEnvReadiness: 'pnpm phase-zero-six:env',
+      collectEvidence: 'pnpm phase-zero-six:collect',
+      applyReviewedEvidence: 'pnpm phase-zero-six:apply',
+      collectAwsOnly: 'pnpm phase-zero-six:collect:aws',
+      collectFullStaging: 'pnpm phase-zero-six:collect',
+    });
+    expect(parsed.blockingGroups).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'aws-preflight',
+          readyItems: ['S3.05'],
+          notReadyItems: ['S3.04'],
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
+        }),
+        expect.objectContaining({
+          id: 'runtime-smoke',
+          notReadyItems: ['S3.07'],
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+        expect.objectContaining({
+          id: 'router-smoke',
+          notReadyItems: ['R5.11'],
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+        expect.objectContaining({
+          id: 'provider-smoke',
+          notReadyItems: ['G6.13'],
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+      ]),
+    );
+  });
+
+  it('renders aggregate phase zero-six audit as a text report', async () => {
+    const dir = await tempDir();
+    const checklistPath = path.join(dir, 'checklist.md');
+    await writeFile(checklistPath, minimalChecklist());
+
+    const result = await runScript('scripts/verify-phase-zero-six-evidence.ts', [
+      '--checklist',
+      checklistPath,
+      '--format',
+      'text',
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('# Remote Codex Phase 0-6 Audit');
+    expect(result.stdout).toContain('Complete: false');
+    expect(result.stdout).toContain('## Next Commands');
+    expect(result.stdout).toContain('collectEvidence: pnpm phase-zero-six:collect');
+    expect(result.stdout).toContain('## Blocking Groups');
+    expect(result.stdout).toContain('aws-preflight');
+    expect(result.stdout).toContain('provider-smoke');
+    expect(result.stdout).toContain('## Still Missing');
+    expect(result.stdout).toContain('S3.04 Finalize AWS staging configuration.');
+    expect(result.stdout).toContain('Do not check live AWS/staging/provider boxes');
+  });
+
+  it('can fail aggregate phase zero-six audit for CI checks', async () => {
+    const dir = await tempDir();
+    const checklistPath = path.join(dir, 'checklist.md');
+    await writeFile(checklistPath, minimalChecklist());
+
+    const result = await runScript('scripts/verify-phase-zero-six-evidence.ts', [
+      '--checklist',
+      checklistPath,
+      '--format',
+      'text',
+      '--fail-on-incomplete',
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('# Remote Codex Phase 0-6 Audit');
+    expect(result.stdout).toContain('Complete: false');
+  });
+
+  it('applies only ready checklist boxes from AWS preflight evidence', async () => {
+    const dir = await tempDir();
+    const checklistPath = path.join(dir, 'checklist.md');
+    const awsPath = path.join(dir, 'aws.json');
+    await writeFile(checklistPath, minimalChecklist());
+    await writeFile(awsPath, JSON.stringify(completeAwsEvidence(), null, 2));
+
+    const result = await runScript('scripts/verify-phase-zero-six-evidence.ts', [
+      '--checklist',
+      checklistPath,
+      '--aws-preflight',
+      awsPath,
+      '--apply-ready',
+    ]);
+    const parsed = JSON.parse(result.stdout);
+    const checklist = await readFile(checklistPath, 'utf8');
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.apply.applied).toBe(true);
+    expect(parsed.apply.appliedItems).toEqual(['S3.04', 'S3.05']);
+    expect(parsed.readyToCheck).toEqual([
+      expect.objectContaining({
+        item: 'S3.04',
+        groupId: 'aws-preflight',
+        nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
+      }),
+      expect.objectContaining({
+        item: 'S3.05',
+        groupId: 'aws-preflight',
+        nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
+      }),
+    ]);
+    expect(parsed.nextCommands).toEqual({
+      auditChecklist: 'pnpm phase-zero-six:audit',
+      writeEnvTemplate: 'pnpm phase-zero-six:template',
+      sourceEnvTemplate: 'source ./.temp/phase-zero-six-evidence/phase-zero-six.env.sh',
+      verifyEnvReadiness: 'pnpm phase-zero-six:env',
+      collectEvidence: 'pnpm phase-zero-six:collect',
+      applyReviewedEvidence: 'pnpm phase-zero-six:apply',
+      collectAwsOnly: null,
+      collectFullStaging: 'pnpm phase-zero-six:collect',
+    });
+    expect(checklist).toContain('- [x] S3.04 Finalize AWS staging configuration.');
+    expect(checklist).toContain('- [x] S3.05 Add least-privilege Kubernetes credentials.');
+    expect(checklist).toContain('- [ ] S3.06 Create a real worker Pod from the control plane.');
+    expect(checklist).toContain('- [ ] S3.07 Stop a real worker Pod from the control plane.');
+    expect(checklist).toContain('- [ ] S3.08 Add idempotent lifecycle smoke.');
+    expect(checklist).toContain('- [ ] R5.10 Deploy sandbox-router in staging.');
+    expect(checklist).toContain('- [ ] R5.11 Add direct-worker-denial proof.');
+    expect(checklist).toContain('- [ ] R5.12 Add browser-to-router-to-worker smoke.');
+    expect(checklist).toContain('- [ ] G6.11 Run staging Codex gateway smoke.');
+    expect(checklist).toContain('- [ ] G6.12 Run staging Claude Code gateway smoke.');
+    expect(checklist).toContain('- [ ] G6.13 Run staging OpenCode gateway smoke.');
+  });
+
+  it('summarizes AWS preflight evidence gaps by blocking group', async () => {
+    const dir = await tempDir();
+    const awsPath = path.join(dir, 'aws.json');
+    const evidence = completeAwsEvidence();
+    evidence.aws.configReviewed = false;
+    evidence.kubernetesCredentials.credentialReviewPassed = false;
+    await writeFile(awsPath, JSON.stringify(evidence, null, 2));
+
+    const result = await runScript('scripts/verify-aws-staging-preflight-evidence.ts', [awsPath]);
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.readyItems).toEqual([]);
+    expect(parsed.notReadyItems).toEqual(['S3.04', 'S3.05']);
+    expect(parsed.blockingGroups).toEqual([
+      {
+        id: 'aws-preflight',
+        items: ['S3.04', 'S3.05'],
+        readyItems: [],
+        notReadyItems: ['S3.04', 'S3.05'],
+        nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
+      },
+    ]);
+  });
+
+  it('applies all remaining phase zero-six boxes from complete AWS and staging evidence', async () => {
+    const dir = await tempDir();
+    const checklistPath = path.join(dir, 'checklist.md');
+    const awsPath = path.join(dir, 'aws.json');
+    const stagingPath = path.join(dir, 'staging.json');
+    await writeFile(checklistPath, minimalChecklist());
+    await writeFile(awsPath, JSON.stringify(completeAwsEvidence(), null, 2));
+    await writeFile(stagingPath, JSON.stringify(completeStagingSmokeEvidence(), null, 2));
+
+    const result = await runScript('scripts/verify-phase-zero-six-evidence.ts', [
+      '--checklist',
+      checklistPath,
+      '--aws-preflight',
+      awsPath,
+      '--staging-smoke',
+      stagingPath,
+      '--apply-ready',
+    ]);
+    const parsed = JSON.parse(result.stdout);
+    const checklist = await readFile(checklistPath, 'utf8');
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.apply.applied).toBe(true);
+    expect(parsed.apply.appliedItems).toEqual([
+      'S3.04',
+      'S3.05',
+      'S3.06',
+      'S3.07',
+      'S3.08',
+      'R5.10',
+      'R5.11',
+      'R5.12',
+      'G6.11',
+      'G6.12',
+      'G6.13',
+    ]);
+    expect(parsed.readyToCheck.map((entry: { item: string }) => entry.item)).toEqual(
+      parsed.apply.appliedItems,
+    );
+    expect(parsed.stillMissing).toEqual([]);
+    for (const item of parsed.apply.appliedItems as string[]) {
+      expect(checklist).toContain(`- [x] ${item} `);
+    }
+  });
+
+  it('fails artifact safety scan when evidence files contain obvious secrets', async () => {
+    const dir = await tempDir();
+    await writeFile(path.join(dir, 'safe.json'), JSON.stringify({ ok: true }));
+    await writeFile(
+      path.join(dir, 'leak.json'),
+      JSON.stringify({
+        ok: true,
+        Authorization: 'Bearer eyJaaaaaaaaaaaaaaaa.eyJbbbbbbbbbbbbbbbb.cccccccccccccccccc',
+      }),
+    );
+
+    const result = await runScript('scripts/verify-phase-zero-six-artifacts-safe.ts', ['--dir', dir]);
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.findings.map((finding: { kind: string }) => finding.kind)).toContain('bearer_token');
+    expect(parsed.findings.map((finding: { kind: string }) => finding.kind)).toContain('jwt_value');
+  });
+
+  it('scans shell env artifacts for obvious secrets while allowing placeholders', async () => {
+    const safeDir = await tempDir();
+    await writeFile(
+      path.join(safeDir, 'phase-zero-six.env.sh'),
+      [
+        "export STAGING_PRODUCT_JWT='<staging-product-jwt>'",
+        "export AWS_STAGING_REVIEWED_BY='operator@example.com'",
+        '',
+      ].join('\n'),
+    );
+    const safeResult = await runScript('scripts/verify-phase-zero-six-artifacts-safe.ts', [
+      '--dir',
+      safeDir,
+    ]);
+    const safeParsed = JSON.parse(safeResult.stdout);
+
+    expect(safeResult.exitCode).toBe(0);
+    expect(safeParsed.ok).toBe(true);
+    expect(safeParsed.scannedFiles).toContain(path.join(safeDir, 'phase-zero-six.env.sh'));
+
+    const leakingDir = await tempDir();
+    await writeFile(
+      path.join(leakingDir, 'phase-zero-six.env.sh'),
+      "export STAGING_PRODUCT_JWT='Bearer eyJaaaaaaaaaaaaaaaa.eyJbbbbbbbbbbbbbbbb.cccccccccccccccccc'\n",
+    );
+    const leakingResult = await runScript('scripts/verify-phase-zero-six-artifacts-safe.ts', [
+      '--dir',
+      leakingDir,
+    ]);
+    const leakingParsed = JSON.parse(leakingResult.stdout);
+
+    expect(leakingResult.exitCode).toBe(1);
+    expect(leakingParsed.ok).toBe(false);
+    expect(leakingParsed.findings.map((finding: { kind: string }) => finding.kind)).toContain('bearer_token');
+    expect(leakingParsed.findings.map((finding: { kind: string }) => finding.kind)).toContain('jwt_value');
+  });
+
+  it('allows phase evidence artifact paths while still flagging long secret-like values', async () => {
+    const safeDir = await tempDir();
+    await writeFile(
+      path.join(safeDir, 'summary.json'),
+      JSON.stringify({
+        artifacts: {
+          envReadiness: '.temp/phase-zero-six-evidence/latest-local-template-check/env-readiness.json',
+          envTemplate: '.temp/phase-zero-six-evidence/latest-local-template-check/phase-zero-six.env.sh',
+          absoluteEnvReadiness: path.join(safeDir, '.temp/phase-zero-six-evidence/latest/env-readiness.json'),
+          testArtifact: path.join(safeDir, 'artifact-secret-scan.json'),
+          inputArtifactSecretScan: path.join(safeDir, 'artifact-secret-scan-input.json'),
+          outputArtifactSecretScan: path.join(safeDir, 'artifact-secret-scan-output.json'),
+          postApplyArtifactSecretScan: path.join(safeDir, 'artifact-secret-scan-post-apply.json'),
+          finalArtifactSecretScan: path.join(safeDir, 'artifact-secret-scan-final.json'),
+        },
+        scannedFiles: [
+          path.join(safeDir, 'aws-staging-preflight-verification.json'),
+        ],
+      }),
+    );
+    const safeResult = await runScript('scripts/verify-phase-zero-six-artifacts-safe.ts', [
+      '--dir',
+      safeDir,
+    ]);
+    const safeParsed = JSON.parse(safeResult.stdout);
+
+    expect(safeResult.exitCode).toBe(0);
+    expect(safeParsed.ok).toBe(true);
+
+    const leakingDir = await tempDir();
+    await writeFile(
+      path.join(leakingDir, 'summary.json'),
+      JSON.stringify({
+        value: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      }),
+    );
+    const leakingResult = await runScript('scripts/verify-phase-zero-six-artifacts-safe.ts', [
+      '--dir',
+      leakingDir,
+    ]);
+    const leakingParsed = JSON.parse(leakingResult.stdout);
+
+    expect(leakingResult.exitCode).toBe(1);
+    expect(leakingParsed.findings.map((finding: { kind: string }) => finding.kind)).toContain('long_secret_like_value');
+  });
+
+  it('reports env readiness without printing secret values', async () => {
+    const result = await runScriptWithEnv(
+      'scripts/verify-phase-zero-six-env-ready.ts',
+      [],
+      {
+        STAGING_CONTROL_PLANE_BASE_URL: 'https://control-plane.example.test',
+        STAGING_PRODUCT_JWT: 'secret-product-jwt-value',
+        STAGING_ADMIN_JWT: 'secret-admin-jwt-value',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.secretSafety.valuesPrinted).toBe(false);
+    expect(parsed.hostToolReadiness).toEqual(
+      expect.objectContaining({
+        ok: expect.any(Boolean),
+        requirements: expect.arrayContaining([
+          expect.objectContaining({
+            command: 'aws',
+            requiredForGroups: expect.arrayContaining(['aws-preflight']),
+          }),
+          expect.objectContaining({
+            command: 'kubectl',
+            requiredForGroups: expect.arrayContaining(['aws-preflight']),
+          }),
+        ]),
+      }),
+    );
+    expect(result.stdout).toContain('STAGING_PRODUCT_JWT');
+    expect(result.stdout).toContain('STAGING_ADMIN_JWT');
+    expect(parsed.itemReadiness).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          item: 'S3.06',
+          groupId: 'runtime-smoke',
+          envReady: false,
+          missingEnv: expect.arrayContaining([
+            'STAGING_IDEMPOTENT_LIFECYCLE_SMOKE=true',
+            'STAGING_STOP_SANDBOX_AFTER_SMOKE=true',
+          ]),
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+        expect.objectContaining({
+          item: 'G6.11',
+          groupId: 'codex-provider-smoke',
+          envReady: false,
+        }),
+      ]),
+    );
+    expect(parsed.nextCommands.collectEvidence).toBe(
+      'pnpm phase-zero-six:collect',
+    );
+    expect(parsed.missingEnvExportTemplate).toEqual(
+      expect.arrayContaining([
+        "# runtime-smoke\nexport STAGING_IDEMPOTENT_LIFECYCLE_SMOKE='<idempotent-smoke>'",
+        "# runtime-smoke\nexport STAGING_STOP_SANDBOX_AFTER_SMOKE='<stop-after-smoke>'",
+      ]),
+    );
+    expect(result.stdout).not.toContain('secret-product-jwt-value');
+    expect(result.stdout).not.toContain('secret-admin-jwt-value');
+  });
+
+  it('renders env readiness as a text report without printing secret values', async () => {
+    const result = await runScriptWithEnv(
+      'scripts/verify-phase-zero-six-env-ready.ts',
+      ['--format', 'text', '--no-fail'],
+      {
+        STAGING_CONTROL_PLANE_BASE_URL: 'https://control-plane.example.test',
+        STAGING_PRODUCT_JWT: 'secret-product-jwt-value',
+        STAGING_ADMIN_JWT: 'secret-admin-jwt-value',
+      },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('# Remote Codex Phase 0-6 Env Readiness');
+    expect(result.stdout).toContain('Ready: false');
+    expect(result.stdout).toContain('Mode: full staging');
+    expect(result.stdout).toContain('## Next Commands');
+    expect(result.stdout).toContain('collectEvidence: pnpm phase-zero-six:collect');
+    expect(result.stdout).toContain('## Host Tools');
+    expect(result.stdout).toContain('aws:');
+    expect(result.stdout).toContain('kubectl:');
+    expect(result.stdout).toContain('## Groups');
+    expect(result.stdout).toContain('runtime-smoke: not ready');
+    expect(result.stdout).toContain('STAGING_IDEMPOTENT_LIFECYCLE_SMOKE=true');
+    expect(result.stdout).toContain('## Item Readiness');
+    expect(result.stdout).toContain('S3.06 [runtime-smoke]: envReady=false');
+    expect(result.stdout).toContain('This report prints environment variable names only');
+    expect(result.stdout).not.toContain('secret-product-jwt-value');
+    expect(result.stdout).not.toContain('secret-admin-jwt-value');
+  });
+
+  it('can fail env readiness text report for CI checks', async () => {
+    const result = await runScript('scripts/verify-phase-zero-six-env-ready.ts', [
+      '--format',
+      'text',
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('# Remote Codex Phase 0-6 Env Readiness');
+    expect(result.stdout).toContain('Ready: false');
+  });
+
+  it('writes a placeholder env template without leaking current secret values', async () => {
+    const dir = await tempDir();
+    const templatePath = path.join(dir, 'phase-zero-six.env.sh');
+    const result = await runScriptWithEnv(
+      'scripts/verify-phase-zero-six-env-ready.ts',
+      ['--write-env-template', templatePath],
+      {
+        STAGING_CONTROL_PLANE_BASE_URL: 'https://control-plane.example.test',
+        STAGING_PRODUCT_JWT: 'secret-product-jwt-value',
+        STAGING_ADMIN_JWT: 'secret-admin-jwt-value',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+    const template = await readFile(templatePath, 'utf8');
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.envTemplatePath).toBe(templatePath);
+    expect(template).toContain('Phase 0-6 staging evidence environment template');
+    expect(template).toContain('# runtime-smoke: Runtime staging smoke for S3.06-S3.08 and R5.10/R5.12');
+    expect(template).toContain("export STAGING_IDEMPOTENT_LIFECYCLE_SMOKE='<idempotent-smoke>'");
+    expect(template).toContain("export AWS_STAGING_REVIEWED_BY='operator@example.com'");
+    expect(template).not.toContain('secret-product-jwt-value');
+    expect(template).not.toContain('secret-admin-jwt-value');
+    expect(result.stdout).not.toContain('secret-product-jwt-value');
+    expect(result.stdout).not.toContain('secret-admin-jwt-value');
+  });
+
+  it('does not treat sourced placeholder env template values as ready', async () => {
+    const dir = await tempDir();
+    const templatePath = path.join(dir, 'phase-zero-six.env.sh');
+    await runScript(
+      'scripts/verify-phase-zero-six-env-ready.ts',
+      ['--write-env-template', templatePath],
+    );
+    const template = await readFile(templatePath, 'utf8');
+    const env: Record<string, string> = {};
+    for (const line of template.split(/\r?\n/)) {
+      const match = /^export ([A-Z0-9_]+)='(.*)'$/.exec(line);
+      if (match) {
+        env[match[1]] = match[2];
+      }
+    }
+
+    const result = await runScriptWithEnv(
+      'scripts/verify-phase-zero-six-env-ready.ts',
+      [],
+      env,
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.notReadyGroups).toContain('runtime-smoke');
+    expect(parsed.groups.find((group: { id: string }) => group.id === 'runtime-smoke').missingEnv)
+      .toContain('STAGING_PRODUCT_JWT');
+    expect(parsed.groups.find((group: { id: string }) => group.id === 'aws-preflight').missingEnv)
+      .toContain('AWS_STAGING_WORKER_IMAGE_TAG | SANDBOX_WORKER_IMAGE_TAG');
+    expect(parsed.groups.find((group: { id: string }) => group.id === 'aws-preflight').missingEnv)
+      .toContain('AWS_STAGING_CONFIG_REVIEWED=true');
+  });
+
+  it('writes a GitHub staging Environment template without leaking current secret values', async () => {
+    const dir = await tempDir();
+    const templatePath = path.join(dir, 'github-staging.env.sh');
+    const result = await runScriptWithEnv(
+      'scripts/configure-github-staging-evidence-env.ts',
+      ['--write-template', templatePath, '--direct-worker-mode', 'private'],
+      {
+        STAGING_PRODUCT_JWT: 'secret-product-jwt-value',
+        AWS_SECRET_ACCESS_KEY: 'secret-aws-value',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+    const template = await readFile(templatePath, 'utf8');
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.action).toBe('write-template');
+    expect(template).toContain('Phase 0-6 GitHub staging Environment configuration template');
+    expect(template).toContain('export AWS_STAGING_REVIEWED_BY=');
+    expect(template).toContain("export AWS_STAGING_CONFIG_REVIEWED='<aws-staging-config-reviewed>'");
+    expect(template).toContain("export AWS_STAGING_CREDENTIAL_REVIEW_PASSED='<aws-staging-credential-review-passed>'");
+    expect(template).toContain('export STAGING_DIRECT_WORKER_PRIVATE_PROOF=');
+    expect(template).toContain(`# export ${kubeconfigSecretAlternatives[0]}=`);
+    expect(template).toContain(`export ${kubeconfigSecretAlternatives[1]}=`);
+    expect(template).not.toContain('secret-product-jwt-value');
+    expect(template).not.toContain('secret-aws-value');
+  });
+
+  it('rejects unfilled GitHub staging Environment template placeholders', async () => {
+    const dir = await tempDir();
+    const templatePath = path.join(dir, 'github-staging.env.sh');
+    await runScript(
+      'scripts/configure-github-staging-evidence-env.ts',
+      ['--write-template', templatePath, '--direct-worker-mode', 'private'],
+    );
+
+    const result = await runScript(
+      'scripts/configure-github-staging-evidence-env.ts',
+      ['--values-file', templatePath, '--direct-worker-mode', 'private', '--dry-run'],
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.missingVariables).toContain('AWS_STAGING_REVIEWED_BY');
+    expect(parsed.missingSecrets).toContain('STAGING_PRODUCT_JWT');
+    expect(result.stdout).not.toContain('<aws-staging-reviewed-by>');
+    expect(result.stdout).not.toContain('<staging-product-jwt>');
+  });
+
+  it('dry-runs GitHub staging Environment configuration without printing secret values', async () => {
+    const dir = await tempDir();
+    const envPath = path.join(dir, 'github-staging.env.sh');
+    const secretProductJwt = 'secret-product-jwt-value';
+    const secretAwsKey = 'secret-aws-value';
+    const lines = [
+      ...requiredVariables.map((name) => `export ${name}='value-for-${name}'`),
+      ...directWorkerPrivateVariables.map((name) => `export ${name}='value-for-${name}'`),
+      ...requiredSecrets.map((name) => `export ${name}='value-for-${name}'`),
+      `export ${kubeconfigSecretAlternatives[1]}='secret-kubeconfig-b64-value'`,
+      `export STAGING_PRODUCT_JWT='${secretProductJwt}'`,
+      `export AWS_SECRET_ACCESS_KEY='${secretAwsKey}'`,
+    ];
+    await writeFile(envPath, `${lines.join('\n')}\n`);
+
+    const result = await runScript(
+      'scripts/configure-github-staging-evidence-env.ts',
+      ['--values-file', envPath, '--direct-worker-mode', 'private', '--dry-run'],
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.dryRun).toBe(true);
+    expect(parsed.variables.names).toContain('AWS_STAGING_REVIEWED_BY');
+    expect(parsed.variables.names).toContain('STAGING_DIRECT_WORKER_PRIVATE_PROOF');
+    expect(parsed.secrets.requiredNames).toContain('STAGING_PRODUCT_JWT');
+    expect(parsed.secrets.requiredNames).toContain(kubeconfigSecretAlternatives[1]);
+    expect(result.stdout).not.toContain(secretProductJwt);
+    expect(result.stdout).not.toContain(secretAwsKey);
+    expect(result.stdout).not.toContain('secret-kubeconfig-b64-value');
+  });
+
+  it('ignores optional GitHub staging Environment placeholder secrets', async () => {
+    const dir = await tempDir();
+    const envPath = path.join(dir, 'github-staging.env.sh');
+    const lines = [
+      ...requiredVariables.map((name) => `export ${name}='value-for-${name}'`),
+      ...directWorkerPrivateVariables.map((name) => `export ${name}='value-for-${name}'`),
+      ...requiredSecrets.map((name) => `export ${name}='value-for-${name}'`),
+      `export ${kubeconfigSecretAlternatives[1]}='secret-kubeconfig-b64-value'`,
+      "export AWS_SESSION_TOKEN='<aws-session-token>'",
+    ];
+    await writeFile(envPath, `${lines.join('\n')}\n`);
+
+    const result = await runScript(
+      'scripts/configure-github-staging-evidence-env.ts',
+      ['--values-file', envPath, '--direct-worker-mode', 'private', '--dry-run'],
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.secrets.optionalNames).not.toContain('AWS_SESSION_TOKEN');
+    expect(result.stdout).not.toContain('<aws-session-token>');
+  });
+
+  it('reports missing GitHub staging Environment values by name only', async () => {
+    const dir = await tempDir();
+    const envPath = path.join(dir, 'github-staging-incomplete.env.sh');
+    await writeFile(
+      envPath,
+      [
+        "export STAGING_PRODUCT_JWT='secret-product-jwt-value'",
+        "export AWS_SECRET_ACCESS_KEY='secret-aws-value'",
+      ].join('\n'),
+    );
+
+    const result = await runScript(
+      'scripts/configure-github-staging-evidence-env.ts',
+      ['--values-file', envPath, '--direct-worker-mode', 'private', '--dry-run'],
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.missingVariables).toContain('AWS_STAGING_REVIEWED_BY');
+    expect(parsed.missingSecrets).toContain('STAGING_ADMIN_JWT');
+    expect(parsed.missingSecrets).toContain(kubeconfigSecretAlternatives[0]);
+    expect(result.stdout).not.toContain('secret-product-jwt-value');
+    expect(result.stdout).not.toContain('secret-aws-value');
+  });
+
+  it('marks all phase zero-six env groups ready when required env names are set', async () => {
+    const result = await runScriptWithEnv(
+      'scripts/verify-phase-zero-six-env-ready.ts',
+      [],
+      {
+        AWS_STAGING_REVIEWED_BY: 'operator@example.test',
+        AWS_STAGING_EKS_CLUSTER_NAME: 'remote-codex-staging',
+        AWS_STAGING_K8S_NAMESPACE: 'remote-codex-sandboxes',
+        AWS_STAGING_FARGATE_PROFILE_NAME: 'sandbox-workers',
+        AWS_STAGING_K8S_SERVICE_ACCOUNT: 'remote-codex-sandbox-manager',
+        AWS_STAGING_WORKER_IMAGE_REPOSITORY: 'example/remote-codex-worker',
+        AWS_STAGING_WORKER_IMAGE_TAG: 'sha-abc123',
+        AWS_STAGING_LOG_GROUP_NAMES: '/aws/eks/remote-codex-staging',
+        AWS_STAGING_CONFIG_REVIEWED: 'true',
+        AWS_STAGING_CREDENTIAL_REVIEW_PASSED: 'true',
+        STAGING_CONTROL_PLANE_BASE_URL: 'https://control-plane.example.test',
+        STAGING_PRODUCT_JWT: 'secret-product-jwt-value',
+        STAGING_ADMIN_JWT: 'secret-admin-jwt-value',
+        STAGING_IDEMPOTENT_LIFECYCLE_SMOKE: '1',
+        STAGING_STOP_SANDBOX_AFTER_SMOKE: '1',
+        STAGING_DIRECT_WORKER_BASE_URL: 'https://worker.example.test',
+        STAGING_CODEX_GATEWAY_SMOKE_COMMAND_JSON: '["echo","codex"]',
+        STAGING_CLAUDE_GATEWAY_SMOKE_COMMAND_JSON: '["echo","claude"]',
+        STAGING_OPENCODE_GATEWAY_SMOKE_COMMAND_JSON: '["echo","opencode"]',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.notReadyGroups).toEqual([]);
+    expect(parsed.missingEnvExportTemplate).toEqual([]);
+    expect(parsed.readyGroups).toEqual([
+      'aws-preflight',
+      'runtime-smoke',
+      'direct-worker-denial',
+      'codex-provider-smoke',
+      'claude-provider-smoke',
+      'opencode-provider-smoke',
+    ]);
+    expect(parsed.itemReadiness.every((entry: { envReady: boolean }) => entry.envReady)).toBe(true);
+    expect(parsed.itemReadiness.map((entry: { item: string }) => entry.item)).toEqual([
+      'S3.04',
+      'S3.05',
+      'S3.06',
+      'S3.07',
+      'S3.08',
+      'R5.10',
+      'R5.12',
+      'R5.11',
+      'G6.11',
+      'G6.12',
+      'G6.13',
+    ]);
+    expect(result.stdout).not.toContain('secret-product-jwt-value');
+    expect(result.stdout).not.toContain('secret-admin-jwt-value');
+  });
+
+  it('accepts private router-only worker denial readiness without a public worker URL', async () => {
+    const result = await runScriptWithEnv(
+      'scripts/verify-phase-zero-six-env-ready.ts',
+      [],
+      {
+        STAGING_DIRECT_WORKER_PRIVATE_REVIEWED_BY: 'operator@example.test',
+        STAGING_DIRECT_WORKER_NETWORK_MODE: 'private',
+        STAGING_DIRECT_WORKER_INGRESS_POLICY: 'router-only',
+        STAGING_DIRECT_WORKER_PRIVATE_PROOF: 'eks private service has no public ingress',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+    const directGroup = parsed.groups.find((group: { id: string }) =>
+      group.id === 'direct-worker-denial',
+    );
+
+    expect(directGroup.ready).toBe(true);
+    expect(directGroup.missingEnv).toEqual([]);
+    expect(directGroup.presentEnvNamesOnly).toEqual([
+      'STAGING_DIRECT_WORKER_INGRESS_POLICY',
+      'STAGING_DIRECT_WORKER_NETWORK_MODE',
+      'STAGING_DIRECT_WORKER_PRIVATE_PROOF',
+      'STAGING_DIRECT_WORKER_PRIVATE_REVIEWED_BY',
+    ]);
+    expect(result.stdout).not.toContain('eks private service has no public ingress');
+  });
+
+  it('accepts private router-only direct worker denial evidence for R5.11', async () => {
+    const dir = await tempDir();
+    const stagingPath = path.join(dir, 'staging.json');
+    const evidence = completeStagingSmokeEvidence();
+    evidence.steps = evidence.steps.filter((step) => step.name !== 'direct_worker_denial');
+    const steps = evidence.steps as Array<{
+      name: string;
+      ok: boolean;
+      details?: Record<string, unknown>;
+    }>;
+    steps.push({
+      name: 'direct_worker_private_denial',
+      ok: true,
+      details: {
+        reviewedBy: 'operator@example.test',
+        networkMode: 'private',
+        ingressPolicy: 'router-only',
+        proof: 'EKS worker service is ClusterIP-only and reachable only through sandbox-router.',
+      },
+    });
+    await writeFile(stagingPath, JSON.stringify(evidence, null, 2));
+
+    const result = await runScript('scripts/verify-staging-phase-one-evidence.ts', [stagingPath]);
+    const parsed = JSON.parse(result.stdout);
+    const r511 = parsed.results.find((entry: { item: string }) => entry.item === 'R5.11');
+
+    expect(result.exitCode).toBe(0);
+    expect(r511.readyToCheck).toBe(true);
+    expect(r511.matchedSteps).toEqual(['direct_worker_private_denial']);
+  });
+
+  it('summarizes staging evidence gaps by blocking group', async () => {
+    const dir = await tempDir();
+    const stagingPath = path.join(dir, 'staging.json');
+    const evidence = completeStagingSmokeEvidence();
+    evidence.steps = evidence.steps.filter((step) =>
+      !['stop_sandbox', 'direct_worker_denial', 'opencode_gateway_smoke'].includes(step.name),
+    );
+    await writeFile(stagingPath, JSON.stringify(evidence, null, 2));
+
+    const result = await runScript('scripts/verify-staging-phase-one-evidence.ts', [stagingPath]);
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.blockingGroups).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'aws-preflight',
+          notReadyItems: ['S3.04', 'S3.05'],
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
+        }),
+        expect.objectContaining({
+          id: 'runtime-smoke',
+          notReadyItems: ['S3.07'],
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+        expect.objectContaining({
+          id: 'router-smoke',
+          notReadyItems: ['R5.11'],
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+        expect.objectContaining({
+          id: 'provider-smoke',
+          notReadyItems: ['G6.13'],
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+      ]),
+    );
+  });
+
+  it('checks only AWS preflight env when staging smoke is skipped', async () => {
+    const result = await runScriptWithEnv(
+      'scripts/verify-phase-zero-six-env-ready.ts',
+      ['--skip-staging-smoke'],
+      {
+        AWS_STAGING_REVIEWED_BY: 'operator@example.test',
+        AWS_STAGING_EKS_CLUSTER_NAME: 'remote-codex-staging',
+        AWS_STAGING_K8S_NAMESPACE: 'remote-codex-sandboxes',
+        AWS_STAGING_FARGATE_PROFILE_NAME: 'sandbox-workers',
+        AWS_STAGING_K8S_SERVICE_ACCOUNT: 'remote-codex-sandbox-manager',
+        AWS_STAGING_WORKER_IMAGE_REPOSITORY: 'example/remote-codex-worker',
+        AWS_STAGING_WORKER_IMAGE_TAG: 'sha-abc123',
+        AWS_STAGING_LOG_GROUP_NAMES: '/aws/eks/remote-codex-staging',
+        AWS_STAGING_CONFIG_REVIEWED: 'true',
+        AWS_STAGING_CREDENTIAL_REVIEW_PASSED: 'true',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.skippedStagingSmoke).toBe(true);
+    expect(parsed.readyGroups).toEqual(['aws-preflight']);
+    expect(parsed.notReadyGroups).toEqual([]);
+    expect(parsed.groups.map((group: { id: string }) => group.id)).toEqual(['aws-preflight']);
+    expect(parsed.itemReadiness.map((entry: { item: string }) => entry.item)).toEqual(['S3.04', 'S3.05']);
+    expect(parsed.nextCommands.collectEvidence).toBe(
+      'pnpm phase-zero-six:collect:aws',
+    );
+    expect(parsed.nextCommands.writeEnvTemplate).toBe(
+      'pnpm phase-zero-six:template:aws',
+    );
+  });
+
+  it('stops bundle collection after env readiness failure unless forced', async () => {
+    const dir = await tempDir();
+    const result = await runScriptWithEnv(
+      'scripts/run-phase-zero-six-staging-evidence.ts',
+      [
+        '--output-dir',
+        dir,
+      ],
+      {
+        STAGING_PRODUCT_JWT: 'secret-product-jwt-value',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+    const files = await readdir(dir);
+    const template = await readFile(path.join(dir, 'phase-zero-six.env.sh'), 'utf8');
+    const operatorReport = await readFile(path.join(dir, 'operator-report.txt'), 'utf8');
+    const releaseReview = JSON.parse(await readFile(path.join(dir, 'release-review.json'), 'utf8'));
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.stoppedAfterEnvReadiness).toBe(true);
+    expect(parsed.artifactScanPassed).toBe(true);
+    expect(parsed.envReadiness.notReadyGroups).toEqual([
+      'aws-preflight',
+      'runtime-smoke',
+      'direct-worker-denial',
+      'codex-provider-smoke',
+      'claude-provider-smoke',
+      'opencode-provider-smoke',
+    ]);
+    expect(parsed.envReadiness.groups[0]).toEqual(expect.objectContaining({
+      id: 'aws-preflight',
+      items: ['S3.04', 'S3.05'],
+      ready: false,
+    }));
+    expect(parsed.envReadiness.itemReadiness).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          item: 'S3.04',
+          groupId: 'aws-preflight',
+          envReady: false,
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
+        }),
+        expect.objectContaining({
+          item: 'G6.13',
+          groupId: 'opencode-provider-smoke',
+          envReady: false,
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+      ]),
+    );
+    expect(parsed.envReadiness.nextCommands.collectEvidence).toBe(
+      'pnpm phase-zero-six:collect',
+    );
+    expect(parsed.nextSteps.fillEnvTemplate).toContain(path.join(dir, 'phase-zero-six.env.sh'));
+    expect(parsed.nextSteps.verifyEnvReadiness).toBe('pnpm phase-zero-six:env');
+    expect(parsed.nextSteps.rerunBundle).toContain(`--output-dir ${dir}`);
+    expect(parsed.artifacts.envReadiness).toBe(path.join(dir, 'env-readiness.json'));
+    expect(parsed.artifacts.envTemplate).toBe(path.join(dir, 'phase-zero-six.env.sh'));
+    expect(parsed.artifacts.artifactSecretScan).toBe(path.join(dir, 'artifact-secret-scan.json'));
+    expect(parsed.artifacts.operatorReport).toBe(path.join(dir, 'operator-report.txt'));
+    expect(parsed.artifacts.releaseReview).toBe(path.join(dir, 'release-review.json'));
+    expect(releaseReview.envReadiness.itemReadiness).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          item: 'S3.04',
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
+        }),
+        expect.objectContaining({
+          item: 'G6.13',
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+      ]),
+    );
+    expect(releaseReview.envReadiness.blockingGroups).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'aws-preflight',
+          items: ['S3.04', 'S3.05'],
+          nextEvidenceCommands: ['pnpm phase-zero-six:collect:aws'],
+        }),
+        expect.objectContaining({
+          id: 'opencode-provider-smoke',
+          items: ['G6.13'],
+          nextEvidenceCommands: ['pnpm phase-zero-six:collect'],
+        }),
+      ]),
+    );
+    expect(parsed.artifacts.finalArtifactSecretScan).toBe(path.join(dir, 'artifact-secret-scan-final.json'));
+    expect(parsed.finalArtifactScanPassed).toBe(true);
+    expect(parsed.artifacts.awsPreflight).toBeNull();
+    expect(files.sort()).toEqual([
+      'artifact-secret-scan-final.json',
+      'artifact-secret-scan.json',
+      'env-readiness.json',
+      'operator-report.txt',
+      'phase-zero-six.env.sh',
+      'release-review.json',
+      'summary.json',
+    ]);
+    expect(parsed.results.map((entry: { name: string }) => entry.name)).toEqual([
+      'verify_phase_zero_six_env_ready',
+      'verify_phase_zero_six_artifacts_safe',
+      'verify_phase_zero_six_final_artifacts_safe',
+    ]);
+    expect(template).toContain('Phase 0-6 staging evidence environment template');
+    expect(template).not.toContain('secret-product-jwt-value');
+    expect(operatorReport).toContain('Remote Codex Phase 0-6 Evidence Operator Report');
+    expect(operatorReport).toContain('S3.04 [aws-preflight]: envReady=false');
+    expect(operatorReport).toContain('G6.13 [opencode-provider-smoke]: envReady=false');
+    expect(operatorReport).not.toContain('secret-product-jwt-value');
+    expect(releaseReview.ok).toBe(false);
+    expect(releaseReview.phaseZeroSixComplete).toBe(false);
+    expect(releaseReview.envReadiness.notReadyGroups).toEqual([
+      'aws-preflight',
+      'runtime-smoke',
+      'direct-worker-denial',
+      'codex-provider-smoke',
+      'claude-provider-smoke',
+      'opencode-provider-smoke',
+    ]);
+    expect(JSON.stringify(releaseReview)).not.toContain('secret-product-jwt-value');
+    expect(result.stdout).not.toContain('secret-product-jwt-value');
+  });
+
+  it('force mode continues bundle collection after env readiness failure', async () => {
+    const dir = await tempDir();
+    const result = await runScriptWithEnv(
+      'scripts/run-phase-zero-six-staging-evidence.ts',
+      [
+        '--output-dir',
+        dir,
+        '--skip-staging-smoke',
+        '--force',
+      ],
+      {
+        AWS_STAGING_PREFLIGHT_SKIP_COMMANDS: '1',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+    const files = await readdir(dir);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.stoppedAfterEnvReadiness).toBe(false);
+    expect(files).toContain('env-readiness.json');
+    expect(files).toContain('aws-staging-preflight.json');
+    expect(files).toContain('aws-staging-preflight-verification.json');
+    expect(files).toContain('phase-zero-six-verification.json');
+    expect(files).toContain('artifact-secret-scan.json');
+    expect(files).toContain('summary.json');
+  });
+
+  it('treats partial bundle evidence as successful without claiming phase zero-six complete', async () => {
+    const dir = await tempDir();
+    const fakeBin = await fakeAwsKubectlBin(dir);
+    const checklistPath = path.join(dir, 'checklist.md');
+    await writeFile(checklistPath, minimalChecklist());
+
+    const result = await runScriptWithEnv(
+      'scripts/run-phase-zero-six-staging-evidence.ts',
+      [
+        '--output-dir',
+        dir,
+        '--skip-staging-smoke',
+        '--apply-ready',
+        '--checklist',
+        checklistPath,
+      ],
+      {
+        PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ''}`,
+        AWS_STAGING_REVIEWED_BY: 'operator@example.test',
+        AWS_STAGING_REGION: 'us-east-1',
+        AWS_STAGING_EKS_CLUSTER_NAME: 'remote-codex-staging',
+        AWS_STAGING_K8S_NAMESPACE: 'remote-codex-sandboxes',
+        AWS_STAGING_FARGATE_PROFILE_NAME: 'sandbox-workers',
+        AWS_STAGING_K8S_SERVICE_ACCOUNT: 'remote-codex-sandbox-manager',
+        AWS_STAGING_WORKER_IMAGE_REPOSITORY: 'example/remote-codex-worker',
+        AWS_STAGING_WORKER_IMAGE_TAG: 'sha-abc123',
+        AWS_STAGING_LOG_GROUP_NAMES: '/aws/eks/remote-codex-staging',
+        AWS_STAGING_CONFIG_REVIEWED: 'true',
+        AWS_STAGING_CREDENTIAL_REVIEW_PASSED: 'true',
+        AWS_STAGING_K8S_AUTH_MODE: 'aws-iam',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+    const checklist = await readFile(checklistPath, 'utf8');
+    const files = await readdir(dir);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.phaseZeroSixComplete).toBe(false);
+    expect(parsed.checklistReadiness.readyToCheck.map((entry: { item: string }) => entry.item)).toEqual([
+      'S3.04',
+      'S3.05',
+    ]);
+    expect(parsed.checklistReadiness.readyToCheck).toEqual([
+      expect.objectContaining({
+        item: 'S3.04',
+        groupId: 'aws-preflight',
+        nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
+      }),
+      expect.objectContaining({
+        item: 'S3.05',
+        groupId: 'aws-preflight',
+        nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
+      }),
+    ]);
+    expect(parsed.checklistReadiness.stillMissing).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          item: 'S3.06',
+          groupId: 'runtime-smoke',
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+      ]),
+    );
+    expect(parsed.checklistReadiness.blockingGroups).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'runtime-smoke',
+          notReadyItems: ['S3.06', 'S3.07', 'S3.08'],
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+        expect.objectContaining({
+          id: 'router-smoke',
+          notReadyItems: ['R5.10', 'R5.11', 'R5.12'],
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+        expect.objectContaining({
+          id: 'provider-smoke',
+          notReadyItems: ['G6.11', 'G6.12', 'G6.13'],
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+      ]),
+    );
+    expect(parsed.checklistReadiness.checkedButContradicted).toEqual([]);
+    expect(parsed.applySkippedReason).toBeNull();
+    expect(
+      parsed.results.find((entry: { name: string }) => entry.name === 'verify_phase_zero_six_evidence'),
+    ).toMatchObject({
+      ok: true,
+      rawOk: false,
+      parsedOk: false,
+    });
+    expect(
+      parsed.results.find((entry: { name: string }) => entry.name === 'verify_phase_zero_six_evidence_apply'),
+    ).toMatchObject({
+      ok: true,
+      rawOk: false,
+      parsedOk: false,
+    });
+    expect(
+      parsed.results.find((entry: { name: string }) =>
+        entry.name === 'verify_phase_zero_six_post_apply_artifacts_safe'),
+    ).toMatchObject({
+      ok: true,
+      rawOk: true,
+      parsedOk: true,
+    });
+    expect(parsed.postApplyScanPassed).toBe(true);
+    expect(parsed.artifacts.phaseZeroSixApply).toBe(path.join(dir, 'phase-zero-six-apply.json'));
+    expect(parsed.artifacts.postApplyArtifactSecretScan).toBe(path.join(dir, 'artifact-secret-scan-post-apply.json'));
+    expect(parsed.artifacts.operatorReport).toBe(path.join(dir, 'operator-report.txt'));
+    expect(parsed.artifacts.releaseReview).toBe(path.join(dir, 'release-review.json'));
+    expect(parsed.artifacts.finalArtifactSecretScan).toBe(path.join(dir, 'artifact-secret-scan-final.json'));
+    expect(parsed.finalArtifactScanPassed).toBe(true);
+    const operatorReport = await readFile(path.join(dir, 'operator-report.txt'), 'utf8');
+    const releaseReview = JSON.parse(await readFile(path.join(dir, 'release-review.json'), 'utf8'));
+    expect(operatorReport).toContain('## Checklist blocking groups');
+    expect(operatorReport).toContain('runtime-smoke');
+    expect(operatorReport).toContain('Next evidence command: pnpm phase-zero-six:collect');
+    expect(operatorReport).toContain('Group: runtime-smoke');
+    expect(releaseReview.checklist.blockingGroups).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'runtime-smoke',
+          notReadyItems: ['S3.06', 'S3.07', 'S3.08'],
+        }),
+      ]),
+    );
+    expect(releaseReview.checklist.readyToCheck).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          item: 'S3.04',
+          groupId: 'aws-preflight',
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect:aws',
+        }),
+      ]),
+    );
+    expect(releaseReview.checklist.stillMissing).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          item: 'S3.06',
+          groupId: 'runtime-smoke',
+          nextEvidenceCommand: 'pnpm phase-zero-six:collect',
+        }),
+      ]),
+    );
+    expect(files).toContain('phase-zero-six-apply.json');
+    expect(files).toContain('artifact-secret-scan-post-apply.json');
+    expect(files).toContain('artifact-secret-scan-final.json');
+    expect(files).toContain('operator-report.txt');
+    expect(files).toContain('release-review.json');
+    expect(checklist).toContain('- [x] S3.04 Finalize AWS staging configuration.');
+    expect(checklist).toContain('- [x] S3.05 Add least-privilege Kubernetes credentials.');
+    expect(checklist).toContain('- [ ] S3.06 Create a real worker Pod from the control plane.');
+  }, 15_000);
+
+  it('applies reviewed artifacts without rerunning live collection or smoke commands', async () => {
+    const evidenceDir = await tempDir();
+    const applyDir = await tempDir();
+    const checklistPath = path.join(applyDir, 'checklist.md');
+    await writeFile(checklistPath, minimalChecklist());
+    await writeFile(
+      path.join(evidenceDir, 'env-readiness.json'),
+      JSON.stringify({
+        ok: true,
+        readyGroups: ['aws-preflight'],
+        notReadyGroups: [],
+        groups: [{
+          id: 'aws-preflight',
+          items: ['S3.04', 'S3.05'],
+          ready: true,
+          missingEnv: [],
+          missingRecommendedEnv: [],
+        }],
+      }),
+    );
+    await writeFile(
+      path.join(evidenceDir, 'aws-staging-preflight.json'),
+      JSON.stringify(completeAwsEvidence(), null, 2),
+    );
+
+    const result = await runScript(
+      'scripts/run-phase-zero-six-staging-evidence.ts',
+      [
+        '--from-output-dir',
+        evidenceDir,
+        '--output-dir',
+        applyDir,
+        '--skip-staging-smoke',
+        '--apply-ready',
+        '--checklist',
+        checklistPath,
+      ],
+    );
+    const parsed = JSON.parse(result.stdout);
+    const checklist = await readFile(checklistPath, 'utf8');
+    const commandNames = parsed.results.map((entry: { name: string }) => entry.name);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.reuseExistingArtifacts).toBe(true);
+    expect(parsed.fromOutputDir).toBe(evidenceDir);
+    expect(parsed.checklistReadiness.readyToCheck.map((entry: { item: string }) => entry.item)).toEqual([
+      'S3.04',
+      'S3.05',
+    ]);
+    expect(parsed.checklistReadiness.checkedButContradicted).toEqual([]);
+    expect(commandNames).not.toContain('verify_phase_zero_six_env_ready');
+    expect(commandNames).not.toContain('collect_aws_staging_preflight_evidence');
+    expect(commandNames).not.toContain('run_staging_phase_one_smoke');
+    expect(commandNames).toEqual([
+      'verify_aws_staging_preflight_evidence',
+      'verify_phase_zero_six_evidence',
+      'verify_phase_zero_six_input_artifacts_safe',
+      'verify_phase_zero_six_output_artifacts_safe',
+      'verify_phase_zero_six_evidence_apply',
+      'verify_phase_zero_six_post_apply_artifacts_safe',
+      'verify_phase_zero_six_final_artifacts_safe',
+    ]);
+    expect(parsed.envReadiness.readyGroups).toEqual(['aws-preflight']);
+    expect(parsed.artifacts.awsPreflight).toBe(path.join(evidenceDir, 'aws-staging-preflight.json'));
+    expect(parsed.artifacts.artifactSecretScan).toBeNull();
+    expect(parsed.artifacts.inputArtifactSecretScan).toBe(path.join(applyDir, 'artifact-secret-scan-input.json'));
+    expect(parsed.artifacts.outputArtifactSecretScan).toBe(path.join(applyDir, 'artifact-secret-scan-output.json'));
+    expect(parsed.artifacts.postApplyArtifactSecretScan).toBe(path.join(applyDir, 'artifact-secret-scan-post-apply.json'));
+    expect(parsed.postApplyScanPassed).toBe(true);
+    expect(checklist).toContain('- [x] S3.04 Finalize AWS staging configuration.');
+    expect(checklist).toContain('- [x] S3.05 Add least-privilege Kubernetes credentials.');
+  });
+
+  it('reports missing reviewed artifact files before running reuse verifiers', async () => {
+    const evidenceDir = await tempDir();
+    const applyDir = await tempDir();
+    await writeFile(
+      path.join(evidenceDir, 'env-readiness.json'),
+      JSON.stringify({
+        ok: false,
+        readyGroups: [],
+        notReadyGroups: ['aws-preflight'],
+        groups: [{
+          id: 'aws-preflight',
+          items: ['S3.04', 'S3.05'],
+          ready: false,
+          missingEnv: ['AWS_STAGING_REVIEWED_BY'],
+          missingRecommendedEnv: [],
+        }],
+      }),
+    );
+
+    const result = await runScript(
+      'scripts/run-phase-zero-six-staging-evidence.ts',
+      [
+        '--from-output-dir',
+        evidenceDir,
+        '--output-dir',
+        applyDir,
+        '--apply-ready',
+      ],
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.reason).toBe('Reviewed artifact reuse requested, but required evidence files are missing.');
+    expect(parsed.missingEvidenceFiles).toEqual([
+      path.join(evidenceDir, 'aws-staging-preflight.json'),
+      path.join(evidenceDir, 'staging-phase-one-smoke.json'),
+    ]);
+    expect(parsed.results).toEqual([
+      expect.objectContaining({
+        name: 'verify_phase_zero_six_final_artifacts_safe',
+        ok: true,
+      }),
+    ]);
+    expect(parsed.finalArtifactScanPassed).toBe(true);
+    expect(parsed.envReadiness.notReadyGroups).toEqual(['aws-preflight']);
+    expect(parsed.envReadiness.itemReadiness).toEqual([]);
+    expect(parsed.nextSteps.rerunBundle).toContain(`--from-output-dir ${evidenceDir}`);
+  });
+
+  it('does not apply checklist changes when bundle artifact scan fails', async () => {
+    const dir = await tempDir();
+    const checklistPath = path.join(dir, 'checklist.md');
+    await writeFile(checklistPath, minimalChecklist());
+
+    const result = await runScriptWithEnv(
+      'scripts/run-phase-zero-six-staging-evidence.ts',
+      [
+        '--output-dir',
+        dir,
+        '--skip-staging-smoke',
+        '--force',
+        '--apply-ready',
+        '--checklist',
+        checklistPath,
+      ],
+      {
+        AWS_STAGING_PREFLIGHT_SKIP_COMMANDS: '1',
+        AWS_STAGING_REVIEWED_BY: 'operator@example.test',
+        AWS_STAGING_ACCOUNT_ID: '123456789012',
+        AWS_STAGING_REGION: 'us-east-1',
+        AWS_STAGING_EKS_CLUSTER_NAME: 'remote-codex-staging',
+        AWS_STAGING_K8S_NAMESPACE: 'remote-codex-sandboxes',
+        AWS_STAGING_FARGATE_PROFILE_NAME: 'sandbox-workers',
+        AWS_STAGING_K8S_SERVICE_ACCOUNT: 'remote-codex-sandbox-manager',
+        AWS_STAGING_WORKER_IMAGE_REPOSITORY: 'example/remote-codex-worker',
+        AWS_STAGING_WORKER_IMAGE_TAG: 'sha-abc123',
+        AWS_STAGING_LOG_GROUP_NAMES: '/aws/eks/remote-codex-staging',
+        AWS_STAGING_CONFIG_REVIEWED: 'true',
+        AWS_STAGING_CREDENTIAL_REVIEW_PASSED: 'true',
+        AWS_STAGING_K8S_AUTH_MODE: 'aws-iam',
+        AWS_STAGING_K8S_ROLE_ARN: 'arn:aws:iam::123456789012:role/remote-codex-sandbox-manager',
+        AWS_STAGING_VPC_ID: 'vpc-123',
+        AWS_STAGING_SUBNET_IDS: 'subnet-1',
+        AWS_STAGING_SECURITY_GROUP_IDS: 'sg-1',
+        AWS_STAGING_ENVIRONMENT: 'Bearer eyJaaaaaaaaaaaaaaaa.eyJbbbbbbbbbbbbbbbb.cccccccccccccccccc',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+    const checklist = await readFile(checklistPath, 'utf8');
+    const files = await readdir(dir);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.applySkippedReason).toBe('Artifact secret scan failed; checklist apply was not run.');
+    expect(parsed.artifacts.phaseZeroSixApply).toBeNull();
+    expect(files).not.toContain('phase-zero-six-apply.json');
+    expect(checklist).toContain('- [ ] S3.04 Finalize AWS staging configuration.');
+    expect(checklist).toContain('- [ ] S3.05 Add least-privilege Kubernetes credentials.');
+  });
+
+  it('records direct worker denial when direct worker returns non-json 403', async () => {
+    await withFakeStagingServers(async ({ controlPlaneBaseUrl, directWorkerBaseUrl }) => {
+      const result = await runScriptWithEnv(
+        'scripts/staging-phase-one-smoke.ts',
+        [],
+        {
+          STAGING_CONTROL_PLANE_BASE_URL: controlPlaneBaseUrl,
+          STAGING_PRODUCT_JWT: 'secret-product-jwt-value',
+          STAGING_DIRECT_WORKER_BASE_URL: directWorkerBaseUrl,
+        },
+      );
+      const parsed = JSON.parse(result.stdout);
+      const directStep = parsed.steps.find((step: { name: string }) =>
+        step.name === 'direct_worker_denial',
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(directStep).toMatchObject({
+        name: 'direct_worker_denial',
+        ok: true,
+        details: {
+          status: 403,
+          acceptedStatuses: [401, 403],
+        },
+      });
+      expect(result.stdout).not.toContain('forbidden without worker token');
+      expect(result.stdout).not.toContain('secret-product-jwt-value');
+    });
+  });
+
+  it('records optional Harness staging smoke steps through router and control-plane APIs', async () => {
+    await withFakeStagingServers(async ({ controlPlaneBaseUrl }) => {
+      const result = await runScriptWithEnv(
+        'scripts/staging-phase-one-smoke.ts',
+        [],
+        {
+          STAGING_CONTROL_PLANE_BASE_URL: controlPlaneBaseUrl,
+          STAGING_PRODUCT_JWT: 'secret-product-jwt-value',
+          STAGING_HARNESS_SMOKE: '1',
+          STAGING_HARNESS_MODULE: 'farmaco',
+          STAGING_HARNESS_INVOKE_TOOL: 'generate_ligand_xyz',
+          STAGING_HARNESS_INVOKE_INPUT_JSON: '{"smiles":"CCO"}',
+        },
+      );
+      const parsed = JSON.parse(result.stdout);
+      const steps = new Map(
+        parsed.steps.map((step: { name: string }) => [step.name, step]),
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(steps.get('harness_worker_status')).toMatchObject({
+        name: 'harness_worker_status',
+        ok: true,
+        details: {
+          enabled: true,
+          keyPresent: true,
+          chemistryToolsEnabled: true,
+        },
+      });
+      expect(steps.get('harness_worker_home')).toMatchObject({
+        name: 'harness_worker_home',
+        ok: true,
+        details: {
+          responseKeys: ['payload'],
+        },
+      });
+      expect(steps.get('harness_worker_discovery')).toMatchObject({
+        name: 'harness_worker_discovery',
+        ok: true,
+        details: {
+          module: 'farmaco',
+          mode: 'tools',
+        },
+      });
+      expect(steps.get('harness_control_plane_invoke')).toMatchObject({
+        name: 'harness_control_plane_invoke',
+        ok: true,
+        details: {
+          module: 'farmaco',
+          tool: 'generate_ligand_xyz',
+          expectedWorkspaceId: 'workspace-smoke',
+          expectedSessionId: 'session-smoke',
+          usageEventId: 'harness-usage-smoke',
+          workspaceId: 'workspace-smoke',
+          sessionId: 'session-smoke',
+          runId: 'run-harness-smoke',
+          status: 'completed',
+        },
+      });
+      expect(steps.get('harness_usage_summary_after_invoke')).toMatchObject({
+        name: 'harness_usage_summary_after_invoke',
+        ok: true,
+        details: {
+          beforeEventCount: 0,
+          afterEventCount: 1,
+        },
+      });
+      expect(result.stdout).not.toContain('secret-product-jwt-value');
+    });
+  });
+
+  it('verifies complete Harness integration evidence bundles', async () => {
+    const dir = await tempDir();
+    const adminPath = path.join(dir, 'harness-admin.json');
+    const stagingPath = path.join(dir, 'harness-staging.json');
+    const k8sPath = path.join(dir, 'harness-k8s.json');
+    await writeFile(adminPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessAdminSteps(),
+    }));
+    await writeFile(stagingPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessStagingSteps(),
+    }));
+    await writeFile(k8sPath, JSON.stringify({
+      ok: true,
+      secretSafety: { valuePrinted: false },
+      steps: [
+        'harness_k8s_secret_rbac_get',
+        'harness_k8s_secret_rbac_patch',
+        'harness_k8s_secret_key_present',
+      ].map((name) => ({ name, ok: true })),
+    }));
+
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-integration-evidence.ts',
+      ['--admin-smoke', adminPath, '--staging-smoke', stagingPath, '--k8s-secret-smoke', k8sPath],
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.verifications).toHaveLength(4);
+    expect(parsed.verifications.every((entry: { ok: boolean }) => entry.ok)).toBe(true);
+  });
+
+  it('fails Harness integration evidence when admin smoke details do not prove key shape', async () => {
+    const dir = await tempDir();
+    const adminPath = path.join(dir, 'harness-admin.json');
+    const stagingPath = path.join(dir, 'harness-staging.json');
+    const k8sPath = path.join(dir, 'harness-k8s.json');
+    const adminSteps = completeHarnessAdminSteps();
+    const ensureStep = adminSteps.find((step) => step.name === 'authenticated ensure creates or returns member');
+    const rekeyStep = adminSteps.find((step) => step.name === 'authenticated rekey returns a new key');
+    if (ensureStep) {
+      ensureStep.details = {
+        ...ensureStep.details,
+        apiKeyPresent: false,
+      };
+    }
+    if (rekeyStep) {
+      rekeyStep.details = {
+        ...rekeyStep.details,
+        keyChanged: false,
+      };
+    }
+    await writeFile(adminPath, JSON.stringify({
+      ok: true,
+      steps: adminSteps,
+    }));
+    await writeFile(stagingPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessStagingSteps(),
+    }));
+    await writeFile(k8sPath, JSON.stringify({
+      ok: true,
+      secretSafety: { valuePrinted: false },
+      steps: [
+        'harness_k8s_secret_rbac_get',
+        'harness_k8s_secret_rbac_patch',
+        'harness_k8s_secret_key_present',
+      ].map((name) => ({ name, ok: true })),
+    }));
+
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-integration-evidence.ts',
+      ['--admin-smoke', adminPath, '--staging-smoke', stagingPath, '--k8s-secret-smoke', k8sPath],
+    );
+    const parsed = JSON.parse(result.stdout);
+    const failedIds = parsed.verifications
+      .filter((entry: { ok: boolean }) => !entry.ok)
+      .map((entry: { id: string }) => entry.id);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(failedIds).toEqual(['harness-admin-contract']);
+  });
+
+  it('fails Harness integration evidence when admin smoke body contains a non-redacted key', async () => {
+    const dir = await tempDir();
+    const adminPath = path.join(dir, 'harness-admin.json');
+    const stagingPath = path.join(dir, 'harness-staging.json');
+    const k8sPath = path.join(dir, 'harness-k8s.json');
+    const adminSteps = completeHarnessAdminSteps();
+    const ensureStep = adminSteps.find((step) => step.name === 'authenticated ensure creates or returns member');
+    if (ensureStep?.details?.body && typeof ensureStep.details.body === 'object') {
+      ensureStep.details.body = {
+        ...ensureStep.details.body,
+        apiKey: 'sk-raw-harness-key-should-fail',
+      };
+    }
+    await writeFile(adminPath, JSON.stringify({
+      ok: true,
+      steps: adminSteps,
+    }));
+    await writeFile(stagingPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessStagingSteps(),
+    }));
+    await writeFile(k8sPath, JSON.stringify({
+      ok: true,
+      secretSafety: { valuePrinted: false },
+      steps: [
+        'harness_k8s_secret_rbac_get',
+        'harness_k8s_secret_rbac_patch',
+        'harness_k8s_secret_key_present',
+      ].map((name) => ({ name, ok: true })),
+    }));
+
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-integration-evidence.ts',
+      ['--admin-smoke', adminPath, '--staging-smoke', stagingPath, '--k8s-secret-smoke', k8sPath],
+    );
+    const parsed = JSON.parse(result.stdout);
+    const failedIds = parsed.verifications
+      .filter((entry: { ok: boolean }) => !entry.ok)
+      .map((entry: { id: string }) => entry.id);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(failedIds).toEqual([
+      'harness-admin-contract',
+      'harness-secret-safety',
+    ]);
+  });
+
+  it('collects Harness K8s Secret key presence without printing Secret values', async () => {
+    const dir = await tempDir();
+    const binDir = await fakeHarnessKubectlBin(dir);
+    const result = await runScriptWithEnv(
+      'scripts/harness-k8s-secret-smoke.ts',
+      [],
+      {
+        PATH: `${binDir}:${process.env.PATH ?? ''}`,
+        HARNESS_K8S_NAMESPACE: 'remote-codex-sandboxes',
+        ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: 'remote-codex-harness-app-keys',
+        HARNESS_K8S_SECRET_KEY: 'sandbox-smoke',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.secretSafety.valuePrinted).toBe(false);
+    expect(parsed.steps).toEqual([
+      expect.objectContaining({ name: 'harness_k8s_secret_rbac_get', ok: true }),
+      expect.objectContaining({ name: 'harness_k8s_secret_rbac_patch', ok: true }),
+      expect.objectContaining({
+        name: 'harness_k8s_secret_key_present',
+        ok: true,
+        details: expect.objectContaining({
+          secretName: 'remote-codex-harness-app-keys',
+          secretKey: 'sandbox-smoke',
+          keyPresent: true,
+        }),
+      }),
+    ]);
+    expect(result.stdout).not.toContain('cmVkYWN0ZWQ=');
+  });
+
+  it('requires Harness evidence review to include live smoke paths and secret-safety signoff', async () => {
+    const dir = await tempDir();
+    const reviewPath = path.join(dir, 'harness-evidence-review.json');
+    await writeFile(
+      reviewPath,
+      JSON.stringify(
+        {
+          generatedAt: new Date().toISOString(),
+          reviewedBy: 'operator@example.com',
+          reviewSource: 'staging-smoke-run',
+          harness: {
+            adminSmokePath: './.temp/harness-evidence/harness-admin-smoke.json',
+            adminSmokeOk: true,
+          },
+          remoteCodex: {
+            stagingSmokePath: './.temp/harness-evidence/staging-phase-one-smoke.json',
+            stagingSmokeOk: true,
+          },
+          kubernetes: {
+            k8sSecretSmokePath: './.temp/harness-evidence/harness-k8s-secret-smoke.json',
+            k8sSecretSmokeOk: true,
+            secretDataValuesPrinted: false,
+          },
+          combinedVerifier: {
+            path: './.temp/harness-evidence/harness-integration-verification.json',
+            ok: true,
+            requiredGates: requiredHarnessIntegrationGatesForReview,
+          },
+          secretSafety: {
+            valuesPrinted: false,
+            frontendBundleContainsHarnessKey: false,
+            apiResponseContainsHarnessKey: false,
+            threadMessageContainsHarnessKey: false,
+            logsContainHarnessKey: false,
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    const result = await runScript('scripts/verify-harness-evidence-review.ts', [
+      '--review',
+      reviewPath,
+    ]);
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.checks.map((entry: { name: string; ok: boolean }) => [entry.name, entry.ok])).toEqual([
+      ['review_metadata_present', true],
+      ['admin_smoke_reviewed', true],
+      ['staging_smoke_reviewed', true],
+      ['k8s_secret_smoke_reviewed', true],
+      ['combined_verifier_reviewed', true],
+      ['secret_safety_reviewed', true],
+    ]);
+  });
+
+  it('rejects Harness evidence review when secret safety is not signed off', async () => {
+    const dir = await tempDir();
+    const reviewPath = path.join(dir, 'harness-evidence-review-unsafe.json');
+    await writeFile(
+      reviewPath,
+      JSON.stringify(
+        {
+          generatedAt: new Date().toISOString(),
+          reviewedBy: 'operator@example.com',
+          reviewSource: 'staging-smoke-run',
+          harness: {
+            adminSmokePath: './.temp/harness-evidence/harness-admin-smoke.json',
+            adminSmokeOk: true,
+          },
+          remoteCodex: {
+            stagingSmokePath: './.temp/harness-evidence/staging-phase-one-smoke.json',
+            stagingSmokeOk: true,
+          },
+          kubernetes: {
+            k8sSecretSmokePath: './.temp/harness-evidence/harness-k8s-secret-smoke.json',
+            k8sSecretSmokeOk: true,
+            secretDataValuesPrinted: false,
+          },
+          combinedVerifier: {
+            path: './.temp/harness-evidence/harness-integration-verification.json',
+            ok: true,
+            requiredGates: requiredHarnessIntegrationGatesForReview,
+          },
+          secretSafety: {
+            valuesPrinted: true,
+            frontendBundleContainsHarnessKey: false,
+            apiResponseContainsHarnessKey: false,
+            threadMessageContainsHarnessKey: false,
+            logsContainHarnessKey: false,
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    const result = await runScript('scripts/verify-harness-evidence-review.ts', [
+      '--review',
+      reviewPath,
+    ]);
+    expect(result.exitCode).toBe(1);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.checks.find((entry: { name: string }) => entry.name === 'secret_safety_reviewed')?.ok).toBe(false);
+  });
+
+  it('rejects Harness evidence review when combined verifier gate list is incomplete', async () => {
+    const dir = await tempDir();
+    const reviewPath = path.join(dir, 'harness-evidence-review-missing-gate.json');
+    await writeFile(
+      reviewPath,
+      JSON.stringify(
+        {
+          generatedAt: new Date().toISOString(),
+          reviewedBy: 'operator@example.com',
+          reviewSource: 'staging-smoke-run',
+          harness: {
+            adminSmokePath: './.temp/harness-evidence/harness-admin-smoke.json',
+            adminSmokeOk: true,
+          },
+          remoteCodex: {
+            stagingSmokePath: './.temp/harness-evidence/staging-phase-one-smoke.json',
+            stagingSmokeOk: true,
+          },
+          kubernetes: {
+            k8sSecretSmokePath: './.temp/harness-evidence/harness-k8s-secret-smoke.json',
+            k8sSecretSmokeOk: true,
+            secretDataValuesPrinted: false,
+          },
+          combinedVerifier: {
+            path: './.temp/harness-evidence/harness-integration-verification.json',
+            ok: true,
+            requiredGates: requiredHarnessIntegrationGatesForReview.filter(
+              (gate) => gate !== 'harness-secret-safety',
+            ),
+          },
+          secretSafety: {
+            valuesPrinted: false,
+            frontendBundleContainsHarnessKey: false,
+            apiResponseContainsHarnessKey: false,
+            threadMessageContainsHarnessKey: false,
+            logsContainHarnessKey: false,
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    const result = await runScript('scripts/verify-harness-evidence-review.ts', [
+      '--review',
+      reviewPath,
+    ]);
+    expect(result.exitCode).toBe(1);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.checks.find((entry: { name: string }) => entry.name === 'combined_verifier_reviewed')?.ok).toBe(false);
+  });
+
+  it('collects a complete Harness evidence bundle when live env is present', async () => {
+    const dir = await tempDir();
+    const pnpmPath = await fakeHarnessEvidencePnpmBin(dir);
+    const outputDir = path.join(dir, 'harness-evidence');
+    const result = await runScriptWithEnv(
+      'scripts/collect-harness-integration-evidence.ts',
+      ['--output-dir', outputDir],
+      {
+        HARNESS_EVIDENCE_PNPM_BIN: pnpmPath,
+        ELAGENTE_HARNESS_ADMIN_BASE_URL: 'https://elagenteharness.example.test',
+        ELAGENTE_HARNESS_ADMIN_KEY: 'secret-admin-key',
+        STAGING_CONTROL_PLANE_BASE_URL: 'https://remote-codex.example.test',
+        STAGING_PRODUCT_JWT: 'secret-product-jwt',
+        STAGING_HARNESS_SMOKE: '1',
+        STAGING_HARNESS_MODULE: 'farmaco',
+        STAGING_HARNESS_INVOKE_TOOL: 'generate_ligand_xyz',
+        STAGING_HARNESS_INVOKE_INPUT_JSON: '{"smiles":"CCO"}',
+        HARNESS_K8S_NAMESPACE: 'remote-codex-sandboxes',
+        ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: 'remote-codex-harness-app-keys',
+        HARNESS_K8S_SECRET_KEY: 'sandbox-smoke',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+    const review = JSON.parse(await readFile(path.join(outputDir, 'evidence-review.json'), 'utf8'));
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.missingEnv).toEqual([]);
+    expect(parsed.commandResults.map((entry: { name: string; ok: boolean }) => [entry.name, entry.ok])).toEqual([
+      ['harness_admin_contract_smoke', true],
+      ['staging_phase_one_harness_smoke', true],
+      ['harness_k8s_secret_smoke', true],
+      ['harness_integration_verifier', true],
+      ['harness_evidence_review_verifier', true],
+    ]);
+    expect(review.combinedVerifier.ok).toBe(true);
+    expect(review.combinedVerifier.requiredGates).toEqual(requiredHarnessIntegrationGatesForReview);
+    expect(review.secretSafety.valuesPrinted).toBe(false);
+    expect(result.stdout).not.toContain('secret-admin-key');
+    expect(result.stdout).not.toContain('secret-product-jwt');
+  });
+
+  it('reports missing Harness evidence env without printing secret values', async () => {
+    const dir = await tempDir();
+    const outputDir = path.join(dir, 'harness-evidence-missing');
+    const result = await runScriptWithEnv(
+      'scripts/collect-harness-integration-evidence.ts',
+      ['--output-dir', outputDir],
+      {
+        ELAGENTE_HARNESS_ADMIN_KEY: '',
+        STAGING_PRODUCT_JWT: '',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.commandResults).toEqual([]);
+    expect(parsed.missingEnv.map((entry: { name: string }) => entry.name)).toEqual([
+      'ELAGENTE_HARNESS_ADMIN_KEY',
+      'STAGING_HARNESS_INVOKE_TOOL',
+      'STAGING_HARNESS_INVOKE_INPUT_JSON',
+      'HARNESS_K8S_SECRET_KEY',
+    ]);
+    expect(parsed.nextSteps.rerun).toContain(`--output-dir ${outputDir}`);
+  });
+
+  it('writes a Harness evidence env template without leaking current secret values', async () => {
+    const dir = await tempDir();
+    const outputDir = path.join(dir, 'harness-evidence-template');
+    const envTemplatePath = path.join(dir, 'harness.env.sh');
+    const result = await runScriptWithEnv(
+      'scripts/collect-harness-integration-evidence.ts',
+      ['--output-dir', outputDir, '--write-env-template', envTemplatePath],
+      {
+        ELAGENTE_HARNESS_ADMIN_KEY: '',
+        STAGING_PRODUCT_JWT: '',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+    const envTemplate = await readFile(envTemplatePath, 'utf8');
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.envTemplatePath).toBe(envTemplatePath);
+    expect(envTemplate).toContain('ELAGENTE_HARNESS_ADMIN_KEY');
+    expect(envTemplate).toContain('STAGING_PRODUCT_JWT');
+    expect(envTemplate).toContain('STAGING_HARNESS_SMOKE');
+    expect(envTemplate).toContain('<actual Harness ADMIN_KEY>');
+    expect(envTemplate).toContain('STAGING_LOGIN_EMAIL');
+    expect(envTemplate).toContain('STAGING_LOGIN_PASSWORD');
+    expect(envTemplate).toContain('<low-cost Harness tool>');
+    expect(envTemplate).not.toContain('secret-admin-key');
+    expect(envTemplate).not.toContain('secret-product-jwt');
+    expect(result.stdout).not.toContain('secret-admin-key');
+    expect(result.stdout).not.toContain('secret-product-jwt');
+  });
+
+  it('reports Harness evidence env readiness without printing secret values', async () => {
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-evidence-env.ts',
+      [],
+      {
+        ELAGENTE_HARNESS_ADMIN_KEY: 'secret-admin-key',
+        STAGING_PRODUCT_JWT: 'secret-product-jwt',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.missingRequired).toEqual([]);
+    expect(parsed.defaults.STAGING_CONTROL_PLANE_BASE_URL)
+      .toBe('https://remote-codex-control-plane-production.up.railway.app');
+    expect(result.stdout).not.toContain('secret-admin-key');
+    expect(result.stdout).not.toContain('secret-product-jwt');
+  });
+
+  it('writes a Harness evidence env readiness template without leaking current values', async () => {
+    const dir = await tempDir();
+    const templatePath = path.join(dir, 'harness-readiness.env.sh');
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-evidence-env.ts',
+      ['--write-env-template', templatePath],
+      {
+        ELAGENTE_HARNESS_ADMIN_KEY: 'secret-admin-key',
+        STAGING_PRODUCT_JWT: 'secret-product-jwt',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+    const template = await readFile(templatePath, 'utf8');
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.envTemplatePath).toBe(templatePath);
+    expect(template).toContain('ELAGENTE_HARNESS_ADMIN_KEY');
+    expect(template).toContain('STAGING_LOGIN_EMAIL');
+    expect(template).toContain('STAGING_LOGIN_PASSWORD');
+    expect(template).toContain('STAGING_HARNESS_SMOKE');
+    expect(template).toContain('<actual Harness ADMIN_KEY>');
+    expect(template).toContain('<low-cost Harness tool>');
+    expect(template).not.toContain('secret-admin-key');
+    expect(template).not.toContain('secret-product-jwt');
+  });
+
+  it('marks Harness evidence env ready when required env names are set', async () => {
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-evidence-env.ts',
+      [],
+      {
+        ELAGENTE_HARNESS_ADMIN_BASE_URL: 'https://elagenteharness.example.test',
+        ELAGENTE_HARNESS_ADMIN_KEY: 'secret-admin-key',
+        STAGING_CONTROL_PLANE_BASE_URL: 'https://remote-codex.example.test',
+        STAGING_PRODUCT_JWT: 'secret-product-jwt',
+        STAGING_HARNESS_SMOKE: '1',
+        STAGING_HARNESS_MODULE: 'farmaco',
+        STAGING_HARNESS_INVOKE_TOOL: 'generate_ligand_xyz',
+        STAGING_HARNESS_INVOKE_INPUT_JSON: '{"smiles":"CCO"}',
+        HARNESS_K8S_NAMESPACE: 'remote-codex-sandboxes',
+        ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: 'remote-codex-harness-app-keys',
+        HARNESS_K8S_SECRET_KEY: 'sandbox-smoke',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.missingRequired).toEqual([]);
+    expect(result.stdout).not.toContain('secret-admin-key');
+    expect(result.stdout).not.toContain('secret-product-jwt');
+  });
+
+  it('fails Harness integration evidence when worker root discovery proof is missing', async () => {
+    const dir = await tempDir();
+    const adminPath = path.join(dir, 'harness-admin.json');
+    const stagingPath = path.join(dir, 'harness-staging.json');
+    const k8sPath = path.join(dir, 'harness-k8s.json');
+    await writeFile(adminPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessAdminSteps(),
+    }));
+    await writeFile(stagingPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessStagingSteps({
+        includeHome: false,
+      }),
+    }));
+    await writeFile(k8sPath, JSON.stringify({
+      ok: true,
+      secretSafety: { valuePrinted: false },
+      steps: [
+        'harness_k8s_secret_rbac_get',
+        'harness_k8s_secret_rbac_patch',
+        'harness_k8s_secret_key_present',
+      ].map((name) => ({ name, ok: true })),
+    }));
+
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-integration-evidence.ts',
+      ['--admin-smoke', adminPath, '--staging-smoke', stagingPath, '--k8s-secret-smoke', k8sPath],
+    );
+    const parsed = JSON.parse(result.stdout);
+    const failedIds = parsed.verifications
+      .filter((entry: { ok: boolean }) => !entry.ok)
+      .map((entry: { id: string }) => entry.id);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(failedIds).toEqual(['harness-worker-runtime']);
+  });
+
+  it('fails Harness integration evidence when worker status does not prove injected Harness key readiness', async () => {
+    const dir = await tempDir();
+    const adminPath = path.join(dir, 'harness-admin.json');
+    const stagingPath = path.join(dir, 'harness-staging.json');
+    const k8sPath = path.join(dir, 'harness-k8s.json');
+    await writeFile(adminPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessAdminSteps(),
+    }));
+    const stagingSteps = completeHarnessStagingSteps();
+    const statusStep = stagingSteps.find((step) => step.name === 'harness_worker_status');
+    if (statusStep) {
+      statusStep.details = {
+        ...statusStep.details,
+        keyPresent: false,
+      };
+    }
+    await writeFile(stagingPath, JSON.stringify({
+      ok: true,
+      steps: stagingSteps,
+    }));
+    await writeFile(k8sPath, JSON.stringify({
+      ok: true,
+      secretSafety: { valuePrinted: false },
+      steps: [
+        'harness_k8s_secret_rbac_get',
+        'harness_k8s_secret_rbac_patch',
+        'harness_k8s_secret_key_present',
+      ].map((name) => ({ name, ok: true })),
+    }));
+
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-integration-evidence.ts',
+      ['--admin-smoke', adminPath, '--staging-smoke', stagingPath, '--k8s-secret-smoke', k8sPath],
+    );
+    const parsed = JSON.parse(result.stdout);
+    const failedIds = parsed.verifications
+      .filter((entry: { ok: boolean }) => !entry.ok)
+      .map((entry: { id: string }) => entry.id);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(failedIds).toEqual(['harness-worker-runtime']);
+  });
+
+  it('fails Harness integration evidence when K8s Secret smoke does not prove secret values stayed hidden', async () => {
+    const dir = await tempDir();
+    const adminPath = path.join(dir, 'harness-admin.json');
+    const stagingPath = path.join(dir, 'harness-staging.json');
+    const k8sPath = path.join(dir, 'harness-k8s.json');
+    await writeFile(adminPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessAdminSteps(),
+    }));
+    await writeFile(stagingPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessStagingSteps(),
+    }));
+    await writeFile(k8sPath, JSON.stringify({
+      ok: true,
+      secretSafety: { valuePrinted: true },
+      steps: [
+        'harness_k8s_secret_rbac_get',
+        'harness_k8s_secret_rbac_patch',
+        'harness_k8s_secret_key_present',
+      ].map((name) => ({ name, ok: true })),
+    }));
+
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-integration-evidence.ts',
+      ['--admin-smoke', adminPath, '--staging-smoke', stagingPath, '--k8s-secret-smoke', k8sPath],
+    );
+    const parsed = JSON.parse(result.stdout);
+    const failedIds = parsed.verifications
+      .filter((entry: { ok: boolean }) => !entry.ok)
+      .map((entry: { id: string }) => entry.id);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(failedIds).toEqual(['harness-secret-safety']);
+  });
+
+  it('fails Harness integration evidence when any evidence file contains obvious raw secrets', async () => {
+    const dir = await tempDir();
+    const adminPath = path.join(dir, 'harness-admin.json');
+    const stagingPath = path.join(dir, 'harness-staging.json');
+    const k8sPath = path.join(dir, 'harness-k8s.json');
+    const stagingSteps = completeHarnessStagingSteps();
+    stagingSteps.push({
+      name: 'accidental_raw_secret_debug',
+      ok: true,
+      details: {
+        note: 'INACT_X_APP_KEY=raw-harness-key-should-not-be-in-evidence',
+        bearer: 'Bearer eyJaaaaaaaaaaaaaaaa.eyJbbbbbbbbbbbbbbbb.cccccccccccccccccc',
+      },
+    });
+    await writeFile(adminPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessAdminSteps(),
+    }));
+    await writeFile(stagingPath, JSON.stringify({
+      ok: true,
+      steps: stagingSteps,
+    }));
+    await writeFile(k8sPath, JSON.stringify({
+      ok: true,
+      secretSafety: { valuePrinted: false },
+      steps: [
+        'harness_k8s_secret_rbac_get',
+        'harness_k8s_secret_rbac_patch',
+        'harness_k8s_secret_key_present',
+      ].map((name) => ({ name, ok: true })),
+    }));
+
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-integration-evidence.ts',
+      ['--admin-smoke', adminPath, '--staging-smoke', stagingPath, '--k8s-secret-smoke', k8sPath],
+    );
+    const parsed = JSON.parse(result.stdout);
+    const failedIds = parsed.verifications
+      .filter((entry: { ok: boolean }) => !entry.ok)
+      .map((entry: { id: string }) => entry.id);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(failedIds).toEqual(['harness-secret-safety']);
+  });
+
+  it('fails Harness integration evidence when usage attribution details are missing', async () => {
+    const dir = await tempDir();
+    const adminPath = path.join(dir, 'harness-admin.json');
+    const stagingPath = path.join(dir, 'harness-staging.json');
+    const k8sPath = path.join(dir, 'harness-k8s.json');
+    await writeFile(adminPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessAdminSteps(),
+    }));
+    await writeFile(stagingPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessStagingSteps({
+        includeUsageDetails: false,
+      }),
+    }));
+    await writeFile(k8sPath, JSON.stringify({
+      ok: true,
+      secretSafety: { valuePrinted: false },
+      steps: [
+        'harness_k8s_secret_rbac_get',
+        'harness_k8s_secret_rbac_patch',
+        'harness_k8s_secret_key_present',
+      ].map((name) => ({ name, ok: true })),
+    }));
+
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-integration-evidence.ts',
+      ['--admin-smoke', adminPath, '--staging-smoke', stagingPath, '--k8s-secret-smoke', k8sPath],
+    );
+    const parsed = JSON.parse(result.stdout);
+    const failedIds = parsed.verifications
+      .filter((entry: { ok: boolean }) => !entry.ok)
+      .map((entry: { id: string }) => entry.id);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(failedIds).toEqual(['harness-usage-attribution']);
+  });
+
+  it('fails Harness integration evidence when usage event lacks run job or external event identity', async () => {
+    const dir = await tempDir();
+    const adminPath = path.join(dir, 'harness-admin.json');
+    const stagingPath = path.join(dir, 'harness-staging.json');
+    const k8sPath = path.join(dir, 'harness-k8s.json');
+    const stagingSteps = completeHarnessStagingSteps();
+    const invokeStep = stagingSteps.find((step) => step.name === 'harness_control_plane_invoke');
+    if (invokeStep) {
+      invokeStep.details = {
+        ...invokeStep.details,
+        runId: null,
+        jobId: null,
+        externalEventId: null,
+      };
+    }
+    await writeFile(adminPath, JSON.stringify({
+      ok: true,
+      steps: completeHarnessAdminSteps(),
+    }));
+    await writeFile(stagingPath, JSON.stringify({
+      ok: true,
+      steps: stagingSteps,
+    }));
+    await writeFile(k8sPath, JSON.stringify({
+      ok: true,
+      secretSafety: { valuePrinted: false },
+      steps: [
+        'harness_k8s_secret_rbac_get',
+        'harness_k8s_secret_rbac_patch',
+        'harness_k8s_secret_key_present',
+      ].map((name) => ({ name, ok: true })),
+    }));
+
+    const result = await runScriptWithEnv(
+      'scripts/verify-harness-integration-evidence.ts',
+      ['--admin-smoke', adminPath, '--staging-smoke', stagingPath, '--k8s-secret-smoke', k8sPath],
+    );
+    const parsed = JSON.parse(result.stdout);
+    const failedIds = parsed.verifications
+      .filter((entry: { ok: boolean }) => !entry.ok)
+      .map((entry: { id: string }) => entry.id);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(failedIds).toEqual(['harness-usage-attribution']);
+  });
+
+  it('treats placeholder staging smoke env values as missing without echoing them', async () => {
+    const result = await runScriptWithEnv(
+      'scripts/staging-phase-one-smoke.ts',
+      [],
+      {
+        STAGING_CONTROL_PLANE_BASE_URL: '<staging-control-plane-base-url>',
+        STAGING_PRODUCT_JWT: '<staging-product-jwt>',
+      },
+    );
+    const parsed = JSON.parse(result.stderr);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe('');
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error).toBe('STAGING_CONTROL_PLANE_BASE_URL contains a placeholder.');
+    expect(parsed.controlPlaneBaseUrl).toBeNull();
+    expect(result.stderr).not.toContain('<staging-control-plane-base-url>');
+    expect(result.stderr).not.toContain('<staging-product-jwt>');
+  });
+
+  it('prints partial staging smoke steps when the smoke aborts mid-run', async () => {
+    await withFailingRouteTokenServer(async ({ controlPlaneBaseUrl }) => {
+      const result = await runScriptWithEnv(
+        'scripts/staging-phase-one-smoke.ts',
+        [],
+        {
+          STAGING_CONTROL_PLANE_BASE_URL: controlPlaneBaseUrl,
+          STAGING_PRODUCT_JWT: 'secret-product-jwt-value',
+        },
+      );
+      const parsed = JSON.parse(result.stderr);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout).toBe('');
+      expect(parsed.ok).toBe(false);
+      expect(parsed.error).toContain('expected 200, got 500');
+      expect(parsed.controlPlaneBaseUrl).toBe(controlPlaneBaseUrl);
+      expect(parsed.steps.map((step: { name: string }) => step.name)).toEqual([
+        'resolve_product_jwt',
+        'bootstrap_user_and_sandbox',
+        'start_sandbox',
+        'sandbox_health',
+        'sandbox_ready',
+        'create_project_workspace_session',
+      ]);
+      expect(result.stderr).not.toContain('secret-product-jwt-value');
+    });
+  });
+
+  it('redacts provider command output in provider gateway smoke evidence', async () => {
+    const dir = await tempDir();
+    const configPath = path.join(dir, 'config.toml');
+    const codexHome = path.join(dir, 'codex-home');
+    const authPath = path.join(codexHome, 'auth.json');
+    const commandPath = path.join(dir, 'provider-command.mjs');
+    await mkdir(codexHome, { recursive: true });
+    await writeFile(
+      configPath,
+      [
+        'model_provider = "sub2api"',
+        'base_url = "https://gateway.example.test"',
+        'requires_openai_auth = true',
+        'token_env = "REMOTE_CODEX_LLM_GATEWAY_TOKEN"',
+      ].join('\n'),
+    );
+    await writeFile(
+      authPath,
+      JSON.stringify({ OPENAI_API_KEY: 'redacted-test-token' }),
+    );
+    await writeFile(
+      commandPath,
+      [
+        'console.log("Bearer eyJaaaaaaaaaaaaaaaa.eyJbbbbbbbbbbbbbbbb.cccccccccccccccccc");',
+        'console.error("sk-testsecretvalue1234567890");',
+      ].join('\n'),
+    );
+
+    const result = await runScriptWithEnv(
+      'scripts/provider-gateway-smoke.ts',
+      ['codex'],
+      {
+        PROVIDER_GATEWAY_SMOKE_CONFIG_PATH: configPath,
+        PROVIDER_GATEWAY_SMOKE_COMMAND_JSON: JSON.stringify(['node', commandPath]),
+        PROVIDER_GATEWAY_SMOKE_USAGE_RECORDED: '1',
+        REMOTE_CODEX_LLM_GATEWAY_BASE_URL: 'https://gateway.example.test',
+        CODEX_HOME: codexHome,
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.details.commandStdout).toContain('Bearer [REDACTED]');
+    expect(parsed.details.commandStderr).toContain('[REDACTED_OPENAI_KEY]');
+    expect(result.stdout).not.toContain('eyJaaaaaaaaaaaaaaaa');
+    expect(result.stdout).not.toContain('sk-testsecretvalue1234567890');
+  });
+
+  it('ignores placeholder provider gateway smoke env values as unconfigured', async () => {
+    const result = await runScriptWithEnv(
+      'scripts/provider-gateway-smoke.ts',
+      ['codex'],
+      {
+        PROVIDER_GATEWAY_SMOKE_CONFIG_PATH: '<provider-config-path>',
+        PROVIDER_GATEWAY_SMOKE_COMMAND_JSON: '<provider-smoke-command-json>',
+        PROVIDER_GATEWAY_SMOKE_USAGE_RECORDED: '<provider-usage-recorded>',
+        REMOTE_CODEX_LLM_GATEWAY_BASE_URL: '<gateway-base-url>',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.details.commandRan).toBe(false);
+    expect(parsed.gatewayUsageRecorded).toBe(false);
+    expect(parsed.workerConfigUsesGateway).toBe(false);
+    expect(parsed.details.gatewayBaseUrlConfigured).toBe(false);
+    expect(parsed.details.providerConfigPath).not.toBe('<provider-config-path>');
+    expect(result.stdout).not.toContain('<provider-config-path>');
+    expect(result.stdout).not.toContain('<provider-smoke-command-json>');
+    expect(result.stdout).not.toContain('<gateway-base-url>');
+  });
+
+  it('keeps redacted provider command output when provider gateway smoke command fails', async () => {
+    const dir = await tempDir();
+    const configPath = path.join(dir, 'config.toml');
+    const commandPath = path.join(dir, 'provider-command-fails.mjs');
+    await writeFile(
+      configPath,
+      [
+        'base_url = "https://gateway.example.test"',
+        'token_env = "REMOTE_CODEX_LLM_GATEWAY_TOKEN"',
+      ].join('\n'),
+    );
+    await writeFile(
+      commandPath,
+      [
+        'console.log("Bearer eyJaaaaaaaaaaaaaaaa.eyJbbbbbbbbbbbbbbbb.cccccccccccccccccc");',
+        'console.error("sk-testsecretvalue1234567890");',
+        'process.exit(9);',
+      ].join('\n'),
+    );
+
+    const result = await runScriptWithEnv(
+      'scripts/provider-gateway-smoke.ts',
+      ['codex'],
+      {
+        PROVIDER_GATEWAY_SMOKE_CONFIG_PATH: configPath,
+        PROVIDER_GATEWAY_SMOKE_COMMAND_JSON: JSON.stringify(['node', commandPath]),
+        PROVIDER_GATEWAY_SMOKE_USAGE_RECORDED: '1',
+        REMOTE_CODEX_LLM_GATEWAY_BASE_URL: 'https://gateway.example.test',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(1);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.details.commandStdout).toContain('Bearer [REDACTED]');
+    expect(parsed.details.commandStderr).toContain('[REDACTED_OPENAI_KEY]');
+    expect(parsed.details.commandError).toContain('Command failed');
+    expect(result.stdout).not.toContain('eyJaaaaaaaaaaaaaaaa');
+    expect(result.stdout).not.toContain('sk-testsecretvalue1234567890');
+  });
+
+  it('records failed provider command as a redacted staging smoke step', async () => {
+    const dir = await tempDir();
+    const commandPath = path.join(dir, 'failing-provider-command.mjs');
+    await writeFile(
+      commandPath,
+      [
+        'console.log("Bearer eyJaaaaaaaaaaaaaaaa.eyJbbbbbbbbbbbbbbbb.cccccccccccccccccc");',
+        'console.error("sk-testsecretvalue1234567890");',
+        'process.exit(7);',
+      ].join('\n'),
+    );
+
+    await withFakeStagingServers(async ({ controlPlaneBaseUrl }) => {
+      const result = await runScriptWithEnv(
+        'scripts/staging-phase-one-smoke.ts',
+        [],
+        {
+          STAGING_CONTROL_PLANE_BASE_URL: controlPlaneBaseUrl,
+          STAGING_PRODUCT_JWT: 'secret-product-jwt-value',
+          STAGING_CODEX_GATEWAY_SMOKE_COMMAND_JSON: JSON.stringify(['node', commandPath]),
+        },
+      );
+      const parsed = JSON.parse(result.stdout);
+      const providerStep = parsed.steps.find((step: { name: string }) =>
+        step.name === 'codex_gateway_smoke',
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(parsed.ok).toBe(false);
+      expect(providerStep).toMatchObject({
+        name: 'codex_gateway_smoke',
+        ok: false,
+      });
+      expect(providerStep.details.stdout).toContain('Bearer [REDACTED]');
+      expect(providerStep.details.stderr).toContain('[REDACTED_OPENAI_KEY]');
+      expect(providerStep.details.commandError).toContain('Command failed');
+      expect(result.stdout).not.toContain('eyJaaaaaaaaaaaaaaaa');
+      expect(result.stdout).not.toContain('sk-testsecretvalue1234567890');
+      expect(result.stdout).not.toContain('secret-product-jwt-value');
+    });
+  });
+
+  it('ignores placeholder AWS preflight values instead of recording them as evidence', async () => {
+    const result = await runScriptWithEnv(
+      'scripts/collect-aws-staging-preflight-evidence.ts',
+      [],
+      {
+        AWS_STAGING_PREFLIGHT_SKIP_COMMANDS: '1',
+        AWS_STAGING_REVIEWED_BY: '<reviewed-by>',
+        AWS_STAGING_ACCOUNT_ID: '<account-id>',
+        AWS_STAGING_REGION: '<region>',
+        AWS_STAGING_EKS_CLUSTER_NAME: '<cluster-name>',
+        AWS_STAGING_K8S_NAMESPACE: '<namespace>',
+        AWS_STAGING_FARGATE_PROFILE_NAME: '<fargate-profile>',
+        AWS_STAGING_K8S_SERVICE_ACCOUNT: '<service-account>',
+        AWS_STAGING_WORKER_IMAGE_REPOSITORY: '<worker-image-repository>',
+        AWS_STAGING_WORKER_IMAGE_TAG: 'sha-<git-sha>',
+        AWS_STAGING_LOG_GROUP_NAMES: '<log-group-name>',
+        AWS_STAGING_CONFIG_REVIEWED: '<aws-staging-config-reviewed>',
+        AWS_STAGING_CREDENTIAL_REVIEW_PASSED: '<aws-staging-credential-review-passed>',
+        AWS_STAGING_K8S_AUTH_MODE: '<k8s-auth-mode>',
+        AWS_STAGING_K8S_ROLE_ARN: '<role-arn>',
+        AWS_STAGING_VPC_ID: '<vpc-id>',
+        AWS_STAGING_SUBNET_IDS: '<subnet-ids>',
+        AWS_STAGING_SECURITY_GROUP_IDS: '<security-group-ids>',
+        AWS_STAGING_ENVIRONMENT: '<environment>',
+      },
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.reviewedBy).toBe('');
+    expect(parsed.aws.accountId).toBe('');
+    expect(parsed.aws.region).toBe('us-east-1');
+    expect(parsed.aws.eksClusterName).toBe('');
+    expect(parsed.aws.namespace).toBe('remote-codex-sandboxes');
+    expect(parsed.aws.fargateProfileName).toBe('');
+    expect(parsed.aws.workerImageRepository).toBe('');
+    expect(parsed.aws.workerImageTag).toBe('');
+    expect(parsed.aws.configReviewed).toBe(false);
+    expect(parsed.kubernetesCredentials.authMode).toBe('');
+    expect(parsed.kubernetesCredentials.roleArn).toBe('');
+    expect(parsed.kubernetesCredentials.ownedResourceSelector['remote-codex.dev/environment'])
+      .toBe('staging');
+    expect(parsed.kubernetesCredentials.credentialReviewPassed).toBe(false);
+    expect(result.stdout).not.toContain('<reviewed-by>');
+    expect(result.stdout).not.toContain('sha-<git-sha>');
+  });
+});
