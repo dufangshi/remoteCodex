@@ -92,7 +92,13 @@ fun AppShellNavigationPanel(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            RoundTextButton(label = "Close", onClick = onClose)
+            GraphIconButton(
+                icon = GraphActionIcon.Cancel,
+                contentDescription = "Close navigation",
+                variant = GraphButtonVariant.Outline,
+                size = GraphButtonSize.Default,
+                onClick = onClose,
+            )
         }
 
         ConnectionSummary(appShell = appShell)
@@ -180,7 +186,13 @@ fun AppShellSettingsPanel(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                RoundTextButton(label = "Close", onClick = onClose)
+                GraphIconButton(
+                    icon = GraphActionIcon.Cancel,
+                    contentDescription = "Close settings",
+                    variant = GraphButtonVariant.Outline,
+                    size = GraphButtonSize.Default,
+                    onClick = onClose,
+                )
             }
 
             Column(
@@ -606,21 +618,6 @@ private fun ToggleDot(enabled: Boolean) {
         selected = enabled,
         tone = GraphSelectionTone.Success,
         contentDescription = if (enabled) "Plugin enabled" else "Plugin disabled",
-    )
-}
-
-@Composable
-private fun RoundTextButton(label: String, onClick: () -> Unit) {
-    Text(
-        text = label,
-        modifier = Modifier
-            .clip(RoundedCornerShape(999.dp))
-            .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 7.dp),
-        color = ThreadColors.ForegroundSoft,
-        style = MaterialTheme.typography.labelMedium,
-        fontWeight = FontWeight.SemiBold,
     )
 }
 

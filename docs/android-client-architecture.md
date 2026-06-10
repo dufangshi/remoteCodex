@@ -116,7 +116,7 @@ The visual direction is close to the web mobile thread view, but not a literal D
 
 | Web thread-ui source | Android native equivalent | Current status |
 | --- | --- | --- |
-| `AppShellNavigation.tsx` | `AppShellPanels.kt` + `ThreadTopBar.kt` | Native app shell drawer with Workspaces/Threads/Shells sample navigation, supervisor summary, and settings entry. |
+| `AppShellNavigation.tsx` | `AppShellPanels.kt` + `ThreadTopBar.kt` | Native app shell drawer with Workspaces/Threads/Shells sample navigation, supervisor summary, settings entry, and shared close icon controls. |
 | `AppShellNavContext.tsx` | `ThreadDetailPreviewScreen.kt` state + `ThemeMode.kt` | Local Compose state for nav/settings visibility plus persisted System/Light/Dark theme mode. |
 | `AppShellSettingsDialog` appearance section | `AppShellSettingsPanel` + `AppSettingsRepository.kt` | Settings panel with explicit System/Light/Dark theme selection, native theme glyphs, Active badges, and shared-preferences persistence. |
 | `AppShellSettingsDialog` plugin section | `AppShellSettingsPanel` + `AppShellPreview` | Read-only native plugin/renderers skeleton showing enabled state with shared selection glyphs, renderer status with graph badges, capabilities, source, and import-policy placeholder. |
