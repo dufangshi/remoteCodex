@@ -5,7 +5,7 @@ import { z } from 'zod';
 export interface RelayServerConfig {
   host: string;
   port: number;
-  supervisorToken: string;
+  supervisorToken: string | null;
   clientToken: string | null;
   adminUsername: string;
   adminEmail: string;
@@ -19,7 +19,7 @@ export interface RelayServerConfig {
 const envSchema = z.object({
   HOST: z.string().min(1).optional(),
   PORT: z.coerce.number().int().positive().optional(),
-  REMOTE_CODEX_RELAY_SUPERVISOR_TOKEN: z.string().min(1),
+  REMOTE_CODEX_RELAY_SUPERVISOR_TOKEN: z.string().min(1).optional(),
   REMOTE_CODEX_RELAY_CLIENT_TOKEN: z.string().min(1).optional(),
   REMOTE_CODEX_ADMIN_USERNAME: z.string().min(3),
   REMOTE_CODEX_ADMIN_PASSWORD: z.string().min(8),
@@ -37,7 +37,7 @@ export function loadRelayServerConfig(
   return {
     host: parsed.HOST ?? '0.0.0.0',
     port: parsed.PORT ?? 8788,
-    supervisorToken: parsed.REMOTE_CODEX_RELAY_SUPERVISOR_TOKEN,
+    supervisorToken: parsed.REMOTE_CODEX_RELAY_SUPERVISOR_TOKEN ?? null,
     clientToken: parsed.REMOTE_CODEX_RELAY_CLIENT_TOKEN ?? null,
     adminUsername: parsed.REMOTE_CODEX_ADMIN_USERNAME,
     adminEmail:
@@ -47,7 +47,7 @@ export function loadRelayServerConfig(
     dataDir: parsed.REMOTE_CODEX_RELAY_DATA_DIR ?? '.local/relay-server',
     sessionSecret:
       parsed.REMOTE_CODEX_RELAY_SESSION_SECRET ??
-      parsed.REMOTE_CODEX_RELAY_SUPERVISOR_TOKEN,
+      parsed.REMOTE_CODEX_ADMIN_PASSWORD,
     registrationEnabled:
       parsed.REMOTE_CODEX_RELAY_REGISTRATION_ENABLED === undefined
         ? true

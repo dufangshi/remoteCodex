@@ -256,7 +256,11 @@ export function buildRelayServer(config: RelayServerConfig): FastifyInstance {
         const legacyToken = bearerToken(request.headers.authorization) ?? queryToken(request.query);
         const deviceToken = queryToken(request.query, 'deviceToken') ?? legacyToken;
         const device = store.verifyDeviceToken(deviceToken);
-        const deviceId = device?.id ?? (legacyToken === config.supervisorToken ? 'legacy-default' : null);
+        const deviceId =
+          device?.id ??
+          (config.supervisorToken && legacyToken === config.supervisorToken
+            ? 'legacy-default'
+            : null);
         if (!deviceId) {
           socket.close(1008, 'Supervisor relay token is invalid.');
           return;

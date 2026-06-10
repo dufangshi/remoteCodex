@@ -79,7 +79,6 @@ On the public server:
 
 ```bash
 npm install -g remote-codex
-REMOTE_CODEX_RELAY_SUPERVISOR_TOKEN=legacy-bootstrap-token
 REMOTE_CODEX_ADMIN_USERNAME=admin
 REMOTE_CODEX_ADMIN_PASSWORD=change-me-now
 REMOTE_CODEX_RELAY_SESSION_SECRET=at-least-16-characters
@@ -117,7 +116,7 @@ The current implementation establishes the supervisor-initiated outbound tunnel,
 - the home supervisor requires the configured admin username/password for Remote Codex API access,
 - the home supervisor connects outward to `/supervisor/tunnel`,
 - the relay authenticates that tunnel with a per-device token created in `/relay-portal`,
-- `REMOTE_CODEX_RELAY_SUPERVISOR_TOKEN` remains as a legacy bootstrap token path,
+- optional `REMOTE_CODEX_RELAY_SUPERVISOR_TOKEN` remains as a legacy bootstrap token path,
 - `/healthz` on the relay reports whether a supervisor is connected.
 - relay users register with email, username, and password at `/relay-portal`,
 - relay users create devices and configure the returned `rcd_...` token on the private supervisor as `REMOTE_CODEX_RELAY_AGENT_TOKEN`,

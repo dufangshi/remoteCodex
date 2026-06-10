@@ -26,19 +26,18 @@ describe('relay server config', () => {
     process.chdir(tempDir);
 
     const config = loadRelayServerConfig({
-      REMOTE_CODEX_RELAY_SUPERVISOR_TOKEN: 'supervisor-token',
       REMOTE_CODEX_ADMIN_USERNAME: 'admin',
       REMOTE_CODEX_ADMIN_PASSWORD: 'password123',
     } as any);
 
     expect(config.webDistDir).toBe(distDir);
+    expect(config.supervisorToken).toBeNull();
   });
 
   it('lets REMOTE_CODEX_RELAY_WEB_DIST_DIR override the default web dist', () => {
     const configuredDist = `/tmp/relay-web-${crypto.randomUUID()}`;
 
     const config = loadRelayServerConfig({
-      REMOTE_CODEX_RELAY_SUPERVISOR_TOKEN: 'supervisor-token',
       REMOTE_CODEX_ADMIN_USERNAME: 'admin',
       REMOTE_CODEX_ADMIN_PASSWORD: 'password123',
       REMOTE_CODEX_RELAY_WEB_DIST_DIR: configuredDist,
