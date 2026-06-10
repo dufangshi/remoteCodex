@@ -58,6 +58,81 @@ EKS/staging configuration checklist:
 
 Progress log:
 
+- 2026-06-10: Continued after merge to `main` for the active goal. Current branch is `main` at `9380a7d Merge EFS workspace persistence`; local worktree started clean. Next actions are to re-verify the AWS/EKS/Fargate side from live CLI state first, then address remaining lifecycle/deployment risks, run Docker-based CI/e2e validation, and deploy only if those checks pass.
+- 2026-06-10: Live CLI preflight failed immediately and work stopped per the active goal's "do not bypass failures" instruction:
+  - `aws sts get-caller-identity` failed with `aws: [ERROR]: Your session has expired. Please reauthenticate using 'aws login'.`
+  - `railway status --json` failed with `Unauthorized. Please run railway login again.`
+  - `RAILWAY_CALLER=skill:use-railway@1.2.2 RAILWAY_AGENT_SESSION=railway-skill-aws-workspace-20260610 railway whoami --json` failed after OAuth refresh warning `invalid_grant`, then `Unauthorized. Please run railway login again.`
+  - Non-mutating local context still showed AWS region `ca-central-1` and kubectl context `remote-codex-staging`, but Kubernetes AWS exec auth cannot be trusted while AWS login is expired.
+  - Because the requested first real action was to apply/verify Fargate-side changes with AWS CLI, no AWS mutation, Railway mutation, Docker CI, e2e, or deploy was attempted after this preflight failure.
+- 2026-06-10: Retried the live preflight after goal continuation; the same external-auth blocker remained:
+  - `aws sts get-caller-identity` failed with `aws: [ERROR]: Your session has expired. Please reauthenticate using 'aws login'.`
+  - `kubectl get namespace remote-codex-staging` failed because Kubernetes exec auth shells out to `aws`, which exited `255` with the same expired-session error.
+  - `RAILWAY_CALLER=skill:use-railway@1.2.2 RAILWAY_AGENT_SESSION=railway-skill-aws-workspace-20260610 railway whoami --json` failed with `Unauthorized. Please run railway login again.`
+  - Work stopped again at preflight. No Fargate/EKS mutation, Railway mutation, Docker CI, e2e, or deploy was attempted.
+- 2026-06-10: Retried the live preflight a third consecutive time; the same external-auth blocker remained:
+  - `aws sts get-caller-identity` failed with `aws: [ERROR]: Your session has expired. Please reauthenticate using 'aws login'.`
+  - `kubectl get namespace remote-codex-staging` failed because Kubernetes exec auth shells out to `aws`, which exited `255` with the same expired-session error.
+  - `RAILWAY_CALLER=skill:use-railway@1.2.2 RAILWAY_AGENT_SESSION=railway-skill-aws-workspace-20260610 railway whoami --json` failed with `Unauthorized. Please run railway login again.`
+  - This is now the third consecutive goal turn blocked by the same AWS/Railway authentication condition, so the active goal is blocked until `aws login` and `railway login` are refreshed in this workspace.
+- 2026-06-10: Resumed after refreshed login. Live preflight is now unblocked:
+  - `aws sts get-caller-identity` returned account `918876873590` with assumed AdministratorAccess SSO role.
+  - AWS region is `ca-central-1`.
+  - `kubectl get namespace remote-codex-staging` returned namespace `Active`.
+  - `railway whoami --json` succeeded for the Matter Lab workspace.
+- 2026-06-10: Re-verified live Fargate/EFS side before code or deploy work:
+  - EKS Fargate profile `remote-codex-staging-workers` on cluster `inact-harness-agents` is `ACTIVE`, selects namespace `remote-codex-staging` with label `remote-codex.dev/runtime-role=worker`, and uses subnets `subnet-0fa48208a8b2bd15d` and `subnet-0c214d167d8d51b5f`.
+  - EKS addon `aws-efs-csi-driver` is `ACTIVE`, version `v3.2.0-eksbuild.1`, with IRSA role `arn:aws:iam::918876873590:role/remote-codex-staging-efs-csi-driver`; EFS CSI controller/node Pods are `Running`.
+  - EFS filesystem `fs-0cae987596d071653` is `available`, encrypted, elastic throughput, with 2 mount targets.
+  - EFS mount targets `fsmt-0643d87aa101b9f12` in `subnet-0fa48208a8b2bd15d` and `fsmt-00765d91c00368c7b` in `subnet-0c214d167d8d51b5f` are both `available`.
+  - EFS security group `sg-09e6f258f246ed6a5` allows NFS `tcp/2049` from worker security group `sg-096882e17d18914f1`.
+  - EFS access point `fsap-043567466c8c901a9` is `available`, enforces POSIX user `1000:1000`, and uses root directory `/remote-codex-workspaces` with creation owner `1000:1000` and permissions `700`.
+  - Kubernetes PV `staging-remote-codex-worker-workspace` is `Bound` with CSI volume handle `fs-0cae987596d071653::fsap-043567466c8c901a9`.
+  - Kubernetes PVC `remote-codex-worker-workspace` in namespace `remote-codex-staging` is `Bound`.
+  - Railway production `remote-codex-control-plane` variables include `SANDBOX_WORKSPACE_PVC_NAME=remote-codex-worker-workspace` and `SANDBOX_WORKSPACE_VOLUME_SUBPATH_PREFIX=staging`.
+- 2026-06-10: Re-ran a live worker-shaped Fargate/EFS subPath smoke Pod `remote-codex-efs-resumed-subpath-smoke` before Docker CI/e2e/deploy. Work stopped per the active goal because this smoke failed:
+  - Pod namespace: `remote-codex-staging`.
+  - Pod labels matched the Fargate worker selector `remote-codex.dev/runtime-role=worker`; it scheduled to Fargate node `fargate-ip-10-0-142-205.ca-central-1.compute.internal`.
+  - Pod used PVC `remote-codex-worker-workspace`, init mount `/mnt/remote-codex-workspaces`, main mount `/workspace`, and `subPath: staging/resumed-subpath-smoke`.
+  - Pod stayed `Pending` / `Init:0/1`.
+  - Events included an early warning: `MountVolume.MountDevice failed ... driver name efs.csi.aws.com not found in the list of registered CSI drivers`.
+  - Final inspected init container state was `ImagePullBackOff`, with message `Back-off pulling image "918876873590.dkr.ecr.ca-central-1.amazonaws.com/remote-codex-worker-staging:9380a7da4589f0557ebdd58d47ad085ca05051f4": ErrImagePull ... failed to extract layer ... context canceled`.
+  - Init and main container logs were unavailable because containers never started.
+  - No Docker CI, e2e, or deploy was attempted after this Fargate smoke failure.
+- 2026-06-10: Continued investigation of the failed Fargate smoke instead of treating it as a deployment pass:
+  - The failed `remote-codex-efs-resumed-subpath-smoke` Pod was BestEffort, so Fargate provisioned only `0.25vCPU 0.5GB` for a worker image that is about `1.26GB`; this did not match the real control-plane standard worker profile.
+  - The old failed smoke Pod was later deleted and confirmed absent.
+  - Re-ran the same EFS subPath smoke as `remote-codex-efs-standard-subpath-smoke` with real standard worker resources: main container requests/limits `1000m CPU`, `2Gi memory`, `40Gi ephemeral-storage`, and the same init-container resource shape used by the control-plane manifest.
+  - The standard smoke still emitted an early one-time Fargate event `MountVolume.MountDevice failed ... driver name efs.csi.aws.com not found in the list of registered CSI drivers`, then recovered and successfully pulled the worker image in about `1m29s`.
+  - The standard smoke Pod reached `Succeeded`; init and main containers exited `0`.
+  - Init log showed the prepared subPath directory as `drwx------` owned by uid/gid `1000:1000`.
+  - Main container ran as uid/gid `1000:1000`, saw `/workspace` as `drwx------`, created `/workspace/.venv/bin/python` and `/workspace/node_modules/pkg/index.js`, executed/read both as `ok`, and `stat` reported `/workspace` as `1000:1000 700` with `.venv` and `node_modules` owned by `1000:1000`.
+  - `remote-codex-efs-standard-subpath-smoke` was deleted after collecting logs.
+- 2026-06-10: Local targeted validation after live Fargate/EFS verification passed:
+  - `pnpm --filter @remote-codex/control-plane-api test -- adapters.test.ts` passed: 5 files / 112 tests.
+  - `terraform -chdir=infra/terraform/staging validate` passed.
+  - `pnpm --filter @remote-codex/control-plane-api build` passed.
+  - `pnpm --filter @remote-codex/supervisor-api build` passed.
+- 2026-06-10: Docker-based local CI smoke passed:
+  - Worker image build passed with `docker build -f Dockerfile.worker -t remote-codex-worker:local-workspace-persistence --build-arg REMOTE_CODEX_IMAGE_VERSION=local-workspace-persistence --build-arg REMOTE_CODEX_GIT_SHA=9380a7da4589f0557ebdd58d47ad085ca05051f4 .`.
+  - Worker container smoke passed: container `remote-codex-worker-local-smoke` returned `/readyz` with `status=ready`, `role=worker`, sandbox id `sbx_verify`, user id `user_verify`, workspace root `/workspace`, and empty runtimes because agent providers were disabled for the smoke.
+  - Worker smoke container was removed.
+  - Sandbox router image build passed with `docker build -f Dockerfile.sandbox-router -t remote-codex-router:local-workspace-persistence --build-arg REMOTE_CODEX_IMAGE_VERSION=local-workspace-persistence --build-arg REMOTE_CODEX_GIT_SHA=9380a7da4589f0557ebdd58d47ad085ca05051f4 .`.
+  - Router container smoke passed: container `remote-codex-router-local-smoke` returned `/healthz` with `{ "ok": true, "role": "sandbox-router" }`.
+  - Router smoke container was removed.
+- 2026-06-10: Staging phase-one e2e smoke passed after Docker CI:
+  - Command: `STAGING_STOP_SANDBOX_AFTER_SMOKE=1 STAGING_IDEMPOTENT_LIFECYCLE_SMOKE=1 STAGING_SANDBOX_READY_TIMEOUT_MS=900000 STAGING_SANDBOX_STOP_TIMEOUT_MS=900000 pnpm exec tsx scripts/staging-phase-one-smoke.ts`.
+  - Smoke generated at `2026-06-10T13:27:09.093Z` and returned top-level `ok: true`.
+  - Started sandbox `cced27cb-c543-4425-b0fd-6211e5baf41e` with image `918876873590.dkr.ecr.ca-central-1.amazonaws.com/remote-codex-worker-staging:9380a7da4589f0557ebdd58d47ad085ca05051f4` and resource profile `standard`.
+  - Sandbox reached `running` with `startupProgress=100`.
+  - Idempotent lifecycle smoke passed for first start, second start, and restart paths.
+  - Created project/workspace/session and worker session successfully.
+  - Router health passed and browser-to-router-to-worker metadata request reached the worker.
+  - Codex runtime was `ready` with provider `codex`, transport `stdio`, and restart count `0`.
+  - Codex worker prompt e2e passed.
+  - Stop sandbox returned `stopping` and final health converged to `stopped`.
+  - Post-smoke checks confirmed the smoke worker Pod and the standard Fargate smoke Pod were absent after cleanup.
+  - Live health after smoke: control-plane `/healthz` returned build SHA `9380a7da4589f0557ebdd58d47ad085ca05051f4`; router `/healthz` returned `{ "ok": true, "role": "sandbox-router" }`.
 - 2026-06-10: Created this progress document before mutating AWS or code.
 - 2026-06-10: AWS preflight confirmed account `918876873590`, region `ca-central-1`, EKS cluster `inact-harness-agents`, context `remote-codex-staging`, namespace `remote-codex-staging`, Fargate profile `remote-codex-staging-workers`, worker/cluster security group `sg-096882e17d18914f1`, worker subnets `subnet-0fa48208a8b2bd15d` and `subnet-0c214d167d8d51b5f`.
 - 2026-06-10: Installed EKS addon `aws-efs-csi-driver` version `v3.2.0-eksbuild.1` with IRSA role `arn:aws:iam::918876873590:role/remote-codex-staging-efs-csi-driver`; addon status became `ACTIVE`, controller/node Pods are running in `kube-system`.
