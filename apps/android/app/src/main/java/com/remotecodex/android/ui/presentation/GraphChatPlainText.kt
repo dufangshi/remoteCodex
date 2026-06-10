@@ -25,6 +25,39 @@ fun shouldShowGraphChatMessageExpansion(text: String, streaming: Boolean = false
 fun graphChatPlainTextSegments(text: String): List<GraphChatPlainTextSegment> {
     if (text.isEmpty()) return emptyList()
 
+    val markdownLinkPattern = Regex("!?\\[([^\\]\\n]+)]\\(([^)\\s]+)\\)")
+    val segments = mutableListOf<GraphChatPlainTextSegment>()
+    var cursor = 0
+
+    for (match in markdownLinkPattern.findAll(text)) {
+        val start = match.range.first
+        if (start > cursor) {
+            segments += plainUrlSegments(text.substring(cursor, start))
+        }
+
+        val label = match.groupValues.getOrNull(1).orEmpty()
+        val href = match.groupValues.getOrNull(2).orEmpty()
+        if (label.isNotBlank() && href.isNotBlank()) {
+            segments += GraphChatPlainTextSegment.Url(
+                text = label,
+                href = normalizeGraphChatHref(href),
+            )
+        } else {
+            segments += GraphChatPlainTextSegment.Text(match.value)
+        }
+        cursor = match.range.last + 1
+    }
+
+    if (cursor < text.length) {
+        segments += plainUrlSegments(text.substring(cursor))
+    }
+
+    return segments
+}
+
+private fun plainUrlSegments(text: String): List<GraphChatPlainTextSegment> {
+    if (text.isEmpty()) return emptyList()
+
     val matcher = Regex("\\b(?:https?://|www\\.)[^\\s<>\"'`]+", RegexOption.IGNORE_CASE)
     val trailingPunctuationPattern = Regex("[),.;:!?]+$")
     val segments = mutableListOf<GraphChatPlainTextSegment>()

@@ -232,6 +232,7 @@ object ThreadPreviewSample {
                             | Tables | Simple |
 
                             Plain links stay readable in native text: www.example.com/remote-codex/status.
+                            Markdown links are native too: [architecture docs](docs/android-client-architecture.md).
 
                             ```kotlin
                             @Composable

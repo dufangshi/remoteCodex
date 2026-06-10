@@ -30,6 +30,22 @@ class GraphChatPlainTextTest {
     }
 
     @Test
+    fun linkifiesMarkdownInlineLinksBeforePlainUrls() {
+        val segments = graphChatPlainTextSegments("Read [architecture docs](docs/android-client-architecture.md) or www.example.com.")
+
+        assertEquals(
+            listOf(
+                GraphChatPlainTextSegment.Text("Read "),
+                GraphChatPlainTextSegment.Url("architecture docs", "docs/android-client-architecture.md"),
+                GraphChatPlainTextSegment.Text(" or "),
+                GraphChatPlainTextSegment.Url("www.example.com", "https://www.example.com"),
+                GraphChatPlainTextSegment.Text("."),
+            ),
+            segments,
+        )
+    }
+
+    @Test
     fun previewsLargeNonStreamingMessagesAtWebThreshold() {
         val text = "a".repeat(LargeMessagePreviewChars + 20)
 
