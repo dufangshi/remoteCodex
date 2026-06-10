@@ -123,6 +123,7 @@ function AppShell({
   const isViewportLockedRoute = isThreadDetailRoute || isControlPlaneSessionRoute || isThreadsRoute;
   const isThreadWorkspaceRoute =
     isThreadsRoute || isThreadDetailRoute || isControlPlaneSessionRoute;
+  const ownsNavigationShell = isThreadDetailRoute || isControlPlaneSessionRoute;
   const isWorkspacesRoute = location.pathname === '/workspaces';
   const isControlPlaneRoute = location.pathname.startsWith('/control-plane');
   const usesInlineTopbar = isWorkspacesRoute || isThreadsRoute || isControlPlaneRoute;
@@ -163,24 +164,22 @@ function AppShell({
             : 'min-h-screen'
         }`}
       >
-        {!usesInlineTopbar && (
-          <div
-            className={`fixed left-4 top-4 z-50 ${
-              isThreadDetailRoute || isControlPlaneSessionRoute ? 'hidden sm:block' : ''
-            }`}
-          >
+        {!usesInlineTopbar && !ownsNavigationShell && (
+          <div className="fixed left-4 top-4 z-50">
             <AppShellMenuButton />
             <AppShellNavigationMenu className="mt-3 w-[min(22rem,calc(100vw-2rem))]" />
           </div>
         )}
 
         <main
-          className={`mx-auto w-full max-w-[1600px] ${
+          className={`mx-auto w-full ${
+            isThreadWorkspaceRoute ? 'max-w-none' : 'max-w-[1600px]'
+          } ${
             isViewportLockedRoute ? 'absolute inset-0 pb-0 sm:pb-4' : 'pb-4'
           } ${
             isThreadWorkspaceRoute
               ? isThreadDetailRoute || isControlPlaneSessionRoute
-                ? 'pt-[env(safe-area-inset-top)] sm:pt-4'
+                ? 'pt-0'
                 : isThreadsRoute
                   ? 'pt-[env(safe-area-inset-top)] sm:pt-4'
                   : 'pt-[calc(env(safe-area-inset-top)+4rem)] sm:pt-4'
@@ -189,7 +188,9 @@ function AppShell({
                 : 'pt-4'
           } ${
             isViewportLockedRoute
-              ? 'overflow-hidden overscroll-none px-0 sm:px-6'
+              ? isThreadDetailRoute || isControlPlaneSessionRoute
+                ? 'overflow-hidden overscroll-none px-0'
+                : 'overflow-hidden overscroll-none px-0 sm:px-6'
               : 'px-4 sm:px-6'
           }`}
         >

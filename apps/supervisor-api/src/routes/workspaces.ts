@@ -1,8 +1,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { Readable } from 'node:stream';
+import type { Dirent } from 'node:fs';
 
-import { FastifyInstance } from 'fastify';
+import { FastifyInstance, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
 
 import {
@@ -20,6 +22,9 @@ import {
   updateWorkspaceFavorite
 } from '../../../../packages/db/src/index';
 import {
+  ThreadWorkspaceFilePreviewDto,
+  ThreadWorkspaceTreeNodeDto,
+  ThreadWorkspaceUploadResultDto,
   UpdateWorkspaceInput,
   WorkspaceFileDto,
   WriteWorkspaceFileInput,
@@ -27,6 +32,7 @@ import {
   WorkspaceTreeDto
 } from '../../../../packages/shared/src/index';
 import {
+  assertPathWithinRoot,
   deleteWorkspaceFile,
   moveWorkspaceFile,
   readWorkspaceTree,
@@ -36,6 +42,28 @@ import {
 import { HttpError } from '../app';
 import { requireWorkerScope } from '../worker-identity';
 import { getWorkspaceSettings } from '../workspace-settings';
+
+type MultipartUploadFile = {
+  filename?: string;
+  toBuffer: () => Promise<Buffer>;
+};
+
+type MultipartUploadRequest = FastifyRequest & {
+  file: () => Promise<MultipartUploadFile | undefined>;
+  parts: () => AsyncIterableIterator<
+    | {
+        type: 'file';
+        fieldname: string;
+        toBuffer: () => Promise<Buffer>;
+      }
+    | {
+        type: 'field';
+        fieldname: string;
+        value: unknown;
+      }
+  >;
+  isMultipart: () => boolean;
+};
 
 const createWorkspaceSchema = z.union([
   z.object({
@@ -90,6 +118,27 @@ const treeQuerySchema = z.object({
   showHidden: z.coerce.boolean().optional()
 });
 
+const workspaceFileQuerySchema = z.object({
+  path: z.string().optional().default('')
+});
+
+const workspacePreviewQuerySchema = z.object({
+  path: z.string().min(1),
+  offset: z.coerce.number().int().min(0).optional(),
+  limit: z.coerce.number().int().positive().max(250_000).optional()
+});
+
+const PREVIEW_DEFAULT_LIMIT_BYTES = 50_000;
+const WORKSPACE_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
+const WORKSPACE_TREE_IGNORED_NAMES = new Set([
+  '.git',
+  'node_modules',
+  '.next',
+  '.turbo',
+  'dist',
+  'build'
+]);
+
 function toWorkspaceDto(record: {
   id: string;
   hostId: string;
@@ -126,16 +175,144 @@ function toWorkspaceFileDto(file: {
   };
 }
 
-function getWorkspaceOrThrow(app: FastifyInstance, id: string) {
-  const record = getWorkspaceRecordById(app.services.database.db, id);
+function languageForPath(filePath: string) {
+  const extension = path.extname(filePath).slice(1).toLowerCase();
+  switch (extension) {
+    case 'js':
+    case 'jsx':
+      return 'javascript';
+    case 'ts':
+    case 'tsx':
+      return extension;
+    case 'md':
+    case 'markdown':
+      return 'markdown';
+    case 'yml':
+      return 'yaml';
+    case 'sh':
+    case 'bash':
+      return 'bash';
+    case 'py':
+      return 'python';
+    case 'rb':
+      return 'ruby';
+    case 'rs':
+      return 'rust';
+    case 'go':
+      return 'go';
+    case 'c':
+    case 'h':
+      return 'c';
+    case 'cc':
+    case 'cpp':
+    case 'cxx':
+    case 'hpp':
+      return 'cpp';
+    case 'html':
+    case 'css':
+    case 'json':
+    case 'jsonl':
+    case 'toml':
+    case 'xml':
+    case 'sql':
+    case 'txt':
+      return extension;
+    default:
+      return extension || 'text';
+  }
+}
 
+function relativeWorkspacePath(rootPath: string, absPath: string) {
+  const relative = path.relative(rootPath, absPath);
+  return relative === '' ? '' : relative.split(path.sep).join('/');
+}
+
+async function resolveWorkspaceItemPath(rootPath: string, relativePath = '') {
+  const candidate = path.resolve(rootPath, relativePath || '.');
+  const comparable = await assertPathWithinRoot(rootPath, candidate);
+  return comparable;
+}
+
+async function buildWorkspaceTreeNode(
+  rootPath: string,
+  absPath: string,
+  depth = 0,
+): Promise<ThreadWorkspaceTreeNodeDto> {
+  const stats = await fs.stat(absPath);
+  const relativePath = relativeWorkspacePath(rootPath, absPath);
+  const name = relativePath ? path.basename(absPath) : path.basename(rootPath);
+
+  if (!stats.isDirectory()) {
+    return {
+      name,
+      path: relativePath,
+      kind: 'file',
+      size: stats.size
+    };
+  }
+
+  const node: ThreadWorkspaceTreeNodeDto = {
+    name,
+    path: relativePath,
+    kind: 'directory',
+    children: []
+  };
+
+  if (depth >= 6) {
+    return node;
+  }
+
+  let entries: Dirent<string>[];
+  try {
+    entries = await fs.readdir(absPath, { withFileTypes: true });
+  } catch {
+    return node;
+  }
+
+  const visible = entries
+    .filter((entry) => !entry.name.startsWith('.'))
+    .filter((entry) => !WORKSPACE_TREE_IGNORED_NAMES.has(entry.name))
+    .sort((left, right) => {
+      if (left.isDirectory() && !right.isDirectory()) {
+        return -1;
+      }
+      if (!left.isDirectory() && right.isDirectory()) {
+        return 1;
+      }
+      return left.name.localeCompare(right.name);
+    })
+    .slice(0, 400);
+
+  node.children = (
+    await Promise.all(
+      visible.map(async (entry) => {
+        const childPath = path.join(absPath, entry.name);
+        try {
+          if (!entry.isDirectory() && !entry.isFile()) {
+            return null;
+          }
+          return await buildWorkspaceTreeNode(rootPath, childPath, depth + 1);
+        } catch {
+          return null;
+        }
+      })
+    )
+  ).filter((child): child is ThreadWorkspaceTreeNodeDto => child !== null);
+
+  return node;
+}
+
+function requireWorkspaceRecord(
+  app: FastifyInstance,
+  workspaceId: string,
+) {
+  const record = getWorkspaceRecordById(app.services.database.db, workspaceId);
   if (!record) {
     throw new HttpError(404, {
       code: 'not_found',
       message: 'Workspace was not found.'
     });
   }
-
   return record;
 }
 
@@ -215,6 +392,45 @@ async function listWorkspaceArtifacts(record: { absPath: string }) {
     }
   }
   return artifacts.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+function contentTypeForPath(filePath: string) {
+  switch (path.extname(filePath).slice(1).toLowerCase()) {
+    case 'png':
+      return 'image/png';
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'gif':
+      return 'image/gif';
+    case 'webp':
+      return 'image/webp';
+    case 'svg':
+      return 'image/svg+xml';
+    case 'pdf':
+      return 'application/pdf';
+    case 'json':
+      return 'application/json; charset=utf-8';
+    case 'html':
+      return 'text/html; charset=utf-8';
+    case 'css':
+      return 'text/css; charset=utf-8';
+    case 'js':
+    case 'mjs':
+    case 'ts':
+    case 'tsx':
+      return 'text/plain; charset=utf-8';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+function sanitizeUploadFilename(filename: string | undefined) {
+  const baseName = path.basename(filename?.trim() || 'upload');
+  if (!baseName || baseName === '.' || baseName === '..') {
+    return 'upload';
+  }
+  return baseName;
 }
 
 function inferGitRepoName(gitUrl: string) {
@@ -328,6 +544,316 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     return toWorkspaceDto(record);
   });
 
+  app.get('/api/workspaces/:id/files/tree', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const query = workspaceFileQuerySchema.parse(request.query);
+    const record = requireWorkspaceRecord(app, params.id);
+    const rootPath = await fs.realpath(record.absPath);
+    const targetPath = await resolveWorkspaceItemPath(rootPath, query.path);
+
+    return buildWorkspaceTreeNode(rootPath, targetPath);
+  });
+
+  app.put('/api/workspaces/:id/files', async (request) => {
+    requireWorkerScope(request, 'file:write');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = writeWorkspaceFileSchema.parse(request.body) satisfies WriteWorkspaceFileInput;
+    const record = requireWorkspaceRecord(app, params.id);
+
+    const file = await writeWorkspaceFile({
+      workspacePath: record.absPath,
+      relativePath: body.path,
+      content: body.content,
+    });
+
+    return toWorkspaceFileDto(file);
+  });
+
+  app.get('/api/workspaces/:id/files/preview', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const query = workspacePreviewQuerySchema.parse(request.query);
+    const record = requireWorkspaceRecord(app, params.id);
+    const rootPath = await fs.realpath(record.absPath);
+    const filePath = await resolveWorkspaceItemPath(rootPath, query.path);
+    const stats = await fs.stat(filePath);
+
+    if (!stats.isFile()) {
+      throw new HttpError(400, {
+        code: 'bad_request',
+        message: 'Workspace preview path must point to a file.'
+      });
+    }
+
+    const offset = query.offset ?? 0;
+    const limit = query.limit ?? PREVIEW_DEFAULT_LIMIT_BYTES;
+    const handle = await fs.open(filePath, 'r');
+    try {
+      const length = Math.min(limit, Math.max(0, stats.size - offset));
+      const buffer = Buffer.alloc(length);
+      const read = await handle.read(buffer, 0, length, offset);
+      const nextOffset = offset + read.bytesRead;
+      return {
+        path: relativeWorkspacePath(rootPath, filePath),
+        name: path.basename(filePath),
+        content: buffer.subarray(0, read.bytesRead).toString('utf8'),
+        language: languageForPath(filePath),
+        size: stats.size,
+        truncated: nextOffset < stats.size,
+        nextOffset
+      } satisfies ThreadWorkspaceFilePreviewDto;
+    } finally {
+      await handle.close();
+    }
+  });
+
+  app.get('/api/workspaces/:id/files/raw', async (request, reply) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const query = workspacePreviewQuerySchema
+      .pick({ path: true })
+      .parse(request.query);
+    const record = requireWorkspaceRecord(app, params.id);
+    const rootPath = await fs.realpath(record.absPath);
+    const filePath = await resolveWorkspaceItemPath(rootPath, query.path);
+    const stats = await fs.stat(filePath);
+
+    if (!stats.isFile()) {
+      throw new HttpError(400, {
+        code: 'bad_request',
+        message: 'Raw workspace path must point to a file.'
+      });
+    }
+
+    reply.header('content-type', contentTypeForPath(filePath));
+    return reply.send(Readable.from(await fs.readFile(filePath)));
+  });
+
+  app.get('/api/workspaces/:id/files/download', async (request, reply) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const query = workspaceFileQuerySchema.parse(request.query);
+    const record = requireWorkspaceRecord(app, params.id);
+    const rootPath = await fs.realpath(record.absPath);
+    const itemPath = await resolveWorkspaceItemPath(rootPath, query.path);
+    const stats = await fs.stat(itemPath);
+
+    if (!stats.isFile()) {
+      throw new HttpError(400, {
+        code: 'bad_request',
+        message: 'Only file downloads are supported from this endpoint.'
+      });
+    }
+
+    const filename = path.basename(itemPath);
+    reply
+      .header('content-type', contentTypeForPath(itemPath))
+      .header(
+        'content-disposition',
+        `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`
+      );
+    return reply.send(Readable.from(await fs.readFile(itemPath)));
+  });
+
+  app.post('/api/workspaces/:id/files/upload', async (request) => {
+    requireWorkerScope(request, 'file:write');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const record = requireWorkspaceRecord(app, params.id);
+    const rootPath = await fs.realpath(record.absPath);
+    const uploadRequest = request as MultipartUploadRequest;
+
+    if (!uploadRequest.isMultipart()) {
+      throw new HttpError(400, {
+        code: 'bad_request',
+        message: 'File upload must use multipart/form-data.'
+      });
+    }
+
+    let requestedPath: string | null = null;
+    let fileBuffer: Buffer | null = null;
+    let filename: string | undefined;
+    for await (const part of uploadRequest.parts()) {
+      if (part.type === 'file') {
+        if (part.fieldname !== 'file') {
+          throw new HttpError(400, {
+            code: 'bad_request',
+            message: `Unexpected multipart file field: ${part.fieldname}.`
+          });
+        }
+        if (fileBuffer) {
+          throw new HttpError(400, {
+            code: 'bad_request',
+            message: 'Only one file can be uploaded at a time.'
+          });
+        }
+        fileBuffer = await part.toBuffer();
+        filename =
+          'filename' in part && typeof part.filename === 'string'
+            ? part.filename
+            : undefined;
+        continue;
+      }
+
+      if (part.fieldname === 'path') {
+        requestedPath = String(part.value ?? '').trim();
+      }
+    }
+
+    if (!fileBuffer) {
+      throw new HttpError(400, {
+        code: 'bad_request',
+        message: 'A file field is required.'
+      });
+    }
+
+    if (fileBuffer.byteLength > WORKSPACE_UPLOAD_MAX_BYTES) {
+      throw new HttpError(400, {
+        code: 'bad_request',
+        message: 'Workspace uploads must be 50 MB or smaller.'
+      });
+    }
+
+    const relativePath = requestedPath || sanitizeUploadFilename(filename);
+    const file = await writeWorkspaceFile({
+      workspacePath: rootPath,
+      relativePath,
+      content: fileBuffer,
+    });
+
+    return {
+      kind: 'file',
+      file: {
+        path: file.path,
+        name: path.basename(file.path),
+        size: file.size
+      }
+    } satisfies ThreadWorkspaceUploadResultDto;
+  });
+
+  app.patch('/api/workspaces/:id/files/move', async (request) => {
+    requireWorkerScope(request, 'file:write');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = moveWorkspaceFileSchema.parse(request.body);
+    const record = requireWorkspaceRecord(app, params.id);
+
+    const file = await moveWorkspaceFile({
+      workspacePath: record.absPath,
+      fromPath: body.fromPath,
+      toPath: body.toPath,
+      ...(body.overwrite !== undefined ? { overwrite: body.overwrite } : {}),
+    });
+
+    return toWorkspaceFileDto(file);
+  });
+
+  app.delete('/api/workspaces/:id/files', async (request) => {
+    requireWorkerScope(request, 'file:write');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = deleteWorkspaceFileSchema.parse(request.body);
+    const record = requireWorkspaceRecord(app, params.id);
+
+    return deleteWorkspaceFile({
+      workspacePath: record.absPath,
+      relativePath: body.path,
+      ...(body.recursive !== undefined ? { recursive: body.recursive } : {}),
+    });
+  });
+
+  app.post('/api/workspaces/:id/artifacts', async (request) => {
+    requireWorkerScope(request, 'artifact:write');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = createWorkspaceArtifactSchema.parse(request.body);
+    const record = requireWorkspaceRecord(app, params.id);
+    const artifactId = body.id ?? artifactIdFromName(body.name);
+    const content = Buffer.from(body.contentBase64, 'base64');
+    if (content.length === 0) {
+      throw new HttpError(400, {
+        code: 'bad_request',
+        message: 'Artifact content must not be empty.',
+      });
+    }
+
+    const dir = path.dirname(artifactFilePath(record, artifactId));
+    await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+    const filePath = artifactFilePath(record, artifactId);
+    await fs.writeFile(filePath, content, { flag: 'wx' }).catch((error) => {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        throw new HttpError(409, {
+          code: 'conflict',
+          message: 'Workspace artifact already exists.',
+        });
+      }
+      throw error;
+    });
+
+    const now = new Date().toISOString();
+    const artifact: WorkspaceArtifactMetadata = {
+      id: artifactId,
+      workspaceId: record.id,
+      name: safeArtifactFileName(body.name),
+      mediaType: body.mediaType,
+      size: content.length,
+      createdAt: now,
+      updatedAt: now,
+      metadata: body.metadata ?? {},
+    };
+    await fs.writeFile(artifactMetadataPath(record, artifactId), JSON.stringify(artifact, null, 2));
+    return { artifact };
+  });
+
+  app.get('/api/workspaces/:id/artifacts', async (request) => {
+    requireWorkerScope(request, 'artifact:read');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const record = requireWorkspaceRecord(app, params.id);
+    return { artifacts: await listWorkspaceArtifacts(record) };
+  });
+
+  app.get('/api/workspaces/:id/artifacts/:artifactId', async (request) => {
+    requireWorkerScope(request, 'artifact:read');
+    const params = z
+      .object({ id: z.string().uuid(), artifactId: workspaceArtifactIdSchema })
+      .parse(request.params);
+    const record = requireWorkspaceRecord(app, params.id);
+    return { artifact: await readArtifactMetadata(record, params.artifactId) };
+  });
+
+  app.get('/api/workspaces/:id/artifacts/:artifactId/download', async (request, reply) => {
+    requireWorkerScope(request, 'artifact:read');
+    const params = z
+      .object({ id: z.string().uuid(), artifactId: workspaceArtifactIdSchema })
+      .parse(request.params);
+    const record = requireWorkspaceRecord(app, params.id);
+    const artifact = await readArtifactMetadata(record, params.artifactId);
+    let content: Buffer;
+    try {
+      content = await fs.readFile(artifactFilePath(record, params.artifactId));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new HttpError(404, {
+          code: 'not_found',
+          message: 'Workspace artifact content was not found.',
+        });
+      }
+      throw error;
+    }
+    reply
+      .header('content-type', artifact.mediaType)
+      .header('content-length', String(content.length))
+      .header('content-disposition', `attachment; filename="${artifact.name.replace(/"/g, '')}"`);
+    return reply.send(content);
+  });
+
+  app.delete('/api/workspaces/:id/artifacts/:artifactId', async (request) => {
+    requireWorkerScope(request, 'artifact:write');
+    const params = z
+      .object({ id: z.string().uuid(), artifactId: workspaceArtifactIdSchema })
+      .parse(request.params);
+    const record = requireWorkspaceRecord(app, params.id);
+    const artifact = await readArtifactMetadata(record, params.artifactId);
+    await fs.rm(path.dirname(artifactFilePath(record, params.artifactId)), {
+      recursive: true,
+      force: true,
+    });
+    return { deleted: true, artifact };
+  });
+
   app.post('/api/workspaces', async (request) => {
     const body = createWorkspaceSchema.parse(request.body);
     const settings = await getWorkspaceSettings(
@@ -377,201 +903,6 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     });
 
     return toWorkspaceDto(created);
-  });
-
-  app.put('/api/workspaces/:id/files', async (request) => {
-    requireWorkerScope(request, 'file:write');
-    const params = z.object({ id: z.string().uuid() }).parse(request.params);
-    const body = writeWorkspaceFileSchema.parse(request.body) satisfies WriteWorkspaceFileInput;
-    const record = getWorkspaceOrThrow(app, params.id);
-
-    const file = await writeWorkspaceFile({
-      workspacePath: record.absPath,
-      relativePath: body.path,
-      content: body.content,
-    });
-
-    return toWorkspaceFileDto(file);
-  });
-
-  app.post('/api/workspaces/:id/files/upload', async (request) => {
-    requireWorkerScope(request, 'file:write');
-    const params = z.object({ id: z.string().uuid() }).parse(request.params);
-    const record = getWorkspaceOrThrow(app, params.id);
-
-    if (!request.isMultipart()) {
-      throw new HttpError(400, {
-        code: 'bad_request',
-        message: 'File upload must use multipart/form-data.',
-      });
-    }
-
-    let relativePath: string | null = null;
-    let fileBuffer: Buffer | null = null;
-    for await (const part of request.parts()) {
-      if (part.type === 'file') {
-        if (part.fieldname !== 'file') {
-          throw new HttpError(400, {
-            code: 'bad_request',
-            message: `Unexpected multipart file field: ${part.fieldname}.`,
-          });
-        }
-        if (fileBuffer) {
-          throw new HttpError(400, {
-            code: 'bad_request',
-            message: 'Only one file can be uploaded at a time.',
-          });
-        }
-        fileBuffer = await part.toBuffer();
-        continue;
-      }
-
-      if (part.fieldname === 'path') {
-        relativePath = String(part.value ?? '').trim();
-      }
-    }
-
-    if (!relativePath || !fileBuffer) {
-      throw new HttpError(400, {
-        code: 'bad_request',
-        message: 'File upload requires path and file fields.',
-      });
-    }
-
-    const file = await writeWorkspaceFile({
-      workspacePath: record.absPath,
-      relativePath,
-      content: fileBuffer,
-    });
-
-    return toWorkspaceFileDto(file);
-  });
-
-  app.patch('/api/workspaces/:id/files/move', async (request) => {
-    requireWorkerScope(request, 'file:write');
-    const params = z.object({ id: z.string().uuid() }).parse(request.params);
-    const body = moveWorkspaceFileSchema.parse(request.body);
-    const record = getWorkspaceOrThrow(app, params.id);
-
-    const file = await moveWorkspaceFile({
-      workspacePath: record.absPath,
-      fromPath: body.fromPath,
-      toPath: body.toPath,
-      ...(body.overwrite !== undefined ? { overwrite: body.overwrite } : {}),
-    });
-
-    return toWorkspaceFileDto(file);
-  });
-
-  app.delete('/api/workspaces/:id/files', async (request) => {
-    requireWorkerScope(request, 'file:write');
-    const params = z.object({ id: z.string().uuid() }).parse(request.params);
-    const body = deleteWorkspaceFileSchema.parse(request.body);
-    const record = getWorkspaceOrThrow(app, params.id);
-
-    return deleteWorkspaceFile({
-      workspacePath: record.absPath,
-      relativePath: body.path,
-      ...(body.recursive !== undefined ? { recursive: body.recursive } : {}),
-    });
-  });
-
-  app.post('/api/workspaces/:id/artifacts', async (request) => {
-    requireWorkerScope(request, 'artifact:write');
-    const params = z.object({ id: z.string().uuid() }).parse(request.params);
-    const body = createWorkspaceArtifactSchema.parse(request.body);
-    const record = getWorkspaceOrThrow(app, params.id);
-    const artifactId = body.id ?? artifactIdFromName(body.name);
-    const content = Buffer.from(body.contentBase64, 'base64');
-    if (content.length === 0) {
-      throw new HttpError(400, {
-        code: 'bad_request',
-        message: 'Artifact content must not be empty.',
-      });
-    }
-
-    const dir = path.dirname(artifactFilePath(record, artifactId));
-    await fs.mkdir(dir, { recursive: true, mode: 0o700 });
-    const filePath = artifactFilePath(record, artifactId);
-    await fs.writeFile(filePath, content, { flag: 'wx' }).catch((error) => {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-        throw new HttpError(409, {
-          code: 'conflict',
-          message: 'Workspace artifact already exists.',
-        });
-      }
-      throw error;
-    });
-
-    const now = new Date().toISOString();
-    const artifact: WorkspaceArtifactMetadata = {
-      id: artifactId,
-      workspaceId: record.id,
-      name: safeArtifactFileName(body.name),
-      mediaType: body.mediaType,
-      size: content.length,
-      createdAt: now,
-      updatedAt: now,
-      metadata: body.metadata ?? {},
-    };
-    await fs.writeFile(artifactMetadataPath(record, artifactId), JSON.stringify(artifact, null, 2));
-    return { artifact };
-  });
-
-  app.get('/api/workspaces/:id/artifacts', async (request) => {
-    requireWorkerScope(request, 'artifact:read');
-    const params = z.object({ id: z.string().uuid() }).parse(request.params);
-    const record = getWorkspaceOrThrow(app, params.id);
-    return { artifacts: await listWorkspaceArtifacts(record) };
-  });
-
-  app.get('/api/workspaces/:id/artifacts/:artifactId', async (request) => {
-    requireWorkerScope(request, 'artifact:read');
-    const params = z
-      .object({ id: z.string().uuid(), artifactId: workspaceArtifactIdSchema })
-      .parse(request.params);
-    const record = getWorkspaceOrThrow(app, params.id);
-    return { artifact: await readArtifactMetadata(record, params.artifactId) };
-  });
-
-  app.get('/api/workspaces/:id/artifacts/:artifactId/download', async (request, reply) => {
-    requireWorkerScope(request, 'artifact:read');
-    const params = z
-      .object({ id: z.string().uuid(), artifactId: workspaceArtifactIdSchema })
-      .parse(request.params);
-    const record = getWorkspaceOrThrow(app, params.id);
-    const artifact = await readArtifactMetadata(record, params.artifactId);
-    let content: Buffer;
-    try {
-      content = await fs.readFile(artifactFilePath(record, params.artifactId));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        throw new HttpError(404, {
-          code: 'not_found',
-          message: 'Workspace artifact content was not found.',
-        });
-      }
-      throw error;
-    }
-    reply
-      .header('content-type', artifact.mediaType)
-      .header('content-length', String(content.length))
-      .header('content-disposition', `attachment; filename="${artifact.name.replace(/"/g, '')}"`);
-    return reply.send(content);
-  });
-
-  app.delete('/api/workspaces/:id/artifacts/:artifactId', async (request) => {
-    requireWorkerScope(request, 'artifact:write');
-    const params = z
-      .object({ id: z.string().uuid(), artifactId: workspaceArtifactIdSchema })
-      .parse(request.params);
-    const record = getWorkspaceOrThrow(app, params.id);
-    const artifact = await readArtifactMetadata(record, params.artifactId);
-    await fs.rm(path.dirname(artifactFilePath(record, params.artifactId)), {
-      recursive: true,
-      force: true,
-    });
-    return { deleted: true, artifact };
   });
 
   app.patch('/api/workspaces/:id', async (request) => {

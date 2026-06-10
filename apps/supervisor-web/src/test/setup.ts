@@ -10,6 +10,19 @@ if (!globalThis.URL.revokeObjectURL) {
   globalThis.URL.revokeObjectURL = (() => undefined) as typeof URL.revokeObjectURL;
 }
 
+if (!globalThis.window.matchMedia) {
+  globalThis.window.matchMedia = ((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    dispatchEvent: () => false,
+  })) as typeof window.matchMedia;
+}
+
 afterEach(() => {
   cleanup();
 });
