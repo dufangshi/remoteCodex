@@ -260,6 +260,29 @@ resource "aws_efs_file_system" "worker_workspace" {
   })
 }
 
+resource "aws_efs_access_point" "worker_workspace" {
+  file_system_id = aws_efs_file_system.worker_workspace.id
+
+  posix_user {
+    uid = var.workspace_efs_access_point_uid
+    gid = var.workspace_efs_access_point_gid
+  }
+
+  root_directory {
+    path = var.workspace_efs_access_point_root_path
+
+    creation_info {
+      owner_uid   = var.workspace_efs_access_point_uid
+      owner_gid   = var.workspace_efs_access_point_gid
+      permissions = var.workspace_efs_access_point_permissions
+    }
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.environment}-remote-codex-worker-workspace-ap"
+  })
+}
+
 resource "aws_efs_mount_target" "worker_workspace" {
   for_each = toset(var.private_subnet_ids)
 
@@ -364,12 +387,15 @@ resource "kubernetes_persistent_volume_v1" "worker_workspace" {
     persistent_volume_source {
       csi {
         driver        = "efs.csi.aws.com"
-        volume_handle = aws_efs_file_system.worker_workspace.id
+        volume_handle = "${aws_efs_file_system.worker_workspace.id}::${aws_efs_access_point.worker_workspace.id}"
       }
     }
   }
 
-  depends_on = [aws_efs_mount_target.worker_workspace]
+  depends_on = [
+    aws_efs_access_point.worker_workspace,
+    aws_efs_mount_target.worker_workspace,
+  ]
 }
 
 resource "kubernetes_persistent_volume_claim_v1" "worker_workspace" {

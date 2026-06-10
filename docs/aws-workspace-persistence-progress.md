@@ -46,6 +46,16 @@ Planned checkpoints:
    - If tests and infrastructure pass, deploy updated images/services.
    - Verify Railway control-plane health and EKS/router health after deploy.
 
+EKS/staging configuration checklist:
+
+- EKS addon `aws-efs-csi-driver` must be installed and `ACTIVE`.
+- The CSI controller service account `kube-system/efs-csi-controller-sa` must have an IRSA role with `AmazonEFSCSIDriverPolicy`.
+- Worker Fargate Pods must be able to reach EFS mount targets on `tcp/2049`; staging uses worker security group `sg-096882e17d18914f1` and EFS security group `sg-09e6f258f246ed6a5`.
+- The EFS filesystem must have mount targets in the worker private subnets used by the Fargate profile.
+- Worker workspace mounts must use an EFS access point with POSIX UID/GID `1000:1000` and root directory `/remote-codex-workspaces`; without this, the non-root `agent` user can fail on `/workspace` with `EACCES`.
+- Kubernetes must expose a static RWX PV/PVC named `staging-remote-codex-worker-workspace` / `remote-codex-worker-workspace`; the PV CSI `volumeHandle` must be `fs-0cae987596d071653::fsap-043567466c8c901a9` for current staging.
+- Railway/control-plane variables must include `SANDBOX_WORKSPACE_PVC_NAME=remote-codex-worker-workspace` and `SANDBOX_WORKSPACE_VOLUME_SUBPATH_PREFIX=staging`.
+
 Progress log:
 
 - 2026-06-10: Created this progress document before mutating AWS or code.
@@ -105,3 +115,10 @@ Progress log:
   - Worker container exited with code `1`.
   - Worker log: `Error: EACCES: permission denied, access '/workspace'` from `validateWorkerEntrypointEnvironment`.
   - Interpretation: the EFS-backed `/workspace` mount exists, but the non-root `agent` user cannot access the mounted subPath. The init container currently creates/chowns/chmods the sandbox subdirectory on the init mount, but Kubernetes mounts that subPath itself at `/workspace`; the effective root of `/workspace` is not accessible to the worker user. Fix likely needs a mount/subPath ownership strategy change, e.g. mount the EFS root elsewhere and bind/use the prepared subdirectory as workspace, use an EFS access point with enforced UID/GID, or adjust Pod security/fsGroup behavior if supported on Fargate/EFS.
+- 2026-06-10: Created EFS access point `fsap-043567466c8c901a9` for filesystem `fs-0cae987596d071653`, name/client token `staging-remote-codex-worker-workspace-ap`, POSIX user `1000:1000`, root directory `/remote-codex-workspaces`, creation owner `1000:1000`, permissions `700`; access point state became `available`.
+- 2026-06-10: Recreated static PV/PVC with the same Kubernetes names but with EFS CSI volume handle `fs-0cae987596d071653::fsap-043567466c8c901a9`; `kubectl get pv` showed `Bound` and the access-point volume handle, and PVC `remote-codex-worker-workspace` in namespace `remote-codex-staging` returned `Bound`.
+- 2026-06-10: Ran Fargate access point smoke Pod `remote-codex-efs-ap-smoke` using UID/GID `1000:1000`; it mounted PVC `remote-codex-worker-workspace` at `/workspace`, created `.venv` and `node_modules`-style directories under `/workspace/staging/ap-smoke`, wrote/read files, and exited `Succeeded` with code `0`.
+- 2026-06-10: Ran worker-shaped Fargate subPath smoke Pod `remote-codex-efs-subpath-smoke`:
+  - Init container mounted the PVC root at `/mnt/remote-codex-workspaces`, created `staging/subpath-smoke`, and logged `drwx------ 2 1000 1000 ... /mnt/remote-codex-workspaces/staging/subpath-smoke`.
+  - Main container ran as UID/GID `1000:1000`, mounted the same PVC with `subPath: staging/subpath-smoke` at `/workspace`, logged `/workspace` as `drwx------ 2 1000 1000`, created `/workspace/.venv/bin/python` and `/workspace/node_modules/pkg/index.js`, read both files back as `ok`, and exited `Succeeded` with code `0`.
+- 2026-06-10: Updated Terraform to codify the EFS access point and PV `volume_handle = "${aws_efs_file_system.worker_workspace.id}::${aws_efs_access_point.worker_workspace.id}"`, with variables for access point UID/GID/root path/permissions.

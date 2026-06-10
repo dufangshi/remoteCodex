@@ -186,6 +186,30 @@ variable "workspace_efs_transition_to_ia" {
   default     = "AFTER_30_DAYS"
 }
 
+variable "workspace_efs_access_point_uid" {
+  description = "POSIX UID enforced by the EFS access point for worker workspace mounts. The worker image runs as uid 1000."
+  type        = number
+  default     = 1000
+}
+
+variable "workspace_efs_access_point_gid" {
+  description = "POSIX GID enforced by the EFS access point for worker workspace mounts. The worker image runs as gid 1000."
+  type        = number
+  default     = 1000
+}
+
+variable "workspace_efs_access_point_root_path" {
+  description = "EFS access point root directory for all persisted worker workspaces."
+  type        = string
+  default     = "/remote-codex-workspaces"
+}
+
+variable "workspace_efs_access_point_permissions" {
+  description = "Permissions used when the EFS access point creates its root directory."
+  type        = string
+  default     = "700"
+}
+
 variable "worker_enabled_agent_providers" {
   description = "Comma-separated worker runtime providers injected when starting sandbox Pods. Staging defaults to codex only."
   type        = string
