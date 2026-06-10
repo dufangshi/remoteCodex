@@ -18,7 +18,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -105,12 +109,15 @@ fun ArtifactPreviewCard(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun InlineMoleculePreviewCard(
     code: String,
     language: String,
     modifier: Modifier = Modifier,
 ) {
+    var expanded by rememberSaveable(code, language) { mutableStateOf(true) }
+    var sourceOpen by rememberSaveable(code, language) { mutableStateOf(false) }
     val normalizedFormat = remember(language) { normalizeMoleculeFormat(language) }
     val moleculeData = remember(code, normalizedFormat) {
         readGraphMoleculeViewerData(
@@ -132,15 +139,14 @@ fun InlineMoleculePreviewCard(
             .background(ThreadColors.Surface)
             .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(12.dp)),
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(ThreadColors.Panel)
                 .padding(horizontal = 12.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Column(modifier = Modifier.weight(1f)) {
+            Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
                     text = "${normalizedFormat.uppercase()} molecule",
                     color = ThreadColors.Foreground,
@@ -157,34 +163,77 @@ fun InlineMoleculePreviewCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            GraphBadge(
-                label = if (moleculeData.frames.size == 1) {
-                    "1 frame"
-                } else {
-                    "${moleculeData.frames.size} frames"
-                },
-                variant = GraphBadgeVariant.Outline,
-            )
-            atoms.size.takeIf { it > 0 }?.let { atomCount ->
-                GraphBadge(label = "$atomCount atoms", variant = GraphBadgeVariant.Secondary)
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                verticalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                GraphBadge(
+                    label = if (moleculeData.frames.size == 1) {
+                        "1 frame"
+                    } else {
+                        "${moleculeData.frames.size} frames"
+                    },
+                    variant = GraphBadgeVariant.Outline,
+                )
+                atoms.size.takeIf { it > 0 }?.let { atomCount ->
+                    GraphBadge(label = "$atomCount atoms", variant = GraphBadgeVariant.Secondary)
+                }
+                GraphButton(
+                    label = if (sourceOpen) "Hide source" else "Source",
+                    variant = if (sourceOpen) GraphButtonVariant.Secondary else GraphButtonVariant.Ghost,
+                    contentDescription = if (sourceOpen) {
+                        "Hide molecule source"
+                    } else {
+                        "Show molecule source"
+                    },
+                    onClick = { sourceOpen = !sourceOpen },
+                )
+                GraphButton(
+                    label = if (expanded) "Collapse" else "Open",
+                    variant = GraphButtonVariant.Ghost,
+                    contentDescription = if (expanded) {
+                        "Collapse molecule preview"
+                    } else {
+                        "Open molecule preview"
+                    },
+                    onClick = { expanded = !expanded },
+                )
             }
         }
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            MoleculeSchematicCanvas(atoms = atoms)
+        if (expanded || sourceOpen) {
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                if (expanded) {
+                    MoleculeSchematicCanvas(atoms = atoms)
+                }
+                if (sourceOpen) {
+                    Text(
+                        text = sourcePreview,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(ThreadColors.CodeBackground)
+                            .padding(10.dp),
+                        color = ThreadColors.CodeForeground,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+            }
+        }
+        if (!expanded && !sourceOpen) {
             Text(
-                text = sourcePreview,
+                text = "Preview collapsed",
                 modifier = Modifier
                     .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(ThreadColors.CodeBackground)
-                    .padding(10.dp),
-                color = ThreadColors.CodeForeground,
+                    .background(ThreadColors.SurfaceStrong.copy(alpha = 0.58f))
+                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                color = ThreadColors.ForegroundMuted,
                 style = MaterialTheme.typography.labelSmall,
-                fontFamily = FontFamily.Monospace,
             )
         }
     }
