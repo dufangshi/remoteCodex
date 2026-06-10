@@ -85,6 +85,8 @@ Android equivalents are intentionally native Compose components:
 - `GraphChatShellLayout.kt`
 - `GraphResizablePanels.kt`
 - `GraphUiPrimitives.kt`
+- `GraphInputGroup.kt`
+- `GraphSlider.kt`
 - `LongTextDialog.kt`
 - `StatusBadge.kt`
 - `ThreadPresentation.kt`
@@ -140,8 +142,8 @@ The visual direction is close to the web mobile thread view, but not a literal D
 | `ConfirmDialog.tsx` | `ThreadActionDialogs.kt` | Native destructive confirmation skeleton for delete-thread flow. |
 | `ThreadComposer.tsx` | `ThreadComposer.kt` | Bottom input surface with native slash toolbox, attachment picker, model and effort menus, plan chip, shell tools, and send action. |
 | `ThreadComposer.tsx` context usage and attachment draft UI | `ThreadComposer.kt` | Native context progress bar, context usage row, queued attachment chips, and attachment preview strip. |
-| `InputGroup.tsx` | `ThreadComposer.kt` | Native grouped prompt input surface with block-start attachment chips, prompt body, context progress, and block-end metadata/addon pills. |
-| `Slider.tsx` | `ThreadComposer.kt` | Native slider-like effort budget indicator in the reasoning effort panel. It is visual-only until settings wiring lands. |
+| `InputGroup.tsx` | `GraphInputGroup.kt` + `ThreadComposer.kt` | Native grouped prompt input surface with block-start attachment chips, prompt body/control content, and block-end metadata/addon rows. |
+| `Slider.tsx` | `GraphSlider.kt` + `ThreadComposer.kt` | Native slider track/range/thumb primitive plus labeled slider wrapper, used by context usage and reasoning effort previews. It is visual-only until settings wiring lands. |
 | `Button.tsx` | `GraphUiPrimitives.kt` | Native graph button primitive with default, destructive, outline, secondary, ghost, disabled, and compact size variants. |
 | `Badge.tsx` | `GraphUiPrimitives.kt` | Native graph badge primitive with default, secondary, destructive, and outline variants. |
 | `ButtonGroup.tsx` | `GraphUiPrimitives.kt` + `ArtifactPreviewCard.kt` | Native grouped control surface used by molecule viewer actions, with horizontal flow and vertical group support. |
@@ -179,7 +181,7 @@ Still open:
 - Real app shell navigation destinations: workspace home, thread list, shell list, import plugin, and backend settings are still preview-only.
 - Full markdown/GFM parity, tables, math, syntax highlighting, copy buttons, and plugin-rendered inline artifacts.
 - Full Shiki parity for code blocks: language grammars, themes, token scopes, line metadata, and copy actions are still open. Current Android highlighting is intentionally lightweight.
-- Full graph-ui primitive behavior: pressed/loading states, focus polish, icon slots, long-press tooltip popovers, Dialog trigger/portal parity, and broader reuse outside molecule controls, accordion surfaces, and thread action dialogs.
+- Full graph-ui primitive behavior: pressed/loading states, focus polish, icon slots, real editable input controls, long-press tooltip popovers, Dialog trigger/portal parity, and broader reuse outside molecule controls, accordion surfaces, input groups, sliders, and thread action dialogs.
 - Full graph-chat tool block parity: robust JSON parsing, streaming result reconciliation, copy actions, and plugin-aware renderers. Current Android support is lightweight and preview-oriented.
 - Full history entry ordering parity with persisted server events; current native dispatcher preserves the preview item/group stream but does not yet consume server event cursors.
 - Full `ThreadTimeline.tsx` behavior: scroll anchoring, tail visibility, server-managed history paging, deferred history detail cache, request anchoring by turn id, and live output attachment are still not implemented.

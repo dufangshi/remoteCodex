@@ -10,8 +10,6 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -123,67 +121,40 @@ fun ThreadComposer(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ComposerInputGroupPreview() {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 86.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(ThreadColors.Surface)
-            .border(1.dp, ThreadColors.Border, RoundedCornerShape(16.dp))
-            .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(9.dp),
-    ) {
-        FlowRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            AttachmentChip(kind = "PHOTO", name = "shell-preview.png")
-            AttachmentChip(kind = "FILE", name = "android-client-architecture.md")
-        }
-        Text(
-            text = "Ask the backend to inspect, modify, or explain code...",
-            color = ThreadColors.ForegroundMuted,
-            style = MaterialTheme.typography.bodyLarge,
-        )
-        ContextProgressPreview()
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(7.dp),
-        ) {
-            InputAddonPill(label = "Prompt")
-            InputAddonPill(label = "Markdown")
-            Box(modifier = Modifier.weight(1f))
+    GraphInputGroup(
+        blockStart = {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                AttachmentChip(kind = "PHOTO", name = "shell-preview.png")
+                AttachmentChip(kind = "FILE", name = "android-client-architecture.md")
+            }
+        },
+        control = {
             Text(
-                text = "42.8k / 128k",
+                text = "Ask the backend to inspect, modify, or explain code...",
                 color = ThreadColors.ForegroundMuted,
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyLarge,
             )
-        }
-    }
+            ContextProgressPreview()
+        },
+        blockEnd = {
+            GraphInputGroupAddonRow {
+                GraphInputGroupAddon(label = "Prompt")
+                GraphInputGroupAddon(label = "Markdown")
+                Box(modifier = Modifier.weight(1f))
+                GraphInputGroupText(text = "42.8k / 128k")
+            }
+        },
+    )
 }
 
 @Composable
 private fun ContextProgressPreview() {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(5.dp)
-                .clip(RoundedCornerShape(999.dp))
-                .background(ThreadColors.SurfaceStrong),
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.67f)
-                    .height(5.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(ThreadColors.Info),
-            )
-        }
+        GraphSlider(fraction = 0.67f)
         Text(
             text = "67% context left",
             color = ThreadColors.ForegroundMuted,
@@ -222,22 +193,6 @@ private fun AttachmentChip(
             overflow = TextOverflow.Ellipsis,
         )
     }
-}
-
-@Composable
-private fun InputAddonPill(label: String) {
-    Text(
-        text = label,
-        modifier = Modifier
-            .clip(RoundedCornerShape(999.dp))
-            .background(ThreadColors.Panel)
-            .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        color = ThreadColors.ForegroundMuted,
-        style = MaterialTheme.typography.labelSmall,
-        fontWeight = FontWeight.SemiBold,
-        maxLines = 1,
-    )
 }
 
 @Composable
@@ -281,50 +236,7 @@ private fun ValueSliderPreview(
     valueLabel: String,
     fraction: Float,
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(ThreadColors.Surface)
-            .border(1.dp, ThreadColors.Border, RoundedCornerShape(10.dp))
-            .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(7.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = label,
-                modifier = Modifier.weight(1f),
-                color = ThreadColors.ForegroundSoft,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-            )
-            Text(
-                text = valueLabel,
-                color = ThreadColors.ForegroundMuted,
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-            )
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(6.dp)
-                .clip(RoundedCornerShape(999.dp))
-                .background(ThreadColors.SurfaceStrong),
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(fraction)
-                    .height(6.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(ThreadColors.Warning),
-            )
-        }
-    }
+    GraphLabeledSlider(label = label, valueLabel = valueLabel, fraction = fraction)
 }
 
 @Composable
