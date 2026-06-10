@@ -145,7 +145,7 @@ The visual direction is close to the web mobile thread view, but not a literal D
 | `RenameDialog.tsx` | `ThreadActionDialogs.kt` | Native rename-thread dialog skeleton with preview field, cancel, and save actions. |
 | `ExportTranscriptDialog.tsx` | `ThreadActionDialogs.kt` + `ExportTurnPreview` | Native export transcript dialog skeleton with latest/custom mode, PDF/HTML format controls, selected turn rows, token/price option, and export footer. |
 | `ConfirmDialog.tsx` | `ThreadActionDialogs.kt` | Native destructive confirmation skeleton for delete-thread flow. |
-| `ThreadComposer.tsx` | `ThreadComposer.kt` | Bottom input surface with Web-like native slash/attachment/shell glyph buttons, native slash toolbox, attachment picker, model and effort menus, plan chip, shell tools, and send action. |
+| `ThreadComposer.tsx` | `ThreadComposer.kt` | Bottom input surface with Web-like native slash/attachment/shell glyph buttons, chat/shell view toggle preview, native slash toolbox, attachment picker, model and effort menus, plan chip, shell tools, and send action. |
 | `ThreadComposer.tsx` context usage and attachment draft UI | `ThreadComposer.kt` | Native context progress bar, context usage row, queued attachment chips, and attachment preview strip. |
 | `InputGroup.tsx` | `GraphInputGroup.kt` + `ThreadComposer.kt` | Native grouped prompt input surface with block-start attachment chips, prompt body/control content, and block-end metadata/addon rows. |
 | `Slider.tsx` | `GraphSlider.kt` + `ThreadComposer.kt` | Native slider track/range/thumb primitive plus labeled slider wrapper, used by context usage and reasoning effort previews. It is visual-only until settings wiring lands. |

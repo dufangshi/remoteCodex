@@ -108,6 +108,10 @@ fun ThreadComposer(
                 overflow = TextOverflow.Ellipsis,
             )
             Box(modifier = Modifier.weight(1f))
+            ComposerViewToggleButton(
+                icon = ComposerToolIcon.Terminal,
+                label = "Shell",
+            )
             Text(
                 text = "Send",
                 modifier = Modifier
@@ -326,7 +330,44 @@ private fun ComposerToolGlyph(icon: ComposerToolIcon, color: Color) {
                 line(0.38f, 0.44f, 0.25f, 0.56f, terminalStrokeWidth)
                 line(0.48f, 0.59f, 0.75f, 0.59f, terminalStrokeWidth)
             }
+            ComposerToolIcon.Chat -> {
+                line(0.19f, 0.28f, 0.19f, 0.55f, terminalStrokeWidth)
+                line(0.19f, 0.28f, 0.31f, 0.18f, terminalStrokeWidth)
+                line(0.31f, 0.18f, 0.69f, 0.18f, terminalStrokeWidth)
+                line(0.69f, 0.18f, 0.81f, 0.28f, terminalStrokeWidth)
+                line(0.81f, 0.28f, 0.81f, 0.55f, terminalStrokeWidth)
+                line(0.81f, 0.55f, 0.69f, 0.65f, terminalStrokeWidth)
+                line(0.69f, 0.65f, 0.50f, 0.65f, terminalStrokeWidth)
+                line(0.50f, 0.65f, 0.31f, 0.82f, terminalStrokeWidth)
+                line(0.31f, 0.82f, 0.31f, 0.65f, terminalStrokeWidth)
+                line(0.31f, 0.65f, 0.19f, 0.55f, terminalStrokeWidth)
+            }
         }
+    }
+}
+
+@Composable
+private fun ComposerViewToggleButton(
+    icon: ComposerToolIcon,
+    label: String,
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(ThreadColors.SurfaceStrong)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
+            .padding(horizontal = 9.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        ComposerToolGlyph(icon = icon, color = ThreadColors.ForegroundSoft)
+        Text(
+            text = label,
+            color = ThreadColors.ForegroundSoft,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+        )
     }
 }
 
@@ -599,4 +640,5 @@ private enum class ComposerToolIcon {
     Slash,
     Plus,
     Terminal,
+    Chat,
 }
