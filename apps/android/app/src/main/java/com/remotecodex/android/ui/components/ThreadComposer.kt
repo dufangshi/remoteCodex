@@ -547,11 +547,9 @@ private fun ToolboxRow(command: String, status: String, description: String) {
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
             )
-            Text(
-                text = status,
-                color = ThreadColors.ForegroundMuted,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
+            GraphBadge(
+                label = status,
+                variant = GraphBadgeVariant.Outline,
             )
         }
         Text(
