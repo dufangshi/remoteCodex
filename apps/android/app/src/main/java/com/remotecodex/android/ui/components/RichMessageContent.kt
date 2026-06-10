@@ -308,18 +308,30 @@ private fun ToolSection(title: String, body: String) {
                     .clip(RoundedCornerShape(7.dp))
                     .background(ThreadColors.CodeBackground)
                     .padding(10.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(5.dp),
             ) {
-                entries.forEach { entry ->
-                    ToolEntryRow(entry = entry)
+                ToolPunctuation(text = "{")
+                if (entries.isEmpty()) {
+                    ToolPunctuation(text = "  empty")
+                } else {
+                    entries.forEachIndexed { index, entry ->
+                        ToolEntryRow(
+                            entry = entry,
+                            trailingComma = index < entries.lastIndex,
+                        )
+                    }
                 }
+                ToolPunctuation(text = "}")
             }
         }
     }
 }
 
 @Composable
-private fun ToolEntryRow(entry: GraphChatToolEntry) {
+private fun ToolEntryRow(
+    entry: GraphChatToolEntry,
+    trailingComma: Boolean,
+) {
     val shouldUseOutputBlock = entry.kind == GraphChatToolValueKind.Raw &&
         (entry.key in setOf("stdout", "stderr", "result") || entry.value.contains('\n'))
     if (shouldUseOutputBlock) {
@@ -327,30 +339,52 @@ private fun ToolEntryRow(entry: GraphChatToolEntry) {
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(5.dp),
         ) {
-            ToolEntryKey(key = entry.key)
+            Row(horizontalArrangement = Arrangement.spacedBy(0.dp)) {
+                ToolPunctuation(text = "  ")
+                ToolEntryKey(key = entry.key)
+                ToolPunctuation(text = ":")
+            }
             ToolRawValue(body = entry.value.ifBlank { "(empty)" })
+            if (trailingComma) {
+                ToolPunctuation(text = ",")
+            }
         }
         return
     }
 
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(0.dp),
     ) {
+        ToolPunctuation(text = "  ")
         ToolEntryKey(
             key = entry.key,
-            modifier = Modifier.weight(0.34f),
         )
+        ToolPunctuation(text = ": ")
         Text(
             text = toolEntryDisplayValue(entry),
             modifier = Modifier
-                .weight(0.66f)
+                .weight(1f)
                 .horizontalScroll(rememberScrollState()),
             color = toolEntryValueColor(entry.kind),
             style = MaterialTheme.typography.labelMedium,
             fontFamily = FontFamily.Monospace,
         )
+        if (trailingComma) {
+            ToolPunctuation(text = ",")
+        }
     }
+}
+
+@Composable
+private fun ToolPunctuation(text: String) {
+    Text(
+        text = text,
+        color = ThreadColors.ForegroundMuted,
+        style = MaterialTheme.typography.labelMedium,
+        fontFamily = FontFamily.Monospace,
+        maxLines = 1,
+    )
 }
 
 @Composable
