@@ -7,8 +7,22 @@ sealed interface RichMessageBlock {
     data class OrderedItem(val number: Int, val text: String) : RichMessageBlock
     data class Quote(val text: String) : RichMessageBlock
     data object HorizontalRule : RichMessageBlock
-    data class Table(val rows: List<List<String>>) : RichMessageBlock
+    data class Table(
+        val columns: List<TableColumn>,
+        val rows: List<List<String>>,
+    ) : RichMessageBlock
     data class Code(val language: String, val code: String) : RichMessageBlock
+}
+
+data class TableColumn(
+    val header: String,
+    val alignment: TableAlignment = TableAlignment.Left,
+)
+
+enum class TableAlignment {
+    Left,
+    Center,
+    Right,
 }
 
 fun parsePlainRichMessageBlocks(content: String): List<RichMessageBlock> {
@@ -80,7 +94,10 @@ fun parseRichMessageBlocks(content: String): List<RichMessageBlock> {
         val table = readSimpleMarkdownTable(lines, index)
         if (table != null) {
             flushParagraph()
-            blocks += RichMessageBlock.Table(table.rows)
+            blocks += RichMessageBlock.Table(
+                columns = table.columns,
+                rows = table.rows,
+            )
             index = table.nextIndex
             continue
         }
@@ -160,6 +177,7 @@ fun parseRichMessageBlocks(content: String): List<RichMessageBlock> {
 }
 
 private data class TableReadResult(
+    val columns: List<TableColumn>,
     val rows: List<List<String>>,
     val nextIndex: Int,
 )
@@ -167,10 +185,16 @@ private data class TableReadResult(
 private fun readSimpleMarkdownTable(lines: List<String>, startIndex: Int): TableReadResult? {
     if (startIndex + 1 >= lines.size) return null
     val header = parseTableRow(lines[startIndex]) ?: return null
-    val separator = parseTableSeparator(lines[startIndex + 1]) ?: return null
-    if (header.size < 2 || separator < 2) return null
+    val alignments = parseTableSeparator(lines[startIndex + 1]) ?: return null
+    if (header.size < 2 || alignments.size < 2) return null
 
-    val rows = mutableListOf(header)
+    val columns = header.mapIndexed { index, title ->
+        TableColumn(
+            header = title,
+            alignment = alignments.getOrNull(index) ?: TableAlignment.Left,
+        )
+    }
+    val rows = mutableListOf<List<String>>()
     var index = startIndex + 2
     while (index < lines.size) {
         val row = parseTableRow(lines[index]) ?: break
@@ -178,7 +202,7 @@ private fun readSimpleMarkdownTable(lines: List<String>, startIndex: Int): Table
         rows += row
         index += 1
     }
-    return TableReadResult(rows = rows, nextIndex = index)
+    return TableReadResult(columns = columns, rows = rows, nextIndex = index)
 }
 
 private fun parseTableRow(line: String): List<String>? {
@@ -190,10 +214,16 @@ private fun parseTableRow(line: String): List<String>? {
         .map { it.trim() }
 }
 
-private fun parseTableSeparator(line: String): Int? {
+private fun parseTableSeparator(line: String): List<TableAlignment>? {
     val cells = parseTableRow(line) ?: return null
     if (cells.any { cell -> !Regex(":?-{3,}:?").matches(cell) }) {
         return null
     }
-    return cells.size
+    return cells.map { cell ->
+        when {
+            cell.startsWith(":") && cell.endsWith(":") -> TableAlignment.Center
+            cell.endsWith(":") -> TableAlignment.Right
+            else -> TableAlignment.Left
+        }
+    }
 }

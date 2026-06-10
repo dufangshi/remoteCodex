@@ -32,6 +32,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.ui.presentation.GraphChatInlineSegment
@@ -41,6 +42,8 @@ import com.remotecodex.android.ui.presentation.graphChatHighlightedCode
 import com.remotecodex.android.ui.presentation.graphChatInlineSegments
 import com.remotecodex.android.ui.presentation.graphChatMessagePreviewText
 import com.remotecodex.android.ui.presentation.RichMessageBlock
+import com.remotecodex.android.ui.presentation.TableAlignment
+import com.remotecodex.android.ui.presentation.TableColumn
 import com.remotecodex.android.ui.presentation.parsePlainRichMessageBlocks
 import com.remotecodex.android.ui.presentation.parseRichMessageBlocks
 import com.remotecodex.android.ui.presentation.preprocessGraphChatToolBlocks
@@ -85,7 +88,7 @@ fun RichMessageContent(
                 is RichMessageBlock.OrderedItem -> RichOrderedItem(number = block.number, text = block.text)
                 is RichMessageBlock.Quote -> RichQuote(text = block.text)
                 RichMessageBlock.HorizontalRule -> RichHorizontalRule()
-                is RichMessageBlock.Table -> RichTable(rows = block.rows)
+                is RichMessageBlock.Table -> RichTable(columns = block.columns, rows = block.rows)
                 is RichMessageBlock.Code -> {
                     if (block.language.startsWith("tool-")) {
                         RichToolBlock(language = block.language, code = block.code)
@@ -266,9 +269,11 @@ private fun RichHorizontalRule() {
 }
 
 @Composable
-private fun RichTable(rows: List<List<String>>) {
-    if (rows.isEmpty()) return
-    val columnCount = rows.maxOf { it.size }.coerceAtLeast(1)
+private fun RichTable(
+    columns: List<TableColumn>,
+    rows: List<List<String>>,
+) {
+    if (columns.isEmpty()) return
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -276,26 +281,49 @@ private fun RichTable(rows: List<List<String>>) {
             .clip(RoundedCornerShape(8.dp))
             .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(8.dp)),
     ) {
-        rows.forEachIndexed { rowIndex, row ->
-            Row(
+        RichTableRow(
+            values = columns.map { it.header },
+            alignments = columns.map { it.alignment },
+            header = true,
+        )
+        rows.forEach { row ->
+            RichTableRow(
+                values = row,
+                alignments = columns.map { it.alignment },
+                header = false,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RichTableRow(
+    values: List<String>,
+    alignments: List<TableAlignment>,
+    header: Boolean,
+) {
+    Row(
+        modifier = Modifier
+            .background(if (header) ThreadColors.SurfaceStrong else ThreadColors.Surface),
+    ) {
+        repeat(alignments.size) { columnIndex ->
+            val value = values.getOrNull(columnIndex).orEmpty()
+            Box(
                 modifier = Modifier
-                    .background(if (rowIndex == 0) ThreadColors.SurfaceStrong else ThreadColors.Surface),
+                    .border(0.5.dp, ThreadColors.Border)
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
             ) {
-                repeat(columnCount) { columnIndex ->
-                    val value = row.getOrNull(columnIndex).orEmpty()
-                    Box(
-                        modifier = Modifier
-                            .border(0.5.dp, ThreadColors.Border)
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                    ) {
-                        Text(
-                            text = inlineCodeAndLinkAnnotatedString(value),
-                            color = if (rowIndex == 0) ThreadColors.Foreground else ThreadColors.ForegroundSoft,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = if (rowIndex == 0) FontWeight.SemiBold else FontWeight.Normal,
-                        )
-                    }
-                }
+                Text(
+                    text = inlineCodeAndLinkAnnotatedString(value),
+                    color = if (header) ThreadColors.Foreground else ThreadColors.ForegroundSoft,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (header) FontWeight.SemiBold else FontWeight.Normal,
+                    textAlign = when (alignments[columnIndex]) {
+                        TableAlignment.Left -> TextAlign.Start
+                        TableAlignment.Center -> TextAlign.Center
+                        TableAlignment.Right -> TextAlign.End
+                    },
+                )
             }
         }
     }

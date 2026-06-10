@@ -61,10 +61,40 @@ class RichMessageBlocksTest {
                 RichMessageBlock.Bullet(text = "pending", checked = false),
                 RichMessageBlock.HorizontalRule,
                 RichMessageBlock.Table(
+                    columns = listOf(
+                        TableColumn("Area", TableAlignment.Left),
+                        TableColumn("Status", TableAlignment.Left),
+                    ),
                     rows = listOf(
-                        listOf("Area", "Status"),
                         listOf("Links", "Done"),
                         listOf("Tables", "Native"),
+                    ),
+                ),
+            ),
+            blocks,
+        )
+    }
+
+    @Test
+    fun parsesTableColumnAlignment() {
+        val blocks = parseRichMessageBlocks(
+            """
+            | Area | Count | State |
+            | :--- | ---: | :---: |
+            | Links | 3 | Done |
+            """.trimIndent(),
+        )
+
+        assertEquals(
+            listOf(
+                RichMessageBlock.Table(
+                    columns = listOf(
+                        TableColumn("Area", TableAlignment.Left),
+                        TableColumn("Count", TableAlignment.Right),
+                        TableColumn("State", TableAlignment.Center),
+                    ),
+                    rows = listOf(
+                        listOf("Links", "3", "Done"),
                     ),
                 ),
             ),

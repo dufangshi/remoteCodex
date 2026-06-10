@@ -227,10 +227,10 @@ object ThreadPreviewSample {
 
                             ---
 
-                            | Area | Native status |
-                            | --- | --- |
-                            | Links | Clickable |
-                            | Tables | Simple |
+                            | Area | Count | Native status |
+                            | :--- | ---: | :---: |
+                            | Links | 2 | Clickable |
+                            | Tables | 1 | Aligned |
 
                             Plain links stay readable in native text: www.example.com/remote-codex/status.
                             Markdown links are native too: [architecture docs](docs/android-client-architecture.md).
