@@ -59,6 +59,8 @@ env:
   SANDBOX_WORKER_DEFAULT_CODEX_MODEL: gpt-5.4
   SANDBOX_WORKER_DEFAULT_REASONING_EFFORT: medium
   SANDBOX_ROUTE_TOKEN_TTL_SECONDS: '3600'
+  SANDBOX_WORKSPACE_PVC_NAME: remote-codex-worker-workspace
+  SANDBOX_WORKSPACE_VOLUME_SUBPATH_PREFIX: staging
   ELAGENTE_HARNESS_BASE_URL: https://elagenteharness-production.up.railway.app
   ELAGENTE_HARNESS_ADMIN_BASE_URL: https://elagenteharness-production.up.railway.app
   ELAGENTE_HARNESS_APP_KEY_SECRET_NAME: remote-codex-harness-app-keys
@@ -242,6 +244,8 @@ jobs:
               "SANDBOX_WORKER_DEFAULT_CODEX_MODEL=${SANDBOX_WORKER_DEFAULT_CODEX_MODEL}" \
               "SANDBOX_WORKER_DEFAULT_REASONING_EFFORT=${SANDBOX_WORKER_DEFAULT_REASONING_EFFORT}" \
               "SANDBOX_ROUTE_TOKEN_TTL_SECONDS=${SANDBOX_ROUTE_TOKEN_TTL_SECONDS}" \
+              "SANDBOX_WORKSPACE_PVC_NAME=${SANDBOX_WORKSPACE_PVC_NAME}" \
+              "SANDBOX_WORKSPACE_VOLUME_SUBPATH_PREFIX=${SANDBOX_WORKSPACE_VOLUME_SUBPATH_PREFIX}" \
               "CONTROL_PLANE_BUILD_SHA=${GITHUB_SHA}" \
               "LLM_GATEWAY_PROVIDER=sub2api" \
               "LLM_GATEWAY_BASE_URL=${SUB2API_BASE_URL}" \
@@ -271,6 +275,8 @@ jobs:
               grep -qx "SANDBOX_WORKER_DEFAULT_CODEX_MODEL=${SANDBOX_WORKER_DEFAULT_CODEX_MODEL}" <<<"${variables}" &&
               grep -qx "SANDBOX_WORKER_DEFAULT_REASONING_EFFORT=${SANDBOX_WORKER_DEFAULT_REASONING_EFFORT}" <<<"${variables}" &&
               grep -qx "SANDBOX_ROUTE_TOKEN_TTL_SECONDS=${SANDBOX_ROUTE_TOKEN_TTL_SECONDS}" <<<"${variables}" &&
+              grep -qx "SANDBOX_WORKSPACE_PVC_NAME=${SANDBOX_WORKSPACE_PVC_NAME}" <<<"${variables}" &&
+              grep -qx "SANDBOX_WORKSPACE_VOLUME_SUBPATH_PREFIX=${SANDBOX_WORKSPACE_VOLUME_SUBPATH_PREFIX}" <<<"${variables}" &&
               grep -qx "CONTROL_PLANE_BUILD_SHA=${GITHUB_SHA}" <<<"${variables}" &&
               grep -qx "LLM_GATEWAY_PROVIDER=sub2api" <<<"${variables}" &&
               grep -qx "LLM_GATEWAY_BASE_URL=${SUB2API_BASE_URL}" <<<"${variables}" &&
