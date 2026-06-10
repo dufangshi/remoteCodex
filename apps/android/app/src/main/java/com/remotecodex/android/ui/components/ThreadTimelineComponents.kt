@@ -480,16 +480,7 @@ private fun MessageBubble(
     val messageStatus = graphChatMessageStatusModel(message.status)
     val assistantStatus = if (isUser) null else messageStatus ?: graphChatMessageStatusModel("Complete")
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(if (isUser) ThreadColors.UserBubble else ThreadColors.Panel)
-            .border(
-                1.dp,
-                if (isUser) ThreadColors.UserBubbleBorder else ThreadColors.Border,
-                RoundedCornerShape(14.dp),
-            )
-            .padding(12.dp),
+        modifier = Modifier.messageBubbleContainer(isUser = isUser),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (!isUser) {
@@ -572,6 +563,20 @@ private fun MessageBubble(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun Modifier.messageBubbleContainer(isUser: Boolean): Modifier {
+    val base = fillMaxWidth()
+    return if (isUser) {
+        base
+            .clip(RoundedCornerShape(12.dp))
+            .background(ThreadColors.UserBubble)
+            .border(1.dp, ThreadColors.UserBubbleBorder, RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+    } else {
+        base.padding(vertical = 2.dp)
     }
 }
 
