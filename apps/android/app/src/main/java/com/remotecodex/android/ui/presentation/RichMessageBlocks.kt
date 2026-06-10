@@ -45,6 +45,7 @@ fun parseRichMessageBlocks(content: String): List<RichMessageBlock> {
     val blocks = mutableListOf<RichMessageBlock>()
     val paragraph = StringBuilder()
     var codeLanguage: String? = null
+    var codeFenceMarker: String? = null
     val code = StringBuilder()
     var index = 0
 
@@ -67,9 +68,10 @@ fun parseRichMessageBlocks(content: String): List<RichMessageBlock> {
         val line = lines[index]
         val trimmed = line.trimEnd()
         if (codeLanguage != null) {
-            if (trimmed.trim() == "```") {
+            if (isClosingCodeFence(trimmed.trim(), codeFenceMarker.orEmpty())) {
                 blocks += RichMessageBlock.Code(codeLanguage.orEmpty(), code.toString())
                 codeLanguage = null
+                codeFenceMarker = null
                 code.clear()
             } else {
                 code.appendLine(line)
@@ -104,10 +106,11 @@ fun parseRichMessageBlocks(content: String): List<RichMessageBlock> {
             continue
         }
 
-        val fenceMatch = Regex("^```([A-Za-z0-9_-]*)\\s*$").matchEntire(trimmed.trim())
+        val fenceMatch = Regex("^(```|~~~)([A-Za-z0-9_-]*)\\s*$").matchEntire(trimmed.trim())
         if (fenceMatch != null) {
             flushParagraph()
-            codeLanguage = fenceMatch.groupValues.getOrNull(1).orEmpty()
+            codeFenceMarker = fenceMatch.groupValues[1]
+            codeLanguage = fenceMatch.groupValues.getOrNull(2).orEmpty()
             index += 1
             continue
         }
@@ -162,40 +165,41 @@ fun parseRichMessageBlocks(content: String): List<RichMessageBlock> {
             continue
         }
 
-        val listIndentLevel = listIndentLevel(line)
-
         val taskBullet = Regex("^[-*+]\\s+\\[([ xX])]\\s+(.+)$").matchEntire(trimmed.trim())
         if (taskBullet != null) {
             flushParagraph()
+            val item = readListItem(lines = lines, startIndex = index, initialText = taskBullet.groupValues[2])
             blocks += RichMessageBlock.Bullet(
-                text = taskBullet.groupValues[2],
+                text = item.text,
                 checked = taskBullet.groupValues[1].equals("x", ignoreCase = true),
-                level = listIndentLevel,
+                level = listIndentLevel(line),
             )
-            index += 1
+            index = item.nextIndex
             continue
         }
 
         val bullet = Regex("^[-*+]\\s+(.+)$").matchEntire(trimmed.trim())
         if (bullet != null) {
             flushParagraph()
+            val item = readListItem(lines = lines, startIndex = index, initialText = bullet.groupValues[1])
             blocks += RichMessageBlock.Bullet(
-                text = bullet.groupValues[1],
-                level = listIndentLevel,
+                text = item.text,
+                level = listIndentLevel(line),
             )
-            index += 1
+            index = item.nextIndex
             continue
         }
 
         val ordered = Regex("^(\\d{1,9})[.)]\\s+(.+)$").matchEntire(trimmed.trim())
         if (ordered != null) {
             flushParagraph()
+            val item = readListItem(lines = lines, startIndex = index, initialText = ordered.groupValues[2])
             blocks += RichMessageBlock.OrderedItem(
                 number = ordered.groupValues[1].toIntOrNull() ?: 1,
-                text = ordered.groupValues[2],
-                level = listIndentLevel,
+                text = item.text,
+                level = listIndentLevel(line),
             )
-            index += 1
+            index = item.nextIndex
             continue
         }
 
@@ -213,6 +217,64 @@ fun parseRichMessageBlocks(content: String): List<RichMessageBlock> {
 private fun listIndentLevel(line: String): Int {
     val leadingSpaces = line.takeWhile { it == ' ' }.length
     return (leadingSpaces / 2).coerceIn(0, 4)
+}
+
+private fun isClosingCodeFence(trimmed: String, marker: String): Boolean {
+    if (marker.isBlank()) {
+        return false
+    }
+    return trimmed == marker
+}
+
+private data class ListItemReadResult(
+    val text: String,
+    val nextIndex: Int,
+)
+
+private fun readListItem(
+    lines: List<String>,
+    startIndex: Int,
+    initialText: String,
+): ListItemReadResult {
+    val continuationIndent = listContentColumn(lines[startIndex])
+    val parts = mutableListOf(initialText.trimEnd())
+    var index = startIndex + 1
+
+    while (index < lines.size) {
+        val line = lines[index]
+        val trimmedEnd = line.trimEnd()
+        if (trimmedEnd.isBlank()) {
+            break
+        }
+        if (isListItemLine(trimmedEnd.trim())) {
+            break
+        }
+        val leadingSpaces = line.takeWhile { it == ' ' }.length
+        if (leadingSpaces < continuationIndent) {
+            break
+        }
+
+        val continuation = line.drop(continuationIndent.coerceAtMost(line.length)).trimEnd()
+        if (continuation.isNotBlank()) {
+            parts += continuation
+        }
+        index += 1
+    }
+
+    return ListItemReadResult(
+        text = parts.joinToString("\n").trim(),
+        nextIndex = index,
+    )
+}
+
+private fun listContentColumn(line: String): Int {
+    val marker = Regex("^\\s*(?:[-*+]\\s+(?:\\[[ xX]]\\s+)?|\\d{1,9}[.)]\\s+)").find(line)
+    return marker?.value?.length ?: line.takeWhile { it == ' ' }.length + 2
+}
+
+private fun isListItemLine(trimmed: String): Boolean {
+    return Regex("^[-*+]\\s+(?:\\[[ xX]]\\s+)?\\S").containsMatchIn(trimmed) ||
+        Regex("^\\d{1,9}[.)]\\s+\\S").containsMatchIn(trimmed)
 }
 
 private data class TableReadResult(

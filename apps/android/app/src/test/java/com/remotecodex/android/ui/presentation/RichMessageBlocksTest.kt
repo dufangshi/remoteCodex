@@ -125,6 +125,76 @@ class RichMessageBlocksTest {
     }
 
     @Test
+    fun preservesListContinuationLines() {
+        val blocks = parseRichMessageBlocks(
+            """
+            - top line
+              continuation line
+              second continuation
+            - next item
+
+            3. ordered line
+               ordered continuation
+            """.trimIndent(),
+        )
+
+        assertEquals(
+            listOf(
+                RichMessageBlock.Bullet(
+                    text = "top line\ncontinuation line\nsecond continuation",
+                    level = 0,
+                ),
+                RichMessageBlock.Bullet("next item", level = 0),
+                RichMessageBlock.OrderedItem(
+                    number = 3,
+                    text = "ordered line\nordered continuation",
+                    level = 0,
+                ),
+            ),
+            blocks,
+        )
+    }
+
+    @Test
+    fun keepsNestedListItemsSeparateFromContinuationLines() {
+        val blocks = parseRichMessageBlocks(
+            """
+            - parent
+              - child
+                child continuation
+            - sibling
+            """.trimIndent(),
+        )
+
+        assertEquals(
+            listOf(
+                RichMessageBlock.Bullet("parent", level = 0),
+                RichMessageBlock.Bullet("child\nchild continuation", level = 1),
+                RichMessageBlock.Bullet("sibling", level = 0),
+            ),
+            blocks,
+        )
+    }
+
+    @Test
+    fun parsesTildeCodeFences() {
+        val blocks = parseRichMessageBlocks(
+            """
+            ~~~kotlin
+            val value = 2
+            ~~~
+            """.trimIndent(),
+        )
+
+        assertEquals(
+            listOf(
+                RichMessageBlock.Code(language = "kotlin", code = "val value = 2\n"),
+            ),
+            blocks,
+        )
+    }
+
+    @Test
     fun parsesDisplayMathBlocks() {
         val blocks = parseRichMessageBlocks(
             """
