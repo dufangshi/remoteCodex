@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -45,4 +46,20 @@ describe('relay server config', () => {
 
     expect(config.webDistDir).toBe(configuredDist);
   });
+
+  it('finds the repo web dist when the relay cwd is the relay package', () => {
+    const config = loadRelayServerConfig({
+      REMOTE_CODEX_ADMIN_USERNAME: 'admin',
+      REMOTE_CODEX_ADMIN_PASSWORD: 'password123',
+    } as any);
+
+    const repoDistDir = path.resolve(originalCwd, '../supervisor-web/dist');
+    const expectedDistDir =
+      fsSyncExists(path.join(repoDistDir, 'index.html')) ? repoDistDir : null;
+    expect(config.webDistDir).toBe(expectedDistDir);
+  });
 });
+
+function fsSyncExists(filePath: string) {
+  return fsSync.existsSync(filePath);
+}

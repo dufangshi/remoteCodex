@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 
 export interface RelayServerConfig {
@@ -59,9 +60,15 @@ export function loadRelayServerConfig(
 }
 
 function defaultRelayWebDistDir() {
-  const candidate = path.resolve('apps/supervisor-web/dist');
-  if (fs.existsSync(path.join(candidate, 'index.html'))) {
-    return candidate;
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.resolve('apps/supervisor-web/dist'),
+    path.resolve(moduleDir, '../../supervisor-web/dist'),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(path.join(candidate, 'index.html'))) {
+      return candidate;
+    }
   }
   return null;
 }
