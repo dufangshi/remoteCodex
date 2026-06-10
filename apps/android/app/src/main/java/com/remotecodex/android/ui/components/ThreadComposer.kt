@@ -437,8 +437,18 @@ private fun SlashToolboxPanel() {
 private fun AttachmentPanel() {
     ComposerMenuSurface(title = "Add attachment", subtitle = "Prompt context") {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            AttachmentButton(label = "Photo", detail = "camera or gallery", modifier = Modifier.weight(1f))
-            AttachmentButton(label = "File", detail = "workspace upload", modifier = Modifier.weight(1f))
+            AttachmentButton(
+                label = "Photo",
+                detail = "camera or gallery",
+                icon = AttachmentTileIcon.Photo,
+                modifier = Modifier.weight(1f),
+            )
+            AttachmentButton(
+                label = "File",
+                detail = "workspace upload",
+                icon = AttachmentTileIcon.File,
+                modifier = Modifier.weight(1f),
+            )
         }
         AttachmentPreviewStrip()
     }
@@ -561,26 +571,98 @@ private fun ToolboxRow(command: String, status: String, description: String) {
 }
 
 @Composable
-private fun AttachmentButton(label: String, detail: String, modifier: Modifier = Modifier) {
-    Column(
+private fun AttachmentButton(
+    label: String,
+    detail: String,
+    icon: AttachmentTileIcon,
+    modifier: Modifier = Modifier,
+) {
+    Row(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
             .background(ThreadColors.Surface)
             .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
             .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
     ) {
-        Text(
-            text = label,
-            color = ThreadColors.Foreground,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Text(
-            text = detail,
-            color = ThreadColors.ForegroundMuted,
-            style = MaterialTheme.typography.labelSmall,
-        )
+        Box(
+            modifier = Modifier
+                .size(30.dp)
+                .clip(RoundedCornerShape(9.dp))
+                .background(ThreadColors.SurfaceStrong)
+                .border(1.dp, ThreadColors.Border, RoundedCornerShape(9.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            AttachmentTileGlyph(icon = icon, color = ThreadColors.Info)
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Text(
+                text = label,
+                color = ThreadColors.Foreground,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = detail,
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AttachmentTileGlyph(icon: AttachmentTileIcon, color: Color) {
+    Canvas(modifier = Modifier.size(15.dp)) {
+        val strokeWidth = 1.35.dp.toPx()
+        val w = size.width
+        val h = size.height
+        fun line(x1: Float, y1: Float, x2: Float, y2: Float) {
+            drawLine(
+                color = color,
+                start = Offset(w * x1, h * y1),
+                end = Offset(w * x2, h * y2),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round,
+            )
+        }
+
+        when (icon) {
+            AttachmentTileIcon.Photo -> {
+                line(0.18f, 0.26f, 0.82f, 0.26f)
+                line(0.82f, 0.26f, 0.82f, 0.78f)
+                line(0.82f, 0.78f, 0.18f, 0.78f)
+                line(0.18f, 0.78f, 0.18f, 0.26f)
+                drawCircle(
+                    color = color,
+                    radius = w * 0.07f,
+                    center = Offset(w * 0.66f, h * 0.40f),
+                )
+                line(0.25f, 0.70f, 0.42f, 0.52f)
+                line(0.42f, 0.52f, 0.55f, 0.66f)
+                line(0.55f, 0.66f, 0.66f, 0.56f)
+                line(0.66f, 0.56f, 0.76f, 0.70f)
+            }
+            AttachmentTileIcon.File -> {
+                line(0.28f, 0.18f, 0.62f, 0.18f)
+                line(0.62f, 0.18f, 0.76f, 0.34f)
+                line(0.76f, 0.34f, 0.76f, 0.82f)
+                line(0.76f, 0.82f, 0.28f, 0.82f)
+                line(0.28f, 0.82f, 0.28f, 0.18f)
+                line(0.62f, 0.18f, 0.62f, 0.34f)
+                line(0.62f, 0.34f, 0.76f, 0.34f)
+                line(0.38f, 0.50f, 0.66f, 0.50f)
+                line(0.38f, 0.64f, 0.62f, 0.64f)
+            }
+        }
     }
 }
 
@@ -667,6 +749,11 @@ private enum class ShellToolTone {
     Neutral,
     Info,
     Danger,
+}
+
+private enum class AttachmentTileIcon {
+    Photo,
+    File,
 }
 
 private val shellToolPreviewItems = listOf(
