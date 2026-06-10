@@ -2,6 +2,7 @@ package com.remotecodex.android.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -24,7 +26,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.SpanStyle
@@ -214,7 +219,7 @@ private fun RichToolBlock(language: String, code: String) {
             backgroundColor = background,
             contentBackgroundColor = ThreadColors.Surface,
             leading = {
-                GraphAccordionIcon(label = "Tool", color = foreground)
+                ToolGlyph(color = foreground)
             },
             trailing = {
                 Row(
@@ -235,6 +240,40 @@ private fun RichToolBlock(language: String, code: String) {
                 ToolSection(title = "Result", body = result)
             }
         }
+    }
+}
+
+@Composable
+private fun ToolGlyph(
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(
+        modifier = modifier
+            .padding(top = 2.dp)
+            .size(20.dp),
+    ) {
+        val strokeWidth = 2.dp.toPx()
+        val handleStart = Offset(size.width * 0.30f, size.height * 0.72f)
+        val handleEnd = Offset(size.width * 0.68f, size.height * 0.34f)
+        drawLine(
+            color = color,
+            start = handleStart,
+            end = handleEnd,
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round,
+        )
+        drawCircle(
+            color = color,
+            radius = 3.4.dp.toPx(),
+            center = Offset(size.width * 0.72f, size.height * 0.28f),
+            style = Stroke(width = strokeWidth),
+        )
+        drawCircle(
+            color = color,
+            radius = 2.1.dp.toPx(),
+            center = Offset(size.width * 0.24f, size.height * 0.78f),
+        )
     }
 }
 
