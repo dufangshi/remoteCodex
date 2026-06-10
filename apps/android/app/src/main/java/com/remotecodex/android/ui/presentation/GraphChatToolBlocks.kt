@@ -11,6 +11,13 @@ data class ToolResultState(
     val stderr: String,
 )
 
+data class GraphChatToolBlockPreview(
+    val title: String,
+    val callId: String?,
+    val parameters: String,
+    val result: String?,
+)
+
 fun preprocessGraphChatToolBlocks(content: String): ToolBlockPreprocessResult {
     val resultMap = linkedMapOf<String, MutableToolResultState>()
     val resultRegex = Regex("```tool-result\\s*([\\s\\S]*?)\\s*```")
@@ -70,6 +77,48 @@ fun toolBlockStatus(language: String, body: String): String {
         return "pending"
     }
     return "completed"
+}
+
+fun parseGraphChatToolBlock(language: String, body: String): GraphChatToolBlockPreview {
+    if (language == "tool-call") {
+        return GraphChatToolBlockPreview(
+            title = readJsonString(body, "tool") ?: "Unknown",
+            callId = readJsonString(body, "call_id"),
+            parameters = readJsonObjectBody(body, "args") ?: readJsonString(body, "args") ?: "{}",
+            result = null,
+        )
+    }
+
+    val sections = readMergedToolSections(body)
+    return GraphChatToolBlockPreview(
+        title = sections["tool"]?.lineSequence()?.firstOrNull()?.trim()?.ifBlank { null } ?: "Tool",
+        callId = sections["call_id"]?.lineSequence()?.firstOrNull()?.trim()?.ifBlank { null },
+        parameters = sections["args"]?.trim().orEmpty().ifBlank { "{}" },
+        result = sections["result"]?.trim(),
+    )
+}
+
+private fun readMergedToolSections(body: String): Map<String, String> {
+    val sections = linkedMapOf<String, StringBuilder>()
+    var currentKey: String? = null
+
+    body.lineSequence().forEach { rawLine ->
+        val trimmed = rawLine.trim()
+        val keyMatch = Regex("^(tool|call_id|args|result):\\s*(.*)$").matchEntire(trimmed)
+        if (keyMatch != null) {
+            val key = keyMatch.groupValues[1]
+            currentKey = key
+            sections.getOrPut(key) { StringBuilder() }
+            val inlineValue = keyMatch.groupValues[2].trim()
+            if (inlineValue.isNotEmpty()) {
+                sections.getValue(key).appendLine(inlineValue)
+            }
+        } else {
+            currentKey?.let { sections.getValue(it).appendLine(rawLine) }
+        }
+    }
+
+    return sections.mapValues { it.value.toString().trimEnd() }
 }
 
 private data class MutableToolResultState(

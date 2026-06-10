@@ -47,6 +47,7 @@ import com.remotecodex.android.ui.presentation.TableAlignment
 import com.remotecodex.android.ui.presentation.TableColumn
 import com.remotecodex.android.ui.presentation.parsePlainRichMessageBlocks
 import com.remotecodex.android.ui.presentation.parseRichMessageBlocks
+import com.remotecodex.android.ui.presentation.parseGraphChatToolBlock
 import com.remotecodex.android.ui.presentation.preprocessGraphChatToolBlocks
 import com.remotecodex.android.ui.presentation.shouldShowGraphChatMessageExpansion
 import com.remotecodex.android.ui.presentation.toolBlockStatus
@@ -169,6 +170,7 @@ private fun RichMathBlock(expression: String) {
 @Composable
 private fun RichToolBlock(language: String, code: String) {
     val status = toolBlockStatus(language, code)
+    val preview = remember(language, code) { parseGraphChatToolBlock(language, code) }
     val foreground = when (status) {
         "failed" -> ThreadColors.Danger
         "pending" -> ThreadColors.Warning
@@ -195,34 +197,67 @@ private fun RichToolBlock(language: String, code: String) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = when (language) {
-                    "tool-merged" -> "Tool Result"
-                    "tool-call" -> "Tool Call"
-                    "tool-result" -> "Tool Output"
-                    else -> "Tool"
-                },
+                text = preview.title,
                 modifier = Modifier.weight(1f),
                 color = foreground,
                 style = MaterialTheme.typography.labelMedium,
+                fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = status,
+                text = when (status) {
+                    "completed" -> "Completed"
+                    "failed" -> "Failed"
+                    else -> "Running"
+                },
                 color = foreground,
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.SemiBold,
             )
             CopyCodeButton(value = code.trimEnd())
         }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            preview.callId?.let { callId ->
+                Text(
+                    text = callId,
+                    color = ThreadColors.ForegroundMuted,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                )
+            }
+            ToolSection(title = "Parameters", body = preview.parameters.ifBlank { "{}" })
+            preview.result?.takeIf { it.isNotBlank() }?.let { result ->
+                ToolSection(title = "Result", body = result)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ToolSection(title: String, body: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = title,
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
+                .clip(RoundedCornerShape(7.dp))
                 .background(ThreadColors.CodeBackground)
                 .padding(10.dp),
         ) {
             Text(
-                text = code.trimEnd(),
+                text = body,
                 color = ThreadColors.CodeForeground,
                 style = MaterialTheme.typography.bodyMedium,
                 fontFamily = FontFamily.Monospace,
