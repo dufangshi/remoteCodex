@@ -1,5 +1,10 @@
 package com.remotecodex.android.ui.screen
 
+import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -92,6 +97,7 @@ fun ThreadDetailScreen(
     var pendingWorkspaceRawOpenPath by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingWorkspaceRawCopyPath by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingWorkspaceUploadNote by remember(threadId) { mutableStateOf(false) }
+    var pendingWorkspaceUploadFile by remember(threadId) { mutableStateOf<UploadWorkspaceFileRequest?>(null) }
     var workspaceActionMessage by remember(threadId) { mutableStateOf<String?>(null) }
     var resolvingRequestId by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingRenameTitle by remember(threadId) { mutableStateOf<String?>(null) }
@@ -109,6 +115,19 @@ fun ThreadDetailScreen(
         SupervisorEventSocketClient(supervisorConnection)
     }
     val clipboardManager = LocalClipboardManager.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val workspaceUploadPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) {
+            workspaceActionMessage = "Upload cancelled"
+            return@rememberLauncherForActivityResult
+        }
+        val request = runCatching { context.readUploadRequest(uri) }
+        request
+            .onSuccess { pendingWorkspaceUploadFile = it }
+            .onFailure { throwable -> error = throwable.message ?: "Could not read selected file." }
+    }
 
     LaunchedEffect(threadId, refreshNonce) {
         loading = detail == null
@@ -524,6 +543,37 @@ fun ThreadDetailScreen(
             .onFailure { throwable -> error = throwable.message ?: "Workspace upload failed." }
     }
 
+    LaunchedEffect(pendingWorkspaceUploadFile) {
+        val uploadRequest = pendingWorkspaceUploadFile ?: return@LaunchedEffect
+        error = null
+        workspaceActionMessage = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                val threadDetail = client.fetchThreadDetail(threadId, limit = 1)
+                val upload = client.uploadWorkspaceFile(
+                    workspaceId = threadDetail.workspace.id,
+                    request = uploadRequest,
+                )
+                val uploadedPath = upload.file?.path ?: upload.paths.firstOrNull()
+                val preview = client.fetchThreadDetailPreview(
+                    threadId = threadId,
+                    selectedWorkspaceFilePath = uploadedPath ?: selectedWorkspaceFilePath,
+                )
+                upload to preview
+            }
+        }
+        pendingWorkspaceUploadFile = null
+        result
+            .onSuccess { (upload, preview) ->
+                detail = preview
+                selectedWorkspaceFilePath = upload.file?.path ?: preview.workspacePreview.selectedFile.path
+                workspaceActionMessage = upload.file?.let { file ->
+                    "Uploaded ${file.name} (${file.size} bytes)"
+                } ?: "Uploaded ${upload.archiveName ?: uploadRequest.filename}"
+            }
+            .onFailure { throwable -> error = throwable.message ?: "Workspace upload failed." }
+    }
+
     LaunchedEffect(pendingRequestResponse) {
         val response = pendingRequestResponse ?: return@LaunchedEffect
         resolvingRequestId = response.request.id
@@ -685,7 +735,7 @@ fun ThreadDetailScreen(
                 pendingWorkspaceRawCopyPath = path
             },
             onUploadWorkspaceNote = {
-                pendingWorkspaceUploadNote = true
+                workspaceUploadPicker.launch(arrayOf("*/*"))
             },
             onDenyPendingRequest = { request ->
                 pendingRequestResponse = PendingRequestResponse(
@@ -833,6 +883,32 @@ private fun ThreadDetailPreview.withShellEvent(event: SupervisorShellEvent): Thr
         else -> shell
     }
     return copy(shellPreview = nextShell)
+}
+
+private fun Context.readUploadRequest(uri: Uri): UploadWorkspaceFileRequest {
+    val bytes = contentResolver.openInputStream(uri)?.use { stream ->
+        stream.readBytes()
+    } ?: throw IllegalStateException("Could not open selected file.")
+    val filename = queryDisplayName(uri)
+        ?: uri.lastPathSegment?.substringAfterLast('/')
+        ?: "android-upload"
+    val contentType = contentResolver.getType(uri) ?: "application/octet-stream"
+    return UploadWorkspaceFileRequest(
+        filename = filename,
+        bytes = bytes,
+        contentType = contentType,
+    )
+}
+
+private fun Context.queryDisplayName(uri: Uri): String? {
+    return contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+        if (!cursor.moveToFirst()) {
+            null
+        } else {
+            val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (index < 0) null else cursor.getString(index)
+        }
+    }?.takeIf { it.isNotBlank() }
 }
 
 @Composable
