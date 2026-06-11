@@ -42,6 +42,7 @@ import com.remotecodex.android.ui.model.ReasoningPreview
 import com.remotecodex.android.ui.model.ThreadGoalPreview
 import com.remotecodex.android.ui.model.ThreadGoalStatusPreview
 import com.remotecodex.android.ui.model.ThreadStatus
+import com.remotecodex.android.ui.model.TimelineNotePreview
 import com.remotecodex.android.ui.model.ToolStatus
 import com.remotecodex.android.ui.model.TurnPreview
 import com.remotecodex.android.ui.model.LivePlanPreview
@@ -5159,6 +5160,70 @@ class ThreadPresentationTest {
                 turnCount = 1,
                 itemLabel = " ",
                 usageLabel = "",
+            ),
+        )
+    }
+
+    @Test
+    fun buildsAnsweredTimelineNoteCardState() {
+        assertEquals(
+            TimelineNoteCardState(
+                label = "Resolved",
+                title = "Permission answered",
+                summaryLines = listOf(
+                    "You selected Approved Android debug build.",
+                    "You selected ./gradlew :app:assembleDebug",
+                ),
+                timeLabel = "13:42",
+                tone = TimelineNoteToneState.Answered,
+            ),
+            buildTimelineNoteCardState(
+                note = TimelineNotePreview(
+                    title = " Permission answered ",
+                    summaryLines = listOf(
+                        " Approved Android debug build. ",
+                        "./gradlew :app:assembleDebug",
+                        "",
+                    ),
+                    timeLabel = " 13:42 ",
+                ),
+                tone = TimelineNoteToneState.Answered,
+            ),
+        )
+    }
+
+    @Test
+    fun preservesAnsweredTimelineNoteSelectionPrefix() {
+        assertEquals(
+            listOf("You selected Run tests."),
+            buildTimelineNoteCardState(
+                note = TimelineNotePreview(
+                    title = "",
+                    summaryLines = listOf(" You selected Run tests. "),
+                    timeLabel = null,
+                ),
+                tone = TimelineNoteToneState.Answered,
+            ).summaryLines,
+        )
+    }
+
+    @Test
+    fun buildsActivityTimelineNoteCardStateWithoutAnswerPrefix() {
+        assertEquals(
+            TimelineNoteCardState(
+                label = "Activity",
+                title = "System",
+                summaryLines = listOf("Socket resumed."),
+                timeLabel = null,
+                tone = TimelineNoteToneState.Activity,
+            ),
+            buildTimelineNoteCardState(
+                note = TimelineNotePreview(
+                    title = " ",
+                    summaryLines = listOf(" Socket resumed. "),
+                    timeLabel = " ",
+                ),
+                tone = TimelineNoteToneState.Activity,
             ),
         )
     }

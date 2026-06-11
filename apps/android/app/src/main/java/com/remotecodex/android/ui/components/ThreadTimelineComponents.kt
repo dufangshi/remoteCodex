@@ -90,9 +90,11 @@ import com.remotecodex.android.ui.presentation.GraphChatHistoryStatusTone
 import com.remotecodex.android.ui.presentation.MessageStatusModel
 import com.remotecodex.android.ui.presentation.ComposerStatusTone
 import com.remotecodex.android.ui.presentation.GraphChatPlainTextSegment
+import com.remotecodex.android.ui.presentation.TimelineNoteToneState
 import com.remotecodex.android.ui.presentation.UserMessageAttachmentState
 import com.remotecodex.android.ui.presentation.buildGraphChatImageHistoryState
 import com.remotecodex.android.ui.presentation.buildGraphChatLivePlanCardState
+import com.remotecodex.android.ui.presentation.buildTimelineNoteCardState
 import com.remotecodex.android.ui.presentation.parseUserMessageSegments
 import com.remotecodex.android.ui.presentation.buildUserMessageAttachmentState
 import com.remotecodex.android.ui.presentation.buildPlanStepStatusPresentationState
@@ -325,6 +327,13 @@ private fun TimelineNoteCard(
     note: TimelineNotePreview,
     tone: TimelineNoteTone,
 ) {
+    val state = buildTimelineNoteCardState(
+        note = note,
+        tone = when (tone) {
+            TimelineNoteTone.Activity -> TimelineNoteToneState.Activity
+            TimelineNoteTone.Answered -> TimelineNoteToneState.Answered
+        },
+    )
     val foreground = if (tone == TimelineNoteTone.Activity) ThreadColors.Info else ThreadColors.Success
     val background = if (tone == TimelineNoteTone.Activity) ThreadColors.InfoSoft else ThreadColors.SuccessSoft
     Column(
@@ -342,7 +351,7 @@ private fun TimelineNoteCard(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = if (tone == TimelineNoteTone.Activity) "Activity" else "Resolved",
+                text = state.label,
                 modifier = Modifier
                     .clip(RoundedCornerShape(999.dp))
                     .background(ThreadColors.Panel.copy(alpha = 0.70f))
@@ -352,7 +361,7 @@ private fun TimelineNoteCard(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = note.title,
+                text = state.title,
                 modifier = Modifier.weight(1f),
                 color = ThreadColors.Foreground,
                 style = MaterialTheme.typography.bodyMedium,
@@ -360,7 +369,7 @@ private fun TimelineNoteCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            note.timeLabel?.let { timeLabel ->
+            state.timeLabel?.let { timeLabel ->
                 Text(
                     text = timeLabel,
                     color = ThreadColors.ForegroundMuted,
@@ -369,7 +378,7 @@ private fun TimelineNoteCard(
                 )
             }
         }
-        note.summaryLines.take(3).forEach { line ->
+        state.summaryLines.take(3).forEach { line ->
             Text(
                 text = line,
                 color = ThreadColors.ForegroundSoft,

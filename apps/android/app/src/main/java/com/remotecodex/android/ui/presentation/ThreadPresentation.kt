@@ -40,6 +40,7 @@ import com.remotecodex.android.ui.model.ComposerToolboxItemPreview
 import com.remotecodex.android.ui.model.ThreadGoalPreview
 import com.remotecodex.android.ui.model.ThreadGoalStatusPreview
 import com.remotecodex.android.ui.model.ThreadDetailPreview
+import com.remotecodex.android.ui.model.TimelineNotePreview
 import kotlin.math.round
 
 enum class MessageStatusTone {
@@ -202,6 +203,19 @@ data class PendingRequestCardState(
     val approveLabel: String,
     val approveAccessibilityLabel: String,
     val denyAccessibilityLabel: String,
+)
+
+enum class TimelineNoteToneState {
+    Activity,
+    Answered,
+}
+
+data class TimelineNoteCardState(
+    val label: String,
+    val title: String,
+    val summaryLines: List<String>,
+    val timeLabel: String?,
+    val tone: TimelineNoteToneState,
 )
 
 data class ContextCompactionHistoryState(
@@ -3448,6 +3462,33 @@ fun buildPendingRequestCardState(request: PendingRequestPreview): PendingRequest
         approveLabel = "Approve",
         denyAccessibilityLabel = "Deny $title",
         approveAccessibilityLabel = "Approve $title",
+    )
+}
+
+fun buildTimelineNoteCardState(
+    note: TimelineNotePreview,
+    tone: TimelineNoteToneState,
+): TimelineNoteCardState {
+    val title = note.title.trim().ifEmpty {
+        if (tone == TimelineNoteToneState.Activity) "System" else "Resolved"
+    }
+    val summaryLines = note.summaryLines
+        .map { line -> line.trim() }
+        .filter { line -> line.isNotEmpty() }
+        .map { line ->
+            if (tone == TimelineNoteToneState.Answered && !line.startsWith("You selected ")) {
+                "You selected $line"
+            } else {
+                line
+            }
+        }
+
+    return TimelineNoteCardState(
+        label = if (tone == TimelineNoteToneState.Activity) "Activity" else "Resolved",
+        title = title,
+        summaryLines = summaryLines,
+        timeLabel = note.timeLabel?.trim()?.takeIf { it.isNotEmpty() },
+        tone = tone,
     )
 }
 
