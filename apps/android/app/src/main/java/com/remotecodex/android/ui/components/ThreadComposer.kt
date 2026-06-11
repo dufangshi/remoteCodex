@@ -33,10 +33,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.ui.model.ComposerPreview
 import com.remotecodex.android.ui.presentation.ComposerActionState
+import com.remotecodex.android.ui.presentation.ComposerJumpLatestState
 import com.remotecodex.android.ui.presentation.ComposerPrimaryActionKind
 import com.remotecodex.android.ui.presentation.ComposerStatusChipModel
 import com.remotecodex.android.ui.presentation.ComposerStatusTone
 import com.remotecodex.android.ui.presentation.buildComposerActionState
+import com.remotecodex.android.ui.presentation.buildComposerJumpLatestState
 import com.remotecodex.android.ui.presentation.buildComposerStatusStrip
 import com.remotecodex.android.ui.theme.ThreadColors
 
@@ -60,6 +62,10 @@ fun ThreadComposer(
         activeView = composer.activeView,
         canInterrupt = composer.canInterrupt,
     )
+    val jumpLatestState = buildComposerJumpLatestState(
+        activeView = composer.activeView,
+        followTail = composer.followTail,
+    )
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -80,6 +86,7 @@ fun ThreadComposer(
             }
         }
 
+        ComposerJumpLatestButton(state = jumpLatestState)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -129,6 +136,62 @@ fun ThreadComposer(
             )
             ComposerActionControls(actionState = actionState)
         }
+    }
+}
+
+@Composable
+private fun ComposerJumpLatestButton(state: ComposerJumpLatestState) {
+    if (!state.visible) {
+        return
+    }
+    val foreground = if (state.active) ThreadColors.Info else ThreadColors.ForegroundSoft
+    val background = if (state.active) ThreadColors.InfoSoft.copy(alpha = 0.48f) else ThreadColors.SurfaceStrong
+    val border = if (state.active) ThreadColors.Info.copy(alpha = 0.38f) else ThreadColors.Border
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .background(background)
+                .border(1.dp, border, RoundedCornerShape(999.dp))
+                .padding(horizontal = 10.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            ComposerJumpLatestGlyph(color = foreground)
+            Text(
+                text = state.title,
+                color = foreground,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ComposerJumpLatestGlyph(color: Color) {
+    Canvas(modifier = Modifier.size(14.dp)) {
+        val strokeWidth = 1.5.dp.toPx()
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.25f, size.height * 0.38f),
+            end = Offset(size.width * 0.50f, size.height * 0.64f),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round,
+        )
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.75f, size.height * 0.38f),
+            end = Offset(size.width * 0.50f, size.height * 0.64f),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round,
+        )
     }
 }
 

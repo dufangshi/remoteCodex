@@ -165,6 +165,47 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun buildsComposerJumpLatestStateForChat() {
+        assertEquals(
+            ComposerJumpLatestState(
+                visible = true,
+                active = false,
+                title = "Jump to latest",
+            ),
+            buildComposerJumpLatestState(
+                activeView = ComposerActiveView.Chat,
+                followTail = false,
+            ),
+        )
+        assertEquals(
+            ComposerJumpLatestState(
+                visible = true,
+                active = true,
+                title = "Latest turn is in view",
+            ),
+            buildComposerJumpLatestState(
+                activeView = ComposerActiveView.Chat,
+                followTail = true,
+            ),
+        )
+    }
+
+    @Test
+    fun hidesComposerJumpLatestStateForShell() {
+        assertEquals(
+            ComposerJumpLatestState(
+                visible = false,
+                active = false,
+                title = "Jump to latest",
+            ),
+            buildComposerJumpLatestState(
+                activeView = ComposerActiveView.Shell,
+                followTail = false,
+            ),
+        )
+    }
+
+    @Test
     fun buildsStructuredFileChangeSummarySegments() {
         assertEquals(
             listOf(

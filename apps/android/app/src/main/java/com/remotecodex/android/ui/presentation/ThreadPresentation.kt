@@ -79,6 +79,24 @@ data class ComposerActionState(
     val sendEnabled: Boolean,
 )
 
+data class ComposerJumpLatestState(
+    val visible: Boolean,
+    val active: Boolean,
+    val title: String,
+)
+
+fun buildComposerJumpLatestState(
+    activeView: ComposerActiveView,
+    followTail: Boolean,
+): ComposerJumpLatestState {
+    val visible = activeView == ComposerActiveView.Chat
+    return ComposerJumpLatestState(
+        visible = visible,
+        active = visible && followTail,
+        title = if (followTail) "Latest turn is in view" else "Jump to latest",
+    )
+}
+
 fun buildComposerActionState(
     threadConnected: Boolean,
     busy: Boolean,
