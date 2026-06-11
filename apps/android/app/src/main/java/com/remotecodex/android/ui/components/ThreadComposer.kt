@@ -151,6 +151,7 @@ import com.remotecodex.android.ui.presentation.buildComposerSubmitInputState
 import com.remotecodex.android.ui.presentation.buildComposerToolbarState
 import com.remotecodex.android.ui.presentation.buildComposerToolboxItems
 import com.remotecodex.android.ui.presentation.formatGoalTokenBudgetThousands
+import com.remotecodex.android.ui.presentation.normalizePromptText
 import com.remotecodex.android.ui.presentation.parseGoalTokenBudgetThousands
 import com.remotecodex.android.ui.theme.ThreadColors
 
@@ -397,7 +398,7 @@ fun ThreadComposer(
             buildClientId = { _, _, _ -> upload.clientId },
         )
         draftPrompt = draftPrompt.copy(
-            text = insertion.prompt,
+            text = normalizePromptText(insertion.prompt),
             attachments = draftPrompt.attachments + insertion.insertedAttachments,
         )
         draftAttachmentUploads = draftAttachmentUploads + upload.copy(
@@ -589,7 +590,7 @@ fun ThreadComposer(
                                 },
                             )
                             draftPrompt = draftPrompt.copy(
-                                text = insertion.prompt,
+                                text = normalizePromptText(insertion.prompt),
                                 attachments = draftPrompt.attachments + insertion.insertedAttachments,
                             )
                         }
@@ -705,11 +706,12 @@ fun ThreadComposer(
             goalTokenBudgetDraft = goalTokenBudgetDraft,
             onRemoveAttachment = removeAttachmentPreview,
             onPromptChange = { value ->
+                val normalizedValue = normalizePromptText(value)
                 val nextAttachments = draftPrompt.attachments.filter { attachment ->
-                    value.contains(attachment.placeholder)
+                    normalizedValue.contains(attachment.placeholder)
                 }
                 draftPrompt = draftPrompt.copy(
-                    text = value,
+                    text = normalizedValue,
                     attachments = nextAttachments,
                 )
                 val nextAttachmentIds = nextAttachments.map { it.clientId }.toSet()
@@ -856,7 +858,7 @@ fun ThreadComposer(
                         ComposerPrimaryActionKind.Connecting -> Unit
                         ComposerPrimaryActionKind.Send -> {
                             if (sendButtonState.enabled) {
-                                val promptText = draftPrompt.text.trim()
+                                val promptText = normalizePromptText(draftPrompt.text).trim()
                                 if (onSubmitPromptRequest != null) {
                                     val activeUploads = draftAttachmentUploads
                                         .filter { upload -> promptText.contains(upload.placeholder) }

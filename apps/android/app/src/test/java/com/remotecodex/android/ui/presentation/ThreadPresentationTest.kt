@@ -2609,6 +2609,10 @@ class ThreadPresentationTest {
     @Test
     fun normalizesPromptTextAndAttachmentLabels() {
         assertEquals("hello world", normalizePromptText("hello\u00a0world"))
+        assertEquals("a\nb\nc", normalizePromptText("a\r\nb\rc"))
+        assertEquals("abc", normalizePromptText("a\u0000b\u0008c"))
+        assertEquals("one\n\n\ntwo", normalizePromptText("one\n\n\n\n\ntwo"))
+        assertEquals("line\nnext", normalizePromptText("line   \nnext"))
         assertEquals("bad name", normalizeAttachmentLabel(" [bad]\nname "))
         assertEquals("attachment", normalizeAttachmentLabel(""))
     }
@@ -2815,6 +2819,19 @@ class ThreadPresentationTest {
                 plainText = "plain",
                 htmlText = "<b>html</b>",
                 htmlToText = { "html" },
+            ),
+        )
+        assertEquals(
+            ComposerPromptPasteActionState(
+                kind = ComposerPromptPasteActionKind.InsertText,
+                preventDefault = true,
+                text = "line\nnext",
+            ),
+            derivePromptPasteAction(
+                fileCount = 0,
+                plainText = "line\r\nnext\u0000",
+                htmlText = "",
+                htmlToText = { "" },
             ),
         )
         assertEquals(

@@ -2406,7 +2406,7 @@ fun buildComposerSubmitInputState(
         return ComposerSubmitInputState(prompt = prompt.text)
     }
 
-    val normalizedPrompt = prompt.text.trim()
+    val normalizedPrompt = normalizePromptText(prompt.text).trim()
     if (normalizedPrompt.isEmpty()) {
         return null
     }
@@ -2420,7 +2420,13 @@ fun buildComposerSubmitInputState(
 }
 
 fun normalizePromptText(value: String): String {
-    return value.replace('\u00a0', ' ')
+    return value
+        .replace("\r\n", "\n")
+        .replace('\r', '\n')
+        .replace('\u00a0', ' ')
+        .replace(Regex("[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F]"), "")
+        .replace(Regex("[ \\t]+\\n"), "\n")
+        .replace(Regex("\\n{4,}"), "\n\n\n")
 }
 
 fun normalizeAttachmentLabel(name: String): String {
@@ -2572,7 +2578,7 @@ fun derivePromptPasteAction(
             fileCount = fileCount,
         )
     }
-    val text = plainText.ifEmpty { htmlToText(htmlText) }
+    val text = normalizePromptText(plainText.ifEmpty { htmlToText(htmlText) })
     if (text.isEmpty() && htmlText.isEmpty()) {
         return ComposerPromptPasteActionState(
             kind = ComposerPromptPasteActionKind.Ignore,
