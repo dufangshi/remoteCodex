@@ -1105,20 +1105,11 @@ private fun HistoryGroupRow(
                 overflow = TextOverflow.Ellipsis,
             )
             item.status?.let { status ->
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (status == ToolStatus.Running) {
-                        RunningDots(color = colors.foreground, dotSize = 4.dp, spacing = 2.dp)
-                    }
-                    Text(
-                        text = status.name.lowercase(),
-                        color = ThreadColors.ForegroundMuted,
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 1,
-                    )
-                }
+                ToolStatusBadge(
+                    label = toolResultStatusLabel(status),
+                    status = status,
+                    compact = true,
+                )
             }
         }
         HistoryGroupRowSummary(item = item)
