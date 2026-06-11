@@ -137,6 +137,20 @@ data class ComposerPromptAttachmentState(
     val kind: ComposerAttachmentActionKind,
 )
 
+sealed interface ComposerPromptSegmentState {
+    data class Text(
+        val key: String,
+        val text: String,
+    ) : ComposerPromptSegmentState
+
+    data class Attachment(
+        val key: String,
+        val attachment: ComposerPromptAttachmentState,
+        val clientId: String,
+        val placeholder: String,
+    ) : ComposerPromptSegmentState
+}
+
 data class ComposerSubmitAttachmentState(
     val clientId: String,
     val kind: ComposerAttachmentActionKind,
@@ -203,6 +217,7 @@ data class ComposerPromptSlotState(
     val sendDisabled: Boolean,
     val attachmentChips: List<ComposerPromptAttachmentState>,
     val inputModeLabel: String,
+    val promptSegments: List<ComposerPromptSegmentState> = emptyList(),
 )
 
 data class ComposerShellPromptInputState(
@@ -1992,6 +2007,11 @@ fun buildComposerPromptSlotState(
         sendDisabled = goalBusy || busy || prompt.disabled,
         attachmentChips = activeAttachments.map(::buildComposerPromptAttachmentState),
         inputModeLabel = if (isShellView) "Shell input" else "Prompt",
+        promptSegments = if (isShellView) {
+            emptyList()
+        } else {
+            tokenizeComposerPrompt(prompt.text, prompt.attachments)
+        },
     )
 }
 
@@ -2279,6 +2299,58 @@ private fun activePromptAttachments(
     return attachments.filter { attachment ->
         promptText.isBlank() || promptText.contains(attachment.placeholder)
     }
+}
+
+fun tokenizeComposerPrompt(
+    promptText: String,
+    attachments: List<ComposerPromptAttachmentPreview>,
+): List<ComposerPromptSegmentState> {
+    if (promptText.isEmpty()) {
+        return emptyList()
+    }
+
+    val placeholders = attachments
+        .filter { attachment -> attachment.placeholder.isNotEmpty() }
+        .sortedByDescending { attachment -> attachment.placeholder.length }
+    val segments = mutableListOf<ComposerPromptSegmentState>()
+    var cursor = 0
+    var textIndex = 0
+
+    while (cursor < promptText.length) {
+        val matchingAttachment = placeholders.firstOrNull { attachment ->
+            promptText.startsWith(attachment.placeholder, cursor)
+        }
+        if (matchingAttachment != null) {
+            segments += ComposerPromptSegmentState.Attachment(
+                key = "${matchingAttachment.clientId}-$cursor",
+                attachment = buildComposerPromptAttachmentState(matchingAttachment),
+                clientId = matchingAttachment.clientId,
+                placeholder = matchingAttachment.placeholder,
+            )
+            cursor += matchingAttachment.placeholder.length
+            continue
+        }
+
+        var nextTokenIndex = promptText.length
+        placeholders.forEach { attachment ->
+            val candidateIndex = promptText.indexOf(attachment.placeholder, cursor)
+            if (candidateIndex != -1 && candidateIndex < nextTokenIndex) {
+                nextTokenIndex = candidateIndex
+            }
+        }
+
+        val text = promptText.substring(cursor, nextTokenIndex)
+        if (text.isNotEmpty()) {
+            segments += ComposerPromptSegmentState.Text(
+                key = "text-$textIndex",
+                text = text,
+            )
+            textIndex += 1
+        }
+        cursor = nextTokenIndex
+    }
+
+    return segments
 }
 
 private fun buildComposerPromptAttachmentState(

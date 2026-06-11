@@ -1210,6 +1210,21 @@ class ThreadPresentationTest {
                     ),
                 ),
                 inputModeLabel = "Prompt",
+                promptSegments = listOf(
+                    ComposerPromptSegmentState.Text(
+                        key = "text-0",
+                        text = "inspect ",
+                    ),
+                    ComposerPromptSegmentState.Attachment(
+                        key = "active-8",
+                        attachment = ComposerPromptAttachmentState(
+                            label = "active.txt",
+                            kind = ComposerAttachmentActionKind.File,
+                        ),
+                        clientId = "active",
+                        placeholder = "[FILE active.txt]",
+                    ),
+                ),
             ),
             buildComposerPromptSlotState(
                 prompt = ComposerPromptPreview(
@@ -1245,6 +1260,81 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun tokenizesComposerPromptAndPrefersLongerAttachmentPlaceholders() {
+        val shortAttachment = ComposerPromptAttachmentPreview(
+            clientId = "short",
+            kind = ComposerAttachmentKindPreview.File,
+            name = "a.txt",
+            placeholder = "[FILE a]",
+        )
+        val longAttachment = ComposerPromptAttachmentPreview(
+            clientId = "long",
+            kind = ComposerAttachmentKindPreview.File,
+            name = "a-long.txt",
+            placeholder = "[FILE a long]",
+        )
+
+        assertEquals(
+            listOf(
+                ComposerPromptSegmentState.Text(
+                    key = "text-0",
+                    text = "see ",
+                ),
+                ComposerPromptSegmentState.Attachment(
+                    key = "long-4",
+                    attachment = ComposerPromptAttachmentState(
+                        label = "a-long.txt",
+                        kind = ComposerAttachmentActionKind.File,
+                    ),
+                    clientId = "long",
+                    placeholder = "[FILE a long]",
+                ),
+                ComposerPromptSegmentState.Text(
+                    key = "text-1",
+                    text = " then ",
+                ),
+                ComposerPromptSegmentState.Attachment(
+                    key = "short-23",
+                    attachment = ComposerPromptAttachmentState(
+                        label = "a.txt",
+                        kind = ComposerAttachmentActionKind.File,
+                    ),
+                    clientId = "short",
+                    placeholder = "[FILE a]",
+                ),
+            ),
+            tokenizeComposerPrompt(
+                promptText = "see [FILE a long] then [FILE a]",
+                attachments = listOf(shortAttachment, longAttachment),
+            ),
+        )
+    }
+
+    @Test
+    fun tokenizesComposerPromptAsTextWhenNoAttachmentPlaceholderMatches() {
+        assertEquals(
+            listOf(
+                ComposerPromptSegmentState.Text(
+                    key = "text-0",
+                    text = "inspect [FILE missing.txt]",
+                ),
+            ),
+            tokenizeComposerPrompt(
+                promptText = "inspect [FILE missing.txt]",
+                attachments = listOf(
+                    ComposerPromptAttachmentPreview(
+                        clientId = "other",
+                        kind = ComposerAttachmentKindPreview.File,
+                        name = "other.txt",
+                        placeholder = "[FILE other.txt]",
+                    ),
+                ),
+            ),
+        )
+        assertEquals(emptyList<ComposerPromptSegmentState>(), tokenizeComposerPrompt("", emptyList()))
+    }
+
+    @Test
     fun buildsEmptyChatComposerPromptSlotStateWithPlaceholderAndAllQueuedAttachments() {
         assertEquals(
             ComposerPromptSlotState(
@@ -1269,6 +1359,7 @@ class ThreadPresentationTest {
                     ),
                 ),
                 inputModeLabel = "Prompt",
+                promptSegments = emptyList(),
             ),
             buildComposerPromptSlotState(
                 prompt = ComposerPromptPreview(
@@ -1320,6 +1411,7 @@ class ThreadPresentationTest {
                 sendDisabled = true,
                 attachmentChips = emptyList(),
                 inputModeLabel = "Shell input",
+                promptSegments = emptyList(),
             ),
             buildComposerPromptSlotState(
                 prompt = ComposerPromptPreview(
@@ -1376,6 +1468,7 @@ class ThreadPresentationTest {
                     sendDisabled = true,
                     attachmentChips = emptyList(),
                     inputModeLabel = "Shell input",
+                    promptSegments = emptyList(),
                 ),
             ),
         )
@@ -1398,6 +1491,7 @@ class ThreadPresentationTest {
                     sendDisabled = false,
                     attachmentChips = emptyList(),
                     inputModeLabel = "Prompt",
+                    promptSegments = emptyList(),
                 ),
             ),
         )
