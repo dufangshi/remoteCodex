@@ -100,6 +100,16 @@ data class GraphChatHistoryItemFrameState(
     val copyText: String,
 )
 
+data class GraphChatImageHistoryState(
+    val previewLabel: String,
+    val assetPath: String?,
+    val fallbackSummary: String,
+    val openTitle: String,
+    val openText: String,
+    val pathAccessibilityLabel: String?,
+    val copyAccessibilityLabel: String?,
+)
+
 enum class FileChangeSummaryTone {
     Files,
     Added,
@@ -3006,6 +3016,31 @@ fun graphChatHistoryItemCopyText(
             appendLine(it)
         }
     }.trim()
+}
+
+fun buildGraphChatImageHistoryState(
+    text: String,
+    detail: String?,
+    assetPath: String?,
+    imageLabel: String?,
+): GraphChatImageHistoryState {
+    val normalizedText = text.trim()
+    val normalizedDetail = detail?.trim()?.takeIf { it.isNotEmpty() }
+    val normalizedAssetPath = assetPath?.trim()?.takeIf { it.isNotEmpty() } ?: normalizedDetail
+    val previewLabel = imageLabel?.trim()?.takeIf { it.isNotEmpty() }
+        ?: normalizedText.takeIf { it.isNotEmpty() }
+        ?: "Image preview"
+    val openText = normalizedAssetPath ?: normalizedText.ifEmpty { "Image preview" }
+
+    return GraphChatImageHistoryState(
+        previewLabel = previewLabel,
+        assetPath = normalizedAssetPath,
+        fallbackSummary = normalizedText.ifEmpty { "Image preview" },
+        openTitle = "Image Path",
+        openText = openText,
+        pathAccessibilityLabel = normalizedAssetPath?.let { "Open image path" },
+        copyAccessibilityLabel = normalizedAssetPath?.let { "Copy image path" },
+    )
 }
 
 fun isScrollableHistoryItem(kind: HistoryItemKind): Boolean {

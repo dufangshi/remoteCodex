@@ -80,6 +80,7 @@ import com.remotecodex.android.ui.presentation.GraphChatMessageFrameState
 import com.remotecodex.android.ui.presentation.GraphChatHistoryStatusState
 import com.remotecodex.android.ui.presentation.GraphChatHistoryStatusTone
 import com.remotecodex.android.ui.presentation.MessageStatusModel
+import com.remotecodex.android.ui.presentation.buildGraphChatImageHistoryState
 import com.remotecodex.android.ui.presentation.parseUserMessageSegments
 import com.remotecodex.android.ui.presentation.planStepStatusAccessibilityLabel
 import com.remotecodex.android.ui.presentation.shouldShowHistoryGroupRowTitle
@@ -2059,6 +2060,12 @@ private fun ImageHistoryPreview(
     colors: HistoryItemColors,
     onOpenDetail: (DetailPreview) -> Unit,
 ) {
+    val state = buildGraphChatImageHistoryState(
+        text = item.summary,
+        detail = item.detail,
+        assetPath = item.assetPath,
+        imageLabel = item.imageLabel,
+    )
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -2068,8 +2075,8 @@ private fun ImageHistoryPreview(
             .clickable {
                 onOpenDetail(
                     DetailPreview(
-                        title = "Image Path",
-                        text = item.assetPath ?: item.detail ?: item.summary,
+                        title = state.openTitle,
+                        text = state.openText,
                     ),
                 )
             },
@@ -2083,20 +2090,23 @@ private fun ImageHistoryPreview(
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = item.imageLabel ?: "Image preview",
+                text = state.previewLabel,
                 color = colors.foreground,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
             )
         }
-        item.assetPath?.let { path ->
+        state.assetPath?.let { path ->
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(ThreadColors.Panel.copy(alpha = 0.72f))
                     .border(1.dp, colors.border.copy(alpha = 0.42f))
                     .clickable {
-                        onOpenDetail(DetailPreview(title = "Image Path", text = path))
+                        onOpenDetail(DetailPreview(title = state.openTitle, text = path))
+                    }
+                    .semantics {
+                        contentDescription = state.pathAccessibilityLabel ?: "Open image path"
                     }
                     .padding(horizontal = 10.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -2122,7 +2132,7 @@ private fun ImageHistoryPreview(
                     value = path,
                     idleLabel = "Copy",
                     copiedLabel = "Copied",
-                    contentDescription = "Copy image path",
+                    contentDescription = state.copyAccessibilityLabel ?: "Copy image path",
                 )
             }
         }

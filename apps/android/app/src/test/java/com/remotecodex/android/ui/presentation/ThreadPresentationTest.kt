@@ -4261,6 +4261,69 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun buildsImageHistoryStateWithAssetPath() {
+        assertEquals(
+            GraphChatImageHistoryState(
+                previewLabel = "Shell preview",
+                assetPath = "apps/android/output/shell-preview.png",
+                fallbackSummary = "Generated screenshot",
+                openTitle = "Image Path",
+                openText = "apps/android/output/shell-preview.png",
+                pathAccessibilityLabel = "Open image path",
+                copyAccessibilityLabel = "Copy image path",
+            ),
+            buildGraphChatImageHistoryState(
+                text = "Generated screenshot",
+                detail = "detail/path.png",
+                assetPath = "apps/android/output/shell-preview.png",
+                imageLabel = "Shell preview",
+            ),
+        )
+    }
+
+    @Test
+    fun buildsImageHistoryStateWithDetailFallbackPath() {
+        assertEquals(
+            GraphChatImageHistoryState(
+                previewLabel = "Image preview",
+                assetPath = "detail/path.png",
+                fallbackSummary = "Image preview",
+                openTitle = "Image Path",
+                openText = "detail/path.png",
+                pathAccessibilityLabel = "Open image path",
+                copyAccessibilityLabel = "Copy image path",
+            ),
+            buildGraphChatImageHistoryState(
+                text = " ",
+                detail = " detail/path.png ",
+                assetPath = null,
+                imageLabel = null,
+            ),
+        )
+    }
+
+    @Test
+    fun buildsImageHistoryStateWithoutPath() {
+        assertEquals(
+            GraphChatImageHistoryState(
+                previewLabel = "Inline plot",
+                assetPath = null,
+                fallbackSummary = "Inline plot",
+                openTitle = "Image Path",
+                openText = "Inline plot",
+                pathAccessibilityLabel = null,
+                copyAccessibilityLabel = null,
+            ),
+            buildGraphChatImageHistoryState(
+                text = "Inline plot",
+                detail = null,
+                assetPath = " ",
+                imageLabel = null,
+            ),
+        )
+    }
+
+    @Test
     fun summarizesHookOutputWithHookLabelAndGap() {
         assertEquals(
             HookHistorySummary(
