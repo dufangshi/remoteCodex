@@ -65,6 +65,49 @@ data class ComposerStatusChipModel(
     val tone: ComposerStatusTone,
 )
 
+enum class ComposerPrimaryActionKind {
+    Send,
+    Stop,
+    Connecting,
+}
+
+data class ComposerActionState(
+    val primaryLabel: String,
+    val primaryKind: ComposerPrimaryActionKind,
+    val interruptLabel: String,
+    val showInterrupt: Boolean,
+    val sendEnabled: Boolean,
+)
+
+fun buildComposerActionState(
+    threadConnected: Boolean,
+    busy: Boolean,
+    activeView: ComposerActiveView,
+    canInterrupt: Boolean,
+): ComposerActionState {
+    val isShellView = activeView == ComposerActiveView.Shell
+    val interruptLabel = if (isShellView) "Send Ctrl-C" else "Stop Current Turn"
+    val sendLabel = when {
+        !threadConnected && busy -> "Connecting..."
+        !threadConnected -> "Send"
+        busy && !isShellView -> "Sending..."
+        else -> "Send"
+    }
+    val primaryKind = when {
+        canInterrupt && !isShellView -> ComposerPrimaryActionKind.Stop
+        !threadConnected && busy -> ComposerPrimaryActionKind.Connecting
+        else -> ComposerPrimaryActionKind.Send
+    }
+
+    return ComposerActionState(
+        primaryLabel = if (primaryKind == ComposerPrimaryActionKind.Stop) interruptLabel else sendLabel,
+        primaryKind = primaryKind,
+        interruptLabel = interruptLabel,
+        showInterrupt = canInterrupt && isShellView,
+        sendEnabled = !(busy && isShellView),
+    )
+}
+
 fun buildComposerStatusStrip(
     threadConnected: Boolean,
     busy: Boolean,

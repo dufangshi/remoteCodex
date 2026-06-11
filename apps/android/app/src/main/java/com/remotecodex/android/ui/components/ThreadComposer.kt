@@ -32,8 +32,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.ui.model.ComposerPreview
+import com.remotecodex.android.ui.presentation.ComposerActionState
+import com.remotecodex.android.ui.presentation.ComposerPrimaryActionKind
 import com.remotecodex.android.ui.presentation.ComposerStatusChipModel
 import com.remotecodex.android.ui.presentation.ComposerStatusTone
+import com.remotecodex.android.ui.presentation.buildComposerActionState
 import com.remotecodex.android.ui.presentation.buildComposerStatusStrip
 import com.remotecodex.android.ui.theme.ThreadColors
 
@@ -50,6 +53,12 @@ fun ThreadComposer(
         followTail = composer.followTail,
         activeView = composer.activeView,
         workspaceModeLabel = composer.workspaceModeLabel,
+    )
+    val actionState = buildComposerActionState(
+        threadConnected = composer.threadConnected,
+        busy = composer.busy,
+        activeView = composer.activeView,
+        canInterrupt = composer.canInterrupt,
     )
     Column(
         modifier = modifier
@@ -118,7 +127,7 @@ fun ThreadComposer(
                 icon = ComposerToolIcon.Terminal,
                 label = "Shell",
             )
-            ComposerSendButton()
+            ComposerActionControls(actionState = actionState)
         }
     }
 }
@@ -405,16 +414,123 @@ private fun ComposerToolGlyph(icon: ComposerToolIcon, color: Color) {
 }
 
 @Composable
-private fun ComposerSendButton() {
-    Box(
-        modifier = Modifier
-            .size(36.dp)
-            .clip(CircleShape)
-            .background(ThreadColors.Primary)
-            .border(1.dp, ThreadColors.Primary, CircleShape),
-        contentAlignment = Alignment.Center,
+private fun ComposerActionControls(actionState: ComposerActionState) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        ComposerToolGlyph(icon = ComposerToolIcon.Send, color = ThreadColors.PrimaryForeground)
+        if (actionState.showInterrupt) {
+            ComposerInterruptButton(label = actionState.interruptLabel)
+        }
+        ComposerPrimaryActionButton(actionState = actionState)
+    }
+}
+
+@Composable
+private fun ComposerInterruptButton(label: String) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(ThreadColors.DangerSoft.copy(alpha = 0.58f))
+            .border(1.dp, ThreadColors.Danger.copy(alpha = 0.42f), RoundedCornerShape(999.dp))
+            .padding(horizontal = 9.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(ThreadColors.Danger),
+        )
+        Text(
+            text = label,
+            color = ThreadColors.Danger,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun ComposerPrimaryActionButton(actionState: ComposerActionState) {
+    val enabled = actionState.sendEnabled
+    val isStop = actionState.primaryKind == ComposerPrimaryActionKind.Stop
+    val isConnecting = actionState.primaryKind == ComposerPrimaryActionKind.Connecting
+    val background = when {
+        isStop -> ThreadColors.Danger
+        isConnecting -> ThreadColors.WarningSoft
+        enabled -> ThreadColors.Primary
+        else -> ThreadColors.SurfaceStrong
+    }
+    val foreground = when {
+        isStop -> ThreadColors.PrimaryForeground
+        isConnecting -> ThreadColors.Warning
+        enabled -> ThreadColors.PrimaryForeground
+        else -> ThreadColors.ForegroundMuted
+    }
+    val border = when {
+        isStop -> ThreadColors.Danger
+        isConnecting -> ThreadColors.Warning.copy(alpha = 0.46f)
+        enabled -> ThreadColors.Primary
+        else -> ThreadColors.Border
+    }
+    val horizontalPadding = if (actionState.primaryLabel == "Send") 0.dp else 11.dp
+    Row(
+        modifier = Modifier
+            .then(
+                if (actionState.primaryLabel == "Send") {
+                    Modifier.size(36.dp)
+                } else {
+                    Modifier
+                },
+            )
+            .clip(RoundedCornerShape(999.dp))
+            .background(background)
+            .border(1.dp, border, RoundedCornerShape(999.dp))
+            .padding(horizontal = horizontalPadding, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = if (actionState.primaryLabel == "Send") {
+            Arrangement.Center
+        } else {
+            Arrangement.spacedBy(7.dp)
+        },
+    ) {
+        ComposerPrimaryActionGlyph(kind = actionState.primaryKind, color = foreground)
+        if (actionState.primaryLabel != "Send") {
+            Text(
+                text = actionState.primaryLabel,
+                color = foreground,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ComposerPrimaryActionGlyph(
+    kind: ComposerPrimaryActionKind,
+    color: Color,
+) {
+    when (kind) {
+        ComposerPrimaryActionKind.Stop -> Box(
+            modifier = Modifier
+                .size(10.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(color),
+        )
+        ComposerPrimaryActionKind.Send -> ComposerToolGlyph(icon = ComposerToolIcon.Send, color = color)
+        ComposerPrimaryActionKind.Connecting -> Box(
+            modifier = Modifier
+                .size(10.dp)
+                .clip(CircleShape)
+                .background(color),
+        )
     }
 }
 

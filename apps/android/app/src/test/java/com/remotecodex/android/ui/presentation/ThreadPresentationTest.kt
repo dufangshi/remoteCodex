@@ -108,6 +108,63 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun buildsComposerActionStateForInterruptibleChat() {
+        assertEquals(
+            ComposerActionState(
+                primaryLabel = "Stop Current Turn",
+                primaryKind = ComposerPrimaryActionKind.Stop,
+                interruptLabel = "Stop Current Turn",
+                showInterrupt = false,
+                sendEnabled = true,
+            ),
+            buildComposerActionState(
+                threadConnected = true,
+                busy = true,
+                activeView = ComposerActiveView.Chat,
+                canInterrupt = true,
+            ),
+        )
+    }
+
+    @Test
+    fun buildsComposerActionStateForConnectingChat() {
+        assertEquals(
+            ComposerActionState(
+                primaryLabel = "Connecting...",
+                primaryKind = ComposerPrimaryActionKind.Connecting,
+                interruptLabel = "Stop Current Turn",
+                showInterrupt = false,
+                sendEnabled = true,
+            ),
+            buildComposerActionState(
+                threadConnected = false,
+                busy = true,
+                activeView = ComposerActiveView.Chat,
+                canInterrupt = false,
+            ),
+        )
+    }
+
+    @Test
+    fun buildsComposerActionStateForShellInterruptControl() {
+        assertEquals(
+            ComposerActionState(
+                primaryLabel = "Send",
+                primaryKind = ComposerPrimaryActionKind.Send,
+                interruptLabel = "Send Ctrl-C",
+                showInterrupt = true,
+                sendEnabled = false,
+            ),
+            buildComposerActionState(
+                threadConnected = true,
+                busy = true,
+                activeView = ComposerActiveView.Shell,
+                canInterrupt = true,
+            ),
+        )
+    }
+
+    @Test
     fun buildsStructuredFileChangeSummarySegments() {
         assertEquals(
             listOf(
