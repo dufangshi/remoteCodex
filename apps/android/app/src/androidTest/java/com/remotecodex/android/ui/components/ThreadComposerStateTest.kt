@@ -256,6 +256,24 @@ class ThreadComposerStateTest {
         composeRule.onNodeWithContentDescription("Plan not pressed").assertExists()
     }
 
+    @Test
+    fun goalToolboxActionEntersAndCancelsGoalComposePreview() {
+        setComposerContent()
+
+        composeRule.onNodeWithContentDescription("Open slash toolbox").performClick()
+        composeRule.onNodeWithContentDescription("Goal").performClick()
+
+        composeRule.onNodeWithText("Max tokens (k): 12.5").assertExists()
+        composeRule.onNodeWithText("Describe the goal the backend should continue working toward.").assertExists()
+        composeRule.onNodeWithContentDescription("Set goal").assertExists()
+        composeRule.onNodeWithText("Slash toolbox").assertDoesNotExist()
+
+        composeRule.onNodeWithContentDescription("Cancel").performClick()
+
+        composeRule.onNodeWithContentDescription("Send Prompt").assertExists()
+        composeRule.onNodeWithText("Max tokens (k): 12.5").assertDoesNotExist()
+    }
+
     private fun setComposerContent(composer: ComposerPreview = ComposerPreview()) {
         composeRule.setContent {
             RemoteCodexTheme(dark = true) {

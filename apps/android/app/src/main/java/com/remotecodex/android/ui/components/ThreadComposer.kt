@@ -157,6 +157,9 @@ fun ThreadComposer(
     var selectedReasoningEffort by remember(composer.reasoningEffort) { mutableStateOf(composer.reasoningEffort) }
     var draftPrompt by remember(composer.prompt) { mutableStateOf(composer.prompt) }
     var planModeSelected by remember(composer.planModeActive) { mutableStateOf(composer.planModeActive) }
+    var goalComposeMode by remember(composer.goalComposeMode, composer.goalPanel.composeMode) {
+        mutableStateOf(composer.goalComposeMode || composer.goalPanel.composeMode)
+    }
     val selectedContext = composer.context.copy(model = selectedModel)
     val queuedAttachmentCount = draftPrompt.attachments.size
     val statusChips = buildComposerStatusStrip(
@@ -179,7 +182,7 @@ fun ThreadComposer(
         actionState = actionState,
         busy = composer.busy,
         goalBusy = composer.goalPanel.busy,
-        goalComposeMode = composer.goalComposeMode || composer.goalPanel.composeMode,
+        goalComposeMode = goalComposeMode,
     )
     val shellPromptInputState = buildComposerShellPromptInputState(promptSlotState)
     val submitInputState = buildComposerSubmitInputState(
@@ -206,7 +209,7 @@ fun ThreadComposer(
         actionState = actionState,
         activeView = composer.activeView,
         promptDisabled = composer.prompt.disabled,
-        goalComposeMode = composer.goalComposeMode || composer.goalPanel.composeMode,
+        goalComposeMode = goalComposeMode,
         goalBusy = composer.goalPanel.busy,
     )
     val toolbarState = buildComposerToolbarState(
@@ -236,7 +239,7 @@ fun ThreadComposer(
         items = composer.toolboxItems,
         fastMode = composer.fastMode,
         compactBusy = composer.compactBusy,
-        goalComposeMode = composer.goalComposeMode,
+        goalComposeMode = goalComposeMode,
         goalStatus = composer.goalStatus,
         busy = composer.busy,
         settingsBusy = composer.settingsBusy,
@@ -259,7 +262,7 @@ fun ThreadComposer(
     )
     val goalPanelState = buildComposerGoalPanelState(
         composer.goalPanel.copy(
-            composeMode = composer.goalComposeMode || composer.goalPanel.composeMode,
+            composeMode = goalComposeMode,
             fastMode = composer.fastMode || composer.goalPanel.fastMode,
         ),
     )
@@ -389,12 +392,19 @@ fun ThreadComposer(
                                 }
                             }
                             ComposerToolboxActionDecisionKind.RunCompact,
-                            ComposerToolboxActionDecisionKind.ExitGoalCompose,
                             -> if (actionDecision.closeMenu) {
                                 openMenu = null
                             }
+                            ComposerToolboxActionDecisionKind.ExitGoalCompose -> {
+                                goalComposeMode = false
+                                openMenu = null
+                            }
+                            ComposerToolboxActionDecisionKind.EnterGoalCompose -> {
+                                goalComposeMode = true
+                                slashPanelView = ComposerSlashPanelViewState.Root
+                                openMenu = null
+                            }
                             ComposerToolboxActionDecisionKind.ToggleFast,
-                            ComposerToolboxActionDecisionKind.EnterGoalCompose,
                             ComposerToolboxActionDecisionKind.Noop,
                             -> Unit
                         }
@@ -480,6 +490,7 @@ fun ThreadComposer(
             promptSlotState = promptSlotState,
             shellPromptInputState = shellPromptInputState,
             goalPanelState = goalPanelState,
+            onCancelGoal = { goalComposeMode = false },
             submitReady = submitInputState != null,
         )
         ComposerStatusStrip(chips = statusChips)
@@ -733,6 +744,7 @@ private fun ComposerFrameSlotsPreview(
     promptSlotState: ComposerPromptSlotState,
     shellPromptInputState: ComposerShellPromptInputState?,
     goalPanelState: ComposerGoalPanelState,
+    onCancelGoal: () -> Unit,
     submitReady: Boolean,
 ) {
     Column(
@@ -747,7 +759,10 @@ private fun ComposerFrameSlotsPreview(
             )
         }
         if (frameState.showGoalSlot) {
-            GoalComposePreviewCard(state = goalPanelState.composeCard)
+            GoalComposePreviewCard(
+                state = goalPanelState.composeCard,
+                onCancelGoal = onCancelGoal,
+            )
         }
         if (frameState.showShellPromptSlot && shellPromptInputState != null) {
             ShellPromptInputPreview(state = shellPromptInputState)
@@ -1744,7 +1759,10 @@ private fun GoalPreviewGroup(goalPanelState: ComposerGoalPanelState) {
 }
 
 @Composable
-private fun GoalComposePreviewCard(state: ComposerGoalComposeCardState) {
+private fun GoalComposePreviewCard(
+    state: ComposerGoalComposeCardState,
+    onCancelGoal: (() -> Unit)? = null,
+) {
     if (!state.visible) {
         return
     }
@@ -1793,13 +1811,42 @@ private fun GoalComposePreviewCard(state: ComposerGoalComposeCardState) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            GraphBadge(label = state.cancelLabel, variant = GraphBadgeVariant.Outline)
+            if (onCancelGoal != null) {
+                GoalComposeActionBadge(
+                    label = state.cancelLabel,
+                    onClick = onCancelGoal,
+                )
+            } else {
+                GraphBadge(label = state.cancelLabel, variant = GraphBadgeVariant.Outline)
+            }
             GraphBadge(
                 label = state.primaryLabel,
                 variant = if (state.primaryEnabled) GraphBadgeVariant.Default else GraphBadgeVariant.Outline,
             )
         }
     }
+}
+
+@Composable
+private fun GoalComposeActionBadge(
+    label: String,
+    onClick: () -> Unit,
+) {
+    Text(
+        text = label,
+        modifier = Modifier
+            .semantics { contentDescription = label }
+            .clip(RoundedCornerShape(999.dp))
+            .background(ThreadColors.SurfaceStrong)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        color = ThreadColors.ForegroundMuted,
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)
