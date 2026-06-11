@@ -48,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.remotecodex.android.api.UpdateThreadGoalRequest
 import com.remotecodex.android.api.UpdateThreadSettingsRequest
 import com.remotecodex.android.ui.model.ComposerActiveView
 import com.remotecodex.android.ui.model.ComposerSlashPanelViewPreview
@@ -158,6 +159,7 @@ fun ThreadComposer(
     onSubmitPrompt: ((String) -> Unit)? = null,
     onInterruptThread: (() -> Unit)? = null,
     onUpdateSettings: ((UpdateThreadSettingsRequest) -> Unit)? = null,
+    onUpdateGoal: ((UpdateThreadGoalRequest) -> Unit)? = null,
     onCompactThread: (() -> Unit)? = null,
 ) {
     var openMenu by remember { mutableStateOf<ComposerMenu?>(null) }
@@ -686,17 +688,29 @@ fun ThreadComposer(
                 } else {
                     goalLocalError = null
                     goalComposeMode = false
-                    goalPreviewStatus = "Goal preview set: $objective"
                     val tokenBudget = goalTokenBudgetDraft.toPreviewGoalTokenBudget()
-                    goalBudgetPreviewStatus = tokenBudget?.let {
-                        "Goal token budget preview: ${formatGoalTokenBudgetThousands(it)}k budget"
+                    if (onUpdateGoal != null) {
+                        onUpdateGoal(
+                            UpdateThreadGoalRequest(
+                                objective = objective,
+                                status = "active",
+                                tokenBudget = tokenBudget,
+                            ),
+                        )
+                        goalPreviewStatus = null
+                        goalBudgetPreviewStatus = null
+                    } else {
+                        goalPreviewStatus = "Goal preview set: $objective"
+                        goalBudgetPreviewStatus = tokenBudget?.let {
+                            "Goal token budget preview: ${formatGoalTokenBudgetThousands(it)}k budget"
+                        }
+                        currentGoalPreview = ThreadGoalPreview(
+                            objective = objective,
+                            status = ThreadGoalStatusPreview.Active,
+                            tokenBudget = tokenBudget,
+                            tokensUsed = 0,
+                        )
                     }
-                    currentGoalPreview = ThreadGoalPreview(
-                        objective = objective,
-                        status = ThreadGoalStatusPreview.Active,
-                        tokenBudget = tokenBudget,
-                        tokensUsed = 0,
-                    )
                     draftPrompt = draftPrompt.copy(text = "", attachments = emptyList())
                 }
             },

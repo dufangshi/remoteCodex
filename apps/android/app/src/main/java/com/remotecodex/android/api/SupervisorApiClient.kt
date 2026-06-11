@@ -170,6 +170,18 @@ class SupervisorApiClient(
         ).toThreadSummary()
     }
 
+    fun updateThreadGoal(threadId: String, request: UpdateThreadGoalRequest) {
+        val body = JSONObject()
+        request.objective?.let { body.put("objective", it) }
+        request.status?.let { body.put("status", it) }
+        request.tokenBudget?.let { body.put("tokenBudget", it) }
+        requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/goal"),
+            method = "PATCH",
+            body = body.toString(),
+        )
+    }
+
     fun respondToThreadRequest(
         threadId: String,
         requestId: String,

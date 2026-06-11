@@ -27,6 +27,7 @@ import com.remotecodex.android.api.SupervisorApiClient
 import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorEventSocketClient
 import com.remotecodex.android.api.SupervisorHomeSnapshot
+import com.remotecodex.android.api.UpdateThreadGoalRequest
 import com.remotecodex.android.api.UpdateThreadRequest
 import com.remotecodex.android.api.UpdateThreadSettingsRequest
 import com.remotecodex.android.settings.ThemeMode
@@ -63,6 +64,7 @@ fun ThreadDetailScreen(
     var pendingPrompt by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingInterrupt by remember(threadId) { mutableStateOf(false) }
     var pendingSettingsUpdate by remember(threadId) { mutableStateOf<UpdateThreadSettingsRequest?>(null) }
+    var pendingGoalUpdate by remember(threadId) { mutableStateOf<UpdateThreadGoalRequest?>(null) }
     var pendingCompact by remember(threadId) { mutableStateOf(false) }
     var resolvingRequestId by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingRenameTitle by remember(threadId) { mutableStateOf<String?>(null) }
@@ -156,6 +158,24 @@ fun ThreadDetailScreen(
                 refreshNonce += 1
             }
             .onFailure { throwable -> error = throwable.message ?: "Settings update failed." }
+    }
+
+    LaunchedEffect(pendingGoalUpdate) {
+        val goal = pendingGoalUpdate ?: return@LaunchedEffect
+        error = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                client.updateThreadGoal(threadId, goal)
+                client.fetchThreadDetail(threadId, limit = 30)
+            }
+        }
+        pendingGoalUpdate = null
+        result
+            .onSuccess { dto ->
+                detail = buildThreadDetailPreviewFromSupervisor(dto)
+                refreshNonce += 1
+            }
+            .onFailure { throwable -> error = throwable.message ?: "Goal update failed." }
     }
 
     LaunchedEffect(pendingCompact) {
@@ -259,6 +279,9 @@ fun ThreadDetailScreen(
             },
             onUpdateThreadSettings = { settings ->
                 pendingSettingsUpdate = settings
+            },
+            onUpdateThreadGoal = { goal ->
+                pendingGoalUpdate = goal
             },
             onCompactThread = {
                 pendingCompact = true

@@ -369,6 +369,45 @@ class SupervisorApiClientTest {
     }
 
     @Test
+    fun updateThreadGoalUsesRelayDevicePath() {
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(
+                200,
+                """{"goal":{"status":"active","objective":"Ship Android goal","tokenBudget":12500}}""",
+            ),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        client.updateThreadGoal(
+            "thread-1",
+            UpdateThreadGoalRequest(
+                objective = "Ship Android goal",
+                status = "active",
+                tokenBudget = 12500,
+            ),
+        )
+
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1/goal",
+            transport.requests.single().url,
+        )
+        assertEquals("PATCH", transport.requests.single().method)
+        assertEquals("relay-token", transport.requests.single().bearerToken)
+        val body = transport.requests.single().body!!
+        assertTrue(body.contains("\"objective\":\"Ship Android goal\""))
+        assertTrue(body.contains("\"status\":\"active\""))
+        assertTrue(body.contains("\"tokenBudget\":12500"))
+    }
+
+    @Test
     fun compactThreadUsesRelayDevicePath() {
         val compactedThreadJson = """{"id":"thread-1","workspaceId":"workspace-1","title":"Android API","status":"idle","model":"gpt-5","reasoningEffort":"medium","fastMode":false,"collaborationMode":"default","sandboxMode":"workspace-write","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":"Compacted"}"""
         val transport = RecordingTransport(

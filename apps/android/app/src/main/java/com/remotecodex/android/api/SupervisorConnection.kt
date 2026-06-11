@@ -264,6 +264,12 @@ data class UpdateThreadSettingsRequest(
     val sandboxMode: String? = null,
 )
 
+data class UpdateThreadGoalRequest(
+    val objective: String? = null,
+    val status: String? = null,
+    val tokenBudget: Int? = null,
+)
+
 data class RespondThreadRequestAnswer(
     val answers: List<String>,
 )
