@@ -90,6 +90,9 @@ data class GraphChatHistoryItemFrameState(
     val runningLabel: String,
     val showDetail: Boolean,
     val showFileChangeDelta: Boolean,
+    val fileChangeSummarySegments: List<FileChangeSummarySegment>,
+    val fileChangeCanOpen: Boolean,
+    val fileChangeOpenAccessibilityLabel: String?,
     val showImagePreview: Boolean,
     val showAction: Boolean,
     val actionAccessibilityLabel: String?,
@@ -2914,11 +2917,17 @@ fun buildGraphChatHistoryItemFrameState(
     summary: String,
     detail: String?,
     actionLabel: String?,
+    changedFiles: Int? = null,
+    addedLines: Int? = null,
+    removedLines: Int? = null,
 ): GraphChatHistoryItemFrameState {
     val normalizedSummary = graphChatHistoryItemSummary(kind, summary)
     val normalizedDetail = detail?.takeIf { it.isNotBlank() }
     val normalizedAction = actionLabel?.trim()?.takeIf { it.isNotEmpty() }
-    val showAction = normalizedAction != null && kind != HistoryItemKind.Artifact
+    val isFileChange = kind == HistoryItemKind.FileChange
+    val showAction = normalizedAction != null &&
+        kind != HistoryItemKind.Artifact &&
+        !isFileChange
     val copyText = graphChatHistoryItemCopyText(
         title = title,
         meta = meta,
@@ -2935,8 +2944,25 @@ fun buildGraphChatHistoryItemFrameState(
         runningLabel = "Running from thread events",
         showDetail = normalizedDetail != null &&
             kind != HistoryItemKind.Artifact &&
-            kind != HistoryItemKind.Hook,
-        showFileChangeDelta = kind == HistoryItemKind.FileChange,
+            kind != HistoryItemKind.Hook &&
+            !isFileChange,
+        showFileChangeDelta = isFileChange,
+        fileChangeSummarySegments = if (isFileChange) {
+            fileChangeSummarySegments(
+                changedFiles = changedFiles,
+                addedLines = addedLines,
+                removedLines = removedLines,
+                previewText = summary,
+            )
+        } else {
+            emptyList()
+        },
+        fileChangeCanOpen = isFileChange && (normalizedDetail != null || normalizedAction != null),
+        fileChangeOpenAccessibilityLabel = if (isFileChange && (normalizedDetail != null || normalizedAction != null)) {
+            "Open file change details"
+        } else {
+            null
+        },
         showImagePreview = kind == HistoryItemKind.Image,
         showAction = showAction,
         actionAccessibilityLabel = normalizedAction

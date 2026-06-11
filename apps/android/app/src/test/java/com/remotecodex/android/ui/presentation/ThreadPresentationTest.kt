@@ -4166,6 +4166,9 @@ class ThreadPresentationTest {
                 runningLabel = "Running from thread events",
                 showDetail = true,
                 showFileChangeDelta = false,
+                fileChangeSummarySegments = emptyList(),
+                fileChangeCanOpen = false,
+                fileChangeOpenAccessibilityLabel = null,
                 showImagePreview = false,
                 showAction = true,
                 actionAccessibilityLabel = "Open command output",
@@ -4194,17 +4197,30 @@ class ThreadPresentationTest {
             summary = "/home/u/dev/remoteCodex-main/apps/android/app/src/main/java/com/remotecodex/android/ui/components/ThreadTimelineComponents.kt",
             detail = "diff --git",
             actionLabel = "Diff",
+            changedFiles = 2,
+            addedLines = 12,
+            removedLines = 3,
         )
 
         assertEquals(GraphChatHistoryStatusState("Completed", GraphChatHistoryStatusTone.Success), state.status)
         assertEquals(true, state.summary.endsWith("ThreadTimelineComponents.kt"))
         assertEquals(true, state.summary.startsWith(".../"))
         assertEquals(false, state.running)
-        assertEquals(true, state.showDetail)
+        assertEquals(false, state.showDetail)
         assertEquals(true, state.showFileChangeDelta)
+        assertEquals(
+            listOf(
+                FileChangeSummarySegment("2 files", FileChangeSummaryTone.Files),
+                FileChangeSummarySegment("+12", FileChangeSummaryTone.Added),
+                FileChangeSummarySegment("-3", FileChangeSummaryTone.Removed),
+            ),
+            state.fileChangeSummarySegments,
+        )
+        assertEquals(true, state.fileChangeCanOpen)
+        assertEquals("Open file change details", state.fileChangeOpenAccessibilityLabel)
         assertEquals(false, state.showImagePreview)
-        assertEquals(true, state.showAction)
-        assertEquals("Open diff", state.actionAccessibilityLabel)
+        assertEquals(false, state.showAction)
+        assertEquals(null, state.actionAccessibilityLabel)
         assertEquals(true, state.showCopy)
         assertEquals(
             "File Change\nworkspace\nDone\n/home/u/dev/remoteCodex-main/apps/android/app/src/main/java/com/remotecodex/android/ui/components/ThreadTimelineComponents.kt\n\ndiff --git",
@@ -4223,6 +4239,9 @@ class ThreadPresentationTest {
                 runningLabel = "Running from thread events",
                 showDetail = false,
                 showFileChangeDelta = false,
+                fileChangeSummarySegments = emptyList(),
+                fileChangeCanOpen = false,
+                fileChangeOpenAccessibilityLabel = null,
                 showImagePreview = false,
                 showAction = false,
                 actionAccessibilityLabel = null,

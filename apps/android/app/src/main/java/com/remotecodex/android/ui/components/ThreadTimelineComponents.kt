@@ -1331,6 +1331,9 @@ private fun HistoryItemCard(
         summary = item.summary,
         detail = item.detail,
         actionLabel = item.actionLabel,
+        changedFiles = item.changedFiles,
+        addedLines = item.addedLines,
+        removedLines = item.removedLines,
     )
     Column(
         modifier = Modifier
@@ -1376,6 +1379,11 @@ private fun HistoryItemCard(
                 colors = colors,
                 onOpenDetail = onOpenDetail,
             )
+            HistoryItemKind.FileChange -> FileChangeInlineSummary(
+                state = frameState,
+                colors = colors,
+                onOpen = { openHistoryItemDetail(item, null, onOpenDetail) },
+            )
             else -> {
                 Text(
                     text = frameState.summary,
@@ -1413,9 +1421,6 @@ private fun HistoryItemCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-        }
-        if (frameState.showFileChangeDelta) {
-            FileChangeDeltaRow(item = item)
         }
         if (frameState.showImagePreview) {
             ImageHistoryPreview(item = item, colors = colors, onOpenDetail = onOpenDetail)
@@ -1509,6 +1514,57 @@ private fun HistoryStatusBadge(status: GraphChatHistoryStatusState) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+@Composable
+private fun FileChangeInlineSummary(
+    state: GraphChatHistoryItemFrameState,
+    colors: HistoryItemColors,
+    onOpen: () -> Unit,
+) {
+    val shape = RoundedCornerShape(8.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(ThreadColors.Panel.copy(alpha = 0.58f))
+            .border(1.dp, colors.border.copy(alpha = 0.55f), shape)
+            .then(
+                if (state.fileChangeCanOpen) {
+                    Modifier
+                        .clickable(onClick = onOpen)
+                        .semantics {
+                            contentDescription = state.fileChangeOpenAccessibilityLabel
+                                ?: "Open file change details"
+                        }
+                } else {
+                    Modifier
+                },
+            )
+            .padding(horizontal = 9.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = state.summary,
+            modifier = Modifier.weight(1f),
+            color = ThreadColors.ForegroundSoft,
+            style = MaterialTheme.typography.labelMedium,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (state.fileChangeSummarySegments.isNotEmpty()) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                state.fileChangeSummarySegments.forEach { segment ->
+                    FileChangeSummaryPill(segment = segment)
+                }
+            }
+        }
     }
 }
 
