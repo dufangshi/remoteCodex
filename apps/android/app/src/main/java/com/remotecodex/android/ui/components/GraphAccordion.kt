@@ -68,6 +68,7 @@ fun GraphAccordionItem(
     subtitleColor: Color = ThreadColors.ForegroundMuted,
     backgroundColor: Color = ThreadColors.Panel,
     contentBackgroundColor: Color? = null,
+    contentDescriptionForExpanded: ((Boolean) -> String)? = null,
     leading: @Composable (() -> Unit)? = null,
     trailing: @Composable (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
@@ -89,11 +90,12 @@ fun GraphAccordionItem(
                     onClick = { expanded = !expanded },
                 )
                 .semantics {
-                    contentDescription = if (expanded) {
-                        "Collapse $title"
-                    } else {
-                        "Expand $title"
-                    }
+                    contentDescription = contentDescriptionForExpanded?.invoke(expanded)
+                        ?: if (expanded) {
+                            "Collapse $title"
+                        } else {
+                            "Expand $title"
+                        }
                 }
                 .padding(horizontal = 12.dp, vertical = 13.dp),
             verticalAlignment = Alignment.Top,

@@ -4052,6 +4052,88 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun buildsRunningCommandHistoryGroupFrameState() {
+        assertEquals(
+            GraphChatHistoryGroupFrameState(
+                title = "Batch",
+                subtitle = "3 commands · running",
+                countBadgeLabel = "3",
+                running = true,
+                fileChangeSummarySegments = emptyList(),
+                toggleAccessibilityLabel = "Expand 3 commands",
+                toggleTargetLabel = "3 commands",
+            ),
+            buildGraphChatHistoryGroupFrameState(
+                kind = HistoryItemKind.Command,
+                countLabel = "3 commands",
+                statusLabel = " running ",
+                itemCount = 3,
+                expanded = false,
+            ),
+        )
+    }
+
+    @Test
+    fun buildsFileChangeHistoryGroupFrameStateWithDeltaSummary() {
+        assertEquals(
+            GraphChatHistoryGroupFrameState(
+                title = "Batch",
+                subtitle = "2 file changes",
+                countBadgeLabel = "2",
+                running = false,
+                fileChangeSummarySegments = listOf(
+                    FileChangeSummarySegment("4 files", FileChangeSummaryTone.Files),
+                    FileChangeSummarySegment("+12", FileChangeSummaryTone.Added),
+                    FileChangeSummarySegment("-3", FileChangeSummaryTone.Removed),
+                ),
+                toggleAccessibilityLabel = "Collapse 2 file changes",
+                toggleTargetLabel = "2 file changes",
+            ),
+            buildGraphChatHistoryGroupFrameState(
+                kind = HistoryItemKind.FileChange,
+                countLabel = "2 file changes",
+                statusLabel = null,
+                itemCount = 2,
+                expanded = true,
+                changedFiles = 4,
+                addedLines = 12,
+                removedLines = 3,
+            ),
+        )
+    }
+
+    @Test
+    fun buildsHistoryGroupFrameFallbackForMissingCountLabel() {
+        assertEquals(
+            GraphChatHistoryGroupFrameState(
+                title = "Batch",
+                subtitle = "1 entry",
+                countBadgeLabel = "1",
+                running = false,
+                fileChangeSummarySegments = emptyList(),
+                toggleAccessibilityLabel = "Expand 1 web search entry",
+                toggleTargetLabel = "1 web search entry",
+            ),
+            buildGraphChatHistoryGroupFrameState(
+                kind = HistoryItemKind.WebSearch,
+                countLabel = " ",
+                statusLabel = " ",
+                itemCount = 1,
+                expanded = false,
+            ),
+        )
+    }
+
+    @Test
+    fun recognizesWebAlignedRunningHistoryStatuses() {
+        listOf("running", "in_progress", "in progress", "pending", "still running").forEach { status ->
+            assertEquals(true, isRunningHistoryStatusLabel(status))
+        }
+        assertEquals(false, isRunningHistoryStatusLabel("completed"))
+        assertEquals(false, isRunningHistoryStatusLabel(null))
+    }
+
+    @Test
     fun summarizesHookOutputWithHookLabelAndGap() {
         assertEquals(
             HookHistorySummary(

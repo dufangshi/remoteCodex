@@ -64,6 +64,7 @@ import com.remotecodex.android.ui.model.ToolStatus
 import com.remotecodex.android.ui.model.TurnPreview
 import com.remotecodex.android.ui.presentation.artifactHistorySummary
 import com.remotecodex.android.ui.presentation.basenameFromAssetPath
+import com.remotecodex.android.ui.presentation.buildGraphChatHistoryGroupFrameState
 import com.remotecodex.android.ui.presentation.buildGraphChatMessageFrameState
 import com.remotecodex.android.ui.presentation.FileChangeSummarySegment
 import com.remotecodex.android.ui.presentation.FileChangeSummaryTone
@@ -72,6 +73,7 @@ import com.remotecodex.android.ui.presentation.formatGraphChatToolParameterObjec
 import com.remotecodex.android.ui.presentation.formatTrailingPathLabel
 import com.remotecodex.android.ui.presentation.historyGroupRowOrdinalLabel
 import com.remotecodex.android.ui.presentation.hookHistorySummary
+import com.remotecodex.android.ui.presentation.GraphChatHistoryGroupFrameState
 import com.remotecodex.android.ui.presentation.GraphChatMessageFrameState
 import com.remotecodex.android.ui.presentation.MessageStatusModel
 import com.remotecodex.android.ui.presentation.parseUserMessageSegments
@@ -1110,6 +1112,16 @@ private fun HistoryGroupCard(
     onOpenDetail: (DetailPreview) -> Unit,
 ) {
     val colors = historyItemColors(group.kind)
+    val frameState = buildGraphChatHistoryGroupFrameState(
+        kind = group.kind,
+        countLabel = group.countLabel,
+        statusLabel = group.statusLabel,
+        itemCount = group.items.size,
+        expanded = group.expandedByDefault,
+        changedFiles = group.changedFiles,
+        addedLines = group.addedLines,
+        removedLines = group.removedLines,
+    )
     GraphAccordion(
         modifier = Modifier
             .fillMaxWidth()
@@ -1117,26 +1129,33 @@ private fun HistoryGroupCard(
             .border(1.dp, colors.border, RoundedCornerShape(10.dp))
     ) {
         GraphAccordionItem(
-            title = "Batch",
-            subtitle = historyGroupSubtitle(group),
+            title = frameState.title,
+            subtitle = frameState.subtitle,
             defaultExpanded = group.expandedByDefault,
             showDivider = false,
             titleColor = colors.foreground,
             backgroundColor = colors.background,
             contentBackgroundColor = colors.background,
+            contentDescriptionForExpanded = { expanded ->
+                if (expanded) {
+                    "Collapse ${frameState.toggleTargetLabel}"
+                } else {
+                    "Expand ${frameState.toggleTargetLabel}"
+                }
+            },
             leading = {
-                HistoryGroupBadge(group = group, colors = colors)
+                HistoryGroupBadge(group = group, frameState = frameState, colors = colors)
             },
             trailing = {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (isRunningStatusLabel(group.statusLabel)) {
+                    if (frameState.running) {
                         RunningDots(color = colors.foreground, dotSize = 4.dp, spacing = 2.dp)
                     }
-                    if (group.kind == HistoryItemKind.FileChange) {
-                        FileChangeGroupSummary(group = group)
+                    if (frameState.fileChangeSummarySegments.isNotEmpty()) {
+                        FileChangeGroupSummary(segments = frameState.fileChangeSummarySegments)
                     }
                 }
             },
@@ -1162,24 +1181,10 @@ private fun HistoryGroupCard(
     }
 }
 
-private fun historyGroupSubtitle(group: HistoryGroupPreview): String {
-    return listOfNotNull(
-        group.countLabel.takeIf { it.isNotBlank() },
-        group.statusLabel?.takeIf { it.isNotBlank() },
-    ).joinToString(" · ").ifBlank {
-        "${group.items.size} entries"
-    }
-}
-
 @Composable
-private fun FileChangeGroupSummary(group: HistoryGroupPreview) {
+private fun FileChangeGroupSummary(segments: List<FileChangeSummarySegment>) {
     Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-        fileChangeSummarySegments(
-            changedFiles = group.changedFiles,
-            addedLines = group.addedLines,
-            removedLines = group.removedLines,
-            previewText = group.countLabel,
-        ).forEach { segment ->
+        segments.forEach { segment ->
             FileChangeSummaryPill(segment = segment)
         }
     }
@@ -1188,6 +1193,7 @@ private fun FileChangeGroupSummary(group: HistoryGroupPreview) {
 @Composable
 private fun HistoryGroupBadge(
     group: HistoryGroupPreview,
+    frameState: GraphChatHistoryGroupFrameState,
     colors: HistoryItemColors,
 ) {
     Box(
@@ -1204,10 +1210,14 @@ private fun HistoryGroupBadge(
                 .border(1.dp, colors.foreground.copy(alpha = 0.30f), RoundedCornerShape(10.dp)),
             contentAlignment = Alignment.Center,
         ) {
-            HistoryGroupGlyph(group = group, color = colors.foreground)
+            HistoryGroupGlyph(
+                group = group,
+                countBadgeLabel = frameState.countBadgeLabel,
+                color = colors.foreground,
+            )
         }
         Text(
-            text = graphChatHistoryGroupCountLabel(group.countLabel),
+            text = frameState.countBadgeLabel,
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .clip(RoundedCornerShape(999.dp))
@@ -1662,16 +1672,6 @@ private fun historyGroupRowSummary(item: HistoryItemPreview): String {
     }
 }
 
-private fun isRunningStatusLabel(statusLabel: String?): Boolean {
-    if (statusLabel == null) {
-        return false
-    }
-    val normalized = statusLabel.lowercase()
-    return normalized.contains("running") ||
-        normalized.contains("inprogress") ||
-        normalized.contains("in_progress")
-}
-
 private fun openHistoryItemDetail(
     item: HistoryItemPreview,
     index: Int?,
@@ -1820,7 +1820,11 @@ private fun HistoryKindGlyph(kind: HistoryItemKind, color: Color) {
 }
 
 @Composable
-private fun HistoryGroupGlyph(group: HistoryGroupPreview, color: Color) {
+private fun HistoryGroupGlyph(
+    group: HistoryGroupPreview,
+    countBadgeLabel: String,
+    color: Color,
+) {
     Box(
         modifier = Modifier
             .widthIn(min = 30.dp)
@@ -1828,7 +1832,7 @@ private fun HistoryGroupGlyph(group: HistoryGroupPreview, color: Color) {
     ) {
         HistoryKindGlyph(kind = group.kind, color = color)
         Text(
-            text = graphChatHistoryGroupCountLabel(group.countLabel),
+            text = countBadgeLabel,
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .clip(RoundedCornerShape(999.dp))

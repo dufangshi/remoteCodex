@@ -59,6 +59,16 @@ data class GraphChatMessageFrameState(
     val timeLabel: String?,
 )
 
+data class GraphChatHistoryGroupFrameState(
+    val title: String,
+    val subtitle: String,
+    val countBadgeLabel: String,
+    val running: Boolean,
+    val fileChangeSummarySegments: List<FileChangeSummarySegment>,
+    val toggleAccessibilityLabel: String,
+    val toggleTargetLabel: String,
+)
+
 enum class FileChangeSummaryTone {
     Files,
     Added,
@@ -2763,6 +2773,75 @@ fun shouldShowHistoryGroupRowTitle(kind: HistoryItemKind): Boolean {
         -> false
         else -> true
     }
+}
+
+fun buildGraphChatHistoryGroupFrameState(
+    kind: HistoryItemKind,
+    countLabel: String,
+    statusLabel: String?,
+    itemCount: Int,
+    expanded: Boolean,
+    changedFiles: Int? = null,
+    addedLines: Int? = null,
+    removedLines: Int? = null,
+): GraphChatHistoryGroupFrameState {
+    val trimmedCountLabel = countLabel.trim()
+    val trimmedStatusLabel = statusLabel?.trim()?.takeIf { it.isNotEmpty() }
+    val subtitle = listOfNotNull(
+        trimmedCountLabel.takeIf { it.isNotEmpty() },
+        trimmedStatusLabel,
+    ).joinToString(" · ").ifBlank {
+        "$itemCount ${if (itemCount == 1) "entry" else "entries"}"
+    }
+    val toggleVerb = if (expanded) "Collapse" else "Expand"
+    val toggleTarget = trimmedCountLabel.ifEmpty {
+        "$itemCount ${historyGroupToggleNoun(kind, itemCount)}"
+    }
+
+    return GraphChatHistoryGroupFrameState(
+        title = "Batch",
+        subtitle = subtitle,
+        countBadgeLabel = graphChatHistoryGroupCountLabel(trimmedCountLabel.ifEmpty { toggleTarget }),
+        running = isRunningHistoryStatusLabel(trimmedStatusLabel),
+        fileChangeSummarySegments = if (kind == HistoryItemKind.FileChange) {
+            fileChangeSummarySegments(
+                changedFiles = changedFiles,
+                addedLines = addedLines,
+                removedLines = removedLines,
+                previewText = countLabel,
+            )
+        } else {
+            emptyList()
+        },
+        toggleAccessibilityLabel = "$toggleVerb $toggleTarget",
+        toggleTargetLabel = toggleTarget,
+    )
+}
+
+private fun historyGroupToggleNoun(kind: HistoryItemKind, count: Int): String {
+    val singular = when (kind) {
+        HistoryItemKind.Command -> "command entry"
+        HistoryItemKind.WebSearch -> "web search entry"
+        HistoryItemKind.FileRead -> "file read entry"
+        HistoryItemKind.FileChange -> "file change entry"
+        else -> "entry"
+    }
+    return if (count == 1) singular else "${singular}s"
+}
+
+fun isRunningHistoryStatusLabel(statusLabel: String?): Boolean {
+    val normalized = statusLabel?.trim()?.lowercase() ?: return false
+    return normalized == "running" ||
+        normalized == "in_progress" ||
+        normalized == "in progress" ||
+        normalized == "pending" ||
+        normalized.contains("running") ||
+        normalized.contains("inprogress") ||
+        normalized.contains("in_progress")
+}
+
+fun graphChatHistoryGroupCountLabel(countLabel: String): String {
+    return Regex("\\d+").find(countLabel)?.value ?: countLabel.trim().take(2).uppercase()
 }
 
 fun isScrollableHistoryItem(kind: HistoryItemKind): Boolean {

@@ -1,5 +1,6 @@
 package com.remotecodex.android.ui.components
 
+import com.remotecodex.android.ui.presentation.graphChatHistoryGroupCountLabel
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
