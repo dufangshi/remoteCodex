@@ -18,6 +18,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.api.ExportThreadRequest
@@ -85,6 +87,10 @@ fun ThreadDetailScreen(
     var selectedWorkspaceFilePath by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingWorkspaceFilePath by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingWorkspaceLoadMore by remember(threadId) { mutableStateOf(false) }
+    var pendingWorkspaceDownloadPath by remember(threadId) { mutableStateOf<String?>(null) }
+    var pendingWorkspaceRawOpenPath by remember(threadId) { mutableStateOf<String?>(null) }
+    var pendingWorkspaceRawCopyPath by remember(threadId) { mutableStateOf<String?>(null) }
+    var workspaceActionMessage by remember(threadId) { mutableStateOf<String?>(null) }
     var resolvingRequestId by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingRenameTitle by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingDelete by remember(threadId) { mutableStateOf(false) }
@@ -100,6 +106,7 @@ fun ThreadDetailScreen(
     val eventSocketClient = remember(supervisorConnection) {
         SupervisorEventSocketClient(supervisorConnection)
     }
+    val clipboardManager = LocalClipboardManager.current
 
     LaunchedEffect(threadId, refreshNonce) {
         loading = detail == null
@@ -408,6 +415,70 @@ fun ThreadDetailScreen(
             .onFailure { throwable -> error = throwable.message ?: "Workspace preview load more failed." }
     }
 
+    LaunchedEffect(pendingWorkspaceDownloadPath) {
+        val path = pendingWorkspaceDownloadPath ?: return@LaunchedEffect
+        error = null
+        workspaceActionMessage = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                val threadDetail = client.fetchThreadDetail(threadId, limit = 1)
+                client.downloadWorkspaceFile(threadDetail.workspace.id, path)
+            }
+        }
+        pendingWorkspaceDownloadPath = null
+        result
+            .onSuccess { download ->
+                workspaceActionMessage = "Downloaded ${download.filename} (${download.bytes.size} bytes)"
+            }
+            .onFailure { throwable -> error = throwable.message ?: "Workspace download failed." }
+    }
+
+    LaunchedEffect(pendingWorkspaceRawOpenPath) {
+        val path = pendingWorkspaceRawOpenPath ?: return@LaunchedEffect
+        error = null
+        workspaceActionMessage = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                val threadDetail = client.fetchThreadDetail(threadId, limit = 1)
+                val raw = client.fetchWorkspaceRawFile(threadDetail.workspace.id, path)
+                client.fetchThreadDetailPreview(
+                    threadId = threadId,
+                    selectedWorkspaceFilePath = path,
+                    overrideWorkspaceContent = raw.text,
+                    overrideWorkspaceNextOffset = raw.bytes.size.toLong(),
+                    overrideWorkspaceTruncated = false,
+                )
+            }
+        }
+        pendingWorkspaceRawOpenPath = null
+        result
+            .onSuccess { preview ->
+                detail = preview
+                selectedWorkspaceFilePath = path
+                workspaceActionMessage = "Opened raw ${path.substringAfterLast('/')}"
+            }
+            .onFailure { throwable -> error = throwable.message ?: "Workspace raw file failed." }
+    }
+
+    LaunchedEffect(pendingWorkspaceRawCopyPath) {
+        val path = pendingWorkspaceRawCopyPath ?: return@LaunchedEffect
+        error = null
+        workspaceActionMessage = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                val threadDetail = client.fetchThreadDetail(threadId, limit = 1)
+                client.fetchWorkspaceRawFile(threadDetail.workspace.id, path)
+            }
+        }
+        pendingWorkspaceRawCopyPath = null
+        result
+            .onSuccess { raw ->
+                clipboardManager.setText(AnnotatedString(raw.text))
+                workspaceActionMessage = "Copied ${path.substringAfterLast('/')} (${raw.bytes.size} bytes)"
+            }
+            .onFailure { throwable -> error = throwable.message ?: "Workspace raw copy failed." }
+    }
+
     LaunchedEffect(pendingRequestResponse) {
         val response = pendingRequestResponse ?: return@LaunchedEffect
         resolvingRequestId = response.request.id
@@ -497,7 +568,11 @@ fun ThreadDetailScreen(
         }
     }
 
-    val currentDetail = detail
+    val currentDetail = detail?.let { preview ->
+        workspaceActionMessage?.let { message ->
+            preview.copy(workspacePreview = preview.workspacePreview.copy(statusMessage = message))
+        } ?: preview
+    }
     if (currentDetail != null) {
         ThreadDetailSurface(
             appShell = ThreadPreviewSample.appShell,
@@ -554,6 +629,15 @@ fun ThreadDetailScreen(
             },
             onLoadMoreWorkspacePreview = {
                 pendingWorkspaceLoadMore = true
+            },
+            onDownloadWorkspaceFile = { path ->
+                pendingWorkspaceDownloadPath = path
+            },
+            onOpenWorkspaceRawFile = { path ->
+                pendingWorkspaceRawOpenPath = path
+            },
+            onCopyWorkspaceRawFile = { path ->
+                pendingWorkspaceRawCopyPath = path
             },
             onDenyPendingRequest = { request ->
                 pendingRequestResponse = PendingRequestResponse(

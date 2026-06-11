@@ -798,6 +798,7 @@ data class WorkspacePreview(
     val toolEvents: List<ToolCallPreview>,
     val artifact: ArtifactPreview,
     val garbageFiles: List<String> = emptyList(),
+    val statusMessage: String? = null,
 )
 
 data class ShellPreview(

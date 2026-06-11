@@ -150,6 +150,27 @@ class SupervisorApiClient(
         ).toWorkspaceFilePreview()
     }
 
+    fun fetchWorkspaceRawFile(workspaceId: String, path: String): SupervisorWorkspaceRawFile {
+        val query = buildQuery("path" to path)
+        val response = requestDownload(
+            config.restPath("/api/workspaces/${urlEncodePathSegment(workspaceId)}/files/raw$query"),
+            fallbackFilename = path.substringAfterLast('/').ifBlank { "workspace-file" },
+        )
+        return SupervisorWorkspaceRawFile(
+            path = path,
+            contentType = response.contentType,
+            bytes = response.bytes,
+        )
+    }
+
+    fun downloadWorkspaceFile(workspaceId: String, path: String): SupervisorFileDownload {
+        val query = buildQuery("path" to path)
+        return requestDownload(
+            config.restPath("/api/workspaces/${urlEncodePathSegment(workspaceId)}/files/download$query"),
+            fallbackFilename = path.substringAfterLast('/').ifBlank { "workspace-file" },
+        )
+    }
+
     fun fetchRelayPortal(): RelayPortalSummary {
         return requestJson("/relay/portal").toRelayPortalSummary()
     }

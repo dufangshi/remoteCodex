@@ -70,6 +70,9 @@ fun WorkspacePanel(
     workspace: WorkspacePreview,
     onSelectFile: ((String) -> Unit)? = null,
     onLoadMorePreview: (() -> Unit)? = null,
+    onDownloadFile: ((String) -> Unit)? = null,
+    onOpenRawFile: ((String) -> Unit)? = null,
+    onCopyRawFile: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var selectedTab by remember { mutableStateOf(WorkspaceTab.Workspace) }
@@ -94,7 +97,10 @@ fun WorkspacePanel(
                     workspace = workspace,
                     onOpenGarbage = { garbageDialogOpen = true },
                     onSelectFile = onSelectFile,
+                    onDownloadFile = onDownloadFile,
                     onLoadMorePreview = onLoadMorePreview,
+                    onOpenRawFile = onOpenRawFile,
+                    onCopyRawFile = onCopyRawFile,
                     modifier = Modifier.weight(1f),
                 )
                 WorkspaceTab.Tools -> ToolUsageSurface(
@@ -201,6 +207,9 @@ private fun WorkspaceBrowserSurface(
     onOpenGarbage: () -> Unit,
     onSelectFile: ((String) -> Unit)?,
     onLoadMorePreview: (() -> Unit)?,
+    onDownloadFile: ((String) -> Unit)?,
+    onOpenRawFile: ((String) -> Unit)?,
+    onCopyRawFile: ((String) -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -214,6 +223,7 @@ private fun WorkspaceBrowserSurface(
                     workspace = workspace,
                     onOpenGarbage = onOpenGarbage,
                     onSelectFile = onSelectFile,
+                    onDownloadFile = onDownloadFile,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -226,6 +236,9 @@ private fun WorkspaceBrowserSurface(
                 WorkspaceViewerCard(
                     workspace = workspace,
                     onLoadMorePreview = onLoadMorePreview,
+                    onDownloadFile = onDownloadFile,
+                    onOpenRawFile = onOpenRawFile,
+                    onCopyRawFile = onCopyRawFile,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -276,7 +289,7 @@ private fun WorkspaceSummaryStrip(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = workspace.selectedFile.title,
+                text = workspace.statusMessage ?: workspace.selectedFile.title,
                 color = ThreadColors.ForegroundMuted,
                 style = MaterialTheme.typography.labelSmall,
                 maxLines = 1,
@@ -293,6 +306,7 @@ private fun WorkspaceExplorerCard(
     workspace: WorkspacePreview,
     onOpenGarbage: () -> Unit,
     onSelectFile: ((String) -> Unit)?,
+    onDownloadFile: ((String) -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -345,6 +359,11 @@ private fun WorkspaceExplorerCard(
                     node = node,
                     onClick = if (node.kind == WorkspaceNodeKind.File) {
                         onSelectFile?.let { selectFile -> { selectFile(node.path) } }
+                    } else {
+                        null
+                    },
+                    onDownload = if (node.kind == WorkspaceNodeKind.File) {
+                        onDownloadFile?.let { downloadFile -> { downloadFile(node.path) } }
                     } else {
                         null
                     },
@@ -645,6 +664,7 @@ private fun ToolUsageRow(event: ToolCallPreview) {
 private fun WorkspaceRow(
     node: WorkspaceNodePreview,
     onClick: (() -> Unit)?,
+    onDownload: (() -> Unit)?,
 ) {
     val background = if (node.selected) ThreadColors.SurfaceStrong else ThreadColors.Panel
     val foreground = if (node.selected) ThreadColors.Foreground else ThreadColors.ForegroundSoft
@@ -685,6 +705,7 @@ private fun WorkspaceRow(
             icon = WorkspaceActionIcon.Download,
             selected = node.selected,
             contentDescription = "Download ${node.name}",
+            onClick = onDownload,
         )
     }
 }
@@ -746,6 +767,7 @@ private fun WorkspaceRowActionButton(
     icon: WorkspaceActionIcon,
     selected: Boolean,
     contentDescription: String,
+    onClick: (() -> Unit)? = null,
 ) {
     val background = if (selected) ThreadColors.Surface else ThreadColors.Panel
     val border = if (selected) ThreadColors.BorderStrong else ThreadColors.Border.copy(alpha = 0.72f)
@@ -755,6 +777,7 @@ private fun WorkspaceRowActionButton(
             .clip(RoundedCornerShape(7.dp))
             .background(background)
             .border(1.dp, border, RoundedCornerShape(7.dp))
+            .then(onClick?.let { Modifier.clickable(onClick = it) } ?: Modifier)
             .semantics { this.contentDescription = contentDescription },
         contentAlignment = Alignment.Center,
     ) {
@@ -823,6 +846,9 @@ private fun WorkspaceNodeGlyph(
 private fun WorkspaceViewerCard(
     workspace: WorkspacePreview,
     onLoadMorePreview: (() -> Unit)?,
+    onDownloadFile: ((String) -> Unit)?,
+    onOpenRawFile: ((String) -> Unit)?,
+    onCopyRawFile: ((String) -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     val selectedFile = workspace.selectedFile
@@ -855,8 +881,27 @@ private fun WorkspaceViewerCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            ActionChip(label = "Copy", icon = WorkspaceActionIcon.Copy)
-            ActionChip(label = "Open", icon = WorkspaceActionIcon.Open)
+            ActionChip(
+                label = "Copy",
+                icon = WorkspaceActionIcon.Copy,
+                onClick = workspace.selectedFile.path.takeIf { it.isNotBlank() }?.let { path ->
+                    onCopyRawFile?.let { copyRawFile -> { copyRawFile(path) } }
+                },
+            )
+            ActionChip(
+                label = "Open",
+                icon = WorkspaceActionIcon.Open,
+                onClick = workspace.selectedFile.path.takeIf { it.isNotBlank() }?.let { path ->
+                    onOpenRawFile?.let { openRawFile -> { openRawFile(path) } }
+                },
+            )
+            ActionChip(
+                label = "Download",
+                icon = WorkspaceActionIcon.Download,
+                onClick = workspace.selectedFile.path.takeIf { it.isNotBlank() }?.let { path ->
+                    onDownloadFile?.let { downloadFile -> { downloadFile(path) } }
+                },
+            )
         }
         Row(
             modifier = Modifier

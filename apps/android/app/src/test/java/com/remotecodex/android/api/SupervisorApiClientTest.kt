@@ -391,6 +391,57 @@ class SupervisorApiClientTest {
     }
 
     @Test
+    fun workspaceRawAndDownloadUseRelayDevicePath() {
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(
+                statusCode = 200,
+                body = "raw-content",
+                headers = mapOf("content-type" to "text/plain"),
+                bytes = "raw-content".toByteArray(),
+            ),
+            SupervisorHttpResponse(
+                statusCode = 200,
+                body = null,
+                headers = mapOf(
+                    "content-disposition" to """attachment; filename="Main.kt"""",
+                    "content-type" to "text/x-kotlin",
+                ),
+                bytes = "fun main() = Unit".toByteArray(),
+            ),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        val raw = client.fetchWorkspaceRawFile("workspace-1", "src/Main.kt")
+        val download = client.downloadWorkspaceFile("workspace-1", "src/Main.kt")
+
+        assertEquals("src/Main.kt", raw.path)
+        assertEquals("raw-content", raw.text)
+        assertEquals("Main.kt", download.filename)
+        assertEquals("text/x-kotlin", download.contentType)
+        assertEquals("fun main() = Unit", download.bytes.toString(Charsets.UTF_8))
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/workspaces/workspace-1/files/raw?path=src%2FMain.kt",
+            transport.requests[0].url,
+        )
+        assertEquals("*/*", transport.requests[0].accept)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/workspaces/workspace-1/files/download?path=src%2FMain.kt",
+            transport.requests[1].url,
+        )
+        assertEquals("*/*", transport.requests[1].accept)
+        assertEquals("relay-token", transport.requests[0].bearerToken)
+        assertEquals("relay-token", transport.requests[1].bearerToken)
+    }
+
+    @Test
     fun relayPortalListsDeviceConnectionStatus() {
         val transport = RecordingTransport(
             SupervisorHttpResponse(

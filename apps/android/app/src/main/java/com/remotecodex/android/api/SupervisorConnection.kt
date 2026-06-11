@@ -348,6 +348,15 @@ data class SupervisorFileDownload(
     val bytes: ByteArray,
 )
 
+data class SupervisorWorkspaceRawFile(
+    val path: String,
+    val contentType: String?,
+    val bytes: ByteArray,
+) {
+    val text: String
+        get() = bytes.toString(Charsets.UTF_8)
+}
+
 data class SupervisorThreadSkills(
     val cwd: String,
     val skills: List<SupervisorAgentSkill>,
