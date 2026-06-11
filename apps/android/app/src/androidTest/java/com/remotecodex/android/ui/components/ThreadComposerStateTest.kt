@@ -1,6 +1,7 @@
 package com.remotecodex.android.ui.components
 
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -40,6 +41,25 @@ class ThreadComposerStateTest {
         composeRule.onNodeWithContentDescription("Back").performClick()
 
         composeRule.onNodeWithText("HTTP / Streamable HTTP").assertExists()
+    }
+
+    @Test
+    fun mcpPanelNavigatesThroughRawBlockPreviewMode() {
+        setComposerContent()
+
+        composeRule.onNodeWithContentDescription("Open slash toolbox").performClick()
+        composeRule.onNodeWithContentDescription("MCP").performClick()
+        composeRule.onNodeWithContentDescription("Add MCP").performClick()
+
+        composeRule.onNodeWithContentDescription("stdio / raw block").performClick()
+
+        composeRule.onAllNodesWithText("MCP block for provider config")[0].assertExists()
+        composeRule.onNodeWithText("[mcp_servers.docs]\ncommand = \"npx\"\nargs = [\"-y\", \"@modelcontextprotocol/server-filesystem\"]").assertExists()
+        composeRule.onNodeWithText("Write raw block").assertExists()
+
+        composeRule.onNodeWithContentDescription("Back").performClick()
+
+        composeRule.onNodeWithText("stdio / raw block").assertExists()
     }
 
     @Test

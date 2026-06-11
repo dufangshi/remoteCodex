@@ -451,7 +451,7 @@ data class ComposerMcpPanelPreview(
     val configBusy: Boolean = false,
     val httpName: String = "openaiDeveloperDocs",
     val httpUrl: String = "https://developers.openai.com/mcp",
-    val rawBlock: String = "[mcp_servers.docs]",
+    val rawBlock: String = "[mcp_servers.docs]\ncommand = \"npx\"\nargs = [\"-y\", \"@modelcontextprotocol/server-filesystem\"]",
     val servers: List<ComposerMcpServerPreview> = defaultComposerMcpServers,
 )
 
