@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -259,6 +260,7 @@ fun ThreadComposer(
                 ComposerModeChip(
                     label = settingsToolbarState.planButton.label,
                     selected = settingsToolbarState.planButton.selected,
+                    pressed = settingsToolbarState.planPressed,
                 )
             }
             ComposerModeChip(label = "2 files", selected = true)
@@ -352,10 +354,14 @@ private fun ComposerToolbarRow(
             state = settingsToolbarState.modelButton,
             onClick = { onToggleMenu(ComposerMenu.Model) },
             modifier = Modifier.weight(1.25f, fill = false),
+            title = settingsToolbarState.modelTitle,
+            expanded = settingsToolbarState.modelMenuExpanded,
         )
         ToolbarInlineToggle(
             state = settingsToolbarState.effortButton,
             onClick = { onToggleMenu(ComposerMenu.Effort) },
+            title = settingsToolbarState.effortTitle,
+            expanded = settingsToolbarState.effortMenuExpanded,
         )
     }
 }
@@ -382,6 +388,8 @@ private fun ToolbarIconButton(
 private fun ToolbarInlineToggle(
     state: ComposerToolbarButtonState,
     modifier: Modifier = Modifier,
+    title: String = state.label,
+    expanded: Boolean = state.selected,
     onClick: () -> Unit,
 ) {
     if (!state.visible) {
@@ -393,6 +401,8 @@ private fun ToolbarInlineToggle(
         enabled = state.enabled,
         onClick = onClick,
         modifier = modifier,
+        title = title,
+        expanded = expanded,
     )
 }
 
@@ -1053,6 +1063,10 @@ private fun ComposerPrimaryActionButton(sendButtonState: ComposerSendButtonState
                     Modifier
                 },
             )
+            .semantics {
+                contentDescription = sendButtonState.accessibilityLabel
+                stateDescription = sendButtonState.title
+            }
             .clip(RoundedCornerShape(999.dp))
             .background(background)
             .border(1.dp, border, RoundedCornerShape(999.dp))
@@ -1132,12 +1146,19 @@ private fun InlineToggle(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    title: String = label,
+    expanded: Boolean = selected,
 ) {
     val background = if (selected) ThreadColors.SurfaceStrong else ThreadColors.Panel
     val foreground = if (enabled) ThreadColors.ForegroundSoft else ThreadColors.ForegroundMuted.copy(alpha = 0.62f)
     Text(
         text = label,
         modifier = modifier
+            .semantics {
+                contentDescription = label
+                stateDescription = if (expanded) "$title expanded" else title
+                this.selected = selected
+            }
             .clip(RoundedCornerShape(999.dp))
             .background(background)
             .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
@@ -1152,12 +1173,17 @@ private fun InlineToggle(
 }
 
 @Composable
-private fun ComposerModeChip(label: String, selected: Boolean) {
+private fun ComposerModeChip(label: String, selected: Boolean, pressed: Boolean = selected) {
     val background = if (selected) ThreadColors.WarningSoft else ThreadColors.SurfaceStrong
     val foreground = if (selected) ThreadColors.Warning else ThreadColors.ForegroundMuted
     Text(
         text = label,
         modifier = Modifier
+            .semantics {
+                contentDescription = label
+                stateDescription = if (pressed) "Pressed" else "Not pressed"
+                this.selected = selected
+            }
             .clip(RoundedCornerShape(999.dp))
             .background(background)
             .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))

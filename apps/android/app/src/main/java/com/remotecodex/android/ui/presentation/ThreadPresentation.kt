@@ -253,14 +253,20 @@ data class ComposerSettingsState(
 data class ComposerSendButtonState(
     val label: String,
     val accessibilityLabel: String,
+    val title: String,
     val enabled: Boolean,
     val primaryKind: ComposerPrimaryActionKind,
 )
 
 data class ComposerSettingsToolbarState(
     val modelButton: ComposerToolbarButtonState,
+    val modelTitle: String,
+    val modelMenuExpanded: Boolean,
     val effortButton: ComposerToolbarButtonState,
+    val effortTitle: String,
+    val effortMenuExpanded: Boolean,
     val planButton: ComposerToolbarButtonState,
+    val planPressed: Boolean,
     val sendButton: ComposerSendButtonState,
 )
 
@@ -1147,21 +1153,27 @@ fun buildComposerSettingsToolbarState(
             enabled = settingsState.modelEnabled,
             label = settingsState.modelLabel,
         ),
+        modelTitle = settingsState.modelLabel,
+        modelMenuExpanded = openMenu == ComposerToolbarMenuState.Model,
         effortButton = ComposerToolbarButtonState(
             visible = isChatView,
             selected = openMenu == ComposerToolbarMenuState.Effort,
             enabled = settingsState.effortEnabled,
             label = settingsState.effortLabel,
         ),
+        effortTitle = settingsState.effortTitle,
+        effortMenuExpanded = openMenu == ComposerToolbarMenuState.Effort,
         planButton = ComposerToolbarButtonState(
             visible = isChatView && settingsState.planVisible,
             selected = settingsState.planSelected,
             enabled = !goalBusy,
             label = "Plan",
         ),
+        planPressed = settingsState.planSelected,
         sendButton = ComposerSendButtonState(
             label = actionState.primaryLabel,
             accessibilityLabel = if (goalComposeMode) "Set goal" else "Send Prompt",
+            title = actionState.primaryLabel,
             enabled = !goalBusy && if (isChatView) !promptDisabled else true,
             primaryKind = actionState.primaryKind,
         ),
