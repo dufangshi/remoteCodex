@@ -36,6 +36,8 @@ import com.remotecodex.android.ui.presentation.ComposerActionState
 import com.remotecodex.android.ui.presentation.ComposerAttachmentActionKind
 import com.remotecodex.android.ui.presentation.ComposerAttachmentActionState
 import com.remotecodex.android.ui.presentation.ComposerContextUsageState
+import com.remotecodex.android.ui.presentation.ComposerForkActionState
+import com.remotecodex.android.ui.presentation.ComposerForkPanelState
 import com.remotecodex.android.ui.presentation.ComposerJumpLatestState
 import com.remotecodex.android.ui.presentation.ComposerPrimaryActionKind
 import com.remotecodex.android.ui.presentation.ComposerSettingsState
@@ -49,6 +51,7 @@ import com.remotecodex.android.ui.presentation.ComposerToolboxItemTone
 import com.remotecodex.android.ui.presentation.buildComposerActionState
 import com.remotecodex.android.ui.presentation.buildComposerAttachmentActions
 import com.remotecodex.android.ui.presentation.buildComposerContextUsageState
+import com.remotecodex.android.ui.presentation.buildComposerForkPanelState
 import com.remotecodex.android.ui.presentation.buildComposerJumpLatestState
 import com.remotecodex.android.ui.presentation.buildComposerModelOptions
 import com.remotecodex.android.ui.presentation.buildComposerReasoningEffortOptions
@@ -114,6 +117,10 @@ fun ThreadComposer(
         settingsBusy = composer.settingsBusy,
         forkBusy = composer.forkBusy,
     )
+    val forkPanelState = buildComposerForkPanelState(
+        busy = composer.busy,
+        forkBusy = composer.forkBusy,
+    )
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -125,7 +132,10 @@ fun ThreadComposer(
     ) {
         if (openMenu != null) {
             when (openMenu) {
-                ComposerMenu.Slash -> SlashToolboxPanel(toolboxItems = toolboxItems)
+                ComposerMenu.Slash -> SlashToolboxPanel(
+                    toolboxItems = toolboxItems,
+                    forkPanelState = forkPanelState,
+                )
                 ComposerMenu.Attachments -> AttachmentPanel()
                 ComposerMenu.Model -> ModelPickerPanel(modelOptions = modelOptions)
                 ComposerMenu.Effort -> EffortPickerPanel(
@@ -730,7 +740,10 @@ private fun ComposerModeChip(label: String, selected: Boolean) {
 }
 
 @Composable
-private fun SlashToolboxPanel(toolboxItems: List<ComposerToolboxItemState>) {
+private fun SlashToolboxPanel(
+    toolboxItems: List<ComposerToolboxItemState>,
+    forkPanelState: ComposerForkPanelState,
+) {
     ComposerMenuSurface(title = "Slash toolbox", subtitle = "Thread actions") {
         if (toolboxItems.isEmpty()) {
             EmptyToolboxState()
@@ -740,7 +753,7 @@ private fun SlashToolboxPanel(toolboxItems: List<ComposerToolboxItemState>) {
             }
         }
         GoalPreviewGroup()
-        ForkPreviewGroup()
+        ForkPreviewGroup(forkPanelState = forkPanelState)
         SkillsPreviewGroup()
         McpPreviewGroup()
         HooksPreviewGroup()
@@ -879,7 +892,7 @@ private fun GoalStatusPreviewRow() {
 }
 
 @Composable
-private fun ForkPreviewGroup() {
+private fun ForkPreviewGroup(forkPanelState: ComposerForkPanelState) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -904,19 +917,20 @@ private fun ForkPreviewGroup() {
                 overflow = TextOverflow.Ellipsis,
             )
             GraphBadge(
-                label = "Idle only",
+                label = if (forkPanelState.showIdleOnlyNotice) "Idle only" else "Open",
                 variant = GraphBadgeVariant.Outline,
             )
         }
         Text(
-            text = "Fork is only available while the thread is idle.",
+            text = forkPanelState.notice ?: "Start a new thread from the latest or selected turn.",
             color = ThreadColors.ForegroundMuted,
             style = MaterialTheme.typography.labelSmall,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
-        ForkActionRow(label = "Fork from latest", state = "Run")
-        ForkActionRow(label = "Fork from selected turn", state = "Pick")
+        forkPanelState.actions.forEach { action ->
+            ForkActionRow(action = action)
+        }
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             forkTurnPreviewItems.forEach { item ->
                 ForkTurnRow(item = item)
@@ -926,32 +940,32 @@ private fun ForkPreviewGroup() {
 }
 
 @Composable
-private fun ForkActionRow(
-    label: String,
-    state: String,
-) {
+private fun ForkActionRow(action: ComposerForkActionState) {
+    val foreground = if (action.enabled) ThreadColors.ForegroundSoft else ThreadColors.ForegroundMuted.copy(alpha = 0.58f)
+    val background = if (action.enabled) ThreadColors.SurfaceStrong else ThreadColors.Surface.copy(alpha = 0.58f)
+    val border = if (action.enabled) ThreadColors.Border else ThreadColors.Border.copy(alpha = 0.62f)
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .background(ThreadColors.SurfaceStrong)
-            .border(1.dp, ThreadColors.Border, RoundedCornerShape(10.dp))
+            .background(background)
+            .border(1.dp, border, RoundedCornerShape(10.dp))
             .padding(horizontal = 10.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
-            text = label,
+            text = action.label,
             modifier = Modifier.weight(1f),
-            color = ThreadColors.ForegroundSoft,
+            color = foreground,
             style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
         Text(
-            text = state,
-            color = ThreadColors.ForegroundMuted,
+            text = action.status,
+            color = if (action.enabled) ThreadColors.ForegroundMuted else ThreadColors.ForegroundMuted.copy(alpha = 0.58f),
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Bold,
             maxLines = 1,

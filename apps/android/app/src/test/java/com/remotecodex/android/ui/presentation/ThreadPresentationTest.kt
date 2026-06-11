@@ -462,6 +462,86 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun buildsIdleComposerForkPanelState() {
+        assertEquals(
+            ComposerForkPanelState(
+                actions = listOf(
+                    ComposerForkActionState(
+                        label = "Fork from latest",
+                        status = "Run",
+                        enabled = true,
+                        kind = ComposerForkActionKind.Latest,
+                    ),
+                    ComposerForkActionState(
+                        label = "Fork from selected turn",
+                        status = "Pick",
+                        enabled = true,
+                        kind = ComposerForkActionKind.SelectedTurn,
+                    ),
+                ),
+                showIdleOnlyNotice = false,
+                notice = null,
+            ),
+            buildComposerForkPanelState(
+                busy = false,
+                forkBusy = false,
+            ),
+        )
+    }
+
+    @Test
+    fun disablesComposerForkPanelActionsWhileBusy() {
+        assertEquals(
+            ComposerForkPanelState(
+                actions = listOf(
+                    ComposerForkActionState(
+                        label = "Fork from latest",
+                        status = "Run",
+                        enabled = false,
+                        kind = ComposerForkActionKind.Latest,
+                    ),
+                    ComposerForkActionState(
+                        label = "Fork from selected turn",
+                        status = "Pick",
+                        enabled = false,
+                        kind = ComposerForkActionKind.SelectedTurn,
+                    ),
+                ),
+                showIdleOnlyNotice = true,
+                notice = "Fork is only available while the thread is idle.",
+            ),
+            buildComposerForkPanelState(
+                busy = true,
+                forkBusy = false,
+            ),
+        )
+    }
+
+    @Test
+    fun marksComposerForkLatestActionWhileForking() {
+        assertEquals(
+            listOf(
+                ComposerForkActionState(
+                    label = "Fork from latest",
+                    status = "Forking",
+                    enabled = false,
+                    kind = ComposerForkActionKind.Latest,
+                ),
+                ComposerForkActionState(
+                    label = "Fork from selected turn",
+                    status = "Pick",
+                    enabled = false,
+                    kind = ComposerForkActionKind.SelectedTurn,
+                ),
+            ),
+            buildComposerForkPanelState(
+                busy = false,
+                forkBusy = true,
+            ).actions,
+        )
+    }
+
+    @Test
     fun buildsComposerToolboxItemsFromBackendActions() {
         assertEquals(
             listOf(

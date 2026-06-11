@@ -168,6 +168,49 @@ data class ComposerToolboxItemState(
     val tone: ComposerToolboxItemTone,
 )
 
+enum class ComposerForkActionKind {
+    Latest,
+    SelectedTurn,
+}
+
+data class ComposerForkActionState(
+    val label: String,
+    val status: String,
+    val enabled: Boolean,
+    val kind: ComposerForkActionKind,
+)
+
+data class ComposerForkPanelState(
+    val actions: List<ComposerForkActionState>,
+    val showIdleOnlyNotice: Boolean,
+    val notice: String?,
+)
+
+fun buildComposerForkPanelState(
+    busy: Boolean,
+    forkBusy: Boolean,
+): ComposerForkPanelState {
+    val enabled = !(busy || forkBusy)
+    return ComposerForkPanelState(
+        actions = listOf(
+            ComposerForkActionState(
+                label = "Fork from latest",
+                status = if (forkBusy) "Forking" else "Run",
+                enabled = enabled,
+                kind = ComposerForkActionKind.Latest,
+            ),
+            ComposerForkActionState(
+                label = "Fork from selected turn",
+                status = "Pick",
+                enabled = enabled,
+                kind = ComposerForkActionKind.SelectedTurn,
+            ),
+        ),
+        showIdleOnlyNotice = busy,
+        notice = if (busy) "Fork is only available while the thread is idle." else null,
+    )
+}
+
 fun buildComposerToolboxItems(
     items: List<ComposerToolboxItemPreview>,
     fastMode: Boolean,
