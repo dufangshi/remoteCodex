@@ -41,6 +41,7 @@ import com.remotecodex.android.ui.model.ThreadGoalPreview
 import com.remotecodex.android.ui.model.ThreadGoalStatusPreview
 import com.remotecodex.android.ui.model.ThreadDetailPreview
 import com.remotecodex.android.ui.model.TimelineNotePreview
+import com.remotecodex.android.ui.model.TimelineSteerPreview
 import kotlin.math.round
 
 enum class MessageStatusTone {
@@ -216,6 +217,18 @@ data class TimelineNoteCardState(
     val summaryLines: List<String>,
     val timeLabel: String?,
     val tone: TimelineNoteToneState,
+)
+
+enum class PendingSteerToneState {
+    QueuedUserMessage,
+    Warning,
+}
+
+data class PendingSteerCardState(
+    val statusLabel: String,
+    val prompt: String,
+    val timeLabel: String?,
+    val tone: PendingSteerToneState,
 )
 
 data class ContextCompactionHistoryState(
@@ -3489,6 +3502,20 @@ fun buildTimelineNoteCardState(
         summaryLines = summaryLines,
         timeLabel = note.timeLabel?.trim()?.takeIf { it.isNotEmpty() },
         tone = tone,
+    )
+}
+
+fun buildPendingSteerCardState(steer: TimelineSteerPreview): PendingSteerCardState {
+    val statusLabel = steer.statusLabel?.trim()?.takeIf { it.isNotEmpty() } ?: "Queued"
+    return PendingSteerCardState(
+        statusLabel = statusLabel,
+        prompt = steer.prompt.trim(),
+        timeLabel = steer.timeLabel.trim().takeIf { it.isNotEmpty() },
+        tone = if (isGraphChatQueuedLikeUserStatus(statusLabel)) {
+            PendingSteerToneState.QueuedUserMessage
+        } else {
+            PendingSteerToneState.Warning
+        },
     )
 }
 

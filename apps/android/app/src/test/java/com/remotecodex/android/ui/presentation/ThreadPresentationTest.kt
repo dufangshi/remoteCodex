@@ -43,6 +43,7 @@ import com.remotecodex.android.ui.model.ThreadGoalPreview
 import com.remotecodex.android.ui.model.ThreadGoalStatusPreview
 import com.remotecodex.android.ui.model.ThreadStatus
 import com.remotecodex.android.ui.model.TimelineNotePreview
+import com.remotecodex.android.ui.model.TimelineSteerPreview
 import com.remotecodex.android.ui.model.ToolStatus
 import com.remotecodex.android.ui.model.TurnPreview
 import com.remotecodex.android.ui.model.LivePlanPreview
@@ -5224,6 +5225,44 @@ class ThreadPresentationTest {
                     timeLabel = " ",
                 ),
                 tone = TimelineNoteToneState.Activity,
+            ),
+        )
+    }
+
+    @Test
+    fun buildsQueuedLikePendingSteerCardState() {
+        assertEquals(
+            PendingSteerCardState(
+                statusLabel = "Accepted",
+                prompt = "Continue Android parity.",
+                timeLabel = "13:43",
+                tone = PendingSteerToneState.QueuedUserMessage,
+            ),
+            buildPendingSteerCardState(
+                TimelineSteerPreview(
+                    prompt = " Continue Android parity. ",
+                    statusLabel = " Accepted ",
+                    timeLabel = " 13:43 ",
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun buildsFallbackPendingSteerCardState() {
+        assertEquals(
+            PendingSteerCardState(
+                statusLabel = "Queued",
+                prompt = "Wait for approval.",
+                timeLabel = null,
+                tone = PendingSteerToneState.Warning,
+            ),
+            buildPendingSteerCardState(
+                TimelineSteerPreview(
+                    prompt = " Wait for approval. ",
+                    statusLabel = " ",
+                    timeLabel = " ",
+                ),
             ),
         )
     }

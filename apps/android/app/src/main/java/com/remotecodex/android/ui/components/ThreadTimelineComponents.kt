@@ -90,10 +90,12 @@ import com.remotecodex.android.ui.presentation.GraphChatHistoryStatusTone
 import com.remotecodex.android.ui.presentation.MessageStatusModel
 import com.remotecodex.android.ui.presentation.ComposerStatusTone
 import com.remotecodex.android.ui.presentation.GraphChatPlainTextSegment
+import com.remotecodex.android.ui.presentation.PendingSteerToneState
 import com.remotecodex.android.ui.presentation.TimelineNoteToneState
 import com.remotecodex.android.ui.presentation.UserMessageAttachmentState
 import com.remotecodex.android.ui.presentation.buildGraphChatImageHistoryState
 import com.remotecodex.android.ui.presentation.buildGraphChatLivePlanCardState
+import com.remotecodex.android.ui.presentation.buildPendingSteerCardState
 import com.remotecodex.android.ui.presentation.buildTimelineNoteCardState
 import com.remotecodex.android.ui.presentation.parseUserMessageSegments
 import com.remotecodex.android.ui.presentation.buildUserMessageAttachmentState
@@ -392,40 +394,49 @@ private fun TimelineNoteCard(
 
 @Composable
 private fun PendingSteerCard(steer: TimelineSteerPreview) {
+    val state = buildPendingSteerCardState(steer)
+    val queuedLike = state.tone == PendingSteerToneState.QueuedUserMessage
+    val background = if (queuedLike) ThreadColors.UserBubble else ThreadColors.WarningSoft.copy(alpha = 0.46f)
+    val border = if (queuedLike) ThreadColors.UserBubbleBorder else ThreadColors.Warning.copy(alpha = 0.36f)
+    val statusColor = if (queuedLike) ThreadColors.UserBubbleText.copy(alpha = 0.76f) else ThreadColors.Warning
+    val promptColor = if (queuedLike) ThreadColors.UserBubbleText else ThreadColors.ForegroundSoft
+    val timeColor = if (queuedLike) ThreadColors.UserBubbleText.copy(alpha = 0.58f) else ThreadColors.ForegroundMuted
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(11.dp))
-            .background(ThreadColors.WarningSoft.copy(alpha = 0.46f))
-            .border(1.dp, ThreadColors.Warning.copy(alpha = 0.36f), RoundedCornerShape(11.dp))
+            .background(background)
+            .border(1.dp, border, RoundedCornerShape(11.dp))
             .padding(11.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
-            text = steer.statusLabel ?: "Queued",
+            text = state.statusLabel,
             modifier = Modifier
                 .clip(RoundedCornerShape(999.dp))
                 .background(ThreadColors.Panel.copy(alpha = 0.72f))
                 .padding(horizontal = 8.dp, vertical = 4.dp),
-            color = ThreadColors.Warning,
+            color = statusColor,
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.SemiBold,
         )
         Text(
-            text = steer.prompt,
+            text = state.prompt,
             modifier = Modifier.weight(1f),
-            color = ThreadColors.ForegroundSoft,
+            color = promptColor,
             style = MaterialTheme.typography.labelMedium,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
-        Text(
-            text = steer.timeLabel,
-            color = ThreadColors.ForegroundMuted,
-            style = MaterialTheme.typography.labelSmall,
-            maxLines = 1,
-        )
+        state.timeLabel?.let { timeLabel ->
+            Text(
+                text = timeLabel,
+                color = timeColor,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+            )
+        }
     }
 }
 
