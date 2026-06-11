@@ -207,6 +207,7 @@ class ThreadPresentationTest {
         assertEquals(
             HookHistorySummary(
                 hookLabel = "PreToolUse hook",
+                hookMetaLabel = "PRETOOLUSE HOOK",
                 firstLine = "lint-command",
                 showGap = true,
                 outputBacked = true,
@@ -226,6 +227,7 @@ class ThreadPresentationTest {
         assertEquals(
             HookHistorySummary(
                 hookLabel = "PostToolUse hook",
+                hookMetaLabel = "POSTTOOLUSE HOOK",
                 firstLine = "PostToolUse hook · Completed with warnings",
                 showGap = false,
                 outputBacked = false,

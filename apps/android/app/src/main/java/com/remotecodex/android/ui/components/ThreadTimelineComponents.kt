@@ -1455,7 +1455,7 @@ private fun HookHistorySummaryRow(
     ) {
         if (summary.outputBacked) {
             Text(
-                text = summary.hookLabel,
+                text = summary.hookMetaLabel,
                 modifier = Modifier
                     .clip(RoundedCornerShape(999.dp))
                     .background(colors.foreground.copy(alpha = 0.10f))

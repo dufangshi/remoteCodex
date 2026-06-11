@@ -37,6 +37,7 @@ data class InlinePreviewSummary(
 
 data class HookHistorySummary(
     val hookLabel: String,
+    val hookMetaLabel: String,
     val firstLine: String,
     val showGap: Boolean,
     val outputBacked: Boolean,
@@ -341,6 +342,7 @@ fun hookHistorySummary(
 
     return HookHistorySummary(
         hookLabel = hookLabel,
+        hookMetaLabel = hookLabel.uppercase(),
         firstLine = firstLine,
         showGap = outputText.isNotEmpty() && summary.showGap,
         outputBacked = outputText.isNotEmpty(),
