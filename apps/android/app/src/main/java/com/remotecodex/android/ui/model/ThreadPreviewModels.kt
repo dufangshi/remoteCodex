@@ -772,6 +772,10 @@ data class WorkspaceFilePreview(
     val sizeLabel: String,
     val truncatedLabel: String?,
     val content: String,
+    val path: String = "",
+    val sizeBytes: Long? = null,
+    val nextOffset: Long? = null,
+    val truncated: Boolean = truncatedLabel != null,
 )
 
 data class ArtifactPreview(

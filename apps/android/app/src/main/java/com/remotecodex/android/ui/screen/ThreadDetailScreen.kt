@@ -70,6 +70,9 @@ fun ThreadDetailScreen(
     var pendingCompact by remember(threadId) { mutableStateOf(false) }
     var pendingCreateShell by remember(threadId) { mutableStateOf(false) }
     var pendingTerminateShellId by remember(threadId) { mutableStateOf<String?>(null) }
+    var selectedWorkspaceFilePath by remember(threadId) { mutableStateOf<String?>(null) }
+    var pendingWorkspaceFilePath by remember(threadId) { mutableStateOf<String?>(null) }
+    var pendingWorkspaceLoadMore by remember(threadId) { mutableStateOf(false) }
     var resolvingRequestId by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingRenameTitle by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingDelete by remember(threadId) { mutableStateOf(false) }
@@ -87,11 +90,20 @@ fun ThreadDetailScreen(
         loading = detail == null
         error = null
         val result = withContext(Dispatchers.IO) {
-            runCatching { client.fetchThreadDetailPreview(threadId) }
+            runCatching {
+                client.fetchThreadDetailPreview(
+                    threadId = threadId,
+                    selectedWorkspaceFilePath = selectedWorkspaceFilePath,
+                )
+            }
         }
         loading = false
         result
-            .onSuccess { preview -> detail = preview }
+            .onSuccess { preview ->
+                detail = preview
+                selectedWorkspaceFilePath = preview.workspacePreview.selectedFile.path.takeIf { it.isNotBlank() }
+                    ?: selectedWorkspaceFilePath
+            }
             .onFailure { throwable -> error = throwable.message ?: "Thread detail failed." }
     }
 
@@ -133,7 +145,7 @@ fun ThreadDetailScreen(
         val result = withContext(Dispatchers.IO) {
             runCatching {
                 client.interruptThread(threadId)
-                client.fetchThreadDetailPreview(threadId)
+                client.fetchThreadDetailPreview(threadId, selectedWorkspaceFilePath = selectedWorkspaceFilePath)
             }
         }
         submittingPrompt = false
@@ -152,7 +164,7 @@ fun ThreadDetailScreen(
         val result = withContext(Dispatchers.IO) {
             runCatching {
                 client.updateThreadSettings(threadId, settings)
-                client.fetchThreadDetailPreview(threadId)
+                client.fetchThreadDetailPreview(threadId, selectedWorkspaceFilePath = selectedWorkspaceFilePath)
             }
         }
         pendingSettingsUpdate = null
@@ -170,7 +182,7 @@ fun ThreadDetailScreen(
         val result = withContext(Dispatchers.IO) {
             runCatching {
                 client.updateThreadGoal(threadId, goal)
-                client.fetchThreadDetailPreview(threadId)
+                client.fetchThreadDetailPreview(threadId, selectedWorkspaceFilePath = selectedWorkspaceFilePath)
             }
         }
         pendingGoalUpdate = null
@@ -188,7 +200,7 @@ fun ThreadDetailScreen(
         val result = withContext(Dispatchers.IO) {
             runCatching {
                 client.compactThread(threadId)
-                client.fetchThreadDetailPreview(threadId)
+                client.fetchThreadDetailPreview(threadId, selectedWorkspaceFilePath = selectedWorkspaceFilePath)
             }
         }
         pendingCompact = false
@@ -209,7 +221,7 @@ fun ThreadDetailScreen(
                     threadId = threadId,
                     request = CreateSupervisorShellRequest(cols = 120, rows = 32, label = "Android shell"),
                 )
-                client.fetchThreadDetailPreview(threadId)
+                client.fetchThreadDetailPreview(threadId, selectedWorkspaceFilePath = selectedWorkspaceFilePath)
             }
         }
         pendingCreateShell = false
@@ -227,7 +239,7 @@ fun ThreadDetailScreen(
         val result = withContext(Dispatchers.IO) {
             runCatching {
                 client.terminateShell(shellId)
-                client.fetchThreadDetailPreview(threadId)
+                client.fetchThreadDetailPreview(threadId, selectedWorkspaceFilePath = selectedWorkspaceFilePath)
             }
         }
         pendingTerminateShellId = null
@@ -237,6 +249,64 @@ fun ThreadDetailScreen(
                 refreshNonce += 1
             }
             .onFailure { throwable -> error = throwable.message ?: "Shell terminate failed." }
+    }
+
+    LaunchedEffect(pendingWorkspaceFilePath) {
+        val path = pendingWorkspaceFilePath ?: return@LaunchedEffect
+        error = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                client.fetchThreadDetailPreview(
+                    threadId = threadId,
+                    selectedWorkspaceFilePath = path,
+                )
+            }
+        }
+        pendingWorkspaceFilePath = null
+        result
+            .onSuccess { preview ->
+                detail = preview
+                selectedWorkspaceFilePath = preview.workspacePreview.selectedFile.path.takeIf { it.isNotBlank() }
+                    ?: path
+            }
+            .onFailure { throwable -> error = throwable.message ?: "Workspace preview failed." }
+    }
+
+    LaunchedEffect(pendingWorkspaceLoadMore) {
+        if (!pendingWorkspaceLoadMore) return@LaunchedEffect
+        val currentFile = detail?.workspacePreview?.selectedFile
+        val path = currentFile?.path?.takeIf { it.isNotBlank() }
+        val nextOffset = currentFile?.nextOffset
+        if (path == null || nextOffset == null || !currentFile.truncated) {
+            pendingWorkspaceLoadMore = false
+            return@LaunchedEffect
+        }
+        error = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                val threadDetail = client.fetchThreadDetail(threadId, limit = 1)
+                val next = client.fetchWorkspaceFilePreview(
+                    workspaceId = threadDetail.workspace.id,
+                    path = path,
+                    offset = nextOffset,
+                    limit = 50_000,
+                )
+                client.fetchThreadDetailPreview(
+                    threadId = threadId,
+                    selectedWorkspaceFilePath = path,
+                    overrideWorkspaceContent = currentFile.content + next.content,
+                    overrideWorkspaceNextOffset = next.nextOffset,
+                    overrideWorkspaceTruncated = next.truncated,
+                )
+            }
+        }
+        pendingWorkspaceLoadMore = false
+        result
+            .onSuccess { preview ->
+                detail = preview
+                selectedWorkspaceFilePath = path
+            }
+            .onFailure { throwable -> error = throwable.message ?: "Workspace preview load more failed." }
     }
 
     LaunchedEffect(pendingRequestResponse) {
@@ -272,7 +342,7 @@ fun ThreadDetailScreen(
         val result = withContext(Dispatchers.IO) {
             runCatching {
                 client.updateThread(threadId, UpdateThreadRequest(title = title))
-                client.fetchThreadDetailPreview(threadId)
+                client.fetchThreadDetailPreview(threadId, selectedWorkspaceFilePath = selectedWorkspaceFilePath)
             }
         }
         threadActionBusy = false
@@ -337,6 +407,12 @@ fun ThreadDetailScreen(
             onTerminateShell = { shellId ->
                 pendingTerminateShellId = shellId
             },
+            onSelectWorkspaceFile = { path ->
+                pendingWorkspaceFilePath = path
+            },
+            onLoadMoreWorkspacePreview = {
+                pendingWorkspaceLoadMore = true
+            },
             onDenyPendingRequest = { request ->
                 pendingRequestResponse = PendingRequestResponse(
                     request = request,
@@ -379,11 +455,17 @@ private data class PendingRequestResponse(
     val answers: Map<String, List<String>>,
 )
 
-private fun SupervisorApiClient.fetchThreadDetailPreview(threadId: String): ThreadDetailPreview {
+private fun SupervisorApiClient.fetchThreadDetailPreview(
+    threadId: String,
+    selectedWorkspaceFilePath: String? = null,
+    overrideWorkspaceContent: String? = null,
+    overrideWorkspaceNextOffset: Long? = null,
+    overrideWorkspaceTruncated: Boolean? = null,
+): ThreadDetailPreview {
     val detail = fetchThreadDetail(threadId, limit = 30)
     val tree = runCatching { fetchWorkspaceTree(detail.workspace.id) }.getOrNull()
-    val firstFilePath = tree?.firstFilePath()
-    val filePreview = firstFilePath?.let { path ->
+    val previewPath = selectedWorkspaceFilePath?.takeIf { it.isNotBlank() } ?: tree?.firstFilePath()
+    val filePreview = previewPath?.let { path ->
         runCatching {
             fetchWorkspaceFilePreview(
                 workspaceId = detail.workspace.id,
@@ -391,6 +473,16 @@ private fun SupervisorApiClient.fetchThreadDetailPreview(threadId: String): Thre
                 limit = 50_000,
             )
         }.getOrNull()
+    }?.let { preview ->
+        if (overrideWorkspaceContent == null) {
+            preview
+        } else {
+            preview.copy(
+                content = overrideWorkspaceContent,
+                nextOffset = overrideWorkspaceNextOffset ?: preview.nextOffset,
+                truncated = overrideWorkspaceTruncated ?: preview.truncated,
+            )
+        }
     }
     val shellState = runCatching { fetchThreadShellState(threadId) }.getOrNull()
     return buildThreadDetailPreviewFromSupervisor(

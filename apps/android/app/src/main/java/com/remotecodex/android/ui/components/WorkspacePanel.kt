@@ -68,6 +68,8 @@ import kotlin.math.sin
 @Composable
 fun WorkspacePanel(
     workspace: WorkspacePreview,
+    onSelectFile: ((String) -> Unit)? = null,
+    onLoadMorePreview: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var selectedTab by remember { mutableStateOf(WorkspaceTab.Workspace) }
@@ -91,6 +93,8 @@ fun WorkspacePanel(
                 WorkspaceTab.Workspace -> WorkspaceBrowserSurface(
                     workspace = workspace,
                     onOpenGarbage = { garbageDialogOpen = true },
+                    onSelectFile = onSelectFile,
+                    onLoadMorePreview = onLoadMorePreview,
                     modifier = Modifier.weight(1f),
                 )
                 WorkspaceTab.Tools -> ToolUsageSurface(
@@ -195,6 +199,8 @@ private fun WorkspaceTabButton(
 private fun WorkspaceBrowserSurface(
     workspace: WorkspacePreview,
     onOpenGarbage: () -> Unit,
+    onSelectFile: ((String) -> Unit)?,
+    onLoadMorePreview: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -207,6 +213,7 @@ private fun WorkspaceBrowserSurface(
                 WorkspaceExplorerCard(
                     workspace = workspace,
                     onOpenGarbage = onOpenGarbage,
+                    onSelectFile = onSelectFile,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -216,7 +223,11 @@ private fun WorkspaceBrowserSurface(
             }
             GraphResizableHandle()
             GraphResizablePanel(weight = 1f) {
-                WorkspaceViewerCard(workspace = workspace, modifier = Modifier.fillMaxWidth())
+                WorkspaceViewerCard(
+                    workspace = workspace,
+                    onLoadMorePreview = onLoadMorePreview,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
     }
@@ -281,6 +292,7 @@ private fun WorkspaceSummaryStrip(
 private fun WorkspaceExplorerCard(
     workspace: WorkspacePreview,
     onOpenGarbage: () -> Unit,
+    onSelectFile: ((String) -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -329,7 +341,14 @@ private fun WorkspaceExplorerCard(
             )
         } else {
             workspace.nodes.take(10).forEach { node ->
-                WorkspaceRow(node = node)
+                WorkspaceRow(
+                    node = node,
+                    onClick = if (node.kind == WorkspaceNodeKind.File) {
+                        onSelectFile?.let { selectFile -> { selectFile(node.path) } }
+                    } else {
+                        null
+                    },
+                )
             }
         }
     }
@@ -623,13 +642,18 @@ private fun ToolUsageRow(event: ToolCallPreview) {
 }
 
 @Composable
-private fun WorkspaceRow(node: WorkspaceNodePreview) {
+private fun WorkspaceRow(
+    node: WorkspaceNodePreview,
+    onClick: (() -> Unit)?,
+) {
     val background = if (node.selected) ThreadColors.SurfaceStrong else ThreadColors.Panel
     val foreground = if (node.selected) ThreadColors.Foreground else ThreadColors.ForegroundSoft
+    val clickModifier = if (onClick == null) Modifier else Modifier.clickable(onClick = onClick)
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(background)
+            .then(clickModifier)
             .padding(
                 start = 10.dp + (node.depth * 16).dp,
                 end = 10.dp,
@@ -798,6 +822,7 @@ private fun WorkspaceNodeGlyph(
 @Composable
 private fun WorkspaceViewerCard(
     workspace: WorkspacePreview,
+    onLoadMorePreview: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     val selectedFile = workspace.selectedFile
@@ -894,6 +919,7 @@ private fun WorkspaceViewerCard(
                         .clip(RoundedCornerShape(7.dp))
                         .background(ThreadColors.SurfaceStrong)
                         .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(7.dp))
+                        .then(onLoadMorePreview?.let { Modifier.clickable(onClick = it) } ?: Modifier)
                         .padding(horizontal = 12.dp, vertical = 6.dp),
                     color = ThreadColors.ForegroundSoft,
                     style = MaterialTheme.typography.labelSmall,

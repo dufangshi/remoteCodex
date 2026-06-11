@@ -104,6 +104,8 @@ fun ThreadDetailSurface(
     onCompactThread: (() -> Unit)? = null,
     onCreateShell: (() -> Unit)? = null,
     onTerminateShell: ((String) -> Unit)? = null,
+    onSelectWorkspaceFile: ((String) -> Unit)? = null,
+    onLoadMoreWorkspacePreview: (() -> Unit)? = null,
     onDenyPendingRequest: (PendingRequestPreview) -> Unit = {},
     onSubmitPendingRequest: (PendingRequestPreview, Map<String, List<String>>) -> Unit = { _, _ -> },
     onRenameThread: ((String) -> Unit)? = null,
@@ -183,6 +185,8 @@ fun ThreadDetailSurface(
                             )
                             ThreadSurfaceView.Workspace -> WorkspacePanel(
                                 workspace = displayedDetail.workspacePreview,
+                                onSelectFile = onSelectWorkspaceFile,
+                                onLoadMorePreview = onLoadMoreWorkspacePreview,
                                 modifier = Modifier.fillMaxSize(),
                             )
                             ThreadSurfaceView.Shell -> ShellPanel(

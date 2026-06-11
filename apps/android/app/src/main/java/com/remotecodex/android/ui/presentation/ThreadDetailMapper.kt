@@ -217,6 +217,7 @@ private fun SupervisorWorkspaceSummary.toWorkspacePreview(
             sizeLabel = "remote workspace",
             truncatedLabel = null,
             content = absPath,
+            path = "",
         )
     return WorkspacePreview(
         title = "Workspace",
@@ -265,6 +266,10 @@ private fun SupervisorWorkspaceFilePreview.toWorkspaceFilePreview(): WorkspaceFi
         sizeLabel = size.formatBytes(),
         truncatedLabel = if (truncated) "truncated at ${nextOffset.formatBytes()}" else null,
         content = content,
+        path = path,
+        sizeBytes = size,
+        nextOffset = nextOffset,
+        truncated = truncated,
     )
 }
 
