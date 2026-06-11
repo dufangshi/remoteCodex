@@ -401,6 +401,33 @@ class ThreadComposerStateTest {
     }
 
     @Test
+    fun shellPromptToolbarLabelTracksLocalDraftPreviewState() {
+        setComposerContent(
+            composer = ComposerPreview(
+                activeView = ComposerActiveView.Shell,
+                busy = false,
+                prompt = ComposerPromptPreview(text = "", attachments = emptyList()),
+            ),
+        )
+
+        composeRule.onNodeWithContentDescription("Shell prompt label").assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("Prompt").performTextInput("pwd")
+
+        composeRule.onNode(
+            SemanticsMatcher.expectValue(
+                SemanticsProperties.ContentDescription,
+                listOf("Shell prompt label"),
+            ) and SemanticsMatcher.expectValue(
+                SemanticsProperties.Text,
+                listOf(androidx.compose.ui.text.AnnotatedString("pwd")),
+            ),
+        ).assertExists()
+
+        composeRule.onNodeWithContentDescription("Send Shell Input").performClick()
+        composeRule.onNodeWithContentDescription("Shell prompt label").assertDoesNotExist()
+    }
+
+    @Test
     fun shellPromptInputKeepsUnavailableActionsDisabled() {
         setComposerContent(
             composer = ComposerPreview(

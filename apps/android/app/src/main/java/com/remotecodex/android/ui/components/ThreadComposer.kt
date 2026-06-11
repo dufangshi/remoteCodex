@@ -261,7 +261,7 @@ fun ThreadComposer(
         openMenu = openMenu.toToolbarMenuState(),
         settingsState = settingsState,
         canToggleShellView = true,
-        shellPromptLabel = composer.prompt.text.ifBlank { null },
+        shellPromptLabel = shellDraft.ifBlank { null },
     )
     val modelOptions = buildComposerModelOptions(
         currentModel = selectedModel,
@@ -803,7 +803,9 @@ private fun ComposerToolbarRow(
         toolbarState.shellPromptLabel?.let { label ->
             GraphInputGroupText(
                 text = label,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .semantics { contentDescription = "Shell prompt label" },
             )
         } ?: Box(modifier = Modifier.weight(1f))
         ToolbarInlineToggle(
