@@ -889,9 +889,13 @@ data class ComposerMcpServerRowState(
 )
 
 data class ComposerMcpFormState(
+    val mode: ComposerMcpPanelModePreview,
     val title: String,
     val primaryLabel: String,
     val primaryEnabled: Boolean,
+    val httpName: String?,
+    val httpUrl: String?,
+    val rawBlock: String?,
     val fields: List<Pair<String, String>>,
     val backTargetMode: ComposerMcpPanelModePreview,
     val configBusy: Boolean,
@@ -1494,9 +1498,13 @@ private fun buildComposerMcpAddOptions(): List<ComposerMcpAddOptionState> {
 private fun buildComposerMcpFormState(panel: ComposerMcpPanelPreview): ComposerMcpFormState? {
     return when (panel.mode) {
         ComposerMcpPanelModePreview.Http -> ComposerMcpFormState(
+            mode = panel.mode,
             title = "HTTP MCP",
             primaryLabel = if (panel.configBusy) "Saving..." else "Write HTTP MCP",
             primaryEnabled = !panel.configBusy,
+            httpName = panel.httpName,
+            httpUrl = panel.httpUrl,
+            rawBlock = null,
             fields = listOf(
                 "MCP name" to panel.httpName,
                 "URL" to panel.httpUrl,
@@ -1505,9 +1513,13 @@ private fun buildComposerMcpFormState(panel: ComposerMcpPanelPreview): ComposerM
             configBusy = panel.configBusy,
         )
         ComposerMcpPanelModePreview.Stdio -> ComposerMcpFormState(
+            mode = panel.mode,
             title = "MCP block for provider config",
             primaryLabel = if (panel.configBusy) "Saving..." else "Write raw block",
             primaryEnabled = !panel.configBusy,
+            httpName = null,
+            httpUrl = null,
+            rawBlock = panel.rawBlock,
             fields = listOf(
                 "MCP block for provider config" to panel.rawBlock,
             ),

@@ -52,6 +52,9 @@ import com.remotecodex.android.ui.model.ComposerHookSourcePreview
 import com.remotecodex.android.ui.model.ComposerHookTrustStatusPreview
 import com.remotecodex.android.ui.model.ComposerHooksPanelModePreview
 import com.remotecodex.android.ui.model.ComposerMcpPanelModePreview
+import com.remotecodex.android.ui.model.ComposerMcpAuthStatusPreview
+import com.remotecodex.android.ui.model.ComposerMcpServerPreview
+import com.remotecodex.android.ui.model.ComposerMcpToolPreview
 import com.remotecodex.android.ui.presentation.ComposerActionState
 import com.remotecodex.android.ui.presentation.ComposerAttachmentActionKind
 import com.remotecodex.android.ui.presentation.ComposerAttachmentActionState
@@ -140,6 +143,8 @@ fun ThreadComposer(
     var openMenu by remember { mutableStateOf<ComposerMenu?>(null) }
     var slashPanelView by remember(composer.slashPanelView) { mutableStateOf(composer.slashPanelView.toPanelViewState()) }
     var mcpPanelMode by remember(composer.mcpPanel.mode) { mutableStateOf(composer.mcpPanel.mode) }
+    var mcpPanelServers by remember(composer.mcpPanel.servers) { mutableStateOf(composer.mcpPanel.servers) }
+    var mcpPanelSuccess by remember(composer.mcpPanel.configSuccess) { mutableStateOf(composer.mcpPanel.configSuccess) }
     var hooksPanelMode by remember(composer.hooksPanel.mode) { mutableStateOf(composer.hooksPanel.mode) }
     var hooksPanelForm by remember(composer.hooksPanel.form) { mutableStateOf(composer.hooksPanel.form) }
     var hooksPanelHooks by remember(composer.hooksPanel.hooks) { mutableStateOf(composer.hooksPanel.hooks) }
@@ -255,7 +260,13 @@ fun ThreadComposer(
         error = composer.error,
     )
     val skillsPanelState = buildComposerSkillsPanelState(composer.skillsPanel)
-    val mcpPanelState = buildComposerMcpPanelState(composer.mcpPanel.copy(mode = mcpPanelMode))
+    val mcpPanelState = buildComposerMcpPanelState(
+        composer.mcpPanel.copy(
+            mode = mcpPanelMode,
+            configSuccess = mcpPanelSuccess,
+            servers = mcpPanelServers,
+        ),
+    )
     val hooksPanelState = buildComposerHooksPanelState(
         composer.hooksPanel.copy(
             mode = hooksPanelMode,
@@ -288,6 +299,19 @@ fun ThreadComposer(
                     },
                     onMcpPanelModeChange = { mode ->
                         mcpPanelMode = mode
+                        mcpPanelSuccess = null
+                    },
+                    onMcpSave = { form ->
+                        val savedServer = form.toPreviewMcpServer()
+                        mcpPanelServers = mcpPanelServers.filterNot { it.name == savedServer.name } + savedServer
+                        mcpPanelSuccess = when (form.mode) {
+                            ComposerMcpPanelModePreview.Http -> "HTTP MCP written: ${savedServer.name}"
+                            ComposerMcpPanelModePreview.Stdio -> "Raw MCP block written: ${savedServer.name}"
+                            ComposerMcpPanelModePreview.List,
+                            ComposerMcpPanelModePreview.Add,
+                            -> "MCP config updated: ${savedServer.name}"
+                        }
+                        mcpPanelMode = ComposerMcpPanelModePreview.List
                     },
                     onHooksPanelModeChange = { mode ->
                         hooksPanelMode = mode
@@ -376,6 +400,8 @@ fun ThreadComposer(
                 if (nextMenu != ComposerMenu.Slash) {
                     slashPanelView = ComposerSlashPanelViewState.Root
                     mcpPanelMode = composer.mcpPanel.mode
+                    mcpPanelServers = composer.mcpPanel.servers
+                    mcpPanelSuccess = composer.mcpPanel.configSuccess
                     hooksPanelMode = composer.hooksPanel.mode
                     hooksPanelForm = composer.hooksPanel.form
                     hooksPanelHooks = composer.hooksPanel.hooks
@@ -1497,6 +1523,7 @@ private fun SlashToolboxPanel(
     hooksPanelState: ComposerHooksPanelState,
     onSlashPanelViewChange: (ComposerSlashPanelViewState) -> Unit,
     onMcpPanelModeChange: (ComposerMcpPanelModePreview) -> Unit,
+    onMcpSave: (ComposerMcpFormState) -> Unit,
     onHooksPanelModeChange: (ComposerHooksPanelModePreview) -> Unit,
     onHookEdit: (ComposerHookFormPreview) -> Unit,
     onHookTrustChange: (String, ComposerHookTrustStatusPreview, String) -> Unit,
@@ -1536,6 +1563,7 @@ private fun SlashToolboxPanel(
             ComposerSlashPanelViewState.Mcp -> McpPreviewGroup(
                 mcpPanelState = mcpPanelState,
                 onMcpPanelModeChange = onMcpPanelModeChange,
+                onMcpSave = onMcpSave,
             )
             ComposerSlashPanelViewState.Hooks -> HooksPreviewGroup(
                 hooksPanelState = hooksPanelState,
@@ -2056,6 +2084,7 @@ private fun SkillWarningRow(
 private fun McpPreviewGroup(
     mcpPanelState: ComposerMcpPanelState,
     onMcpPanelModeChange: (ComposerMcpPanelModePreview) -> Unit,
+    onMcpSave: (ComposerMcpFormState) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -2109,6 +2138,7 @@ private fun McpPreviewGroup(
             McpFormPreview(
                 form = form,
                 onBack = { onMcpPanelModeChange(form.backTargetMode) },
+                onSave = { onMcpSave(form) },
             )
         }
         mcpPanelState.servers.forEach { item ->
@@ -2255,6 +2285,7 @@ private fun McpAddOptionRow(
 private fun McpFormPreview(
     form: ComposerMcpFormState,
     onBack: () -> Unit,
+    onSave: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -2286,10 +2317,11 @@ private fun McpFormPreview(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ComposerPanelActionBadge(label = "Back", onClick = onBack)
-            GraphBadge(
-                label = form.primaryLabel,
-                variant = if (form.primaryEnabled) GraphBadgeVariant.Default else GraphBadgeVariant.Outline,
-            )
+            if (form.primaryEnabled) {
+                ComposerPanelActionBadge(label = form.primaryLabel, onClick = onSave)
+            } else {
+                GraphBadge(label = form.primaryLabel, variant = GraphBadgeVariant.Outline)
+            }
         }
     }
 }
@@ -3161,6 +3193,33 @@ private fun ComposerHookFormPreview.toPreviewHook(): ComposerHookPreview {
         currentHash = "preview-hash-${eventName.name.lowercase()}",
         trustStatus = ComposerHookTrustStatusPreview.Modified,
     )
+}
+
+private fun ComposerMcpFormState.toPreviewMcpServer(): ComposerMcpServerPreview {
+    val serverName = when (mode) {
+        ComposerMcpPanelModePreview.Http -> httpName?.takeIf { it.isNotBlank() } ?: "http-preview"
+        ComposerMcpPanelModePreview.Stdio -> rawBlock?.extractMcpServerName() ?: "raw-preview"
+        ComposerMcpPanelModePreview.List,
+        ComposerMcpPanelModePreview.Add,
+        -> "preview"
+    }
+    return ComposerMcpServerPreview(
+        name = serverName,
+        authStatus = ComposerMcpAuthStatusPreview.Unsupported,
+        tools = listOf(
+            ComposerMcpToolPreview(
+                name = "${serverName.replace('-', '_')}_preview_tool",
+                title = "Preview tool",
+            ),
+        ),
+        resourceCount = if (mode == ComposerMcpPanelModePreview.Stdio) 1 else 0,
+        resourceTemplateCount = 0,
+    )
+}
+
+private fun String.extractMcpServerName(): String? {
+    val match = Regex("""\[mcp_servers\.([A-Za-z0-9_-]+)]""").find(this)
+    return match?.groupValues?.getOrNull(1)?.takeIf { it.isNotBlank() }
 }
 
 private fun ComposerHookSourcePreview.toHookScopePreview(): ComposerHookScopePreview {

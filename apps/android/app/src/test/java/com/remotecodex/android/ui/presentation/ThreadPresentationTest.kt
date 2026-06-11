@@ -3705,9 +3705,13 @@ class ThreadPresentationTest {
     fun buildsComposerMcpHttpAndStdioForms() {
         assertEquals(
             ComposerMcpFormState(
+                mode = ComposerMcpPanelModePreview.Http,
                 title = "HTTP MCP",
                 primaryLabel = "Write HTTP MCP",
                 primaryEnabled = true,
+                httpName = "docs",
+                httpUrl = "https://example.test/mcp",
+                rawBlock = null,
                 fields = listOf(
                     "MCP name" to "docs",
                     "URL" to "https://example.test/mcp",
@@ -3728,9 +3732,13 @@ class ThreadPresentationTest {
 
         assertEquals(
             ComposerMcpFormState(
+                mode = ComposerMcpPanelModePreview.Stdio,
                 title = "MCP block for provider config",
                 primaryLabel = "Saving...",
                 primaryEnabled = false,
+                httpName = null,
+                httpUrl = null,
+                rawBlock = "[mcp_servers.docs]",
                 fields = listOf(
                     "MCP block for provider config" to "[mcp_servers.docs]",
                 ),

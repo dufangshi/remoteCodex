@@ -45,6 +45,21 @@ class ThreadComposerStateTest {
     }
 
     @Test
+    fun mcpPanelWritesHttpPreviewServerAndReturnsToList() {
+        setComposerContent()
+
+        composeRule.onNodeWithContentDescription("Open slash toolbox").performClick()
+        composeRule.onNodeWithContentDescription("MCP").performClick()
+        composeRule.onNodeWithContentDescription("Add MCP").performClick()
+        composeRule.onNodeWithContentDescription("HTTP / Streamable HTTP").performClick()
+
+        composeRule.onNodeWithContentDescription("Write HTTP MCP").performClick()
+
+        composeRule.onNodeWithText("HTTP MCP written: openaiDeveloperDocs").assertExists()
+        composeRule.onNodeWithText("openaiDeveloperDocs").assertExists()
+    }
+
+    @Test
     fun mcpPanelNavigatesThroughRawBlockPreviewMode() {
         setComposerContent()
 
@@ -61,6 +76,21 @@ class ThreadComposerStateTest {
         composeRule.onNodeWithContentDescription("Back").performClick()
 
         composeRule.onNodeWithText("stdio / raw block").assertExists()
+    }
+
+    @Test
+    fun mcpPanelWritesRawBlockPreviewServerAndReturnsToList() {
+        setComposerContent()
+
+        composeRule.onNodeWithContentDescription("Open slash toolbox").performClick()
+        composeRule.onNodeWithContentDescription("MCP").performClick()
+        composeRule.onNodeWithContentDescription("Add MCP").performClick()
+        composeRule.onNodeWithContentDescription("stdio / raw block").performClick()
+
+        composeRule.onNodeWithContentDescription("Write raw block").performClick()
+
+        composeRule.onNodeWithText("Raw MCP block written: docs").assertExists()
+        composeRule.onNodeWithText("docs").assertExists()
     }
 
     @Test
