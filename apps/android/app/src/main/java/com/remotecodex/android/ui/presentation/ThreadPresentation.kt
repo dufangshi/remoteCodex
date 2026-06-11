@@ -1,6 +1,7 @@
 package com.remotecodex.android.ui.presentation
 
 import com.remotecodex.android.ui.model.HistoryItemKind
+import com.remotecodex.android.ui.model.MessageAuthor
 import com.remotecodex.android.ui.model.PlanStepStatus
 import com.remotecodex.android.ui.model.ThreadStatus
 import com.remotecodex.android.ui.model.ToolStatus
@@ -45,6 +46,17 @@ enum class MessageStatusTone {
 data class MessageStatusModel(
     val label: String,
     val tone: MessageStatusTone,
+    val accessibilityLabel: String = "Status: $label",
+)
+
+data class GraphChatMessageFrameState(
+    val isUser: Boolean,
+    val senderLabel: String?,
+    val headerStatus: MessageStatusModel?,
+    val footerStatus: MessageStatusModel?,
+    val showFooterMetadata: Boolean,
+    val showCopyAction: Boolean,
+    val timeLabel: String?,
 )
 
 enum class FileChangeSummaryTone {
@@ -2620,6 +2632,33 @@ fun graphChatMessageStatusModel(status: String?): MessageStatusModel? {
 
 fun graphChatMessageStatusModel(status: ThreadStatus?): MessageStatusModel? {
     return status?.let { graphChatMessageStatusModel(threadStatusLabel(it)) }
+}
+
+fun buildGraphChatMessageFrameState(
+    author: MessageAuthor,
+    status: ThreadStatus?,
+    timeLabel: String?,
+    copyText: String?,
+): GraphChatMessageFrameState {
+    val isUser = author == MessageAuthor.User
+    val normalizedTimeLabel = timeLabel?.trim()?.takeIf { it.isNotEmpty() }
+    val messageStatus = graphChatMessageStatusModel(status)
+    val headerStatus = if (isUser) {
+        null
+    } else {
+        messageStatus ?: graphChatMessageStatusModel("Complete")
+    }
+    val footerStatus = if (isUser) messageStatus else null
+
+    return GraphChatMessageFrameState(
+        isUser = isUser,
+        senderLabel = if (isUser) null else "Assistant",
+        headerStatus = headerStatus,
+        footerStatus = footerStatus,
+        showFooterMetadata = isUser && (footerStatus != null || normalizedTimeLabel != null),
+        showCopyAction = !isUser && !copyText.isNullOrBlank(),
+        timeLabel = normalizedTimeLabel,
+    )
 }
 
 fun exportStatusLabel(status: ThreadStatus): String {

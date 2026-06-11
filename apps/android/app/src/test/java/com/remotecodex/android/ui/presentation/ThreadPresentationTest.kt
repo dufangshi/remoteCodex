@@ -1,6 +1,7 @@
 package com.remotecodex.android.ui.presentation
 
 import com.remotecodex.android.ui.model.HistoryItemKind
+import com.remotecodex.android.ui.model.MessageAuthor
 import com.remotecodex.android.ui.model.PlanStepStatus
 import com.remotecodex.android.ui.model.ComposerActiveView
 import com.remotecodex.android.ui.model.ComposerContextAvailability
@@ -94,6 +95,95 @@ class ThreadPresentationTest {
         assertEquals(
             MessageStatusModel("Complete", MessageStatusTone.Success),
             graphChatMessageStatusModel(ThreadStatus.Complete),
+        )
+    }
+
+    @Test
+    fun buildsAssistantMessageFrameWithDefaultCompleteStatus() {
+        assertEquals(
+            GraphChatMessageFrameState(
+                isUser = false,
+                senderLabel = "Assistant",
+                headerStatus = MessageStatusModel("Complete", MessageStatusTone.Success),
+                footerStatus = null,
+                showFooterMetadata = false,
+                showCopyAction = true,
+                timeLabel = "10:24",
+            ),
+            buildGraphChatMessageFrameState(
+                author = MessageAuthor.Assistant,
+                status = null,
+                timeLabel = " 10:24 ",
+                copyText = "Finished.",
+            ),
+        )
+    }
+
+    @Test
+    fun buildsAssistantMessageFrameWithoutCopyActionForBlankText() {
+        assertEquals(
+            GraphChatMessageFrameState(
+                isUser = false,
+                senderLabel = "Assistant",
+                headerStatus = MessageStatusModel("Running", MessageStatusTone.Running),
+                footerStatus = null,
+                showFooterMetadata = false,
+                showCopyAction = false,
+                timeLabel = null,
+            ),
+            buildGraphChatMessageFrameState(
+                author = MessageAuthor.Assistant,
+                status = ThreadStatus.Running,
+                timeLabel = " ",
+                copyText = " ",
+            ),
+        )
+    }
+
+    @Test
+    fun buildsUserMessageFrameFooterMetadataOnlyWhenNeeded() {
+        assertEquals(
+            GraphChatMessageFrameState(
+                isUser = true,
+                senderLabel = null,
+                headerStatus = null,
+                footerStatus = MessageStatusModel("Failed", MessageStatusTone.Danger),
+                showFooterMetadata = true,
+                showCopyAction = false,
+                timeLabel = null,
+            ),
+            buildGraphChatMessageFrameState(
+                author = MessageAuthor.User,
+                status = ThreadStatus.Failed,
+                timeLabel = "",
+                copyText = "Retry this",
+            ),
+        )
+
+        assertEquals(
+            GraphChatMessageFrameState(
+                isUser = true,
+                senderLabel = null,
+                headerStatus = null,
+                footerStatus = null,
+                showFooterMetadata = false,
+                showCopyAction = false,
+                timeLabel = null,
+            ),
+            buildGraphChatMessageFrameState(
+                author = MessageAuthor.User,
+                status = null,
+                timeLabel = " ",
+                copyText = "No metadata",
+            ),
+        )
+    }
+
+    @Test
+    fun exposesMessageStatusAccessibilityLabel() {
+        assertEquals(
+            "Status: Steering update",
+            graphChatMessageStatusModel("Steering update")?.accessibilityLabel,
         )
     }
 

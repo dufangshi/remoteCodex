@@ -52,7 +52,6 @@ import com.remotecodex.android.ui.model.HistoryGroupPreview
 import com.remotecodex.android.ui.model.HistoryItemPreview
 import com.remotecodex.android.ui.model.DetailPreview
 import com.remotecodex.android.ui.model.LivePlanPreview
-import com.remotecodex.android.ui.model.MessageAuthor
 import com.remotecodex.android.ui.model.MessagePreview
 import com.remotecodex.android.ui.model.PlanStepStatus
 import com.remotecodex.android.ui.model.ReasoningPreview
@@ -65,14 +64,15 @@ import com.remotecodex.android.ui.model.ToolStatus
 import com.remotecodex.android.ui.model.TurnPreview
 import com.remotecodex.android.ui.presentation.artifactHistorySummary
 import com.remotecodex.android.ui.presentation.basenameFromAssetPath
+import com.remotecodex.android.ui.presentation.buildGraphChatMessageFrameState
 import com.remotecodex.android.ui.presentation.FileChangeSummarySegment
 import com.remotecodex.android.ui.presentation.FileChangeSummaryTone
 import com.remotecodex.android.ui.presentation.fileChangeSummarySegments
 import com.remotecodex.android.ui.presentation.formatGraphChatToolParameterObject
 import com.remotecodex.android.ui.presentation.formatTrailingPathLabel
-import com.remotecodex.android.ui.presentation.graphChatMessageStatusModel
 import com.remotecodex.android.ui.presentation.historyGroupRowOrdinalLabel
 import com.remotecodex.android.ui.presentation.hookHistorySummary
+import com.remotecodex.android.ui.presentation.GraphChatMessageFrameState
 import com.remotecodex.android.ui.presentation.MessageStatusModel
 import com.remotecodex.android.ui.presentation.parseUserMessageSegments
 import com.remotecodex.android.ui.presentation.planStepStatusAccessibilityLabel
@@ -604,41 +604,48 @@ private fun MessageBubble(
     message: MessagePreview,
     onOpenDetail: (DetailPreview) -> Unit,
 ) {
-    val isUser = message.author == MessageAuthor.User
-    val messageStatus = graphChatMessageStatusModel(message.status)
-    val assistantStatus = if (isUser) null else messageStatus ?: graphChatMessageStatusModel("Complete")
+    val frameState = buildGraphChatMessageFrameState(
+        author = message.author,
+        status = message.status,
+        timeLabel = message.timeLabel,
+        copyText = message.text,
+    )
     Column(
-        modifier = Modifier.messageBubbleContainer(isUser = isUser),
+        modifier = Modifier.messageBubbleContainer(isUser = frameState.isUser),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (!isUser) {
+        if (!frameState.isUser) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                AssistantSenderPill()
-                assistantStatus?.let {
+                frameState.senderLabel?.let { senderLabel ->
+                    AssistantSenderPill(label = senderLabel)
+                }
+                frameState.headerStatus?.let {
                     MessageStatusBadge(model = it, compact = true)
                 }
                 Spacer(modifier = Modifier.weight(1f))
-                AssistantCopyButton(
-                    value = message.text,
-                )
-                Text(
-                    text = message.timeLabel,
-                    color = ThreadColors.ForegroundMuted,
-                    style = MaterialTheme.typography.labelSmall,
-                )
+                if (frameState.showCopyAction) {
+                    AssistantCopyButton(value = message.text)
+                }
+                frameState.timeLabel?.let { timeLabel ->
+                    Text(
+                        text = timeLabel,
+                        color = ThreadColors.ForegroundMuted,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
             }
         }
-        if (isUser) {
+        if (frameState.isUser) {
             UserMessageBody(text = message.richText)
-            UserMessageFooter(messageStatus = messageStatus, timeLabel = message.timeLabel)
+            UserMessageFooter(frameState = frameState)
         } else {
             RichMessageContent(content = message.richText)
         }
-        if (!isUser && message.reasoningItems.isNotEmpty()) {
+        if (!frameState.isUser && message.reasoningItems.isNotEmpty()) {
             ReasoningAccordion(items = message.reasoningItems)
         }
         message.toolCall?.let {
@@ -670,10 +677,9 @@ private fun MessageBubble(
 
 @Composable
 private fun UserMessageFooter(
-    messageStatus: MessageStatusModel?,
-    timeLabel: String,
+    frameState: GraphChatMessageFrameState,
 ) {
-    if (messageStatus == null && timeLabel.isBlank()) {
+    if (!frameState.showFooterMetadata) {
         return
     }
     Row(
@@ -681,8 +687,8 @@ private fun UserMessageFooter(
         horizontalArrangement = Arrangement.End,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        messageStatus?.let { MessageStatusBadge(model = it, compact = true) }
-        if (timeLabel.isNotBlank()) {
+        frameState.footerStatus?.let { MessageStatusBadge(model = it, compact = true) }
+        frameState.timeLabel?.let { timeLabel ->
             Text(
                 text = timeLabel,
                 modifier = Modifier.padding(start = 8.dp),
@@ -759,9 +765,9 @@ private fun AssistantCopyButton(value: String) {
 }
 
 @Composable
-private fun AssistantSenderPill() {
+private fun AssistantSenderPill(label: String) {
     Text(
-        text = "Assistant",
+        text = label,
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
             .background(ThreadColors.SuccessSoft.copy(alpha = 0.48f))
