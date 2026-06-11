@@ -238,9 +238,9 @@ private fun RichToolBlock(language: String, code: String) {
             },
         ) {
             ToolBlockActions(copyValue = code.trimEnd())
-            ToolSection(title = "Parameters", body = preview.parameters.ifBlank { "{}" })
+            GraphChatToolSection(title = "Parameters", body = preview.parameters.ifBlank { "{}" })
             preview.result?.takeIf { it.isNotBlank() }?.let { result ->
-                ToolSection(title = "Result", body = result)
+                GraphChatToolSection(title = "Result", body = result)
             }
         }
     }
@@ -292,15 +292,14 @@ private fun ToolGlyph(
 }
 
 @Composable
-private fun ToolSection(title: String, body: String) {
+fun GraphChatToolSection(
+    title: String,
+    body: String,
+    copyText: String? = null,
+) {
     val entries = remember(body) { graphChatToolEntries(body) }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(
-            text = title,
-            color = ThreadColors.ForegroundMuted,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-        )
+        GraphChatToolSectionHeader(title = title, copyText = copyText)
         if (
             entries.size == 1 &&
             entries.first().key == "value" &&
@@ -330,6 +329,26 @@ private fun ToolSection(title: String, body: String) {
                 }
                 ToolPunctuation(text = "}")
             }
+        }
+    }
+}
+
+@Composable
+private fun GraphChatToolSectionHeader(title: String, copyText: String?) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = title,
+            modifier = Modifier.weight(1f),
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        copyText?.let { value ->
+            CopyCodeButton(value = value)
         }
     }
 }

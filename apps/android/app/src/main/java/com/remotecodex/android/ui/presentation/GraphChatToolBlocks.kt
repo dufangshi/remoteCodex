@@ -33,6 +33,24 @@ data class GraphChatToolEntry(
     val kind: GraphChatToolValueKind,
 )
 
+fun formatGraphChatToolParameterObject(entries: List<Pair<String, String>>): String {
+    if (entries.isEmpty()) return "{}"
+    return buildString {
+        appendLine("{")
+        entries.forEachIndexed { index, entry ->
+            append("  \"")
+            append(entry.first)
+            append("\": ")
+            append(formatGraphChatToolParameterValue(entry.second))
+            if (index < entries.lastIndex) {
+                append(",")
+            }
+            appendLine()
+        }
+        append("}")
+    }
+}
+
 fun preprocessGraphChatToolBlocks(content: String): ToolBlockPreprocessResult {
     val resultMap = linkedMapOf<String, MutableToolResultState>()
     val resultRegex = Regex("```tool-result\\s*([\\s\\S]*?)\\s*```")
@@ -77,6 +95,22 @@ fun preprocessGraphChatToolBlocks(content: String): ToolBlockPreprocessResult {
         processedContent = processed,
         resultMap = resultMap.mapValues { it.value.toPublicState() },
     )
+}
+
+private fun formatGraphChatToolParameterValue(value: String): String {
+    val trimmed = value.trim()
+    if (trimmed == "true" ||
+        trimmed == "false" ||
+        trimmed == "null" ||
+        Regex("-?(0|[1-9][0-9]*)(\\.[0-9]+)?([eE][+-]?[0-9]+)?").matches(trimmed) ||
+        ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]")))
+    ) {
+        return trimmed
+    }
+    return "\"" + trimmed
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("\n", "\\n") + "\""
 }
 
 fun toolBlockStatus(language: String, body: String): String {

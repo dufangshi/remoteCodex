@@ -80,6 +80,37 @@ class GraphChatToolBlocksTest {
     }
 
     @Test
+    fun formatsToolCallParametersAsJsonObject() {
+        assertEquals(
+            """
+            {
+              "cmd": "./gradlew \"test\"",
+              "timeout": 120,
+              "interactive": false,
+              "env": {"CI":true},
+              "items": ["a","b"],
+              "missing": null
+            }
+            """.trimIndent(),
+            formatGraphChatToolParameterObject(
+                listOf(
+                    "cmd" to "./gradlew \"test\"",
+                    "timeout" to "120",
+                    "interactive" to "false",
+                    "env" to """{"CI":true}""",
+                    "items" to """["a","b"]""",
+                    "missing" to "null",
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun formatsEmptyToolCallParametersAsJsonObject() {
+        assertEquals("{}", formatGraphChatToolParameterObject(emptyList()))
+    }
+
+    @Test
     fun readsColonToolEntries() {
         assertEquals(
             listOf(

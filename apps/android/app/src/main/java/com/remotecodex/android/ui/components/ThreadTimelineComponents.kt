@@ -68,6 +68,7 @@ import com.remotecodex.android.ui.presentation.basenameFromAssetPath
 import com.remotecodex.android.ui.presentation.FileChangeSummarySegment
 import com.remotecodex.android.ui.presentation.FileChangeSummaryTone
 import com.remotecodex.android.ui.presentation.fileChangeSummarySegments
+import com.remotecodex.android.ui.presentation.formatGraphChatToolParameterObject
 import com.remotecodex.android.ui.presentation.formatTrailingPathLabel
 import com.remotecodex.android.ui.presentation.graphChatMessageStatusModel
 import com.remotecodex.android.ui.presentation.historyGroupRowOrdinalLabel
@@ -1924,7 +1925,7 @@ private data class HistoryItemColors(
 
 @Composable
 private fun ToolCallCard(toolCall: ToolCallPreview) {
-    val parametersText = formatToolCallParameters(toolCall.parameters)
+    val parametersText = formatGraphChatToolParameterObject(toolCall.parameters)
     val shouldOpen = toolCall.status == ToolStatus.Running || !toolCall.result.isNullOrBlank()
     GraphAccordion(
         modifier = Modifier
@@ -1948,13 +1949,17 @@ private fun ToolCallCard(toolCall: ToolCallPreview) {
                 )
             },
         ) {
-            JsonBlock(
+            GraphChatToolSection(
                 title = "Parameters",
-                entries = toolCall.parameters,
+                body = parametersText,
                 copyText = parametersText,
             )
             toolCall.result?.takeIf { it.isNotBlank() }?.let { result ->
-                CodeBlock(title = "Result", code = result)
+                GraphChatToolSection(
+                    title = "Result",
+                    body = result,
+                    copyText = result,
+                )
             }
         }
     }
@@ -1986,102 +1991,5 @@ private fun ToolCallGlyph(color: Color) {
             radius = 1.9.dp.toPx(),
             center = Offset(size.width * 0.24f, size.height * 0.78f),
         )
-    }
-}
-
-@Composable
-private fun JsonBlock(title: String, entries: List<Pair<String, String>>, copyText: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        SectionHeaderWithCopy(title = title, copyText = copyText)
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(7.dp))
-                .background(ThreadColors.Panel)
-                .border(1.dp, ThreadColors.Border, RoundedCornerShape(7.dp))
-                .padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            Text("{", color = ThreadColors.ForegroundMuted, fontFamily = FontFamily.Monospace)
-            if (entries.isEmpty()) {
-                Text(
-                    text = "  empty",
-                    color = ThreadColors.ForegroundSoft,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontFamily = FontFamily.Monospace,
-                )
-            }
-            entries.forEachIndexed { index, entry ->
-                Text(
-                    text = "  \"${entry.first}\": \"${entry.second}\"${if (index < entries.lastIndex) "," else ""}",
-                    color = ThreadColors.ForegroundSoft,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontFamily = FontFamily.Monospace,
-                )
-            }
-            Text("}", color = ThreadColors.ForegroundMuted, fontFamily = FontFamily.Monospace)
-        }
-    }
-}
-
-@Composable
-private fun CodeBlock(title: String, code: String) {
-    val displayCode = code.ifEmpty { "(empty)" }
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        SectionHeaderWithCopy(title = title, copyText = code)
-        Text(
-            text = displayCode,
-            modifier = Modifier
-                .fillMaxWidth()
-                .widthIn(min = 0.dp)
-                .clip(RoundedCornerShape(7.dp))
-                .background(ThreadColors.CodeBackground)
-                .padding(10.dp),
-            color = ThreadColors.CodeForeground,
-            style = MaterialTheme.typography.bodyMedium,
-            fontFamily = FontFamily.Monospace,
-        )
-    }
-}
-
-@Composable
-private fun SectionHeaderWithCopy(title: String, copyText: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(
-            text = title,
-            modifier = Modifier.weight(1f),
-            color = ThreadColors.ForegroundMuted,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-        )
-        CopyTextButton(
-            value = copyText,
-            idleLabel = "Copy",
-            copiedLabel = "Copied",
-            contentDescription = "Copy $title",
-        )
-    }
-}
-
-private fun formatToolCallParameters(entries: List<Pair<String, String>>): String {
-    if (entries.isEmpty()) return "{}"
-    return buildString {
-        appendLine("{")
-        entries.forEachIndexed { index, entry ->
-            append("  \"")
-            append(entry.first)
-            append("\": \"")
-            append(entry.second)
-            append("\"")
-            if (index < entries.lastIndex) {
-                append(",")
-            }
-            appendLine()
-        }
-        append("}")
     }
 }
