@@ -1246,16 +1246,12 @@ private fun HistoryItemCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             item.actionLabel?.let { label ->
-                Text(
-                    text = label,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(7.dp))
-                        .border(1.dp, colors.border, RoundedCornerShape(7.dp))
-                        .clickable { openHistoryItemDetail(item, null, onOpenDetail) }
-                        .padding(horizontal = 10.dp, vertical = 7.dp),
-                    color = colors.foreground,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.SemiBold,
+                GraphButton(
+                    label = label,
+                    variant = GraphButtonVariant.Ghost,
+                    icon = GraphActionIcon.Open,
+                    contentDescription = "Open ${label.lowercase()}",
+                    onClick = { openHistoryItemDetail(item, null, onOpenDetail) },
                 )
             }
             Spacer(modifier = Modifier.weight(1f))
