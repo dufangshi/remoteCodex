@@ -218,6 +218,33 @@ class ThreadComposerStateTest {
         composeRule.onNodeWithText("Turn 10").assertExists()
     }
 
+    @Test
+    fun forkPanelStartsLatestForkPreviewAndClosesMenu() {
+        setComposerContent(composer = ComposerPreview(busy = false))
+
+        composeRule.onNodeWithContentDescription("Open slash toolbox").performClick()
+        composeRule.onNodeWithContentDescription("Fork").performClick()
+
+        composeRule.onNodeWithText("Fork from latest").performClick()
+
+        composeRule.onNodeWithText("Fork preview started from latest turn").assertExists()
+        composeRule.onNodeWithText("/fork").assertDoesNotExist()
+    }
+
+    @Test
+    fun forkTurnPickerStartsSelectedTurnForkPreviewAndClosesMenu() {
+        setComposerContent(composer = ComposerPreview(busy = false))
+
+        composeRule.onNodeWithContentDescription("Open slash toolbox").performClick()
+        composeRule.onNodeWithContentDescription("Fork").performClick()
+        composeRule.onNodeWithText("Fork from selected turn").performClick()
+
+        composeRule.onNodeWithText("Turn 12").performClick()
+
+        composeRule.onNodeWithText("Fork preview started from Turn 12").assertExists()
+        composeRule.onNodeWithText("/fork").assertDoesNotExist()
+    }
+
     private fun setComposerContent(composer: ComposerPreview = ComposerPreview()) {
         composeRule.setContent {
             RemoteCodexTheme(dark = true) {

@@ -150,6 +150,7 @@ fun ThreadComposer(
     var hooksPanelForm by remember(composer.hooksPanel.form) { mutableStateOf(composer.hooksPanel.form) }
     var hooksPanelHooks by remember(composer.hooksPanel.hooks) { mutableStateOf(composer.hooksPanel.hooks) }
     var hooksPanelSuccess by remember(composer.hooksPanel.configSuccess) { mutableStateOf(composer.hooksPanel.configSuccess) }
+    var forkPreviewStatus by remember(composer.forkTurnOptions) { mutableStateOf<String?>(null) }
     val statusChips = buildComposerStatusStrip(
         threadConnected = composer.threadConnected,
         busy = composer.busy,
@@ -303,6 +304,16 @@ fun ThreadComposer(
                     onCopySkill = { skillName ->
                         copiedSkillName = skillName
                     },
+                    onForkLatest = {
+                        forkPreviewStatus = "Fork preview started from latest turn"
+                        slashPanelView = ComposerSlashPanelViewState.Root
+                        openMenu = null
+                    },
+                    onForkTurn = { turnTitle ->
+                        forkPreviewStatus = "Fork preview started from $turnTitle"
+                        slashPanelView = ComposerSlashPanelViewState.Root
+                        openMenu = null
+                    },
                     onMcpPanelModeChange = { mode ->
                         mcpPanelMode = mode
                         mcpPanelSuccess = null
@@ -396,6 +407,9 @@ fun ThreadComposer(
         }
 
         ComposerJumpLatestButton(state = frameState.jumpLatest)
+        forkPreviewStatus?.let { status ->
+            ComposerPreviewFeedback(message = status)
+        }
         ComposerToolbarRow(
             toolbarState = toolbarState,
             settingsToolbarState = settingsToolbarState,
@@ -697,6 +711,37 @@ private fun ComposerFrameSlotsPreview(
         frameState.errorMessage?.let { message ->
             ComposerFrameError(message = message)
         }
+    }
+}
+
+@Composable
+private fun ComposerPreviewFeedback(message: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { contentDescription = message }
+            .clip(RoundedCornerShape(12.dp))
+            .background(ThreadColors.SuccessSoft.copy(alpha = 0.56f))
+            .border(1.dp, ThreadColors.Success.copy(alpha = 0.34f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(ThreadColors.Success),
+        )
+        Text(
+            text = message,
+            modifier = Modifier.weight(1f),
+            color = ThreadColors.Success,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -1537,6 +1582,8 @@ private fun SlashToolboxPanel(
     onHookTrustChange: (String, ComposerHookTrustStatusPreview, String) -> Unit,
     onHookSave: (ComposerHookFormPreview) -> Unit,
     onToolboxAction: (ComposerToolboxActionDecisionState) -> Unit,
+    onForkLatest: () -> Unit,
+    onForkTurn: (String) -> Unit,
 ) {
     if (!panelState.surfaceVisible) {
         return
@@ -1565,8 +1612,15 @@ private fun SlashToolboxPanel(
                 forkPanelState = forkPanelState,
                 showTurnPicker = false,
                 onSlashPanelViewChange = onSlashPanelViewChange,
+                onForkLatest = onForkLatest,
+                onForkTurn = onForkTurn,
             )
-            ComposerSlashPanelViewState.ForkTurns -> ForkPreviewGroup(forkPanelState = forkPanelState, showTurnPicker = true)
+            ComposerSlashPanelViewState.ForkTurns -> ForkPreviewGroup(
+                forkPanelState = forkPanelState,
+                showTurnPicker = true,
+                onForkLatest = onForkLatest,
+                onForkTurn = onForkTurn,
+            )
             ComposerSlashPanelViewState.Skills -> SkillsPreviewGroup(
                 skillsPanelState = skillsPanelState,
                 onCopySkill = onCopySkill,
@@ -1752,6 +1806,8 @@ private fun ForkPreviewGroup(
     forkPanelState: ComposerForkPanelState,
     showTurnPicker: Boolean,
     onSlashPanelViewChange: (ComposerSlashPanelViewState) -> Unit = {},
+    onForkLatest: () -> Unit = {},
+    onForkTurn: (String) -> Unit = {},
 ) {
     Column(
         modifier = Modifier
@@ -1795,8 +1851,9 @@ private fun ForkPreviewGroup(
             ForkActionRow(
                 action = action,
                 onClick = {
-                    if (action.kind == ComposerForkActionKind.SelectedTurn) {
-                        onSlashPanelViewChange(ComposerSlashPanelViewState.ForkTurns)
+                    when (action.kind) {
+                        ComposerForkActionKind.Latest -> onForkLatest()
+                        ComposerForkActionKind.SelectedTurn -> onSlashPanelViewChange(ComposerSlashPanelViewState.ForkTurns)
                     }
                 },
             )
@@ -1810,7 +1867,10 @@ private fun ForkPreviewGroup(
                     ForkTurnMessageRow(message = message, error = true)
                 }
                 forkPanelState.turnPicker.rows.forEach { item ->
-                    ForkTurnRow(item = item)
+                    ForkTurnRow(
+                        item = item,
+                        onClick = { onForkTurn(item.title) },
+                    )
                 }
                 forkPanelState.turnPicker.emptyMessage?.let { message ->
                     ForkTurnMessageRow(message = message, error = false)
@@ -1869,13 +1929,17 @@ private fun ForkActionRow(
 }
 
 @Composable
-private fun ForkTurnRow(item: ComposerForkTurnPickerRowState) {
+private fun ForkTurnRow(
+    item: ComposerForkTurnPickerRowState,
+    onClick: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
             .background(ThreadColors.CodeBackground)
             .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(10.dp))
+            .then(if (item.enabled) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
