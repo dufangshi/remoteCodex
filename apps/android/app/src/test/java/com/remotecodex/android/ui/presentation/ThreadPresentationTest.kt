@@ -4647,6 +4647,57 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun usesOriginalFileChangeTextForDeferredDetailFallback() {
+        assertEquals(
+            "/home/u/dev/remoteCodex-main/apps/android/app/src/main/java/com/remotecodex/android/ui/model/ThreadPreviewModels.kt",
+            graphChatHistoryDetailText(
+                kind = HistoryItemKind.FileChange,
+                title = "/home/u/dev/remoteCodex-main/apps/android/app/src/main/java/com/remotecodex/android/ui/model/ThreadPreviewModels.kt",
+                summary = "ThreadPreviewModels.kt",
+                detail = null,
+                hasDeferredDetail = true,
+            ),
+        )
+    }
+
+    @Test
+    fun usesSummaryForNonDeferredHistoryDetailFallback() {
+        assertEquals(
+            "ThreadPreviewModels.kt",
+            graphChatHistoryDetailText(
+                kind = HistoryItemKind.FileChange,
+                title = "/home/u/dev/remoteCodex-main/apps/android/app/src/main/java/com/remotecodex/android/ui/model/ThreadPreviewModels.kt",
+                summary = "ThreadPreviewModels.kt",
+                detail = null,
+                hasDeferredDetail = false,
+            ),
+        )
+        assertEquals(
+            "source excerpt",
+            graphChatHistoryDetailText(
+                kind = HistoryItemKind.FileRead,
+                title = "file_read",
+                summary = "source excerpt",
+                detail = null,
+            ),
+        )
+    }
+
+    @Test
+    fun usesExplicitHistoryDetailBeforeFallbacks() {
+        assertEquals(
+            "diff --git",
+            graphChatHistoryDetailText(
+                kind = HistoryItemKind.FileChange,
+                title = "/home/u/dev/remoteCodex-main/apps/android/app/src/main/java/com/remotecodex/android/ui/model/ThreadPreviewModels.kt",
+                summary = "ThreadPreviewModels.kt",
+                detail = " diff --git ",
+                hasDeferredDetail = true,
+            ),
+        )
+    }
+
+    @Test
     fun buildsArtifactHistoryItemFrameStateWithoutGenericActionOrDetail() {
         assertEquals(
             GraphChatHistoryItemFrameState(

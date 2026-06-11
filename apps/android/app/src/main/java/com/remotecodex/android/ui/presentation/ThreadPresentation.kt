@@ -3343,6 +3343,24 @@ fun graphChatHistoryGroupRowDetailTitle(
     return "$baseTitle $number"
 }
 
+fun graphChatHistoryDetailText(
+    kind: HistoryItemKind,
+    title: String,
+    summary: String,
+    detail: String?,
+    hasDeferredDetail: Boolean = false,
+): String {
+    val normalizedDetail = detail?.trim()?.takeIf { it.isNotEmpty() }
+    if (normalizedDetail != null) {
+        return normalizedDetail
+    }
+    return if (kind == HistoryItemKind.FileChange && hasDeferredDetail) {
+        title.trim().takeIf { it.isNotEmpty() } ?: summary
+    } else {
+        summary
+    }
+}
+
 fun graphChatHistoryItemCopyText(
     title: String,
     meta: String?,

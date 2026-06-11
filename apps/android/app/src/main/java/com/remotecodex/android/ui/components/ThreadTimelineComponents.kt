@@ -104,6 +104,7 @@ import com.remotecodex.android.ui.presentation.threadStatusLabel
 import com.remotecodex.android.ui.presentation.toolResultStatusLabel
 import com.remotecodex.android.ui.presentation.UserMessageSegment
 import com.remotecodex.android.ui.presentation.graphChatPlainTextSegments
+import com.remotecodex.android.ui.presentation.graphChatHistoryDetailText
 import com.remotecodex.android.ui.presentation.graphChatHistoryItemCopyText
 import com.remotecodex.android.ui.presentation.graphChatHistoryGroupRowSummary
 import com.remotecodex.android.ui.presentation.graphChatHistoryGroupRowDetailTitle
@@ -1893,8 +1894,13 @@ private fun openHistoryItemDetail(
         ?: item.meta
         ?: item.actionLabel
         ?: item.title
-    val body = item.detail
-        ?: item.summary
+    val body = graphChatHistoryDetailText(
+        kind = item.kind,
+        title = item.title,
+        summary = item.summary,
+        detail = item.detail,
+        hasDeferredDetail = item.hasDeferredDetail,
+    )
     onOpenDetail(DetailPreview(title = title, text = body))
 }
 
