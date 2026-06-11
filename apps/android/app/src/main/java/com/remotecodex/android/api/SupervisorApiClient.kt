@@ -58,6 +58,31 @@ class SupervisorApiClient(
         }
     }
 
+    fun createWorkspace(request: CreateSupervisorWorkspaceRequest): SupervisorWorkspaceSummary {
+        val body = JSONObject()
+            .put("absPath", request.absPath)
+        request.label?.takeIf { it.isNotBlank() }?.let { body.put("label", it) }
+        return requestJson(
+            config.restPath("/api/workspaces"),
+            method = "POST",
+            body = body.toString(),
+        ).toWorkspaceSummary()
+    }
+
+    fun startThread(request: StartSupervisorThreadRequest): SupervisorThreadSummary {
+        val body = JSONObject()
+            .put("workspaceId", request.workspaceId)
+            .put("model", request.model)
+            .put("approvalMode", request.approvalMode)
+        request.title?.takeIf { it.isNotBlank() }?.let { body.put("title", it) }
+        request.provider?.takeIf { it.isNotBlank() }?.let { body.put("provider", it) }
+        return requestJson(
+            config.restPath("/api/threads/start"),
+            method = "POST",
+            body = body.toString(),
+        ).toThreadSummary()
+    }
+
     fun fetchHomeSnapshot(): SupervisorHomeSnapshot {
         return SupervisorHomeSnapshot(
             workspaces = listWorkspaces(),
@@ -84,7 +109,7 @@ class SupervisorApiClient(
         return requestJson(config.restPath("/api/threads/${urlEncodePathSegment(threadId)}$query")).toThreadDetail()
     }
 
-    fun sendThreadPrompt(threadId: String, request: SendThreadPromptRequest): SupervisorThreadDetail {
+    fun sendThreadPrompt(threadId: String, request: SendThreadPromptRequest): SupervisorThreadSummary {
         val body = JSONObject()
             .put("prompt", request.prompt)
         request.clientRequestId?.takeIf { it.isNotBlank() }?.let { body.put("clientRequestId", it) }
@@ -93,7 +118,7 @@ class SupervisorApiClient(
             config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/prompt"),
             method = "POST",
             body = body.toString(),
-        ).toThreadDetail()
+        ).toThreadSummary()
     }
 
     fun checkConnection(): SupervisorConnectionCheck {
@@ -326,14 +351,36 @@ private fun JSONObject.toThreadDetail(): SupervisorThreadDetail {
     val workspaceJson = getJSONObject("workspace")
     val liveItemsJson = optJSONObject("liveItems")
     val goalJson = optJSONObject("goal")
+    val turns = optJSONArray("turns") ?: org.json.JSONArray()
+    val parsedTurns = List(turns.length()) { index ->
+        turns.getJSONObject(index).toThreadTurn()
+    }
     return SupervisorThreadDetail(
         thread = threadJson.toThreadSummary(),
         workspace = workspaceJson.toWorkspaceSummary(),
+        turns = parsedTurns,
         turnCount = optJSONArray("turns")?.length() ?: 0,
         pendingRequestCount = optJSONArray("pendingRequests")?.length() ?: 0,
         liveItemCount = liveItemsJson?.optJSONArray("items")?.length() ?: 0,
         goalStatus = goalJson?.optNullableString("status"),
         goalObjective = goalJson?.optNullableString("objective"),
+    )
+}
+
+private fun JSONObject.toThreadTurn(): SupervisorThreadTurn {
+    val itemsJson = optJSONArray("items") ?: org.json.JSONArray()
+    return SupervisorThreadTurn(
+        id = optString("id"),
+        status = optString("status"),
+        items = List(itemsJson.length()) { index -> itemsJson.getJSONObject(index).toThreadTurnItem() },
+    )
+}
+
+private fun JSONObject.toThreadTurnItem(): SupervisorThreadTurnItem {
+    return SupervisorThreadTurnItem(
+        id = optString("id"),
+        kind = optString("kind"),
+        text = optString("text"),
     )
 }
 

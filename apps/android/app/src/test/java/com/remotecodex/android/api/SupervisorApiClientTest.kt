@@ -168,11 +168,15 @@ class SupervisorApiClientTest {
     }
 
     @Test
-    fun threadDetailAndPromptUseRelayDevicePath() {
-        val detailJson = """{"thread":{"id":"thread-1","workspaceId":"workspace-1","title":"Android API","status":"running","model":"gpt-5","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":"Wire detail"},"workspace":{"id":"workspace-1","hostId":"host","label":"Remote Codex","absPath":"/repo","isFavorite":false,"createdAt":"2026-01-01T00:00:00.000Z","lastOpenedAt":null},"workspacePathStatus":"present","turns":[{"id":"turn-1","startedAt":null,"status":"inProgress","error":null,"items":[]}],"pendingRequests":[],"pendingSteers":[],"liveItems":{"items":[{"id":"item-1"}]},"goal":{"status":"active","objective":"Ship Android client"}}"""
+    fun workspaceThreadDetailAndPromptUseRelayDevicePath() {
+        val workspaceJson = """{"id":"workspace-1","hostId":"host","label":"Remote Codex","absPath":"/repo","isFavorite":false,"createdAt":"2026-01-01T00:00:00.000Z","lastOpenedAt":null}"""
+        val threadJson = """{"id":"thread-1","workspaceId":"workspace-1","title":"Android API","status":"idle","model":"gpt-5","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":"Wire detail"}"""
+        val detailJson = """{"thread":$threadJson,"workspace":$workspaceJson,"workspacePathStatus":"present","turns":[{"id":"turn-1","startedAt":null,"status":"completed","error":null,"items":[{"id":"item-1","kind":"userMessage","text":"Continue"},{"id":"item-2","kind":"agentMessage","text":"Android API reply"}]}],"pendingRequests":[],"pendingSteers":[],"liveItems":{"items":[{"id":"item-1"}]},"goal":{"status":"active","objective":"Ship Android client"}}"""
         val transport = RecordingTransport(
+            SupervisorHttpResponse(200, workspaceJson),
+            SupervisorHttpResponse(200, threadJson),
             SupervisorHttpResponse(200, detailJson),
-            SupervisorHttpResponse(200, detailJson),
+            SupervisorHttpResponse(200, """{"id":"thread-1","workspaceId":"workspace-1","title":"Android API","status":"running","model":"gpt-5","updatedAt":"2026-01-03T00:00:01.000Z","summaryText":"Continue"}"""),
         )
         val client = SupervisorApiClient(
             SupervisorConnectionConfig(
@@ -184,23 +188,51 @@ class SupervisorApiClientTest {
             transport,
         )
 
+        val workspace = client.createWorkspace(
+            CreateSupervisorWorkspaceRequest(
+                absPath = "/repo",
+                label = "Remote Codex",
+            ),
+        )
+        val thread = client.startThread(
+            StartSupervisorThreadRequest(
+                workspaceId = "workspace-1",
+                title = "Android API",
+                model = "gpt-5",
+            ),
+        )
         val detail = client.fetchThreadDetail("thread-1", limit = 20)
         val prompted = client.sendThreadPrompt("thread-1", SendThreadPromptRequest("Continue"))
 
+        assertEquals("workspace-1", workspace.id)
+        assertEquals("thread-1", thread.id)
         assertEquals("Android API", detail.thread.title)
         assertEquals(1, detail.turnCount)
         assertEquals(1, detail.liveItemCount)
-        assertEquals("active", prompted.goalStatus)
+        assertEquals("Android API reply", detail.latestAgentMessage)
+        assertEquals("running", prompted.status)
         assertEquals(
-            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1?limit=20",
+            "https://relay.example.test/relay/devices/device-1/api/workspaces",
             transport.requests[0].url,
         )
+        assertEquals("POST", transport.requests[0].method)
+        assertTrue(transport.requests[0].body!!.contains("\"absPath\":\"/repo\""))
         assertEquals(
-            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1/prompt",
+            "https://relay.example.test/relay/devices/device-1/api/threads/start",
             transport.requests[1].url,
         )
         assertEquals("POST", transport.requests[1].method)
-        assertTrue(transport.requests[1].body!!.contains("\"prompt\":\"Continue\""))
+        assertTrue(transport.requests[1].body!!.contains("\"workspaceId\":\"workspace-1\""))
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1?limit=20",
+            transport.requests[2].url,
+        )
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1/prompt",
+            transport.requests[3].url,
+        )
+        assertEquals("POST", transport.requests[3].method)
+        assertTrue(transport.requests[3].body!!.contains("\"prompt\":\"Continue\""))
     }
 
     private class RecordingTransport(

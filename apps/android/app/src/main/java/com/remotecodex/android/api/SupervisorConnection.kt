@@ -151,15 +151,48 @@ data class SupervisorHomeSnapshot(
     val activeThreadCount: Int = threads.count { it.status == "running" }
 }
 
+data class CreateSupervisorWorkspaceRequest(
+    val absPath: String,
+    val label: String? = null,
+)
+
+data class StartSupervisorThreadRequest(
+    val workspaceId: String,
+    val title: String? = null,
+    val model: String,
+    val approvalMode: String = "yolo",
+    val provider: String? = null,
+)
+
+data class SupervisorThreadTurnItem(
+    val id: String,
+    val kind: String,
+    val text: String,
+)
+
+data class SupervisorThreadTurn(
+    val id: String,
+    val status: String,
+    val items: List<SupervisorThreadTurnItem>,
+)
+
 data class SupervisorThreadDetail(
     val thread: SupervisorThreadSummary,
     val workspace: SupervisorWorkspaceSummary,
+    val turns: List<SupervisorThreadTurn>,
     val turnCount: Int,
     val pendingRequestCount: Int,
     val liveItemCount: Int,
     val goalStatus: String?,
     val goalObjective: String?,
-)
+) {
+    val latestAgentMessage: String? = turns
+        .asReversed()
+        .asSequence()
+        .flatMap { turn -> turn.items.asReversed().asSequence() }
+        .firstOrNull { item -> item.kind == "agentMessage" && item.text.isNotBlank() }
+        ?.text
+}
 
 data class SendThreadPromptRequest(
     val prompt: String,
