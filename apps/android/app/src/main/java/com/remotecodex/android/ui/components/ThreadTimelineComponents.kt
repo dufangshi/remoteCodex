@@ -84,7 +84,8 @@ import com.remotecodex.android.ui.presentation.GraphChatHistoryStatusTone
 import com.remotecodex.android.ui.presentation.MessageStatusModel
 import com.remotecodex.android.ui.presentation.buildGraphChatImageHistoryState
 import com.remotecodex.android.ui.presentation.parseUserMessageSegments
-import com.remotecodex.android.ui.presentation.planStepStatusAccessibilityLabel
+import com.remotecodex.android.ui.presentation.buildPlanStepStatusPresentationState
+import com.remotecodex.android.ui.presentation.PlanStepStatusTone
 import com.remotecodex.android.ui.presentation.shouldShowHistoryGroupRowTitle
 import com.remotecodex.android.ui.presentation.summarizeInlinePreviewText
 import com.remotecodex.android.ui.presentation.threadStatusLabel
@@ -538,19 +539,20 @@ private fun LivePlanStepRow(
 
 @Composable
 private fun PlanStepStatusPill(status: PlanStepStatus) {
-    val foreground = when (status) {
-        PlanStepStatus.Completed -> ThreadColors.Success
-        PlanStepStatus.Running -> ThreadColors.Warning
-        PlanStepStatus.Failed -> ThreadColors.Danger
-        PlanStepStatus.Pending -> ThreadColors.Info
-        PlanStepStatus.Unknown -> ThreadColors.ForegroundMuted
+    val state = buildPlanStepStatusPresentationState(status)
+    val foreground = when (state.tone) {
+        PlanStepStatusTone.Success -> ThreadColors.Success
+        PlanStepStatusTone.Running -> ThreadColors.Warning
+        PlanStepStatusTone.Danger -> ThreadColors.Danger
+        PlanStepStatusTone.Pending -> ThreadColors.Info
+        PlanStepStatusTone.Unknown -> ThreadColors.ForegroundMuted
     }
-    val background = when (status) {
-        PlanStepStatus.Completed -> ThreadColors.SuccessSoft
-        PlanStepStatus.Running -> ThreadColors.WarningSoft
-        PlanStepStatus.Failed -> ThreadColors.DangerSoft
-        PlanStepStatus.Pending -> ThreadColors.InfoSoft
-        PlanStepStatus.Unknown -> ThreadColors.SurfaceStrong
+    val background = when (state.tone) {
+        PlanStepStatusTone.Success -> ThreadColors.SuccessSoft
+        PlanStepStatusTone.Running -> ThreadColors.WarningSoft
+        PlanStepStatusTone.Danger -> ThreadColors.DangerSoft
+        PlanStepStatusTone.Pending -> ThreadColors.InfoSoft
+        PlanStepStatusTone.Unknown -> ThreadColors.SurfaceStrong
     }
     Box(
         modifier = Modifier
@@ -559,11 +561,11 @@ private fun PlanStepStatusPill(status: PlanStepStatus) {
             .background(background)
             .border(1.dp, foreground.copy(alpha = 0.42f), RoundedCornerShape(999.dp))
             .semantics {
-                contentDescription = planStepStatusAccessibilityLabel(status)
+                contentDescription = state.accessibilityLabel
             },
         contentAlignment = Alignment.Center,
     ) {
-        if (status == PlanStepStatus.Running) {
+        if (state.running) {
             RunningDots(color = foreground, dotSize = 4.dp, spacing = 2.dp)
         } else {
             PlanStepStatusIcon(status = status, color = foreground)

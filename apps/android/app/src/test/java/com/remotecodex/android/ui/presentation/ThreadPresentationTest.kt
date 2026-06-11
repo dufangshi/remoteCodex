@@ -248,6 +248,37 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun buildsPlanStepStatusPresentationState() {
+        assertEquals(
+            PlanStepStatusPresentationState(
+                label = "Done",
+                accessibilityLabel = "Plan step status: Completed",
+                tone = PlanStepStatusTone.Success,
+                running = false,
+            ),
+            buildPlanStepStatusPresentationState(PlanStepStatus.Completed),
+        )
+        assertEquals(
+            PlanStepStatusPresentationState(
+                label = "Running",
+                accessibilityLabel = "Plan step status: In progress",
+                tone = PlanStepStatusTone.Running,
+                running = true,
+            ),
+            buildPlanStepStatusPresentationState(PlanStepStatus.Running),
+        )
+        assertEquals(
+            PlanStepStatusPresentationState(
+                label = "Pending",
+                accessibilityLabel = "Plan step status: Pending",
+                tone = PlanStepStatusTone.Pending,
+                running = false,
+            ),
+            buildPlanStepStatusPresentationState(PlanStepStatus.Pending),
+        )
+    }
+
+    @Test
     fun buildsComposerStatusStripForRunningChat() {
         assertEquals(
             listOf(

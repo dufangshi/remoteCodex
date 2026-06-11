@@ -70,6 +70,21 @@ data class GraphChatReasoningState(
     val copyAccessibilityLabel: String,
 )
 
+enum class PlanStepStatusTone {
+    Success,
+    Running,
+    Danger,
+    Pending,
+    Unknown,
+}
+
+data class PlanStepStatusPresentationState(
+    val label: String,
+    val accessibilityLabel: String,
+    val tone: PlanStepStatusTone,
+    val running: Boolean,
+)
+
 data class GraphChatHistoryGroupFrameState(
     val title: String,
     val subtitle: String,
@@ -2808,6 +2823,21 @@ fun planStepStatusAccessibilityLabel(status: PlanStepStatus): String {
         PlanStepStatus.Unknown -> "Unknown"
     }
     return "Plan step status: $statusLabel"
+}
+
+fun buildPlanStepStatusPresentationState(status: PlanStepStatus): PlanStepStatusPresentationState {
+    return PlanStepStatusPresentationState(
+        label = planStepStatusLabel(status),
+        accessibilityLabel = planStepStatusAccessibilityLabel(status),
+        tone = when (status) {
+            PlanStepStatus.Completed -> PlanStepStatusTone.Success
+            PlanStepStatus.Running -> PlanStepStatusTone.Running
+            PlanStepStatus.Failed -> PlanStepStatusTone.Danger
+            PlanStepStatus.Pending -> PlanStepStatusTone.Pending
+            PlanStepStatus.Unknown -> PlanStepStatusTone.Unknown
+        },
+        running = status == PlanStepStatus.Running,
+    )
 }
 
 fun historyItemLabel(kind: HistoryItemKind): String {
