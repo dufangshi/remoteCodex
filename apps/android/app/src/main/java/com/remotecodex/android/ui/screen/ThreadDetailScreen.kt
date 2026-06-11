@@ -20,18 +20,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.remotecodex.android.api.SendThreadPromptRequest
 import com.remotecodex.android.api.RespondThreadRequest
 import com.remotecodex.android.api.RespondThreadRequestAnswer
+import com.remotecodex.android.api.SendThreadPromptRequest
 import com.remotecodex.android.api.SupervisorApiClient
 import com.remotecodex.android.api.SupervisorConnectionConfig
+import com.remotecodex.android.api.SupervisorEventSocketClient
 import com.remotecodex.android.api.SupervisorHomeSnapshot
 import com.remotecodex.android.settings.ThemeMode
 import com.remotecodex.android.ui.components.GraphButton
 import com.remotecodex.android.ui.components.GraphButtonSize
 import com.remotecodex.android.ui.components.GraphButtonVariant
-import com.remotecodex.android.ui.model.ThreadDetailPreview
 import com.remotecodex.android.ui.model.PendingRequestPreview
+import com.remotecodex.android.ui.model.ThreadDetailPreview
 import com.remotecodex.android.ui.presentation.buildThreadDetailPreviewFromSupervisor
 import com.remotecodex.android.ui.sample.ThreadPreviewSample
 import com.remotecodex.android.ui.theme.ThreadColors
@@ -63,6 +64,9 @@ fun ThreadDetailScreen(
         mutableStateOf<PendingRequestResponse?>(null)
     }
     val client = remember(supervisorConnection) { SupervisorApiClient(supervisorConnection) }
+    val eventSocketClient = remember(supervisorConnection) {
+        SupervisorEventSocketClient(supervisorConnection)
+    }
 
     LaunchedEffect(threadId, refreshNonce) {
         loading = detail == null
@@ -74,6 +78,14 @@ fun ThreadDetailScreen(
         result
             .onSuccess { dto -> detail = buildThreadDetailPreviewFromSupervisor(dto) }
             .onFailure { throwable -> error = throwable.message ?: "Thread detail failed." }
+    }
+
+    LaunchedEffect(threadId, eventSocketClient) {
+        eventSocketClient.threadEvents().collect { event ->
+            if (event.threadId == threadId) {
+                refreshNonce += 1
+            }
+        }
     }
 
     LaunchedEffect(pendingPrompt) {

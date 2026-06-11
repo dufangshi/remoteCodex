@@ -13,7 +13,7 @@ This skeleton is the first step for a Kotlin Android client targeting Android 10
 - UI framework: Jetpack Compose and Material 3.
 - Initial module: `:app`.
 
-The first APK now has a first-run supervisor connection setup path plus the first real thread-detail REST path. The setup path supports local, server, and relay connection modes, persists the selected endpoint, logs in to server and relay auth endpoints, and follows the relay account/device model rather than QR pairing. In relay mode the Android client can load `/relay/portal`, show registered backend devices with online/last-heartbeat status, create a new relay device, and display the one-time `rcd_...` token plus a `remote-codex relay-supervisor` command for the private backend. After a connection is saved, the app reads a backend home snapshot from `/api/workspaces` and `/api/threads` using direct or relay-forwarded paths. Thread rows now open a real `/api/threads/:id` detail screen, project server turns, pending requests, and answered request notes into the native timeline, send prompts through `/api/threads/:id/prompt`, and answer pending requests through `/api/threads/:id/requests/:requestId/respond` before refreshing detail. The sample thread detail surface remains as a fallback and component preview while WebSocket event projection, shell actions, and workspace file APIs are completed.
+The first APK now has a first-run supervisor connection setup path plus the first real thread-detail REST path. The setup path supports local, server, and relay connection modes, persists the selected endpoint, logs in to server and relay auth endpoints, and follows the relay account/device model rather than QR pairing. In relay mode the Android client can load `/relay/portal`, show registered backend devices with online/last-heartbeat status, create a new relay device, and display the one-time `rcd_...` token plus a `remote-codex relay-supervisor` command for the private backend. After a connection is saved, the app reads a backend home snapshot from `/api/workspaces` and `/api/threads` using direct or relay-forwarded paths. Thread rows now open a real `/api/threads/:id` detail screen, project server turns, pending requests, and answered request notes into the native timeline, send prompts through `/api/threads/:id/prompt`, and answer pending requests through `/api/threads/:id/requests/:requestId/respond` before refreshing detail. The detail route also opens `/ws` or `/relay/devices/:deviceId/ws`, listens for matching `thread.*` envelopes, and refreshes the aggregate detail projection when live thread events arrive. The sample thread detail surface remains as a fallback and component preview while a full event reducer, shell actions, and workspace file APIs are completed.
 
 ## Directory Layout
 
@@ -39,7 +39,7 @@ apps/android
 
 Code should keep clear package boundaries:
 
-- `api`: REST transport, connection modes, auth/session DTOs, relay portal/device DTOs, websocket URL derivation, thread detail fetch, and prompt send methods.
+- `api`: REST transport, connection modes, auth/session DTOs, relay portal/device DTOs, websocket URL derivation, first-pass websocket event stream, thread detail fetch, prompt send, and pending request response methods.
 - `auth`: future Android Keystore token storage, relay account login, and device revocation flows.
 - `settings`: persistent local app settings such as theme mode, base URL, auth token, and selected relay device id.
 - `thread`: thread projection state, event reducers, optimistic sends, and reconnect reconciliation.
@@ -209,7 +209,7 @@ Still open:
 - Real resizable workspace panel behavior on tablet/desktop form factors; current Android coverage keeps stable panel boundaries and handle visuals without drag resizing.
 - Real garbage folder mutation behind the current empty-garbage confirmation skeleton.
 - Real shell adapter actions behind the current native shell controls: create, attach, terminate, rename, split pane, copy visible output, PTY input, and control sequences.
-- WebSocket event reducer, relay device deletion/revocation, shared-session selection, and shell integration. Real thread detail REST binding and prompt send/refresh are now present.
+- Full WebSocket event reducer, relay device deletion/revocation, shared-session selection, and shell integration. Android now has a first-pass websocket client that subscribes to supervisor thread events and refreshes thread detail for matching `threadId` values, but it still relies on full-detail reconciliation instead of applying `thread.output.delta` and item lifecycle events locally.
 - A backend claim-code flow is still open. The current relay model is: login to the relay, create a device, copy the one-time `rcd_...` token to the private backend, and run `remote-codex relay-supervisor` with that token. A future smoother path can let the backend print a short claim code and let a logged-in Web or Android client bind that pending backend to the account.
 - Real plugin management behind the current native settings skeleton: refresh, persisted import, enable/disable, uninstall, and trusted renderer policy.
 - Screenshot-based E2E after emulator access is available.
@@ -307,13 +307,34 @@ ANDROID_SDK_ROOT=/home/u/Android/Sdk \
   com.remotecodex.android.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
+Live relay/backend verification uses a relay server reachable from the Windows-hosted emulator at `10.0.2.2`. The websocket E2E logs in to the relay, opens `/relay/devices/:deviceId/ws`, sends `supervisor.ping`, and waits for the private supervisor to return `supervisor.pong`. The backend E2E logs in, verifies the selected relay device is online, creates or finds a workspace, starts a real Codex-backed thread, sends a prompt, and polls the real thread detail until the expected Codex reply appears.
+
+```bash
+/home/u/bin/adb-windows shell am instrument -w -r --user 0 \
+  -e class com.remotecodex.android.e2e.RelayWebSocketE2ETest \
+  -e relayBaseUrl http://10.0.2.2:18788 \
+  -e relayUsername androide2e \
+  -e relayPassword androidpassword \
+  -e relayDeviceId 971c9750-623a-43ee-a8af-5205a53c7581 \
+  com.remotecodex.android.test/androidx.test.runner.AndroidJUnitRunner
+
+/home/u/bin/adb-windows shell am instrument -w -r --user 0 \
+  -e class com.remotecodex.android.e2e.RelayBackendE2ETest \
+  -e relayBaseUrl http://10.0.2.2:18788 \
+  -e relayUsername androide2e \
+  -e relayPassword androidpassword \
+  -e relayDeviceId 971c9750-623a-43ee-a8af-5205a53c7581 \
+  -e workspacePath /home/u/dev/remote-codex-android-instrumented-e2e-workspace \
+  -e expectedReply android-websocket-refresh-ok \
+  com.remotecodex.android.test/androidx.test.runner.AndroidJUnitRunner
+```
+
 ## Near-Term Roadmap
 
 1. Bind the connected mode to a minimal home screen: active threads, workspaces, and pending confirmations.
 2. Replace sample thread detail data with `GET /api/threads/:id` or relay-forwarded equivalents.
-3. Add websocket connect/reconnect and event projection for live thread updates.
+3. Replace the first-pass websocket refresh with a real event reducer for streaming output, live items, pending requests, reconnect reconciliation, and foreground resume.
 4. Move stored auth tokens from SharedPreferences to Android Keystore before broader remote usage.
-5. Add a backend claim-code flow so `remote-codex relay-supervisor` can be bound to a logged-in relay account without manually copying the one-time device token.
-6. Add device revocation and relay device management.
-7. Add voice mode as a native feature instead of mirroring the web composer.
-8. Replace artifact fallbacks with richer native renderers where they are worth maintaining.
+5. Add relay device deletion/revocation and shared-session selection.
+6. Add voice mode as a native feature instead of mirroring the web composer.
+7. Replace artifact fallbacks with richer native renderers where they are worth maintaining.
