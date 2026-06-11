@@ -555,12 +555,23 @@ data class ComposerHookFormState(
     val primaryLabel: String,
     val primaryEnabled: Boolean,
     val fields: List<Pair<String, String>>,
+    val backTargetMode: ComposerHooksPanelModePreview,
+    val clearsEditingTargetOnBack: Boolean,
+    val configBusy: Boolean,
 )
 
 data class ComposerHookActionState(
     val label: String,
     val enabled: Boolean,
+    val kind: ComposerHookActionKind,
+    val clearsConfigStatus: Boolean,
 )
+
+enum class ComposerHookActionKind {
+    Edit,
+    Trust,
+    Untrust,
+}
 
 data class ComposerHookRowState(
     val title: String,
@@ -575,6 +586,7 @@ data class ComposerHookRowState(
 )
 
 data class ComposerHooksPanelState(
+    val configSourceTitle: String,
     val configSourceLabel: String,
     val showAddAction: Boolean,
     val mode: ComposerHooksPanelModePreview,
@@ -582,6 +594,19 @@ data class ComposerHooksPanelState(
     val form: ComposerHookFormState?,
     val hooks: List<ComposerHookRowState>,
     val emptyMessage: String?,
+    val lifecycle: ComposerHooksPanelLifecycleState,
+)
+
+data class ComposerHooksPanelLifecycleState(
+    val hostConfigFilesAvailable: Boolean,
+    val hookTrustAvailable: Boolean,
+    val configBusy: Boolean,
+    val addTargetMode: ComposerHooksPanelModePreview?,
+    val resetsFormOnAdd: Boolean,
+    val clearsConfigStatusOnAdd: Boolean,
+    val backTargetMode: ComposerHooksPanelModePreview?,
+    val clearsEditingTargetOnBack: Boolean,
+    val stateDescription: String,
 )
 
 data class ComposerGoalComposeCardState(
@@ -707,10 +732,29 @@ fun buildComposerHooksPanelState(
                 },
                 commandLabel = hook.command?.takeIf { it.isNotBlank() } ?: hook.handlerType.name.lowercase(),
                 statusMessage = hook.statusMessage?.takeIf { it.isNotBlank() },
-                editAction = if (editable) ComposerHookActionState("Edit", enabled = true) else null,
+                editAction = if (editable) {
+                    ComposerHookActionState(
+                        label = "Edit",
+                        enabled = true,
+                        kind = ComposerHookActionKind.Edit,
+                        clearsConfigStatus = true,
+                    )
+                } else {
+                    null
+                },
                 trustAction = when {
-                    canUntrust -> ComposerHookActionState("Untrust", enabled = !panel.configBusy)
-                    canTrust -> ComposerHookActionState("Trust", enabled = !panel.configBusy)
+                    canUntrust -> ComposerHookActionState(
+                        label = "Untrust",
+                        enabled = !panel.configBusy,
+                        kind = ComposerHookActionKind.Untrust,
+                        clearsConfigStatus = true,
+                    )
+                    canTrust -> ComposerHookActionState(
+                        label = "Trust",
+                        enabled = !panel.configBusy,
+                        kind = ComposerHookActionKind.Trust,
+                        clearsConfigStatus = true,
+                    )
                     else -> null
                 },
                 trustLabel = hookTrustLabel(hook.trustStatus),
@@ -728,6 +772,7 @@ fun buildComposerHooksPanelState(
         panel.hooks.isEmpty()
 
     return ComposerHooksPanelState(
+        configSourceTitle = "Hook config sources",
         configSourceLabel = panel.projectHooksPath?.takeIf { it.isNotBlank() } ?: "<workspace hooks config>",
         showAddAction = panel.mode == ComposerHooksPanelModePreview.List && panel.hostConfigFilesAvailable,
         mode = panel.mode,
@@ -735,7 +780,43 @@ fun buildComposerHooksPanelState(
         form = buildComposerHookFormState(panel),
         hooks = hooks,
         emptyMessage = if (empty) "No hooks configured for this workspace." else null,
+        lifecycle = buildComposerHooksPanelLifecycleState(panel),
     )
+}
+
+private fun buildComposerHooksPanelLifecycleState(
+    panel: ComposerHooksPanelPreview,
+): ComposerHooksPanelLifecycleState {
+    val addVisible = panel.mode == ComposerHooksPanelModePreview.List && panel.hostConfigFilesAvailable
+    val backTarget = when (panel.mode) {
+        ComposerHooksPanelModePreview.Add,
+        ComposerHooksPanelModePreview.Edit,
+        -> ComposerHooksPanelModePreview.List
+        ComposerHooksPanelModePreview.List -> null
+    }
+    return ComposerHooksPanelLifecycleState(
+        hostConfigFilesAvailable = panel.hostConfigFilesAvailable,
+        hookTrustAvailable = panel.hookTrustAvailable,
+        configBusy = panel.configBusy,
+        addTargetMode = if (addVisible) ComposerHooksPanelModePreview.Add else null,
+        resetsFormOnAdd = addVisible,
+        clearsConfigStatusOnAdd = addVisible,
+        backTargetMode = backTarget,
+        clearsEditingTargetOnBack = backTarget != null,
+        stateDescription = buildComposerHooksPanelStateDescription(panel),
+    )
+}
+
+private fun buildComposerHooksPanelStateDescription(panel: ComposerHooksPanelPreview): String {
+    val mode = when (panel.mode) {
+        ComposerHooksPanelModePreview.List -> "list"
+        ComposerHooksPanelModePreview.Add -> "add form"
+        ComposerHooksPanelModePreview.Edit -> "edit form"
+    }
+    val editing = if (panel.hostConfigFilesAvailable) "editing available" else "editing unavailable"
+    val trust = if (panel.hookTrustAvailable) "trust available" else "trust unavailable"
+    val busy = if (panel.configBusy) ", saving" else ""
+    return "Hooks panel: $mode, $editing, $trust$busy"
 }
 
 private fun buildComposerHookFormState(panel: ComposerHooksPanelPreview): ComposerHookFormState? {
@@ -766,6 +847,9 @@ private fun buildComposerHookFormState(panel: ComposerHooksPanelPreview): Compos
             "Timeout" to "${form.timeoutSec}s",
             "Status" to form.statusMessage,
         ),
+        backTargetMode = ComposerHooksPanelModePreview.List,
+        clearsEditingTargetOnBack = true,
+        configBusy = panel.configBusy,
     )
 }
 

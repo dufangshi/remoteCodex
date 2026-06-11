@@ -1995,6 +1995,7 @@ private fun HooksPreviewGroup(hooksPanelState: ComposerHooksPanelState) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .semantics { stateDescription = hooksPanelState.lifecycle.stateDescription }
             .clip(RoundedCornerShape(12.dp))
             .background(ThreadColors.Surface)
             .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
@@ -2016,7 +2017,7 @@ private fun HooksPreviewGroup(hooksPanelState: ComposerHooksPanelState) {
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = hooksPanelState.configSourceLabel,
+                    text = "${hooksPanelState.configSourceTitle} · ${hooksPanelState.configSourceLabel}",
                     color = ThreadColors.ForegroundMuted,
                     style = MaterialTheme.typography.labelSmall,
                     maxLines = 1,

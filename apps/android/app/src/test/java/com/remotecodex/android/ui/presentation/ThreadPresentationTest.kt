@@ -2192,6 +2192,7 @@ class ThreadPresentationTest {
     fun buildsComposerHooksListPanelState() {
         assertEquals(
             ComposerHooksPanelState(
+                configSourceTitle = "Hook config sources",
                 configSourceLabel = "/repo/.codex/hooks.json",
                 showAddAction = true,
                 mode = ComposerHooksPanelModePreview.List,
@@ -2204,8 +2205,18 @@ class ThreadPresentationTest {
                         title = "PreToolUse · Bash",
                         commandLabel = "scripts/check-command.sh",
                         statusMessage = "Checking shell command",
-                        editAction = ComposerHookActionState("Edit", enabled = true),
-                        trustAction = ComposerHookActionState("Trust", enabled = true),
+                        editAction = ComposerHookActionState(
+                            label = "Edit",
+                            enabled = true,
+                            kind = ComposerHookActionKind.Edit,
+                            clearsConfigStatus = true,
+                        ),
+                        trustAction = ComposerHookActionState(
+                            label = "Trust",
+                            enabled = true,
+                            kind = ComposerHookActionKind.Trust,
+                            clearsConfigStatus = true,
+                        ),
                         trustLabel = "Modified",
                         sourceLabel = "Project",
                         enabledLabel = "Enabled",
@@ -2215,8 +2226,18 @@ class ThreadPresentationTest {
                         title = "UserPromptSubmit",
                         commandLabel = "scripts/log-prompt.sh",
                         statusMessage = null,
-                        editAction = ComposerHookActionState("Edit", enabled = true),
-                        trustAction = ComposerHookActionState("Untrust", enabled = true),
+                        editAction = ComposerHookActionState(
+                            label = "Edit",
+                            enabled = true,
+                            kind = ComposerHookActionKind.Edit,
+                            clearsConfigStatus = true,
+                        ),
+                        trustAction = ComposerHookActionState(
+                            label = "Untrust",
+                            enabled = true,
+                            kind = ComposerHookActionKind.Untrust,
+                            clearsConfigStatus = true,
+                        ),
                         trustLabel = "Trusted",
                         sourceLabel = "User",
                         enabledLabel = "Disabled",
@@ -2224,6 +2245,17 @@ class ThreadPresentationTest {
                     ),
                 ),
                 emptyMessage = null,
+                lifecycle = ComposerHooksPanelLifecycleState(
+                    hostConfigFilesAvailable = true,
+                    hookTrustAvailable = true,
+                    configBusy = false,
+                    addTargetMode = ComposerHooksPanelModePreview.Add,
+                    resetsFormOnAdd = true,
+                    clearsConfigStatusOnAdd = true,
+                    backTargetMode = null,
+                    clearsEditingTargetOnBack = false,
+                    stateDescription = "Hooks panel: list, editing available, trust available",
+                ),
             ),
             buildComposerHooksPanelState(
                 ComposerHooksPanelPreview(
@@ -2285,6 +2317,9 @@ class ThreadPresentationTest {
                     "Timeout" to "30s",
                     "Status" to "Checking shell command",
                 ),
+                backTargetMode = ComposerHooksPanelModePreview.List,
+                clearsEditingTargetOnBack = true,
+                configBusy = false,
             ),
             buildComposerHooksPanelState(
                 ComposerHooksPanelPreview(
@@ -2310,6 +2345,9 @@ class ThreadPresentationTest {
                     "Timeout" to "12s",
                     "Status" to "Post write check",
                 ),
+                backTargetMode = ComposerHooksPanelModePreview.List,
+                clearsEditingTargetOnBack = true,
+                configBusy = true,
             ),
             buildComposerHooksPanelState(
                 ComposerHooksPanelPreview(
@@ -2330,6 +2368,84 @@ class ThreadPresentationTest {
                     ),
                 ),
             ).form,
+        )
+    }
+
+    @Test
+    fun buildsComposerHooksLifecycleForListAndFormModes() {
+        assertEquals(
+            ComposerHooksPanelLifecycleState(
+                hostConfigFilesAvailable = true,
+                hookTrustAvailable = true,
+                configBusy = false,
+                addTargetMode = ComposerHooksPanelModePreview.Add,
+                resetsFormOnAdd = true,
+                clearsConfigStatusOnAdd = true,
+                backTargetMode = null,
+                clearsEditingTargetOnBack = false,
+                stateDescription = "Hooks panel: list, editing available, trust available",
+            ),
+            buildComposerHooksPanelState(
+                ComposerHooksPanelPreview(
+                    mode = ComposerHooksPanelModePreview.List,
+                    hostConfigFilesAvailable = true,
+                    hookTrustAvailable = true,
+                    configBusy = false,
+                    hooks = emptyList(),
+                    warnings = emptyList(),
+                    errors = emptyList(),
+                ),
+            ).lifecycle,
+        )
+
+        assertEquals(
+            ComposerHooksPanelLifecycleState(
+                hostConfigFilesAvailable = false,
+                hookTrustAvailable = false,
+                configBusy = false,
+                addTargetMode = null,
+                resetsFormOnAdd = false,
+                clearsConfigStatusOnAdd = false,
+                backTargetMode = null,
+                clearsEditingTargetOnBack = false,
+                stateDescription = "Hooks panel: list, editing unavailable, trust unavailable",
+            ),
+            buildComposerHooksPanelState(
+                ComposerHooksPanelPreview(
+                    mode = ComposerHooksPanelModePreview.List,
+                    hostConfigFilesAvailable = false,
+                    hookTrustAvailable = false,
+                    configBusy = false,
+                    hooks = emptyList(),
+                    warnings = emptyList(),
+                    errors = emptyList(),
+                ),
+            ).lifecycle,
+        )
+
+        assertEquals(
+            ComposerHooksPanelLifecycleState(
+                hostConfigFilesAvailable = true,
+                hookTrustAvailable = true,
+                configBusy = true,
+                addTargetMode = null,
+                resetsFormOnAdd = false,
+                clearsConfigStatusOnAdd = false,
+                backTargetMode = ComposerHooksPanelModePreview.List,
+                clearsEditingTargetOnBack = true,
+                stateDescription = "Hooks panel: edit form, editing available, trust available, saving",
+            ),
+            buildComposerHooksPanelState(
+                ComposerHooksPanelPreview(
+                    mode = ComposerHooksPanelModePreview.Edit,
+                    hostConfigFilesAvailable = true,
+                    hookTrustAvailable = true,
+                    configBusy = true,
+                    hooks = emptyList(),
+                    warnings = emptyList(),
+                    errors = emptyList(),
+                ),
+            ).lifecycle,
         )
     }
 
