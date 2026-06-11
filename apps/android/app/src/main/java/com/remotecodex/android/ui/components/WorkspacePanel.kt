@@ -1188,6 +1188,7 @@ private fun GraphEmptyGarbageDialogPreview(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val fileCountLabel = if (files.size == 1) "1 file" else "${files.size} files"
     GraphDialogOverlay(
         onDismiss = onClose,
         modifier = modifier,
@@ -1212,7 +1213,7 @@ private fun GraphEmptyGarbageDialogPreview(
                     }
                 } else {
                     GraphDialogFooter(
-                        primaryLabel = "Empty garbage",
+                        primaryLabel = "Yes, empty garbage",
                         primaryTone = GraphDialogActionTone.Danger,
                         onCancel = onClose,
                     )
@@ -1225,7 +1226,7 @@ private fun GraphEmptyGarbageDialogPreview(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "Permanently delete files in",
+                    text = "Permanently delete all files in",
                     modifier = Modifier.weight(1f, fill = false),
                     color = ThreadColors.ForegroundMuted,
                     style = MaterialTheme.typography.bodySmall,
@@ -1256,6 +1257,41 @@ private fun GraphEmptyGarbageDialogPreview(
                     style = MaterialTheme.typography.bodyMedium,
                 )
             } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(ThreadColors.DangerSoft)
+                        .border(1.dp, ThreadColors.Danger.copy(alpha = 0.34f), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    WorkspaceActionGlyph(
+                        icon = WorkspaceActionIcon.Trash,
+                        color = ThreadColors.Danger,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            text = fileCountLabel,
+                            color = ThreadColors.Danger,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                        )
+                        Text(
+                            text = "This permanently removes the listed garbage files.",
+                            color = ThreadColors.ForegroundMuted,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
