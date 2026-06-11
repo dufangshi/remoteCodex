@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -40,12 +41,17 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.ui.model.HistoryItemKind
 import com.remotecodex.android.ui.model.HistoryGroupPreview
@@ -83,6 +89,7 @@ import com.remotecodex.android.ui.presentation.GraphChatHistoryStatusState
 import com.remotecodex.android.ui.presentation.GraphChatHistoryStatusTone
 import com.remotecodex.android.ui.presentation.MessageStatusModel
 import com.remotecodex.android.ui.presentation.ComposerStatusTone
+import com.remotecodex.android.ui.presentation.GraphChatPlainTextSegment
 import com.remotecodex.android.ui.presentation.buildGraphChatImageHistoryState
 import com.remotecodex.android.ui.presentation.parseUserMessageSegments
 import com.remotecodex.android.ui.presentation.buildPlanStepStatusPresentationState
@@ -93,10 +100,13 @@ import com.remotecodex.android.ui.presentation.summarizeInlinePreviewText
 import com.remotecodex.android.ui.presentation.threadStatusLabel
 import com.remotecodex.android.ui.presentation.toolResultStatusLabel
 import com.remotecodex.android.ui.presentation.UserMessageSegment
+import com.remotecodex.android.ui.presentation.graphChatPlainTextSegments
 import com.remotecodex.android.ui.presentation.graphChatHistoryItemCopyText
 import com.remotecodex.android.ui.presentation.graphChatHistoryGroupRowSummary
 import com.remotecodex.android.ui.theme.ThreadColors
 import kotlinx.coroutines.delay
+
+private const val UserMessageUrlAnnotationTag = "user-message-url"
 
 @Composable
 fun ThreadTimeline(
@@ -808,13 +818,52 @@ private fun UserMessageBody(text: String) {
     ) {
         segments.forEach { segment ->
             when (segment) {
-                is UserMessageSegment.Text -> Text(
-                    text = segment.text,
-                    color = ThreadColors.UserBubbleText,
-                    style = MaterialTheme.typography.bodyLarge,
-                )
+                is UserMessageSegment.Text -> UserMessageTextSegment(text = segment.text)
                 is UserMessageSegment.Photo -> UserPhotoAttachment(path = segment.path)
                 is UserMessageSegment.File -> UserFileAttachment(path = segment.path)
+            }
+        }
+    }
+}
+
+@Composable
+private fun UserMessageTextSegment(text: String) {
+    val uriHandler = LocalUriHandler.current
+    val linkColor = ThreadColors.Info
+    val annotated = remember(text, linkColor) { userMessageAnnotatedString(text, linkColor) }
+    ClickableText(
+        text = annotated,
+        style = MaterialTheme.typography.bodyLarge.copy(color = ThreadColors.UserBubbleText),
+        onClick = { offset ->
+            annotated
+                .getStringAnnotations(tag = UserMessageUrlAnnotationTag, start = offset, end = offset)
+                .firstOrNull()
+                ?.let { annotation -> uriHandler.openUri(annotation.item) }
+        },
+    )
+}
+
+private fun userMessageAnnotatedString(
+    text: String,
+    linkColor: Color,
+): AnnotatedString {
+    return buildAnnotatedString {
+        graphChatPlainTextSegments(text).forEach { segment ->
+            when (segment) {
+                is GraphChatPlainTextSegment.Text -> append(segment.text)
+                is GraphChatPlainTextSegment.Url -> {
+                    pushStringAnnotation(tag = UserMessageUrlAnnotationTag, annotation = segment.href)
+                    withStyle(
+                        SpanStyle(
+                            color = linkColor,
+                            fontWeight = FontWeight.Medium,
+                            textDecoration = TextDecoration.Underline,
+                        ),
+                    ) {
+                        append(segment.text)
+                    }
+                    pop()
+                }
             }
         }
     }

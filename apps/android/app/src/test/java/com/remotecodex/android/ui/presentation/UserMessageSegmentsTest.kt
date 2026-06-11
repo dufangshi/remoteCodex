@@ -30,6 +30,39 @@ class UserMessageSegmentsTest {
     }
 
     @Test
+    fun preservesUrlTextAroundAttachmentTokensForLinkification() {
+        val segments = parseUserMessageSegments(
+            "Open www.example.com/docs, then [FILE docs/android-client-architecture.md] and https://example.dev/run.",
+        )
+
+        assertEquals(
+            listOf(
+                UserMessageSegment.Text("Open www.example.com/docs, then "),
+                UserMessageSegment.File("docs/android-client-architecture.md"),
+                UserMessageSegment.Text(" and https://example.dev/run."),
+            ),
+            segments,
+        )
+        assertEquals(
+            listOf(
+                GraphChatPlainTextSegment.Text("Open "),
+                GraphChatPlainTextSegment.Url("www.example.com/docs", "https://www.example.com/docs"),
+                GraphChatPlainTextSegment.Text(","),
+                GraphChatPlainTextSegment.Text(" then "),
+            ),
+            graphChatPlainTextSegments((segments.first() as UserMessageSegment.Text).text),
+        )
+        assertEquals(
+            listOf(
+                GraphChatPlainTextSegment.Text(" and "),
+                GraphChatPlainTextSegment.Url("https://example.dev/run", "https://example.dev/run"),
+                GraphChatPlainTextSegment.Text("."),
+            ),
+            graphChatPlainTextSegments((segments.last() as UserMessageSegment.Text).text),
+        )
+    }
+
+    @Test
     fun preservesMalformedOrBlankAttachmentTokensAsText() {
         assertEquals(
             listOf(UserMessageSegment.Text("[PHOTO ] [FILE]")),
