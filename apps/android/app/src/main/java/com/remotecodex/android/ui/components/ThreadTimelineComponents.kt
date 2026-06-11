@@ -883,25 +883,14 @@ private fun ReasoningAccordion(items: List<ReasoningPreview>) {
             .clip(RoundedCornerShape(10.dp)),
     ) {
         GraphAccordionItem(
-            title = if (running) "Thinking" else "Thought Process",
+            title = if (running) "Thinking..." else "Thought Process",
             subtitle = "${items.size} reasoning item${if (items.size == 1) "" else "s"}",
             backgroundColor = ThreadColors.Surface,
             showDivider = false,
             leading = {
-                Text(
-                    text = "Brain",
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(if (running) ThreadColors.InfoSoft else ThreadColors.SurfaceStrong)
-                        .border(
-                            1.dp,
-                            if (running) ThreadColors.Info.copy(alpha = 0.36f) else ThreadColors.Border,
-                            RoundedCornerShape(999.dp),
-                        )
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                ReasoningGlyph(
+                    running = running,
                     color = if (running) ThreadColors.Info else ThreadColors.ForegroundMuted,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.SemiBold,
                 )
             },
             trailing = {
@@ -933,6 +922,71 @@ private fun ReasoningAccordion(items: List<ReasoningPreview>) {
                 style = MaterialTheme.typography.bodyMedium,
                 fontFamily = FontFamily.Monospace,
             )
+        }
+    }
+}
+
+@Composable
+private fun ReasoningGlyph(
+    running: Boolean,
+    color: Color,
+) {
+    val shape = RoundedCornerShape(999.dp)
+    Box(
+        modifier = Modifier
+            .size(30.dp)
+            .clip(shape)
+            .background(if (running) ThreadColors.InfoSoft else ThreadColors.SurfaceStrong)
+            .border(
+                1.dp,
+                if (running) ThreadColors.Info.copy(alpha = 0.36f) else ThreadColors.Border,
+                shape,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(modifier = Modifier.size(16.dp)) {
+            val stroke = Stroke(width = 1.35.dp.toPx(), cap = StrokeCap.Round)
+            val w = size.width
+            val h = size.height
+            fun line(x1: Float, y1: Float, x2: Float, y2: Float) {
+                drawLine(
+                    color = color,
+                    start = Offset(w * x1, h * y1),
+                    end = Offset(w * x2, h * y2),
+                    strokeWidth = stroke.width,
+                    cap = StrokeCap.Round,
+                )
+            }
+
+            drawCircle(
+                color = color,
+                radius = w * 0.28f,
+                center = Offset(w * 0.38f, h * 0.38f),
+                style = stroke,
+            )
+            drawCircle(
+                color = color,
+                radius = w * 0.28f,
+                center = Offset(w * 0.62f, h * 0.38f),
+                style = stroke,
+            )
+            drawCircle(
+                color = color,
+                radius = w * 0.30f,
+                center = Offset(w * 0.42f, h * 0.64f),
+                style = stroke,
+            )
+            drawCircle(
+                color = color,
+                radius = w * 0.30f,
+                center = Offset(w * 0.58f, h * 0.64f),
+                style = stroke,
+            )
+            line(0.50f, 0.16f, 0.50f, 0.84f)
+            line(0.34f, 0.42f, 0.46f, 0.50f)
+            line(0.66f, 0.42f, 0.54f, 0.50f)
+            line(0.36f, 0.68f, 0.46f, 0.62f)
+            line(0.64f, 0.68f, 0.54f, 0.62f)
         }
     }
 }
