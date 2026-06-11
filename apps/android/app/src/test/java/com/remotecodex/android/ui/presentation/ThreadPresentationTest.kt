@@ -3,6 +3,8 @@ package com.remotecodex.android.ui.presentation
 import com.remotecodex.android.ui.model.HistoryItemKind
 import com.remotecodex.android.ui.model.PlanStepStatus
 import com.remotecodex.android.ui.model.ComposerActiveView
+import com.remotecodex.android.ui.model.ComposerContextAvailability
+import com.remotecodex.android.ui.model.ComposerContextPreview
 import com.remotecodex.android.ui.model.ThreadStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -203,6 +205,57 @@ class ThreadPresentationTest {
                 followTail = false,
             ),
         )
+    }
+
+    @Test
+    fun buildsAvailableComposerContextUsageState() {
+        assertEquals(
+            ComposerContextUsageState(
+                modelLabel = "gpt-test",
+                usageLabel = "12.5k / 100k",
+                remainingLabel = "87.5k left · 87% context left",
+                progressFraction = 0.87f,
+                available = true,
+            ),
+            buildComposerContextUsageState(
+                ComposerContextPreview(
+                    model = "gpt-test",
+                    tokensInContextWindow = 12_500,
+                    modelContextWindow = 100_000,
+                    remainingPercent = 87,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun buildsUnavailableComposerContextUsageState() {
+        assertEquals(
+            ComposerContextUsageState(
+                modelLabel = "Select model",
+                usageLabel = "Context unavailable",
+                remainingLabel = "Context usage unavailable",
+                progressFraction = 0f,
+                available = false,
+            ),
+            buildComposerContextUsageState(
+                ComposerContextPreview(
+                    model = "",
+                    tokensInContextWindow = 0,
+                    modelContextWindow = 0,
+                    remainingPercent = 120,
+                    availability = ComposerContextAvailability.Unavailable,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun formatsComposerContextTokenKilocounts() {
+        assertEquals("999", formatContextTokenKilocount(999))
+        assertEquals("1k", formatContextTokenKilocount(1_000))
+        assertEquals("42.8k", formatContextTokenKilocount(42_850))
+        assertEquals("0", formatContextTokenKilocount(-3))
     }
 
     @Test

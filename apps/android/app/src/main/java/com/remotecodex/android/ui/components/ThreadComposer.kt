@@ -33,11 +33,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.ui.model.ComposerPreview
 import com.remotecodex.android.ui.presentation.ComposerActionState
+import com.remotecodex.android.ui.presentation.ComposerContextUsageState
 import com.remotecodex.android.ui.presentation.ComposerJumpLatestState
 import com.remotecodex.android.ui.presentation.ComposerPrimaryActionKind
 import com.remotecodex.android.ui.presentation.ComposerStatusChipModel
 import com.remotecodex.android.ui.presentation.ComposerStatusTone
 import com.remotecodex.android.ui.presentation.buildComposerActionState
+import com.remotecodex.android.ui.presentation.buildComposerContextUsageState
 import com.remotecodex.android.ui.presentation.buildComposerJumpLatestState
 import com.remotecodex.android.ui.presentation.buildComposerStatusStrip
 import com.remotecodex.android.ui.theme.ThreadColors
@@ -66,6 +68,7 @@ fun ThreadComposer(
         activeView = composer.activeView,
         followTail = composer.followTail,
     )
+    val contextState = buildComposerContextUsageState(composer.context)
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -109,7 +112,7 @@ fun ThreadComposer(
             )
             Box(modifier = Modifier.weight(1f))
             InlineToggle(
-                label = "gpt-5.4",
+                label = contextState.modelLabel,
                 selected = openMenu == ComposerMenu.Model,
                 onClick = { openMenu = openMenu.toggle(ComposerMenu.Model) },
                 modifier = Modifier.weight(1.25f, fill = false),
@@ -120,7 +123,7 @@ fun ThreadComposer(
                 onClick = { openMenu = openMenu.toggle(ComposerMenu.Effort) },
             )
         }
-        ComposerInputGroupPreview()
+        ComposerInputGroupPreview(contextState = contextState)
         ComposerStatusStrip(chips = statusChips)
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -259,7 +262,7 @@ private fun ComposerStatusChip(chip: ComposerStatusChipModel) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ComposerInputGroupPreview() {
+private fun ComposerInputGroupPreview(contextState: ComposerContextUsageState) {
     GraphInputGroup(
         blockStart = {
             FlowRow(
@@ -277,28 +280,29 @@ private fun ComposerInputGroupPreview() {
                 color = ThreadColors.ForegroundMuted,
                 style = MaterialTheme.typography.bodyLarge,
             )
-            ContextProgressPreview()
+            ContextProgressPreview(contextState = contextState)
         },
         blockEnd = {
             GraphInputGroupAddonRow {
                 GraphInputGroupAddon(label = "Prompt")
                 GraphInputGroupAddon(label = "Markdown")
                 Box(modifier = Modifier.weight(1f))
-                GraphInputGroupText(text = "42.8k / 128k")
+                GraphInputGroupText(text = contextState.usageLabel)
             }
         },
     )
 }
 
 @Composable
-private fun ContextProgressPreview() {
+private fun ContextProgressPreview(contextState: ComposerContextUsageState) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        GraphSlider(fraction = 0.67f)
+        GraphSlider(fraction = contextState.progressFraction, enabled = contextState.available)
         Text(
-            text = "67% context left",
+            text = contextState.remainingLabel,
             color = ThreadColors.ForegroundMuted,
             style = MaterialTheme.typography.labelSmall,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -359,7 +363,15 @@ private fun ContextUsageRow() {
                 maxLines = 1,
             )
         }
-        ContextProgressPreview()
+        ContextProgressPreview(
+            contextState = ComposerContextUsageState(
+                modelLabel = "gpt-5.4",
+                usageLabel = "42.8k / 128k",
+                remainingLabel = "85.2k left · 67% context left",
+                progressFraction = 0.67f,
+                available = true,
+            ),
+        )
     }
 }
 

@@ -5,6 +5,8 @@ import com.remotecodex.android.ui.model.PlanStepStatus
 import com.remotecodex.android.ui.model.ThreadStatus
 import com.remotecodex.android.ui.model.ToolStatus
 import com.remotecodex.android.ui.model.ComposerActiveView
+import com.remotecodex.android.ui.model.ComposerContextAvailability
+import com.remotecodex.android.ui.model.ComposerContextPreview
 
 enum class MessageStatusTone {
     Neutral,
@@ -84,6 +86,53 @@ data class ComposerJumpLatestState(
     val active: Boolean,
     val title: String,
 )
+
+data class ComposerContextUsageState(
+    val modelLabel: String,
+    val usageLabel: String,
+    val remainingLabel: String,
+    val progressFraction: Float,
+    val available: Boolean,
+)
+
+fun buildComposerContextUsageState(context: ComposerContextPreview): ComposerContextUsageState {
+    val available = context.availability == ComposerContextAvailability.Available &&
+        context.modelContextWindow > 0
+    val usedTokens = context.tokensInContextWindow.coerceAtLeast(0)
+    val contextTokens = context.modelContextWindow.coerceAtLeast(0)
+    val remainingTokens = (contextTokens - usedTokens).coerceAtLeast(0)
+    val percent = context.remainingPercent.coerceIn(0, 100)
+
+    return ComposerContextUsageState(
+        modelLabel = context.model.takeIf { it.isNotBlank() } ?: "Select model",
+        usageLabel = if (available) {
+            "${formatContextTokenKilocount(usedTokens)} / ${formatContextTokenKilocount(contextTokens)}"
+        } else {
+            "Context unavailable"
+        },
+        remainingLabel = if (available) {
+            "${formatContextTokenKilocount(remainingTokens)} left · ${percent}% context left"
+        } else {
+            "Context usage unavailable"
+        },
+        progressFraction = if (available) percent / 100f else 0f,
+        available = available,
+    )
+}
+
+fun formatContextTokenKilocount(value: Int): String {
+    val safeValue = value.coerceAtLeast(0)
+    if (safeValue < 1_000) {
+        return safeValue.toString()
+    }
+    val whole = safeValue / 1_000
+    val tenths = (safeValue % 1_000) / 100
+    return if (tenths == 0) {
+        "${whole}k"
+    } else {
+        "$whole.${tenths}k"
+    }
+}
 
 fun buildComposerJumpLatestState(
     activeView: ComposerActiveView,

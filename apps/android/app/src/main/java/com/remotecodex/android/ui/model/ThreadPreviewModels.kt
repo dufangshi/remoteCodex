@@ -163,7 +163,21 @@ data class ComposerPreview(
     val followTail: Boolean = true,
     val canInterrupt: Boolean = true,
     val workspaceModeLabel: String = "workspace write",
+    val context: ComposerContextPreview = ComposerContextPreview(),
 )
+
+data class ComposerContextPreview(
+    val model: String = "gpt-5.4",
+    val tokensInContextWindow: Int = 42_800,
+    val modelContextWindow: Int = 128_000,
+    val remainingPercent: Int = 67,
+    val availability: ComposerContextAvailability = ComposerContextAvailability.Available,
+)
+
+enum class ComposerContextAvailability {
+    Available,
+    Unavailable,
+}
 
 enum class ComposerActiveView {
     Chat,
