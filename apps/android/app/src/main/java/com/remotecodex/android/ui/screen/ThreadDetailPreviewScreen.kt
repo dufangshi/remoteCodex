@@ -38,6 +38,7 @@ import com.remotecodex.android.api.UpdateThreadGoalRequest
 import com.remotecodex.android.api.UpdateThreadSettingsRequest
 import com.remotecodex.android.ui.model.DetailPreview
 import com.remotecodex.android.ui.model.DetailRequest
+import com.remotecodex.android.ui.model.InlineImagePreview
 import com.remotecodex.android.ui.model.PendingRequestPreview
 import com.remotecodex.android.ui.model.ThreadRoomPreview
 import com.remotecodex.android.ui.model.ThreadDetailPreview
@@ -135,6 +136,7 @@ fun ThreadDetailSurface(
     onDenyPendingRequest: (PendingRequestPreview) -> Unit = {},
     onSubmitPendingRequest: (PendingRequestPreview, Map<String, List<String>>) -> Unit = { _, _ -> },
     onLoadEarlier: (() -> Unit)? = null,
+    imageResolver: (suspend (String) -> InlineImagePreview?)? = null,
     onRenameThread: ((String) -> Unit)? = null,
     onDeleteThread: (() -> Unit)? = null,
     submittingPrompt: Boolean = false,
@@ -234,6 +236,7 @@ fun ThreadDetailSurface(
                                 onDenyPendingRequest = onDenyPendingRequest,
                                 onSubmitPendingRequest = onSubmitPendingRequest,
                                 onLoadEarlier = onLoadEarlier,
+                                imageResolver = imageResolver,
                                 modifier = Modifier.fillMaxSize(),
                             )
                             ThreadSurfaceView.Workspace -> WorkspacePanel(
@@ -409,6 +412,7 @@ private fun ChatPreviewSurface(
     onLoadEarlier: (() -> Unit)?,
     onDenyPendingRequest: (PendingRequestPreview) -> Unit,
     onSubmitPendingRequest: (PendingRequestPreview, Map<String, List<String>>) -> Unit,
+    imageResolver: (suspend (String) -> InlineImagePreview?)?,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -423,6 +427,7 @@ private fun ChatPreviewSurface(
             onLoadEarlier = onLoadEarlier,
             onDenyPendingRequest = onDenyPendingRequest,
             onSubmitPendingRequest = onSubmitPendingRequest,
+            imageResolver = imageResolver,
             modifier = Modifier.weight(1f),
         )
         ThreadUsageFooter(detail = detail)

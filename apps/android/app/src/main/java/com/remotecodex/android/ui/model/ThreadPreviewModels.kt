@@ -120,6 +120,13 @@ data class DetailImagePreview(
     val filename: String? = null,
 )
 
+data class InlineImagePreview(
+    val source: String,
+    val contentType: String?,
+    val bytes: ByteArray,
+    val filename: String? = null,
+)
+
 sealed interface DetailRequest {
     val fallback: DetailPreview
 

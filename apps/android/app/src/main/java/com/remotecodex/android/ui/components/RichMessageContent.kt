@@ -1,8 +1,10 @@
 package com.remotecodex.android.ui.components
 
+import android.graphics.BitmapFactory
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -30,6 +32,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.SpanStyle
@@ -43,6 +46,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import com.remotecodex.android.ui.model.InlineImagePreview
 import com.remotecodex.android.ui.presentation.GraphChatInlineSegment
 import com.remotecodex.android.ui.presentation.GraphChatToolEntry
 import com.remotecodex.android.ui.presentation.GraphChatToolValueKind
@@ -55,6 +59,7 @@ import com.remotecodex.android.ui.presentation.graphChatInlineSegments
 import com.remotecodex.android.ui.presentation.graphChatMessagePreviewText
 import com.remotecodex.android.ui.presentation.graphChatShowMoreLabel
 import com.remotecodex.android.ui.presentation.graphChatToolEntries
+import com.remotecodex.android.ui.presentation.isSafeMarkdownImageSource
 import com.remotecodex.android.ui.presentation.looksLikeMoleculeStructure
 import com.remotecodex.android.ui.presentation.RichMessageBlock
 import com.remotecodex.android.ui.presentation.TableAlignment
@@ -84,6 +89,7 @@ private sealed interface RichInlineRun {
 fun RichMessageContent(
     content: String,
     modifier: Modifier = Modifier,
+    imageResolver: (suspend (String) -> InlineImagePreview?)? = null,
 ) {
     val processedContent = preprocessGraphChatToolBlocks(content).processedContent
     var expanded by remember(processedContent) { mutableStateOf(false) }
@@ -103,19 +109,27 @@ fun RichMessageContent(
     ) {
         blocks.forEach { block ->
             when (block) {
-                is RichMessageBlock.Paragraph -> RichParagraph(text = block.text)
+                is RichMessageBlock.Paragraph -> RichParagraph(
+                    text = block.text,
+                    imageResolver = imageResolver,
+                )
                 is RichMessageBlock.Heading -> RichHeading(block = block)
                 is RichMessageBlock.Bullet -> RichBullet(
                     text = block.text,
                     checked = block.checked,
                     level = block.level,
+                    imageResolver = imageResolver,
                 )
                 is RichMessageBlock.OrderedItem -> RichOrderedItem(
                     number = block.number,
                     text = block.text,
                     level = block.level,
+                    imageResolver = imageResolver,
                 )
-                is RichMessageBlock.Quote -> RichQuote(text = block.text)
+                is RichMessageBlock.Quote -> RichQuote(
+                    text = block.text,
+                    imageResolver = imageResolver,
+                )
                 RichMessageBlock.HorizontalRule -> RichHorizontalRule()
                 is RichMessageBlock.Math -> RichMathBlock(expression = block.expression)
                 is RichMessageBlock.Html -> RichHtmlBlock(source = block.source)
@@ -523,15 +537,24 @@ private fun RichHeading(block: RichMessageBlock.Heading) {
 }
 
 @Composable
-private fun RichParagraph(text: String) {
+private fun RichParagraph(
+    text: String,
+    imageResolver: (suspend (String) -> InlineImagePreview?)?,
+) {
     RichClickableText(
         text = text,
         modifier = Modifier.fillMaxWidth(),
+        imageResolver = imageResolver,
     )
 }
 
 @Composable
-private fun RichBullet(text: String, checked: Boolean? = null, level: Int = 0) {
+private fun RichBullet(
+    text: String,
+    checked: Boolean? = null,
+    level: Int = 0,
+    imageResolver: (suspend (String) -> InlineImagePreview?)?,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -551,12 +574,18 @@ private fun RichBullet(text: String, checked: Boolean? = null, level: Int = 0) {
         RichClickableText(
             text = text,
             modifier = Modifier.weight(1f),
+            imageResolver = imageResolver,
         )
     }
 }
 
 @Composable
-private fun RichOrderedItem(number: Int, text: String, level: Int = 0) {
+private fun RichOrderedItem(
+    number: Int,
+    text: String,
+    level: Int = 0,
+    imageResolver: (suspend (String) -> InlineImagePreview?)?,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -572,6 +601,7 @@ private fun RichOrderedItem(number: Int, text: String, level: Int = 0) {
         RichClickableText(
             text = text,
             modifier = Modifier.weight(1f),
+            imageResolver = imageResolver,
         )
     }
 }
@@ -579,7 +609,10 @@ private fun RichOrderedItem(number: Int, text: String, level: Int = 0) {
 private fun listIndentPadding(level: Int) = (level.coerceIn(0, 4) * 16).dp
 
 @Composable
-private fun RichQuote(text: String) {
+private fun RichQuote(
+    text: String,
+    imageResolver: (suspend (String) -> InlineImagePreview?)?,
+) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -588,7 +621,11 @@ private fun RichQuote(text: String) {
             .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(8.dp))
             .padding(horizontal = 11.dp, vertical = 9.dp),
     ) {
-        RichClickableText(text = text, modifier = Modifier.fillMaxWidth())
+        RichClickableText(
+            text = text,
+            modifier = Modifier.fillMaxWidth(),
+            imageResolver = imageResolver,
+        )
     }
 }
 
@@ -751,6 +788,7 @@ private enum class RichCopyFeedbackState {
 private fun RichClickableText(
     text: String,
     modifier: Modifier = Modifier,
+    imageResolver: (suspend (String) -> InlineImagePreview?)? = null,
 ) {
     val segments = graphChatInlineSegments(text)
     if (segments.none { it is GraphChatInlineSegment.Image }) {
@@ -771,7 +809,10 @@ private fun RichClickableText(
                     segments = run.segments,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                is RichInlineRun.Image -> RichInlineImage(segment = run.segment)
+                is RichInlineRun.Image -> RichInlineImage(
+                    segment = run.segment,
+                    imageResolver = imageResolver,
+                )
             }
         }
     }
@@ -870,7 +911,31 @@ private fun inlineSegmentsAnnotatedString(segments: List<GraphChatInlineSegment>
 }
 
 @Composable
-private fun RichInlineImage(segment: GraphChatInlineSegment.Image) {
+private fun RichInlineImage(
+    segment: GraphChatInlineSegment.Image,
+    imageResolver: (suspend (String) -> InlineImagePreview?)?,
+) {
+    var image by remember(segment.source) { mutableStateOf<InlineImagePreview?>(null) }
+    var failed by remember(segment.source) { mutableStateOf(false) }
+    LaunchedEffect(segment.source, imageResolver) {
+        image = null
+        failed = false
+        val resolver = imageResolver ?: return@LaunchedEffect
+        if (!isSafeMarkdownImageSource(segment.source)) return@LaunchedEffect
+        val resolved = runCatching { resolver(segment.source) }.getOrNull()
+        if (resolved == null) {
+            failed = true
+        } else {
+            image = resolved
+        }
+    }
+    val bitmap = remember(image?.bytes) {
+        image?.bytes?.let { bytes ->
+            runCatching {
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+            }.getOrNull()
+        }
+    }
     Column(
         modifier = Modifier
             .clip(RoundedCornerShape(10.dp))
@@ -879,18 +944,29 @@ private fun RichInlineImage(segment: GraphChatInlineSegment.Image) {
             .padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .background(ThreadColors.CodeBackground)
-                .padding(horizontal = 40.dp, vertical = 24.dp),
-        ) {
-            Text(
-                text = "IMAGE",
-                color = ThreadColors.Info,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap,
+                contentDescription = segment.label.ifBlank { "Markdown image" },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(ThreadColors.CodeBackground),
             )
+        } else {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(ThreadColors.CodeBackground)
+                    .padding(horizontal = 40.dp, vertical = 24.dp),
+            ) {
+                Text(
+                    text = if (failed) "IMAGE UNAVAILABLE" else "IMAGE",
+                    color = if (failed) ThreadColors.Warning else ThreadColors.Info,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
         }
         Text(
             text = segment.label.ifBlank { "Attached image" },
@@ -899,7 +975,8 @@ private fun RichInlineImage(segment: GraphChatInlineSegment.Image) {
             fontWeight = FontWeight.SemiBold,
         )
         Text(
-            text = basenameFromAssetPath(segment.source).ifBlank { segment.source },
+            text = image?.filename?.takeIf { it.isNotBlank() }
+                ?: basenameFromAssetPath(segment.source).ifBlank { segment.source },
             color = ThreadColors.ForegroundMuted,
             style = MaterialTheme.typography.labelSmall,
             fontFamily = FontFamily.Monospace,

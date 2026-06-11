@@ -61,6 +61,7 @@ import com.remotecodex.android.ui.model.HistoryItemPreview
 import com.remotecodex.android.ui.model.DetailPreview
 import com.remotecodex.android.ui.model.DetailRequest
 import com.remotecodex.android.ui.model.LivePlanPreview
+import com.remotecodex.android.ui.model.InlineImagePreview
 import com.remotecodex.android.ui.model.MessagePreview
 import com.remotecodex.android.ui.model.PendingRequestPreview
 import com.remotecodex.android.ui.model.PlanStepStatus
@@ -134,6 +135,7 @@ fun ThreadTimeline(
     onLoadEarlier: (() -> Unit)? = null,
     onDenyPendingRequest: (PendingRequestPreview) -> Unit = {},
     onSubmitPendingRequest: (PendingRequestPreview, Map<String, List<String>>) -> Unit = { _, _ -> },
+    imageResolver: (suspend (String) -> InlineImagePreview?)? = null,
 ) {
     val requestEntries = remember(auxiliary, pendingRequests) {
         buildTimelineRequestEntryStates(
@@ -181,7 +183,11 @@ fun ThreadTimeline(
             }
         }
         items(turns, key = { it.index }) { turn ->
-            TurnFrame(turn = turn, onOpenDetail = onOpenDetail)
+            TurnFrame(
+                turn = turn,
+                onOpenDetail = onOpenDetail,
+                imageResolver = imageResolver,
+            )
         }
         if (auxiliary.pendingSteers.isNotEmpty()) {
             items(auxiliary.pendingSteers, key = { steer -> "steer:${steer.timeLabel}:${steer.prompt}" }) { steer ->
@@ -200,6 +206,7 @@ fun ThreadTimeline(
 private fun TurnFrame(
     turn: TurnPreview,
     onOpenDetail: (DetailRequest) -> Unit,
+    imageResolver: (suspend (String) -> InlineImagePreview?)?,
 ) {
     var collapsed by remember(turn.index, turn.optimistic) { mutableStateOf(false) }
     val frameState = buildGraphChatTurnFrameState(turn = turn, collapsed = collapsed)
@@ -273,7 +280,11 @@ private fun TurnFrame(
             )
         } else {
             turn.messages.forEach { message ->
-                MessageBubble(message = message, onOpenDetail = onOpenDetail)
+                MessageBubble(
+                    message = message,
+                    onOpenDetail = onOpenDetail,
+                    imageResolver = imageResolver,
+                )
             }
             turn.livePlan?.let { livePlan ->
                 LivePlanCard(livePlan = livePlan)
@@ -656,6 +667,7 @@ private fun PlanStepStatusIcon(status: PlanStepStatus, color: Color) {
 private fun MessageBubble(
     message: MessagePreview,
     onOpenDetail: (DetailRequest) -> Unit,
+    imageResolver: (suspend (String) -> InlineImagePreview?)?,
 ) {
     val frameState = buildGraphChatMessageFrameState(
         author = message.author,
@@ -701,7 +713,10 @@ private fun MessageBubble(
                 frameState = frameState,
             )
         } else {
-            RichMessageContent(content = message.richText)
+            RichMessageContent(
+                content = message.richText,
+                imageResolver = imageResolver,
+            )
         }
         if (!frameState.isUser && !frameState.showReasoningBeforeContent && message.reasoningItems.isNotEmpty()) {
             ReasoningAccordion(items = message.reasoningItems)

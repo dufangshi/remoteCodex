@@ -59,6 +59,7 @@ import com.remotecodex.android.ui.components.PendingPromptAttachmentUpload
 import com.remotecodex.android.ui.model.DetailImagePreview
 import com.remotecodex.android.ui.model.DetailPreview
 import com.remotecodex.android.ui.model.DetailRequest
+import com.remotecodex.android.ui.model.InlineImagePreview
 import com.remotecodex.android.ui.model.PendingRequestPreview
 import com.remotecodex.android.ui.model.ShellPreview
 import com.remotecodex.android.ui.model.ThreadDetailPreview
@@ -1006,6 +1007,20 @@ fun ThreadDetailScreen(
             onLoadEarlier = {
                 if (!loadingEarlier) {
                     pendingLoadEarlier = true
+                }
+            },
+            imageResolver = { source ->
+                withContext(Dispatchers.IO) {
+                    val image = client.fetchThreadImageAsset(
+                        threadId = threadId,
+                        path = source,
+                    )
+                    InlineImagePreview(
+                        source = source,
+                        contentType = image.contentType,
+                        bytes = image.bytes,
+                        filename = image.filename,
+                    )
                 }
             },
             onRenameThread = { title ->
