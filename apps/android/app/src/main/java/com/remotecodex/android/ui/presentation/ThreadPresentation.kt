@@ -2025,6 +2025,7 @@ fun buildComposerSettingsState(
     context: ComposerContextPreview,
     reasoningEffort: String?,
     supportedReasoningEffortCount: Int,
+    modelOptionCount: Int = 1,
     settingsBusy: Boolean,
     fastMode: Boolean,
     planModeAvailable: Boolean,
@@ -2033,8 +2034,9 @@ fun buildComposerSettingsState(
     optimisticCollaborationMode: String? = null,
 ): ComposerSettingsState {
     val supportedEfforts = supportedReasoningEffortCount.coerceAtLeast(0)
+    val availableModels = modelOptionCount.coerceAtLeast(0)
     val modelLabel = context.model.takeIf { it.isNotBlank() } ?: "Select model"
-    val modelEnabled = !settingsBusy
+    val modelEnabled = !settingsBusy && availableModels > 0
     val effortEnabled = modelEnabled && supportedEfforts > 0
     val effortTitle = when {
         fastMode -> "Fast mode is on. Turn it off from the slash toolbox to edit reasoning."

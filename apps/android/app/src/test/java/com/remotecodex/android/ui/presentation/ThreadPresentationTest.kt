@@ -795,6 +795,31 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun disablesComposerModelSettingsWhenNoModelOptions() {
+        assertEquals(
+            ComposerSettingsState(
+                modelLabel = "gpt-test",
+                modelEnabled = false,
+                effortLabel = "Medium",
+                effortEnabled = false,
+                effortTitle = "Select reasoning effort",
+                planVisible = true,
+                planSelected = false,
+            ),
+            buildComposerSettingsState(
+                context = ComposerContextPreview(model = "gpt-test"),
+                reasoningEffort = "medium",
+                supportedReasoningEffortCount = 3,
+                modelOptionCount = 0,
+                settingsBusy = false,
+                fastMode = false,
+                planModeAvailable = true,
+                planModeActive = false,
+            ),
+        )
+    }
+
+    @Test
     fun buildsChatComposerSettingsToolbarState() {
         assertEquals(
             ComposerSettingsToolbarState(

@@ -155,6 +155,7 @@ fun ThreadComposer(
         context = composer.context,
         reasoningEffort = composer.reasoningEffort,
         supportedReasoningEffortCount = composer.supportedReasoningEffortCount,
+        modelOptionCount = composer.modelOptions.size,
         settingsBusy = composer.settingsBusy,
         fastMode = composer.fastMode,
         planModeAvailable = composer.planModeAvailable,
