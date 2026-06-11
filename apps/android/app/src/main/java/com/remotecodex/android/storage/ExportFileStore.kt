@@ -16,9 +16,12 @@ data class SavedExportFile(
 )
 
 fun Context.saveExportToDownloads(download: SupervisorFileDownload): SavedExportFile {
-    val filename = download.filename.sanitizeExportFilename()
     val contentType = download.contentType?.substringBefore(';')?.trim()?.takeIf { it.isNotBlank() }
-        ?: filename.inferContentType()
+        ?: download.filename.inferContentType()
+    val filename = normalizeExportFilename(
+        filename = download.filename,
+        contentType = contentType,
+    )
     val values = ContentValues().apply {
         put(MediaStore.Downloads.DISPLAY_NAME, filename)
         put(MediaStore.Downloads.MIME_TYPE, contentType)
@@ -61,9 +64,22 @@ fun Context.shareSavedExport(file: SavedExportFile) {
     startActivity(chooser)
 }
 
-private fun String.sanitizeExportFilename(): String {
-    val cleaned = replace(Regex("""[\\/:*?"<>|]"""), "_").trim().trim('.')
-    return cleaned.ifBlank { "remote-codex-transcript.pdf" }
+internal fun normalizeExportFilename(
+    filename: String,
+    contentType: String?,
+): String {
+    val cleaned = filename
+        .substringAfterLast('/')
+        .substringAfterLast('\\')
+        .replace(Regex("""[\\/:*?"<>|]"""), "_")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+        .trim('.')
+        .ifBlank { "remote-codex-transcript" }
+        .take(120)
+        .trim()
+        .trim('.')
+    return cleaned.withExportExtension(contentType)
 }
 
 private fun String.inferContentType(): String {
@@ -71,5 +87,17 @@ private fun String.inferContentType(): String {
         "html", "htm" -> "text/html"
         "pdf" -> "application/pdf"
         else -> "application/octet-stream"
+    }
+}
+
+private fun String.withExportExtension(contentType: String?): String {
+    val lower = lowercase()
+    if (lower.endsWith(".pdf") || lower.endsWith(".html") || lower.endsWith(".htm")) {
+        return this
+    }
+    return when (contentType?.substringBefore(';')?.trim()?.lowercase()) {
+        "text/html" -> "$this.html"
+        "application/pdf" -> "$this.pdf"
+        else -> this
     }
 }

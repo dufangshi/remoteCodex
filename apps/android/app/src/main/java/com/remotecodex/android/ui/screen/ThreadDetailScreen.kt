@@ -103,6 +103,7 @@ fun ThreadDetailScreen(
     var pendingCompact by remember(threadId) { mutableStateOf(false) }
     var pendingForkRequest by remember(threadId) { mutableStateOf<ForkThreadRequest?>(null) }
     var pendingExportRequest by remember(threadId) { mutableStateOf<ExportThreadRequest?>(null) }
+    var activeExportSignature by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingTrustHook by remember(threadId) { mutableStateOf<TrustThreadHookRequest?>(null) }
     var pendingUntrustHook by remember(threadId) { mutableStateOf<UntrustThreadHookRequest?>(null) }
     var pendingCreateShell by remember(threadId) { mutableStateOf(false) }
@@ -441,6 +442,12 @@ fun ThreadDetailScreen(
 
     LaunchedEffect(pendingExportRequest) {
         val exportRequest = pendingExportRequest ?: return@LaunchedEffect
+        val exportSignature = exportRequest.signature()
+        if (activeExportSignature == exportSignature) {
+            pendingExportRequest = null
+            return@LaunchedEffect
+        }
+        activeExportSignature = exportSignature
         threadActionBusy = true
         threadActionError = null
         val result = withContext(Dispatchers.IO) {
@@ -450,11 +457,16 @@ fun ThreadDetailScreen(
             }
         }
         threadActionBusy = false
+        activeExportSignature = null
         pendingExportRequest = null
         result
             .onSuccess { savedFile ->
-                threadActionError = "Export saved: ${savedFile.filename} (${savedFile.sizeBytes} bytes)"
-                runCatching { context.shareSavedExport(savedFile) }
+                val shareResult = runCatching { context.shareSavedExport(savedFile) }
+                threadActionError = if (shareResult.isSuccess) {
+                    "Export saved and shared: ${savedFile.filename} (${savedFile.sizeBytes} bytes)"
+                } else {
+                    "Export saved: ${savedFile.filename} (${savedFile.sizeBytes} bytes). Share failed: ${shareResult.exceptionOrNull()?.message ?: "No share target."}"
+                }
             }
             .onFailure { throwable -> threadActionError = throwable.message ?: "Export failed." }
     }
@@ -927,7 +939,9 @@ fun ThreadDetailScreen(
                 pendingForkRequest = ForkThreadRequest(mode = "turn", turnId = turnId)
             },
             onExportThread = { exportRequest ->
-                pendingExportRequest = exportRequest
+                if (!threadActionBusy && activeExportSignature != exportRequest.signature()) {
+                    pendingExportRequest = exportRequest
+                }
             },
             onTrustHook = { key, currentHash ->
                 pendingTrustHook = TrustThreadHookRequest(key = key, currentHash = currentHash)
@@ -1053,6 +1067,19 @@ private fun ThreadDetailPreview.withPendingRequestBusy(
             }
         },
     )
+}
+
+private fun ExportThreadRequest.signature(): String {
+    return listOf(
+        format,
+        mode,
+        limit?.toString().orEmpty(),
+        turnIds.joinToString(","),
+        profile,
+        includeTokenAndPrice.toString(),
+        includeCommandOutput?.toString().orEmpty(),
+        includeAbsolutePaths?.toString().orEmpty(),
+    ).joinToString(separator = "\u001f")
 }
 
 private data class ThreadDetailBundle(
