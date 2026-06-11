@@ -5,6 +5,11 @@ import com.remotecodex.android.ui.model.PlanStepStatus
 import com.remotecodex.android.ui.model.ComposerActiveView
 import com.remotecodex.android.ui.model.ComposerContextAvailability
 import com.remotecodex.android.ui.model.ComposerContextPreview
+import com.remotecodex.android.ui.model.ComposerMcpAuthStatusPreview
+import com.remotecodex.android.ui.model.ComposerMcpPanelModePreview
+import com.remotecodex.android.ui.model.ComposerMcpPanelPreview
+import com.remotecodex.android.ui.model.ComposerMcpServerPreview
+import com.remotecodex.android.ui.model.ComposerMcpToolPreview
 import com.remotecodex.android.ui.model.ComposerModelOptionPreview
 import com.remotecodex.android.ui.model.ComposerPanelLoadStatusPreview
 import com.remotecodex.android.ui.model.ComposerReasoningEffortOptionPreview
@@ -669,6 +674,165 @@ class ThreadPresentationTest {
         assertEquals("System", skillScopeLabel(ComposerSkillScopePreview.System))
         assertEquals("Admin", skillScopeLabel(ComposerSkillScopePreview.Admin))
         assertEquals("User", skillScopeLabel(ComposerSkillScopePreview.User))
+    }
+
+    @Test
+    fun buildsComposerMcpListPanelState() {
+        assertEquals(
+            ComposerMcpPanelState(
+                configSourceLabel = "/repo/.codex/config.toml",
+                showAddAction = true,
+                mode = ComposerMcpPanelModePreview.List,
+                statusMessages = emptyList(),
+                addOptions = emptyList(),
+                servers = listOf(
+                    ComposerMcpServerRowState(
+                        name = "docs",
+                        countsLabel = "5 tools · 2 resources · 1 templates",
+                        authLabel = "Public",
+                        toolPreview = "Search Docs · Fetch Docs · openapi · endpoints",
+                    ),
+                ),
+                form = null,
+                emptyMessage = null,
+            ),
+            buildComposerMcpPanelState(
+                ComposerMcpPanelPreview(
+                    mode = ComposerMcpPanelModePreview.List,
+                    status = ComposerPanelLoadStatusPreview.Ready,
+                    configPath = "/repo/.codex/config.toml",
+                    configEditing = true,
+                    servers = listOf(
+                        ComposerMcpServerPreview(
+                            name = "docs",
+                            authStatus = ComposerMcpAuthStatusPreview.Unsupported,
+                            tools = listOf(
+                                ComposerMcpToolPreview(name = "search", title = "Search Docs"),
+                                ComposerMcpToolPreview(name = "fetch", title = "Fetch Docs"),
+                                ComposerMcpToolPreview(name = "openapi", title = null),
+                                ComposerMcpToolPreview(name = "endpoints", title = ""),
+                                ComposerMcpToolPreview(name = "extra", title = "Extra"),
+                            ),
+                            resourceCount = 2,
+                            resourceTemplateCount = 1,
+                        ),
+                    ),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun buildsComposerMcpAddChoices() {
+        assertEquals(
+            listOf(
+                ComposerMcpAddOptionState(
+                    title = "HTTP / Streamable HTTP",
+                    modeLabel = "Form",
+                    description = "Add an MCP server with a name and URL, then write the matching block into provider config.",
+                    targetMode = ComposerMcpPanelModePreview.Http,
+                ),
+                ComposerMcpAddOptionState(
+                    title = "stdio / raw block",
+                    modeLabel = "TOML",
+                    description = "Write a single [mcp_servers.name] block, then save it back into provider config.",
+                    targetMode = ComposerMcpPanelModePreview.Stdio,
+                ),
+            ),
+            buildComposerMcpPanelState(
+                ComposerMcpPanelPreview(
+                    mode = ComposerMcpPanelModePreview.Add,
+                    servers = emptyList(),
+                ),
+            ).addOptions,
+        )
+    }
+
+    @Test
+    fun buildsComposerMcpHttpAndStdioForms() {
+        assertEquals(
+            ComposerMcpFormState(
+                title = "HTTP MCP",
+                primaryLabel = "Write HTTP MCP",
+                primaryEnabled = true,
+                fields = listOf(
+                    "MCP name" to "docs",
+                    "URL" to "https://example.test/mcp",
+                ),
+            ),
+            buildComposerMcpPanelState(
+                ComposerMcpPanelPreview(
+                    mode = ComposerMcpPanelModePreview.Http,
+                    httpName = "docs",
+                    httpUrl = "https://example.test/mcp",
+                    configBusy = false,
+                    servers = emptyList(),
+                ),
+            ).form,
+        )
+
+        assertEquals(
+            ComposerMcpFormState(
+                title = "MCP block for provider config",
+                primaryLabel = "Saving...",
+                primaryEnabled = false,
+                fields = listOf(
+                    "MCP block for provider config" to "[mcp_servers.docs]",
+                ),
+            ),
+            buildComposerMcpPanelState(
+                ComposerMcpPanelPreview(
+                    mode = ComposerMcpPanelModePreview.Stdio,
+                    rawBlock = "[mcp_servers.docs]",
+                    configBusy = true,
+                    servers = emptyList(),
+                ),
+            ).form,
+        )
+    }
+
+    @Test
+    fun buildsComposerMcpStatusMessagesAndEmptyState() {
+        assertEquals(
+            listOf(
+                ComposerMcpStatusMessageState("Loading MCP servers...", ComposerMcpStatusTone.Neutral),
+                ComposerMcpStatusMessageState("Unable to load MCP", ComposerMcpStatusTone.Error),
+                ComposerMcpStatusMessageState("Invalid provider config", ComposerMcpStatusTone.Error),
+                ComposerMcpStatusMessageState("MCP config updated", ComposerMcpStatusTone.Success),
+            ),
+            buildComposerMcpPanelState(
+                ComposerMcpPanelPreview(
+                    mode = ComposerMcpPanelModePreview.List,
+                    status = ComposerPanelLoadStatusPreview.Loading,
+                    error = "Unable to load MCP",
+                    configError = "Invalid provider config",
+                    configSuccess = "MCP config updated",
+                    servers = emptyList(),
+                ),
+            ).statusMessages,
+        )
+
+        assertEquals(
+            "No MCP servers available right now.",
+            buildComposerMcpPanelState(
+                ComposerMcpPanelPreview(
+                    mode = ComposerMcpPanelModePreview.List,
+                    status = ComposerPanelLoadStatusPreview.Ready,
+                    error = null,
+                    configPath = null,
+                    configEditing = false,
+                    servers = emptyList(),
+                ),
+            ).emptyMessage,
+        )
+    }
+
+    @Test
+    fun labelsComposerMcpAuthStatuses() {
+        assertEquals("Public", authStatusLabel(ComposerMcpAuthStatusPreview.Unsupported))
+        assertEquals("Login", authStatusLabel(ComposerMcpAuthStatusPreview.NotLoggedIn))
+        assertEquals("Token", authStatusLabel(ComposerMcpAuthStatusPreview.BearerToken))
+        assertEquals("OAuth", authStatusLabel(ComposerMcpAuthStatusPreview.OAuth))
     }
 
     @Test

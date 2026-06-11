@@ -179,6 +179,7 @@ data class ComposerPreview(
     val goalStatus: ThreadGoalStatusPreview? = ThreadGoalStatusPreview.Active,
     val toolboxItems: List<ComposerToolboxItemPreview> = defaultComposerToolboxItems,
     val skillsPanel: ComposerSkillsPanelPreview = ComposerSkillsPanelPreview(),
+    val mcpPanel: ComposerMcpPanelPreview = ComposerMcpPanelPreview(),
 )
 
 data class ComposerShellControlPreview(
@@ -316,6 +317,76 @@ val defaultComposerSkillErrors = listOf(
     ComposerSkillErrorPreview(
         path = "~/.codex/skills/local-experiment/SKILL.md",
         message = "Skill metadata incomplete",
+    ),
+)
+
+enum class ComposerMcpPanelModePreview {
+    List,
+    Add,
+    Http,
+    Stdio,
+}
+
+enum class ComposerMcpAuthStatusPreview {
+    Unsupported,
+    NotLoggedIn,
+    BearerToken,
+    OAuth,
+}
+
+data class ComposerMcpToolPreview(
+    val name: String,
+    val title: String? = null,
+)
+
+data class ComposerMcpServerPreview(
+    val name: String,
+    val authStatus: ComposerMcpAuthStatusPreview,
+    val tools: List<ComposerMcpToolPreview>,
+    val resourceCount: Int,
+    val resourceTemplateCount: Int,
+)
+
+data class ComposerMcpPanelPreview(
+    val mode: ComposerMcpPanelModePreview = ComposerMcpPanelModePreview.List,
+    val status: ComposerPanelLoadStatusPreview = ComposerPanelLoadStatusPreview.Ready,
+    val error: String? = null,
+    val configPath: String? = "~/.codex/config.toml",
+    val configEditing: Boolean = true,
+    val configError: String? = null,
+    val configSuccess: String? = null,
+    val configBusy: Boolean = false,
+    val httpName: String = "openaiDeveloperDocs",
+    val httpUrl: String = "https://developers.openai.com/mcp",
+    val rawBlock: String = "[mcp_servers.docs]",
+    val servers: List<ComposerMcpServerPreview> = defaultComposerMcpServers,
+)
+
+val defaultComposerMcpServers = listOf(
+    ComposerMcpServerPreview(
+        name = "openaiDeveloperDocs",
+        authStatus = ComposerMcpAuthStatusPreview.Unsupported,
+        tools = listOf(
+            ComposerMcpToolPreview(name = "search_openai_docs", title = "Search docs"),
+            ComposerMcpToolPreview(name = "fetch_openai_doc", title = "Fetch doc"),
+            ComposerMcpToolPreview(name = "get_openapi_spec", title = "OpenAPI spec"),
+            ComposerMcpToolPreview(name = "list_api_endpoints", title = "Endpoint list"),
+        ),
+        resourceCount = 0,
+        resourceTemplateCount = 0,
+    ),
+    ComposerMcpServerPreview(
+        name = "local-workspace",
+        authStatus = ComposerMcpAuthStatusPreview.BearerToken,
+        tools = listOf(
+            ComposerMcpToolPreview(name = "read_file", title = "Read file"),
+            ComposerMcpToolPreview(name = "list_resources", title = "List resources"),
+            ComposerMcpToolPreview(name = "inspect_schema", title = "Inspect schema"),
+            ComposerMcpToolPreview(name = "run_task", title = "Run task"),
+            ComposerMcpToolPreview(name = "write_note", title = "Write note"),
+        ),
+        resourceCount = 3,
+        resourceTemplateCount = 2,
     ),
 )
 

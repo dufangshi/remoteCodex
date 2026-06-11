@@ -7,6 +7,9 @@ import com.remotecodex.android.ui.model.ToolStatus
 import com.remotecodex.android.ui.model.ComposerActiveView
 import com.remotecodex.android.ui.model.ComposerContextAvailability
 import com.remotecodex.android.ui.model.ComposerContextPreview
+import com.remotecodex.android.ui.model.ComposerMcpAuthStatusPreview
+import com.remotecodex.android.ui.model.ComposerMcpPanelModePreview
+import com.remotecodex.android.ui.model.ComposerMcpPanelPreview
 import com.remotecodex.android.ui.model.ComposerModelOptionPreview
 import com.remotecodex.android.ui.model.ComposerPanelLoadStatusPreview
 import com.remotecodex.android.ui.model.ComposerReasoningEffortOptionPreview
@@ -211,6 +214,150 @@ data class ComposerSkillsPanelState(
     val errors: List<ComposerSkillErrorState>,
     val emptyMessage: String?,
 )
+
+enum class ComposerMcpStatusTone {
+    Neutral,
+    Error,
+    Success,
+}
+
+data class ComposerMcpStatusMessageState(
+    val message: String,
+    val tone: ComposerMcpStatusTone,
+)
+
+data class ComposerMcpAddOptionState(
+    val title: String,
+    val modeLabel: String,
+    val description: String,
+    val targetMode: ComposerMcpPanelModePreview,
+)
+
+data class ComposerMcpServerRowState(
+    val name: String,
+    val countsLabel: String,
+    val authLabel: String,
+    val toolPreview: String?,
+)
+
+data class ComposerMcpFormState(
+    val title: String,
+    val primaryLabel: String,
+    val primaryEnabled: Boolean,
+    val fields: List<Pair<String, String>>,
+)
+
+data class ComposerMcpPanelState(
+    val configSourceLabel: String,
+    val showAddAction: Boolean,
+    val mode: ComposerMcpPanelModePreview,
+    val statusMessages: List<ComposerMcpStatusMessageState>,
+    val addOptions: List<ComposerMcpAddOptionState>,
+    val servers: List<ComposerMcpServerRowState>,
+    val form: ComposerMcpFormState?,
+    val emptyMessage: String?,
+)
+
+fun buildComposerMcpPanelState(
+    panel: ComposerMcpPanelPreview,
+): ComposerMcpPanelState {
+    val statusMessages = buildList {
+        if (panel.status == ComposerPanelLoadStatusPreview.Loading && panel.servers.isEmpty()) {
+            add(ComposerMcpStatusMessageState("Loading MCP servers...", ComposerMcpStatusTone.Neutral))
+        }
+        panel.error?.takeIf { it.isNotBlank() }?.let { error ->
+            add(ComposerMcpStatusMessageState(error, ComposerMcpStatusTone.Error))
+        }
+        panel.configError?.takeIf { it.isNotBlank() }?.let { error ->
+            add(ComposerMcpStatusMessageState(error, ComposerMcpStatusTone.Error))
+        }
+        panel.configSuccess?.takeIf { it.isNotBlank() }?.let { success ->
+            add(ComposerMcpStatusMessageState(success, ComposerMcpStatusTone.Success))
+        }
+    }
+    val servers = if (panel.mode == ComposerMcpPanelModePreview.List) {
+        panel.servers.map { server ->
+            ComposerMcpServerRowState(
+                name = server.name,
+                countsLabel = "${server.tools.size} tools · ${server.resourceCount} resources · ${server.resourceTemplateCount} templates",
+                authLabel = authStatusLabel(server.authStatus),
+                toolPreview = server.tools
+                    .take(4)
+                    .map { it.title?.takeIf { title -> title.isNotBlank() } ?: it.name }
+                    .takeIf { it.isNotEmpty() }
+                    ?.joinToString(" · "),
+            )
+        }
+    } else {
+        emptyList()
+    }
+    val empty = panel.mode == ComposerMcpPanelModePreview.List &&
+        panel.status != ComposerPanelLoadStatusPreview.Loading &&
+        panel.error.isNullOrBlank() &&
+        panel.servers.isEmpty()
+
+    return ComposerMcpPanelState(
+        configSourceLabel = panel.configPath?.takeIf { it.isNotBlank() } ?: "<provider config>",
+        showAddAction = panel.mode == ComposerMcpPanelModePreview.List && panel.configEditing,
+        mode = panel.mode,
+        statusMessages = statusMessages,
+        addOptions = if (panel.mode == ComposerMcpPanelModePreview.Add) buildComposerMcpAddOptions() else emptyList(),
+        servers = servers,
+        form = buildComposerMcpFormState(panel),
+        emptyMessage = if (empty) "No MCP servers available right now." else null,
+    )
+}
+
+private fun buildComposerMcpAddOptions(): List<ComposerMcpAddOptionState> {
+    return listOf(
+        ComposerMcpAddOptionState(
+            title = "HTTP / Streamable HTTP",
+            modeLabel = "Form",
+            description = "Add an MCP server with a name and URL, then write the matching block into provider config.",
+            targetMode = ComposerMcpPanelModePreview.Http,
+        ),
+        ComposerMcpAddOptionState(
+            title = "stdio / raw block",
+            modeLabel = "TOML",
+            description = "Write a single [mcp_servers.name] block, then save it back into provider config.",
+            targetMode = ComposerMcpPanelModePreview.Stdio,
+        ),
+    )
+}
+
+private fun buildComposerMcpFormState(panel: ComposerMcpPanelPreview): ComposerMcpFormState? {
+    return when (panel.mode) {
+        ComposerMcpPanelModePreview.Http -> ComposerMcpFormState(
+            title = "HTTP MCP",
+            primaryLabel = if (panel.configBusy) "Saving..." else "Write HTTP MCP",
+            primaryEnabled = !panel.configBusy,
+            fields = listOf(
+                "MCP name" to panel.httpName,
+                "URL" to panel.httpUrl,
+            ),
+        )
+        ComposerMcpPanelModePreview.Stdio -> ComposerMcpFormState(
+            title = "MCP block for provider config",
+            primaryLabel = if (panel.configBusy) "Saving..." else "Write raw block",
+            primaryEnabled = !panel.configBusy,
+            fields = listOf(
+                "MCP block for provider config" to panel.rawBlock,
+            ),
+        )
+        ComposerMcpPanelModePreview.List,
+        ComposerMcpPanelModePreview.Add,
+        -> null
+    }
+}
+
+fun authStatusLabel(status: ComposerMcpAuthStatusPreview): String {
+    return when (status) {
+        ComposerMcpAuthStatusPreview.BearerToken -> "Token"
+        ComposerMcpAuthStatusPreview.OAuth -> "OAuth"
+        ComposerMcpAuthStatusPreview.NotLoggedIn -> "Login"
+        ComposerMcpAuthStatusPreview.Unsupported -> "Public"
+    }
+}
 
 fun buildComposerSkillsPanelState(
     panel: ComposerSkillsPanelPreview,

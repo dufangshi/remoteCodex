@@ -39,6 +39,12 @@ import com.remotecodex.android.ui.presentation.ComposerContextUsageState
 import com.remotecodex.android.ui.presentation.ComposerForkActionState
 import com.remotecodex.android.ui.presentation.ComposerForkPanelState
 import com.remotecodex.android.ui.presentation.ComposerJumpLatestState
+import com.remotecodex.android.ui.presentation.ComposerMcpAddOptionState
+import com.remotecodex.android.ui.presentation.ComposerMcpFormState
+import com.remotecodex.android.ui.presentation.ComposerMcpPanelState
+import com.remotecodex.android.ui.presentation.ComposerMcpServerRowState
+import com.remotecodex.android.ui.presentation.ComposerMcpStatusMessageState
+import com.remotecodex.android.ui.presentation.ComposerMcpStatusTone
 import com.remotecodex.android.ui.presentation.ComposerPrimaryActionKind
 import com.remotecodex.android.ui.presentation.ComposerSettingsState
 import com.remotecodex.android.ui.presentation.ComposerSelectionOptionState
@@ -56,6 +62,7 @@ import com.remotecodex.android.ui.presentation.buildComposerAttachmentActions
 import com.remotecodex.android.ui.presentation.buildComposerContextUsageState
 import com.remotecodex.android.ui.presentation.buildComposerForkPanelState
 import com.remotecodex.android.ui.presentation.buildComposerJumpLatestState
+import com.remotecodex.android.ui.presentation.buildComposerMcpPanelState
 import com.remotecodex.android.ui.presentation.buildComposerModelOptions
 import com.remotecodex.android.ui.presentation.buildComposerReasoningEffortOptions
 import com.remotecodex.android.ui.presentation.buildComposerSettingsState
@@ -126,6 +133,7 @@ fun ThreadComposer(
         forkBusy = composer.forkBusy,
     )
     val skillsPanelState = buildComposerSkillsPanelState(composer.skillsPanel)
+    val mcpPanelState = buildComposerMcpPanelState(composer.mcpPanel)
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -141,6 +149,7 @@ fun ThreadComposer(
                     toolboxItems = toolboxItems,
                     forkPanelState = forkPanelState,
                     skillsPanelState = skillsPanelState,
+                    mcpPanelState = mcpPanelState,
                 )
                 ComposerMenu.Attachments -> AttachmentPanel()
                 ComposerMenu.Model -> ModelPickerPanel(modelOptions = modelOptions)
@@ -750,6 +759,7 @@ private fun SlashToolboxPanel(
     toolboxItems: List<ComposerToolboxItemState>,
     forkPanelState: ComposerForkPanelState,
     skillsPanelState: ComposerSkillsPanelState,
+    mcpPanelState: ComposerMcpPanelState,
 ) {
     ComposerMenuSurface(title = "Slash toolbox", subtitle = "Thread actions") {
         if (toolboxItems.isEmpty()) {
@@ -762,7 +772,7 @@ private fun SlashToolboxPanel(
         GoalPreviewGroup()
         ForkPreviewGroup(forkPanelState = forkPanelState)
         SkillsPreviewGroup(skillsPanelState = skillsPanelState)
-        McpPreviewGroup()
+        McpPreviewGroup(mcpPanelState = mcpPanelState)
         HooksPreviewGroup()
     }
 }
@@ -1169,7 +1179,7 @@ private fun SkillWarningRow(
 }
 
 @Composable
-private fun McpPreviewGroup() {
+private fun McpPreviewGroup(mcpPanelState: ComposerMcpPanelState) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1194,40 +1204,88 @@ private fun McpPreviewGroup() {
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = "~/.codex/config.toml",
+                    text = mcpPanelState.configSourceLabel,
                     color = ThreadColors.ForegroundMuted,
                     style = MaterialTheme.typography.labelSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            GraphBadge(
-                label = "Add MCP",
-                variant = GraphBadgeVariant.Outline,
-            )
+            if (mcpPanelState.showAddAction) {
+                GraphBadge(
+                    label = "Add MCP",
+                    variant = GraphBadgeVariant.Outline,
+                )
+            }
         }
-        McpAddOptionRow(
-            title = "HTTP / Streamable HTTP",
-            mode = "Form",
-            description = "Add an MCP server with a name and URL.",
-        )
-        McpAddOptionRow(
-            title = "stdio / raw block",
-            mode = "TOML",
-            description = "Write a single provider config block.",
-        )
-        mcpServerPreviewItems.forEach { item ->
+        mcpPanelState.statusMessages.forEach { message ->
+            McpStatusMessageRow(message = message)
+        }
+        mcpPanelState.addOptions.forEach { option ->
+            McpAddOptionRow(option = option)
+        }
+        mcpPanelState.form?.let { form ->
+            McpFormPreview(form = form)
+        }
+        mcpPanelState.servers.forEach { item ->
             McpServerRow(item = item)
+        }
+        mcpPanelState.emptyMessage?.let { message ->
+            McpPanelMessageRow(message = message)
         }
     }
 }
 
 @Composable
-private fun McpAddOptionRow(
-    title: String,
-    mode: String,
-    description: String,
-) {
+private fun McpStatusMessageRow(message: ComposerMcpStatusMessageState) {
+    val foreground = when (message.tone) {
+        ComposerMcpStatusTone.Neutral -> ThreadColors.ForegroundMuted
+        ComposerMcpStatusTone.Error -> ThreadColors.Danger
+        ComposerMcpStatusTone.Success -> ThreadColors.Success
+    }
+    val background = when (message.tone) {
+        ComposerMcpStatusTone.Neutral -> ThreadColors.CodeBackground
+        ComposerMcpStatusTone.Error -> ThreadColors.DangerSoft.copy(alpha = 0.56f)
+        ComposerMcpStatusTone.Success -> ThreadColors.SuccessSoft.copy(alpha = 0.54f)
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(background)
+            .border(1.dp, foreground.copy(alpha = 0.34f), RoundedCornerShape(10.dp))
+            .padding(10.dp),
+    ) {
+        Text(
+            text = message.message,
+            color = foreground,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = if (message.tone == ComposerMcpStatusTone.Neutral) FontWeight.Normal else FontWeight.SemiBold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun McpPanelMessageRow(message: String) {
+    Text(
+        text = message,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(ThreadColors.CodeBackground)
+            .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(10.dp))
+            .padding(10.dp),
+        color = ThreadColors.ForegroundMuted,
+        style = MaterialTheme.typography.labelSmall,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+@Composable
+private fun McpAddOptionRow(option: ComposerMcpAddOptionState) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1243,7 +1301,7 @@ private fun McpAddOptionRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = title,
+                text = option.title,
                 modifier = Modifier.weight(1f),
                 color = ThreadColors.ForegroundSoft,
                 style = MaterialTheme.typography.bodySmall,
@@ -1252,7 +1310,7 @@ private fun McpAddOptionRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = mode,
+                text = option.modeLabel,
                 color = ThreadColors.ForegroundMuted,
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
@@ -1260,7 +1318,7 @@ private fun McpAddOptionRow(
             )
         }
         Text(
-            text = description,
+            text = option.description,
             color = ThreadColors.ForegroundMuted,
             style = MaterialTheme.typography.labelSmall,
             maxLines = 2,
@@ -1270,7 +1328,47 @@ private fun McpAddOptionRow(
 }
 
 @Composable
-private fun McpServerRow(item: McpServerPreviewItem) {
+private fun McpFormPreview(form: ComposerMcpFormState) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(ThreadColors.SurfaceStrong)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(10.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = form.title,
+            color = ThreadColors.ForegroundSoft,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        form.fields.forEach { (label, value) ->
+            HookFieldPreview(
+                label = label,
+                value = value.ifBlank { "Not set" },
+                mono = true,
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            GraphBadge(label = "Back", variant = GraphBadgeVariant.Outline)
+            GraphBadge(
+                label = form.primaryLabel,
+                variant = if (form.primaryEnabled) GraphBadgeVariant.Default else GraphBadgeVariant.Outline,
+            )
+        }
+    }
+}
+
+@Composable
+private fun McpServerRow(item: ComposerMcpServerRowState) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1295,7 +1393,7 @@ private fun McpServerRow(item: McpServerPreviewItem) {
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = "${item.toolCount} tools | ${item.resourceCount} resources | ${item.templateCount} templates",
+                    text = item.countsLabel,
                     color = ThreadColors.ForegroundMuted,
                     style = MaterialTheme.typography.labelSmall,
                     maxLines = 1,
@@ -1303,17 +1401,19 @@ private fun McpServerRow(item: McpServerPreviewItem) {
                 )
             }
             GraphBadge(
-                label = item.authStatus,
+                label = item.authLabel,
                 variant = GraphBadgeVariant.Outline,
             )
         }
-        Text(
-            text = item.toolPreview,
-            color = ThreadColors.ForegroundMuted,
-            style = MaterialTheme.typography.labelSmall,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
+        item.toolPreview?.let { preview ->
+            Text(
+                text = preview,
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -1873,15 +1973,6 @@ private data class ForkTurnPreviewItem(
     val status: String,
 )
 
-private data class McpServerPreviewItem(
-    val name: String,
-    val toolCount: Int,
-    val resourceCount: Int,
-    val templateCount: Int,
-    val authStatus: String,
-    val toolPreview: String,
-)
-
 private data class HookPreviewItem(
     val event: String,
     val matcher: String,
@@ -1908,25 +1999,6 @@ private val forkTurnPreviewItems = listOf(
     ForkTurnPreviewItem(index = 12, status = "completed"),
     ForkTurnPreviewItem(index = 11, status = "interrupted"),
     ForkTurnPreviewItem(index = 10, status = "failed"),
-)
-
-private val mcpServerPreviewItems = listOf(
-    McpServerPreviewItem(
-        name = "openaiDeveloperDocs",
-        toolCount = 4,
-        resourceCount = 0,
-        templateCount = 0,
-        authStatus = "ready",
-        toolPreview = "Search docs | Fetch doc | OpenAPI spec | Endpoint list",
-    ),
-    McpServerPreviewItem(
-        name = "local-workspace",
-        toolCount = 7,
-        resourceCount = 3,
-        templateCount = 2,
-        authStatus = "local",
-        toolPreview = "Read file | List resources | Inspect schema | Run task",
-    ),
 )
 
 private val hooksPreviewItems = listOf(
