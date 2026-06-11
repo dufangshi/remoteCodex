@@ -1497,12 +1497,18 @@ class ThreadPresentationTest {
                         status = "Run",
                         enabled = true,
                         kind = ComposerForkActionKind.Latest,
+                        startsBusy = true,
+                        closesMenuOnSuccess = true,
+                        closesMenuOnFailure = false,
                     ),
                     ComposerForkActionState(
                         label = "Fork from selected turn",
                         status = "Pick",
                         enabled = true,
                         kind = ComposerForkActionKind.SelectedTurn,
+                        startsBusy = true,
+                        closesMenuOnSuccess = true,
+                        closesMenuOnFailure = false,
                     ),
                 ),
                 showIdleOnlyNotice = false,
@@ -1525,12 +1531,18 @@ class ThreadPresentationTest {
                         status = "Run",
                         enabled = false,
                         kind = ComposerForkActionKind.Latest,
+                        startsBusy = false,
+                        closesMenuOnSuccess = true,
+                        closesMenuOnFailure = false,
                     ),
                     ComposerForkActionState(
                         label = "Fork from selected turn",
                         status = "Pick",
                         enabled = false,
                         kind = ComposerForkActionKind.SelectedTurn,
+                        startsBusy = false,
+                        closesMenuOnSuccess = true,
+                        closesMenuOnFailure = false,
                     ),
                 ),
                 showIdleOnlyNotice = true,
@@ -1552,18 +1564,86 @@ class ThreadPresentationTest {
                     status = "Forking",
                     enabled = false,
                     kind = ComposerForkActionKind.Latest,
+                    startsBusy = false,
+                    closesMenuOnSuccess = true,
+                    closesMenuOnFailure = false,
                 ),
                 ComposerForkActionState(
                     label = "Fork from selected turn",
                     status = "Pick",
                     enabled = false,
                     kind = ComposerForkActionKind.SelectedTurn,
+                    startsBusy = false,
+                    closesMenuOnSuccess = true,
+                    closesMenuOnFailure = false,
                 ),
             ),
             buildComposerForkPanelState(
                 busy = false,
                 forkBusy = true,
             ).actions,
+        )
+    }
+
+    @Test
+    fun buildsComposerForkActionLifecycleRules() {
+        val state = buildComposerForkPanelState(
+            busy = false,
+            forkBusy = false,
+            slashPanelView = ComposerSlashPanelViewPreview.Fork,
+        )
+
+        assertEquals(
+            ComposerForkActionState(
+                label = "Fork from latest",
+                status = "Run",
+                enabled = true,
+                kind = ComposerForkActionKind.Latest,
+                startsBusy = true,
+                closesMenuOnSuccess = true,
+                closesMenuOnFailure = false,
+            ),
+            state.actions.first(),
+        )
+        assertEquals(
+            ComposerForkLifecycleState(
+                forkBusy = false,
+                shouldClearBusyWhenLeavingForkTurns = false,
+                busyWhileRunning = true,
+                closeMenuOnSuccess = true,
+                closeMenuOnFailure = false,
+            ),
+            state.lifecycle,
+        )
+    }
+
+    @Test
+    fun clearsComposerForkBusyWhenLeavingForkTurnsPanel() {
+        assertEquals(
+            ComposerForkLifecycleState(
+                forkBusy = true,
+                shouldClearBusyWhenLeavingForkTurns = true,
+                busyWhileRunning = true,
+                closeMenuOnSuccess = true,
+                closeMenuOnFailure = false,
+            ),
+            buildComposerForkLifecycleState(
+                forkBusy = true,
+                slashPanelView = ComposerSlashPanelViewPreview.Root,
+            ),
+        )
+        assertEquals(
+            ComposerForkLifecycleState(
+                forkBusy = true,
+                shouldClearBusyWhenLeavingForkTurns = false,
+                busyWhileRunning = true,
+                closeMenuOnSuccess = true,
+                closeMenuOnFailure = false,
+            ),
+            buildComposerForkLifecycleState(
+                forkBusy = true,
+                slashPanelView = ComposerSlashPanelViewPreview.ForkTurns,
+            ),
         )
     }
 

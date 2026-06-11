@@ -43,6 +43,7 @@ import com.remotecodex.android.ui.presentation.ComposerAttachmentActionState
 import com.remotecodex.android.ui.presentation.ComposerAttachmentPanelState
 import com.remotecodex.android.ui.presentation.ComposerContextUsageState
 import com.remotecodex.android.ui.presentation.ComposerForkActionState
+import com.remotecodex.android.ui.presentation.ComposerForkLifecycleState
 import com.remotecodex.android.ui.presentation.ComposerForkPanelState
 import com.remotecodex.android.ui.presentation.ComposerFrameState
 import com.remotecodex.android.ui.presentation.ComposerGoalComposeCardState
@@ -210,6 +211,7 @@ fun ThreadComposer(
     val forkPanelState = buildComposerForkPanelState(
         busy = composer.busy,
         forkBusy = composer.forkBusy,
+        slashPanelView = composer.slashPanelView,
     )
     val goalPanelState = buildComposerGoalPanelState(
         composer.goalPanel.copy(
@@ -1421,6 +1423,9 @@ private fun ForkPreviewGroup(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .semantics {
+                stateDescription = composerForkLifecycleDescription(forkPanelState.lifecycle)
+            }
             .clip(RoundedCornerShape(12.dp))
             .background(ThreadColors.Surface)
             .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
@@ -1464,6 +1469,16 @@ private fun ForkPreviewGroup(
             }
         }
     }
+}
+
+private fun composerForkLifecycleDescription(
+    state: ComposerForkLifecycleState,
+): String {
+    val running = if (state.forkBusy) "fork busy" else "fork idle"
+    val reset = if (state.shouldClearBusyWhenLeavingForkTurns) ", clear busy after leaving turn picker" else ""
+    val success = if (state.closeMenuOnSuccess) ", close on success" else ""
+    val failure = if (state.closeMenuOnFailure) ", close on failure" else ", keep open on failure"
+    return "$running$reset$success$failure"
 }
 
 @Composable

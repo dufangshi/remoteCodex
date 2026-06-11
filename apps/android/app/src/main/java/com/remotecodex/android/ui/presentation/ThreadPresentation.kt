@@ -410,12 +410,30 @@ data class ComposerForkActionState(
     val status: String,
     val enabled: Boolean,
     val kind: ComposerForkActionKind,
+    val startsBusy: Boolean = false,
+    val closesMenuOnSuccess: Boolean = true,
+    val closesMenuOnFailure: Boolean = false,
 )
 
 data class ComposerForkPanelState(
     val actions: List<ComposerForkActionState>,
     val showIdleOnlyNotice: Boolean,
     val notice: String?,
+    val lifecycle: ComposerForkLifecycleState = ComposerForkLifecycleState(
+        forkBusy = false,
+        shouldClearBusyWhenLeavingForkTurns = false,
+        busyWhileRunning = true,
+        closeMenuOnSuccess = true,
+        closeMenuOnFailure = false,
+    ),
+)
+
+data class ComposerForkLifecycleState(
+    val forkBusy: Boolean,
+    val shouldClearBusyWhenLeavingForkTurns: Boolean,
+    val busyWhileRunning: Boolean,
+    val closeMenuOnSuccess: Boolean,
+    val closeMenuOnFailure: Boolean,
 )
 
 data class ComposerSkillRowState(
@@ -925,8 +943,13 @@ fun skillScopeLabel(scope: ComposerSkillScopePreview): String {
 fun buildComposerForkPanelState(
     busy: Boolean,
     forkBusy: Boolean,
+    slashPanelView: ComposerSlashPanelViewPreview = ComposerSlashPanelViewPreview.Root,
 ): ComposerForkPanelState {
     val enabled = !(busy || forkBusy)
+    val lifecycle = buildComposerForkLifecycleState(
+        forkBusy = forkBusy,
+        slashPanelView = slashPanelView,
+    )
     return ComposerForkPanelState(
         actions = listOf(
             ComposerForkActionState(
@@ -934,16 +957,36 @@ fun buildComposerForkPanelState(
                 status = if (forkBusy) "Forking" else "Run",
                 enabled = enabled,
                 kind = ComposerForkActionKind.Latest,
+                startsBusy = enabled,
+                closesMenuOnSuccess = true,
+                closesMenuOnFailure = false,
             ),
             ComposerForkActionState(
                 label = "Fork from selected turn",
                 status = "Pick",
                 enabled = enabled,
                 kind = ComposerForkActionKind.SelectedTurn,
+                startsBusy = enabled,
+                closesMenuOnSuccess = true,
+                closesMenuOnFailure = false,
             ),
         ),
         showIdleOnlyNotice = busy,
         notice = if (busy) "Fork is only available while the thread is idle." else null,
+        lifecycle = lifecycle,
+    )
+}
+
+fun buildComposerForkLifecycleState(
+    forkBusy: Boolean,
+    slashPanelView: ComposerSlashPanelViewPreview,
+): ComposerForkLifecycleState {
+    return ComposerForkLifecycleState(
+        forkBusy = forkBusy,
+        shouldClearBusyWhenLeavingForkTurns = forkBusy && slashPanelView != ComposerSlashPanelViewPreview.ForkTurns,
+        busyWhileRunning = true,
+        closeMenuOnSuccess = true,
+        closeMenuOnFailure = false,
     )
 }
 
