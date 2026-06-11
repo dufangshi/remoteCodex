@@ -5431,6 +5431,126 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun buildsTimelineRequestEntryStatesInCreatedOrder() {
+        val entries = buildTimelineRequestEntryStates(
+            activityNotes = listOf(
+                TimelineNotePreview(
+                    title = "Fork",
+                    summaryLines = listOf("Thread forked."),
+                    sortKey = "2026-06-11T13:40:00Z",
+                ),
+            ),
+            pendingRequests = listOf(
+                PendingRequestPreview(
+                    id = "approval-1",
+                    title = "Permission required",
+                    description = "Run debug build.",
+                    command = "./gradlew :app:assembleDebug",
+                    riskLabel = "Workspace write",
+                    sortKey = "2026-06-11T13:41:00Z",
+                ),
+                PendingRequestPreview(
+                    id = "plan-1",
+                    title = "Plan",
+                    description = "",
+                    command = "",
+                    riskLabel = "Decision required",
+                    kind = PendingRequestKindPreview.PlanDecision,
+                    sortKey = "2026-06-11T13:40:30Z",
+                ),
+            ),
+            answeredRequestNotes = listOf(
+                TimelineNotePreview(
+                    title = "Permission answered",
+                    summaryLines = listOf("Approved Android debug build."),
+                    sortKey = "2026-06-11T13:42:00Z",
+                ),
+            ),
+        )
+
+        assertEquals(
+            listOf(
+                "activity:2026-06-11T13:40:00Z:Fork",
+                "pending-request:plan-1",
+                "pending-request:approval-1",
+                "answered:2026-06-11T13:42:00Z:Permission answered",
+            ),
+            entries.map { entry -> entry.key },
+        )
+        assertEquals(
+            listOf(
+                TimelineRequestEntryState.Activity::class,
+                TimelineRequestEntryState.Pending::class,
+                TimelineRequestEntryState.Pending::class,
+                TimelineRequestEntryState.Answered::class,
+            ),
+            entries.map { entry -> entry::class },
+        )
+    }
+
+    @Test
+    fun buildsTimelineRequestEntryStatesWithStablePendingRequestKeys() {
+        val entries = buildTimelineRequestEntryStates(
+            activityNotes = emptyList(),
+            pendingRequests = listOf(
+                PendingRequestPreview(
+                    id = "request-user-input-42",
+                    title = "Follow-up",
+                    description = "Choose scope.",
+                    command = "",
+                    riskLabel = "Input required",
+                    kind = PendingRequestKindPreview.RequestUserInput,
+                ),
+            ),
+            answeredRequestNotes = emptyList(),
+        )
+
+        assertEquals(listOf("pending-request:request-user-input-42"), entries.map { it.key })
+    }
+
+    @Test
+    fun buildsTimelineRequestEntryStatesWithFallbackSortKeys() {
+        val entries = buildTimelineRequestEntryStates(
+            activityNotes = listOf(
+                TimelineNotePreview(
+                    title = "Socket resumed",
+                    summaryLines = listOf("Socket resumed."),
+                    timeLabel = "13:40",
+                ),
+                TimelineNotePreview(
+                    title = "No timestamp",
+                    summaryLines = listOf("System event."),
+                ),
+            ),
+            pendingRequests = listOf(
+                PendingRequestPreview(
+                    id = "approval-1",
+                    title = "Permission required",
+                    description = "Run command.",
+                    command = "pwd",
+                    riskLabel = "Read-only",
+                ),
+            ),
+            answeredRequestNotes = listOf(
+                TimelineNotePreview(
+                    title = "Permission answered",
+                    summaryLines = listOf("Approved."),
+                    timeLabel = "13:42",
+                ),
+                TimelineNotePreview(
+                    title = "Missing timestamp",
+                    summaryLines = listOf("Answered."),
+                ),
+            ),
+        )
+
+        assertEquals(
+            listOf("13:40", "13:42", "activity-0001", "answered-0001", "pending-0000"),
+            entries.map { entry -> entry.sortKey },
+        )
+    }
+
+    @Test
     fun buildsAnsweredTimelineNoteCardState() {
         assertEquals(
             TimelineNoteCardState(

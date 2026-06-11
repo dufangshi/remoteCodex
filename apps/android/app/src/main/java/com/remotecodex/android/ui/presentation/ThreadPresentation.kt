@@ -265,6 +265,29 @@ data class TimelineNoteCardState(
     val tone: TimelineNoteToneState,
 )
 
+sealed interface TimelineRequestEntryState {
+    val sortKey: String
+    val key: String
+
+    data class Activity(
+        override val sortKey: String,
+        override val key: String,
+        val note: TimelineNotePreview,
+    ) : TimelineRequestEntryState
+
+    data class Pending(
+        override val sortKey: String,
+        override val key: String,
+        val request: PendingRequestPreview,
+    ) : TimelineRequestEntryState
+
+    data class Answered(
+        override val sortKey: String,
+        override val key: String,
+        val note: TimelineNotePreview,
+    ) : TimelineRequestEntryState
+}
+
 enum class PendingSteerToneState {
     QueuedUserMessage,
     Warning,
@@ -3603,6 +3626,72 @@ fun buildTimelineNoteCardState(
             ?.let { action -> action },
         tone = tone,
     )
+}
+
+fun buildTimelineRequestEntryStates(
+    activityNotes: List<TimelineNotePreview>,
+    pendingRequests: List<PendingRequestPreview>,
+    answeredRequestNotes: List<TimelineNotePreview>,
+): List<TimelineRequestEntryState> {
+    return buildList {
+        activityNotes.forEachIndexed { index, note ->
+            add(
+                TimelineRequestEntryState.Activity(
+                    sortKey = timelineRequestEntrySortKey(
+                        explicitSortKey = note.sortKey,
+                        timeLabel = note.timeLabel,
+                        fallbackPrefix = "activity",
+                        index = index,
+                    ),
+                    key = "activity:${timelineRequestEntryKeyPart(note.sortKey, index)}:${note.title.trim()}",
+                    note = note,
+                ),
+            )
+        }
+        pendingRequests.forEachIndexed { index, request ->
+            add(
+                TimelineRequestEntryState.Pending(
+                    sortKey = timelineRequestEntrySortKey(
+                        explicitSortKey = request.sortKey,
+                        timeLabel = null,
+                        fallbackPrefix = "pending",
+                        index = index,
+                    ),
+                    key = "pending-request:${request.id}",
+                    request = request,
+                ),
+            )
+        }
+        answeredRequestNotes.forEachIndexed { index, note ->
+            add(
+                TimelineRequestEntryState.Answered(
+                    sortKey = timelineRequestEntrySortKey(
+                        explicitSortKey = note.sortKey,
+                        timeLabel = note.timeLabel,
+                        fallbackPrefix = "answered",
+                        index = index,
+                    ),
+                    key = "answered:${timelineRequestEntryKeyPart(note.sortKey, index)}:${note.title.trim()}",
+                    note = note,
+                ),
+            )
+        }
+    }.sortedBy { entry -> entry.sortKey }
+}
+
+private fun timelineRequestEntrySortKey(
+    explicitSortKey: String?,
+    timeLabel: String?,
+    fallbackPrefix: String,
+    index: Int,
+): String {
+    return explicitSortKey?.trim()?.takeIf { it.isNotEmpty() }
+        ?: timeLabel?.trim()?.takeIf { it.isNotEmpty() }
+        ?: "$fallbackPrefix-${index.toString().padStart(4, '0')}"
+}
+
+private fun timelineRequestEntryKeyPart(sortKey: String?, index: Int): String {
+    return sortKey?.trim()?.takeIf { it.isNotEmpty() } ?: index.toString()
 }
 
 fun buildPendingSteerCardState(steer: TimelineSteerPreview): AuxiliaryUserNoteCardState {

@@ -92,12 +92,14 @@ import com.remotecodex.android.ui.presentation.ComposerStatusTone
 import com.remotecodex.android.ui.presentation.AuxiliaryUserNoteCardState
 import com.remotecodex.android.ui.presentation.GraphChatPlainTextSegment
 import com.remotecodex.android.ui.presentation.TimelineNoteToneState
+import com.remotecodex.android.ui.presentation.TimelineRequestEntryState
 import com.remotecodex.android.ui.presentation.UserMessageAttachmentState
 import com.remotecodex.android.ui.presentation.buildGraphChatImageHistoryState
 import com.remotecodex.android.ui.presentation.buildGraphChatLivePlanCardState
 import com.remotecodex.android.ui.presentation.buildEphemeralUserNoteCardState
 import com.remotecodex.android.ui.presentation.buildPendingSteerCardState
 import com.remotecodex.android.ui.presentation.buildTimelineNoteCardState
+import com.remotecodex.android.ui.presentation.buildTimelineRequestEntryStates
 import com.remotecodex.android.ui.presentation.parseUserMessageSegments
 import com.remotecodex.android.ui.presentation.buildUserMessageAttachmentState
 import com.remotecodex.android.ui.presentation.buildPlanStepStatusPresentationState
@@ -126,6 +128,13 @@ fun ThreadTimeline(
     pendingRequests: List<PendingRequestPreview> = emptyList(),
     onOpenDetail: (DetailPreview) -> Unit = {},
 ) {
+    val requestEntries = remember(auxiliary, pendingRequests) {
+        buildTimelineRequestEntryStates(
+            activityNotes = auxiliary.activityNotes,
+            pendingRequests = pendingRequests,
+            answeredRequestNotes = auxiliary.answeredRequestNotes,
+        )
+    }
     LazyColumn(
         modifier = modifier
             .background(ThreadColors.Workspace),
@@ -138,13 +147,18 @@ fun ThreadTimeline(
             bottom = 132.dp,
         ),
     ) {
-        if (auxiliary.activityNotes.isNotEmpty()) {
-            items(auxiliary.activityNotes, key = { note -> "activity:${note.title}:${note.timeLabel}" }) { note ->
-                TimelineNoteCard(note = note, tone = TimelineNoteTone.Activity)
+        items(requestEntries, key = { entry -> entry.key }) { entry ->
+            when (entry) {
+                is TimelineRequestEntryState.Activity -> TimelineNoteCard(
+                    note = entry.note,
+                    tone = TimelineNoteTone.Activity,
+                )
+                is TimelineRequestEntryState.Pending -> PendingRequestCard(request = entry.request)
+                is TimelineRequestEntryState.Answered -> TimelineNoteCard(
+                    note = entry.note,
+                    tone = TimelineNoteTone.Answered,
+                )
             }
-        }
-        items(pendingRequests, key = { request -> "pending-request:${request.id}" }) { request ->
-            PendingRequestCard(request = request)
         }
         if (auxiliary.canLoadEarlier) {
             item(key = "load-earlier") {
@@ -153,11 +167,6 @@ fun ThreadTimeline(
         }
         items(turns, key = { it.index }) { turn ->
             TurnFrame(turn = turn, onOpenDetail = onOpenDetail)
-        }
-        if (auxiliary.answeredRequestNotes.isNotEmpty()) {
-            items(auxiliary.answeredRequestNotes, key = { note -> "answered:${note.title}:${note.timeLabel}" }) { note ->
-                TimelineNoteCard(note = note, tone = TimelineNoteTone.Answered)
-            }
         }
         if (auxiliary.pendingSteers.isNotEmpty()) {
             items(auxiliary.pendingSteers, key = { steer -> "steer:${steer.timeLabel}:${steer.prompt}" }) { steer ->

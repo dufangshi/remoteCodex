@@ -564,6 +564,7 @@ object ThreadPreviewSample {
                     summaryLines = listOf("Thread forked from Turn 12 for Android timeline parity."),
                     timeLabel = "13:40",
                     actionLabel = "Open fork",
+                    sortKey = "2026-06-11T13:40:00Z",
                 ),
             ),
             answeredRequestNotes = listOf(
@@ -574,6 +575,7 @@ object ThreadPreviewSample {
                         "./gradlew :app:assembleDebug",
                     ),
                     timeLabel = "13:42",
+                    sortKey = "2026-06-11T13:42:00Z",
                 ),
             ),
             pendingSteers = listOf(
@@ -593,6 +595,7 @@ object ThreadPreviewSample {
                 command = "",
                 riskLabel = "Decision required",
                 kind = PendingRequestKindPreview.PlanDecision,
+                sortKey = "2026-06-11T13:40:30Z",
                 questions = listOf(
                     PendingRequestQuestionPreview(
                         header = "Plan decision",
@@ -616,6 +619,7 @@ object ThreadPreviewSample {
                 description = "Codex wants to run the Android debug build from the project workspace.",
                 command = "./gradlew :app:assembleDebug",
                 riskLabel = "Workspace write, local build",
+                sortKey = "2026-06-11T13:41:00Z",
                 questions = listOf(
                     PendingRequestQuestionPreview(
                         header = "Approval",

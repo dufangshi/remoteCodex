@@ -668,6 +668,7 @@ data class TimelineNotePreview(
     val summaryLines: List<String>,
     val timeLabel: String? = null,
     val actionLabel: String? = null,
+    val sortKey: String? = null,
 )
 
 data class TimelineSteerPreview(
@@ -729,6 +730,7 @@ data class PendingRequestPreview(
     val command: String,
     val riskLabel: String,
     val kind: PendingRequestKindPreview = PendingRequestKindPreview.Approval,
+    val sortKey: String? = null,
     val questions: List<PendingRequestQuestionPreview> = emptyList(),
 )
 
