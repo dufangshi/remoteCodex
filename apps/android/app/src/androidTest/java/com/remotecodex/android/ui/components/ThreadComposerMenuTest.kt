@@ -49,6 +49,27 @@ class ThreadComposerMenuTest {
     }
 
     @Test
+    fun modelMenuSelectionUpdatesPreviewModelAndDefaultEffort() {
+        val modelButton = device.wait(Until.findObject(By.desc("gpt-5.4")), 5_000)
+            ?: error("Model toolbar button was not visible")
+        modelButton.click()
+        assertNotNull(device.wait(Until.findObject(By.desc("gpt-5-codex available")), 2_000))
+
+        device.findObject(By.desc("gpt-5-codex available")).click()
+
+        assertNotNull(device.wait(Until.findObject(By.desc("gpt-5-codex")), 2_000))
+        assertNotNull(device.findObject(By.desc("High")))
+        assertTrue(
+            "Model menu should close after local preview selection",
+            device.findObjects(By.text("Runtime preference")).isEmpty(),
+        )
+
+        device.findObject(By.desc("gpt-5-codex")).click()
+        assertNotNull(device.wait(Until.findObject(By.desc("gpt-5-codex selected")), 2_000))
+        assertNotNull(device.findObject(By.desc("gpt-5.4 available")))
+    }
+
+    @Test
     fun effortMenuOpensWithBudgetPreviewAndOptions() {
         val effortButton = device.wait(Until.findObject(By.desc("Medium")), 5_000)
             ?: error("Effort toolbar button was not visible")
@@ -61,6 +82,26 @@ class ThreadComposerMenuTest {
         assertNotNull(device.findObject(By.text("High")))
         assertNotNull(device.findObject(By.desc("Medium selected")))
         assertNotNull(device.findObject(By.desc("High available")))
+    }
+
+    @Test
+    fun effortMenuSelectionUpdatesPreviewEffort() {
+        val effortButton = device.wait(Until.findObject(By.desc("Medium")), 5_000)
+            ?: error("Effort toolbar button was not visible")
+        effortButton.click()
+        assertNotNull(device.wait(Until.findObject(By.desc("Low available")), 2_000))
+
+        device.findObject(By.desc("Low available")).click()
+
+        assertNotNull(device.wait(Until.findObject(By.desc("Low")), 2_000))
+        assertTrue(
+            "Effort menu should close after local preview selection",
+            device.findObjects(By.text("Per-thread setting")).isEmpty(),
+        )
+
+        device.findObject(By.desc("Low")).click()
+        assertNotNull(device.wait(Until.findObject(By.desc("Low selected")), 2_000))
+        assertNotNull(device.findObject(By.desc("Medium available")))
     }
 
     @Test

@@ -1568,16 +1568,19 @@ class ThreadPresentationTest {
         assertEquals(
             listOf(
                 ComposerSelectionOptionState(
+                    value = "gpt-test",
                     label = "gpt-test",
                     detail = "current",
                     selected = true,
                 ),
                 ComposerSelectionOptionState(
+                    value = "gpt-next",
                     label = "gpt-next",
                     detail = "default High",
                     selected = false,
                 ),
                 ComposerSelectionOptionState(
+                    value = "local",
                     label = "local",
                     detail = "available",
                     selected = false,
@@ -1599,11 +1602,13 @@ class ThreadPresentationTest {
         assertEquals(
             listOf(
                 ComposerSelectionOptionState(
+                    value = "low",
                     label = "Low",
                     detail = "available",
                     selected = false,
                 ),
                 ComposerSelectionOptionState(
+                    value = "medium",
                     label = "Medium",
                     detail = "current",
                     selected = true,

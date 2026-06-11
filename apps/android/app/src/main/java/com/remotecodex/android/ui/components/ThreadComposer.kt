@@ -151,6 +151,9 @@ fun ThreadComposer(
     var hooksPanelHooks by remember(composer.hooksPanel.hooks) { mutableStateOf(composer.hooksPanel.hooks) }
     var hooksPanelSuccess by remember(composer.hooksPanel.configSuccess) { mutableStateOf(composer.hooksPanel.configSuccess) }
     var forkPreviewStatus by remember(composer.forkTurnOptions) { mutableStateOf<String?>(null) }
+    var selectedModel by remember(composer.context.model) { mutableStateOf(composer.context.model) }
+    var selectedReasoningEffort by remember(composer.reasoningEffort) { mutableStateOf(composer.reasoningEffort) }
+    val selectedContext = composer.context.copy(model = selectedModel)
     val statusChips = buildComposerStatusStrip(
         threadConnected = composer.threadConnected,
         busy = composer.busy,
@@ -183,8 +186,8 @@ fun ThreadComposer(
         prompt = composer.prompt,
     )
     val settingsState = buildComposerSettingsState(
-        context = composer.context,
-        reasoningEffort = composer.reasoningEffort,
+        context = selectedContext,
+        reasoningEffort = selectedReasoningEffort,
         supportedReasoningEffortCount = composer.supportedReasoningEffortCount,
         modelOptionCount = composer.modelOptions.size,
         settingsBusy = composer.settingsBusy,
@@ -209,11 +212,11 @@ fun ThreadComposer(
         shellPromptLabel = composer.prompt.text.ifBlank { null },
     )
     val modelOptions = buildComposerModelOptions(
-        currentModel = composer.context.model,
+        currentModel = selectedModel,
         options = composer.modelOptions,
     )
     val reasoningEffortOptions = buildComposerReasoningEffortOptions(
-        currentEffort = composer.reasoningEffort,
+        currentEffort = selectedReasoningEffort,
         options = composer.reasoningEffortOptions,
     )
     val shellTools = buildComposerShellTools(
@@ -396,10 +399,22 @@ fun ThreadComposer(
                 ComposerMenu.Model -> ModelPickerPanel(
                     settingsState = settingsState,
                     modelOptions = modelOptions,
+                    onSelectModel = { model ->
+                        selectedModel = model
+                        selectedReasoningEffort = composer.modelOptions
+                            .firstOrNull { it.model == model }
+                            ?.defaultReasoningEffort
+                            ?: selectedReasoningEffort
+                        openMenu = null
+                    },
                 )
                 ComposerMenu.Effort -> EffortPickerPanel(
                     settingsState = settingsState,
                     effortOptions = reasoningEffortOptions,
+                    onSelectEffort = { effort ->
+                        selectedReasoningEffort = effort
+                        openMenu = null
+                    },
                 )
                 ComposerMenu.ShellTools -> ShellToolsPanel(panelState = shellToolsPanelState)
                 null -> Unit
@@ -2790,6 +2805,7 @@ private fun AttachmentPanel(panelState: ComposerAttachmentPanelState) {
 private fun ModelPickerPanel(
     settingsState: ComposerSettingsState,
     modelOptions: List<ComposerSelectionOptionState>,
+    onSelectModel: (String) -> Unit,
 ) {
     ComposerMenuSurface(title = "Model", subtitle = "Runtime preference") {
         ContextUsageRow()
@@ -2800,7 +2816,12 @@ private fun ModelPickerPanel(
             ComposerEmptyMenuRow(text = "Model choices will appear here once the thread reports available runtimes.")
         } else {
             modelOptions.forEach { option ->
-                SelectionRow(label = option.label, detail = option.detail, selected = option.selected)
+                SelectionRow(
+                    label = option.label,
+                    detail = option.detail,
+                    selected = option.selected,
+                    onClick = { onSelectModel(option.value) },
+                )
             }
         }
     }
@@ -2810,6 +2831,7 @@ private fun ModelPickerPanel(
 private fun EffortPickerPanel(
     settingsState: ComposerSettingsState,
     effortOptions: List<ComposerSelectionOptionState>,
+    onSelectEffort: (String) -> Unit,
 ) {
     ComposerMenuSurface(title = "Reasoning effort", subtitle = "Per-thread setting") {
         ValueSliderPreview(
@@ -2825,7 +2847,12 @@ private fun EffortPickerPanel(
             overflow = TextOverflow.Ellipsis,
         )
         effortOptions.forEach { option ->
-            SelectionRow(label = option.label, detail = option.detail, selected = option.selected)
+            SelectionRow(
+                label = option.label,
+                detail = option.detail,
+                selected = option.selected,
+                onClick = { onSelectEffort(option.value) },
+            )
         }
     }
 }
@@ -3159,13 +3186,19 @@ private fun AttachmentTileGlyph(icon: AttachmentTileIcon, color: Color) {
 }
 
 @Composable
-private fun SelectionRow(label: String, detail: String, selected: Boolean) {
+private fun SelectionRow(
+    label: String,
+    detail: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(if (selected) ThreadColors.WarningSoft else ThreadColors.Surface)
             .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),

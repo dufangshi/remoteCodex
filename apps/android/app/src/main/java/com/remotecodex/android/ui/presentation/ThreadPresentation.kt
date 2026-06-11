@@ -597,6 +597,7 @@ data class ComposerSettingsUpdateDecisionState(
 )
 
 data class ComposerSelectionOptionState(
+    val value: String,
     val label: String,
     val detail: String,
     val selected: Boolean,
@@ -2162,6 +2163,7 @@ fun buildComposerModelOptions(
             ?.let { "default ${formatReasoningEffortLabel(it)}" }
             ?: "available"
         ComposerSelectionOptionState(
+            value = option.model,
             label = option.model,
             detail = if (option.model == currentModel) "current" else defaultEffort,
             selected = option.model == currentModel,
@@ -2176,6 +2178,7 @@ fun buildComposerReasoningEffortOptions(
     return options.map { option ->
         val label = formatReasoningEffortLabel(option.reasoningEffort)
         ComposerSelectionOptionState(
+            value = option.reasoningEffort,
             label = label,
             detail = if (option.reasoningEffort == currentEffort) "current" else "available",
             selected = option.reasoningEffort == currentEffort,
