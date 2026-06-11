@@ -255,7 +255,10 @@ fun ThreadComposer(
                     hooksPanelState = hooksPanelState,
                 )
                 ComposerMenu.Attachments -> AttachmentPanel(panelState = attachmentPanelState)
-                ComposerMenu.Model -> ModelPickerPanel(modelOptions = modelOptions)
+                ComposerMenu.Model -> ModelPickerPanel(
+                    settingsState = settingsState,
+                    modelOptions = modelOptions,
+                )
                 ComposerMenu.Effort -> EffortPickerPanel(
                     settingsState = settingsState,
                     effortOptions = reasoningEffortOptions,
@@ -2421,9 +2424,15 @@ private fun AttachmentPanel(panelState: ComposerAttachmentPanelState) {
 }
 
 @Composable
-private fun ModelPickerPanel(modelOptions: List<ComposerSelectionOptionState>) {
+private fun ModelPickerPanel(
+    settingsState: ComposerSettingsState,
+    modelOptions: List<ComposerSelectionOptionState>,
+) {
     ComposerMenuSurface(title = "Model", subtitle = "Runtime preference") {
         ContextUsageRow()
+        settingsState.modelDisabledReason?.let { reason ->
+            ComposerMenuNotice(text = reason)
+        }
         modelOptions.forEach { option ->
             SelectionRow(label = option.label, detail = option.detail, selected = option.selected)
         }
@@ -2452,6 +2461,23 @@ private fun EffortPickerPanel(
             SelectionRow(label = option.label, detail = option.detail, selected = option.selected)
         }
     }
+}
+
+@Composable
+private fun ComposerMenuNotice(text: String) {
+    Text(
+        text = text,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(ThreadColors.WarningSoft.copy(alpha = 0.42f))
+            .border(1.dp, ThreadColors.Warning.copy(alpha = 0.24f), RoundedCornerShape(10.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        color = ThreadColors.Warning,
+        style = MaterialTheme.typography.labelSmall,
+        maxLines = 3,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)

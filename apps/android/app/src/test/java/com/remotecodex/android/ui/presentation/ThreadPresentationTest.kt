@@ -1176,6 +1176,7 @@ class ThreadPresentationTest {
                 modelLabel = "gpt-test",
                 modelEnabled = false,
                 modelTitle = "Fast mode is on. Turn it off from the slash toolbox to edit model.",
+                modelDisabledReason = "Fast mode is on. Turn it off from the slash toolbox to edit model.",
                 effortLabel = "High",
                 effortEnabled = false,
                 effortTitle = "Fast mode is on. Turn it off from the slash toolbox to edit reasoning.",
@@ -1229,6 +1230,7 @@ class ThreadPresentationTest {
 
         assertEquals(false, toolbar.modelButton.enabled)
         assertEquals("Fast mode is on. Turn it off from the slash toolbox to edit model.", toolbar.modelTitle)
+        assertEquals("Fast mode is on. Turn it off from the slash toolbox to edit model.", settings.modelDisabledReason)
         assertEquals(false, toolbar.effortButton.enabled)
         assertEquals("Fast mode is on. Turn it off from the slash toolbox to edit reasoning.", toolbar.effortTitle)
     }

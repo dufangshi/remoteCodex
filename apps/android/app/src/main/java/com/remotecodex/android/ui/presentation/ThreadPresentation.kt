@@ -550,6 +550,7 @@ data class ComposerSettingsState(
     val modelLabel: String,
     val modelEnabled: Boolean,
     val modelTitle: String = modelLabel,
+    val modelDisabledReason: String? = null,
     val effortLabel: String,
     val effortEnabled: Boolean,
     val effortTitle: String,
@@ -2163,6 +2164,7 @@ fun buildComposerSettingsState(
     } else {
         context.model.takeIf { it.isNotBlank() } ?: "Select model"
     }
+    val modelDisabledReason = if (fastMode) modelTitle else null
     val modelEnabled = !settingsBusy && !fastMode && availableModels > 0
     val effortEnabled = modelEnabled && supportedEfforts > 0
     val effortTitle = when {
@@ -2175,6 +2177,7 @@ fun buildComposerSettingsState(
         modelLabel = modelLabel,
         modelEnabled = modelEnabled,
         modelTitle = modelTitle,
+        modelDisabledReason = modelDisabledReason,
         effortLabel = formatReasoningEffortLabel(reasoningEffort),
         effortEnabled = effortEnabled,
         effortTitle = effortTitle,
