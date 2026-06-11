@@ -21,6 +21,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.api.SendThreadPromptRequest
+import com.remotecodex.android.api.RespondThreadRequest
+import com.remotecodex.android.api.RespondThreadRequestAnswer
 import com.remotecodex.android.api.SupervisorApiClient
 import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorHomeSnapshot
@@ -29,6 +31,7 @@ import com.remotecodex.android.ui.components.GraphButton
 import com.remotecodex.android.ui.components.GraphButtonSize
 import com.remotecodex.android.ui.components.GraphButtonVariant
 import com.remotecodex.android.ui.model.ThreadDetailPreview
+import com.remotecodex.android.ui.model.PendingRequestPreview
 import com.remotecodex.android.ui.presentation.buildThreadDetailPreviewFromSupervisor
 import com.remotecodex.android.ui.sample.ThreadPreviewSample
 import com.remotecodex.android.ui.theme.ThreadColors
@@ -55,6 +58,10 @@ fun ThreadDetailScreen(
     var refreshNonce by remember(threadId) { mutableIntStateOf(0) }
     var submittingPrompt by remember(threadId) { mutableStateOf(false) }
     var pendingPrompt by remember(threadId) { mutableStateOf<String?>(null) }
+    var resolvingRequestId by remember(threadId) { mutableStateOf<String?>(null) }
+    var pendingRequestResponse by remember(threadId) {
+        mutableStateOf<PendingRequestResponse?>(null)
+    }
     val client = remember(supervisorConnection) { SupervisorApiClient(supervisorConnection) }
 
     LaunchedEffect(threadId, refreshNonce) {
@@ -92,6 +99,30 @@ fun ThreadDetailScreen(
             .onFailure { throwable -> error = throwable.message ?: "Prompt send failed." }
     }
 
+    LaunchedEffect(pendingRequestResponse) {
+        val response = pendingRequestResponse ?: return@LaunchedEffect
+        resolvingRequestId = response.request.id
+        error = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                client.respondToThreadRequest(
+                    threadId = threadId,
+                    requestId = response.request.id,
+                    request = RespondThreadRequest(
+                        answers = response.answers.mapValues { (_, answers) ->
+                            RespondThreadRequestAnswer(answers = answers)
+                        },
+                    ),
+                )
+            }
+        }
+        resolvingRequestId = null
+        pendingRequestResponse = null
+        result
+            .onSuccess { dto -> detail = buildThreadDetailPreviewFromSupervisor(dto) }
+            .onFailure { throwable -> error = throwable.message ?: "Request response failed." }
+    }
+
     val currentDetail = detail
     if (currentDetail != null) {
         ThreadDetailSurface(
@@ -106,6 +137,17 @@ fun ThreadDetailScreen(
             onThemeModeSelected = onThemeModeSelected,
             onChangeConnection = onChangeConnection,
             onSubmitPrompt = { prompt -> pendingPrompt = prompt },
+            onDenyPendingRequest = { request ->
+                pendingRequestResponse = PendingRequestResponse(
+                    request = request,
+                    answers = request.questions.associate { question ->
+                        (question.id ?: question.header) to emptyList()
+                    },
+                )
+            },
+            onSubmitPendingRequest = { request, answers ->
+                pendingRequestResponse = PendingRequestResponse(request = request, answers = answers)
+            },
             submittingPrompt = submittingPrompt,
         )
         return
@@ -119,6 +161,11 @@ fun ThreadDetailScreen(
         onBackToHome = onBackToHome,
     )
 }
+
+private data class PendingRequestResponse(
+    val request: PendingRequestPreview,
+    val answers: Map<String, List<String>>,
+)
 
 @Composable
 private fun ThreadDetailLoadingState(

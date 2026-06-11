@@ -1,6 +1,10 @@
 package com.remotecodex.android.ui.presentation
 
 import com.remotecodex.android.api.SupervisorThreadDetail
+import com.remotecodex.android.api.SupervisorThreadActionQuestion
+import com.remotecodex.android.api.SupervisorThreadActionQuestionOption
+import com.remotecodex.android.api.SupervisorThreadActionRequest
+import com.remotecodex.android.api.SupervisorThreadAnsweredRequestNote
 import com.remotecodex.android.api.SupervisorThreadSummary
 import com.remotecodex.android.api.SupervisorThreadTurn
 import com.remotecodex.android.api.SupervisorThreadTurnItem
@@ -65,7 +69,38 @@ class ThreadDetailMapperTest {
                     ),
                 ),
                 turnCount = 1,
-                pendingRequestCount = 0,
+                pendingRequests = listOf(
+                    SupervisorThreadActionRequest(
+                        id = "request-1",
+                        kind = "requestUserInput",
+                        title = "Pick a branch",
+                        description = "Choose where to continue.",
+                        createdAt = "2026-06-11T18:59:30Z",
+                        questions = listOf(
+                            SupervisorThreadActionQuestion(
+                                id = "question-1",
+                                header = "Branch",
+                                question = "Which branch?",
+                                multiSelect = false,
+                                isOther = true,
+                                options = listOf(
+                                    SupervisorThreadActionQuestionOption(
+                                        label = "main",
+                                        description = "Use main branch",
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+                answeredRequestNotes = listOf(
+                    SupervisorThreadAnsweredRequestNote(
+                        id = "answered-1",
+                        title = "Branch selected",
+                        summaryLines = listOf("main"),
+                        createdAt = "2026-06-11T18:59:40Z",
+                    ),
+                ),
                 liveItemCount = 2,
                 goalStatus = "active",
                 goalObjective = "Ship Android client",
@@ -81,6 +116,10 @@ class ThreadDetailMapperTest {
         assertEquals(ThreadStatus.Running, preview.rooms.single().status)
         assertEquals("1m", preview.rooms.single().updatedLabel)
         assertEquals("Goal", preview.timelineAuxiliary.activityNotes.single().title)
+        assertEquals("Pick a branch", preview.pendingRequests.single().title)
+        assertEquals("question-1", preview.pendingRequests.single().questions.single().id)
+        assertEquals("main", preview.pendingRequests.single().questions.single().options.single().label)
+        assertEquals("Branch selected", preview.timelineAuxiliary.answeredRequestNotes.single().title)
         assertEquals("Ship Android client", preview.composer.goalPanel.currentGoal?.objective)
         assertEquals("Message Android API...", preview.composer.prompt.placeholder)
 

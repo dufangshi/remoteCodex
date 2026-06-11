@@ -29,6 +29,7 @@ import com.remotecodex.android.settings.ThemeMode
 import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorHomeSnapshot
 import com.remotecodex.android.ui.model.DetailPreview
+import com.remotecodex.android.ui.model.PendingRequestPreview
 import com.remotecodex.android.ui.model.ThreadRoomPreview
 import com.remotecodex.android.ui.model.ThreadDetailPreview
 import com.remotecodex.android.ui.components.AppShellNavigationPanel
@@ -95,6 +96,8 @@ fun ThreadDetailSurface(
     onThemeModeSelected: (ThemeMode) -> Unit,
     onChangeConnection: () -> Unit,
     onSubmitPrompt: ((String) -> Unit)? = null,
+    onDenyPendingRequest: (PendingRequestPreview) -> Unit = {},
+    onSubmitPendingRequest: (PendingRequestPreview, Map<String, List<String>>) -> Unit = { _, _ -> },
     submittingPrompt: Boolean = false,
 ) {
     val detail = initialDetail
@@ -162,6 +165,8 @@ fun ThreadDetailSurface(
                             ThreadSurfaceView.Chat -> ChatPreviewSurface(
                                 detail = displayedDetail,
                                 onOpenDetail = { openDetail = it },
+                                onDenyPendingRequest = onDenyPendingRequest,
+                                onSubmitPendingRequest = onSubmitPendingRequest,
                                 modifier = Modifier.fillMaxSize(),
                             )
                             ThreadSurfaceView.Workspace -> WorkspacePanel(
@@ -292,6 +297,8 @@ fun ThreadDetailSurface(
 private fun ChatPreviewSurface(
     detail: ThreadDetailPreview,
     onOpenDetail: (DetailPreview) -> Unit,
+    onDenyPendingRequest: (PendingRequestPreview) -> Unit,
+    onSubmitPendingRequest: (PendingRequestPreview, Map<String, List<String>>) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -302,6 +309,8 @@ private fun ChatPreviewSurface(
             auxiliary = detail.timelineAuxiliary,
             pendingRequests = detail.pendingRequests,
             onOpenDetail = onOpenDetail,
+            onDenyPendingRequest = onDenyPendingRequest,
+            onSubmitPendingRequest = onSubmitPendingRequest,
             modifier = Modifier.weight(1f),
         )
         ThreadUsageFooter(detail = detail)

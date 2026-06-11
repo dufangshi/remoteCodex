@@ -42,6 +42,8 @@ import com.remotecodex.android.ui.theme.ThreadColors
 fun PendingRequestCard(
     request: PendingRequestPreview,
     modifier: Modifier = Modifier,
+    onDeny: ((PendingRequestPreview) -> Unit)? = null,
+    onSubmit: ((PendingRequestPreview, Map<String, List<String>>) -> Unit)? = null,
 ) {
     val state = buildPendingRequestCardState(request)
     val questionMode = state.questions.isNotEmpty()
@@ -170,6 +172,9 @@ fun PendingRequestCard(
                         .clip(RoundedCornerShape(999.dp))
                         .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(999.dp))
                         .semantics { contentDescription = state.denyAccessibilityLabel }
+                        .clickable(enabled = !state.busy) {
+                            onDeny?.invoke(request)
+                        }
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                     color = ThreadColors.ForegroundSoft,
                     style = MaterialTheme.typography.labelMedium,
@@ -196,11 +201,42 @@ fun PendingRequestCard(
                                 disabled()
                             }
                         }
+                        .clickable(enabled = primaryActionEnabled) {
+                            onSubmit?.invoke(
+                                request,
+                                state.questions.associate { question ->
+                                    question.id to pendingRequestAnswersForQuestion(
+                                        question = question,
+                                        selectedLabels = selectedAnswers[question.id].orEmpty(),
+                                        customAnswer = customAnswers[question.id].orEmpty(),
+                                    )
+                                },
+                            )
+                        }
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                     color = if (primaryActionEnabled) ThreadColors.PrimaryForeground else ThreadColors.ForegroundMuted,
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
+            }
+        }
+    }
+}
+
+private fun pendingRequestAnswersForQuestion(
+    question: PendingRequestQuestionState,
+    selectedLabels: Set<String>,
+    customAnswer: String,
+): List<String> {
+    if (question.options.isEmpty() && question.otherLabel == null) {
+        return customAnswer.trim().takeIf { it.isNotEmpty() }?.let(::listOf).orEmpty()
+    }
+    return buildList {
+        selectedLabels.forEach { label ->
+            if (label == question.otherLabel) {
+                customAnswer.trim().takeIf { it.isNotEmpty() }?.let(::add)
+            } else {
+                add(label)
             }
         }
     }

@@ -1,94 +1,132 @@
 package com.remotecodex.android.ui.components
 
-import android.content.Context
-import android.content.Intent
-import androidx.test.core.app.ApplicationProvider
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
-import androidx.test.uiautomator.By
-import androidx.test.uiautomator.UiDevice
-import androidx.test.uiautomator.Until
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertTrue
-import org.junit.Before
+import com.remotecodex.android.ui.model.PendingRequestKindPreview
+import com.remotecodex.android.ui.model.PendingRequestOptionPreview
+import com.remotecodex.android.ui.model.PendingRequestPreview
+import com.remotecodex.android.ui.model.PendingRequestQuestionPreview
+import com.remotecodex.android.ui.theme.RemoteCodexTheme
+import org.junit.Assert.assertEquals
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PendingRequestCardTest {
-    private lateinit var device: UiDevice
+    @get:Rule
+    val composeRule = createComposeRule()
 
-    @Before
-    fun launchApp() {
-        device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-            ?: error("Missing launch intent for ${context.packageName}")
-        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
-        context.startActivity(intent)
-        assertNotNull(
-            "Remote Codex app did not launch",
-            device.wait(Until.hasObject(By.pkg(context.packageName).depth(0)), 5_000),
+    @Test
+    fun freeFormQuestionSubmitsEnteredAnswer() {
+        var submitted: Map<String, List<String>>? = null
+        val request = PendingRequestPreview(
+            id = "request-1",
+            title = "Follow-up",
+            description = "Answer required",
+            command = "",
+            riskLabel = "Input required",
+            kind = PendingRequestKindPreview.RequestUserInput,
+            questions = listOf(
+                PendingRequestQuestionPreview(
+                    id = "question-1",
+                    header = "Follow-up",
+                    question = "What should Codex do next?",
+                ),
+            ),
         )
+
+        setPendingRequestContent(
+            request = request,
+            onSubmit = { _, answers -> submitted = answers },
+        )
+
+        composeRule.onNodeWithText("Answer Required").assertExists()
+        composeRule.onNodeWithText("Enter an answer").performTextInput("Run tests")
+        composeRule.onNodeWithContentDescription("Submit Answer Required")
+            .assertIsEnabled()
+            .performClick()
+
+        assertEquals(mapOf("question-1" to listOf("Run tests")), submitted)
     }
 
     @Test
-    fun planDecisionRendersWithoutFooterSubmit() {
-        assertNotNull(device.wait(Until.findObject(By.text("Plan")), 5_000))
-        assertNotNull(device.findObject(By.text("Plan decision")))
-        assertNotNull(device.findObject(By.text("Start the next Android component parity pass?")))
-        assertNotNull(device.findObject(By.text("Starting...")))
-        assertNotNull(device.findObject(By.text("Discuss")))
-        assertTrue(
-            "Plan decision should not render an empty command block",
-            device.findObjects(By.text("Requested action")).isEmpty(),
+    fun optionQuestionSubmitsSelectedOptionAndCustomOtherAnswer() {
+        var submitted: Map<String, List<String>>? = null
+        val request = PendingRequestPreview(
+            id = "request-2",
+            title = "Pick modes",
+            description = "Choose modes",
+            command = "",
+            riskLabel = "Input required",
+            kind = PendingRequestKindPreview.RequestUserInput,
+            questions = listOf(
+                PendingRequestQuestionPreview(
+                    id = "question-2",
+                    header = "Modes",
+                    question = "Which modes?",
+                    multiSelect = true,
+                    allowOther = true,
+                    options = listOf(
+                        PendingRequestOptionPreview("Implement", "Start coding"),
+                    ),
+                ),
+            ),
         )
-        assertTrue(
-            "Plan decision description should stay hidden like the Web card",
-            device.findObjects(
-                By.text("Codex prepared a focused plan for the next Android alignment pass."),
-            ).isEmpty(),
+
+        setPendingRequestContent(
+            request = request,
+            onSubmit = { _, answers -> submitted = answers },
         )
+
+        composeRule.onNodeWithContentDescription("Implement").performClick()
+        composeRule.onNodeWithContentDescription("Not from above").performClick()
+        composeRule.onNodeWithContentDescription("Modes custom answer").performTextInput("Document")
+        composeRule.onNodeWithContentDescription("Submit Answer Required").performClick()
+
+        assertEquals(mapOf("question-2" to listOf("Implement", "Document")), submitted)
     }
 
     @Test
-    fun freeFormQuestionRendersAndKeepsSubmitDisabledUntilTextIsProvided() {
-        device.swipeTimelineUp()
-        assertNotNull(device.wait(Until.findObject(By.text("Follow-up")), 5_000))
-        assertNotNull(device.findObject(By.text("Enter an answer")))
-
-        device.findObject(By.desc("Approve once, recommended")).clickCenter()
-        assertNotNull(
-            device.wait(Until.findObject(By.desc("Approve once, recommended, selected")), 2_000),
+    fun denyActionReportsRequest() {
+        var deniedRequestId: String? = null
+        val request = PendingRequestPreview(
+            id = "request-3",
+            title = "Permission required",
+            description = "Allow command",
+            command = "rm -rf build/tmp",
+            riskLabel = "Permission required",
+            kind = PendingRequestKindPreview.Approval,
         )
 
-        val followUpInput = device.findObject(By.clazz("android.widget.EditText"))
-        assertNotNull(followUpInput)
-        assertTrue(followUpInput.isEnabled)
+        setPendingRequestContent(
+            request = request,
+            onDeny = { deniedRequestId = it.id },
+        )
+
+        composeRule.onNodeWithContentDescription("Deny Permission required").performClick()
+
+        assertEquals("request-3", deniedRequestId)
     }
 
-    @Test
-    fun activityNoteRendersForkAction() {
-        assertNotNull(device.wait(Until.findObject(By.text("Fork")), 2_000))
-        assertNotNull(device.findObject(By.text("Thread forked from Turn 12 for Android timeline parity.")))
-        assertNotNull(device.findObject(By.desc("Open fork")))
+    private fun setPendingRequestContent(
+        request: PendingRequestPreview,
+        onDeny: (PendingRequestPreview) -> Unit = {},
+        onSubmit: (PendingRequestPreview, Map<String, List<String>>) -> Unit = { _, _ -> },
+    ) {
+        composeRule.setContent {
+            RemoteCodexTheme(dark = false) {
+                PendingRequestCard(
+                    request = request,
+                    onDeny = onDeny,
+                    onSubmit = onSubmit,
+                )
+            }
+        }
     }
-}
-
-private fun UiDevice.swipeTimelineUp() {
-    swipe(
-        displayWidth / 2,
-        (displayHeight * 0.56f).toInt(),
-        displayWidth / 2,
-        (displayHeight * 0.31f).toInt(),
-        18,
-    )
-}
-
-private fun androidx.test.uiautomator.UiObject2.clickCenter() {
-    val bounds = visibleBounds
-    UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).click(
-        bounds.centerX(),
-        bounds.centerY(),
-    )
 }

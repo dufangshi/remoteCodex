@@ -1,6 +1,8 @@
 package com.remotecodex.android.ui.presentation
 
 import com.remotecodex.android.api.SupervisorThreadDetail
+import com.remotecodex.android.api.SupervisorThreadActionQuestion
+import com.remotecodex.android.api.SupervisorThreadActionRequest
 import com.remotecodex.android.api.SupervisorThreadTurn
 import com.remotecodex.android.api.SupervisorThreadTurnItem
 import com.remotecodex.android.api.SupervisorThreadTurnTokenUsage
@@ -12,6 +14,10 @@ import com.remotecodex.android.ui.model.ComposerPreview
 import com.remotecodex.android.ui.model.ComposerPromptPreview
 import com.remotecodex.android.ui.model.MessageAuthor
 import com.remotecodex.android.ui.model.MessagePreview
+import com.remotecodex.android.ui.model.PendingRequestKindPreview
+import com.remotecodex.android.ui.model.PendingRequestOptionPreview
+import com.remotecodex.android.ui.model.PendingRequestPreview
+import com.remotecodex.android.ui.model.PendingRequestQuestionPreview
 import com.remotecodex.android.ui.model.ShellPreview
 import com.remotecodex.android.ui.model.ShellProcessPreview
 import com.remotecodex.android.ui.model.ThreadDetailPreview
@@ -73,8 +79,16 @@ fun buildThreadDetailPreviewFromSupervisor(
         turns = turns,
         timelineAuxiliary = TimelineAuxiliaryPreview(
             activityNotes = listOfNotNull(goalNote),
+            answeredRequestNotes = detail.answeredRequestNotes.map { note ->
+                TimelineNotePreview(
+                    title = note.title,
+                    summaryLines = note.summaryLines,
+                    timeLabel = shortTimeLabel(note.createdAt),
+                    sortKey = note.createdAt,
+                )
+            },
         ),
-        pendingRequests = emptyList(),
+        pendingRequests = detail.pendingRequests.map { request -> request.toPendingRequestPreview() },
         workspacePreview = detail.workspace.toWorkspacePreview(),
         shellPreview = buildShellPlaceholder(detail.workspace),
         composer = ComposerPreview(
@@ -101,6 +115,39 @@ fun buildThreadDetailPreviewFromSupervisor(
                 },
             ),
         ),
+    )
+}
+
+private fun SupervisorThreadActionRequest.toPendingRequestPreview(): PendingRequestPreview {
+    return PendingRequestPreview(
+        id = id,
+        title = title,
+        description = description.orEmpty(),
+        command = "",
+        riskLabel = if (kind == "planDecision") "Decision required" else "Input required",
+        kind = when (kind) {
+            "planDecision" -> PendingRequestKindPreview.PlanDecision
+            "requestUserInput" -> PendingRequestKindPreview.RequestUserInput
+            else -> PendingRequestKindPreview.Approval
+        },
+        sortKey = createdAt,
+        questions = questions.map { question -> question.toPendingRequestQuestionPreview() },
+    )
+}
+
+private fun SupervisorThreadActionQuestion.toPendingRequestQuestionPreview(): PendingRequestQuestionPreview {
+    return PendingRequestQuestionPreview(
+        id = id,
+        header = header,
+        question = question,
+        options = options.map { option ->
+            PendingRequestOptionPreview(
+                label = option.label,
+                description = option.description,
+            )
+        },
+        multiSelect = multiSelect,
+        allowOther = isOther,
     )
 }
 

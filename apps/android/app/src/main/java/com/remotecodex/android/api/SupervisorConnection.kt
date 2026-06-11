@@ -193,12 +193,43 @@ data class SupervisorThreadTurn(
     val items: List<SupervisorThreadTurnItem>,
 )
 
+data class SupervisorThreadActionQuestionOption(
+    val label: String,
+    val description: String,
+)
+
+data class SupervisorThreadActionQuestion(
+    val id: String,
+    val header: String,
+    val question: String,
+    val multiSelect: Boolean,
+    val isOther: Boolean,
+    val options: List<SupervisorThreadActionQuestionOption>,
+)
+
+data class SupervisorThreadActionRequest(
+    val id: String,
+    val kind: String,
+    val title: String,
+    val description: String?,
+    val createdAt: String,
+    val questions: List<SupervisorThreadActionQuestion>,
+)
+
+data class SupervisorThreadAnsweredRequestNote(
+    val id: String,
+    val title: String,
+    val summaryLines: List<String>,
+    val createdAt: String,
+)
+
 data class SupervisorThreadDetail(
     val thread: SupervisorThreadSummary,
     val workspace: SupervisorWorkspaceSummary,
     val turns: List<SupervisorThreadTurn>,
     val turnCount: Int,
-    val pendingRequestCount: Int,
+    val pendingRequests: List<SupervisorThreadActionRequest>,
+    val answeredRequestNotes: List<SupervisorThreadAnsweredRequestNote>,
     val liveItemCount: Int,
     val goalStatus: String?,
     val goalObjective: String?,
@@ -215,6 +246,14 @@ data class SendThreadPromptRequest(
     val prompt: String,
     val clientRequestId: String? = null,
     val model: String? = null,
+)
+
+data class RespondThreadRequestAnswer(
+    val answers: List<String>,
+)
+
+data class RespondThreadRequest(
+    val answers: Map<String, RespondThreadRequestAnswer>,
 )
 
 data class RelayDeviceSummary(

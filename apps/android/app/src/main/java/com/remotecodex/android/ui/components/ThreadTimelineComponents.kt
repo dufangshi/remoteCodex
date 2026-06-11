@@ -127,6 +127,8 @@ fun ThreadTimeline(
     auxiliary: TimelineAuxiliaryPreview = TimelineAuxiliaryPreview(),
     pendingRequests: List<PendingRequestPreview> = emptyList(),
     onOpenDetail: (DetailPreview) -> Unit = {},
+    onDenyPendingRequest: (PendingRequestPreview) -> Unit = {},
+    onSubmitPendingRequest: (PendingRequestPreview, Map<String, List<String>>) -> Unit = { _, _ -> },
 ) {
     val requestEntries = remember(auxiliary, pendingRequests) {
         buildTimelineRequestEntryStates(
@@ -153,7 +155,11 @@ fun ThreadTimeline(
                     note = entry.note,
                     tone = TimelineNoteTone.Activity,
                 )
-                is TimelineRequestEntryState.Pending -> PendingRequestCard(request = entry.request)
+                is TimelineRequestEntryState.Pending -> PendingRequestCard(
+                    request = entry.request,
+                    onDeny = onDenyPendingRequest,
+                    onSubmit = onSubmitPendingRequest,
+                )
                 is TimelineRequestEntryState.Answered -> TimelineNoteCard(
                     note = entry.note,
                     tone = TimelineNoteTone.Answered,

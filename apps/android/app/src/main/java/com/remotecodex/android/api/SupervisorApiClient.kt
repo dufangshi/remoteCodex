@@ -121,6 +121,30 @@ class SupervisorApiClient(
         ).toThreadSummary()
     }
 
+    fun respondToThreadRequest(
+        threadId: String,
+        requestId: String,
+        request: RespondThreadRequest,
+    ): SupervisorThreadDetail {
+        val answersJson = JSONObject()
+        request.answers.forEach { (questionId, answer) ->
+            answersJson.put(
+                questionId,
+                JSONObject().put("answers", org.json.JSONArray(answer.answers)),
+            )
+        }
+        val body = JSONObject()
+            .put("answers", answersJson)
+            .toString()
+        return requestJson(
+            config.restPath(
+                "/api/threads/${urlEncodePathSegment(threadId)}/requests/${urlEncodePathSegment(requestId)}/respond",
+            ),
+            method = "POST",
+            body = body,
+        ).toThreadDetail()
+    }
+
     fun checkConnection(): SupervisorConnectionCheck {
         val session = fetchAuthSession()
         val health = fetchHealth()
@@ -360,10 +384,60 @@ private fun JSONObject.toThreadDetail(): SupervisorThreadDetail {
         workspace = workspaceJson.toWorkspaceSummary(),
         turns = parsedTurns,
         turnCount = optJSONArray("turns")?.length() ?: 0,
-        pendingRequestCount = optJSONArray("pendingRequests")?.length() ?: 0,
+        pendingRequests = (optJSONArray("pendingRequests") ?: org.json.JSONArray()).let { array ->
+            List(array.length()) { index -> array.getJSONObject(index).toThreadActionRequest() }
+        },
+        answeredRequestNotes = (optJSONArray("answeredRequestNotes") ?: org.json.JSONArray()).let { array ->
+            List(array.length()) { index -> array.getJSONObject(index).toAnsweredRequestNote() }
+        },
         liveItemCount = liveItemsJson?.optJSONArray("items")?.length() ?: 0,
         goalStatus = goalJson?.optNullableString("status"),
         goalObjective = goalJson?.optNullableString("objective"),
+    )
+}
+
+private fun JSONObject.toThreadActionRequest(): SupervisorThreadActionRequest {
+    val questionsJson = optJSONArray("questions") ?: org.json.JSONArray()
+    return SupervisorThreadActionRequest(
+        id = optString("id"),
+        kind = optString("kind"),
+        title = optString("title"),
+        description = optNullableString("description"),
+        createdAt = optString("createdAt"),
+        questions = List(questionsJson.length()) { index ->
+            questionsJson.getJSONObject(index).toThreadActionQuestion()
+        },
+    )
+}
+
+private fun JSONObject.toThreadActionQuestion(): SupervisorThreadActionQuestion {
+    val optionsJson = optJSONArray("options") ?: org.json.JSONArray()
+    return SupervisorThreadActionQuestion(
+        id = optString("id"),
+        header = optString("header"),
+        question = optString("question"),
+        multiSelect = optBoolean("multiSelect", false),
+        isOther = optBoolean("isOther", false),
+        options = List(optionsJson.length()) { index ->
+            optionsJson.getJSONObject(index).toThreadActionQuestionOption()
+        },
+    )
+}
+
+private fun JSONObject.toThreadActionQuestionOption(): SupervisorThreadActionQuestionOption {
+    return SupervisorThreadActionQuestionOption(
+        label = optString("label"),
+        description = optString("description"),
+    )
+}
+
+private fun JSONObject.toAnsweredRequestNote(): SupervisorThreadAnsweredRequestNote {
+    val linesJson = optJSONArray("summaryLines") ?: org.json.JSONArray()
+    return SupervisorThreadAnsweredRequestNote(
+        id = optString("id"),
+        title = optString("title"),
+        summaryLines = List(linesJson.length()) { index -> linesJson.optString(index) },
+        createdAt = optString("createdAt"),
     )
 }
 
