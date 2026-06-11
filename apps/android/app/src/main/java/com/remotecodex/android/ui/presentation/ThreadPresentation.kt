@@ -3,6 +3,7 @@ package com.remotecodex.android.ui.presentation
 import com.remotecodex.android.ui.model.HistoryItemKind
 import com.remotecodex.android.ui.model.MessageAuthor
 import com.remotecodex.android.ui.model.MessagePreview
+import com.remotecodex.android.ui.model.LivePlanPreview
 import com.remotecodex.android.ui.model.PlanStepStatus
 import com.remotecodex.android.ui.model.ReasoningPreview
 import com.remotecodex.android.ui.model.ThreadStatus
@@ -103,6 +104,19 @@ data class PlanStepStatusPresentationState(
     val accessibilityLabel: String,
     val tone: PlanStepStatusTone,
     val running: Boolean,
+)
+
+data class GraphChatLivePlanCardState(
+    val title: String,
+    val badgeLabel: String,
+    val explanation: String?,
+    val steps: List<LivePlanStepState>,
+)
+
+data class LivePlanStepState(
+    val number: Int,
+    val text: String,
+    val status: PlanStepStatus,
 )
 
 data class GraphChatTurnFrameState(
@@ -2941,6 +2955,21 @@ fun buildPlanStepStatusPresentationState(status: PlanStepStatus): PlanStepStatus
             PlanStepStatus.Unknown -> PlanStepStatusTone.Unknown
         },
         running = status == PlanStepStatus.Running,
+    )
+}
+
+fun buildGraphChatLivePlanCardState(livePlan: LivePlanPreview): GraphChatLivePlanCardState {
+    return GraphChatLivePlanCardState(
+        title = "Plan update",
+        badgeLabel = "Live",
+        explanation = livePlan.explanation?.trim()?.takeIf { it.isNotEmpty() },
+        steps = livePlan.steps.mapIndexed { index, step ->
+            LivePlanStepState(
+                number = index + 1,
+                text = step.step,
+                status = step.status,
+            )
+        },
     )
 }
 

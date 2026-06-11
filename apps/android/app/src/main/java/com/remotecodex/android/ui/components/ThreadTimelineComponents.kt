@@ -91,6 +91,7 @@ import com.remotecodex.android.ui.presentation.MessageStatusModel
 import com.remotecodex.android.ui.presentation.ComposerStatusTone
 import com.remotecodex.android.ui.presentation.GraphChatPlainTextSegment
 import com.remotecodex.android.ui.presentation.buildGraphChatImageHistoryState
+import com.remotecodex.android.ui.presentation.buildGraphChatLivePlanCardState
 import com.remotecodex.android.ui.presentation.parseUserMessageSegments
 import com.remotecodex.android.ui.presentation.buildPlanStepStatusPresentationState
 import com.remotecodex.android.ui.presentation.PlanStepStatusTone
@@ -449,6 +450,7 @@ private enum class TimelineNoteTone {
 
 @Composable
 private fun LivePlanCard(livePlan: LivePlanPreview) {
+    val state = remember(livePlan) { buildGraphChatLivePlanCardState(livePlan) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -464,7 +466,7 @@ private fun LivePlanCard(livePlan: LivePlanPreview) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = livePlan.title,
+                text = state.title,
                 modifier = Modifier.weight(1f),
                 color = ThreadColors.Foreground,
                 style = MaterialTheme.typography.bodyMedium,
@@ -473,7 +475,7 @@ private fun LivePlanCard(livePlan: LivePlanPreview) {
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = "Live",
+                text = state.badgeLabel,
                 modifier = Modifier
                     .clip(RoundedCornerShape(999.dp))
                     .background(ThreadColors.WarningSoft)
@@ -484,7 +486,7 @@ private fun LivePlanCard(livePlan: LivePlanPreview) {
                 fontWeight = FontWeight.SemiBold,
             )
         }
-        livePlan.explanation?.let { explanation ->
+        state.explanation?.let { explanation ->
             Text(
                 text = explanation,
                 color = ThreadColors.ForegroundSoft,
@@ -492,10 +494,10 @@ private fun LivePlanCard(livePlan: LivePlanPreview) {
             )
         }
         Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            livePlan.steps.forEachIndexed { index, step ->
+            state.steps.forEach { step ->
                 LivePlanStepRow(
-                    number = index + 1,
-                    text = step.step,
+                    number = step.number,
+                    text = step.text,
                     status = step.status,
                 )
             }

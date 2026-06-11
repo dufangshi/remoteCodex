@@ -362,6 +362,45 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun buildsGraphChatLivePlanCardStateWithWebLabels() {
+        assertEquals(
+            GraphChatLivePlanCardState(
+                title = "Plan update",
+                badgeLabel = "Live",
+                explanation = "Port the card labels.",
+                steps = listOf(
+                    LivePlanStepState(1, "Read web turn body", PlanStepStatus.Completed),
+                    LivePlanStepState(2, "Update Android", PlanStepStatus.Running),
+                ),
+            ),
+            buildGraphChatLivePlanCardState(
+                LivePlanPreview(
+                    title = "Backend supplied title",
+                    explanation = " Port the card labels. ",
+                    steps = listOf(
+                        LivePlanStepPreview("Read web turn body", PlanStepStatus.Completed),
+                        LivePlanStepPreview("Update Android", PlanStepStatus.Running),
+                    ),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun buildsGraphChatLivePlanCardStateWithoutBlankExplanation() {
+        assertEquals(
+            null,
+            buildGraphChatLivePlanCardState(
+                LivePlanPreview(
+                    title = "Plan",
+                    explanation = " ",
+                    steps = emptyList(),
+                ),
+            ).explanation,
+        )
+    }
+
+    @Test
     fun buildsGraphChatTurnFrameStateForOptimisticTurn() {
         assertEquals(
             GraphChatTurnFrameState(
