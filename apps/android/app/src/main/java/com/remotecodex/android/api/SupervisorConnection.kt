@@ -209,6 +209,10 @@ data class CreateSupervisorWorkspaceRequest(
     val label: String? = null,
 )
 
+data class UpdateSupervisorWorkspaceRequest(
+    val label: String,
+)
+
 data class StartSupervisorThreadRequest(
     val workspaceId: String,
     val title: String? = null,

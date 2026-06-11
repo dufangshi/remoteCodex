@@ -69,6 +69,43 @@ class SupervisorApiClient(
         ).toWorkspaceSummary()
     }
 
+    fun updateWorkspace(workspaceId: String, request: UpdateSupervisorWorkspaceRequest): SupervisorWorkspaceSummary {
+        val body = JSONObject()
+            .put("label", request.label)
+            .toString()
+        return requestJson(
+            config.restPath("/api/workspaces/${urlEncodePathSegment(workspaceId)}"),
+            method = "PATCH",
+            body = body,
+        ).toWorkspaceSummary()
+    }
+
+    fun deleteWorkspace(workspaceId: String): String {
+        val json = requestJson(
+            config.restPath("/api/workspaces/${urlEncodePathSegment(workspaceId)}"),
+            method = "DELETE",
+        )
+        return json.optString("id", workspaceId)
+    }
+
+    fun setWorkspaceFavorite(workspaceId: String, isFavorite: Boolean): SupervisorWorkspaceSummary {
+        val body = JSONObject()
+            .put("isFavorite", isFavorite)
+            .toString()
+        return requestJson(
+            config.restPath("/api/workspaces/${urlEncodePathSegment(workspaceId)}/favorite"),
+            method = "POST",
+            body = body,
+        ).toWorkspaceSummary()
+    }
+
+    fun openWorkspace(workspaceId: String): SupervisorWorkspaceSummary {
+        return requestJson(
+            config.restPath("/api/workspaces/${urlEncodePathSegment(workspaceId)}/open"),
+            method = "POST",
+        ).toWorkspaceSummary()
+    }
+
     fun startThread(request: StartSupervisorThreadRequest): SupervisorThreadSummary {
         val body = JSONObject()
             .put("workspaceId", request.workspaceId)

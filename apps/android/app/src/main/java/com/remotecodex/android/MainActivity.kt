@@ -7,6 +7,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -40,12 +41,13 @@ class MainActivity : ComponentActivity() {
             var homeSnapshot by remember { mutableStateOf<SupervisorHomeSnapshot?>(null) }
             var homeSnapshotLoading by remember { mutableStateOf(false) }
             var homeSnapshotError by remember { mutableStateOf<String?>(null) }
+            var homeSnapshotRefreshNonce by remember { mutableIntStateOf(0) }
             val darkThemeActive = when (themeMode) {
                 ThemeMode.System -> systemDark
                 ThemeMode.Light -> false
                 ThemeMode.Dark -> true
             }
-            LaunchedEffect(supervisorConnection) {
+            LaunchedEffect(supervisorConnection, homeSnapshotRefreshNonce) {
                 val connection = supervisorConnection ?: return@LaunchedEffect
                 homeSnapshotLoading = true
                 homeSnapshotError = null
@@ -85,6 +87,9 @@ class MainActivity : ComponentActivity() {
                             onOpenThread = { threadId ->
                                 connectedRoute = threadId?.let(ConnectedRoute::ThreadDetail)
                                     ?: ConnectedRoute.ThreadPreview
+                            },
+                            onRefreshHomeSnapshot = {
+                                homeSnapshotRefreshNonce += 1
                             },
                             onChangeConnection = {
                                 settingsRepository.clearSupervisorConnection()

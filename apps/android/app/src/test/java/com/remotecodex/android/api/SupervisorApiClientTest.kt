@@ -358,6 +358,61 @@ class SupervisorApiClientTest {
     }
 
     @Test
+    fun workspaceManagementUsesRelayDevicePath() {
+        val renamedWorkspaceJson = """{"id":"workspace-1","label":"Renamed Workspace","absPath":"/repo","isFavorite":false,"lastOpenedAt":null}"""
+        val favoriteWorkspaceJson = """{"id":"workspace-1","label":"Renamed Workspace","absPath":"/repo","isFavorite":true,"lastOpenedAt":null}"""
+        val openedWorkspaceJson = """{"id":"workspace-1","label":"Renamed Workspace","absPath":"/repo","isFavorite":true,"lastOpenedAt":"2026-01-03T00:00:00.000Z"}"""
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(200, renamedWorkspaceJson),
+            SupervisorHttpResponse(200, favoriteWorkspaceJson),
+            SupervisorHttpResponse(200, openedWorkspaceJson),
+            SupervisorHttpResponse(200, """{"id":"workspace-1"}"""),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        val renamed = client.updateWorkspace("workspace-1", UpdateSupervisorWorkspaceRequest("Renamed Workspace"))
+        val favorite = client.setWorkspaceFavorite("workspace-1", true)
+        val opened = client.openWorkspace("workspace-1")
+        val deletedId = client.deleteWorkspace("workspace-1")
+
+        assertEquals("Renamed Workspace", renamed.label)
+        assertTrue(favorite.isFavorite)
+        assertEquals("2026-01-03T00:00:00.000Z", opened.lastOpenedAt)
+        assertEquals("workspace-1", deletedId)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/workspaces/workspace-1",
+            transport.requests[0].url,
+        )
+        assertEquals("PATCH", transport.requests[0].method)
+        assertEquals("relay-token", transport.requests[0].bearerToken)
+        assertTrue(transport.requests[0].body!!.contains("\"label\":\"Renamed Workspace\""))
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/workspaces/workspace-1/favorite",
+            transport.requests[1].url,
+        )
+        assertEquals("POST", transport.requests[1].method)
+        assertTrue(transport.requests[1].body!!.contains("\"isFavorite\":true"))
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/workspaces/workspace-1/open",
+            transport.requests[2].url,
+        )
+        assertEquals("POST", transport.requests[2].method)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/workspaces/workspace-1",
+            transport.requests[3].url,
+        )
+        assertEquals("DELETE", transport.requests[3].method)
+    }
+
+    @Test
     fun threadRenameAndDeleteUseRelayDevicePath() {
         val renamedThreadJson = """{"id":"thread-1","workspaceId":"workspace-1","title":"Renamed Android API","status":"idle","model":"gpt-5","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":"Wire detail"}"""
         val deletedThreadJson = """{"id":"thread-1","workspaceId":"workspace-1","title":"Renamed Android API","status":"idle","model":"gpt-5","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":"Wire detail"}"""

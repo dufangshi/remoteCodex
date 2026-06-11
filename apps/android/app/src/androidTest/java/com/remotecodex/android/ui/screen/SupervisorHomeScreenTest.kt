@@ -34,6 +34,10 @@ class SupervisorHomeScreenTest {
         composeRule.onNodeWithContentDescription("Open Threads").assertExists()
         composeRule.onNodeWithContentDescription("Open Shells").assertExists()
         composeRule.onNodeWithText("remoteCodex-main").assertExists()
+        composeRule.onNodeWithContentDescription("Open workspace remoteCodex-main").assertExists()
+        composeRule.onNodeWithContentDescription("Toggle favorite workspace remoteCodex-main").assertExists()
+        composeRule.onNodeWithContentDescription("Rename workspace remoteCodex-main").assertExists()
+        composeRule.onNodeWithContentDescription("Delete workspace remoteCodex-main").assertExists()
 
         composeRule.onNodeWithContentDescription("Open Threads").performClick()
         composeRule.onNodeWithText("Android native thread client").assertExists()
@@ -44,6 +48,20 @@ class SupervisorHomeScreenTest {
         composeRule.onNodeWithContentDescription("Open Shells").performClick()
         composeRule.onNodeWithText("Build shell").assertExists()
         composeRule.onNodeWithText("Shell adapter pending").assertExists()
+    }
+
+    @Test
+    fun workspaceRowsExposeRenameAndDeleteDialogs() {
+        setHomeContent()
+
+        composeRule.onNodeWithContentDescription("Rename workspace remoteCodex-main").performClick()
+        composeRule.onNodeWithText("Rename Workspace").assertExists()
+        composeRule.onNodeWithText("Workspace label").assertExists()
+        composeRule.onNodeWithContentDescription("Close dialog").performClick()
+
+        composeRule.onNodeWithContentDescription("Delete workspace remoteCodex-main").performClick()
+        composeRule.onNodeWithText("Delete Workspace").assertExists()
+        composeRule.onNodeWithText("This removes the workspace record and its related threads from the supervisor.").assertExists()
     }
 
     @Test
