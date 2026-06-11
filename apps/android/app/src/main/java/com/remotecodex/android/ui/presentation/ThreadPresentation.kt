@@ -221,6 +221,14 @@ data class ComposerAttachmentActionState(
     val kind: ComposerAttachmentActionKind,
 )
 
+data class ComposerAttachmentPanelState(
+    val open: Boolean,
+    val triggerLabel: String,
+    val actions: List<ComposerAttachmentActionState>,
+    val queuedAttachments: List<ComposerPromptAttachmentState>,
+    val emptyMessage: String?,
+)
+
 data class ComposerShellToolState(
     val label: String,
     val kind: ComposerShellToolKind,
@@ -954,6 +962,20 @@ fun buildComposerAttachmentActions(): List<ComposerAttachmentActionState> {
             detail = "Workspace or local file",
             kind = ComposerAttachmentActionKind.File,
         ),
+    )
+}
+
+fun buildComposerAttachmentPanelState(
+    open: Boolean,
+    prompt: ComposerPromptPreview,
+): ComposerAttachmentPanelState {
+    val queuedAttachments = prompt.attachments.map(::buildComposerPromptAttachmentState)
+    return ComposerAttachmentPanelState(
+        open = open,
+        triggerLabel = "Add attachment",
+        actions = buildComposerAttachmentActions(),
+        queuedAttachments = queuedAttachments,
+        emptyMessage = if (queuedAttachments.isEmpty()) "No queued attachments." else null,
     )
 }
 

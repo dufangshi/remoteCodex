@@ -437,6 +437,86 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun buildsOpenComposerAttachmentPanelState() {
+        assertEquals(
+            ComposerAttachmentPanelState(
+                open = true,
+                triggerLabel = "Add attachment",
+                actions = listOf(
+                    ComposerAttachmentActionState(
+                        label = "Photo",
+                        detail = "Camera or image library",
+                        kind = ComposerAttachmentActionKind.Photo,
+                    ),
+                    ComposerAttachmentActionState(
+                        label = "File",
+                        detail = "Workspace or local file",
+                        kind = ComposerAttachmentActionKind.File,
+                    ),
+                ),
+                queuedAttachments = listOf(
+                    ComposerPromptAttachmentState(
+                        label = "capture.png",
+                        kind = ComposerAttachmentActionKind.Photo,
+                    ),
+                    ComposerPromptAttachmentState(
+                        label = "notes.md",
+                        kind = ComposerAttachmentActionKind.File,
+                    ),
+                ),
+                emptyMessage = null,
+            ),
+            buildComposerAttachmentPanelState(
+                open = true,
+                prompt = ComposerPromptPreview(
+                    attachments = listOf(
+                        ComposerPromptAttachmentPreview(
+                            clientId = "photo",
+                            kind = ComposerAttachmentKindPreview.Photo,
+                            name = "/tmp/capture.png",
+                            placeholder = "[PHOTO capture.png]",
+                        ),
+                        ComposerPromptAttachmentPreview(
+                            clientId = "file",
+                            kind = ComposerAttachmentKindPreview.File,
+                            name = "notes.md",
+                            placeholder = "[FILE notes.md]",
+                        ),
+                    ),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun buildsClosedEmptyComposerAttachmentPanelState() {
+        assertEquals(
+            ComposerAttachmentPanelState(
+                open = false,
+                triggerLabel = "Add attachment",
+                actions = listOf(
+                    ComposerAttachmentActionState(
+                        label = "Photo",
+                        detail = "Camera or image library",
+                        kind = ComposerAttachmentActionKind.Photo,
+                    ),
+                    ComposerAttachmentActionState(
+                        label = "File",
+                        detail = "Workspace or local file",
+                        kind = ComposerAttachmentActionKind.File,
+                    ),
+                ),
+                queuedAttachments = emptyList(),
+                emptyMessage = "No queued attachments.",
+            ),
+            buildComposerAttachmentPanelState(
+                open = false,
+                prompt = ComposerPromptPreview(attachments = emptyList()),
+            ),
+        )
+    }
+
+    @Test
     fun buildsChatComposerPromptSlotState() {
         assertEquals(
             ComposerPromptSlotState(

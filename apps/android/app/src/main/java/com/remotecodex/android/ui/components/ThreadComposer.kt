@@ -35,6 +35,7 @@ import com.remotecodex.android.ui.model.ComposerPreview
 import com.remotecodex.android.ui.presentation.ComposerActionState
 import com.remotecodex.android.ui.presentation.ComposerAttachmentActionKind
 import com.remotecodex.android.ui.presentation.ComposerAttachmentActionState
+import com.remotecodex.android.ui.presentation.ComposerAttachmentPanelState
 import com.remotecodex.android.ui.presentation.ComposerContextUsageState
 import com.remotecodex.android.ui.presentation.ComposerForkActionState
 import com.remotecodex.android.ui.presentation.ComposerForkPanelState
@@ -70,7 +71,7 @@ import com.remotecodex.android.ui.presentation.ComposerToolbarButtonState
 import com.remotecodex.android.ui.presentation.ComposerToolbarMenuState
 import com.remotecodex.android.ui.presentation.ComposerToolbarState
 import com.remotecodex.android.ui.presentation.buildComposerActionState
-import com.remotecodex.android.ui.presentation.buildComposerAttachmentActions
+import com.remotecodex.android.ui.presentation.buildComposerAttachmentPanelState
 import com.remotecodex.android.ui.presentation.buildComposerContextUsageState
 import com.remotecodex.android.ui.presentation.buildComposerForkPanelState
 import com.remotecodex.android.ui.presentation.buildComposerGoalPanelState
@@ -124,6 +125,10 @@ fun ThreadComposer(
     val submitInputState = buildComposerSubmitInputState(
         prompt = composer.prompt,
         activeView = composer.activeView,
+    )
+    val attachmentPanelState = buildComposerAttachmentPanelState(
+        open = openMenu == ComposerMenu.Attachments,
+        prompt = composer.prompt,
     )
     val settingsState = buildComposerSettingsState(
         context = composer.context,
@@ -195,7 +200,7 @@ fun ThreadComposer(
                     mcpPanelState = mcpPanelState,
                     hooksPanelState = hooksPanelState,
                 )
-                ComposerMenu.Attachments -> AttachmentPanel()
+                ComposerMenu.Attachments -> AttachmentPanel(panelState = attachmentPanelState)
                 ComposerMenu.Model -> ModelPickerPanel(modelOptions = modelOptions)
                 ComposerMenu.Effort -> EffortPickerPanel(
                     settingsState = settingsState,
@@ -646,8 +651,12 @@ private fun ValueSliderPreview(
     GraphLabeledSlider(label = label, valueLabel = valueLabel, fraction = fraction)
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun AttachmentPreviewStrip() {
+private fun AttachmentPreviewStrip(
+    attachments: List<ComposerPromptAttachmentState>,
+    emptyMessage: String?,
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -663,9 +672,24 @@ private fun AttachmentPreviewStrip() {
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.SemiBold,
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            AttachmentChip(icon = AttachmentTileIcon.Photo, name = "shell-preview.png")
-            AttachmentChip(icon = AttachmentTileIcon.File, name = "architecture.md")
+        if (attachments.isEmpty()) {
+            Text(
+                text = emptyMessage ?: "No queued attachments.",
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        } else {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                verticalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                attachments.forEach { attachment ->
+                    AttachmentChip(attachment = attachment)
+                }
+            }
         }
     }
 }
@@ -1890,18 +1914,20 @@ private fun HookStatusRow(
 }
 
 @Composable
-private fun AttachmentPanel() {
-    val actions = buildComposerAttachmentActions()
-    ComposerMenuSurface(title = "Add attachment", subtitle = "Prompt context") {
+private fun AttachmentPanel(panelState: ComposerAttachmentPanelState) {
+    ComposerMenuSurface(title = panelState.triggerLabel, subtitle = "Prompt context") {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            actions.forEach { action ->
+            panelState.actions.forEach { action ->
                 AttachmentButton(
                     action = action,
                     modifier = Modifier.weight(1f),
                 )
             }
         }
-        AttachmentPreviewStrip()
+        AttachmentPreviewStrip(
+            attachments = panelState.queuedAttachments,
+            emptyMessage = panelState.emptyMessage,
+        )
     }
 }
 
