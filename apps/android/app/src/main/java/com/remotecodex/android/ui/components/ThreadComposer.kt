@@ -70,6 +70,7 @@ import com.remotecodex.android.ui.presentation.ComposerSelectionOptionState
 import com.remotecodex.android.ui.presentation.ComposerShellToolState
 import com.remotecodex.android.ui.presentation.ComposerShellToolsPanelState
 import com.remotecodex.android.ui.presentation.ComposerShellToolTone
+import com.remotecodex.android.ui.presentation.ComposerSlashToolboxPanelState
 import com.remotecodex.android.ui.presentation.ComposerSkillErrorState
 import com.remotecodex.android.ui.presentation.ComposerSkillRowState
 import com.remotecodex.android.ui.presentation.ComposerSkillsPanelState
@@ -96,6 +97,7 @@ import com.remotecodex.android.ui.presentation.buildComposerSettingsToolbarState
 import com.remotecodex.android.ui.presentation.buildComposerShellPromptInputState
 import com.remotecodex.android.ui.presentation.buildComposerShellTools
 import com.remotecodex.android.ui.presentation.buildComposerShellToolsPanelState
+import com.remotecodex.android.ui.presentation.buildComposerSlashToolboxPanelState
 import com.remotecodex.android.ui.presentation.buildComposerSkillsPanelState
 import com.remotecodex.android.ui.presentation.buildComposerStatusStrip
 import com.remotecodex.android.ui.presentation.buildComposerSubmitInputState
@@ -191,6 +193,10 @@ fun ThreadComposer(
         settingsBusy = composer.settingsBusy,
         forkBusy = composer.forkBusy,
     )
+    val slashToolboxPanelState = buildComposerSlashToolboxPanelState(
+        open = openMenu == ComposerMenu.Slash,
+        items = toolboxItems,
+    )
     val forkPanelState = buildComposerForkPanelState(
         busy = composer.busy,
         forkBusy = composer.forkBusy,
@@ -223,7 +229,7 @@ fun ThreadComposer(
         if (openMenu != null) {
             when (openMenu) {
                 ComposerMenu.Slash -> SlashToolboxPanel(
-                    toolboxItems = toolboxItems,
+                    panelState = slashToolboxPanelState,
                     forkPanelState = forkPanelState,
                     goalPanelState = goalPanelState,
                     skillsPanelState = skillsPanelState,
@@ -246,6 +252,7 @@ fun ThreadComposer(
             toolbarState = toolbarState,
             settingsToolbarState = settingsToolbarState,
             attachmentPanelState = attachmentPanelState,
+            slashToolboxPanelState = slashToolboxPanelState,
             onToggleMenu = { menu -> openMenu = openMenu.toggle(menu) },
         )
         ComposerFrameSlotsPreview(
@@ -321,6 +328,7 @@ private fun ComposerToolbarRow(
     toolbarState: ComposerToolbarState,
     settingsToolbarState: ComposerSettingsToolbarState,
     attachmentPanelState: ComposerAttachmentPanelState,
+    slashToolboxPanelState: ComposerSlashToolboxPanelState,
     onToggleMenu: (ComposerMenu) -> Unit,
 ) {
     Row(
@@ -329,7 +337,9 @@ private fun ComposerToolbarRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         ToolbarIconButton(
-            state = toolbarState.slashButton,
+            state = toolbarState.slashButton.copy(
+                label = slashToolboxPanelState.triggerAccessibilityLabel,
+            ),
             icon = ComposerToolIcon.Slash,
             onClick = { onToggleMenu(ComposerMenu.Slash) },
         )
@@ -1202,18 +1212,21 @@ private fun ComposerModeChip(label: String, selected: Boolean, pressed: Boolean 
 
 @Composable
 private fun SlashToolboxPanel(
-    toolboxItems: List<ComposerToolboxItemState>,
+    panelState: ComposerSlashToolboxPanelState,
     forkPanelState: ComposerForkPanelState,
     goalPanelState: ComposerGoalPanelState,
     skillsPanelState: ComposerSkillsPanelState,
     mcpPanelState: ComposerMcpPanelState,
     hooksPanelState: ComposerHooksPanelState,
 ) {
-    ComposerMenuSurface(title = "Slash toolbox", subtitle = "Thread actions") {
-        if (toolboxItems.isEmpty()) {
-            EmptyToolboxState()
+    if (!panelState.surfaceVisible) {
+        return
+    }
+    ComposerMenuSurface(title = panelState.title, subtitle = panelState.subtitle) {
+        if (panelState.items.isEmpty()) {
+            EmptyToolboxState(message = panelState.emptyMessage.orEmpty())
         } else {
-            toolboxItems.forEach { item ->
+            panelState.items.forEach { item ->
                 ToolboxRow(item = item)
             }
         }
@@ -2261,9 +2274,9 @@ private fun ComposerMenuSurface(
 }
 
 @Composable
-private fun EmptyToolboxState() {
+private fun EmptyToolboxState(message: String) {
     Text(
-        text = "No backend tools are available for this thread.",
+        text = message,
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))

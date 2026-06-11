@@ -2218,6 +2218,55 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun buildsOpenComposerSlashToolboxPanelStateWithItems() {
+        val item = ComposerToolboxItemState(
+            command = "/fast",
+            label = "Fast",
+            status = "Off",
+            description = "Toggle fast mode",
+            enabled = true,
+            tone = ComposerToolboxItemTone.Neutral,
+        )
+
+        assertEquals(
+            ComposerSlashToolboxPanelState(
+                menuVisible = true,
+                triggerAccessibilityLabel = "Open slash toolbox",
+                triggerTitle = "Open slash toolbox",
+                surfaceVisible = true,
+                title = "Slash toolbox",
+                subtitle = "Thread actions",
+                items = listOf(item),
+                emptyMessage = null,
+            ),
+            buildComposerSlashToolboxPanelState(
+                open = true,
+                items = listOf(item),
+            ),
+        )
+    }
+
+    @Test
+    fun buildsClosedEmptyComposerSlashToolboxPanelState() {
+        assertEquals(
+            ComposerSlashToolboxPanelState(
+                menuVisible = false,
+                triggerAccessibilityLabel = "Open slash toolbox",
+                triggerTitle = "Open slash toolbox",
+                surfaceVisible = false,
+                title = "Slash toolbox",
+                subtitle = "Thread actions",
+                items = emptyList(),
+                emptyMessage = "No backend tools are available for this thread.",
+            ),
+            buildComposerSlashToolboxPanelState(
+                open = false,
+                items = emptyList(),
+            ),
+        )
+    }
+
+    @Test
     fun parsesAndFormatsGoalTokenBudgetsInThousands() {
         assertNull(parseGoalTokenBudgetThousands(""))
         assertEquals(12_500, parseGoalTokenBudgetThousands("12.5"))

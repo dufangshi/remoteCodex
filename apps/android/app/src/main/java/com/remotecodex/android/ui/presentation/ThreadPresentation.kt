@@ -349,6 +349,17 @@ data class ComposerToolboxItemState(
     val tone: ComposerToolboxItemTone,
 )
 
+data class ComposerSlashToolboxPanelState(
+    val menuVisible: Boolean,
+    val triggerAccessibilityLabel: String,
+    val triggerTitle: String,
+    val surfaceVisible: Boolean,
+    val title: String,
+    val subtitle: String,
+    val items: List<ComposerToolboxItemState>,
+    val emptyMessage: String?,
+)
+
 enum class ComposerForkActionKind {
     Latest,
     SelectedTurn,
@@ -936,6 +947,22 @@ fun buildComposerToolboxItems(
             ),
         )
     }
+}
+
+fun buildComposerSlashToolboxPanelState(
+    open: Boolean,
+    items: List<ComposerToolboxItemState>,
+): ComposerSlashToolboxPanelState {
+    return ComposerSlashToolboxPanelState(
+        menuVisible = open,
+        triggerAccessibilityLabel = "Open slash toolbox",
+        triggerTitle = "Open slash toolbox",
+        surfaceVisible = open,
+        title = "Slash toolbox",
+        subtitle = "Thread actions",
+        items = items,
+        emptyMessage = if (items.isEmpty()) "No backend tools are available for this thread." else null,
+    )
 }
 
 private fun composerToolboxItemStatus(
