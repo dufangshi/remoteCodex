@@ -36,6 +36,16 @@ enum class ThreadActionDialog {
     Create,
 }
 
+private enum class ExportMode {
+    Latest,
+    Custom,
+}
+
+private enum class ExportFormat(val label: String) {
+    Pdf("PDF"),
+    Html("HTML"),
+}
+
 @Composable
 fun ThreadActionDialogOverlay(
     dialog: ThreadActionDialog,
@@ -199,7 +209,15 @@ private fun ExportTranscriptDialogPreview(
     exportTurns: List<ExportTurnPreview>,
     onClose: () -> Unit,
 ) {
-    val selectedCount = exportTurns.count { it.selected }
+    var exportMode by rememberSaveable { mutableStateOf(ExportMode.Latest) }
+    var exportFormat by rememberSaveable { mutableStateOf(ExportFormat.Pdf) }
+    var includeTokenAndPrice by rememberSaveable { mutableStateOf(true) }
+    val selectedTurnCount = exportTurns.count { it.selected }
+    val exportCount = if (exportMode == ExportMode.Latest) {
+        minOf(10, exportTurns.size)
+    } else {
+        selectedTurnCount
+    }
     GraphDialogFrame(
         title = "Export transcript",
         subtitle = "Review copy summarizes command batches and file changes.",
@@ -212,7 +230,7 @@ private fun ExportTranscriptDialogPreview(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    text = "$selectedCount turns selected",
+                    text = "$exportCount ${if (exportCount == 1) "turn" else "turns"} will be exported",
                     modifier = Modifier.weight(1f),
                     color = ThreadColors.ForegroundMuted,
                     style = MaterialTheme.typography.labelSmall,
@@ -220,7 +238,7 @@ private fun ExportTranscriptDialogPreview(
                     overflow = TextOverflow.Ellipsis,
                 )
                 GraphDialogFooter(
-                    primaryLabel = "Export PDF",
+                    primaryLabel = "Export ${exportFormat.label}",
                     primaryTone = GraphDialogActionTone.Warning,
                     onCancel = onClose,
                     compact = true,
@@ -230,13 +248,44 @@ private fun ExportTranscriptDialogPreview(
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ChoicePill(label = "Latest 10", selected = true, modifier = Modifier.weight(1f))
-                ChoicePill(label = "Custom", selected = false, modifier = Modifier.weight(1f))
+                ChoicePill(
+                    label = "Latest 10",
+                    selected = exportMode == ExportMode.Latest,
+                    onClick = { exportMode = ExportMode.Latest },
+                    modifier = Modifier.weight(1f),
+                )
+                ChoicePill(
+                    label = "Custom",
+                    selected = exportMode == ExportMode.Custom,
+                    onClick = { exportMode = ExportMode.Custom },
+                    modifier = Modifier.weight(1f),
+                )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ChoicePill(label = "PDF", selected = true, modifier = Modifier.weight(1f))
-                ChoicePill(label = "HTML", selected = false, modifier = Modifier.weight(1f))
+                ChoicePill(
+                    label = "PDF",
+                    selected = exportFormat == ExportFormat.Pdf,
+                    onClick = { exportFormat = ExportFormat.Pdf },
+                    modifier = Modifier.weight(1f),
+                )
+                ChoicePill(
+                    label = "HTML",
+                    selected = exportFormat == ExportFormat.Html,
+                    onClick = { exportFormat = ExportFormat.Html },
+                    modifier = Modifier.weight(1f),
+                )
             }
+            Text(
+                text = if (exportMode == ExportMode.Latest) {
+                    "Exports the latest 10 turns in chronological order."
+                } else {
+                    "Custom selection uses the checked turns below."
+                },
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -256,12 +305,13 @@ private fun ExportTranscriptDialogPreview(
                     .clip(RoundedCornerShape(12.dp))
                     .background(ThreadColors.SurfaceStrong)
                     .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
+                    .clickable { includeTokenAndPrice = !includeTokenAndPrice }
                     .padding(10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 GraphSelectionGlyph(
-                    selected = true,
+                    selected = includeTokenAndPrice,
                     contentDescription = "Token and price summary enabled",
                 )
                 Text(
@@ -271,7 +321,24 @@ private fun ExportTranscriptDialogPreview(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                GraphButton(
+                    label = if (includeTokenAndPrice) "Included" else "Omitted",
+                    variant = GraphButtonVariant.Ghost,
+                    size = GraphButtonSize.Small,
+                    onClick = { includeTokenAndPrice = !includeTokenAndPrice },
+                )
             }
+            Text(
+                text = if (exportFormat == ExportFormat.Html) {
+                    "HTML keeps the chat timeline styling and omits raw command output."
+                } else {
+                    "Review exports keep message text readable and omit tool activity."
+                },
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -314,6 +381,7 @@ private fun DeleteThreadDialogPreview(
 private fun ChoicePill(
     label: String,
     selected: Boolean,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Text(
@@ -326,6 +394,7 @@ private fun ChoicePill(
                 if (selected) ThreadColors.Warning.copy(alpha = 0.45f) else ThreadColors.Border,
                 RoundedCornerShape(999.dp),
             )
+            .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         color = if (selected) ThreadColors.Warning else ThreadColors.ForegroundSoft,
         style = MaterialTheme.typography.labelMedium,
