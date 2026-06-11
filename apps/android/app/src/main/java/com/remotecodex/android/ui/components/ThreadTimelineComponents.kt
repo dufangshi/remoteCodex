@@ -1510,10 +1510,11 @@ private fun JsonBlock(title: String, entries: List<Pair<String, String>>, copyTe
 
 @Composable
 private fun CodeBlock(title: String, code: String) {
+    val displayCode = code.ifEmpty { "(empty)" }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         SectionHeaderWithCopy(title = title, copyText = code)
         Text(
-            text = code,
+            text = displayCode,
             modifier = Modifier
                 .fillMaxWidth()
                 .widthIn(min = 0.dp)
