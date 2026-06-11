@@ -95,6 +95,7 @@ import com.remotecodex.android.ui.presentation.ComposerSendButtonState
 import com.remotecodex.android.ui.presentation.ComposerSettingsState
 import com.remotecodex.android.ui.presentation.ComposerSettingsToolbarState
 import com.remotecodex.android.ui.presentation.ComposerSelectionOptionState
+import com.remotecodex.android.ui.presentation.ComposerShellToolKind
 import com.remotecodex.android.ui.presentation.ComposerShellToolState
 import com.remotecodex.android.ui.presentation.ComposerShellToolsPanelState
 import com.remotecodex.android.ui.presentation.ComposerShellToolTone
@@ -169,6 +170,7 @@ fun ThreadComposer(
     var fastModePreviewStatus by remember { mutableStateOf<String?>(null) }
     var compactBusyPreview by remember(composer.compactBusy) { mutableStateOf(composer.compactBusy) }
     var compactPreviewStatus by remember { mutableStateOf<String?>(null) }
+    var shellToolPreviewStatus by remember { mutableStateOf<String?>(null) }
     val selectedContext = composer.context.copy(model = selectedModel)
     val queuedAttachmentCount = draftPrompt.attachments.size
     val statusChips = buildComposerStatusStrip(
@@ -480,7 +482,12 @@ fun ThreadComposer(
                         openMenu = null
                     },
                 )
-                ComposerMenu.ShellTools -> ShellToolsPanel(panelState = shellToolsPanelState)
+                ComposerMenu.ShellTools -> ShellToolsPanel(
+                    panelState = shellToolsPanelState,
+                    onToolClick = { tool ->
+                        shellToolPreviewStatus = tool.toShellToolPreviewStatus()
+                    },
+                )
                 null -> Unit
             }
         }
@@ -496,6 +503,9 @@ fun ThreadComposer(
             ComposerPreviewFeedback(message = status)
         }
         compactPreviewStatus?.let { status ->
+            ComposerPreviewFeedback(message = status)
+        }
+        shellToolPreviewStatus?.let { status ->
             ComposerPreviewFeedback(message = status)
         }
         ComposerToolbarRow(
@@ -3057,7 +3067,10 @@ private fun ComposerEmptyMenuRow(text: String) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ShellToolsPanel(panelState: ComposerShellToolsPanelState) {
+private fun ShellToolsPanel(
+    panelState: ComposerShellToolsPanelState,
+    onToolClick: (ComposerShellToolState) -> Unit,
+) {
     ComposerMenuSurface(title = panelState.title, subtitle = panelState.subtitle) {
         FlowRow(
             modifier = Modifier.fillMaxWidth(),
@@ -3069,6 +3082,7 @@ private fun ShellToolsPanel(panelState: ComposerShellToolsPanelState) {
                 ShellToolPill(
                     item = item,
                     modifier = Modifier.weight(1f),
+                    onClick = { onToolClick(item) },
                 )
             }
         }
@@ -3393,6 +3407,7 @@ private fun SelectionRow(
 private fun ShellToolPill(
     item: ComposerShellToolState,
     modifier: Modifier = Modifier,
+    onClick: () -> Unit,
 ) {
     val foreground = when (item.tone) {
         ComposerShellToolTone.Neutral -> ThreadColors.ForegroundSoft
@@ -3412,9 +3427,14 @@ private fun ShellToolPill(
     Text(
         text = item.label,
         modifier = modifier
+            .semantics {
+                contentDescription = item.label
+                stateDescription = if (item.enabled) "Available" else "Disabled"
+            }
             .clip(RoundedCornerShape(999.dp))
             .background(background)
             .border(1.dp, border, RoundedCornerShape(999.dp))
+            .then(if (item.enabled) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         color = if (item.enabled) foreground else ThreadColors.ForegroundMuted.copy(alpha = 0.56f),
         style = MaterialTheme.typography.labelSmall,
@@ -3424,6 +3444,20 @@ private fun ShellToolPill(
 
 private fun ComposerMenu?.toggle(target: ComposerMenu): ComposerMenu? {
     return if (this == target) null else target
+}
+
+private fun ComposerShellToolState.toShellToolPreviewStatus(): String {
+    return when (kind) {
+        ComposerShellToolKind.Paste -> "Shell paste preview"
+        ComposerShellToolKind.Copy -> "Shell output copied"
+        ComposerShellToolKind.Clear -> "Shell clear preview"
+        ComposerShellToolKind.CtrlC -> "Sent Ctrl-C preview"
+        ComposerShellToolKind.CtrlD -> "Sent Ctrl-D preview"
+        ComposerShellToolKind.Esc -> "Sent ESC preview"
+        ComposerShellToolKind.Tab -> "Sent TAB preview"
+        ComposerShellToolKind.Up -> "Sent UP preview"
+        ComposerShellToolKind.Down -> "Sent DOWN preview"
+    }
 }
 
 private fun ComposerMenu?.toToolbarMenuState(): ComposerToolbarMenuState? {

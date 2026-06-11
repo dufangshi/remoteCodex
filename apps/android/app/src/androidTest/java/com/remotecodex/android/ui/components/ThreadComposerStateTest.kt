@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.remotecodex.android.ui.model.ComposerActiveView
 import com.remotecodex.android.ui.model.ComposerPreview
 import com.remotecodex.android.ui.model.ComposerPromptPreview
 import com.remotecodex.android.ui.theme.RemoteCodexTheme
@@ -297,6 +298,25 @@ class ThreadComposerStateTest {
 
         composeRule.onNodeWithContentDescription("Open slash toolbox").performClick()
         composeRule.onNodeWithText("Busy").assertExists()
+    }
+
+    @Test
+    fun shellToolsPanelActionsShowPreviewFeedback() {
+        setComposerContent(
+            composer = ComposerPreview(
+                activeView = ComposerActiveView.Shell,
+                busy = false,
+            ),
+        )
+
+        composeRule.onNodeWithContentDescription("Open shell tools").performClick()
+        composeRule.onNodeWithText("Shell tools").assertExists()
+
+        composeRule.onNodeWithContentDescription("PASTE").performClick()
+        composeRule.onNodeWithText("Shell paste preview").assertExists()
+
+        composeRule.onNodeWithContentDescription("CTRL-C").performClick()
+        composeRule.onNodeWithText("Sent Ctrl-C preview").assertExists()
     }
 
     @Test
