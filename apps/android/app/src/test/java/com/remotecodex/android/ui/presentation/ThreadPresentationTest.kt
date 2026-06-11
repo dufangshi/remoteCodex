@@ -740,12 +740,14 @@ class ThreadPresentationTest {
                                 displayLabel = "Approve once",
                                 description = "Run one command.",
                                 recommended = true,
+                                busyLabel = null,
                             ),
                             PendingRequestOptionState(
                                 rawLabel = "Deny",
                                 displayLabel = "Deny",
                                 description = "",
                                 recommended = false,
+                                busyLabel = null,
                             ),
                         ),
                         multiSelect = false,
@@ -753,6 +755,8 @@ class ThreadPresentationTest {
                     ),
                 ),
                 planDecisionMode = false,
+                busy = false,
+                busySelectedOptionLabel = null,
                 showFooterActions = true,
                 denyLabel = "Deny",
                 approveLabel = "Approve",
@@ -805,6 +809,8 @@ class ThreadPresentationTest {
                 showCommand = true,
                 questions = emptyList(),
                 planDecisionMode = false,
+                busy = false,
+                busySelectedOptionLabel = null,
                 showFooterActions = true,
                 denyLabel = "Deny",
                 approveLabel = "Approve",
@@ -847,6 +853,24 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun mapsBusyPendingRequestSubmitLabel() {
+        val state = buildPendingRequestCardState(
+            PendingRequestPreview(
+                id = "request-busy",
+                title = "Permission required",
+                description = "Run command.",
+                command = "pwd",
+                riskLabel = "Read-only",
+                busy = true,
+            ),
+        )
+
+        assertEquals(true, state.busy)
+        assertEquals("Submitting...", state.submitLabel)
+        assertEquals(true, state.showFooterActions)
+    }
+
+    @Test
     fun mapsPendingPlanDecisionPresentation() {
         val state = buildPendingRequestCardState(
             PendingRequestPreview(
@@ -879,6 +903,77 @@ class ThreadPresentationTest {
         assertEquals(false, state.showFooterActions)
         assertEquals("Implement", state.questions.single().options.single().displayLabel)
         assertEquals(true, state.questions.single().options.single().recommended)
+    }
+
+    @Test
+    fun mapsBusyPendingPlanDecisionImplementLabel() {
+        val state = buildPendingRequestCardState(
+            PendingRequestPreview(
+                id = "request-plan-busy",
+                title = "Choose next step",
+                description = "",
+                command = "",
+                riskLabel = "Decision required",
+                kind = PendingRequestKindPreview.PlanDecision,
+                busy = true,
+                busySelectedOptionLabel = "Implement (recommended)",
+                questions = listOf(
+                    PendingRequestQuestionPreview(
+                        header = "Decision",
+                        question = "How should Codex proceed?",
+                        options = listOf(
+                            PendingRequestOptionPreview(
+                                label = "Implement (recommended)",
+                                description = "Start changing files.",
+                            ),
+                            PendingRequestOptionPreview(
+                                label = "Discuss",
+                                description = "Ask for more detail.",
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals(true, state.busy)
+        assertEquals("Starting...", pendingRequestOptionDisplayLabel(state.questions.single().options.first()))
+        assertEquals("Discuss", pendingRequestOptionDisplayLabel(state.questions.single().options[1]))
+    }
+
+    @Test
+    fun mapsBusyPendingPlanDecisionNonImplementLabel() {
+        val state = buildPendingRequestCardState(
+            PendingRequestPreview(
+                id = "request-plan-busy-save",
+                title = "Choose next step",
+                description = "",
+                command = "",
+                riskLabel = "Decision required",
+                kind = PendingRequestKindPreview.PlanDecision,
+                busy = true,
+                busySelectedOptionLabel = "Discuss",
+                questions = listOf(
+                    PendingRequestQuestionPreview(
+                        header = "Decision",
+                        question = "How should Codex proceed?",
+                        options = listOf(
+                            PendingRequestOptionPreview(
+                                label = "Implement (recommended)",
+                                description = "Start changing files.",
+                            ),
+                            PendingRequestOptionPreview(
+                                label = "Discuss",
+                                description = "Ask for more detail.",
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals("Implement", pendingRequestOptionDisplayLabel(state.questions.single().options.first()))
+        assertEquals("Saving...", pendingRequestOptionDisplayLabel(state.questions.single().options[1]))
     }
 
     @Test
@@ -952,6 +1047,7 @@ class ThreadPresentationTest {
                     displayLabel = "Approve once",
                     description = "",
                     recommended = true,
+                    busyLabel = null,
                 ),
             ),
             multiSelect = false,

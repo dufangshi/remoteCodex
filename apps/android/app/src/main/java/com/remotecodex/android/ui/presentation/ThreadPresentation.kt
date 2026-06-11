@@ -206,6 +206,8 @@ data class PendingRequestCardState(
     val showCommand: Boolean,
     val questions: List<PendingRequestQuestionState>,
     val planDecisionMode: Boolean,
+    val busy: Boolean,
+    val busySelectedOptionLabel: String?,
     val showFooterActions: Boolean,
     val denyLabel: String,
     val approveLabel: String,
@@ -230,6 +232,7 @@ data class PendingRequestOptionState(
     val displayLabel: String,
     val description: String,
     val recommended: Boolean,
+    val busyLabel: String?,
 )
 
 fun pendingRequestQuestionHasAnswer(
@@ -248,6 +251,12 @@ fun pendingRequestQuestionHasAnswer(
         return customAnswer.trim().isNotEmpty()
     }
     return true
+}
+
+fun pendingRequestOptionDisplayLabel(
+    option: PendingRequestOptionState,
+): String {
+    return option.busyLabel ?: option.displayLabel
 }
 
 enum class TimelineNoteToneState {
@@ -3551,7 +3560,9 @@ fun buildPendingRequestCardState(request: PendingRequestPreview): PendingRequest
                 id = id?.takeIf { it.isNotEmpty() } ?: "question-$index",
                 header = header.ifEmpty { "Question" },
                 question = questionText,
-                options = question.options.mapNotNull(::buildPendingRequestOptionState),
+                options = question.options.mapNotNull { option ->
+                    buildPendingRequestOptionState(option = option, request = request)
+                },
                 multiSelect = question.multiSelect,
                 otherLabel = if (question.allowOther) "Not from above" else null,
             )
@@ -3568,10 +3579,12 @@ fun buildPendingRequestCardState(request: PendingRequestPreview): PendingRequest
         showCommand = command.isNotEmpty(),
         questions = questions,
         planDecisionMode = planDecisionMode,
+        busy = request.busy,
+        busySelectedOptionLabel = request.busySelectedOptionLabel?.trim()?.takeIf { it.isNotEmpty() },
         showFooterActions = !planDecisionMode,
         denyLabel = "Deny",
         approveLabel = "Approve",
-        submitLabel = "Submit",
+        submitLabel = if (request.busy) "Submitting..." else "Submit",
         denyAccessibilityLabel = "Deny $title",
         approveAccessibilityLabel = "Approve $title",
         submitAccessibilityLabel = "Submit $title",
@@ -3581,6 +3594,7 @@ fun buildPendingRequestCardState(request: PendingRequestPreview): PendingRequest
 
 private fun buildPendingRequestOptionState(
     option: PendingRequestOptionPreview,
+    request: PendingRequestPreview,
 ): PendingRequestOptionState? {
     val rawLabel = option.label.trim()
     if (rawLabel.isEmpty()) {
@@ -3593,7 +3607,32 @@ private fun buildPendingRequestOptionState(
         displayLabel = displayLabel,
         description = option.description.trim(),
         recommended = recommendedPattern.containsMatchIn(rawLabel),
+        busyLabel = pendingRequestBusyOptionLabel(
+            request = request,
+            rawLabel = rawLabel,
+            displayLabel = displayLabel,
+        ),
     )
+}
+
+private fun pendingRequestBusyOptionLabel(
+    request: PendingRequestPreview,
+    rawLabel: String,
+    displayLabel: String,
+): String? {
+    if (!request.busy || request.kind != PendingRequestKindPreview.PlanDecision) {
+        return null
+    }
+    val selectedLabel = request.busySelectedOptionLabel?.trim()?.takeIf { it.isNotEmpty() }
+        ?: return null
+    if (selectedLabel != rawLabel && selectedLabel != displayLabel) {
+        return null
+    }
+    return if (displayLabel.equals("Implement", ignoreCase = true)) {
+        "Starting..."
+    } else {
+        "Saving..."
+    }
 }
 
 fun buildTimelineNoteCardState(

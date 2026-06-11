@@ -33,6 +33,7 @@ import com.remotecodex.android.ui.model.PendingRequestPreview
 import com.remotecodex.android.ui.presentation.PendingRequestOptionState
 import com.remotecodex.android.ui.presentation.PendingRequestQuestionState
 import com.remotecodex.android.ui.presentation.buildPendingRequestCardState
+import com.remotecodex.android.ui.presentation.pendingRequestOptionDisplayLabel
 import com.remotecodex.android.ui.presentation.pendingRequestQuestionHasAnswer
 import com.remotecodex.android.ui.theme.ThreadColors
 
@@ -63,7 +64,7 @@ fun PendingRequestCard(
     } else {
         state.approveAccessibilityLabel
     }
-    val primaryActionEnabled = !questionMode || hasSelectedAnswers
+    val primaryActionEnabled = !state.busy && (!questionMode || hasSelectedAnswers)
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -140,6 +141,7 @@ fun PendingRequestCard(
                         }
                     },
                     planDecisionMode = state.planDecisionMode,
+                    busy = state.busy,
                 )
             }
             if (state.showCommand) {
@@ -249,6 +251,7 @@ private fun PendingRequestQuestionSection(
     onToggleOption: (PendingRequestOptionState) -> Unit,
     onToggleOther: () -> Unit,
     planDecisionMode: Boolean,
+    busy: Boolean,
 ) {
     val otherLabel = question.otherLabel
     val showOtherInput = otherLabel != null && otherLabel in selectedLabels
@@ -287,6 +290,7 @@ private fun PendingRequestQuestionSection(
                         highlighted = if (planDecisionMode) index == 0 else index == 0 || option.recommended,
                         selected = option.rawLabel in selectedLabels,
                         planDecisionMode = planDecisionMode,
+                        busy = busy,
                         onClick = { onToggleOption(option) },
                     )
                 }
@@ -294,6 +298,7 @@ private fun PendingRequestQuestionSection(
                     PendingRequestOtherChip(
                         label = it,
                         selected = it in selectedLabels,
+                        busy = busy,
                         onClick = onToggleOther,
                     )
                 }
@@ -321,8 +326,10 @@ private fun PendingRequestOptionChip(
     highlighted: Boolean,
     selected: Boolean,
     planDecisionMode: Boolean,
+    busy: Boolean,
     onClick: () -> Unit,
 ) {
+    val label = pendingRequestOptionDisplayLabel(option)
     val background = when {
         selected -> ThreadColors.WarningSoft
         planDecisionMode && highlighted -> ThreadColors.InfoSoft
@@ -348,18 +355,21 @@ private fun PendingRequestOptionChip(
             .border(1.dp, border, RoundedCornerShape(999.dp))
             .semantics {
                 contentDescription = if (option.recommended) {
-                    "${option.displayLabel}, recommended${if (selected) ", selected" else ""}"
+                    "$label, recommended${if (selected) ", selected" else ""}"
                 } else {
-                    "${option.displayLabel}${if (selected) ", selected" else ""}"
+                    "$label${if (selected) ", selected" else ""}"
+                }
+                if (busy) {
+                    disabled()
                 }
             }
-            .clickable(onClick = onClick)
+            .clickable(enabled = !busy, onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         Text(
-            text = option.displayLabel,
+            text = label,
             color = foreground,
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.SemiBold,
@@ -457,6 +467,7 @@ private fun PendingRequestFreeAnswerField(
 private fun PendingRequestOtherChip(
     label: String,
     selected: Boolean,
+    busy: Boolean,
     onClick: () -> Unit,
 ) {
     val background = if (selected) ThreadColors.InfoSoft else ThreadColors.SurfaceStrong
@@ -470,8 +481,11 @@ private fun PendingRequestOtherChip(
             .border(1.dp, border, RoundedCornerShape(999.dp))
             .semantics {
                 contentDescription = "$label${if (selected) ", selected" else ""}"
+                if (busy) {
+                    disabled()
+                }
             }
-            .clickable(onClick = onClick)
+            .clickable(enabled = !busy, onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 5.dp),
         color = foreground,
         style = MaterialTheme.typography.labelSmall,

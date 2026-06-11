@@ -731,6 +731,8 @@ data class PendingRequestPreview(
     val riskLabel: String,
     val kind: PendingRequestKindPreview = PendingRequestKindPreview.Approval,
     val sortKey: String? = null,
+    val busy: Boolean = false,
+    val busySelectedOptionLabel: String? = null,
     val questions: List<PendingRequestQuestionPreview> = emptyList(),
 )
 

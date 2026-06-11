@@ -596,6 +596,8 @@ object ThreadPreviewSample {
                 riskLabel = "Decision required",
                 kind = PendingRequestKindPreview.PlanDecision,
                 sortKey = "2026-06-11T13:40:30Z",
+                busy = true,
+                busySelectedOptionLabel = "Implement (recommended)",
                 questions = listOf(
                     PendingRequestQuestionPreview(
                         header = "Plan decision",

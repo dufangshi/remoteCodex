@@ -37,7 +37,7 @@ class PendingRequestCardTest {
         assertNotNull(device.wait(Until.findObject(By.text("Plan")), 5_000))
         assertNotNull(device.findObject(By.text("Plan decision")))
         assertNotNull(device.findObject(By.text("Start the next Android component parity pass?")))
-        assertNotNull(device.findObject(By.text("Implement")))
+        assertNotNull(device.findObject(By.text("Starting...")))
         assertNotNull(device.findObject(By.text("Discuss")))
         assertTrue(
             "Plan decision should not render an empty command block",
