@@ -42,6 +42,13 @@ data class HookHistorySummary(
     val outputBacked: Boolean,
 )
 
+data class ArtifactHistorySummary(
+    val title: String,
+    val summary: String,
+    val typeLabel: String,
+    val rendererLabel: String?,
+)
+
 fun threadStatusLabel(status: ThreadStatus): String {
     return when (status) {
         ThreadStatus.Running -> "Running"
@@ -325,5 +332,27 @@ fun hookHistorySummary(
         firstLine = firstLine,
         showGap = outputText.isNotEmpty() && summary.showGap,
         outputBacked = outputText.isNotEmpty(),
+    )
+}
+
+fun artifactHistorySummary(
+    text: String,
+    previewText: String?,
+    artifactType: String?,
+    artifactTitle: String?,
+    artifactSummary: String?,
+    hasRenderer: Boolean,
+): ArtifactHistorySummary {
+    val title = artifactTitle?.trim()?.takeIf { it.isNotEmpty() } ?: text.trim()
+    val summary = artifactSummary?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: previewText?.trim()?.takeIf { it.isNotEmpty() }
+        ?: text.trim()
+    val typeLabel = artifactType?.trim()?.takeIf { it.isNotEmpty() } ?: "artifact"
+    return ArtifactHistorySummary(
+        title = title,
+        summary = summary,
+        typeLabel = typeLabel,
+        rendererLabel = if (hasRenderer) null else "No renderer",
     )
 }

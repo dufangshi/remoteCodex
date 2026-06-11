@@ -63,6 +63,7 @@ import com.remotecodex.android.ui.model.ThreadStatus
 import com.remotecodex.android.ui.model.ToolCallPreview
 import com.remotecodex.android.ui.model.ToolStatus
 import com.remotecodex.android.ui.model.TurnPreview
+import com.remotecodex.android.ui.presentation.artifactHistorySummary
 import com.remotecodex.android.ui.presentation.basenameFromAssetPath
 import com.remotecodex.android.ui.presentation.FileChangeSummarySegment
 import com.remotecodex.android.ui.presentation.FileChangeSummaryTone
@@ -1017,16 +1018,18 @@ private fun HistoryItemCard(
                 )
             }
         }
-        if (item.kind == HistoryItemKind.Hook) {
-            HookHistorySummaryRow(item = item, colors = colors)
-        } else {
-            Text(
-                text = historyItemSummary(item),
-                color = ThreadColors.ForegroundSoft,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-            )
+        when (item.kind) {
+            HistoryItemKind.Hook -> HookHistorySummaryRow(item = item, colors = colors)
+            HistoryItemKind.Artifact -> ArtifactHistorySummaryBlock(item = item, colors = colors)
+            else -> {
+                Text(
+                    text = historyItemSummary(item),
+                    color = ThreadColors.ForegroundSoft,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         if (running) {
             Row(
@@ -1118,6 +1121,80 @@ private fun historyItemCopyText(item: HistoryItemPreview): String {
             appendLine(it)
         }
     }.trim()
+}
+
+@Composable
+private fun ArtifactHistorySummaryBlock(
+    item: HistoryItemPreview,
+    colors: HistoryItemColors,
+) {
+    val summary = artifactHistorySummary(
+        text = item.summary,
+        previewText = item.detail,
+        artifactType = item.artifactType,
+        artifactTitle = item.artifactTitle,
+        artifactSummary = item.artifactSummary,
+        hasRenderer = item.artifactHasRenderer,
+    )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(7.dp))
+            .background(ThreadColors.Panel.copy(alpha = 0.58f))
+            .border(1.dp, colors.border.copy(alpha = 0.55f), RoundedCornerShape(7.dp))
+            .padding(9.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = summary.title,
+                modifier = Modifier.weight(1f),
+                color = ThreadColors.ForegroundSoft,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = summary.typeLabel,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(colors.foreground.copy(alpha = 0.10f))
+                    .border(1.dp, colors.foreground.copy(alpha = 0.22f), RoundedCornerShape(999.dp))
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                color = colors.foreground,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = summary.summary,
+                modifier = Modifier.weight(1f),
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            summary.rendererLabel?.let { label ->
+                Text(
+                    text = label,
+                    color = ThreadColors.ForegroundMuted,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
 }
 
 @Composable

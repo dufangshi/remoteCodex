@@ -229,4 +229,44 @@ class ThreadPresentationTest {
             ),
         )
     }
+
+    @Test
+    fun summarizesArtifactHistoryWithRenderer() {
+        assertEquals(
+            ArtifactHistorySummary(
+                title = "Ethanol molecule",
+                summary = "XYZ, 9 atoms, 1 frame",
+                typeLabel = "chemistry.molecule3d",
+                rendererLabel = null,
+            ),
+            artifactHistorySummary(
+                text = "artifact fallback",
+                previewText = "preview fallback",
+                artifactType = "chemistry.molecule3d",
+                artifactTitle = "Ethanol molecule",
+                artifactSummary = "XYZ, 9 atoms, 1 frame",
+                hasRenderer = true,
+            ),
+        )
+    }
+
+    @Test
+    fun summarizesArtifactHistoryWithoutRenderer() {
+        assertEquals(
+            ArtifactHistorySummary(
+                title = "artifact fallback",
+                summary = "preview fallback",
+                typeLabel = "artifact",
+                rendererLabel = "No renderer",
+            ),
+            artifactHistorySummary(
+                text = "artifact fallback",
+                previewText = "preview fallback",
+                artifactType = null,
+                artifactTitle = null,
+                artifactSummary = null,
+                hasRenderer = false,
+            ),
+        )
+    }
 }

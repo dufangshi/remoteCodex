@@ -87,6 +87,10 @@ data class HistoryItemPreview(
     val hookEventLabel: String? = null,
     val hookStatusMessage: String? = null,
     val hookOutput: String? = null,
+    val artifactType: String? = null,
+    val artifactTitle: String? = null,
+    val artifactSummary: String? = null,
+    val artifactHasRenderer: Boolean = true,
 )
 
 data class HistoryGroupPreview(

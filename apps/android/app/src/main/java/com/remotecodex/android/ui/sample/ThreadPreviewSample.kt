@@ -333,6 +333,9 @@ object ThreadPreviewSample {
                                 summary = "Ethanol molecule preview is available in the workspace artifact pane.",
                                 detail = "XYZ, 9 atoms, 1 frame",
                                 actionLabel = "Inspect",
+                                artifactType = "chemistry.molecule3d",
+                                artifactTitle = "Ethanol molecule",
+                                artifactSummary = "XYZ, 9 atoms, 1 frame",
                             ),
                             HistoryItemPreview(
                                 kind = HistoryItemKind.Image,
