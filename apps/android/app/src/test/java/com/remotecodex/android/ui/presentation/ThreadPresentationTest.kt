@@ -1938,6 +1938,7 @@ class ThreadPresentationTest {
     fun buildsComposerMcpListPanelState() {
         assertEquals(
             ComposerMcpPanelState(
+                configSourceTitle = "MCP config source",
                 configSourceLabel = "/repo/.codex/config.toml",
                 showAddAction = true,
                 mode = ComposerMcpPanelModePreview.List,
@@ -1953,6 +1954,14 @@ class ThreadPresentationTest {
                 ),
                 form = null,
                 emptyMessage = null,
+                lifecycle = ComposerMcpPanelLifecycleState(
+                    configEditingAvailable = true,
+                    configBusy = false,
+                    addTargetMode = ComposerMcpPanelModePreview.Add,
+                    clearsConfigStatusOnAdd = true,
+                    backTargetMode = null,
+                    stateDescription = "MCP panel: list, editing available",
+                ),
             ),
             buildComposerMcpPanelState(
                 ComposerMcpPanelPreview(
@@ -1989,12 +1998,16 @@ class ThreadPresentationTest {
                     modeLabel = "Form",
                     description = "Add an MCP server with a name and URL, then write the matching block into provider config.",
                     targetMode = ComposerMcpPanelModePreview.Http,
+                    clearsConfigStatus = true,
+                    preparesRawBlock = false,
                 ),
                 ComposerMcpAddOptionState(
                     title = "stdio / raw block",
                     modeLabel = "TOML",
                     description = "Write a single [mcp_servers.name] block, then save it back into provider config.",
                     targetMode = ComposerMcpPanelModePreview.Stdio,
+                    clearsConfigStatus = true,
+                    preparesRawBlock = true,
                 ),
             ),
             buildComposerMcpPanelState(
@@ -2017,6 +2030,8 @@ class ThreadPresentationTest {
                     "MCP name" to "docs",
                     "URL" to "https://example.test/mcp",
                 ),
+                backTargetMode = ComposerMcpPanelModePreview.Add,
+                configBusy = false,
             ),
             buildComposerMcpPanelState(
                 ComposerMcpPanelPreview(
@@ -2037,6 +2052,8 @@ class ThreadPresentationTest {
                 fields = listOf(
                     "MCP block for provider config" to "[mcp_servers.docs]",
                 ),
+                backTargetMode = ComposerMcpPanelModePreview.Add,
+                configBusy = true,
             ),
             buildComposerMcpPanelState(
                 ComposerMcpPanelPreview(
@@ -2046,6 +2063,84 @@ class ThreadPresentationTest {
                     servers = emptyList(),
                 ),
             ).form,
+        )
+    }
+
+    @Test
+    fun buildsComposerMcpLifecycleForAddAndFormModes() {
+        assertEquals(
+            ComposerMcpPanelLifecycleState(
+                configEditingAvailable = true,
+                configBusy = false,
+                addTargetMode = ComposerMcpPanelModePreview.Add,
+                clearsConfigStatusOnAdd = true,
+                backTargetMode = null,
+                stateDescription = "MCP panel: list, editing available",
+            ),
+            buildComposerMcpPanelState(
+                ComposerMcpPanelPreview(
+                    mode = ComposerMcpPanelModePreview.List,
+                    configEditing = true,
+                    configBusy = false,
+                ),
+            ).lifecycle,
+        )
+
+        assertEquals(
+            ComposerMcpPanelLifecycleState(
+                configEditingAvailable = false,
+                configBusy = false,
+                addTargetMode = null,
+                clearsConfigStatusOnAdd = false,
+                backTargetMode = null,
+                stateDescription = "MCP panel: list, editing unavailable",
+            ),
+            buildComposerMcpPanelState(
+                ComposerMcpPanelPreview(
+                    mode = ComposerMcpPanelModePreview.List,
+                    configEditing = false,
+                    configBusy = false,
+                    servers = emptyList(),
+                ),
+            ).lifecycle,
+        )
+
+        assertEquals(
+            ComposerMcpPanelLifecycleState(
+                configEditingAvailable = true,
+                configBusy = true,
+                addTargetMode = null,
+                clearsConfigStatusOnAdd = false,
+                backTargetMode = ComposerMcpPanelModePreview.Add,
+                stateDescription = "MCP panel: HTTP form, editing available, saving",
+            ),
+            buildComposerMcpPanelState(
+                ComposerMcpPanelPreview(
+                    mode = ComposerMcpPanelModePreview.Http,
+                    configEditing = true,
+                    configBusy = true,
+                    servers = emptyList(),
+                ),
+            ).lifecycle,
+        )
+
+        assertEquals(
+            ComposerMcpPanelLifecycleState(
+                configEditingAvailable = true,
+                configBusy = false,
+                addTargetMode = null,
+                clearsConfigStatusOnAdd = false,
+                backTargetMode = ComposerMcpPanelModePreview.Add,
+                stateDescription = "MCP panel: stdio form, editing available",
+            ),
+            buildComposerMcpPanelState(
+                ComposerMcpPanelPreview(
+                    mode = ComposerMcpPanelModePreview.Stdio,
+                    configEditing = true,
+                    configBusy = false,
+                    servers = emptyList(),
+                ),
+            ).lifecycle,
         )
     }
 

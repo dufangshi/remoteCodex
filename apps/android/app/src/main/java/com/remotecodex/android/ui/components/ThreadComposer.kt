@@ -1754,6 +1754,7 @@ private fun McpPreviewGroup(mcpPanelState: ComposerMcpPanelState) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .semantics { stateDescription = mcpPanelState.lifecycle.stateDescription }
             .clip(RoundedCornerShape(12.dp))
             .background(ThreadColors.Surface)
             .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
@@ -1775,7 +1776,7 @@ private fun McpPreviewGroup(mcpPanelState: ComposerMcpPanelState) {
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = mcpPanelState.configSourceLabel,
+                    text = "${mcpPanelState.configSourceTitle} · ${mcpPanelState.configSourceLabel}",
                     color = ThreadColors.ForegroundMuted,
                     style = MaterialTheme.typography.labelSmall,
                     maxLines = 1,

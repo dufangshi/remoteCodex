@@ -502,6 +502,8 @@ data class ComposerMcpAddOptionState(
     val modeLabel: String,
     val description: String,
     val targetMode: ComposerMcpPanelModePreview,
+    val clearsConfigStatus: Boolean,
+    val preparesRawBlock: Boolean,
 )
 
 data class ComposerMcpServerRowState(
@@ -516,9 +518,12 @@ data class ComposerMcpFormState(
     val primaryLabel: String,
     val primaryEnabled: Boolean,
     val fields: List<Pair<String, String>>,
+    val backTargetMode: ComposerMcpPanelModePreview,
+    val configBusy: Boolean,
 )
 
 data class ComposerMcpPanelState(
+    val configSourceTitle: String,
     val configSourceLabel: String,
     val showAddAction: Boolean,
     val mode: ComposerMcpPanelModePreview,
@@ -527,6 +532,16 @@ data class ComposerMcpPanelState(
     val servers: List<ComposerMcpServerRowState>,
     val form: ComposerMcpFormState?,
     val emptyMessage: String?,
+    val lifecycle: ComposerMcpPanelLifecycleState,
+)
+
+data class ComposerMcpPanelLifecycleState(
+    val configEditingAvailable: Boolean,
+    val configBusy: Boolean,
+    val addTargetMode: ComposerMcpPanelModePreview?,
+    val clearsConfigStatusOnAdd: Boolean,
+    val backTargetMode: ComposerMcpPanelModePreview?,
+    val stateDescription: String,
 )
 
 data class ComposerHookStatusMessageState(
@@ -855,6 +870,7 @@ fun buildComposerMcpPanelState(
         panel.servers.isEmpty()
 
     return ComposerMcpPanelState(
+        configSourceTitle = "MCP config source",
         configSourceLabel = panel.configPath?.takeIf { it.isNotBlank() } ?: "<provider config>",
         showAddAction = panel.mode == ComposerMcpPanelModePreview.List && panel.configEditing,
         mode = panel.mode,
@@ -863,7 +879,42 @@ fun buildComposerMcpPanelState(
         servers = servers,
         form = buildComposerMcpFormState(panel),
         emptyMessage = if (empty) "No MCP servers available right now." else null,
+        lifecycle = buildComposerMcpPanelLifecycleState(panel),
     )
+}
+
+private fun buildComposerMcpPanelLifecycleState(
+    panel: ComposerMcpPanelPreview,
+): ComposerMcpPanelLifecycleState {
+    val addVisible = panel.mode == ComposerMcpPanelModePreview.List && panel.configEditing
+    val backTarget = when (panel.mode) {
+        ComposerMcpPanelModePreview.Http,
+        ComposerMcpPanelModePreview.Stdio,
+        -> ComposerMcpPanelModePreview.Add
+        ComposerMcpPanelModePreview.List,
+        ComposerMcpPanelModePreview.Add,
+        -> null
+    }
+    return ComposerMcpPanelLifecycleState(
+        configEditingAvailable = panel.configEditing,
+        configBusy = panel.configBusy,
+        addTargetMode = if (addVisible) ComposerMcpPanelModePreview.Add else null,
+        clearsConfigStatusOnAdd = addVisible,
+        backTargetMode = backTarget,
+        stateDescription = buildComposerMcpPanelStateDescription(panel),
+    )
+}
+
+private fun buildComposerMcpPanelStateDescription(panel: ComposerMcpPanelPreview): String {
+    val mode = when (panel.mode) {
+        ComposerMcpPanelModePreview.List -> "list"
+        ComposerMcpPanelModePreview.Add -> "add choices"
+        ComposerMcpPanelModePreview.Http -> "HTTP form"
+        ComposerMcpPanelModePreview.Stdio -> "stdio form"
+    }
+    val editing = if (panel.configEditing) "editing available" else "editing unavailable"
+    val busy = if (panel.configBusy) ", saving" else ""
+    return "MCP panel: $mode, $editing$busy"
 }
 
 private fun buildComposerMcpAddOptions(): List<ComposerMcpAddOptionState> {
@@ -873,12 +924,16 @@ private fun buildComposerMcpAddOptions(): List<ComposerMcpAddOptionState> {
             modeLabel = "Form",
             description = "Add an MCP server with a name and URL, then write the matching block into provider config.",
             targetMode = ComposerMcpPanelModePreview.Http,
+            clearsConfigStatus = true,
+            preparesRawBlock = false,
         ),
         ComposerMcpAddOptionState(
             title = "stdio / raw block",
             modeLabel = "TOML",
             description = "Write a single [mcp_servers.name] block, then save it back into provider config.",
             targetMode = ComposerMcpPanelModePreview.Stdio,
+            clearsConfigStatus = true,
+            preparesRawBlock = true,
         ),
     )
 }
@@ -893,6 +948,8 @@ private fun buildComposerMcpFormState(panel: ComposerMcpPanelPreview): ComposerM
                 "MCP name" to panel.httpName,
                 "URL" to panel.httpUrl,
             ),
+            backTargetMode = ComposerMcpPanelModePreview.Add,
+            configBusy = panel.configBusy,
         )
         ComposerMcpPanelModePreview.Stdio -> ComposerMcpFormState(
             title = "MCP block for provider config",
@@ -901,6 +958,8 @@ private fun buildComposerMcpFormState(panel: ComposerMcpPanelPreview): ComposerM
             fields = listOf(
                 "MCP block for provider config" to panel.rawBlock,
             ),
+            backTargetMode = ComposerMcpPanelModePreview.Add,
+            configBusy = panel.configBusy,
         )
         ComposerMcpPanelModePreview.List,
         ComposerMcpPanelModePreview.Add,
