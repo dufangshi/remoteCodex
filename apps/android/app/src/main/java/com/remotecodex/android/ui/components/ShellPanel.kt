@@ -56,6 +56,7 @@ fun ShellPanel(
     var processesOpen by remember { mutableStateOf(false) }
     var toolboxOpen by remember { mutableStateOf(false) }
     val activeProcess = shell.processes.firstOrNull { it.id == shell.activeProcessId }
+    val liveProcessCount = shell.processes.count { it.isLiveShellProcess() }
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -71,9 +72,9 @@ fun ShellPanel(
         ) {
             ShellHeader(shell = shell, activeProcess = activeProcess)
             ShellTerminalBar(
-                shell = shell,
                 activeProcess = activeProcess,
                 processesOpen = processesOpen,
+                liveProcessCount = liveProcessCount,
                 onToggleProcesses = { processesOpen = !processesOpen },
             )
             if (processesOpen) {
@@ -92,7 +93,7 @@ fun ShellPanel(
                 ShellToolboxTrigger(
                     open = toolboxOpen,
                     onToggle = { toolboxOpen = !toolboxOpen },
-                    liveCount = shell.processes.size,
+                    liveCount = liveProcessCount,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(12.dp),
@@ -381,9 +382,9 @@ private fun shellToneForeground(tone: ShellControlTone): Color {
 
 @Composable
 private fun ShellTerminalBar(
-    shell: ShellPreview,
     activeProcess: ShellProcessPreview?,
     processesOpen: Boolean,
+    liveProcessCount: Int,
     onToggleProcesses: () -> Unit,
 ) {
     Row(
@@ -415,7 +416,7 @@ private fun ShellTerminalBar(
             }
         }
         Text(
-            text = "Live ${shell.processes.size}",
+            text = "Live $liveProcessCount",
             color = ThreadColors.ForegroundMuted,
             style = MaterialTheme.typography.labelSmall,
         )
@@ -431,6 +432,7 @@ private fun ShellTerminalBar(
 
 @Composable
 private fun ShellProcessDrawer(shell: ShellPreview) {
+    val liveProcesses = shell.processes.filter { it.isLiveShellProcess() }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -451,13 +453,27 @@ private fun ShellProcessDrawer(shell: ShellPreview) {
             )
             Spacer(modifier = Modifier.weight(1f))
             Text(
-                text = "${shell.processes.size} live",
+                text = "${liveProcesses.size} live",
                 color = ThreadColors.ForegroundMuted,
                 style = MaterialTheme.typography.labelSmall,
             )
         }
-        shell.processes.forEach { process ->
-            ShellProcessRow(process = process)
+        if (liveProcesses.isEmpty()) {
+            Text(
+                text = "No live shell processes",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(ThreadColors.Surface.copy(alpha = 0.24f))
+                    .border(1.dp, ThreadColors.BorderStrong.copy(alpha = 0.46f), RoundedCornerShape(9.dp))
+                    .padding(horizontal = 10.dp, vertical = 12.dp),
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+            )
+        } else {
+            liveProcesses.forEach { process ->
+                ShellProcessRow(process = process)
+            }
         }
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -471,6 +487,11 @@ private fun ShellProcessDrawer(shell: ShellPreview) {
         }
     }
 }
+
+private fun ShellProcessPreview.isLiveShellProcess(): Boolean =
+    status.equals("running", ignoreCase = true) ||
+        status.equals("attached", ignoreCase = true) ||
+        runningCommand != null
 
 @Composable
 private fun ShellProcessRow(process: ShellProcessPreview) {
