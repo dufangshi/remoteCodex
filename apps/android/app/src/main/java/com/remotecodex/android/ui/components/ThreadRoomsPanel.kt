@@ -111,6 +111,8 @@ fun ThreadRoomsPanel(
             )
         }
 
+        RoomsListHeader(count = rooms.size)
+
         LazyColumn(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -118,6 +120,34 @@ fun ThreadRoomsPanel(
                 ThreadRoomCard(room = room)
             }
         }
+    }
+}
+
+@Composable
+private fun RoomsListHeader(count: Int) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        RoomsGlyph(
+            kind = RoomsGlyphKind.Rows,
+            color = ThreadColors.ForegroundMuted,
+            modifier = Modifier.size(14.dp),
+        )
+        Text(
+            text = "Rooms",
+            modifier = Modifier.weight(1f),
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        GraphBadge(
+            label = "$count",
+            variant = GraphBadgeVariant.Outline,
+        )
     }
 }
 
@@ -174,6 +204,12 @@ private fun ThreadRoomCard(room: ThreadRoomPreview) {
                     RoomQuietButton(
                         kind = RoomsGlyphKind.Copy,
                         contentDescription = "Copy session ID",
+                    )
+                }
+                if (room.active) {
+                    GraphBadge(
+                        label = "Active",
+                        variant = GraphBadgeVariant.Outline,
                     )
                 }
             }
@@ -295,6 +331,11 @@ private fun RoomsGlyph(
                 line(0.24f, 0.84f, 0.60f, 0.84f)
                 line(0.60f, 0.84f, 0.60f, 0.72f)
             }
+            RoomsGlyphKind.Rows -> {
+                line(0.20f, 0.28f, 0.80f, 0.28f)
+                line(0.20f, 0.50f, 0.80f, 0.50f)
+                line(0.20f, 0.72f, 0.80f, 0.72f)
+            }
             RoomsGlyphKind.Delete -> {
                 line(0.30f, 0.28f, 0.70f, 0.28f)
                 line(0.42f, 0.18f, 0.58f, 0.18f)
@@ -311,5 +352,6 @@ private enum class RoomsGlyphKind {
     Plus,
     Rename,
     Copy,
+    Rows,
     Delete,
 }
