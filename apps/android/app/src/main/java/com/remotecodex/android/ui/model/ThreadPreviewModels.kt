@@ -172,6 +172,12 @@ data class ComposerPreview(
     val planModeActive: Boolean = false,
     val modelOptions: List<ComposerModelOptionPreview> = defaultComposerModelOptions,
     val reasoningEffortOptions: List<ComposerReasoningEffortOptionPreview> = defaultComposerReasoningEffortOptions,
+    val shellControl: ComposerShellControlPreview = ComposerShellControlPreview(),
+)
+
+data class ComposerShellControlPreview(
+    val shellInputEnabled: Boolean = true,
+    val commandRunning: Boolean = true,
 )
 
 data class ComposerModelOptionPreview(

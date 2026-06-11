@@ -7,6 +7,7 @@ import com.remotecodex.android.ui.model.ComposerContextAvailability
 import com.remotecodex.android.ui.model.ComposerContextPreview
 import com.remotecodex.android.ui.model.ComposerModelOptionPreview
 import com.remotecodex.android.ui.model.ComposerReasoningEffortOptionPreview
+import com.remotecodex.android.ui.model.ComposerShellControlPreview
 import com.remotecodex.android.ui.model.ThreadStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -405,6 +406,56 @@ class ThreadPresentationTest {
             ),
             buildComposerAttachmentActions(),
         )
+    }
+
+    @Test
+    fun buildsEnabledComposerShellTools() {
+        assertEquals(
+            listOf(
+                ComposerShellToolState("PASTE", ComposerShellToolKind.Paste, ComposerShellToolTone.Neutral, true),
+                ComposerShellToolState("COPY", ComposerShellToolKind.Copy, ComposerShellToolTone.Neutral, true),
+                ComposerShellToolState("CLEAR", ComposerShellToolKind.Clear, ComposerShellToolTone.Info, true),
+                ComposerShellToolState("CTRL-C", ComposerShellToolKind.CtrlC, ComposerShellToolTone.Danger, true),
+                ComposerShellToolState("CTRL-D", ComposerShellToolKind.CtrlD, ComposerShellToolTone.Neutral, true),
+                ComposerShellToolState("ESC", ComposerShellToolKind.Esc, ComposerShellToolTone.Neutral, true),
+                ComposerShellToolState("TAB", ComposerShellToolKind.Tab, ComposerShellToolTone.Neutral, true),
+                ComposerShellToolState("UP", ComposerShellToolKind.Up, ComposerShellToolTone.Neutral, true),
+                ComposerShellToolState("DOWN", ComposerShellToolKind.Down, ComposerShellToolTone.Neutral, true),
+            ),
+            buildComposerShellTools(
+                busy = false,
+                shellControl = ComposerShellControlPreview(shellInputEnabled = true, commandRunning = true),
+            ),
+        )
+    }
+
+    @Test
+    fun disablesComposerShellToolsFromBusyAndShellInputState() {
+        val tools = buildComposerShellTools(
+            busy = true,
+            shellControl = ComposerShellControlPreview(shellInputEnabled = false, commandRunning = true),
+        ).associateBy { it.kind }
+
+        assertEquals(true, tools.getValue(ComposerShellToolKind.Paste).enabled)
+        assertEquals(true, tools.getValue(ComposerShellToolKind.Copy).enabled)
+        assertEquals(false, tools.getValue(ComposerShellToolKind.Clear).enabled)
+        assertEquals(false, tools.getValue(ComposerShellToolKind.CtrlC).enabled)
+        assertEquals(false, tools.getValue(ComposerShellToolKind.CtrlD).enabled)
+        assertEquals(false, tools.getValue(ComposerShellToolKind.Esc).enabled)
+        assertEquals(false, tools.getValue(ComposerShellToolKind.Tab).enabled)
+        assertEquals(false, tools.getValue(ComposerShellToolKind.Up).enabled)
+        assertEquals(false, tools.getValue(ComposerShellToolKind.Down).enabled)
+    }
+
+    @Test
+    fun disablesCtrlCWhenNoCommandIsRunning() {
+        val tools = buildComposerShellTools(
+            busy = false,
+            shellControl = ComposerShellControlPreview(shellInputEnabled = true, commandRunning = false),
+        ).associateBy { it.kind }
+
+        assertEquals(false, tools.getValue(ComposerShellToolKind.CtrlC).enabled)
+        assertEquals(true, tools.getValue(ComposerShellToolKind.CtrlD).enabled)
     }
 
     @Test

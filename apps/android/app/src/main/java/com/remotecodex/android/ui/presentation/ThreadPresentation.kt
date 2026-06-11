@@ -9,6 +9,7 @@ import com.remotecodex.android.ui.model.ComposerContextAvailability
 import com.remotecodex.android.ui.model.ComposerContextPreview
 import com.remotecodex.android.ui.model.ComposerModelOptionPreview
 import com.remotecodex.android.ui.model.ComposerReasoningEffortOptionPreview
+import com.remotecodex.android.ui.model.ComposerShellControlPreview
 
 enum class MessageStatusTone {
     Neutral,
@@ -118,11 +119,55 @@ enum class ComposerAttachmentActionKind {
     File,
 }
 
+enum class ComposerShellToolTone {
+    Neutral,
+    Info,
+    Danger,
+}
+
+enum class ComposerShellToolKind {
+    Paste,
+    Copy,
+    Clear,
+    CtrlC,
+    CtrlD,
+    Esc,
+    Tab,
+    Up,
+    Down,
+}
+
 data class ComposerAttachmentActionState(
     val label: String,
     val detail: String,
     val kind: ComposerAttachmentActionKind,
 )
+
+data class ComposerShellToolState(
+    val label: String,
+    val kind: ComposerShellToolKind,
+    val tone: ComposerShellToolTone,
+    val enabled: Boolean,
+)
+
+fun buildComposerShellTools(
+    busy: Boolean,
+    shellControl: ComposerShellControlPreview,
+): List<ComposerShellToolState> {
+    val shellInputEnabled = shellControl.shellInputEnabled
+    val commandRunning = shellControl.commandRunning
+    return listOf(
+        ComposerShellToolState("PASTE", ComposerShellToolKind.Paste, ComposerShellToolTone.Neutral, enabled = true),
+        ComposerShellToolState("COPY", ComposerShellToolKind.Copy, ComposerShellToolTone.Neutral, enabled = true),
+        ComposerShellToolState("CLEAR", ComposerShellToolKind.Clear, ComposerShellToolTone.Info, enabled = !busy),
+        ComposerShellToolState("CTRL-C", ComposerShellToolKind.CtrlC, ComposerShellToolTone.Danger, enabled = shellInputEnabled && commandRunning),
+        ComposerShellToolState("CTRL-D", ComposerShellToolKind.CtrlD, ComposerShellToolTone.Neutral, enabled = shellInputEnabled),
+        ComposerShellToolState("ESC", ComposerShellToolKind.Esc, ComposerShellToolTone.Neutral, enabled = shellInputEnabled),
+        ComposerShellToolState("TAB", ComposerShellToolKind.Tab, ComposerShellToolTone.Neutral, enabled = shellInputEnabled),
+        ComposerShellToolState("UP", ComposerShellToolKind.Up, ComposerShellToolTone.Neutral, enabled = shellInputEnabled),
+        ComposerShellToolState("DOWN", ComposerShellToolKind.Down, ComposerShellToolTone.Neutral, enabled = shellInputEnabled),
+    )
+}
 
 fun buildComposerAttachmentActions(): List<ComposerAttachmentActionState> {
     return listOf(

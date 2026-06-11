@@ -40,6 +40,8 @@ import com.remotecodex.android.ui.presentation.ComposerJumpLatestState
 import com.remotecodex.android.ui.presentation.ComposerPrimaryActionKind
 import com.remotecodex.android.ui.presentation.ComposerSettingsState
 import com.remotecodex.android.ui.presentation.ComposerSelectionOptionState
+import com.remotecodex.android.ui.presentation.ComposerShellToolState
+import com.remotecodex.android.ui.presentation.ComposerShellToolTone
 import com.remotecodex.android.ui.presentation.ComposerStatusChipModel
 import com.remotecodex.android.ui.presentation.ComposerStatusTone
 import com.remotecodex.android.ui.presentation.buildComposerActionState
@@ -49,6 +51,7 @@ import com.remotecodex.android.ui.presentation.buildComposerJumpLatestState
 import com.remotecodex.android.ui.presentation.buildComposerModelOptions
 import com.remotecodex.android.ui.presentation.buildComposerReasoningEffortOptions
 import com.remotecodex.android.ui.presentation.buildComposerSettingsState
+import com.remotecodex.android.ui.presentation.buildComposerShellTools
 import com.remotecodex.android.ui.presentation.buildComposerStatusStrip
 import com.remotecodex.android.ui.theme.ThreadColors
 
@@ -94,6 +97,10 @@ fun ThreadComposer(
         currentEffort = composer.reasoningEffort,
         options = composer.reasoningEffortOptions,
     )
+    val shellTools = buildComposerShellTools(
+        busy = composer.busy,
+        shellControl = composer.shellControl,
+    )
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -112,7 +119,7 @@ fun ThreadComposer(
                     settingsState = settingsState,
                     effortOptions = reasoningEffortOptions,
                 )
-                ComposerMenu.ShellTools -> ShellToolsPanel()
+                ComposerMenu.ShellTools -> ShellToolsPanel(shellTools = shellTools)
                 null -> Unit
             }
         }
@@ -1483,15 +1490,15 @@ private fun EffortPickerPanel(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ShellToolsPanel() {
+private fun ShellToolsPanel(shellTools: List<ComposerShellToolState>) {
     ComposerMenuSurface(title = "Shell tools", subtitle = "Mobile terminal controls") {
         FlowRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            shellToolPreviewItems.forEach { item ->
-                ShellToolPill(label = item.label, tone = item.tone)
+            shellTools.forEach { item ->
+                ShellToolPill(item = item)
             }
         }
     }
@@ -1708,30 +1715,30 @@ private fun SelectionRow(label: String, detail: String, selected: Boolean) {
 }
 
 @Composable
-private fun ShellToolPill(label: String, tone: ShellToolTone) {
-    val foreground = when (tone) {
-        ShellToolTone.Neutral -> ThreadColors.ForegroundSoft
-        ShellToolTone.Info -> ThreadColors.Info
-        ShellToolTone.Danger -> ThreadColors.Danger
+private fun ShellToolPill(item: ComposerShellToolState) {
+    val foreground = when (item.tone) {
+        ComposerShellToolTone.Neutral -> ThreadColors.ForegroundSoft
+        ComposerShellToolTone.Info -> ThreadColors.Info
+        ComposerShellToolTone.Danger -> ThreadColors.Danger
     }
-    val background = when (tone) {
-        ShellToolTone.Neutral -> ThreadColors.Surface
-        ShellToolTone.Info -> ThreadColors.InfoSoft.copy(alpha = 0.50f)
-        ShellToolTone.Danger -> ThreadColors.DangerSoft.copy(alpha = 0.52f)
+    val background = when (item.tone) {
+        ComposerShellToolTone.Neutral -> ThreadColors.Surface
+        ComposerShellToolTone.Info -> ThreadColors.InfoSoft.copy(alpha = 0.50f)
+        ComposerShellToolTone.Danger -> ThreadColors.DangerSoft.copy(alpha = 0.52f)
     }
-    val border = when (tone) {
-        ShellToolTone.Neutral -> ThreadColors.Border
-        ShellToolTone.Info -> ThreadColors.Info.copy(alpha = 0.36f)
-        ShellToolTone.Danger -> ThreadColors.Danger.copy(alpha = 0.40f)
+    val border = when (item.tone) {
+        ComposerShellToolTone.Neutral -> ThreadColors.Border
+        ComposerShellToolTone.Info -> ThreadColors.Info.copy(alpha = 0.36f)
+        ComposerShellToolTone.Danger -> ThreadColors.Danger.copy(alpha = 0.40f)
     }
     Text(
-        text = label,
+        text = item.label,
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
             .background(background)
             .border(1.dp, border, RoundedCornerShape(999.dp))
             .padding(horizontal = 12.dp, vertical = 8.dp),
-        color = foreground,
+        color = if (item.enabled) foreground else ThreadColors.ForegroundMuted.copy(alpha = 0.56f),
         style = MaterialTheme.typography.labelSmall,
         fontWeight = FontWeight.Bold,
     )
@@ -1748,11 +1755,6 @@ private enum class ComposerMenu {
     Effort,
     ShellTools,
 }
-
-private data class ShellToolPreviewItem(
-    val label: String,
-    val tone: ShellToolTone = ShellToolTone.Neutral,
-)
 
 private data class ForkTurnPreviewItem(
     val index: Int,
@@ -1787,12 +1789,6 @@ private data class HookPreviewItem(
     val timeoutSec: Int,
 )
 
-private enum class ShellToolTone {
-    Neutral,
-    Info,
-    Danger,
-}
-
 private enum class HookStatusTone {
     Warning,
     Error,
@@ -1803,18 +1799,6 @@ private enum class AttachmentTileIcon {
     Photo,
     File,
 }
-
-private val shellToolPreviewItems = listOf(
-    ShellToolPreviewItem(label = "PASTE"),
-    ShellToolPreviewItem(label = "COPY"),
-    ShellToolPreviewItem(label = "CLEAR", tone = ShellToolTone.Info),
-    ShellToolPreviewItem(label = "CTRL-C", tone = ShellToolTone.Danger),
-    ShellToolPreviewItem(label = "CTRL-D"),
-    ShellToolPreviewItem(label = "ESC"),
-    ShellToolPreviewItem(label = "TAB"),
-    ShellToolPreviewItem(label = "UP"),
-    ShellToolPreviewItem(label = "DOWN"),
-)
 
 private val forkTurnPreviewItems = listOf(
     ForkTurnPreviewItem(index = 12, status = "completed"),
