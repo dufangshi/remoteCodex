@@ -45,6 +45,7 @@ import com.remotecodex.android.ui.presentation.ComposerContextUsageState
 import com.remotecodex.android.ui.presentation.ComposerForkActionState
 import com.remotecodex.android.ui.presentation.ComposerForkLifecycleState
 import com.remotecodex.android.ui.presentation.ComposerForkPanelState
+import com.remotecodex.android.ui.presentation.ComposerForkTurnPickerRowState
 import com.remotecodex.android.ui.presentation.ComposerFrameState
 import com.remotecodex.android.ui.presentation.ComposerGoalComposeCardState
 import com.remotecodex.android.ui.presentation.ComposerGoalPanelState
@@ -212,6 +213,7 @@ fun ThreadComposer(
         busy = composer.busy,
         forkBusy = composer.forkBusy,
         slashPanelView = composer.slashPanelView,
+        forkTurnOptions = composer.forkTurnOptions,
     )
     val goalPanelState = buildComposerGoalPanelState(
         composer.goalPanel.copy(
@@ -1463,8 +1465,17 @@ private fun ForkPreviewGroup(
         }
         if (showTurnPicker) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                forkTurnPreviewItems.forEach { item ->
+                forkPanelState.turnPicker.loadingMessage?.let { message ->
+                    ForkTurnMessageRow(message = message, error = false)
+                }
+                forkPanelState.turnPicker.errorMessage?.let { message ->
+                    ForkTurnMessageRow(message = message, error = true)
+                }
+                forkPanelState.turnPicker.rows.forEach { item ->
                     ForkTurnRow(item = item)
+                }
+                forkPanelState.turnPicker.emptyMessage?.let { message ->
+                    ForkTurnMessageRow(message = message, error = false)
                 }
             }
         }
@@ -1516,7 +1527,7 @@ private fun ForkActionRow(action: ComposerForkActionState) {
 }
 
 @Composable
-private fun ForkTurnRow(item: ForkTurnPreviewItem) {
+private fun ForkTurnRow(item: ComposerForkTurnPickerRowState) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1528,9 +1539,9 @@ private fun ForkTurnRow(item: ForkTurnPreviewItem) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
-            text = "Turn ${item.index}",
+            text = item.title,
             modifier = Modifier.weight(1f),
-            color = ThreadColors.CodeForeground,
+            color = if (item.enabled) ThreadColors.CodeForeground else ThreadColors.ForegroundMuted.copy(alpha = 0.58f),
             style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
@@ -1541,6 +1552,29 @@ private fun ForkTurnRow(item: ForkTurnPreviewItem) {
             variant = GraphBadgeVariant.Outline,
         )
     }
+}
+
+@Composable
+private fun ForkTurnMessageRow(
+    message: String,
+    error: Boolean,
+) {
+    val foreground = if (error) ThreadColors.Danger else ThreadColors.ForegroundMuted
+    val background = if (error) ThreadColors.DangerSoft.copy(alpha = 0.56f) else ThreadColors.CodeBackground
+    val border = if (error) ThreadColors.Danger.copy(alpha = 0.34f) else ThreadColors.BorderStrong
+    Text(
+        text = message,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(background)
+            .border(1.dp, border, RoundedCornerShape(10.dp))
+            .padding(10.dp),
+        color = foreground,
+        style = MaterialTheme.typography.labelSmall,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 @Composable
@@ -2627,11 +2661,6 @@ private enum class ComposerMenu {
     ShellTools,
 }
 
-private data class ForkTurnPreviewItem(
-    val index: Int,
-    val status: String,
-)
-
 private enum class HookStatusTone {
     Warning,
     Error,
@@ -2642,12 +2671,6 @@ private enum class AttachmentTileIcon {
     Photo,
     File,
 }
-
-private val forkTurnPreviewItems = listOf(
-    ForkTurnPreviewItem(index = 12, status = "completed"),
-    ForkTurnPreviewItem(index = 11, status = "interrupted"),
-    ForkTurnPreviewItem(index = 10, status = "failed"),
-)
 
 private enum class ComposerToolIcon {
     Slash,

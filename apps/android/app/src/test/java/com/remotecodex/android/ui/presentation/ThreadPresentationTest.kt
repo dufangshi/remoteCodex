@@ -5,6 +5,8 @@ import com.remotecodex.android.ui.model.PlanStepStatus
 import com.remotecodex.android.ui.model.ComposerActiveView
 import com.remotecodex.android.ui.model.ComposerContextAvailability
 import com.remotecodex.android.ui.model.ComposerContextPreview
+import com.remotecodex.android.ui.model.ComposerForkTurnOptionPreview
+import com.remotecodex.android.ui.model.ComposerForkTurnOptionsPreview
 import com.remotecodex.android.ui.model.ComposerGoalPanelPreview
 import com.remotecodex.android.ui.model.ComposerHookErrorPreview
 import com.remotecodex.android.ui.model.ComposerHookEventNamePreview
@@ -1513,6 +1515,7 @@ class ThreadPresentationTest {
                 ),
                 showIdleOnlyNotice = false,
                 notice = null,
+                turnPicker = defaultComposerForkTurnPickerState(),
             ),
             buildComposerForkPanelState(
                 busy = false,
@@ -1547,6 +1550,7 @@ class ThreadPresentationTest {
                 ),
                 showIdleOnlyNotice = true,
                 notice = "Fork is only available while the thread is idle.",
+                turnPicker = defaultComposerForkTurnPickerState(),
             ),
             buildComposerForkPanelState(
                 busy = true,
@@ -1644,6 +1648,124 @@ class ThreadPresentationTest {
                 forkBusy = true,
                 slashPanelView = ComposerSlashPanelViewPreview.ForkTurns,
             ),
+        )
+    }
+
+    @Test
+    fun buildsComposerForkTurnPickerRows() {
+        assertEquals(
+            ComposerForkTurnPickerState(
+                loadingMessage = null,
+                errorMessage = null,
+                rows = listOf(
+                    ComposerForkTurnPickerRowState(
+                        turnId = "turn-7",
+                        title = "Turn 7",
+                        status = "completed",
+                        enabled = true,
+                    ),
+                ),
+                emptyMessage = null,
+            ),
+            buildComposerForkTurnPickerState(
+                options = ComposerForkTurnOptionsPreview(
+                    status = ComposerPanelLoadStatusPreview.Ready,
+                    error = null,
+                    turns = listOf(
+                        ComposerForkTurnOptionPreview(
+                            turnId = "turn-7",
+                            turnIndex = 7,
+                            status = "completed",
+                        ),
+                    ),
+                ),
+                forkBusy = false,
+            ),
+        )
+    }
+
+    @Test
+    fun buildsComposerForkTurnPickerLoadingErrorEmptyAndBusyStates() {
+        assertEquals(
+            "Loading turns...",
+            buildComposerForkTurnPickerState(
+                options = ComposerForkTurnOptionsPreview(
+                    status = ComposerPanelLoadStatusPreview.Loading,
+                    turns = emptyList(),
+                ),
+                forkBusy = false,
+            ).loadingMessage,
+        )
+        assertEquals(
+            "Could not load turns",
+            buildComposerForkTurnPickerState(
+                options = ComposerForkTurnOptionsPreview(
+                    status = ComposerPanelLoadStatusPreview.Failed,
+                    error = "Could not load turns",
+                    turns = emptyList(),
+                ),
+                forkBusy = false,
+            ).errorMessage,
+        )
+        assertEquals(
+            "No turns available to fork yet.",
+            buildComposerForkTurnPickerState(
+                options = ComposerForkTurnOptionsPreview(
+                    status = ComposerPanelLoadStatusPreview.Ready,
+                    error = null,
+                    turns = emptyList(),
+                ),
+                forkBusy = false,
+            ).emptyMessage,
+        )
+        assertEquals(
+            ComposerForkTurnPickerRowState(
+                turnId = "turn-8",
+                title = "Turn 8",
+                status = "Forking",
+                enabled = false,
+            ),
+            buildComposerForkTurnPickerState(
+                options = ComposerForkTurnOptionsPreview(
+                    status = ComposerPanelLoadStatusPreview.Ready,
+                    turns = listOf(
+                        ComposerForkTurnOptionPreview(
+                            turnId = "turn-8",
+                            turnIndex = 8,
+                            status = "completed",
+                        ),
+                    ),
+                ),
+                forkBusy = true,
+            ).rows.single(),
+        )
+    }
+
+    private fun defaultComposerForkTurnPickerState(): ComposerForkTurnPickerState {
+        return ComposerForkTurnPickerState(
+            loadingMessage = null,
+            errorMessage = null,
+            rows = listOf(
+                ComposerForkTurnPickerRowState(
+                    turnId = "turn-12",
+                    title = "Turn 12",
+                    status = "completed",
+                    enabled = true,
+                ),
+                ComposerForkTurnPickerRowState(
+                    turnId = "turn-11",
+                    title = "Turn 11",
+                    status = "interrupted",
+                    enabled = true,
+                ),
+                ComposerForkTurnPickerRowState(
+                    turnId = "turn-10",
+                    title = "Turn 10",
+                    status = "failed",
+                    enabled = true,
+                ),
+            ),
+            emptyMessage = null,
         )
     }
 

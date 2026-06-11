@@ -177,6 +177,7 @@ data class ComposerPreview(
     val shellControl: ComposerShellControlPreview = ComposerShellControlPreview(),
     val compactBusy: Boolean = false,
     val forkBusy: Boolean = false,
+    val forkTurnOptions: ComposerForkTurnOptionsPreview = ComposerForkTurnOptionsPreview(),
     val goalComposeMode: Boolean = false,
     val goalStatus: ThreadGoalStatusPreview? = ThreadGoalStatusPreview.Active,
     val goalPanel: ComposerGoalPanelPreview = ComposerGoalPanelPreview(),
@@ -249,6 +250,24 @@ data class ComposerGoalPanelPreview(
     val updateAvailable: Boolean = true,
     val currentGoal: ThreadGoalPreview? = defaultThreadGoalPreview,
     val fastMode: Boolean = false,
+)
+
+data class ComposerForkTurnOptionsPreview(
+    val status: ComposerPanelLoadStatusPreview = ComposerPanelLoadStatusPreview.Ready,
+    val error: String? = null,
+    val turns: List<ComposerForkTurnOptionPreview> = defaultComposerForkTurnOptions,
+)
+
+data class ComposerForkTurnOptionPreview(
+    val turnId: String,
+    val turnIndex: Int,
+    val status: String,
+)
+
+val defaultComposerForkTurnOptions = listOf(
+    ComposerForkTurnOptionPreview(turnId = "turn-12", turnIndex = 12, status = "completed"),
+    ComposerForkTurnOptionPreview(turnId = "turn-11", turnIndex = 11, status = "interrupted"),
+    ComposerForkTurnOptionPreview(turnId = "turn-10", turnIndex = 10, status = "failed"),
 )
 
 val defaultThreadGoalPreview = ThreadGoalPreview(

@@ -7,6 +7,7 @@ import com.remotecodex.android.ui.model.ToolStatus
 import com.remotecodex.android.ui.model.ComposerActiveView
 import com.remotecodex.android.ui.model.ComposerContextAvailability
 import com.remotecodex.android.ui.model.ComposerContextPreview
+import com.remotecodex.android.ui.model.ComposerForkTurnOptionsPreview
 import com.remotecodex.android.ui.model.ComposerGoalPanelPreview
 import com.remotecodex.android.ui.model.ComposerHookEventNamePreview
 import com.remotecodex.android.ui.model.ComposerHookHandlerTypePreview
@@ -419,6 +420,7 @@ data class ComposerForkPanelState(
     val actions: List<ComposerForkActionState>,
     val showIdleOnlyNotice: Boolean,
     val notice: String?,
+    val turnPicker: ComposerForkTurnPickerState = ComposerForkTurnPickerState(),
     val lifecycle: ComposerForkLifecycleState = ComposerForkLifecycleState(
         forkBusy = false,
         shouldClearBusyWhenLeavingForkTurns = false,
@@ -426,6 +428,20 @@ data class ComposerForkPanelState(
         closeMenuOnSuccess = true,
         closeMenuOnFailure = false,
     ),
+)
+
+data class ComposerForkTurnPickerRowState(
+    val turnId: String,
+    val title: String,
+    val status: String,
+    val enabled: Boolean,
+)
+
+data class ComposerForkTurnPickerState(
+    val loadingMessage: String? = null,
+    val errorMessage: String? = null,
+    val rows: List<ComposerForkTurnPickerRowState> = emptyList(),
+    val emptyMessage: String? = null,
 )
 
 data class ComposerForkLifecycleState(
@@ -944,6 +960,7 @@ fun buildComposerForkPanelState(
     busy: Boolean,
     forkBusy: Boolean,
     slashPanelView: ComposerSlashPanelViewPreview = ComposerSlashPanelViewPreview.Root,
+    forkTurnOptions: ComposerForkTurnOptionsPreview = ComposerForkTurnOptionsPreview(),
 ): ComposerForkPanelState {
     val enabled = !(busy || forkBusy)
     val lifecycle = buildComposerForkLifecycleState(
@@ -973,7 +990,36 @@ fun buildComposerForkPanelState(
         ),
         showIdleOnlyNotice = busy,
         notice = if (busy) "Fork is only available while the thread is idle." else null,
+        turnPicker = buildComposerForkTurnPickerState(
+            options = forkTurnOptions,
+            forkBusy = forkBusy,
+        ),
         lifecycle = lifecycle,
+    )
+}
+
+fun buildComposerForkTurnPickerState(
+    options: ComposerForkTurnOptionsPreview,
+    forkBusy: Boolean,
+): ComposerForkTurnPickerState {
+    val loading = options.status == ComposerPanelLoadStatusPreview.Loading && options.turns.isEmpty()
+    val error = options.error?.takeIf { it.isNotBlank() }
+    val rows = options.turns.map { turn ->
+        ComposerForkTurnPickerRowState(
+            turnId = turn.turnId,
+            title = "Turn ${turn.turnIndex}",
+            status = if (forkBusy) "Forking" else turn.status,
+            enabled = !forkBusy,
+        )
+    }
+    val empty = options.status != ComposerPanelLoadStatusPreview.Loading &&
+        error == null &&
+        rows.isEmpty()
+    return ComposerForkTurnPickerState(
+        loadingMessage = if (loading) "Loading turns..." else null,
+        errorMessage = error,
+        rows = rows,
+        emptyMessage = if (empty) "No turns available to fork yet." else null,
     )
 }
 
