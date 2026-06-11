@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.ui.model.ThreadStatus
 import com.remotecodex.android.ui.model.ToolStatus
@@ -85,7 +86,7 @@ fun MessageStatusBadge(
             .semantics {
                 contentDescription = model.accessibilityLabel
             },
-        showLabel = !compact,
+        edgeSize = if (compact) 6.dp else 8.dp,
         leading = {
             MessageStatusLeadingIcon(
                 tone = model.tone,
@@ -257,6 +258,7 @@ private fun PillBadge(
     colors: BadgeColors,
     modifier: Modifier = Modifier,
     showLabel: Boolean = true,
+    edgeSize: Dp = if (showLabel) 8.dp else 4.dp,
     leading: @Composable () -> Unit,
 ) {
     Row(
@@ -272,7 +274,6 @@ private fun PillBadge(
             horizontalArrangement = Arrangement.spacedBy(5.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val edgeSize = if (showLabel) 8.dp else 4.dp
             Box(modifier = Modifier.size(edgeSize))
             leading()
             if (showLabel) {
