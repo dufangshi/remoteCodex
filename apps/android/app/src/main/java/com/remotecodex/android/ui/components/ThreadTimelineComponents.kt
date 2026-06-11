@@ -73,7 +73,7 @@ import com.remotecodex.android.ui.presentation.graphChatMessageStatusModel
 import com.remotecodex.android.ui.presentation.historyGroupRowOrdinalLabel
 import com.remotecodex.android.ui.presentation.hookHistorySummary
 import com.remotecodex.android.ui.presentation.parseUserMessageSegments
-import com.remotecodex.android.ui.presentation.planStepStatusLabel
+import com.remotecodex.android.ui.presentation.planStepStatusAccessibilityLabel
 import com.remotecodex.android.ui.presentation.summarizeInlinePreviewText
 import com.remotecodex.android.ui.presentation.threadStatusLabel
 import com.remotecodex.android.ui.presentation.toolResultStatusLabel
@@ -464,25 +464,60 @@ private fun PlanStepStatusPill(status: PlanStepStatus) {
         PlanStepStatus.Pending -> ThreadColors.InfoSoft
         PlanStepStatus.Unknown -> ThreadColors.SurfaceStrong
     }
-    Row(
+    Box(
         modifier = Modifier
+            .size(30.dp)
             .clip(RoundedCornerShape(999.dp))
             .background(background)
             .border(1.dp, foreground.copy(alpha = 0.42f), RoundedCornerShape(999.dp))
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .semantics {
+                contentDescription = planStepStatusAccessibilityLabel(status)
+            },
+        contentAlignment = Alignment.Center,
     ) {
         if (status == PlanStepStatus.Running) {
             RunningDots(color = foreground, dotSize = 4.dp, spacing = 2.dp)
+        } else {
+            PlanStepStatusIcon(status = status, color = foreground)
         }
-        Text(
-            text = planStepStatusLabel(status),
-            color = foreground,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-        )
+    }
+}
+
+@Composable
+private fun PlanStepStatusIcon(status: PlanStepStatus, color: Color) {
+    Canvas(modifier = Modifier.size(15.dp)) {
+        val stroke = Stroke(width = 1.75.dp.toPx(), cap = StrokeCap.Round)
+        val w = size.width
+        val h = size.height
+        fun line(x1: Float, y1: Float, x2: Float, y2: Float) {
+            drawLine(color, Offset(w * x1, h * y1), Offset(w * x2, h * y2), stroke.width, StrokeCap.Round)
+        }
+        when (status) {
+            PlanStepStatus.Completed -> {
+                drawCircle(color, radius = w * 0.42f, center = Offset(w * 0.5f, h * 0.5f), style = stroke)
+                line(0.30f, 0.52f, 0.44f, 0.66f)
+                line(0.44f, 0.66f, 0.72f, 0.34f)
+            }
+            PlanStepStatus.Failed -> {
+                drawCircle(color, radius = w * 0.42f, center = Offset(w * 0.5f, h * 0.5f), style = stroke)
+                line(0.34f, 0.34f, 0.66f, 0.66f)
+                line(0.66f, 0.34f, 0.34f, 0.66f)
+            }
+            PlanStepStatus.Pending -> {
+                drawCircle(color, radius = w * 0.42f, center = Offset(w * 0.5f, h * 0.5f), style = stroke)
+                line(0.50f, 0.27f, 0.50f, 0.52f)
+                line(0.50f, 0.52f, 0.66f, 0.62f)
+            }
+            PlanStepStatus.Unknown -> {
+                drawCircle(color, radius = w * 0.42f, center = Offset(w * 0.5f, h * 0.5f), style = stroke)
+                line(0.40f, 0.38f, 0.44f, 0.30f)
+                line(0.44f, 0.30f, 0.56f, 0.30f)
+                line(0.56f, 0.30f, 0.62f, 0.38f)
+                line(0.62f, 0.38f, 0.50f, 0.52f)
+                drawCircle(color, radius = w * 0.035f, center = Offset(w * 0.50f, h * 0.70f))
+            }
+            PlanStepStatus.Running -> Unit
+        }
     }
 }
 

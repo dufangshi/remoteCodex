@@ -1,6 +1,7 @@
 package com.remotecodex.android.ui.presentation
 
 import com.remotecodex.android.ui.model.HistoryItemKind
+import com.remotecodex.android.ui.model.PlanStepStatus
 import com.remotecodex.android.ui.model.ThreadStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -57,6 +58,15 @@ class ThreadPresentationTest {
             MessageStatusModel("Complete", MessageStatusTone.Success),
             graphChatMessageStatusModel(ThreadStatus.Complete),
         )
+    }
+
+    @Test
+    fun mapsPlanStepStatusAccessibilityLabels() {
+        assertEquals("Plan step status: Completed", planStepStatusAccessibilityLabel(PlanStepStatus.Completed))
+        assertEquals("Plan step status: In progress", planStepStatusAccessibilityLabel(PlanStepStatus.Running))
+        assertEquals("Plan step status: Failed", planStepStatusAccessibilityLabel(PlanStepStatus.Failed))
+        assertEquals("Plan step status: Pending", planStepStatusAccessibilityLabel(PlanStepStatus.Pending))
+        assertEquals("Plan step status: Unknown", planStepStatusAccessibilityLabel(PlanStepStatus.Unknown))
     }
 
     @Test

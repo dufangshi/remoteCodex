@@ -114,6 +114,17 @@ fun planStepStatusLabel(status: PlanStepStatus): String {
     }
 }
 
+fun planStepStatusAccessibilityLabel(status: PlanStepStatus): String {
+    val statusLabel = when (status) {
+        PlanStepStatus.Completed -> "Completed"
+        PlanStepStatus.Running -> "In progress"
+        PlanStepStatus.Failed -> "Failed"
+        PlanStepStatus.Pending -> "Pending"
+        PlanStepStatus.Unknown -> "Unknown"
+    }
+    return "Plan step status: $statusLabel"
+}
+
 fun historyItemLabel(kind: HistoryItemKind): String {
     return when (kind) {
         HistoryItemKind.Plan -> "Plan"
