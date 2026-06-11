@@ -71,10 +71,14 @@ import com.remotecodex.android.ui.presentation.FileChangeSummaryTone
 import com.remotecodex.android.ui.presentation.fileChangeSummarySegments
 import com.remotecodex.android.ui.presentation.formatGraphChatToolParameterObject
 import com.remotecodex.android.ui.presentation.formatTrailingPathLabel
+import com.remotecodex.android.ui.presentation.buildGraphChatHistoryItemFrameState
 import com.remotecodex.android.ui.presentation.historyGroupRowOrdinalLabel
 import com.remotecodex.android.ui.presentation.hookHistorySummary
+import com.remotecodex.android.ui.presentation.GraphChatHistoryItemFrameState
 import com.remotecodex.android.ui.presentation.GraphChatHistoryGroupFrameState
 import com.remotecodex.android.ui.presentation.GraphChatMessageFrameState
+import com.remotecodex.android.ui.presentation.GraphChatHistoryStatusState
+import com.remotecodex.android.ui.presentation.GraphChatHistoryStatusTone
 import com.remotecodex.android.ui.presentation.MessageStatusModel
 import com.remotecodex.android.ui.presentation.parseUserMessageSegments
 import com.remotecodex.android.ui.presentation.planStepStatusAccessibilityLabel
@@ -82,8 +86,9 @@ import com.remotecodex.android.ui.presentation.shouldShowHistoryGroupRowTitle
 import com.remotecodex.android.ui.presentation.summarizeInlinePreviewText
 import com.remotecodex.android.ui.presentation.threadStatusLabel
 import com.remotecodex.android.ui.presentation.toolResultStatusLabel
-import com.remotecodex.android.ui.presentation.toolStatusLabel
 import com.remotecodex.android.ui.presentation.UserMessageSegment
+import com.remotecodex.android.ui.presentation.graphChatHistoryItemCopyText
+import com.remotecodex.android.ui.presentation.graphChatHistoryGroupRowSummary
 import com.remotecodex.android.ui.theme.ThreadColors
 import kotlinx.coroutines.delay
 
@@ -1297,7 +1302,13 @@ private fun HistoryGroupRow(
             horizontalArrangement = Arrangement.End,
         ) {
             CopyTextButton(
-                value = historyItemCopyText(item),
+                value = graphChatHistoryItemCopyText(
+                    title = item.title,
+                    meta = item.meta,
+                    status = item.status,
+                    summary = item.summary,
+                    detail = item.detail,
+                ),
                 idleLabel = "Copy",
                 copiedLabel = "Copied",
                 contentDescription = "Copy history item details",
@@ -1312,7 +1323,15 @@ private fun HistoryItemCard(
     onOpenDetail: (DetailPreview) -> Unit,
 ) {
     val colors = historyItemColors(item.kind)
-    val running = item.status == ToolStatus.Running
+    val frameState = buildGraphChatHistoryItemFrameState(
+        kind = item.kind,
+        title = item.title,
+        status = item.status,
+        meta = item.meta,
+        summary = item.summary,
+        detail = item.detail,
+        actionLabel = item.actionLabel,
+    )
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1329,7 +1348,7 @@ private fun HistoryItemCard(
         ) {
             HistoryKindGlyph(kind = item.kind, color = colors.foreground)
             Text(
-                text = item.title,
+                text = frameState.title,
                 modifier = Modifier.weight(1f),
                 color = colors.foreground,
                 style = MaterialTheme.typography.bodyMedium,
@@ -1338,11 +1357,8 @@ private fun HistoryItemCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            item.status?.let { status ->
-                ToolStatusBadge(
-                    label = toolStatusLabel(status),
-                    status = status,
-                )
+            frameState.status?.let { status ->
+                HistoryStatusBadge(status = status)
             }
             item.meta?.let { meta ->
                 Text(
@@ -1362,7 +1378,7 @@ private fun HistoryItemCard(
             )
             else -> {
                 Text(
-                    text = historyItemSummary(item),
+                    text = frameState.summary,
                     color = ThreadColors.ForegroundSoft,
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = 3,
@@ -1370,7 +1386,7 @@ private fun HistoryItemCard(
                 )
             }
         }
-        if (running) {
+        if (frameState.running) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1388,7 +1404,7 @@ private fun HistoryItemCard(
                         .background(ThreadColors.Warning),
                 )
                 Text(
-                    text = "Running from thread events",
+                    text = frameState.runningLabel,
                     modifier = Modifier.weight(1f),
                     color = ThreadColors.Warning,
                     style = MaterialTheme.typography.labelSmall,
@@ -1398,15 +1414,14 @@ private fun HistoryItemCard(
                 )
             }
         }
-        if (item.kind == HistoryItemKind.FileChange) {
+        if (frameState.showFileChangeDelta) {
             FileChangeDeltaRow(item = item)
         }
-        if (item.kind == HistoryItemKind.Image) {
+        if (frameState.showImagePreview) {
             ImageHistoryPreview(item = item, colors = colors, onOpenDetail = onOpenDetail)
         }
-        item.detail?.takeIf {
-            item.kind != HistoryItemKind.Artifact && item.kind != HistoryItemKind.Hook
-        }?.let { detail ->
+        if (frameState.showDetail) {
+            item.detail?.let { detail ->
             Text(
                 text = detail,
                 modifier = Modifier
@@ -1421,43 +1436,80 @@ private fun HistoryItemCard(
                 maxLines = 4,
                 overflow = TextOverflow.Ellipsis,
             )
+            }
         }
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            item.actionLabel?.takeIf { item.kind != HistoryItemKind.Artifact }?.let { label ->
+            if (frameState.showAction) {
+                val label = item.actionLabel.orEmpty()
                 GraphButton(
                     label = label,
                     variant = GraphButtonVariant.Ghost,
                     icon = GraphActionIcon.Open,
-                    contentDescription = "Open ${label.lowercase()}",
+                    contentDescription = frameState.actionAccessibilityLabel,
                     onClick = { openHistoryItemDetail(item, null, onOpenDetail) },
                 )
             }
             Spacer(modifier = Modifier.weight(1f))
-            CopyTextButton(
-                value = historyItemCopyText(item),
-                idleLabel = "Copy",
-                copiedLabel = "Copied",
-                contentDescription = "Copy history item details",
-            )
+            if (frameState.showCopy) {
+                CopyTextButton(
+                    value = frameState.copyText,
+                    idleLabel = "Copy",
+                    copiedLabel = "Copied",
+                    contentDescription = "Copy history item details",
+                )
+            }
         }
     }
 }
 
-private fun historyItemCopyText(item: HistoryItemPreview): String {
-    return buildString {
-        appendLine(item.title)
-        item.meta?.takeIf { it.isNotBlank() }?.let { appendLine(it) }
-        item.status?.let { appendLine(toolStatusLabel(it)) }
-        item.summary.takeIf { it.isNotBlank() }?.let { appendLine(it) }
-        item.detail?.takeIf { it.isNotBlank() }?.let {
-            if (isNotEmpty()) appendLine()
-            appendLine(it)
+@Composable
+private fun HistoryStatusBadge(status: GraphChatHistoryStatusState) {
+    val foreground = when (status.tone) {
+        GraphChatHistoryStatusTone.Success -> ThreadColors.Success
+        GraphChatHistoryStatusTone.Danger -> ThreadColors.Danger
+        GraphChatHistoryStatusTone.Running -> ThreadColors.Warning
+        GraphChatHistoryStatusTone.Neutral -> ThreadColors.ForegroundMuted
+    }
+    val background = when (status.tone) {
+        GraphChatHistoryStatusTone.Success -> ThreadColors.SuccessSoft
+        GraphChatHistoryStatusTone.Danger -> ThreadColors.DangerSoft
+        GraphChatHistoryStatusTone.Running -> ThreadColors.WarningSoft
+        GraphChatHistoryStatusTone.Neutral -> ThreadColors.SurfaceStrong
+    }
+    val shape = RoundedCornerShape(999.dp)
+    Row(
+        modifier = Modifier
+            .clip(shape)
+            .background(background.copy(alpha = 0.78f))
+            .border(1.dp, foreground.copy(alpha = 0.36f), shape)
+            .semantics { contentDescription = status.accessibilityLabel }
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (status.tone == GraphChatHistoryStatusTone.Running) {
+            RunningDots(color = foreground, dotSize = 3.5.dp, spacing = 1.5.dp)
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(foreground),
+            )
         }
-    }.trim()
+        Text(
+            text = status.label,
+            color = foreground,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
 }
 
 @Composable
@@ -1630,7 +1682,12 @@ private fun HookHistorySummaryRow(
 
 @Composable
 private fun HistoryGroupRowSummary(item: HistoryItemPreview) {
-    val summary = summarizeInlinePreviewText(historyGroupRowSummary(item))
+    val summary = summarizeInlinePreviewText(
+        graphChatHistoryGroupRowSummary(
+            kind = item.kind,
+            summary = item.summary,
+        ),
+    )
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(7.dp),
@@ -1653,22 +1710,6 @@ private fun HistoryGroupRowSummary(item: HistoryItemPreview) {
                 maxLines = 1,
             )
         }
-    }
-}
-
-private fun historyItemSummary(item: HistoryItemPreview): String {
-    return if (item.kind == HistoryItemKind.FileChange) {
-        formatTrailingPathLabel(item.summary, maxLength = 48)
-    } else {
-        item.summary
-    }
-}
-
-private fun historyGroupRowSummary(item: HistoryItemPreview): String {
-    return if (item.kind == HistoryItemKind.FileChange) {
-        formatTrailingPathLabel(item.summary, maxLength = 34)
-    } else {
-        item.summary
     }
 }
 

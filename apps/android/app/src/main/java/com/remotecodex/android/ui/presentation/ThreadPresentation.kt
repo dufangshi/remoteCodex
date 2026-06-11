@@ -69,6 +69,34 @@ data class GraphChatHistoryGroupFrameState(
     val toggleTargetLabel: String,
 )
 
+enum class GraphChatHistoryStatusTone {
+    Neutral,
+    Running,
+    Success,
+    Danger,
+}
+
+data class GraphChatHistoryStatusState(
+    val label: String,
+    val tone: GraphChatHistoryStatusTone,
+    val accessibilityLabel: String = "Status: $label",
+)
+
+data class GraphChatHistoryItemFrameState(
+    val title: String,
+    val status: GraphChatHistoryStatusState?,
+    val summary: String,
+    val running: Boolean,
+    val runningLabel: String,
+    val showDetail: Boolean,
+    val showFileChangeDelta: Boolean,
+    val showImagePreview: Boolean,
+    val showAction: Boolean,
+    val actionAccessibilityLabel: String?,
+    val showCopy: Boolean,
+    val copyText: String,
+)
+
 enum class FileChangeSummaryTone {
     Files,
     Added,
@@ -2842,6 +2870,116 @@ fun isRunningHistoryStatusLabel(statusLabel: String?): Boolean {
 
 fun graphChatHistoryGroupCountLabel(countLabel: String): String {
     return Regex("\\d+").find(countLabel)?.value ?: countLabel.trim().take(2).uppercase()
+}
+
+fun graphChatHistoryStatusState(status: ToolStatus?): GraphChatHistoryStatusState? {
+    return status?.let { graphChatHistoryStatusState(toolStatusLabel(it)) }
+}
+
+fun graphChatHistoryStatusState(statusLabel: String?): GraphChatHistoryStatusState? {
+    val label = statusLabel?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    val normalized = label.lowercase()
+    return when {
+        normalized == "completed" ||
+            normalized == "complete" ||
+            normalized == "done" ||
+            normalized == "success" ||
+            normalized == "succeeded" -> GraphChatHistoryStatusState(
+            label = "Completed",
+            tone = GraphChatHistoryStatusTone.Success,
+        )
+        normalized == "failed" ||
+            normalized == "failure" ||
+            normalized == "error" ||
+            normalized == "errored" -> GraphChatHistoryStatusState(
+            label = "Failed",
+            tone = GraphChatHistoryStatusTone.Danger,
+        )
+        isRunningHistoryStatusLabel(label) -> GraphChatHistoryStatusState(
+            label = label,
+            tone = GraphChatHistoryStatusTone.Running,
+        )
+        else -> GraphChatHistoryStatusState(
+            label = label,
+            tone = GraphChatHistoryStatusTone.Neutral,
+        )
+    }
+}
+
+fun buildGraphChatHistoryItemFrameState(
+    kind: HistoryItemKind,
+    title: String,
+    status: ToolStatus?,
+    meta: String?,
+    summary: String,
+    detail: String?,
+    actionLabel: String?,
+): GraphChatHistoryItemFrameState {
+    val normalizedSummary = graphChatHistoryItemSummary(kind, summary)
+    val normalizedDetail = detail?.takeIf { it.isNotBlank() }
+    val normalizedAction = actionLabel?.trim()?.takeIf { it.isNotEmpty() }
+    val showAction = normalizedAction != null && kind != HistoryItemKind.Artifact
+    val copyText = graphChatHistoryItemCopyText(
+        title = title,
+        meta = meta,
+        status = status,
+        summary = summary,
+        detail = detail,
+    )
+
+    return GraphChatHistoryItemFrameState(
+        title = title,
+        status = graphChatHistoryStatusState(status),
+        summary = normalizedSummary,
+        running = status == ToolStatus.Running,
+        runningLabel = "Running from thread events",
+        showDetail = normalizedDetail != null &&
+            kind != HistoryItemKind.Artifact &&
+            kind != HistoryItemKind.Hook,
+        showFileChangeDelta = kind == HistoryItemKind.FileChange,
+        showImagePreview = kind == HistoryItemKind.Image,
+        showAction = showAction,
+        actionAccessibilityLabel = normalizedAction
+            ?.takeIf { showAction }
+            ?.let { "Open ${it.lowercase()}" },
+        showCopy = copyText.isNotBlank(),
+        copyText = copyText,
+    )
+}
+
+fun graphChatHistoryItemSummary(kind: HistoryItemKind, summary: String): String {
+    return if (kind == HistoryItemKind.FileChange) {
+        formatTrailingPathLabel(summary, maxLength = 48)
+    } else {
+        summary
+    }
+}
+
+fun graphChatHistoryGroupRowSummary(kind: HistoryItemKind, summary: String): String {
+    return if (kind == HistoryItemKind.FileChange) {
+        formatTrailingPathLabel(summary, maxLength = 34)
+    } else {
+        summary
+    }
+}
+
+fun graphChatHistoryItemCopyText(
+    title: String,
+    meta: String?,
+    status: ToolStatus?,
+    summary: String,
+    detail: String?,
+): String {
+    return buildString {
+        appendLine(title)
+        meta?.takeIf { it.isNotBlank() }?.let { appendLine(it) }
+        status?.let { appendLine(toolStatusLabel(it)) }
+        summary.takeIf { it.isNotBlank() }?.let { appendLine(it) }
+        detail?.takeIf { it.isNotBlank() }?.let {
+            if (isNotEmpty()) appendLine()
+            appendLine(it)
+        }
+    }.trim()
 }
 
 fun isScrollableHistoryItem(kind: HistoryItemKind): Boolean {

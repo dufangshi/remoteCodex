@@ -41,6 +41,7 @@ import com.remotecodex.android.ui.model.ComposerAttachmentKindPreview
 import com.remotecodex.android.ui.model.ThreadGoalPreview
 import com.remotecodex.android.ui.model.ThreadGoalStatusPreview
 import com.remotecodex.android.ui.model.ThreadStatus
+import com.remotecodex.android.ui.model.ToolStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -4131,6 +4132,113 @@ class ThreadPresentationTest {
         }
         assertEquals(false, isRunningHistoryStatusLabel("completed"))
         assertEquals(false, isRunningHistoryStatusLabel(null))
+    }
+
+    @Test
+    fun classifiesGraphChatHistoryStatusLabels() {
+        assertEquals(
+            GraphChatHistoryStatusState("Completed", GraphChatHistoryStatusTone.Success),
+            graphChatHistoryStatusState("succeeded"),
+        )
+        assertEquals(
+            GraphChatHistoryStatusState("Failed", GraphChatHistoryStatusTone.Danger),
+            graphChatHistoryStatusState("errored"),
+        )
+        assertEquals(
+            GraphChatHistoryStatusState("pending", GraphChatHistoryStatusTone.Running),
+            graphChatHistoryStatusState(" pending "),
+        )
+        assertEquals(
+            GraphChatHistoryStatusState("queued", GraphChatHistoryStatusTone.Neutral),
+            graphChatHistoryStatusState("queued"),
+        )
+        assertNull(graphChatHistoryStatusState(""))
+    }
+
+    @Test
+    fun buildsCommandHistoryItemFrameState() {
+        assertEquals(
+            GraphChatHistoryItemFrameState(
+                title = "command",
+                status = GraphChatHistoryStatusState("Running", GraphChatHistoryStatusTone.Running),
+                summary = "./gradlew :app:test",
+                running = true,
+                runningLabel = "Running from thread events",
+                showDetail = true,
+                showFileChangeDelta = false,
+                showImagePreview = false,
+                showAction = true,
+                actionAccessibilityLabel = "Open command output",
+                showCopy = true,
+                copyText = "command\nRunning\n./gradlew :app:test\n\nBUILD SUCCESSFUL",
+            ),
+            buildGraphChatHistoryItemFrameState(
+                kind = HistoryItemKind.Command,
+                title = "command",
+                status = ToolStatus.Running,
+                meta = null,
+                summary = "./gradlew :app:test",
+                detail = "BUILD SUCCESSFUL",
+                actionLabel = "Command Output",
+            ),
+        )
+    }
+
+    @Test
+    fun buildsFileChangeHistoryItemFrameStateWithTrailingPathSummary() {
+        val state = buildGraphChatHistoryItemFrameState(
+            kind = HistoryItemKind.FileChange,
+            title = "File Change",
+            status = ToolStatus.Completed,
+            meta = "workspace",
+            summary = "/home/u/dev/remoteCodex-main/apps/android/app/src/main/java/com/remotecodex/android/ui/components/ThreadTimelineComponents.kt",
+            detail = "diff --git",
+            actionLabel = "Diff",
+        )
+
+        assertEquals(GraphChatHistoryStatusState("Completed", GraphChatHistoryStatusTone.Success), state.status)
+        assertEquals(true, state.summary.endsWith("ThreadTimelineComponents.kt"))
+        assertEquals(true, state.summary.startsWith(".../"))
+        assertEquals(false, state.running)
+        assertEquals(true, state.showDetail)
+        assertEquals(true, state.showFileChangeDelta)
+        assertEquals(false, state.showImagePreview)
+        assertEquals(true, state.showAction)
+        assertEquals("Open diff", state.actionAccessibilityLabel)
+        assertEquals(true, state.showCopy)
+        assertEquals(
+            "File Change\nworkspace\nDone\n/home/u/dev/remoteCodex-main/apps/android/app/src/main/java/com/remotecodex/android/ui/components/ThreadTimelineComponents.kt\n\ndiff --git",
+            state.copyText,
+        )
+    }
+
+    @Test
+    fun buildsArtifactHistoryItemFrameStateWithoutGenericActionOrDetail() {
+        assertEquals(
+            GraphChatHistoryItemFrameState(
+                title = "Artifact",
+                status = null,
+                summary = "chart rendered",
+                running = false,
+                runningLabel = "Running from thread events",
+                showDetail = false,
+                showFileChangeDelta = false,
+                showImagePreview = false,
+                showAction = false,
+                actionAccessibilityLabel = null,
+                showCopy = true,
+                copyText = "Artifact\nchart rendered\n\nartifact detail",
+            ),
+            buildGraphChatHistoryItemFrameState(
+                kind = HistoryItemKind.Artifact,
+                title = "Artifact",
+                status = null,
+                meta = null,
+                summary = "chart rendered",
+                detail = "artifact detail",
+                actionLabel = "Artifact Inspector",
+            ),
+        )
     }
 
     @Test
