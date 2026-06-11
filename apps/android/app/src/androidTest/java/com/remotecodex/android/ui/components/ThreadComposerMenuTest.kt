@@ -105,6 +105,38 @@ class ThreadComposerMenuTest {
     }
 
     @Test
+    fun attachmentMenuAddsPreviewPhotoAttachment() {
+        val attachmentButton = device.wait(Until.findObject(By.desc("Add attachment")), 5_000)
+            ?: error("Attachment toolbar button was not visible")
+        attachmentButton.click()
+
+        assertNotNull(device.wait(Until.findObject(By.text("Add attachment")), 2_000))
+        assertNotNull(device.findObject(By.text("2 actions · 2 queued attachments")))
+
+        device.findObject(By.text("Photo")).click()
+
+        assertNotNull(device.wait(Until.findObject(By.text("3 files")), 2_000))
+        assertNotNull(device.findObject(By.text("android-preview.png")))
+        assertTrue(
+            "Attachment menu should close after local preview photo insertion",
+            device.findObjects(By.text("2 actions · 2 queued attachments")).isEmpty(),
+        )
+    }
+
+    @Test
+    fun attachmentMenuAddsPreviewFileAttachment() {
+        val attachmentButton = device.wait(Until.findObject(By.desc("Add attachment")), 5_000)
+            ?: error("Attachment toolbar button was not visible")
+        attachmentButton.click()
+        assertNotNull(device.wait(Until.findObject(By.text("File")), 2_000))
+
+        device.findObject(By.text("File")).click()
+
+        assertNotNull(device.wait(Until.findObject(By.text("3 files")), 2_000))
+        assertNotNull(device.findObject(By.text("android-client-notes.txt")))
+    }
+
+    @Test
     fun slashToolboxOpensWithRootActionsAndStatuses() {
         val slashButton = device.wait(Until.findObject(By.desc("Open slash toolbox")), 5_000)
             ?: error("Slash toolbox button was not visible")

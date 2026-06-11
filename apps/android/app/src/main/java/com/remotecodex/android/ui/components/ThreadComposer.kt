@@ -55,6 +55,7 @@ import com.remotecodex.android.ui.model.ComposerMcpPanelModePreview
 import com.remotecodex.android.ui.model.ComposerMcpAuthStatusPreview
 import com.remotecodex.android.ui.model.ComposerMcpServerPreview
 import com.remotecodex.android.ui.model.ComposerMcpToolPreview
+import com.remotecodex.android.ui.model.ComposerPromptPreview
 import com.remotecodex.android.ui.presentation.ComposerActionState
 import com.remotecodex.android.ui.presentation.ComposerAttachmentActionKind
 import com.remotecodex.android.ui.presentation.ComposerAttachmentActionState
@@ -111,6 +112,7 @@ import com.remotecodex.android.ui.presentation.ComposerToolbarMenuState
 import com.remotecodex.android.ui.presentation.ComposerToolbarState
 import com.remotecodex.android.ui.presentation.buildComposerActionState
 import com.remotecodex.android.ui.presentation.buildComposerAttachmentPanelState
+import com.remotecodex.android.ui.presentation.buildAttachmentInsertionState
 import com.remotecodex.android.ui.presentation.buildComposerContextUsageState
 import com.remotecodex.android.ui.presentation.buildComposerForkPanelState
 import com.remotecodex.android.ui.presentation.buildComposerFrameState
@@ -153,7 +155,9 @@ fun ThreadComposer(
     var forkPreviewStatus by remember(composer.forkTurnOptions) { mutableStateOf<String?>(null) }
     var selectedModel by remember(composer.context.model) { mutableStateOf(composer.context.model) }
     var selectedReasoningEffort by remember(composer.reasoningEffort) { mutableStateOf(composer.reasoningEffort) }
+    var draftPrompt by remember(composer.prompt) { mutableStateOf(composer.prompt) }
     val selectedContext = composer.context.copy(model = selectedModel)
+    val queuedAttachmentCount = draftPrompt.attachments.size
     val statusChips = buildComposerStatusStrip(
         threadConnected = composer.threadConnected,
         busy = composer.busy,
@@ -169,7 +173,7 @@ fun ThreadComposer(
     )
     val contextState = buildComposerContextUsageState(composer.context)
     val promptSlotState = buildComposerPromptSlotState(
-        prompt = composer.prompt,
+        prompt = draftPrompt,
         activeView = composer.activeView,
         actionState = actionState,
         busy = composer.busy,
@@ -178,12 +182,12 @@ fun ThreadComposer(
     )
     val shellPromptInputState = buildComposerShellPromptInputState(promptSlotState)
     val submitInputState = buildComposerSubmitInputState(
-        prompt = composer.prompt,
+        prompt = draftPrompt,
         activeView = composer.activeView,
     )
     val attachmentPanelState = buildComposerAttachmentPanelState(
         open = openMenu == ComposerMenu.Attachments,
-        prompt = composer.prompt,
+        prompt = draftPrompt,
     )
     val settingsState = buildComposerSettingsState(
         context = selectedContext,
@@ -395,7 +399,30 @@ fun ThreadComposer(
                         }
                     },
                 )
-                ComposerMenu.Attachments -> AttachmentPanel(panelState = attachmentPanelState)
+                ComposerMenu.Attachments -> AttachmentPanel(
+                    panelState = attachmentPanelState,
+                    onPickAttachment = { kind ->
+                        val insertion = buildAttachmentInsertionState(
+                            prompt = draftPrompt.text,
+                            existingAttachments = draftPrompt.attachments,
+                            fileNames = listOf(kind.previewAttachmentFileName()),
+                            kind = kind,
+                            selection = null,
+                            buildClientId = { index, actionKind, fileName ->
+                                val prefix = when (actionKind) {
+                                    ComposerAttachmentActionKind.Photo -> "preview-photo"
+                                    ComposerAttachmentActionKind.File -> "preview-file"
+                                }
+                                "$prefix-${draftPrompt.attachments.size + index + 1}-${fileName.hashCode().toString().replace("-", "m")}"
+                            },
+                        )
+                        draftPrompt = draftPrompt.copy(
+                            text = insertion.prompt,
+                            attachments = draftPrompt.attachments + insertion.insertedAttachments,
+                        )
+                        openMenu = null
+                    },
+                )
                 ComposerMenu.Model -> ModelPickerPanel(
                     settingsState = settingsState,
                     modelOptions = modelOptions,
@@ -467,7 +494,7 @@ fun ThreadComposer(
                     pressed = settingsToolbarState.planPressed,
                 )
             }
-            ComposerModeChip(label = "2 files", selected = true)
+            ComposerModeChip(label = queuedAttachmentCount.attachmentCountLabel(), selected = queuedAttachmentCount > 0)
             Box(modifier = Modifier.weight(1f))
             if (toolbarState.viewToggleButton.visible) {
                 ComposerViewToggleButton(
@@ -2781,7 +2808,10 @@ private fun HookStatusRow(
 }
 
 @Composable
-private fun AttachmentPanel(panelState: ComposerAttachmentPanelState) {
+private fun AttachmentPanel(
+    panelState: ComposerAttachmentPanelState,
+    onPickAttachment: (ComposerAttachmentActionKind) -> Unit,
+) {
     ComposerMenuSurface(
         title = panelState.triggerLabel,
         subtitle = "${panelState.actionCountLabel} · ${panelState.queuedCountLabel}",
@@ -2791,6 +2821,7 @@ private fun AttachmentPanel(panelState: ComposerAttachmentPanelState) {
                 AttachmentButton(
                     action = action,
                     modifier = Modifier.weight(1f),
+                    onClick = { onPickAttachment(action.kind) },
                 )
             }
         }
@@ -3091,6 +3122,7 @@ private fun composerMenuLifecycleDescription(
 private fun AttachmentButton(
     action: ComposerAttachmentActionState,
     modifier: Modifier = Modifier,
+    onClick: () -> Unit,
 ) {
     val icon = when (action.kind) {
         ComposerAttachmentActionKind.Photo -> AttachmentTileIcon.Photo
@@ -3101,6 +3133,7 @@ private fun AttachmentButton(
             .clip(RoundedCornerShape(12.dp))
             .background(ThreadColors.Surface)
             .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(9.dp),
@@ -3388,6 +3421,21 @@ private enum class HookStatusTone {
 private enum class AttachmentTileIcon {
     Photo,
     File,
+}
+
+private fun Int.attachmentCountLabel(): String {
+    return when (this) {
+        0 -> "No files"
+        1 -> "1 file"
+        else -> "$this files"
+    }
+}
+
+private fun ComposerAttachmentActionKind.previewAttachmentFileName(): String {
+    return when (this) {
+        ComposerAttachmentActionKind.Photo -> "android-preview.png"
+        ComposerAttachmentActionKind.File -> "android-client-notes.txt"
+    }
 }
 
 private enum class ComposerToolIcon {
