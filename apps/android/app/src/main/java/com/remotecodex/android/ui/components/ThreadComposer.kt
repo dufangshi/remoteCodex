@@ -796,31 +796,74 @@ private fun ComposerPromptTextSegment(text: String) {
 
 @Composable
 private fun ComposerPromptAttachmentSegment(segment: ComposerPromptSegmentState.Attachment) {
+    if (segment.tone == ComposerPromptAttachmentTokenTone.Photo) {
+        ComposerPromptPhotoAttachmentSegment(segment = segment)
+        return
+    }
+    ComposerPromptFileAttachmentSegment(segment = segment)
+}
+
+@Composable
+private fun ComposerPromptPhotoAttachmentSegment(segment: ComposerPromptSegmentState.Attachment) {
     Row(
         modifier = Modifier
-            .semantics {
-                contentDescription = segment.stateDescription
-                stateDescription = if (segment.restoresCaretAfterInsert) {
-                    "Caret resumes after this attachment"
-                } else if (segment.newlyInserted) {
-                    "Newly inserted attachment"
-                } else {
-                    "Prompt attachment"
-                }
-            }
-            .clip(RoundedCornerShape(9.dp))
+            .promptAttachmentTokenSemantics(segment)
+            .clip(RoundedCornerShape(12.dp))
             .background(
                 when {
                     segment.newlyInserted -> ThreadColors.Primary.copy(alpha = 0.14f)
-                    segment.tone == ComposerPromptAttachmentTokenTone.Photo -> ThreadColors.Info.copy(alpha = 0.16f)
-                    else -> ThreadColors.SurfaceStrong
+                    else -> ThreadColors.Info.copy(alpha = 0.14f)
                 },
             )
             .border(
                 1.dp,
                 when {
                     segment.restoresCaretAfterInsert -> ThreadColors.Primary.copy(alpha = 0.58f)
-                    segment.tone == ComposerPromptAttachmentTokenTone.Photo -> ThreadColors.Info.copy(alpha = 0.36f)
+                    else -> ThreadColors.SurfaceStrong
+                },
+                RoundedCornerShape(12.dp),
+            )
+            .padding(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(width = 78.dp, height = 56.dp)
+                .clip(RoundedCornerShape(9.dp))
+                .background(ThreadColors.CodeBackground)
+                .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(9.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            AttachmentTileGlyph(
+                icon = AttachmentTileIcon.Photo,
+                color = if (segment.newlyInserted) ThreadColors.Primary else ThreadColors.Info,
+            )
+        }
+        Text(
+            text = segment.attachment.label,
+            color = ThreadColors.ForegroundSoft,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun ComposerPromptFileAttachmentSegment(segment: ComposerPromptSegmentState.Attachment) {
+    Row(
+        modifier = Modifier
+            .promptAttachmentTokenSemantics(segment)
+            .clip(RoundedCornerShape(9.dp))
+            .background(
+                if (segment.newlyInserted) ThreadColors.Primary.copy(alpha = 0.14f) else ThreadColors.SurfaceStrong,
+            )
+            .border(
+                1.dp,
+                when {
+                    segment.restoresCaretAfterInsert -> ThreadColors.Primary.copy(alpha = 0.58f)
                     else -> ThreadColors.BorderStrong
                 },
                 RoundedCornerShape(9.dp),
@@ -830,10 +873,7 @@ private fun ComposerPromptAttachmentSegment(segment: ComposerPromptSegmentState.
         horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         AttachmentTileGlyph(
-            icon = when (segment.tone) {
-                ComposerPromptAttachmentTokenTone.Photo -> AttachmentTileIcon.Photo
-                ComposerPromptAttachmentTokenTone.File -> AttachmentTileIcon.File
-            },
+            icon = AttachmentTileIcon.File,
             color = if (segment.newlyInserted) ThreadColors.Primary else ThreadColors.Info,
         )
         Text(
@@ -844,6 +884,21 @@ private fun ComposerPromptAttachmentSegment(segment: ComposerPromptSegmentState.
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+private fun Modifier.promptAttachmentTokenSemantics(
+    segment: ComposerPromptSegmentState.Attachment,
+): Modifier {
+    return semantics {
+        contentDescription = segment.stateDescription
+        stateDescription = if (segment.restoresCaretAfterInsert) {
+            "Caret resumes after this attachment"
+        } else if (segment.newlyInserted) {
+            "Newly inserted attachment"
+        } else {
+            "Prompt attachment"
+        }
     }
 }
 
