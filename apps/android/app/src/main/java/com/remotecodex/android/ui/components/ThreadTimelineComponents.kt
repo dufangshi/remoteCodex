@@ -90,9 +90,11 @@ import com.remotecodex.android.ui.presentation.GraphChatHistoryStatusTone
 import com.remotecodex.android.ui.presentation.MessageStatusModel
 import com.remotecodex.android.ui.presentation.ComposerStatusTone
 import com.remotecodex.android.ui.presentation.GraphChatPlainTextSegment
+import com.remotecodex.android.ui.presentation.UserMessageAttachmentState
 import com.remotecodex.android.ui.presentation.buildGraphChatImageHistoryState
 import com.remotecodex.android.ui.presentation.buildGraphChatLivePlanCardState
 import com.remotecodex.android.ui.presentation.parseUserMessageSegments
+import com.remotecodex.android.ui.presentation.buildUserMessageAttachmentState
 import com.remotecodex.android.ui.presentation.buildPlanStepStatusPresentationState
 import com.remotecodex.android.ui.presentation.PlanStepStatusTone
 import com.remotecodex.android.ui.presentation.buildGraphChatTurnFrameState
@@ -873,12 +875,14 @@ private fun userMessageAnnotatedString(
 
 @Composable
 private fun UserPhotoAttachment(path: String) {
+    val state = remember(path) { buildUserMessageAttachmentState(UserMessageSegment.Photo(path)) }
     Column(
         modifier = Modifier
             .clip(RoundedCornerShape(14.dp))
             .background(ThreadColors.InfoSoft.copy(alpha = 0.38f))
             .border(1.dp, ThreadColors.Info.copy(alpha = 0.34f), RoundedCornerShape(14.dp))
             .widthIn(max = 124.dp)
+            .semantics(mergeDescendants = true) { contentDescription = state.accessibilityLabel }
             .padding(6.dp),
         verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
@@ -890,14 +894,14 @@ private fun UserPhotoAttachment(path: String) {
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = "PHOTO",
+                text = state.typeLabel,
                 color = ThreadColors.Info,
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
             )
         }
         Text(
-            text = basenameFromAssetPath(path).ifBlank { "Attached image" },
+            text = state.fileName,
             color = ThreadColors.UserBubbleText,
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.SemiBold,
@@ -909,13 +913,14 @@ private fun UserPhotoAttachment(path: String) {
 
 @Composable
 private fun UserFileAttachment(path: String) {
-    val fileName = basenameFromAssetPath(path).ifBlank { "Attached file" }
+    val state = remember(path) { buildUserMessageAttachmentState(UserMessageSegment.File(path)) }
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(14.dp))
             .background(ThreadColors.SuccessSoft.copy(alpha = 0.36f))
             .border(1.dp, ThreadColors.Success.copy(alpha = 0.34f), RoundedCornerShape(14.dp))
             .widthIn(max = 192.dp)
+            .semantics(mergeDescendants = true) { contentDescription = state.accessibilityLabel }
             .padding(horizontal = 9.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -930,7 +935,7 @@ private fun UserFileAttachment(path: String) {
             verticalArrangement = Arrangement.spacedBy(1.dp),
         ) {
             Text(
-                text = fileName,
+                text = state.fileName,
                 color = ThreadColors.UserBubbleText,
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.SemiBold,
@@ -938,7 +943,7 @@ private fun UserFileAttachment(path: String) {
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = "Attached file",
+                text = state.fallbackLabel,
                 color = ThreadColors.UserBubbleText.copy(alpha = 0.66f),
                 style = MaterialTheme.typography.labelSmall,
                 maxLines = 1,

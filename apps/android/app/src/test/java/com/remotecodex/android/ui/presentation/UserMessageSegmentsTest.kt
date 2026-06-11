@@ -77,4 +77,36 @@ class UserMessageSegmentsTest {
         assertEquals("output", basenameFromAssetPath("apps/android/output/"))
         assertEquals("", basenameFromAssetPath("   "))
     }
+
+    @Test
+    fun buildsPhotoAttachmentPresentationState() {
+        assertEquals(
+            UserMessageAttachmentState(
+                kind = UserMessageAttachmentKind.Photo,
+                path = "apps/android/output/shell-preview.png",
+                fileName = "shell-preview.png",
+                typeLabel = "PHOTO",
+                fallbackLabel = "Attached image",
+                accessibilityLabel = "image attachment: shell-preview.png",
+            ),
+            buildUserMessageAttachmentState(
+                UserMessageSegment.Photo("apps/android/output/shell-preview.png"),
+            ),
+        )
+    }
+
+    @Test
+    fun buildsFileAttachmentPresentationStateWithFallbackName() {
+        assertEquals(
+            UserMessageAttachmentState(
+                kind = UserMessageAttachmentKind.File,
+                path = "   ",
+                fileName = "Attached file",
+                typeLabel = "FILE",
+                fallbackLabel = "Attached file",
+                accessibilityLabel = "file attachment: Attached file",
+            ),
+            buildUserMessageAttachmentState(UserMessageSegment.File("   ")),
+        )
+    }
 }
