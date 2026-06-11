@@ -1622,7 +1622,11 @@ private fun ImageHistoryPreview(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(ThreadColors.Panel.copy(alpha = 0.74f))
+                    .background(ThreadColors.Panel.copy(alpha = 0.72f))
+                    .border(1.dp, colors.border.copy(alpha = 0.42f))
+                    .clickable {
+                        onOpenDetail(DetailPreview(title = "Image Path", text = path))
+                    }
                     .padding(horizontal = 10.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1636,14 +1640,12 @@ private fun ImageHistoryPreview(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                GraphButton(
-                    label = "Open",
-                    size = GraphButtonSize.Small,
-                    variant = GraphButtonVariant.Ghost,
-                    contentDescription = "Open image path",
-                    onClick = {
-                        onOpenDetail(DetailPreview(title = "Image Path", text = path))
-                    },
+                Text(
+                    text = "Open",
+                    color = colors.foreground,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
                 )
                 CopyTextButton(
                     value = path,
