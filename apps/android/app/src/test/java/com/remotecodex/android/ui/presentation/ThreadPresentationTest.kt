@@ -871,6 +871,231 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun normalizesPromptTextAndAttachmentLabels() {
+        assertEquals("hello world", normalizePromptText("hello\u00a0world"))
+        assertEquals("bad name", normalizeAttachmentLabel(" [bad]\nname "))
+        assertEquals("attachment", normalizeAttachmentLabel(""))
+    }
+
+    @Test
+    fun allocatesUniqueAttachmentPlaceholders() {
+        assertEquals(
+            "[FILE report.txt (2)]",
+            buildAttachmentPlaceholder(
+                kind = ComposerAttachmentActionKind.File,
+                name = "report.txt",
+                usedPlaceholders = setOf("[FILE report.txt]"),
+            ),
+        )
+        assertEquals(
+            "[PHOTO diagram.png]",
+            buildAttachmentPlaceholder(
+                kind = ComposerAttachmentActionKind.Photo,
+                name = "diagram.png",
+                usedPlaceholders = setOf("[FILE report.txt]"),
+            ),
+        )
+    }
+
+    @Test
+    fun buildsAttachmentInsertionTextWithSurroundingSpacesOnlyWhenNeeded() {
+        assertEquals(
+            " [FILE a.txt] ",
+            buildAttachmentInsertionText(
+                basePrompt = "beforeafter",
+                selection = ComposerPromptSelectionRange(6, 6),
+                placeholders = listOf("[FILE a.txt]"),
+            ),
+        )
+        assertEquals(
+            "[FILE a.txt] ",
+            buildAttachmentInsertionText(
+                basePrompt = "before after",
+                selection = ComposerPromptSelectionRange(7, 7),
+                placeholders = listOf("[FILE a.txt]"),
+            ),
+        )
+        assertEquals(
+            "",
+            buildAttachmentInsertionText(
+                basePrompt = "before",
+                selection = ComposerPromptSelectionRange(2, 2),
+                placeholders = emptyList(),
+            ),
+        )
+    }
+
+    @Test
+    fun buildsAttachmentInsertionStateAndCaretPosition() {
+        assertEquals(
+            ComposerAttachmentInsertionState(
+                prompt = "see [FILE report.txt] ",
+                selection = ComposerPromptSelectionRange(
+                    start = "see [FILE report.txt]".length,
+                    end = "see [FILE report.txt]".length,
+                ),
+                insertedPlaceholders = listOf("[FILE report.txt]"),
+            ),
+            buildAttachmentInsertionState(
+                prompt = "see this",
+                existingAttachments = listOf(
+                    ComposerPromptAttachmentPreview(
+                        clientId = "existing",
+                        kind = ComposerAttachmentKindPreview.File,
+                        name = "old.txt",
+                        placeholder = "[FILE old.txt]",
+                    ),
+                ),
+                fileNames = listOf("report.txt"),
+                kind = ComposerAttachmentActionKind.File,
+                selection = ComposerPromptSelectionRange(4, 8),
+            ),
+        )
+    }
+
+    @Test
+    fun buildsAttachmentInsertionStateWithDuplicateSuffixesAtEnd() {
+        assertEquals(
+            ComposerAttachmentInsertionState(
+                prompt = "prompt [PHOTO image.png (2)] [PHOTO image.png (3)] ",
+                selection = ComposerPromptSelectionRange(
+                    start = "prompt [PHOTO image.png (2)] [PHOTO image.png (3)]".length,
+                    end = "prompt [PHOTO image.png (2)] [PHOTO image.png (3)]".length,
+                ),
+                insertedPlaceholders = listOf("[PHOTO image.png (2)]", "[PHOTO image.png (3)]"),
+            ),
+            buildAttachmentInsertionState(
+                prompt = "prompt",
+                existingAttachments = listOf(
+                    ComposerPromptAttachmentPreview(
+                        clientId = "existing",
+                        kind = ComposerAttachmentKindPreview.Photo,
+                        name = "image.png",
+                        placeholder = "[PHOTO image.png]",
+                    ),
+                ),
+                fileNames = listOf("image.png", "image.png"),
+                kind = ComposerAttachmentActionKind.Photo,
+                selection = null,
+            ),
+        )
+    }
+
+    @Test
+    fun derivesPromptPasteActionsForFilesTextHtmlAndEmptyInput() {
+        assertEquals(
+            ComposerPromptPasteActionState(
+                kind = ComposerPromptPasteActionKind.AppendFiles,
+                preventDefault = true,
+                fileCount = 2,
+            ),
+            derivePromptPasteAction(
+                fileCount = 2,
+                plainText = "",
+                htmlText = "",
+                htmlToText = { "" },
+            ),
+        )
+        assertEquals(
+            ComposerPromptPasteActionState(
+                kind = ComposerPromptPasteActionKind.InsertText,
+                preventDefault = true,
+                text = "plain",
+            ),
+            derivePromptPasteAction(
+                fileCount = 0,
+                plainText = "plain",
+                htmlText = "<b>html</b>",
+                htmlToText = { "html" },
+            ),
+        )
+        assertEquals(
+            ComposerPromptPasteActionState(
+                kind = ComposerPromptPasteActionKind.InsertText,
+                preventDefault = true,
+                text = "html",
+            ),
+            derivePromptPasteAction(
+                fileCount = 0,
+                plainText = "",
+                htmlText = "<b>html</b>",
+                htmlToText = { "html" },
+            ),
+        )
+        assertEquals(
+            ComposerPromptPasteActionState(
+                kind = ComposerPromptPasteActionKind.Ignore,
+                preventDefault = false,
+            ),
+            derivePromptPasteAction(
+                fileCount = 0,
+                plainText = "",
+                htmlText = "",
+                htmlToText = { "" },
+            ),
+        )
+    }
+
+    @Test
+    fun derivesPromptFileTransferAndKeyboardActions() {
+        assertEquals(
+            ComposerPromptFileTransferActionState(
+                kind = ComposerPromptFileTransferActionKind.Ignore,
+                preventDefault = false,
+                activateDragTarget = false,
+            ),
+            derivePromptFileDragAction(false),
+        )
+        assertEquals(
+            ComposerPromptFileTransferActionState(
+                kind = ComposerPromptFileTransferActionKind.AcceptFiles,
+                preventDefault = true,
+                activateDragTarget = true,
+            ),
+            derivePromptFileDragAction(true),
+        )
+        assertEquals(
+            ComposerPromptFileTransferActionState(
+                kind = ComposerPromptFileTransferActionKind.AcceptFiles,
+                preventDefault = true,
+                activateDragTarget = true,
+                fileCount = 3,
+            ),
+            derivePromptDropAction(3),
+        )
+        assertEquals(
+            ComposerPromptKeyDownActionState(preventDefault = false, submit = false),
+            derivePromptKeyDownAction(
+                key = "Enter",
+                metaKey = false,
+                ctrlKey = false,
+                busy = false,
+                disabled = false,
+            ),
+        )
+        assertEquals(
+            ComposerPromptKeyDownActionState(preventDefault = true, submit = false),
+            derivePromptKeyDownAction(
+                key = "Enter",
+                metaKey = true,
+                ctrlKey = false,
+                busy = true,
+                disabled = false,
+            ),
+        )
+        assertEquals(
+            ComposerPromptKeyDownActionState(preventDefault = true, submit = true),
+            derivePromptKeyDownAction(
+                key = "Enter",
+                metaKey = false,
+                ctrlKey = true,
+                busy = false,
+                disabled = false,
+            ),
+        )
+    }
+
+    @Test
     fun buildsTrimmedChatComposerSubmitInputWithActiveAttachmentsOnly() {
         assertEquals(
             ComposerSubmitInputState(

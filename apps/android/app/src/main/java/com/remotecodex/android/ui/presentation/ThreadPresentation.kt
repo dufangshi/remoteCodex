@@ -146,6 +146,47 @@ data class ComposerSubmitInputState(
     val attachments: List<ComposerSubmitAttachmentState> = emptyList(),
 )
 
+data class ComposerPromptSelectionRange(
+    val start: Int,
+    val end: Int,
+)
+
+data class ComposerAttachmentInsertionState(
+    val prompt: String,
+    val selection: ComposerPromptSelectionRange,
+    val insertedPlaceholders: List<String>,
+)
+
+enum class ComposerPromptPasteActionKind {
+    Ignore,
+    InsertText,
+    AppendFiles,
+}
+
+data class ComposerPromptPasteActionState(
+    val kind: ComposerPromptPasteActionKind,
+    val preventDefault: Boolean,
+    val text: String? = null,
+    val fileCount: Int = 0,
+)
+
+enum class ComposerPromptFileTransferActionKind {
+    Ignore,
+    AcceptFiles,
+}
+
+data class ComposerPromptFileTransferActionState(
+    val kind: ComposerPromptFileTransferActionKind,
+    val preventDefault: Boolean,
+    val activateDragTarget: Boolean,
+    val fileCount: Int = 0,
+)
+
+data class ComposerPromptKeyDownActionState(
+    val preventDefault: Boolean,
+    val submit: Boolean,
+)
+
 data class ComposerPromptSlotState(
     val chatVisible: Boolean,
     val shellVisible: Boolean,
@@ -1188,6 +1229,161 @@ fun buildComposerSubmitInputState(
     )
 }
 
+fun normalizePromptText(value: String): String {
+    return value.replace('\u00a0', ' ')
+}
+
+fun normalizeAttachmentLabel(name: String): String {
+    return name
+        .trim()
+        .replace(Regex("[\\[\\]\\n\\r\\t]+"), " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+        .ifEmpty { "attachment" }
+}
+
+fun buildAttachmentPlaceholder(
+    kind: ComposerAttachmentActionKind,
+    name: String,
+    usedPlaceholders: Set<String>,
+): String {
+    val token = when (kind) {
+        ComposerAttachmentActionKind.Photo -> "PHOTO"
+        ComposerAttachmentActionKind.File -> "FILE"
+    }
+    val label = normalizeAttachmentLabel(name)
+    var suffix = 0
+    while (true) {
+        val candidateLabel = if (suffix == 0) label else "$label (${suffix + 1})"
+        val placeholder = "[$token $candidateLabel]"
+        if (!usedPlaceholders.contains(placeholder)) {
+            return placeholder
+        }
+        suffix += 1
+    }
+}
+
+fun buildAttachmentInsertionText(
+    basePrompt: String,
+    selection: ComposerPromptSelectionRange,
+    placeholders: List<String>,
+): String {
+    if (placeholders.isEmpty()) {
+        return ""
+    }
+    val safeRange = selection.normalizedFor(basePrompt)
+    val beforeChar = if (safeRange.start > 0) basePrompt[safeRange.start - 1] else null
+    val afterChar = if (safeRange.end < basePrompt.length) basePrompt[safeRange.end] else null
+    val needsLeadingSpace = beforeChar != null && !beforeChar.isWhitespace()
+    val needsTrailingSpace = afterChar == null || !afterChar.isWhitespace()
+    return buildString {
+        if (needsLeadingSpace) {
+            append(' ')
+        }
+        append(placeholders.joinToString(" "))
+        if (needsTrailingSpace) {
+            append(' ')
+        }
+    }
+}
+
+fun buildAttachmentInsertionState(
+    prompt: String,
+    existingAttachments: List<ComposerPromptAttachmentPreview>,
+    fileNames: List<String>,
+    kind: ComposerAttachmentActionKind,
+    selection: ComposerPromptSelectionRange?,
+): ComposerAttachmentInsertionState {
+    val usedPlaceholders = existingAttachments.mapTo(mutableSetOf()) { it.placeholder }
+    val placeholders = fileNames.map { fileName ->
+        buildAttachmentPlaceholder(kind, fileName, usedPlaceholders).also { usedPlaceholders.add(it) }
+    }
+    val range = (selection ?: ComposerPromptSelectionRange(prompt.length, prompt.length)).normalizedFor(prompt)
+    val insertionText = buildAttachmentInsertionText(prompt, range, placeholders)
+    val nextPrompt = prompt.replaceRange(range.start, range.end, insertionText)
+    val trailingSpacerOffset = if (insertionText.endsWith(" ")) 1 else 0
+    val nextCaret = range.start + insertionText.length - trailingSpacerOffset
+    return ComposerAttachmentInsertionState(
+        prompt = nextPrompt,
+        selection = ComposerPromptSelectionRange(nextCaret, nextCaret),
+        insertedPlaceholders = placeholders,
+    )
+}
+
+fun derivePromptPasteAction(
+    fileCount: Int,
+    plainText: String,
+    htmlText: String,
+    htmlToText: (String) -> String,
+): ComposerPromptPasteActionState {
+    if (fileCount > 0) {
+        return ComposerPromptPasteActionState(
+            kind = ComposerPromptPasteActionKind.AppendFiles,
+            preventDefault = true,
+            fileCount = fileCount,
+        )
+    }
+    val text = plainText.ifEmpty { htmlToText(htmlText) }
+    if (text.isEmpty() && htmlText.isEmpty()) {
+        return ComposerPromptPasteActionState(
+            kind = ComposerPromptPasteActionKind.Ignore,
+            preventDefault = false,
+        )
+    }
+    return ComposerPromptPasteActionState(
+        kind = ComposerPromptPasteActionKind.InsertText,
+        preventDefault = true,
+        text = text,
+    )
+}
+
+fun derivePromptFileDragAction(hasFiles: Boolean): ComposerPromptFileTransferActionState {
+    return if (hasFiles) {
+        ComposerPromptFileTransferActionState(
+            kind = ComposerPromptFileTransferActionKind.AcceptFiles,
+            preventDefault = true,
+            activateDragTarget = true,
+        )
+    } else {
+        ComposerPromptFileTransferActionState(
+            kind = ComposerPromptFileTransferActionKind.Ignore,
+            preventDefault = false,
+            activateDragTarget = false,
+        )
+    }
+}
+
+fun derivePromptDropAction(fileCount: Int): ComposerPromptFileTransferActionState {
+    return if (fileCount > 0) {
+        ComposerPromptFileTransferActionState(
+            kind = ComposerPromptFileTransferActionKind.AcceptFiles,
+            preventDefault = true,
+            activateDragTarget = true,
+            fileCount = fileCount,
+        )
+    } else {
+        ComposerPromptFileTransferActionState(
+            kind = ComposerPromptFileTransferActionKind.Ignore,
+            preventDefault = false,
+            activateDragTarget = false,
+        )
+    }
+}
+
+fun derivePromptKeyDownAction(
+    key: String,
+    metaKey: Boolean,
+    ctrlKey: Boolean,
+    busy: Boolean,
+    disabled: Boolean,
+): ComposerPromptKeyDownActionState {
+    val isSubmitShortcut = key == "Enter" && (metaKey || ctrlKey)
+    return ComposerPromptKeyDownActionState(
+        preventDefault = isSubmitShortcut,
+        submit = isSubmitShortcut && !busy && !disabled,
+    )
+}
+
 fun buildComposerToolbarState(
     activeView: ComposerActiveView,
     openMenu: ComposerToolbarMenuState?,
@@ -1306,6 +1502,16 @@ fun attachmentDisplayLabel(
         else -> normalizedPlaceholder
     }.removeSuffix("]").trim()
     return label.ifEmpty { "attachment" }
+}
+
+private fun ComposerPromptSelectionRange.normalizedFor(value: String): ComposerPromptSelectionRange {
+    val safeStart = start.coerceIn(0, value.length)
+    val safeEnd = end.coerceIn(0, value.length)
+    return if (safeStart <= safeEnd) {
+        ComposerPromptSelectionRange(safeStart, safeEnd)
+    } else {
+        ComposerPromptSelectionRange(safeEnd, safeStart)
+    }
 }
 
 fun formatContextTokenKilocount(value: Int): String {
