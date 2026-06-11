@@ -31,6 +31,7 @@ import com.remotecodex.android.ui.model.ComposerSkillErrorPreview
 import com.remotecodex.android.ui.model.ComposerSkillPreview
 import com.remotecodex.android.ui.model.ComposerSkillScopePreview
 import com.remotecodex.android.ui.model.ComposerSkillsPanelPreview
+import com.remotecodex.android.ui.model.ComposerSlashPanelViewPreview
 import com.remotecodex.android.ui.model.ComposerToolboxActionPreview
 import com.remotecodex.android.ui.model.ComposerToolboxItemPreview
 import com.remotecodex.android.ui.model.ComposerAttachmentKindPreview
@@ -2236,11 +2237,14 @@ class ThreadPresentationTest {
                 surfaceVisible = true,
                 title = "Slash toolbox",
                 subtitle = "Thread actions",
+                view = ComposerSlashPanelViewState.Root,
+                showRootItems = true,
                 items = listOf(item),
                 emptyMessage = null,
             ),
             buildComposerSlashToolboxPanelState(
                 open = true,
+                view = ComposerSlashPanelViewPreview.Root,
                 items = listOf(item),
             ),
         )
@@ -2256,12 +2260,47 @@ class ThreadPresentationTest {
                 surfaceVisible = false,
                 title = "Slash toolbox",
                 subtitle = "Thread actions",
+                view = ComposerSlashPanelViewState.Root,
+                showRootItems = true,
                 items = emptyList(),
                 emptyMessage = "No backend tools are available for this thread.",
             ),
             buildComposerSlashToolboxPanelState(
                 open = false,
+                view = ComposerSlashPanelViewPreview.Root,
                 items = emptyList(),
+            ),
+        )
+    }
+
+    @Test
+    fun buildsComposerSlashToolboxChildPanelState() {
+        val item = ComposerToolboxItemState(
+            command = "/skills",
+            label = "Skills",
+            status = "View",
+            description = "Inspect skills",
+            enabled = true,
+            tone = ComposerToolboxItemTone.Neutral,
+        )
+
+        assertEquals(
+            ComposerSlashToolboxPanelState(
+                menuVisible = true,
+                triggerAccessibilityLabel = "Open slash toolbox",
+                triggerTitle = "Open slash toolbox",
+                surfaceVisible = true,
+                title = "Slash toolbox",
+                subtitle = "Thread actions",
+                view = ComposerSlashPanelViewState.Skills,
+                showRootItems = false,
+                items = listOf(item),
+                emptyMessage = null,
+            ),
+            buildComposerSlashToolboxPanelState(
+                open = true,
+                view = ComposerSlashPanelViewPreview.Skills,
+                items = listOf(item),
             ),
         )
     }

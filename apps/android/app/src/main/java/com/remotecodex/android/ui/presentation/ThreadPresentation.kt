@@ -26,6 +26,7 @@ import com.remotecodex.android.ui.model.ComposerReasoningEffortOptionPreview
 import com.remotecodex.android.ui.model.ComposerShellControlPreview
 import com.remotecodex.android.ui.model.ComposerSkillScopePreview
 import com.remotecodex.android.ui.model.ComposerSkillsPanelPreview
+import com.remotecodex.android.ui.model.ComposerSlashPanelViewPreview
 import com.remotecodex.android.ui.model.ComposerToolboxActionPreview
 import com.remotecodex.android.ui.model.ComposerToolboxItemPreview
 import com.remotecodex.android.ui.model.ThreadGoalPreview
@@ -340,6 +341,15 @@ enum class ComposerToolboxItemTone {
     Disabled,
 }
 
+enum class ComposerSlashPanelViewState {
+    Root,
+    Skills,
+    Mcp,
+    Hooks,
+    Fork,
+    ForkTurns,
+}
+
 data class ComposerToolboxItemState(
     val command: String,
     val label: String,
@@ -356,6 +366,8 @@ data class ComposerSlashToolboxPanelState(
     val surfaceVisible: Boolean,
     val title: String,
     val subtitle: String,
+    val view: ComposerSlashPanelViewState,
+    val showRootItems: Boolean,
     val items: List<ComposerToolboxItemState>,
     val emptyMessage: String?,
 )
@@ -951,8 +963,10 @@ fun buildComposerToolboxItems(
 
 fun buildComposerSlashToolboxPanelState(
     open: Boolean,
+    view: ComposerSlashPanelViewPreview,
     items: List<ComposerToolboxItemState>,
 ): ComposerSlashToolboxPanelState {
+    val viewState = slashPanelViewState(view)
     return ComposerSlashToolboxPanelState(
         menuVisible = open,
         triggerAccessibilityLabel = "Open slash toolbox",
@@ -960,9 +974,26 @@ fun buildComposerSlashToolboxPanelState(
         surfaceVisible = open,
         title = "Slash toolbox",
         subtitle = "Thread actions",
+        view = viewState,
+        showRootItems = viewState == ComposerSlashPanelViewState.Root,
         items = items,
-        emptyMessage = if (items.isEmpty()) "No backend tools are available for this thread." else null,
+        emptyMessage = if (viewState == ComposerSlashPanelViewState.Root && items.isEmpty()) {
+            "No backend tools are available for this thread."
+        } else {
+            null
+        },
     )
+}
+
+private fun slashPanelViewState(view: ComposerSlashPanelViewPreview): ComposerSlashPanelViewState {
+    return when (view) {
+        ComposerSlashPanelViewPreview.Root -> ComposerSlashPanelViewState.Root
+        ComposerSlashPanelViewPreview.Skills -> ComposerSlashPanelViewState.Skills
+        ComposerSlashPanelViewPreview.Mcp -> ComposerSlashPanelViewState.Mcp
+        ComposerSlashPanelViewPreview.Hooks -> ComposerSlashPanelViewState.Hooks
+        ComposerSlashPanelViewPreview.Fork -> ComposerSlashPanelViewState.Fork
+        ComposerSlashPanelViewPreview.ForkTurns -> ComposerSlashPanelViewState.ForkTurns
+    }
 }
 
 private fun composerToolboxItemStatus(

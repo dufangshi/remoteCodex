@@ -180,6 +180,7 @@ data class ComposerPreview(
     val goalComposeMode: Boolean = false,
     val goalStatus: ThreadGoalStatusPreview? = ThreadGoalStatusPreview.Active,
     val goalPanel: ComposerGoalPanelPreview = ComposerGoalPanelPreview(),
+    val slashPanelView: ComposerSlashPanelViewPreview = ComposerSlashPanelViewPreview.Root,
     val toolboxItems: List<ComposerToolboxItemPreview> = defaultComposerToolboxItems,
     val skillsPanel: ComposerSkillsPanelPreview = ComposerSkillsPanelPreview(),
     val mcpPanel: ComposerMcpPanelPreview = ComposerMcpPanelPreview(),
@@ -265,6 +266,15 @@ enum class ComposerToolboxActionPreview {
     Skills,
     Mcp,
     Hooks,
+}
+
+enum class ComposerSlashPanelViewPreview {
+    Root,
+    Skills,
+    Mcp,
+    Hooks,
+    Fork,
+    ForkTurns,
 }
 
 data class ComposerToolboxItemPreview(

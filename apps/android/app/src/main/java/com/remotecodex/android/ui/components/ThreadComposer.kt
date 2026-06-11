@@ -70,6 +70,7 @@ import com.remotecodex.android.ui.presentation.ComposerSelectionOptionState
 import com.remotecodex.android.ui.presentation.ComposerShellToolState
 import com.remotecodex.android.ui.presentation.ComposerShellToolsPanelState
 import com.remotecodex.android.ui.presentation.ComposerShellToolTone
+import com.remotecodex.android.ui.presentation.ComposerSlashPanelViewState
 import com.remotecodex.android.ui.presentation.ComposerSlashToolboxPanelState
 import com.remotecodex.android.ui.presentation.ComposerSkillErrorState
 import com.remotecodex.android.ui.presentation.ComposerSkillRowState
@@ -195,6 +196,7 @@ fun ThreadComposer(
     )
     val slashToolboxPanelState = buildComposerSlashToolboxPanelState(
         open = openMenu == ComposerMenu.Slash,
+        view = composer.slashPanelView,
         items = toolboxItems,
     )
     val forkPanelState = buildComposerForkPanelState(
@@ -231,7 +233,6 @@ fun ThreadComposer(
                 ComposerMenu.Slash -> SlashToolboxPanel(
                     panelState = slashToolboxPanelState,
                     forkPanelState = forkPanelState,
-                    goalPanelState = goalPanelState,
                     skillsPanelState = skillsPanelState,
                     mcpPanelState = mcpPanelState,
                     hooksPanelState = hooksPanelState,
@@ -1214,7 +1215,6 @@ private fun ComposerModeChip(label: String, selected: Boolean, pressed: Boolean 
 private fun SlashToolboxPanel(
     panelState: ComposerSlashToolboxPanelState,
     forkPanelState: ComposerForkPanelState,
-    goalPanelState: ComposerGoalPanelState,
     skillsPanelState: ComposerSkillsPanelState,
     mcpPanelState: ComposerMcpPanelState,
     hooksPanelState: ComposerHooksPanelState,
@@ -1223,18 +1223,24 @@ private fun SlashToolboxPanel(
         return
     }
     ComposerMenuSurface(title = panelState.title, subtitle = panelState.subtitle) {
-        if (panelState.items.isEmpty()) {
-            EmptyToolboxState(message = panelState.emptyMessage.orEmpty())
-        } else {
-            panelState.items.forEach { item ->
-                ToolboxRow(item = item)
+        if (panelState.showRootItems) {
+            if (panelState.items.isEmpty()) {
+                EmptyToolboxState(message = panelState.emptyMessage.orEmpty())
+            } else {
+                panelState.items.forEach { item ->
+                    ToolboxRow(item = item)
+                }
             }
+            return@ComposerMenuSurface
         }
-        GoalPreviewGroup(goalPanelState = goalPanelState)
-        ForkPreviewGroup(forkPanelState = forkPanelState)
-        SkillsPreviewGroup(skillsPanelState = skillsPanelState)
-        McpPreviewGroup(mcpPanelState = mcpPanelState)
-        HooksPreviewGroup(hooksPanelState = hooksPanelState)
+        when (panelState.view) {
+            ComposerSlashPanelViewState.Root -> Unit
+            ComposerSlashPanelViewState.Fork -> ForkPreviewGroup(forkPanelState = forkPanelState, showTurnPicker = false)
+            ComposerSlashPanelViewState.ForkTurns -> ForkPreviewGroup(forkPanelState = forkPanelState, showTurnPicker = true)
+            ComposerSlashPanelViewState.Skills -> SkillsPreviewGroup(skillsPanelState = skillsPanelState)
+            ComposerSlashPanelViewState.Mcp -> McpPreviewGroup(mcpPanelState = mcpPanelState)
+            ComposerSlashPanelViewState.Hooks -> HooksPreviewGroup(hooksPanelState = hooksPanelState)
+        }
     }
 }
 
@@ -1394,7 +1400,10 @@ private fun GoalStatusPreviewRow(goal: ComposerCurrentGoalState) {
 }
 
 @Composable
-private fun ForkPreviewGroup(forkPanelState: ComposerForkPanelState) {
+private fun ForkPreviewGroup(
+    forkPanelState: ComposerForkPanelState,
+    showTurnPicker: Boolean,
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1433,9 +1442,11 @@ private fun ForkPreviewGroup(forkPanelState: ComposerForkPanelState) {
         forkPanelState.actions.forEach { action ->
             ForkActionRow(action = action)
         }
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            forkTurnPreviewItems.forEach { item ->
-                ForkTurnRow(item = item)
+        if (showTurnPicker) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                forkTurnPreviewItems.forEach { item ->
+                    ForkTurnRow(item = item)
+                }
             }
         }
     }
