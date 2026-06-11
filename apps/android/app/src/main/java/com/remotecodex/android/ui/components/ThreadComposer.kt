@@ -66,6 +66,9 @@ import com.remotecodex.android.ui.presentation.ComposerStatusChipModel
 import com.remotecodex.android.ui.presentation.ComposerStatusTone
 import com.remotecodex.android.ui.presentation.ComposerToolboxItemState
 import com.remotecodex.android.ui.presentation.ComposerToolboxItemTone
+import com.remotecodex.android.ui.presentation.ComposerToolbarButtonState
+import com.remotecodex.android.ui.presentation.ComposerToolbarMenuState
+import com.remotecodex.android.ui.presentation.ComposerToolbarState
 import com.remotecodex.android.ui.presentation.buildComposerActionState
 import com.remotecodex.android.ui.presentation.buildComposerAttachmentActions
 import com.remotecodex.android.ui.presentation.buildComposerContextUsageState
@@ -81,6 +84,7 @@ import com.remotecodex.android.ui.presentation.buildComposerSettingsState
 import com.remotecodex.android.ui.presentation.buildComposerShellTools
 import com.remotecodex.android.ui.presentation.buildComposerSkillsPanelState
 import com.remotecodex.android.ui.presentation.buildComposerStatusStrip
+import com.remotecodex.android.ui.presentation.buildComposerToolbarState
 import com.remotecodex.android.ui.presentation.buildComposerToolboxItems
 import com.remotecodex.android.ui.theme.ThreadColors
 
@@ -124,6 +128,13 @@ fun ThreadComposer(
         fastMode = composer.fastMode,
         planModeAvailable = composer.planModeAvailable,
         planModeActive = composer.planModeActive,
+    )
+    val toolbarState = buildComposerToolbarState(
+        activeView = composer.activeView,
+        openMenu = openMenu.toToolbarMenuState(),
+        settingsState = settingsState,
+        canToggleShellView = true,
+        shellPromptLabel = composer.prompt.text.ifBlank { null },
     )
     val modelOptions = buildComposerModelOptions(
         currentModel = composer.context.model,
@@ -191,41 +202,10 @@ fun ThreadComposer(
         }
 
         ComposerJumpLatestButton(state = jumpLatestState)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            ComposerIcon(
-                icon = ComposerToolIcon.Slash,
-                selected = openMenu == ComposerMenu.Slash,
-                onClick = { openMenu = openMenu.toggle(ComposerMenu.Slash) },
-            )
-            ComposerIcon(
-                icon = ComposerToolIcon.Plus,
-                selected = openMenu == ComposerMenu.Attachments,
-                onClick = { openMenu = openMenu.toggle(ComposerMenu.Attachments) },
-            )
-            ComposerIcon(
-                icon = ComposerToolIcon.Terminal,
-                selected = openMenu == ComposerMenu.ShellTools,
-                onClick = { openMenu = openMenu.toggle(ComposerMenu.ShellTools) },
-            )
-            Box(modifier = Modifier.weight(1f))
-            InlineToggle(
-                label = settingsState.modelLabel,
-                selected = openMenu == ComposerMenu.Model,
-                enabled = settingsState.modelEnabled,
-                onClick = { openMenu = openMenu.toggle(ComposerMenu.Model) },
-                modifier = Modifier.weight(1.25f, fill = false),
-            )
-            InlineToggle(
-                label = settingsState.effortLabel,
-                selected = openMenu == ComposerMenu.Effort,
-                enabled = settingsState.effortEnabled,
-                onClick = { openMenu = openMenu.toggle(ComposerMenu.Effort) },
-            )
-        }
+        ComposerToolbarRow(
+            toolbarState = toolbarState,
+            onToggleMenu = { menu -> openMenu = openMenu.toggle(menu) },
+        )
         ComposerInputGroupPreview(
             contextState = contextState,
             promptSlotState = promptSlotState,
@@ -241,10 +221,12 @@ fun ThreadComposer(
             }
             ComposerModeChip(label = "2 files", selected = true)
             Box(modifier = Modifier.weight(1f))
-            ComposerViewToggleButton(
-                icon = ComposerToolIcon.Terminal,
-                label = "Shell",
-            )
+            if (toolbarState.viewToggleButton.visible) {
+                ComposerViewToggleButton(
+                    icon = if (toolbarState.viewToggleButton.selected) ComposerToolIcon.Chat else ComposerToolIcon.Terminal,
+                    label = if (toolbarState.viewToggleButton.selected) "Chat" else "Shell",
+                )
+            }
             ComposerActionControls(actionState = actionState)
         }
     }
@@ -283,6 +265,89 @@ private fun ComposerJumpLatestButton(state: ComposerJumpLatestState) {
             )
         }
     }
+}
+
+@Composable
+private fun ComposerToolbarRow(
+    toolbarState: ComposerToolbarState,
+    onToggleMenu: (ComposerMenu) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ToolbarIconButton(
+            state = toolbarState.slashButton,
+            icon = ComposerToolIcon.Slash,
+            onClick = { onToggleMenu(ComposerMenu.Slash) },
+        )
+        ToolbarIconButton(
+            state = toolbarState.attachmentButton,
+            icon = ComposerToolIcon.Plus,
+            onClick = { onToggleMenu(ComposerMenu.Attachments) },
+        )
+        ToolbarIconButton(
+            state = toolbarState.shellToolsButton,
+            icon = ComposerToolIcon.Terminal,
+            onClick = { onToggleMenu(ComposerMenu.ShellTools) },
+        )
+        ToolbarIconButton(
+            state = toolbarState.viewToggleButton,
+            icon = if (toolbarState.viewToggleButton.selected) ComposerToolIcon.Chat else ComposerToolIcon.Terminal,
+            onClick = {},
+        )
+        toolbarState.shellPromptLabel?.let { label ->
+            GraphInputGroupText(
+                text = label,
+                modifier = Modifier.weight(1f),
+            )
+        } ?: Box(modifier = Modifier.weight(1f))
+        ToolbarInlineToggle(
+            state = toolbarState.modelButton,
+            onClick = { onToggleMenu(ComposerMenu.Model) },
+            modifier = Modifier.weight(1.25f, fill = false),
+        )
+        ToolbarInlineToggle(
+            state = toolbarState.effortButton,
+            onClick = { onToggleMenu(ComposerMenu.Effort) },
+        )
+    }
+}
+
+@Composable
+private fun ToolbarIconButton(
+    state: ComposerToolbarButtonState,
+    icon: ComposerToolIcon,
+    onClick: () -> Unit,
+) {
+    if (!state.visible) {
+        return
+    }
+    ComposerIcon(
+        icon = icon,
+        selected = state.selected,
+        enabled = state.enabled,
+        onClick = onClick,
+    )
+}
+
+@Composable
+private fun ToolbarInlineToggle(
+    state: ComposerToolbarButtonState,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    if (!state.visible) {
+        return
+    }
+    InlineToggle(
+        label = state.label,
+        selected = state.selected,
+        enabled = state.enabled,
+        onClick = onClick,
+        modifier = modifier,
+    )
 }
 
 @Composable
@@ -602,17 +667,26 @@ private fun AttachmentPreviewStrip() {
 private fun ComposerIcon(
     icon: ComposerToolIcon,
     selected: Boolean,
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
-    val background = if (selected) ThreadColors.Primary else ThreadColors.Panel
-    val foreground = if (selected) ThreadColors.PrimaryForeground else ThreadColors.ForegroundSoft
+    val background = when {
+        selected -> ThreadColors.Primary
+        enabled -> ThreadColors.Panel
+        else -> ThreadColors.SurfaceStrong
+    }
+    val foreground = when {
+        selected -> ThreadColors.PrimaryForeground
+        enabled -> ThreadColors.ForegroundSoft
+        else -> ThreadColors.ForegroundMuted.copy(alpha = 0.58f)
+    }
     Box(
         modifier = Modifier
             .size(34.dp)
             .clip(CircleShape)
             .background(background)
             .border(1.dp, if (selected) ThreadColors.Primary else ThreadColors.Border, CircleShape)
-            .clickable(onClick = onClick),
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
         contentAlignment = Alignment.Center,
     ) {
         ComposerToolGlyph(icon = icon, color = foreground)
@@ -2150,6 +2224,17 @@ private fun ShellToolPill(item: ComposerShellToolState) {
 
 private fun ComposerMenu?.toggle(target: ComposerMenu): ComposerMenu? {
     return if (this == target) null else target
+}
+
+private fun ComposerMenu?.toToolbarMenuState(): ComposerToolbarMenuState? {
+    return when (this) {
+        ComposerMenu.Slash -> ComposerToolbarMenuState.Slash
+        ComposerMenu.Attachments -> ComposerToolbarMenuState.Attachments
+        ComposerMenu.Model -> ComposerToolbarMenuState.Model
+        ComposerMenu.Effort -> ComposerToolbarMenuState.Effort
+        ComposerMenu.ShellTools -> ComposerToolbarMenuState.ShellTools
+        null -> null
+    }
 }
 
 private enum class ComposerMenu {

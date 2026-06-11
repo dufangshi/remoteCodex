@@ -139,6 +139,31 @@ data class ComposerPromptSlotState(
     val inputModeLabel: String,
 )
 
+enum class ComposerToolbarMenuState {
+    Slash,
+    Attachments,
+    Model,
+    Effort,
+    ShellTools,
+}
+
+data class ComposerToolbarButtonState(
+    val visible: Boolean,
+    val selected: Boolean,
+    val enabled: Boolean,
+    val label: String,
+)
+
+data class ComposerToolbarState(
+    val slashButton: ComposerToolbarButtonState,
+    val attachmentButton: ComposerToolbarButtonState,
+    val shellToolsButton: ComposerToolbarButtonState,
+    val modelButton: ComposerToolbarButtonState,
+    val effortButton: ComposerToolbarButtonState,
+    val viewToggleButton: ComposerToolbarButtonState,
+    val shellPromptLabel: String?,
+)
+
 data class ComposerSettingsState(
     val modelLabel: String,
     val modelEnabled: Boolean,
@@ -1042,6 +1067,55 @@ fun buildComposerPromptSlotState(
         sendDisabled = goalBusy || busy || prompt.disabled,
         attachmentChips = activeAttachments.map(::buildComposerPromptAttachmentState),
         inputModeLabel = if (isShellView) "Shell input" else "Prompt",
+    )
+}
+
+fun buildComposerToolbarState(
+    activeView: ComposerActiveView,
+    openMenu: ComposerToolbarMenuState?,
+    settingsState: ComposerSettingsState,
+    canToggleShellView: Boolean,
+    shellPromptLabel: String?,
+): ComposerToolbarState {
+    val isShellView = activeView == ComposerActiveView.Shell
+    return ComposerToolbarState(
+        slashButton = ComposerToolbarButtonState(
+            visible = !isShellView,
+            selected = openMenu == ComposerToolbarMenuState.Slash,
+            enabled = !isShellView,
+            label = if (openMenu == ComposerToolbarMenuState.Slash) "Close slash toolbox" else "Open slash toolbox",
+        ),
+        attachmentButton = ComposerToolbarButtonState(
+            visible = !isShellView,
+            selected = openMenu == ComposerToolbarMenuState.Attachments,
+            enabled = !isShellView,
+            label = if (openMenu == ComposerToolbarMenuState.Attachments) "Close attachment menu" else "Add attachment",
+        ),
+        shellToolsButton = ComposerToolbarButtonState(
+            visible = isShellView,
+            selected = openMenu == ComposerToolbarMenuState.ShellTools,
+            enabled = isShellView,
+            label = if (openMenu == ComposerToolbarMenuState.ShellTools) "Close shell tools" else "Open shell tools",
+        ),
+        modelButton = ComposerToolbarButtonState(
+            visible = !isShellView,
+            selected = openMenu == ComposerToolbarMenuState.Model,
+            enabled = settingsState.modelEnabled,
+            label = settingsState.modelLabel,
+        ),
+        effortButton = ComposerToolbarButtonState(
+            visible = !isShellView,
+            selected = openMenu == ComposerToolbarMenuState.Effort,
+            enabled = settingsState.effortEnabled,
+            label = settingsState.effortLabel,
+        ),
+        viewToggleButton = ComposerToolbarButtonState(
+            visible = canToggleShellView,
+            selected = isShellView,
+            enabled = canToggleShellView,
+            label = if (isShellView) "Switch to chat" else "Switch to shell",
+        ),
+        shellPromptLabel = shellPromptLabel?.takeIf { isShellView && it.isNotBlank() },
     )
 }
 

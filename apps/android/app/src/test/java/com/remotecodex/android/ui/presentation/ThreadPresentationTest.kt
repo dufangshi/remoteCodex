@@ -603,6 +603,126 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun buildsChatComposerToolbarState() {
+        assertEquals(
+            ComposerToolbarState(
+                slashButton = ComposerToolbarButtonState(
+                    visible = true,
+                    selected = true,
+                    enabled = true,
+                    label = "Close slash toolbox",
+                ),
+                attachmentButton = ComposerToolbarButtonState(
+                    visible = true,
+                    selected = false,
+                    enabled = true,
+                    label = "Add attachment",
+                ),
+                shellToolsButton = ComposerToolbarButtonState(
+                    visible = false,
+                    selected = false,
+                    enabled = false,
+                    label = "Open shell tools",
+                ),
+                modelButton = ComposerToolbarButtonState(
+                    visible = true,
+                    selected = false,
+                    enabled = true,
+                    label = "gpt-test",
+                ),
+                effortButton = ComposerToolbarButtonState(
+                    visible = true,
+                    selected = false,
+                    enabled = true,
+                    label = "Medium",
+                ),
+                viewToggleButton = ComposerToolbarButtonState(
+                    visible = true,
+                    selected = false,
+                    enabled = true,
+                    label = "Switch to shell",
+                ),
+                shellPromptLabel = null,
+            ),
+            buildComposerToolbarState(
+                activeView = ComposerActiveView.Chat,
+                openMenu = ComposerToolbarMenuState.Slash,
+                settingsState = ComposerSettingsState(
+                    modelLabel = "gpt-test",
+                    modelEnabled = true,
+                    effortLabel = "Medium",
+                    effortEnabled = true,
+                    effortTitle = "Select reasoning effort",
+                    planVisible = true,
+                    planSelected = false,
+                ),
+                canToggleShellView = true,
+                shellPromptLabel = "ignored shell prompt",
+            ),
+        )
+    }
+
+    @Test
+    fun buildsShellComposerToolbarState() {
+        assertEquals(
+            ComposerToolbarState(
+                slashButton = ComposerToolbarButtonState(
+                    visible = false,
+                    selected = false,
+                    enabled = false,
+                    label = "Open slash toolbox",
+                ),
+                attachmentButton = ComposerToolbarButtonState(
+                    visible = false,
+                    selected = false,
+                    enabled = false,
+                    label = "Add attachment",
+                ),
+                shellToolsButton = ComposerToolbarButtonState(
+                    visible = true,
+                    selected = true,
+                    enabled = true,
+                    label = "Close shell tools",
+                ),
+                modelButton = ComposerToolbarButtonState(
+                    visible = false,
+                    selected = false,
+                    enabled = false,
+                    label = "gpt-test",
+                ),
+                effortButton = ComposerToolbarButtonState(
+                    visible = false,
+                    selected = false,
+                    enabled = false,
+                    label = "Auto",
+                ),
+                viewToggleButton = ComposerToolbarButtonState(
+                    visible = true,
+                    selected = true,
+                    enabled = true,
+                    label = "Switch to chat",
+                ),
+                shellPromptLabel = "pnpm test",
+            ),
+            buildComposerToolbarState(
+                activeView = ComposerActiveView.Shell,
+                openMenu = ComposerToolbarMenuState.ShellTools,
+                settingsState = ComposerSettingsState(
+                    modelLabel = "gpt-test",
+                    modelEnabled = false,
+                    effortLabel = "Auto",
+                    effortEnabled = false,
+                    effortTitle = "The selected model does not expose adjustable reasoning effort.",
+                    planVisible = false,
+                    planSelected = false,
+                ),
+                canToggleShellView = true,
+                shellPromptLabel = "pnpm test",
+            ),
+        )
+    }
+
+    @Test
     fun buildsEnabledComposerShellTools() {
         assertEquals(
             listOf(
