@@ -2,8 +2,10 @@ package com.remotecodex.android.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,17 +21,22 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.ui.model.PendingRequestPreview
+import com.remotecodex.android.ui.presentation.PendingRequestOptionState
+import com.remotecodex.android.ui.presentation.PendingRequestQuestionState
 import com.remotecodex.android.ui.presentation.buildPendingRequestCardState
 import com.remotecodex.android.ui.theme.ThreadColors
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 fun PendingRequestCard(
     request: PendingRequestPreview,
     modifier: Modifier = Modifier,
 ) {
     val state = buildPendingRequestCardState(request)
+    val questionMode = state.questions.isNotEmpty()
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -67,29 +74,23 @@ fun PendingRequestCard(
                 text = state.description,
                 color = ThreadColors.ForegroundSoft,
                 style = MaterialTheme.typography.bodyMedium,
+                maxLines = if (questionMode) 1 else Int.MAX_VALUE,
+                overflow = TextOverflow.Ellipsis,
             )
         }
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(ThreadColors.Panel)
-                .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
-                .padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text(
-                text = state.commandLabel,
-                color = ThreadColors.ForegroundMuted,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.SemiBold,
+        if (questionMode) {
+            state.questions.forEach { question ->
+                PendingRequestQuestionSection(question = question)
+            }
+            PendingRequestCommandBlock(
+                label = state.commandLabel,
+                command = state.command,
+                compact = true,
             )
-            Text(
-                text = state.command,
-                modifier = Modifier.fillMaxWidth(),
-                color = ThreadColors.ForegroundSoft,
-                style = MaterialTheme.typography.bodyMedium,
-                fontFamily = FontFamily.Monospace,
+        } else {
+            PendingRequestCommandBlock(
+                label = state.commandLabel,
+                command = state.command,
             )
         }
         Row(
@@ -121,4 +122,154 @@ fun PendingRequestCard(
             )
         }
     }
+}
+
+@Composable
+private fun PendingRequestCommandBlock(
+    label: String,
+    command: String,
+    compact: Boolean = false,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(ThreadColors.Panel)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
+            .padding(if (compact) 8.dp else 10.dp),
+        verticalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp),
+    ) {
+        Text(
+            text = label,
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = command,
+            modifier = Modifier.fillMaxWidth(),
+            color = ThreadColors.ForegroundSoft,
+            style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.bodyMedium,
+            fontFamily = FontFamily.Monospace,
+        )
+    }
+}
+
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+private fun PendingRequestQuestionSection(
+    question: PendingRequestQuestionState,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(ThreadColors.Panel)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
+            .padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = question.header,
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        if (question.question.isNotEmpty()) {
+            Text(
+                text = question.question,
+                color = ThreadColors.Foreground,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (question.options.isNotEmpty() || question.otherLabel != null) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                verticalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                question.options.forEachIndexed { index, option ->
+                    PendingRequestOptionChip(
+                        option = option,
+                        highlighted = index == 0 || option.recommended,
+                    )
+                }
+                question.otherLabel?.let { otherLabel ->
+                    PendingRequestOtherChip(label = otherLabel)
+                }
+            }
+        } else {
+            Text(
+                text = if (question.multiSelect) "Select one or more answers" else "Enter an answer",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(ThreadColors.SurfaceStrong)
+                    .border(1.dp, ThreadColors.Border, RoundedCornerShape(10.dp))
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PendingRequestOptionChip(
+    option: PendingRequestOptionState,
+    highlighted: Boolean,
+) {
+    val background = if (highlighted) ThreadColors.InfoSoft else ThreadColors.SurfaceStrong
+    val border = if (highlighted) ThreadColors.Info.copy(alpha = 0.34f) else ThreadColors.Border
+    val foreground = if (highlighted) ThreadColors.Info else ThreadColors.ForegroundSoft
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(background)
+            .border(1.dp, border, RoundedCornerShape(999.dp))
+            .semantics {
+                contentDescription = if (option.recommended) {
+                    "${option.displayLabel}, recommended"
+                } else {
+                    option.displayLabel
+                }
+            }
+            .padding(horizontal = 8.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Text(
+            text = option.displayLabel,
+            color = foreground,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+        )
+        if (option.recommended) {
+            Text(
+                text = "*",
+                color = foreground,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PendingRequestOtherChip(label: String) {
+    Text(
+        text = label,
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(ThreadColors.SurfaceStrong)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
+            .padding(horizontal = 8.dp, vertical = 5.dp),
+        color = ThreadColors.ForegroundSoft,
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 1,
+    )
 }

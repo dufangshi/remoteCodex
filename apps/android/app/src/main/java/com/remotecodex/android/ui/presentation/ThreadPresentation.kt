@@ -6,6 +6,7 @@ import com.remotecodex.android.ui.model.MessagePreview
 import com.remotecodex.android.ui.model.LivePlanPreview
 import com.remotecodex.android.ui.model.PendingRequestPreview
 import com.remotecodex.android.ui.model.PlanStepStatus
+import com.remotecodex.android.ui.model.PendingRequestOptionPreview
 import com.remotecodex.android.ui.model.ReasoningPreview
 import com.remotecodex.android.ui.model.ThreadStatus
 import com.remotecodex.android.ui.model.ToolStatus
@@ -200,10 +201,26 @@ data class PendingRequestCardState(
     val riskLabel: String,
     val commandLabel: String,
     val command: String,
+    val questions: List<PendingRequestQuestionState>,
     val denyLabel: String,
     val approveLabel: String,
     val approveAccessibilityLabel: String,
     val denyAccessibilityLabel: String,
+)
+
+data class PendingRequestQuestionState(
+    val header: String,
+    val question: String,
+    val options: List<PendingRequestOptionState>,
+    val multiSelect: Boolean,
+    val otherLabel: String?,
+)
+
+data class PendingRequestOptionState(
+    val rawLabel: String,
+    val displayLabel: String,
+    val description: String,
+    val recommended: Boolean,
 )
 
 enum class TimelineNoteToneState {
@@ -3465,6 +3482,21 @@ fun buildPendingRequestCardState(request: PendingRequestPreview): PendingRequest
     val description = request.description.trim()
     val riskLabel = request.riskLabel.trim().ifEmpty { "Permission required" }
     val command = request.command.trim()
+    val questions = request.questions.mapNotNull { question ->
+        val header = question.header.trim()
+        val questionText = question.question.trim()
+        if (header.isEmpty() && questionText.isEmpty()) {
+            null
+        } else {
+            PendingRequestQuestionState(
+                header = header.ifEmpty { "Question" },
+                question = questionText,
+                options = question.options.mapNotNull(::buildPendingRequestOptionState),
+                multiSelect = question.multiSelect,
+                otherLabel = if (question.allowOther) "Not from above" else null,
+            )
+        }
+    }
 
     return PendingRequestCardState(
         title = title,
@@ -3472,10 +3504,28 @@ fun buildPendingRequestCardState(request: PendingRequestPreview): PendingRequest
         riskLabel = riskLabel,
         commandLabel = "Requested action",
         command = command,
+        questions = questions,
         denyLabel = "Deny",
         approveLabel = "Approve",
         denyAccessibilityLabel = "Deny $title",
         approveAccessibilityLabel = "Approve $title",
+    )
+}
+
+private fun buildPendingRequestOptionState(
+    option: PendingRequestOptionPreview,
+): PendingRequestOptionState? {
+    val rawLabel = option.label.trim()
+    if (rawLabel.isEmpty()) {
+        return null
+    }
+    val recommendedPattern = Regex("\\s*\\(recommended\\)\\s*$", RegexOption.IGNORE_CASE)
+    val displayLabel = rawLabel.replace(recommendedPattern, "").trim().ifEmpty { rawLabel }
+    return PendingRequestOptionState(
+        rawLabel = rawLabel,
+        displayLabel = displayLabel,
+        description = option.description.trim(),
+        recommended = recommendedPattern.containsMatchIn(rawLabel),
     )
 }
 

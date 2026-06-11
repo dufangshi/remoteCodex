@@ -12,6 +12,8 @@ import com.remotecodex.android.ui.model.ExportTurnPreview
 import com.remotecodex.android.ui.model.LivePlanPreview
 import com.remotecodex.android.ui.model.LivePlanStepPreview
 import com.remotecodex.android.ui.model.PendingRequestPreview
+import com.remotecodex.android.ui.model.PendingRequestOptionPreview
+import com.remotecodex.android.ui.model.PendingRequestQuestionPreview
 import com.remotecodex.android.ui.model.PlanStepStatus
 import com.remotecodex.android.ui.model.PluginPreview
 import com.remotecodex.android.ui.model.ReasoningPreview
@@ -586,6 +588,22 @@ object ThreadPreviewSample {
             description = "Codex wants to run the Android debug build from the project workspace.",
             command = "./gradlew :app:assembleDebug",
             riskLabel = "Workspace write, local build",
+            questions = listOf(
+                PendingRequestQuestionPreview(
+                    header = "Approval",
+                    question = "Allow this build command to run in the Android workspace?",
+                    options = listOf(
+                        PendingRequestOptionPreview(
+                            label = "Approve once (recommended)",
+                            description = "Run the command for this turn only.",
+                        ),
+                        PendingRequestOptionPreview(
+                            label = "Deny",
+                            description = "Keep the agent waiting and do not run the build.",
+                        ),
+                    ),
+                ),
+            ),
         ),
         workspacePreview = WorkspacePreview(
             title = "Workspace",

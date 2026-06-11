@@ -49,6 +49,8 @@ import com.remotecodex.android.ui.model.TurnPreview
 import com.remotecodex.android.ui.model.LivePlanPreview
 import com.remotecodex.android.ui.model.LivePlanStepPreview
 import com.remotecodex.android.ui.model.MessagePreview
+import com.remotecodex.android.ui.model.PendingRequestOptionPreview
+import com.remotecodex.android.ui.model.PendingRequestQuestionPreview
 import com.remotecodex.android.ui.model.PendingRequestPreview
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -724,6 +726,28 @@ class ThreadPresentationTest {
                 riskLabel = "Permission required",
                 commandLabel = "Requested action",
                 command = "./gradlew :app:assembleDebug",
+                questions = listOf(
+                    PendingRequestQuestionState(
+                        header = "Approval",
+                        question = "Allow the build?",
+                        options = listOf(
+                            PendingRequestOptionState(
+                                rawLabel = "Approve once (recommended)",
+                                displayLabel = "Approve once",
+                                description = "Run one command.",
+                                recommended = true,
+                            ),
+                            PendingRequestOptionState(
+                                rawLabel = "Deny",
+                                displayLabel = "Deny",
+                                description = "",
+                                recommended = false,
+                            ),
+                        ),
+                        multiSelect = false,
+                        otherLabel = "Not from above",
+                    ),
+                ),
                 denyLabel = "Deny",
                 approveLabel = "Approve",
                 approveAccessibilityLabel = "Approve Answer Required",
@@ -735,6 +759,23 @@ class ThreadPresentationTest {
                     description = " Run the build from the Android workspace. ",
                     command = " ./gradlew :app:assembleDebug ",
                     riskLabel = " ",
+                    questions = listOf(
+                        PendingRequestQuestionPreview(
+                            header = " Approval ",
+                            question = " Allow the build? ",
+                            options = listOf(
+                                PendingRequestOptionPreview(
+                                    label = " Approve once (recommended) ",
+                                    description = " Run one command. ",
+                                ),
+                                PendingRequestOptionPreview(
+                                    label = "Deny",
+                                    description = " ",
+                                ),
+                            ),
+                            allowOther = true,
+                        ),
+                    ),
                 ),
             ),
         )

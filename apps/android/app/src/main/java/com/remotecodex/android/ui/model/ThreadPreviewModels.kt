@@ -720,6 +720,20 @@ data class PendingRequestPreview(
     val description: String,
     val command: String,
     val riskLabel: String,
+    val questions: List<PendingRequestQuestionPreview> = emptyList(),
+)
+
+data class PendingRequestQuestionPreview(
+    val header: String,
+    val question: String,
+    val options: List<PendingRequestOptionPreview> = emptyList(),
+    val multiSelect: Boolean = false,
+    val allowOther: Boolean = false,
+)
+
+data class PendingRequestOptionPreview(
+    val label: String,
+    val description: String,
 )
 
 enum class WorkspaceNodeKind {
