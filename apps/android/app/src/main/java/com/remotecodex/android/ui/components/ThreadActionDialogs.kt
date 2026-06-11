@@ -406,15 +406,20 @@ private fun DeleteThreadDialogPreview(
     threadTitle: String,
     onClose: () -> Unit,
 ) {
+    var confirmed by rememberSaveable(threadTitle) { mutableStateOf(false) }
+    var deleteBusy by rememberSaveable(threadTitle) { mutableStateOf(false) }
+    val canDelete = confirmed && !deleteBusy
     GraphDialogFrame(
         title = "Delete thread",
         subtitle = "This removes the thread from the local supervisor history.",
         onClose = onClose,
         footer = {
             GraphDialogFooter(
-                primaryLabel = "Delete",
+                primaryLabel = if (deleteBusy) "Deleting..." else "Delete",
                 primaryTone = GraphDialogActionTone.Danger,
                 onCancel = onClose,
+                primaryEnabled = canDelete,
+                onPrimary = { deleteBusy = true },
             )
         },
     ) {
@@ -451,6 +456,39 @@ private fun DeleteThreadDialogPreview(
                 ConfirmRiskRow(label = "Scope", value = "Local supervisor history")
                 ConfirmRiskRow(label = "Recovery", value = "Cannot be undone in this preview")
                 ConfirmRiskRow(label = "Next step", value = "Use Delete only when the room is no longer needed")
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(ThreadColors.Surface)
+                    .border(
+                        1.dp,
+                        if (confirmed) ThreadColors.Danger.copy(alpha = 0.42f) else ThreadColors.Border,
+                        RoundedCornerShape(12.dp),
+                    )
+                    .clickable(enabled = !deleteBusy) { confirmed = !confirmed }
+                    .padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                GraphSelectionGlyph(
+                    selected = confirmed,
+                    tone = GraphSelectionTone.Warning,
+                    contentDescription = if (confirmed) {
+                        "Delete confirmation selected"
+                    } else {
+                        "Delete confirmation not selected"
+                    },
+                )
+                Text(
+                    text = "I understand this thread cannot be restored from this preview.",
+                    modifier = Modifier.weight(1f),
+                    color = if (confirmed) ThreadColors.Danger else ThreadColors.ForegroundSoft,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }
