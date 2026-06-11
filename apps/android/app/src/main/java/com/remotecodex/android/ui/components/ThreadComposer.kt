@@ -43,7 +43,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.ui.model.ComposerSlashPanelViewPreview
 import com.remotecodex.android.ui.model.ComposerPreview
+import com.remotecodex.android.ui.model.ComposerHookEventNamePreview
 import com.remotecodex.android.ui.model.ComposerHookFormPreview
+import com.remotecodex.android.ui.model.ComposerHookHandlerTypePreview
+import com.remotecodex.android.ui.model.ComposerHookPreview
+import com.remotecodex.android.ui.model.ComposerHookScopePreview
+import com.remotecodex.android.ui.model.ComposerHookSourcePreview
 import com.remotecodex.android.ui.model.ComposerHookTrustStatusPreview
 import com.remotecodex.android.ui.model.ComposerHooksPanelModePreview
 import com.remotecodex.android.ui.model.ComposerMcpPanelModePreview
@@ -301,6 +306,31 @@ fun ThreadComposer(
                             }
                         }
                         hooksPanelSuccess = label
+                    },
+                    onHookSave = { form ->
+                        val savedHook = form.toPreviewHook()
+                        if (hooksPanelMode == ComposerHooksPanelModePreview.Edit) {
+                            val targetScope = form.editingScope ?: form.scope
+                            val targetEventName = form.editingEventName ?: form.eventName
+                            hooksPanelHooks = hooksPanelHooks.map { hook ->
+                                if (hook.source.toHookScopePreview() == targetScope && hook.eventName == targetEventName) {
+                                    savedHook.copy(
+                                        key = hook.key,
+                                        trustStatus = hook.trustStatus,
+                                        currentHash = hook.currentHash,
+                                    )
+                                } else {
+                                    hook
+                                }
+                            }
+                            hooksPanelSuccess = "Hook updated: ${savedHook.eventName.toHookActionLabel()}"
+                        } else {
+                            val existingKeys = hooksPanelHooks.map { it.key }.toSet()
+                            val uniqueHook = savedHook.copy(key = savedHook.key.uniqueHookKey(existingKeys))
+                            hooksPanelHooks = hooksPanelHooks + uniqueHook
+                            hooksPanelSuccess = "Hook written: ${uniqueHook.eventName.toHookActionLabel()}"
+                        }
+                        hooksPanelMode = ComposerHooksPanelModePreview.List
                     },
                     onToolboxAction = { actionDecision ->
                         when (actionDecision.kind) {
@@ -1470,6 +1500,7 @@ private fun SlashToolboxPanel(
     onHooksPanelModeChange: (ComposerHooksPanelModePreview) -> Unit,
     onHookEdit: (ComposerHookFormPreview) -> Unit,
     onHookTrustChange: (String, ComposerHookTrustStatusPreview, String) -> Unit,
+    onHookSave: (ComposerHookFormPreview) -> Unit,
     onToolboxAction: (ComposerToolboxActionDecisionState) -> Unit,
 ) {
     if (!panelState.surfaceVisible) {
@@ -1511,6 +1542,7 @@ private fun SlashToolboxPanel(
                 onHooksPanelModeChange = onHooksPanelModeChange,
                 onHookEdit = onHookEdit,
                 onHookTrustChange = onHookTrustChange,
+                onHookSave = onHookSave,
             )
         }
     }
@@ -2319,6 +2351,7 @@ private fun HooksPreviewGroup(
     onHooksPanelModeChange: (ComposerHooksPanelModePreview) -> Unit,
     onHookEdit: (ComposerHookFormPreview) -> Unit,
     onHookTrustChange: (String, ComposerHookTrustStatusPreview, String) -> Unit,
+    onHookSave: (ComposerHookFormPreview) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -2366,6 +2399,7 @@ private fun HooksPreviewGroup(
             HookFormPreview(
                 form = form,
                 onBack = { onHooksPanelModeChange(form.backTargetMode) },
+                onSave = { onHookSave(form.form) },
             )
         }
         hooksPanelState.hooks.forEach { item ->
@@ -2418,6 +2452,7 @@ private fun HookPanelMessageRow(message: String) {
 private fun HookFormPreview(
     form: ComposerHookFormState,
     onBack: () -> Unit,
+    onSave: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -2450,10 +2485,11 @@ private fun HookFormPreview(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ComposerPanelActionBadge(label = "Back", onClick = onBack)
-            GraphBadge(
-                label = form.primaryLabel,
-                variant = if (form.primaryEnabled) GraphBadgeVariant.Default else GraphBadgeVariant.Outline,
-            )
+            if (form.primaryEnabled) {
+                ComposerPanelActionBadge(label = form.primaryLabel, onClick = onSave)
+            } else {
+                GraphBadge(label = form.primaryLabel, variant = GraphBadgeVariant.Outline)
+            }
         }
     }
 }
@@ -3104,6 +3140,57 @@ private fun ComposerSlashPanelViewState.toPreviewPanelView(): ComposerSlashPanel
         ComposerSlashPanelViewState.Hooks -> ComposerSlashPanelViewPreview.Hooks
         ComposerSlashPanelViewState.Fork -> ComposerSlashPanelViewPreview.Fork
         ComposerSlashPanelViewState.ForkTurns -> ComposerSlashPanelViewPreview.ForkTurns
+    }
+}
+
+private fun ComposerHookFormPreview.toPreviewHook(): ComposerHookPreview {
+    return ComposerHookPreview(
+        key = "preview-${scope.name.lowercase()}-${eventName.name.lowercase()}-${matcher.ifBlank { "any" }.lowercase()}",
+        eventName = eventName,
+        handlerType = ComposerHookHandlerTypePreview.Command,
+        matcher = matcher.ifBlank { null },
+        command = command,
+        timeoutSec = timeoutSec.toIntOrNull() ?: 30,
+        statusMessage = statusMessage.ifBlank { null },
+        source = when (scope) {
+            ComposerHookScopePreview.Global -> ComposerHookSourcePreview.User
+            ComposerHookScopePreview.Project -> ComposerHookSourcePreview.Project
+        },
+        enabled = true,
+        isManaged = false,
+        currentHash = "preview-hash-${eventName.name.lowercase()}",
+        trustStatus = ComposerHookTrustStatusPreview.Modified,
+    )
+}
+
+private fun ComposerHookSourcePreview.toHookScopePreview(): ComposerHookScopePreview {
+    return when (this) {
+        ComposerHookSourcePreview.User -> ComposerHookScopePreview.Global
+        else -> ComposerHookScopePreview.Project
+    }
+}
+
+private fun String.uniqueHookKey(existingKeys: Set<String>): String {
+    if (this !in existingKeys) {
+        return this
+    }
+    var index = 2
+    while ("$this-$index" in existingKeys) {
+        index += 1
+    }
+    return "$this-$index"
+}
+
+private fun ComposerHookEventNamePreview.toHookActionLabel(): String {
+    return when (this) {
+        ComposerHookEventNamePreview.PreToolUse -> "PreToolUse"
+        ComposerHookEventNamePreview.PermissionRequest -> "PermissionRequest"
+        ComposerHookEventNamePreview.PostToolUse -> "PostToolUse"
+        ComposerHookEventNamePreview.PreCompact -> "PreCompact"
+        ComposerHookEventNamePreview.PostCompact -> "PostCompact"
+        ComposerHookEventNamePreview.SessionStart -> "SessionStart"
+        ComposerHookEventNamePreview.UserPromptSubmit -> "UserPromptSubmit"
+        ComposerHookEventNamePreview.Stop -> "Stop"
     }
 }
 

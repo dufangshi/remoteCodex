@@ -926,6 +926,8 @@ data class ComposerHookStatusMessageState(
 )
 
 data class ComposerHookFormState(
+    val mode: ComposerHooksPanelModePreview,
+    val form: ComposerHookFormPreview,
     val editingLabel: String?,
     val primaryLabel: String,
     val primaryEnabled: Boolean,
@@ -1297,6 +1299,8 @@ private fun buildComposerHookFormState(panel: ComposerHooksPanelPreview): Compos
         null
     }
     return ComposerHookFormState(
+        mode = panel.mode,
+        form = form,
         editingLabel = editingLabel,
         primaryLabel = when {
             panel.configBusy -> "Saving..."

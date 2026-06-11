@@ -4010,6 +4010,8 @@ class ThreadPresentationTest {
     fun buildsComposerHooksAddAndEditForms() {
         assertEquals(
             ComposerHookFormState(
+                mode = ComposerHooksPanelModePreview.Add,
+                form = ComposerHookFormPreview(),
                 editingLabel = null,
                 primaryLabel = "Write Hook",
                 primaryEnabled = true,
@@ -4036,8 +4038,20 @@ class ThreadPresentationTest {
             ).form,
         )
 
+        val editFormPreview = ComposerHookFormPreview(
+            scope = ComposerHookScopePreview.Global,
+            eventName = ComposerHookEventNamePreview.PostToolUse,
+            matcher = "Write",
+            command = "scripts/post-write.sh",
+            timeoutSec = "12",
+            statusMessage = "Post write check",
+            editingScope = ComposerHookScopePreview.Global,
+            editingEventName = ComposerHookEventNamePreview.PostToolUse,
+        )
         assertEquals(
             ComposerHookFormState(
+                mode = ComposerHooksPanelModePreview.Edit,
+                form = editFormPreview,
                 editingLabel = "Editing PostToolUse in global hooks.json",
                 primaryLabel = "Saving...",
                 primaryEnabled = false,
@@ -4060,16 +4074,7 @@ class ThreadPresentationTest {
                     hooks = emptyList(),
                     warnings = emptyList(),
                     errors = emptyList(),
-                    form = ComposerHookFormPreview(
-                        scope = ComposerHookScopePreview.Global,
-                        eventName = ComposerHookEventNamePreview.PostToolUse,
-                        matcher = "Write",
-                        command = "scripts/post-write.sh",
-                        timeoutSec = "12",
-                        statusMessage = "Post write check",
-                        editingScope = ComposerHookScopePreview.Global,
-                        editingEventName = ComposerHookEventNamePreview.PostToolUse,
-                    ),
+                    form = editFormPreview,
                 ),
             ).form,
         )

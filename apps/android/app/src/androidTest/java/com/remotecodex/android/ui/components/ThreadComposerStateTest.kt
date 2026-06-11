@@ -87,6 +87,20 @@ class ThreadComposerStateTest {
     }
 
     @Test
+    fun hooksPanelWritesPreviewHookAndReturnsToList() {
+        setComposerContent()
+
+        composeRule.onNodeWithContentDescription("Open slash toolbox").performClick()
+        composeRule.onNodeWithContentDescription("Hooks").performClick()
+        composeRule.onNodeWithContentDescription("Add Hook").performClick()
+
+        composeRule.onNodeWithContentDescription("Write Hook").performClick()
+
+        composeRule.onNodeWithText("Hook written: PreToolUse").assertExists()
+        composeRule.onAllNodesWithText("PreToolUse · Bash").assertCountEquals(2)
+    }
+
+    @Test
     fun hooksPanelNavigatesThroughEditPreviewMode() {
         setComposerContent()
 
@@ -111,6 +125,20 @@ class ThreadComposerStateTest {
 
         composeRule.onNodeWithContentDescription("Back").performClick()
 
+        composeRule.onNodeWithText("PreToolUse · Bash").assertExists()
+    }
+
+    @Test
+    fun hooksPanelUpdatesPreviewHookAndReturnsToList() {
+        setComposerContent()
+
+        composeRule.onNodeWithContentDescription("Open slash toolbox").performClick()
+        composeRule.onNodeWithContentDescription("Hooks").performClick()
+        composeRule.onNodeWithContentDescription("Edit PreToolUse · Bash").performClick()
+
+        composeRule.onNodeWithContentDescription("Update Hook").performClick()
+
+        composeRule.onNodeWithText("Hook updated: PreToolUse").assertExists()
         composeRule.onNodeWithText("PreToolUse · Bash").assertExists()
     }
 
