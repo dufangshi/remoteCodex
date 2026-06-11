@@ -68,6 +68,7 @@ import com.remotecodex.android.ui.presentation.ComposerSettingsState
 import com.remotecodex.android.ui.presentation.ComposerSettingsToolbarState
 import com.remotecodex.android.ui.presentation.ComposerSelectionOptionState
 import com.remotecodex.android.ui.presentation.ComposerShellToolState
+import com.remotecodex.android.ui.presentation.ComposerShellToolsPanelState
 import com.remotecodex.android.ui.presentation.ComposerShellToolTone
 import com.remotecodex.android.ui.presentation.ComposerSkillErrorState
 import com.remotecodex.android.ui.presentation.ComposerSkillRowState
@@ -94,6 +95,7 @@ import com.remotecodex.android.ui.presentation.buildComposerSettingsState
 import com.remotecodex.android.ui.presentation.buildComposerSettingsToolbarState
 import com.remotecodex.android.ui.presentation.buildComposerShellPromptInputState
 import com.remotecodex.android.ui.presentation.buildComposerShellTools
+import com.remotecodex.android.ui.presentation.buildComposerShellToolsPanelState
 import com.remotecodex.android.ui.presentation.buildComposerSkillsPanelState
 import com.remotecodex.android.ui.presentation.buildComposerStatusStrip
 import com.remotecodex.android.ui.presentation.buildComposerSubmitInputState
@@ -175,6 +177,10 @@ fun ThreadComposer(
         busy = composer.busy,
         shellControl = composer.shellControl,
     )
+    val shellToolsPanelState = buildComposerShellToolsPanelState(
+        open = openMenu == ComposerMenu.ShellTools,
+        tools = shellTools,
+    )
     val toolboxItems = buildComposerToolboxItems(
         items = composer.toolboxItems,
         fastMode = composer.fastMode,
@@ -230,7 +236,7 @@ fun ThreadComposer(
                     settingsState = settingsState,
                     effortOptions = reasoningEffortOptions,
                 )
-                ComposerMenu.ShellTools -> ShellToolsPanel(shellTools = shellTools)
+                ComposerMenu.ShellTools -> ShellToolsPanel(panelState = shellToolsPanelState)
                 null -> Unit
             }
         }
@@ -2192,15 +2198,19 @@ private fun EffortPickerPanel(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ShellToolsPanel(shellTools: List<ComposerShellToolState>) {
-    ComposerMenuSurface(title = "Shell tools", subtitle = "Mobile terminal controls") {
+private fun ShellToolsPanel(panelState: ComposerShellToolsPanelState) {
+    ComposerMenuSurface(title = panelState.title, subtitle = panelState.subtitle) {
         FlowRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
+            maxItemsInEachRow = panelState.columnCount,
         ) {
-            shellTools.forEach { item ->
-                ShellToolPill(item = item)
+            panelState.tools.forEach { item ->
+                ShellToolPill(
+                    item = item,
+                    modifier = Modifier.weight(1f),
+                )
             }
         }
     }
@@ -2451,7 +2461,10 @@ private fun SelectionRow(label: String, detail: String, selected: Boolean) {
 }
 
 @Composable
-private fun ShellToolPill(item: ComposerShellToolState) {
+private fun ShellToolPill(
+    item: ComposerShellToolState,
+    modifier: Modifier = Modifier,
+) {
     val foreground = when (item.tone) {
         ComposerShellToolTone.Neutral -> ThreadColors.ForegroundSoft
         ComposerShellToolTone.Info -> ThreadColors.Info
@@ -2469,7 +2482,7 @@ private fun ShellToolPill(item: ComposerShellToolState) {
     }
     Text(
         text = item.label,
-        modifier = Modifier
+        modifier = modifier
             .clip(RoundedCornerShape(999.dp))
             .background(background)
             .border(1.dp, border, RoundedCornerShape(999.dp))

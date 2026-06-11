@@ -1463,6 +1463,30 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun buildsComposerShellToolsPanelStateGroups() {
+        val tools = buildComposerShellTools(
+            busy = false,
+            shellControl = ComposerShellControlPreview(shellInputEnabled = true, commandRunning = true),
+        )
+
+        assertEquals(
+            ComposerShellToolsPanelState(
+                menuVisible = true,
+                title = "Shell tools",
+                subtitle = "2 clipboard · 7 controls",
+                columnCount = 2,
+                clipboardTools = tools.take(2),
+                controlTools = tools.drop(2),
+                tools = tools,
+            ),
+            buildComposerShellToolsPanelState(
+                open = true,
+                tools = tools,
+            ),
+        )
+    }
+
+    @Test
     fun buildsIdleComposerForkPanelState() {
         assertEquals(
             ComposerForkPanelState(

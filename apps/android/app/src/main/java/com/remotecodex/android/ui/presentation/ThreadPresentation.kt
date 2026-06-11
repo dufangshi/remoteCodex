@@ -324,6 +324,16 @@ data class ComposerShellToolState(
     val enabled: Boolean,
 )
 
+data class ComposerShellToolsPanelState(
+    val menuVisible: Boolean,
+    val title: String,
+    val subtitle: String,
+    val columnCount: Int,
+    val clipboardTools: List<ComposerShellToolState>,
+    val controlTools: List<ComposerShellToolState>,
+    val tools: List<ComposerShellToolState>,
+)
+
 enum class ComposerToolboxItemTone {
     Neutral,
     Active,
@@ -1035,6 +1045,27 @@ fun buildComposerShellTools(
         ComposerShellToolState("TAB", ComposerShellToolKind.Tab, ComposerShellToolTone.Neutral, enabled = shellInputEnabled),
         ComposerShellToolState("UP", ComposerShellToolKind.Up, ComposerShellToolTone.Neutral, enabled = shellInputEnabled),
         ComposerShellToolState("DOWN", ComposerShellToolKind.Down, ComposerShellToolTone.Neutral, enabled = shellInputEnabled),
+    )
+}
+
+fun buildComposerShellToolsPanelState(
+    open: Boolean,
+    tools: List<ComposerShellToolState>,
+): ComposerShellToolsPanelState {
+    val clipboardTools = tools.filter { tool ->
+        tool.kind == ComposerShellToolKind.Paste || tool.kind == ComposerShellToolKind.Copy
+    }
+    val controlTools = tools.filterNot { tool ->
+        tool.kind == ComposerShellToolKind.Paste || tool.kind == ComposerShellToolKind.Copy
+    }
+    return ComposerShellToolsPanelState(
+        menuVisible = open,
+        title = "Shell tools",
+        subtitle = "${clipboardTools.size} clipboard · ${controlTools.size} controls",
+        columnCount = 2,
+        clipboardTools = clipboardTools,
+        controlTools = controlTools,
+        tools = tools,
     )
 }
 
