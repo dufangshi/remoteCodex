@@ -154,6 +154,7 @@ import com.remotecodex.android.ui.theme.ThreadColors
 fun ThreadComposer(
     modifier: Modifier = Modifier,
     composer: ComposerPreview = ComposerPreview(),
+    onSubmitPrompt: ((String) -> Unit)? = null,
 ) {
     var openMenu by remember { mutableStateOf<ComposerMenu?>(null) }
     var activeViewPreview by remember(composer.activeView) { mutableStateOf(composer.activeView) }
@@ -720,12 +721,19 @@ fun ThreadComposer(
                         ComposerPrimaryActionKind.Send -> {
                             if (sendButtonState.enabled) {
                                 val promptText = draftPrompt.text.trim()
-                                promptPreviewStatus = if (promptText.isEmpty()) {
-                                    "Prompt preview sent"
+                                if (onSubmitPrompt != null) {
+                                    if (promptText.isNotEmpty()) {
+                                        onSubmitPrompt(promptText)
+                                        draftPrompt = draftPrompt.copy(text = "", attachments = emptyList())
+                                    }
                                 } else {
-                                    "Prompt preview sent: $promptText"
+                                    promptPreviewStatus = if (promptText.isEmpty()) {
+                                        "Prompt preview sent"
+                                    } else {
+                                        "Prompt preview sent: $promptText"
+                                    }
+                                    draftPrompt = draftPrompt.copy(text = "", attachments = emptyList())
                                 }
-                                draftPrompt = draftPrompt.copy(text = "", attachments = emptyList())
                             }
                         }
                     }

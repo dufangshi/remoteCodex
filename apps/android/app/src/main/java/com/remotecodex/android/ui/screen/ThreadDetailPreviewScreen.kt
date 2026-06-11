@@ -68,6 +68,36 @@ fun ThreadDetailPreviewScreen(
 ) {
     val appShell = ThreadPreviewSample.appShell
     val detail = ThreadPreviewSample.detail
+    ThreadDetailSurface(
+        appShell = appShell,
+        initialDetail = detail,
+        themeMode = themeMode,
+        darkThemeActive = darkThemeActive,
+        supervisorConnection = supervisorConnection,
+        homeSnapshot = homeSnapshot,
+        homeSnapshotLoading = homeSnapshotLoading,
+        homeSnapshotError = homeSnapshotError,
+        onThemeModeSelected = onThemeModeSelected,
+        onChangeConnection = onChangeConnection,
+    )
+}
+
+@Composable
+fun ThreadDetailSurface(
+    appShell: com.remotecodex.android.ui.model.AppShellPreview,
+    initialDetail: ThreadDetailPreview,
+    themeMode: ThemeMode,
+    darkThemeActive: Boolean,
+    supervisorConnection: SupervisorConnectionConfig,
+    homeSnapshot: SupervisorHomeSnapshot?,
+    homeSnapshotLoading: Boolean,
+    homeSnapshotError: String?,
+    onThemeModeSelected: (ThemeMode) -> Unit,
+    onChangeConnection: () -> Unit,
+    onSubmitPrompt: ((String) -> Unit)? = null,
+    submittingPrompt: Boolean = false,
+) {
+    val detail = initialDetail
     var activeRoomId by remember {
         mutableStateOf(detail.rooms.firstOrNull { it.active }?.id ?: detail.rooms.firstOrNull()?.id)
     }
@@ -148,7 +178,10 @@ fun ThreadDetailPreviewScreen(
             }
             if (selectedView == ThreadSurfaceView.Chat) {
                 ThreadComposer(
-                    composer = displayedDetail.composer,
+                    composer = displayedDetail.composer.copy(
+                        busy = displayedDetail.composer.busy || submittingPrompt,
+                    ),
+                    onSubmitPrompt = onSubmitPrompt,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(start = contentStartPadding)

@@ -58,7 +58,7 @@ fun SupervisorHomeScreen(
     themeMode: ThemeMode,
     darkThemeActive: Boolean,
     onThemeModeSelected: (ThemeMode) -> Unit,
-    onOpenThreadPreview: () -> Unit,
+    onOpenThread: (String?) -> Unit,
     onChangeConnection: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -123,7 +123,7 @@ fun SupervisorHomeScreen(
                                 title = if (homeSnapshotLoading) "Loading workspaces" else "No workspaces loaded",
                                 detail = homeSnapshotError ?: "Workspace rows will appear here after `/api/workspaces` returns data.",
                                 actionLabel = "Thread Preview",
-                                onClick = onOpenThreadPreview,
+                                onClick = { onOpenThread(null) },
                             )
                         }
                     } else {
@@ -143,12 +143,12 @@ fun SupervisorHomeScreen(
                                 title = if (homeSnapshotLoading) "Loading threads" else "No threads loaded",
                                 detail = homeSnapshotError ?: "Connect to a supervisor and open a thread preview while the list endpoint is empty.",
                                 actionLabel = "Open Preview",
-                                onClick = onOpenThreadPreview,
+                                onClick = { onOpenThread(null) },
                             )
                         }
                     } else {
                         items(threads.take(8), key = { it.id }) { thread ->
-                            ThreadSummaryRow(thread = thread, onClick = onOpenThreadPreview)
+                            ThreadSummaryRow(thread = thread, onClick = { onOpenThread(thread.id) })
                         }
                     }
                 }
@@ -160,7 +160,7 @@ fun SupervisorHomeScreen(
                         ShellProcessSummaryRow(
                             process = process,
                             activeProcessId = detail.shellPreview.activeProcessId,
-                            onClick = onOpenThreadPreview,
+                            onClick = { onOpenThread(null) },
                         )
                     }
                     item {
@@ -168,7 +168,7 @@ fun SupervisorHomeScreen(
                             title = "Shell adapter pending",
                             detail = "Open the thread preview to inspect current native shell controls while backend shell actions are being wired.",
                             actionLabel = "Open Shell",
-                            onClick = onOpenThreadPreview,
+                            onClick = { onOpenThread(null) },
                         )
                     }
                 }

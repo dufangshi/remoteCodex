@@ -13,7 +13,7 @@ import com.remotecodex.android.api.SupervisorThreadSummary
 import com.remotecodex.android.api.SupervisorWorkspaceSummary
 import com.remotecodex.android.settings.ThemeMode
 import com.remotecodex.android.ui.theme.RemoteCodexTheme
-import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -25,9 +25,9 @@ class SupervisorHomeScreenTest {
 
     @Test
     fun homeShowsNavigationDestinationsAndOpensThreadPreview() {
-        var openedThreadPreview = false
+        var openedThreadId: String? = null
 
-        setHomeContent(onOpenThreadPreview = { openedThreadPreview = true })
+        setHomeContent(onOpenThread = { openedThreadId = it })
 
         composeRule.onNodeWithText("Remote Codex").assertExists()
         composeRule.onNodeWithContentDescription("Open Workspaces").assertExists()
@@ -39,7 +39,7 @@ class SupervisorHomeScreenTest {
         composeRule.onNodeWithText("Android native thread client").assertExists()
         composeRule.onNodeWithContentDescription("Open thread Android native thread client").performClick()
 
-        assertTrue(openedThreadPreview)
+        assertEquals("thread-1", openedThreadId)
 
         composeRule.onNodeWithContentDescription("Open Shells").performClick()
         composeRule.onNodeWithText("Build shell").assertExists()
@@ -56,7 +56,7 @@ class SupervisorHomeScreenTest {
         composeRule.onNodeWithContentDescription("Import plugin").assertExists()
     }
 
-    private fun setHomeContent(onOpenThreadPreview: () -> Unit = {}) {
+    private fun setHomeContent(onOpenThread: (String?) -> Unit = {}) {
         composeRule.setContent {
             RemoteCodexTheme(dark = false) {
                 SupervisorHomeScreen(
@@ -91,7 +91,7 @@ class SupervisorHomeScreenTest {
                     themeMode = ThemeMode.System,
                     darkThemeActive = false,
                     onThemeModeSelected = {},
-                    onOpenThreadPreview = onOpenThreadPreview,
+                    onOpenThread = onOpenThread,
                     onChangeConnection = {},
                 )
             }

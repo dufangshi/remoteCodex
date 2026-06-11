@@ -170,9 +170,26 @@ data class SupervisorThreadTurnItem(
     val text: String,
 )
 
+data class SupervisorTokenBreakdown(
+    val inputTokens: Int,
+    val cachedInputTokens: Int,
+    val outputTokens: Int,
+    val reasoningOutputTokens: Int,
+)
+
+data class SupervisorThreadTurnTokenUsage(
+    val total: SupervisorTokenBreakdown,
+    val last: SupervisorTokenBreakdown,
+    val modelContextWindow: Int?,
+)
+
 data class SupervisorThreadTurn(
     val id: String,
+    val startedAt: String?,
     val status: String,
+    val error: String?,
+    val model: String?,
+    val tokenUsage: SupervisorThreadTurnTokenUsage?,
     val items: List<SupervisorThreadTurnItem>,
 )
 

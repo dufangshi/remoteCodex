@@ -17,6 +17,7 @@ import com.remotecodex.android.settings.AppSettingsRepository
 import com.remotecodex.android.settings.ThemeMode
 import com.remotecodex.android.ui.screen.SupervisorConnectionSetupScreen
 import com.remotecodex.android.ui.screen.SupervisorHomeScreen
+import com.remotecodex.android.ui.screen.ThreadDetailScreen
 import com.remotecodex.android.ui.screen.ThreadDetailPreviewScreen
 import com.remotecodex.android.ui.theme.RemoteCodexTheme
 import kotlinx.coroutines.Dispatchers
@@ -35,7 +36,7 @@ class MainActivity : ComponentActivity() {
             var supervisorConnection by remember {
                 mutableStateOf(settingsRepository.readSupervisorConnection())
             }
-            var connectedRoute by remember { mutableStateOf(ConnectedRoute.Home) }
+            var connectedRoute by remember { mutableStateOf<ConnectedRoute>(ConnectedRoute.Home) }
             var homeSnapshot by remember { mutableStateOf<SupervisorHomeSnapshot?>(null) }
             var homeSnapshotLoading by remember { mutableStateOf(false) }
             var homeSnapshotError by remember { mutableStateOf<String?>(null) }
@@ -81,7 +82,10 @@ class MainActivity : ComponentActivity() {
                                 themeMode = nextMode
                                 settingsRepository.writeThemeMode(nextMode)
                             },
-                            onOpenThreadPreview = { connectedRoute = ConnectedRoute.ThreadPreview },
+                            onOpenThread = { threadId ->
+                                connectedRoute = threadId?.let(ConnectedRoute::ThreadDetail)
+                                    ?: ConnectedRoute.ThreadPreview
+                            },
                             onChangeConnection = {
                                 settingsRepository.clearSupervisorConnection()
                                 homeSnapshot = null
@@ -111,6 +115,28 @@ class MainActivity : ComponentActivity() {
                                 supervisorConnection = null
                             },
                         )
+                        is ConnectedRoute.ThreadDetail -> ThreadDetailScreen(
+                            threadId = (connectedRoute as ConnectedRoute.ThreadDetail).threadId,
+                            themeMode = themeMode,
+                            darkThemeActive = darkThemeActive,
+                            supervisorConnection = connection,
+                            homeSnapshot = homeSnapshot,
+                            homeSnapshotLoading = homeSnapshotLoading,
+                            homeSnapshotError = homeSnapshotError,
+                            onThemeModeSelected = { nextMode ->
+                                themeMode = nextMode
+                                settingsRepository.writeThemeMode(nextMode)
+                            },
+                            onChangeConnection = {
+                                settingsRepository.clearSupervisorConnection()
+                                homeSnapshot = null
+                                homeSnapshotError = null
+                                homeSnapshotLoading = false
+                                connectedRoute = ConnectedRoute.Home
+                                supervisorConnection = null
+                            },
+                            onBackToHome = { connectedRoute = ConnectedRoute.Home },
+                        )
                     }
                 }
             }
@@ -118,7 +144,8 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class ConnectedRoute {
-    Home,
-    ThreadPreview,
+private sealed interface ConnectedRoute {
+    data object Home : ConnectedRoute
+    data object ThreadPreview : ConnectedRoute
+    data class ThreadDetail(val threadId: String) : ConnectedRoute
 }

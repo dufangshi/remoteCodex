@@ -371,8 +371,33 @@ private fun JSONObject.toThreadTurn(): SupervisorThreadTurn {
     val itemsJson = optJSONArray("items") ?: org.json.JSONArray()
     return SupervisorThreadTurn(
         id = optString("id"),
+        startedAt = optNullableString("startedAt"),
         status = optString("status"),
+        error = optNullableString("error"),
+        model = optNullableString("model"),
+        tokenUsage = optJSONObject("tokenUsage")?.toThreadTurnTokenUsage(),
         items = List(itemsJson.length()) { index -> itemsJson.getJSONObject(index).toThreadTurnItem() },
+    )
+}
+
+private fun JSONObject.toThreadTurnTokenUsage(): SupervisorThreadTurnTokenUsage {
+    return SupervisorThreadTurnTokenUsage(
+        total = getJSONObject("total").toTokenBreakdown(),
+        last = getJSONObject("last").toTokenBreakdown(),
+        modelContextWindow = if (has("modelContextWindow") && !isNull("modelContextWindow")) {
+            optInt("modelContextWindow")
+        } else {
+            null
+        },
+    )
+}
+
+private fun JSONObject.toTokenBreakdown(): SupervisorTokenBreakdown {
+    return SupervisorTokenBreakdown(
+        inputTokens = optInt("inputTokens", 0),
+        cachedInputTokens = optInt("cachedInputTokens", 0),
+        outputTokens = optInt("outputTokens", 0),
+        reasoningOutputTokens = optInt("reasoningOutputTokens", 0),
     )
 }
 
