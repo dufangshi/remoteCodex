@@ -764,7 +764,7 @@ function shouldForwardSocketEvent(
   return 'threadId' in event && event.threadId === threadId;
 }
 
-function relayRequestBody(body: unknown) {
+export function relayRequestBody(body: unknown) {
   if (body === undefined || body === null) {
     return null;
   }
@@ -780,10 +780,15 @@ function relayRequestBody(body: unknown) {
   return JSON.stringify(body);
 }
 
-function relayRequestHeaders(headers: Record<string, string | string[] | undefined>) {
+export function relayRequestHeaders(headers: Record<string, string | string[] | undefined>) {
   const output: Record<string, string> = {};
   for (const [name, value] of Object.entries(headers)) {
-    if (name.toLowerCase() === 'authorization') {
+    const lower = name.toLowerCase();
+    if (
+      lower === 'authorization' ||
+      lower === 'content-length' ||
+      lower === 'transfer-encoding'
+    ) {
       continue;
     }
     if (Array.isArray(value)) {

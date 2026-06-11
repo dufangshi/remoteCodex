@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { buildRelayServer } from './app';
+import { buildRelayServer, relayRequestBody, relayRequestHeaders } from './app';
 import type { RelayServerConfig } from './config';
 import { RelayRequestBroker } from './request-broker';
 
@@ -86,6 +86,25 @@ describe('relay server', () => {
     });
 
     await app.close();
+  });
+
+  it('normalizes relayed request headers and parsed JSON bodies', () => {
+    expect(
+      relayRequestHeaders({
+        authorization: 'Bearer client-token',
+        'content-length': '999',
+        'transfer-encoding': 'chunked',
+        'content-type': 'application/json',
+        accept: ['application/json', 'text/plain'],
+      }),
+    ).toEqual({
+      'content-type': 'application/json',
+      accept: 'application/json, text/plain',
+    });
+
+    expect(relayRequestBody({ absPath: '/repo', label: 'Android E2E' })).toBe(
+      '{"absPath":"/repo","label":"Android E2E"}',
+    );
   });
 
   it('registers users and lets them create relay devices', async () => {
