@@ -749,6 +749,14 @@ class ThreadPresentationTest {
                 ),
                 queuedCountLabel = "2 queued attachments",
                 emptyMessage = null,
+                previewLifecycle = ComposerAttachmentPreviewLifecycleState(
+                    previewablePhotoClientIds = listOf("photo"),
+                    clearsPreviewsInShellView = false,
+                    reusesCachedPreviewUrls = true,
+                    revokesRemovedPreviewUrls = true,
+                    revokesPreviewUrlsOnDispose = true,
+                    stateDescription = "1 photo preview",
+                ),
             ),
             buildComposerAttachmentPanelState(
                 open = true,
@@ -796,6 +804,14 @@ class ThreadPresentationTest {
                 queuedAttachments = emptyList(),
                 queuedCountLabel = "No queued attachments",
                 emptyMessage = "No queued attachments.",
+                previewLifecycle = ComposerAttachmentPreviewLifecycleState(
+                    previewablePhotoClientIds = emptyList(),
+                    clearsPreviewsInShellView = false,
+                    reusesCachedPreviewUrls = true,
+                    revokesRemovedPreviewUrls = true,
+                    revokesPreviewUrlsOnDispose = true,
+                    stateDescription = "No photo previews",
+                ),
             ),
             buildComposerAttachmentPanelState(
                 open = false,
@@ -825,6 +841,59 @@ class ThreadPresentationTest {
         assertEquals(listOf("Photo", "File"), state.actions.map { it.label })
         assertEquals("1 queued attachment", state.queuedCountLabel)
         assertEquals(null, state.emptyMessage)
+    }
+
+    @Test
+    fun buildsAttachmentPreviewLifecycleForPhotosAndShellView() {
+        val attachments = listOf(
+            ComposerPromptAttachmentPreview(
+                clientId = "photo-a",
+                kind = ComposerAttachmentKindPreview.Photo,
+                name = "a.png",
+                placeholder = "[PHOTO a.png]",
+            ),
+            ComposerPromptAttachmentPreview(
+                clientId = "file-a",
+                kind = ComposerAttachmentKindPreview.File,
+                name = "a.txt",
+                placeholder = "[FILE a.txt]",
+            ),
+            ComposerPromptAttachmentPreview(
+                clientId = "photo-b",
+                kind = ComposerAttachmentKindPreview.Photo,
+                name = "b.png",
+                placeholder = "[PHOTO b.png]",
+            ),
+        )
+
+        assertEquals(
+            ComposerAttachmentPreviewLifecycleState(
+                previewablePhotoClientIds = listOf("photo-a", "photo-b"),
+                clearsPreviewsInShellView = false,
+                reusesCachedPreviewUrls = true,
+                revokesRemovedPreviewUrls = true,
+                revokesPreviewUrlsOnDispose = true,
+                stateDescription = "2 photo previews",
+            ),
+            buildComposerAttachmentPreviewLifecycleState(
+                attachments = attachments,
+                isShellView = false,
+            ),
+        )
+        assertEquals(
+            ComposerAttachmentPreviewLifecycleState(
+                previewablePhotoClientIds = emptyList(),
+                clearsPreviewsInShellView = true,
+                reusesCachedPreviewUrls = true,
+                revokesRemovedPreviewUrls = true,
+                revokesPreviewUrlsOnDispose = true,
+                stateDescription = "Attachment previews cleared in shell view",
+            ),
+            buildComposerAttachmentPreviewLifecycleState(
+                attachments = attachments,
+                isShellView = true,
+            ),
+        )
     }
 
     @Test

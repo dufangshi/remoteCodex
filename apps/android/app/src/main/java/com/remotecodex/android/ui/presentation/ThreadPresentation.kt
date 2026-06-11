@@ -332,6 +332,16 @@ data class ComposerAttachmentPanelState(
     val queuedAttachments: List<ComposerPromptAttachmentState>,
     val queuedCountLabel: String,
     val emptyMessage: String?,
+    val previewLifecycle: ComposerAttachmentPreviewLifecycleState,
+)
+
+data class ComposerAttachmentPreviewLifecycleState(
+    val previewablePhotoClientIds: List<String>,
+    val clearsPreviewsInShellView: Boolean,
+    val reusesCachedPreviewUrls: Boolean,
+    val revokesRemovedPreviewUrls: Boolean,
+    val revokesPreviewUrlsOnDispose: Boolean,
+    val stateDescription: String,
 )
 
 data class ComposerShellToolState(
@@ -1586,6 +1596,7 @@ fun buildComposerAttachmentActions(): List<ComposerAttachmentActionState> {
 fun buildComposerAttachmentPanelState(
     open: Boolean,
     prompt: ComposerPromptPreview,
+    isShellView: Boolean = false,
 ): ComposerAttachmentPanelState {
     val queuedAttachments = prompt.attachments.map(::buildComposerPromptAttachmentState)
     return ComposerAttachmentPanelState(
@@ -1602,6 +1613,36 @@ fun buildComposerAttachmentPanelState(
             else -> "${queuedAttachments.size} queued attachments"
         },
         emptyMessage = if (queuedAttachments.isEmpty()) "No queued attachments." else null,
+        previewLifecycle = buildComposerAttachmentPreviewLifecycleState(
+            attachments = prompt.attachments,
+            isShellView = isShellView,
+        ),
+    )
+}
+
+fun buildComposerAttachmentPreviewLifecycleState(
+    attachments: List<ComposerPromptAttachmentPreview>,
+    isShellView: Boolean,
+): ComposerAttachmentPreviewLifecycleState {
+    val previewablePhotoClientIds = if (isShellView) {
+        emptyList()
+    } else {
+        attachments
+            .filter { attachment -> attachment.kind == com.remotecodex.android.ui.model.ComposerAttachmentKindPreview.Photo }
+            .map { attachment -> attachment.clientId }
+    }
+    return ComposerAttachmentPreviewLifecycleState(
+        previewablePhotoClientIds = previewablePhotoClientIds,
+        clearsPreviewsInShellView = isShellView,
+        reusesCachedPreviewUrls = true,
+        revokesRemovedPreviewUrls = true,
+        revokesPreviewUrlsOnDispose = true,
+        stateDescription = when {
+            isShellView -> "Attachment previews cleared in shell view"
+            previewablePhotoClientIds.isEmpty() -> "No photo previews"
+            previewablePhotoClientIds.size == 1 -> "1 photo preview"
+            else -> "${previewablePhotoClientIds.size} photo previews"
+        },
     )
 }
 
