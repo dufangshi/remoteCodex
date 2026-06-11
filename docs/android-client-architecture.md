@@ -185,7 +185,7 @@ The visual direction is close to the web mobile thread view, but not a literal D
 
 ### Android Shell Scope
 
-Shell and terminal access are intentionally paused for Android because exposing a remote command surface needs a separate product and security decision. Existing shell API adapters, presentation models, and `ShellPanel.kt` stay in the tree for now, but Android keeps `AndroidFeatureFlags.ShellEnabled = false`, hides shell destinations and composer controls, skips shell state loading by default, and does not call backend shell APIs in the normal thread-detail path. Future work should treat shell as a policy-gated feature rather than a parity requirement.
+Shell and terminal access are intentionally paused for Android because exposing a remote command surface needs a separate product and security decision. Existing shell API adapters, presentation models, and `ShellPanel.kt` stay in the tree for now, but Android keeps `AndroidFeatureFlags.ShellEnabled = false`, hides shell destinations and composer controls, skips shell state loading by default, and does not call backend shell APIs in the normal thread-detail path. Shell is not part of the active Android parity backlog; future work should only re-enable it behind an explicit policy and permission model.
 
 Still open:
 
