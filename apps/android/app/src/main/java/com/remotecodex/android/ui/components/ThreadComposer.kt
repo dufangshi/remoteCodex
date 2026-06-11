@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,6 +45,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.ui.model.ComposerActiveView
@@ -143,6 +145,8 @@ import com.remotecodex.android.ui.presentation.buildComposerStatusStrip
 import com.remotecodex.android.ui.presentation.buildComposerSubmitInputState
 import com.remotecodex.android.ui.presentation.buildComposerToolbarState
 import com.remotecodex.android.ui.presentation.buildComposerToolboxItems
+import com.remotecodex.android.ui.presentation.formatGoalTokenBudgetThousands
+import com.remotecodex.android.ui.presentation.parseGoalTokenBudgetThousands
 import com.remotecodex.android.ui.theme.ThreadColors
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -174,7 +178,11 @@ fun ThreadComposer(
         mutableStateOf(composer.goalComposeMode || composer.goalPanel.composeMode)
     }
     var goalLocalError by remember(composer.goalPanel.localError) { mutableStateOf(composer.goalPanel.localError) }
+    var goalTokenBudgetDraft by remember(composer.goalPanel.tokenBudget) {
+        mutableStateOf(formatGoalTokenBudgetThousands(composer.goalPanel.tokenBudget))
+    }
     var goalPreviewStatus by remember { mutableStateOf<String?>(null) }
+    var goalBudgetPreviewStatus by remember { mutableStateOf<String?>(null) }
     var currentGoalPreview by remember(composer.goalPanel.currentGoal) { mutableStateOf(composer.goalPanel.currentGoal) }
     var promptPreviewStatus by remember { mutableStateOf<String?>(null) }
     var fastModePreviewStatus by remember { mutableStateOf<String?>(null) }
@@ -547,6 +555,9 @@ fun ThreadComposer(
         goalPreviewStatus?.let { status ->
             ComposerPreviewFeedback(message = status)
         }
+        goalBudgetPreviewStatus?.let { status ->
+            ComposerPreviewFeedback(message = status)
+        }
         promptPreviewStatus?.let { status ->
             ComposerPreviewFeedback(message = status)
         }
@@ -594,6 +605,7 @@ fun ThreadComposer(
             shellPromptInputState = shellPromptInputState,
             shellDraft = shellDraft,
             goalPanelState = goalPanelState,
+            goalTokenBudgetDraft = goalTokenBudgetDraft,
             onRemoveAttachment = removeAttachmentPreview,
             onPromptChange = { value ->
                 draftPrompt = draftPrompt.copy(
@@ -626,22 +638,32 @@ fun ThreadComposer(
                 goalComposeMode = false
                 goalLocalError = null
             },
+            onGoalTokenBudgetChange = { value ->
+                goalTokenBudgetDraft = value
+                goalLocalError = null
+            },
             onSubmitGoal = {
                 val objective = draftPrompt.text.trim()
                 if (objective.isBlank()) {
                     goalLocalError = "Goal objective cannot be empty."
                     goalPreviewStatus = null
+                    goalBudgetPreviewStatus = null
                 } else if (!composer.goalPanel.updateAvailable) {
                     goalLocalError = "/goal is unavailable in this view."
                     goalPreviewStatus = null
+                    goalBudgetPreviewStatus = null
                 } else {
                     goalLocalError = null
                     goalComposeMode = false
                     goalPreviewStatus = "Goal preview set: $objective"
+                    val tokenBudget = goalTokenBudgetDraft.toPreviewGoalTokenBudget()
+                    goalBudgetPreviewStatus = tokenBudget?.let {
+                        "Goal token budget preview: ${formatGoalTokenBudgetThousands(it)}k budget"
+                    }
                     currentGoalPreview = ThreadGoalPreview(
                         objective = objective,
                         status = ThreadGoalStatusPreview.Active,
-                        tokenBudget = composer.goalPanel.tokenBudget,
+                        tokenBudget = tokenBudget,
                         tokensUsed = 0,
                     )
                     draftPrompt = draftPrompt.copy(text = "", attachments = emptyList())
@@ -932,12 +954,14 @@ private fun ComposerFrameSlotsPreview(
     shellPromptInputState: ComposerShellPromptInputState?,
     shellDraft: String,
     goalPanelState: ComposerGoalPanelState,
+    goalTokenBudgetDraft: String,
     onRemoveAttachment: (ComposerPromptAttachmentState) -> Unit,
     onPromptChange: (String) -> Unit,
     onShellDraftChange: (String) -> Unit,
     onShellInterrupt: () -> Unit,
     onShellSend: () -> Unit,
     onCancelGoal: () -> Unit,
+    onGoalTokenBudgetChange: (String) -> Unit,
     onSubmitGoal: () -> Unit,
     submitReady: Boolean,
 ) {
@@ -957,6 +981,8 @@ private fun ComposerFrameSlotsPreview(
         if (frameState.showGoalSlot) {
             GoalComposePreviewCard(
                 state = goalPanelState.composeCard,
+                tokenBudgetDraft = goalTokenBudgetDraft,
+                onTokenBudgetChange = onGoalTokenBudgetChange,
                 onCancelGoal = onCancelGoal,
                 onSubmitGoal = onSubmitGoal,
             )
@@ -2122,6 +2148,8 @@ private fun GoalPreviewGroup(goalPanelState: ComposerGoalPanelState) {
 @Composable
 private fun GoalComposePreviewCard(
     state: ComposerGoalComposeCardState,
+    tokenBudgetDraft: String = state.tokenBudgetLabel,
+    onTokenBudgetChange: ((String) -> Unit)? = null,
     onCancelGoal: (() -> Unit)? = null,
     onSubmitGoal: (() -> Unit)? = null,
 ) {
@@ -2149,13 +2177,12 @@ private fun GoalComposePreviewCard(
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
             )
-            GraphBadge(
-                label = if (state.tokenBudgetLabel.isBlank()) {
-                    "${state.tokenBudgetInputLabel}: ${state.tokenBudgetPlaceholder}"
-                } else {
-                    "${state.tokenBudgetInputLabel}: ${state.tokenBudgetLabel}"
-                },
-                variant = GraphBadgeVariant.Outline,
+            GoalTokenBudgetInput(
+                label = state.tokenBudgetInputLabel,
+                value = tokenBudgetDraft,
+                placeholder = state.tokenBudgetPlaceholder,
+                onValueChange = onTokenBudgetChange,
+                modifier = Modifier.weight(1f),
             )
         }
         Text(
@@ -2194,6 +2221,67 @@ private fun GoalComposePreviewCard(
                     variant = if (state.primaryEnabled) GraphBadgeVariant.Default else GraphBadgeVariant.Outline,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun GoalTokenBudgetInput(
+    label: String,
+    value: String,
+    placeholder: String,
+    onValueChange: ((String) -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = label,
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (onValueChange == null) {
+            GraphBadge(
+                label = value.ifBlank { placeholder },
+                variant = GraphBadgeVariant.Outline,
+            )
+        } else {
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                modifier = Modifier
+                    .width(92.dp)
+                    .semantics {
+                        contentDescription = "Goal token budget"
+                    },
+                singleLine = true,
+                placeholder = {
+                    Text(
+                        text = placeholder,
+                        color = ThreadColors.ForegroundMuted,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                },
+                textStyle = MaterialTheme.typography.labelSmall.copy(color = ThreadColors.CodeForeground),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                shape = RoundedCornerShape(999.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = ThreadColors.CodeForeground,
+                    unfocusedTextColor = ThreadColors.CodeForeground,
+                    focusedContainerColor = ThreadColors.SurfaceStrong,
+                    unfocusedContainerColor = ThreadColors.SurfaceStrong,
+                    cursorColor = ThreadColors.Primary,
+                    focusedBorderColor = ThreadColors.Primary.copy(alpha = 0.58f),
+                    unfocusedBorderColor = ThreadColors.Border,
+                    focusedPlaceholderColor = ThreadColors.ForegroundMuted,
+                    unfocusedPlaceholderColor = ThreadColors.ForegroundMuted,
+                ),
+            )
         }
     }
 }
@@ -3874,6 +3962,10 @@ private fun ComposerMcpFormState.toPreviewMcpServer(): ComposerMcpServerPreview 
 private fun String.extractMcpServerName(): String? {
     val match = Regex("""\[mcp_servers\.([A-Za-z0-9_-]+)]""").find(this)
     return match?.groupValues?.getOrNull(1)?.takeIf { it.isNotBlank() }
+}
+
+private fun String.toPreviewGoalTokenBudget(): Int? {
+    return takeIf { it.isNotBlank() }?.let(::parseGoalTokenBudgetThousands)
 }
 
 private fun ComposerHookSourcePreview.toHookScopePreview(): ComposerHookScopePreview {

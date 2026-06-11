@@ -5,12 +5,14 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.remotecodex.android.ui.model.ComposerActiveView
@@ -525,7 +527,8 @@ class ThreadComposerStateTest {
         composeRule.onNodeWithContentDescription("Open slash toolbox").performClick()
         composeRule.onNodeWithContentDescription("Goal").performClick()
 
-        composeRule.onNodeWithText("Max tokens (k): 12.5").assertExists()
+        composeRule.onNodeWithText("Max tokens (k)").assertExists()
+        composeRule.onNodeWithContentDescription("Goal token budget").assertTextEquals("12.5")
         composeRule.onNodeWithText("Describe the goal the backend should continue working toward.").assertExists()
         composeRule.onNodeWithText("Set goal").assertExists()
         composeRule.onNodeWithContentDescription("Submit goal").assertExists()
@@ -534,7 +537,7 @@ class ThreadComposerStateTest {
         composeRule.onNodeWithContentDescription("Cancel").performClick()
 
         composeRule.onNodeWithContentDescription("Send Prompt").assertExists()
-        composeRule.onNodeWithText("Max tokens (k): 12.5").assertDoesNotExist()
+        composeRule.onNodeWithText("Max tokens (k)").assertDoesNotExist()
     }
 
     @Test
@@ -551,7 +554,28 @@ class ThreadComposerStateTest {
         composeRule.onNodeWithContentDescription("Submit goal").performClick()
 
         composeRule.onNodeWithText("Goal objective cannot be empty.").assertExists()
-        composeRule.onNodeWithText("Max tokens (k): 12.5").assertExists()
+        composeRule.onNodeWithContentDescription("Goal token budget").assertTextEquals("12.5")
+    }
+
+    @Test
+    fun goalTokenBudgetInputUpdatesPreviewState() {
+        setComposerContent(
+            composer = ComposerPreview(
+                prompt = ComposerPromptPreview(
+                    text = "Keep composer goal budget editable",
+                ),
+            ),
+        )
+
+        composeRule.onNodeWithContentDescription("Open slash toolbox").performClick()
+        composeRule.onNodeWithContentDescription("Goal").performClick()
+
+        composeRule.onNodeWithContentDescription("Goal token budget").performTextReplacement("32")
+        composeRule.onNodeWithContentDescription("Goal token budget").assertTextEquals("32")
+        composeRule.onNodeWithContentDescription("Submit goal").performClick()
+
+        composeRule.onNodeWithText("Goal preview set: Keep composer goal budget editable").assertExists()
+        composeRule.onNodeWithText("Goal token budget preview: 32k budget").assertExists()
     }
 
     @Test
@@ -572,7 +596,7 @@ class ThreadComposerStateTest {
         composeRule.onNodeWithText("Goal preview set: Ship the native Android goal lifecycle").assertExists()
         composeRule.onNodeWithText("Ask the backend to inspect, modify, or explain code...").assertExists()
         composeRule.onNodeWithText("No files").assertExists()
-        composeRule.onNodeWithText("Max tokens (k): 12.5").assertDoesNotExist()
+        composeRule.onNodeWithText("Max tokens (k)").assertDoesNotExist()
     }
 
     private fun setComposerContent(composer: ComposerPreview = ComposerPreview()) {
