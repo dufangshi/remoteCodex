@@ -1,5 +1,6 @@
 package com.remotecodex.android.ui.presentation
 
+import com.remotecodex.android.ui.model.HistoryItemKind
 import com.remotecodex.android.ui.model.ThreadStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -180,5 +181,14 @@ class ThreadPresentationTest {
             ),
             summarizeInlinePreviewText("first\r\nsecond"),
         )
+    }
+
+    @Test
+    fun labelsGroupedHistoryRowsByKind() {
+        assertEquals("Step 1", historyGroupRowOrdinalLabel(HistoryItemKind.Command, 0))
+        assertEquals("Search 2", historyGroupRowOrdinalLabel(HistoryItemKind.WebSearch, 1))
+        assertEquals("Read 3", historyGroupRowOrdinalLabel(HistoryItemKind.FileRead, 2))
+        assertNull(historyGroupRowOrdinalLabel(HistoryItemKind.FileChange, 0))
+        assertEquals("Item 4", historyGroupRowOrdinalLabel(HistoryItemKind.Artifact, 3))
     }
 }

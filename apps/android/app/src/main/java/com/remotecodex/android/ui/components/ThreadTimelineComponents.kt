@@ -69,6 +69,7 @@ import com.remotecodex.android.ui.presentation.FileChangeSummaryTone
 import com.remotecodex.android.ui.presentation.fileChangeSummarySegments
 import com.remotecodex.android.ui.presentation.formatTrailingPathLabel
 import com.remotecodex.android.ui.presentation.graphChatMessageStatusModel
+import com.remotecodex.android.ui.presentation.historyGroupRowOrdinalLabel
 import com.remotecodex.android.ui.presentation.parseUserMessageSegments
 import com.remotecodex.android.ui.presentation.planStepStatusLabel
 import com.remotecodex.android.ui.presentation.summarizeInlinePreviewText
@@ -911,17 +912,19 @@ private fun HistoryGroupRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(7.dp),
         ) {
-            Text(
-                text = "Step ${index + 1}",
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(colors.foreground.copy(alpha = 0.10f))
-                    .border(1.dp, colors.foreground.copy(alpha = 0.22f), RoundedCornerShape(999.dp))
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                color = colors.foreground,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-            )
+            historyGroupRowOrdinalLabel(item.kind, index)?.let { label ->
+                Text(
+                    text = label,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(colors.foreground.copy(alpha = 0.10f))
+                        .border(1.dp, colors.foreground.copy(alpha = 0.22f), RoundedCornerShape(999.dp))
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    color = colors.foreground,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
             Text(
                 text = item.title,
                 modifier = Modifier.weight(1f),

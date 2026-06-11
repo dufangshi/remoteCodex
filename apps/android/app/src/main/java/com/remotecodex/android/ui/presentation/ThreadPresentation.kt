@@ -135,6 +135,17 @@ fun historyItemShortLabel(kind: HistoryItemKind): String {
     }
 }
 
+fun historyGroupRowOrdinalLabel(kind: HistoryItemKind, index: Int): String? {
+    val number = index + 1
+    return when (kind) {
+        HistoryItemKind.Command -> "Step $number"
+        HistoryItemKind.WebSearch -> "Search $number"
+        HistoryItemKind.FileRead -> "Read $number"
+        HistoryItemKind.FileChange -> null
+        else -> "Item $number"
+    }
+}
+
 fun isScrollableHistoryItem(kind: HistoryItemKind): Boolean {
     return kind == HistoryItemKind.Command || kind == HistoryItemKind.Context
 }
