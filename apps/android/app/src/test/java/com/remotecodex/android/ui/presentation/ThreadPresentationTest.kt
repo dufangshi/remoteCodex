@@ -191,4 +191,42 @@ class ThreadPresentationTest {
         assertNull(historyGroupRowOrdinalLabel(HistoryItemKind.FileChange, 0))
         assertEquals("Item 4", historyGroupRowOrdinalLabel(HistoryItemKind.Artifact, 3))
     }
+
+    @Test
+    fun summarizesHookOutputWithHookLabelAndGap() {
+        assertEquals(
+            HookHistorySummary(
+                hookLabel = "PreToolUse hook",
+                firstLine = "lint-command",
+                showGap = true,
+                outputBacked = true,
+            ),
+            hookHistorySummary(
+                text = "PreToolUse",
+                hookEventLabel = "PreToolUse",
+                hookStatusMessage = "Allowed",
+                previewText = "Allowed",
+                hookOutput = "lint-command\npolicy: allow",
+            ),
+        )
+    }
+
+    @Test
+    fun summarizesHookStatusWithoutDuplicateLabel() {
+        assertEquals(
+            HookHistorySummary(
+                hookLabel = "PostToolUse hook",
+                firstLine = "PostToolUse hook · Completed with warnings",
+                showGap = false,
+                outputBacked = false,
+            ),
+            hookHistorySummary(
+                text = "fallback hook",
+                hookEventLabel = "PostToolUse",
+                hookStatusMessage = "Completed with warnings",
+                previewText = "Completed with warnings",
+                hookOutput = null,
+            ),
+        )
+    }
 }

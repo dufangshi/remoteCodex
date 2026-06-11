@@ -84,6 +84,9 @@ data class HistoryItemPreview(
     val removedLines: Int? = null,
     val assetPath: String? = null,
     val imageLabel: String? = null,
+    val hookEventLabel: String? = null,
+    val hookStatusMessage: String? = null,
+    val hookOutput: String? = null,
 )
 
 data class HistoryGroupPreview(

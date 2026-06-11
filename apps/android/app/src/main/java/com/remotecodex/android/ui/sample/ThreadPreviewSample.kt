@@ -344,6 +344,17 @@ object ThreadPreviewSample {
                                 assetPath = "apps/android/output/shell-preview.png",
                                 imageLabel = "Shell preview",
                             ),
+                            HistoryItemPreview(
+                                kind = HistoryItemKind.Hook,
+                                title = "PreToolUse_hook",
+                                status = ToolStatus.Completed,
+                                summary = "Command allowed after project hook checks.",
+                                detail = "lint-command\npolicy: allow\nlatency: 42ms",
+                                actionLabel = "Hook Output",
+                                hookEventLabel = "PreToolUse",
+                                hookStatusMessage = "Command allowed after project hook checks.",
+                                hookOutput = "lint-command\npolicy: allow\nlatency: 42ms",
+                            ),
                         ),
                         historyGroups = listOf(
                             HistoryGroupPreview(

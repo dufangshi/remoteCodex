@@ -70,6 +70,7 @@ import com.remotecodex.android.ui.presentation.fileChangeSummarySegments
 import com.remotecodex.android.ui.presentation.formatTrailingPathLabel
 import com.remotecodex.android.ui.presentation.graphChatMessageStatusModel
 import com.remotecodex.android.ui.presentation.historyGroupRowOrdinalLabel
+import com.remotecodex.android.ui.presentation.hookHistorySummary
 import com.remotecodex.android.ui.presentation.parseUserMessageSegments
 import com.remotecodex.android.ui.presentation.planStepStatusLabel
 import com.remotecodex.android.ui.presentation.summarizeInlinePreviewText
@@ -1016,13 +1017,17 @@ private fun HistoryItemCard(
                 )
             }
         }
-        Text(
-            text = historyItemSummary(item),
-            color = ThreadColors.ForegroundSoft,
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
-        )
+        if (item.kind == HistoryItemKind.Hook) {
+            HookHistorySummaryRow(item = item, colors = colors)
+        } else {
+            Text(
+                text = historyItemSummary(item),
+                color = ThreadColors.ForegroundSoft,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         if (running) {
             Row(
                 modifier = Modifier
@@ -1113,6 +1118,57 @@ private fun historyItemCopyText(item: HistoryItemPreview): String {
             appendLine(it)
         }
     }.trim()
+}
+
+@Composable
+private fun HookHistorySummaryRow(
+    item: HistoryItemPreview,
+    colors: HistoryItemColors,
+) {
+    val summary = hookHistorySummary(
+        text = item.summary,
+        hookEventLabel = item.hookEventLabel,
+        hookStatusMessage = item.hookStatusMessage,
+        previewText = item.summary,
+        hookOutput = item.hookOutput,
+    )
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (summary.outputBacked) {
+            Text(
+                text = summary.hookLabel,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(colors.foreground.copy(alpha = 0.10f))
+                    .border(1.dp, colors.foreground.copy(alpha = 0.22f), RoundedCornerShape(999.dp))
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                color = colors.foreground,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+            )
+        }
+        Text(
+            text = summary.firstLine,
+            modifier = Modifier.weight(1f),
+            color = ThreadColors.ForegroundSoft,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (summary.showGap) {
+            Text(
+                text = "...",
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+            )
+        }
+    }
 }
 
 @Composable

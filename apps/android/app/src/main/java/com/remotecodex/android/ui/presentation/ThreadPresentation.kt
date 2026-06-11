@@ -35,6 +35,13 @@ data class InlinePreviewSummary(
     val isTruncated: Boolean,
 )
 
+data class HookHistorySummary(
+    val hookLabel: String,
+    val firstLine: String,
+    val showGap: Boolean,
+    val outputBacked: Boolean,
+)
+
 fun threadStatusLabel(status: ThreadStatus): String {
     return when (status) {
         ThreadStatus.Running -> "Running"
@@ -273,5 +280,50 @@ fun summarizeInlinePreviewText(text: String): InlinePreviewSummary {
         firstLine = firstLine,
         showGap = truncated,
         isTruncated = truncated,
+    )
+}
+
+fun hookHistorySummary(
+    text: String,
+    hookEventLabel: String?,
+    hookStatusMessage: String?,
+    previewText: String?,
+    hookOutput: String?,
+): HookHistorySummary {
+    val outputText = hookOutput
+        ?.lines()
+        ?.map { it.trim() }
+        ?.filter { it.isNotEmpty() }
+        ?.joinToString("\n")
+        ?.trim()
+        .orEmpty()
+    val baseText = text.trim()
+    val hookLabel = hookEventLabel
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?.let { "$it hook" }
+        ?: baseText
+    val status = hookStatusMessage?.trim().orEmpty()
+    val preview = previewText?.trim().orEmpty()
+    val fallbackText = status
+        .ifEmpty { preview.takeIf { it.isNotEmpty() && it != status }.orEmpty() }
+        .ifEmpty { baseText }
+    val summaryText = outputText.ifEmpty {
+        fallbackText.takeIf { it.isNotEmpty() && it != hookLabel } ?: hookLabel
+    }
+    val summary = summarizeInlinePreviewText(summaryText)
+    val firstLine = if (outputText.isNotEmpty()) {
+        summary.firstLine
+    } else if (summary.firstLine.isNotEmpty() && summary.firstLine != hookLabel) {
+        "$hookLabel · ${summary.firstLine}"
+    } else {
+        hookLabel
+    }
+
+    return HookHistorySummary(
+        hookLabel = hookLabel,
+        firstLine = firstLine,
+        showGap = outputText.isNotEmpty() && summary.showGap,
+        outputBacked = outputText.isNotEmpty(),
     )
 }
