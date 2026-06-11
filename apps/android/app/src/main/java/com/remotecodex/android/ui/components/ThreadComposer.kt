@@ -77,6 +77,8 @@ import com.remotecodex.android.ui.presentation.ComposerSkillRowState
 import com.remotecodex.android.ui.presentation.ComposerSkillsPanelState
 import com.remotecodex.android.ui.presentation.ComposerStatusChipModel
 import com.remotecodex.android.ui.presentation.ComposerStatusTone
+import com.remotecodex.android.ui.presentation.ComposerToolboxActionDecisionKind
+import com.remotecodex.android.ui.presentation.ComposerToolboxActionDecisionState
 import com.remotecodex.android.ui.presentation.ComposerToolboxItemState
 import com.remotecodex.android.ui.presentation.ComposerToolboxItemTone
 import com.remotecodex.android.ui.presentation.ComposerToolbarButtonState
@@ -2319,6 +2321,10 @@ private fun ToolboxRow(item: ComposerToolboxItemState) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .semantics {
+                contentDescription = item.label
+                stateDescription = toolboxActionDecisionDescription(item.actionDecision)
+            }
             .clip(RoundedCornerShape(12.dp))
             .background(background)
             .border(1.dp, border, RoundedCornerShape(12.dp))
@@ -2351,6 +2357,34 @@ private fun ToolboxRow(item: ComposerToolboxItemState) {
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+private fun toolboxActionDecisionDescription(
+    decision: ComposerToolboxActionDecisionState,
+): String {
+    return when (decision.kind) {
+        ComposerToolboxActionDecisionKind.ToggleFast -> {
+            if (decision.targetFastMode == true) "Turn fast mode on" else "Turn fast mode off"
+        }
+        ComposerToolboxActionDecisionKind.RunCompact -> "Run compact"
+        ComposerToolboxActionDecisionKind.EnterGoalCompose -> "Enter goal compose"
+        ComposerToolboxActionDecisionKind.ExitGoalCompose -> "Exit goal compose"
+        ComposerToolboxActionDecisionKind.OpenPanel -> "Open ${toolboxPanelLabel(decision)} panel"
+        ComposerToolboxActionDecisionKind.Noop -> "No action"
+    }
+}
+
+private fun toolboxPanelLabel(decision: ComposerToolboxActionDecisionState): String {
+    return when (decision.targetPanel) {
+        ComposerSlashPanelViewState.Fork -> "fork"
+        ComposerSlashPanelViewState.ForkTurns -> "fork turns"
+        ComposerSlashPanelViewState.Skills -> "skills"
+        ComposerSlashPanelViewState.Mcp -> "MCP"
+        ComposerSlashPanelViewState.Hooks -> "hooks"
+        ComposerSlashPanelViewState.Root,
+        null,
+        -> "panel"
     }
 }
 

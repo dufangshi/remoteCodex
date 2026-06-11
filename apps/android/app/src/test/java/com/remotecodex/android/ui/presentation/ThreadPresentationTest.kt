@@ -2067,6 +2067,10 @@ class ThreadPresentationTest {
                     description = "Toggle fast mode",
                     enabled = true,
                     tone = ComposerToolboxItemTone.Active,
+                    actionDecision = ComposerToolboxActionDecisionState(
+                        kind = ComposerToolboxActionDecisionKind.ToggleFast,
+                        targetFastMode = false,
+                    ),
                 ),
                 ComposerToolboxItemState(
                     command = "/compact",
@@ -2075,6 +2079,10 @@ class ThreadPresentationTest {
                     description = "Compact thread",
                     enabled = false,
                     tone = ComposerToolboxItemTone.Disabled,
+                    actionDecision = ComposerToolboxActionDecisionState(
+                        kind = ComposerToolboxActionDecisionKind.RunCompact,
+                        closeMenu = true,
+                    ),
                 ),
                 ComposerToolboxItemState(
                     command = "/goal",
@@ -2083,6 +2091,10 @@ class ThreadPresentationTest {
                     description = "Goal",
                     enabled = true,
                     tone = ComposerToolboxItemTone.Active,
+                    actionDecision = ComposerToolboxActionDecisionState(
+                        kind = ComposerToolboxActionDecisionKind.ExitGoalCompose,
+                        closeMenu = true,
+                    ),
                 ),
                 ComposerToolboxItemState(
                     command = "/fork",
@@ -2091,6 +2103,10 @@ class ThreadPresentationTest {
                     description = "Fork thread",
                     enabled = false,
                     tone = ComposerToolboxItemTone.Disabled,
+                    actionDecision = ComposerToolboxActionDecisionState(
+                        kind = ComposerToolboxActionDecisionKind.OpenPanel,
+                        targetPanel = ComposerSlashPanelViewState.Fork,
+                    ),
                 ),
                 ComposerToolboxItemState(
                     command = "/skills",
@@ -2099,6 +2115,10 @@ class ThreadPresentationTest {
                     description = "Skills",
                     enabled = true,
                     tone = ComposerToolboxItemTone.Neutral,
+                    actionDecision = ComposerToolboxActionDecisionState(
+                        kind = ComposerToolboxActionDecisionKind.OpenPanel,
+                        targetPanel = ComposerSlashPanelViewState.Skills,
+                    ),
                 ),
             ),
             buildComposerToolboxItems(
@@ -2156,6 +2176,10 @@ class ThreadPresentationTest {
                     description = "Fast",
                     enabled = false,
                     tone = ComposerToolboxItemTone.Disabled,
+                    actionDecision = ComposerToolboxActionDecisionState(
+                        kind = ComposerToolboxActionDecisionKind.ToggleFast,
+                        targetFastMode = true,
+                    ),
                 ),
                 ComposerToolboxItemState(
                     command = "/compact",
@@ -2164,6 +2188,10 @@ class ThreadPresentationTest {
                     description = "Compact",
                     enabled = true,
                     tone = ComposerToolboxItemTone.Neutral,
+                    actionDecision = ComposerToolboxActionDecisionState(
+                        kind = ComposerToolboxActionDecisionKind.RunCompact,
+                        closeMenu = true,
+                    ),
                 ),
                 ComposerToolboxItemState(
                     command = "/goal",
@@ -2172,6 +2200,9 @@ class ThreadPresentationTest {
                     description = "Goal",
                     enabled = true,
                     tone = ComposerToolboxItemTone.Neutral,
+                    actionDecision = ComposerToolboxActionDecisionState(
+                        kind = ComposerToolboxActionDecisionKind.EnterGoalCompose,
+                    ),
                 ),
                 ComposerToolboxItemState(
                     command = "/fork",
@@ -2180,6 +2211,10 @@ class ThreadPresentationTest {
                     description = "Fork",
                     enabled = false,
                     tone = ComposerToolboxItemTone.Disabled,
+                    actionDecision = ComposerToolboxActionDecisionState(
+                        kind = ComposerToolboxActionDecisionKind.OpenPanel,
+                        targetPanel = ComposerSlashPanelViewState.Fork,
+                    ),
                 ),
                 ComposerToolboxItemState(
                     command = "/mcp",
@@ -2188,6 +2223,10 @@ class ThreadPresentationTest {
                     description = "MCP",
                     enabled = true,
                     tone = ComposerToolboxItemTone.Neutral,
+                    actionDecision = ComposerToolboxActionDecisionState(
+                        kind = ComposerToolboxActionDecisionKind.OpenPanel,
+                        targetPanel = ComposerSlashPanelViewState.Mcp,
+                    ),
                 ),
                 ComposerToolboxItemState(
                     command = "/hooks",
@@ -2196,6 +2235,10 @@ class ThreadPresentationTest {
                     description = "Hooks",
                     enabled = true,
                     tone = ComposerToolboxItemTone.Neutral,
+                    actionDecision = ComposerToolboxActionDecisionState(
+                        kind = ComposerToolboxActionDecisionKind.OpenPanel,
+                        targetPanel = ComposerSlashPanelViewState.Hooks,
+                    ),
                 ),
             ),
             buildComposerToolboxItems(
@@ -2214,6 +2257,64 @@ class ThreadPresentationTest {
                 busy = false,
                 settingsBusy = true,
                 forkBusy = true,
+            ),
+        )
+    }
+
+    @Test
+    fun buildsComposerToolboxActionDecisionsWithoutSideEffects() {
+        assertEquals(
+            ComposerToolboxActionDecisionState(
+                kind = ComposerToolboxActionDecisionKind.ToggleFast,
+                targetFastMode = false,
+            ),
+            buildComposerToolboxActionDecision(
+                action = ComposerToolboxActionPreview.Fast,
+                fastMode = true,
+                goalComposeMode = false,
+            ),
+        )
+        assertEquals(
+            ComposerToolboxActionDecisionState(
+                kind = ComposerToolboxActionDecisionKind.RunCompact,
+                closeMenu = true,
+            ),
+            buildComposerToolboxActionDecision(
+                action = ComposerToolboxActionPreview.Compact,
+                fastMode = false,
+                goalComposeMode = false,
+            ),
+        )
+        assertEquals(
+            ComposerToolboxActionDecisionState(
+                kind = ComposerToolboxActionDecisionKind.EnterGoalCompose,
+            ),
+            buildComposerToolboxActionDecision(
+                action = ComposerToolboxActionPreview.Goal,
+                fastMode = false,
+                goalComposeMode = false,
+            ),
+        )
+        assertEquals(
+            ComposerToolboxActionDecisionState(
+                kind = ComposerToolboxActionDecisionKind.ExitGoalCompose,
+                closeMenu = true,
+            ),
+            buildComposerToolboxActionDecision(
+                action = ComposerToolboxActionPreview.Goal,
+                fastMode = false,
+                goalComposeMode = true,
+            ),
+        )
+        assertEquals(
+            ComposerToolboxActionDecisionState(
+                kind = ComposerToolboxActionDecisionKind.OpenPanel,
+                targetPanel = ComposerSlashPanelViewState.Skills,
+            ),
+            buildComposerToolboxActionDecision(
+                action = ComposerToolboxActionPreview.Skills,
+                fastMode = false,
+                goalComposeMode = false,
             ),
         )
     }

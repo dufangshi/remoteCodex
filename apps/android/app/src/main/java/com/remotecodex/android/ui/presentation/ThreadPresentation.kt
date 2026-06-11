@@ -341,6 +341,22 @@ enum class ComposerToolboxItemTone {
     Disabled,
 }
 
+enum class ComposerToolboxActionDecisionKind {
+    ToggleFast,
+    RunCompact,
+    EnterGoalCompose,
+    ExitGoalCompose,
+    OpenPanel,
+    Noop,
+}
+
+data class ComposerToolboxActionDecisionState(
+    val kind: ComposerToolboxActionDecisionKind,
+    val targetFastMode: Boolean? = null,
+    val targetPanel: ComposerSlashPanelViewState? = null,
+    val closeMenu: Boolean = false,
+)
+
 enum class ComposerSlashPanelViewState {
     Root,
     Skills,
@@ -357,6 +373,9 @@ data class ComposerToolboxItemState(
     val description: String,
     val enabled: Boolean,
     val tone: ComposerToolboxItemTone,
+    val actionDecision: ComposerToolboxActionDecisionState = ComposerToolboxActionDecisionState(
+        ComposerToolboxActionDecisionKind.Noop,
+    ),
 )
 
 data class ComposerSlashToolboxPanelState(
@@ -957,6 +976,54 @@ fun buildComposerToolboxItems(
                 goalComposeMode = goalComposeMode,
                 goalStatus = goalStatus,
             ),
+            actionDecision = buildComposerToolboxActionDecision(
+                action = item.action,
+                fastMode = fastMode,
+                goalComposeMode = goalComposeMode,
+            ),
+        )
+    }
+}
+
+fun buildComposerToolboxActionDecision(
+    action: ComposerToolboxActionPreview,
+    fastMode: Boolean,
+    goalComposeMode: Boolean,
+): ComposerToolboxActionDecisionState {
+    return when (action) {
+        ComposerToolboxActionPreview.Fast -> ComposerToolboxActionDecisionState(
+            kind = ComposerToolboxActionDecisionKind.ToggleFast,
+            targetFastMode = !fastMode,
+        )
+        ComposerToolboxActionPreview.Compact -> ComposerToolboxActionDecisionState(
+            kind = ComposerToolboxActionDecisionKind.RunCompact,
+            closeMenu = true,
+        )
+        ComposerToolboxActionPreview.Goal -> if (goalComposeMode) {
+            ComposerToolboxActionDecisionState(
+                kind = ComposerToolboxActionDecisionKind.ExitGoalCompose,
+                closeMenu = true,
+            )
+        } else {
+            ComposerToolboxActionDecisionState(
+                kind = ComposerToolboxActionDecisionKind.EnterGoalCompose,
+            )
+        }
+        ComposerToolboxActionPreview.Fork -> ComposerToolboxActionDecisionState(
+            kind = ComposerToolboxActionDecisionKind.OpenPanel,
+            targetPanel = ComposerSlashPanelViewState.Fork,
+        )
+        ComposerToolboxActionPreview.Skills -> ComposerToolboxActionDecisionState(
+            kind = ComposerToolboxActionDecisionKind.OpenPanel,
+            targetPanel = ComposerSlashPanelViewState.Skills,
+        )
+        ComposerToolboxActionPreview.Mcp -> ComposerToolboxActionDecisionState(
+            kind = ComposerToolboxActionDecisionKind.OpenPanel,
+            targetPanel = ComposerSlashPanelViewState.Mcp,
+        )
+        ComposerToolboxActionPreview.Hooks -> ComposerToolboxActionDecisionState(
+            kind = ComposerToolboxActionDecisionKind.OpenPanel,
+            targetPanel = ComposerSlashPanelViewState.Hooks,
         )
     }
 }
