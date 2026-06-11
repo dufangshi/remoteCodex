@@ -1266,6 +1266,8 @@ class ThreadPresentationTest {
             ComposerSettingsState(
                 modelLabel = "gpt-test",
                 modelEnabled = false,
+                modelTitle = "No model options are available for this thread.",
+                modelDisabledReason = "No model options are available for this thread.",
                 effortLabel = "Medium",
                 effortEnabled = false,
                 effortTitle = "Select reasoning effort",
@@ -1283,6 +1285,40 @@ class ThreadPresentationTest {
                 planModeActive = false,
             ),
         )
+    }
+
+    @Test
+    fun explainsDisabledComposerModelSettingsWhenNoModelOptions() {
+        val settings = buildComposerSettingsState(
+            context = ComposerContextPreview(model = "gpt-test"),
+            reasoningEffort = "medium",
+            supportedReasoningEffortCount = 3,
+            modelOptionCount = 0,
+            settingsBusy = false,
+            fastMode = false,
+            planModeAvailable = true,
+            planModeActive = false,
+        )
+
+        val toolbar = buildComposerSettingsToolbarState(
+            settingsState = settings,
+            openMenu = null,
+            actionState = ComposerActionState(
+                primaryLabel = "Send",
+                primaryKind = ComposerPrimaryActionKind.Send,
+                interruptLabel = "Stop Current Turn",
+                showInterrupt = false,
+                sendEnabled = true,
+            ),
+            activeView = ComposerActiveView.Chat,
+            promptDisabled = false,
+            goalComposeMode = false,
+            goalBusy = false,
+        )
+
+        assertEquals(false, toolbar.modelButton.enabled)
+        assertEquals("No model options are available for this thread.", toolbar.modelTitle)
+        assertEquals("No model options are available for this thread.", settings.modelDisabledReason)
     }
 
     @Test

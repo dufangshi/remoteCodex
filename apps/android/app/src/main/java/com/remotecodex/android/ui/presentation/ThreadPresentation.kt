@@ -2159,12 +2159,16 @@ fun buildComposerSettingsState(
     val supportedEfforts = supportedReasoningEffortCount.coerceAtLeast(0)
     val availableModels = modelOptionCount.coerceAtLeast(0)
     val modelLabel = context.model.takeIf { it.isNotBlank() } ?: "Select model"
-    val modelTitle = if (fastMode) {
-        "Fast mode is on. Turn it off from the slash toolbox to edit model."
-    } else {
-        context.model.takeIf { it.isNotBlank() } ?: "Select model"
+    val modelTitle = when {
+        fastMode -> "Fast mode is on. Turn it off from the slash toolbox to edit model."
+        availableModels == 0 -> "No model options are available for this thread."
+        else -> context.model.takeIf { it.isNotBlank() } ?: "Select model"
     }
-    val modelDisabledReason = if (fastMode) modelTitle else null
+    val modelDisabledReason = when {
+        fastMode -> modelTitle
+        availableModels == 0 -> modelTitle
+        else -> null
+    }
     val modelEnabled = !settingsBusy && !fastMode && availableModels > 0
     val effortEnabled = modelEnabled && supportedEfforts > 0
     val effortTitle = when {

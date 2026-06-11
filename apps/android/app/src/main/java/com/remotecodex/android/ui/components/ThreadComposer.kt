@@ -2433,8 +2433,12 @@ private fun ModelPickerPanel(
         settingsState.modelDisabledReason?.let { reason ->
             ComposerMenuNotice(text = reason)
         }
-        modelOptions.forEach { option ->
-            SelectionRow(label = option.label, detail = option.detail, selected = option.selected)
+        if (modelOptions.isEmpty()) {
+            ComposerEmptyMenuRow(text = "Model choices will appear here once the thread reports available runtimes.")
+        } else {
+            modelOptions.forEach { option ->
+                SelectionRow(label = option.label, detail = option.detail, selected = option.selected)
+            }
         }
     }
 }
@@ -2474,6 +2478,23 @@ private fun ComposerMenuNotice(text: String) {
             .border(1.dp, ThreadColors.Warning.copy(alpha = 0.24f), RoundedCornerShape(10.dp))
             .padding(horizontal = 10.dp, vertical = 8.dp),
         color = ThreadColors.Warning,
+        style = MaterialTheme.typography.labelSmall,
+        maxLines = 3,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+@Composable
+private fun ComposerEmptyMenuRow(text: String) {
+    Text(
+        text = text,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(ThreadColors.Surface.copy(alpha = 0.42f))
+            .border(1.dp, ThreadColors.Border.copy(alpha = 0.72f), RoundedCornerShape(10.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        color = ThreadColors.ForegroundMuted,
         style = MaterialTheme.typography.labelSmall,
         maxLines = 3,
         overflow = TextOverflow.Ellipsis,
