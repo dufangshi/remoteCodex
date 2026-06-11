@@ -779,6 +779,7 @@ class ThreadPresentationTest {
                 effortLabel = "Auto",
                 effortEnabled = false,
                 effortTitle = "The selected model does not expose adjustable reasoning effort.",
+                settingsBusy = true,
                 planVisible = true,
                 planSelected = false,
             ),
@@ -966,6 +967,36 @@ class ThreadPresentationTest {
             ),
             state.sendButton,
         )
+        assertEquals(true, state.planButton.enabled)
+    }
+
+    @Test
+    fun disablesSettingsToolbarPlanButtonWhileSettingsBusy() {
+        val state = buildComposerSettingsToolbarState(
+            settingsState = ComposerSettingsState(
+                modelLabel = "gpt-test",
+                modelEnabled = false,
+                effortLabel = "Medium",
+                effortEnabled = false,
+                effortTitle = "Select reasoning effort",
+                settingsBusy = true,
+                planVisible = true,
+                planSelected = false,
+            ),
+            openMenu = null,
+            actionState = ComposerActionState(
+                primaryLabel = "Send",
+                primaryKind = ComposerPrimaryActionKind.Send,
+                interruptLabel = "Stop Current Turn",
+                showInterrupt = false,
+                sendEnabled = true,
+            ),
+            activeView = ComposerActiveView.Chat,
+            promptDisabled = false,
+            goalComposeMode = false,
+            goalBusy = false,
+        )
+
         assertEquals(false, state.planButton.enabled)
     }
 

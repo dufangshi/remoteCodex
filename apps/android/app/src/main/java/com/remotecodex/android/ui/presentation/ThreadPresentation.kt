@@ -432,6 +432,7 @@ data class ComposerSettingsState(
     val effortLabel: String,
     val effortEnabled: Boolean,
     val effortTitle: String,
+    val settingsBusy: Boolean = false,
     val planVisible: Boolean,
     val planSelected: Boolean,
     val updateActions: ComposerSettingsActionState = ComposerSettingsActionState(),
@@ -2050,6 +2051,7 @@ fun buildComposerSettingsState(
         effortLabel = formatReasoningEffortLabel(reasoningEffort),
         effortEnabled = effortEnabled,
         effortTitle = effortTitle,
+        settingsBusy = settingsBusy,
         planVisible = planModeAvailable,
         planSelected = planModeAvailable && planModeActive,
         updateActions = ComposerSettingsActionState(
@@ -2090,7 +2092,7 @@ fun buildComposerSettingsToolbarState(
         planButton = ComposerToolbarButtonState(
             visible = isChatView && settingsState.planVisible,
             selected = settingsState.planSelected,
-            enabled = !goalBusy,
+            enabled = !settingsState.settingsBusy,
             label = "Plan",
         ),
         planPressed = settingsState.planSelected,
