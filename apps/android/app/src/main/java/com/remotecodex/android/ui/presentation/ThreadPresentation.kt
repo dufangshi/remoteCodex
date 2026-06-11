@@ -209,6 +209,7 @@ data class PendingRequestCardState(
 )
 
 data class PendingRequestQuestionState(
+    val id: String,
     val header: String,
     val question: String,
     val options: List<PendingRequestOptionState>,
@@ -3482,13 +3483,15 @@ fun buildPendingRequestCardState(request: PendingRequestPreview): PendingRequest
     val description = request.description.trim()
     val riskLabel = request.riskLabel.trim().ifEmpty { "Permission required" }
     val command = request.command.trim()
-    val questions = request.questions.mapNotNull { question ->
+    val questions = request.questions.mapIndexedNotNull { index, question ->
+        val id = question.id?.trim()
         val header = question.header.trim()
         val questionText = question.question.trim()
         if (header.isEmpty() && questionText.isEmpty()) {
             null
         } else {
             PendingRequestQuestionState(
+                id = id?.takeIf { it.isNotEmpty() } ?: "question-$index",
                 header = header.ifEmpty { "Question" },
                 question = questionText,
                 options = question.options.mapNotNull(::buildPendingRequestOptionState),

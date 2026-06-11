@@ -728,6 +728,7 @@ class ThreadPresentationTest {
                 command = "./gradlew :app:assembleDebug",
                 questions = listOf(
                     PendingRequestQuestionState(
+                        id = "question-0",
                         header = "Approval",
                         question = "Allow the build?",
                         options = listOf(
@@ -774,10 +775,40 @@ class ThreadPresentationTest {
                                 ),
                             ),
                             allowOther = true,
+                            id = " ",
                         ),
                     ),
                 ),
             ),
+        )
+    }
+
+    @Test
+    fun preservesPendingRequestQuestionIds() {
+        val state = buildPendingRequestCardState(
+            PendingRequestPreview(
+                title = "Answer Required",
+                description = "",
+                command = "",
+                riskLabel = "",
+                questions = listOf(
+                    PendingRequestQuestionPreview(
+                        header = "Approval",
+                        question = "Allow first command?",
+                        id = " first-question ",
+                    ),
+                    PendingRequestQuestionPreview(
+                        header = "Approval",
+                        question = "Allow second command?",
+                        id = "second-question",
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals(
+            listOf("first-question", "second-question"),
+            state.questions.map { it.id },
         )
     }
 

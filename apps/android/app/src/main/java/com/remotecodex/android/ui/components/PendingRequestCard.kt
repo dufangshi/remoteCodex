@@ -2,6 +2,7 @@ package com.remotecodex.android.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -14,9 +15,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -37,6 +41,13 @@ fun PendingRequestCard(
 ) {
     val state = buildPendingRequestCardState(request)
     val questionMode = state.questions.isNotEmpty()
+    val selectedAnswers = remember(request) {
+        mutableStateMapOf<String, Set<String>>()
+    }
+    val hasSelectedAnswers = state.questions.all { question ->
+        selectedAnswers[question.id].orEmpty().isNotEmpty()
+    }
+    val submitEnabled = !questionMode || hasSelectedAnswers
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -80,7 +91,35 @@ fun PendingRequestCard(
         }
         if (questionMode) {
             state.questions.forEach { question ->
-                PendingRequestQuestionSection(question = question)
+                PendingRequestQuestionSection(
+                    question = question,
+                    selectedLabels = selectedAnswers[question.id].orEmpty(),
+                    onToggleOption = { option ->
+                        val currentLabels = selectedAnswers[question.id].orEmpty()
+                        selectedAnswers[question.id] = if (question.multiSelect) {
+                            if (option.rawLabel in currentLabels) {
+                                currentLabels - option.rawLabel
+                            } else {
+                                currentLabels + option.rawLabel
+                            }
+                        } else {
+                            setOf(option.rawLabel)
+                        }
+                    },
+                    onToggleOther = {
+                        val currentLabels = selectedAnswers[question.id].orEmpty()
+                        val otherLabel = question.otherLabel ?: return@PendingRequestQuestionSection
+                        selectedAnswers[question.id] = if (question.multiSelect) {
+                            if (otherLabel in currentLabels) {
+                                currentLabels - otherLabel
+                            } else {
+                                currentLabels + otherLabel
+                            }
+                        } else {
+                            setOf(otherLabel)
+                        }
+                    },
+                )
             }
             PendingRequestCommandBlock(
                 label = state.commandLabel,
@@ -109,14 +148,28 @@ fun PendingRequestCard(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = state.approveLabel,
+                text = if (questionMode && hasSelectedAnswers) "Submit" else state.approveLabel,
                 modifier = Modifier
                     .padding(start = 8.dp)
                     .clip(RoundedCornerShape(999.dp))
-                    .background(ThreadColors.Primary)
-                    .semantics { contentDescription = state.approveAccessibilityLabel }
+                    .background(if (submitEnabled) ThreadColors.Primary else ThreadColors.SurfaceStrong)
+                    .border(
+                        1.dp,
+                        if (submitEnabled) ThreadColors.Primary else ThreadColors.Border,
+                        RoundedCornerShape(999.dp),
+                    )
+                    .semantics {
+                        contentDescription = if (submitEnabled) {
+                            state.approveAccessibilityLabel
+                        } else {
+                            "Select an answer before submitting ${state.title}"
+                        }
+                        if (!submitEnabled) {
+                            disabled()
+                        }
+                    }
                     .padding(horizontal = 14.dp, vertical = 8.dp),
-                color = ThreadColors.PrimaryForeground,
+                color = if (submitEnabled) ThreadColors.PrimaryForeground else ThreadColors.ForegroundMuted,
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -163,6 +216,9 @@ private fun PendingRequestCommandBlock(
 @OptIn(ExperimentalLayoutApi::class)
 private fun PendingRequestQuestionSection(
     question: PendingRequestQuestionState,
+    selectedLabels: Set<String>,
+    onToggleOption: (PendingRequestOptionState) -> Unit,
+    onToggleOther: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -197,10 +253,16 @@ private fun PendingRequestQuestionSection(
                     PendingRequestOptionChip(
                         option = option,
                         highlighted = index == 0 || option.recommended,
+                        selected = option.rawLabel in selectedLabels,
+                        onClick = { onToggleOption(option) },
                     )
                 }
                 question.otherLabel?.let { otherLabel ->
-                    PendingRequestOtherChip(label = otherLabel)
+                    PendingRequestOtherChip(
+                        label = otherLabel,
+                        selected = otherLabel in selectedLabels,
+                        onClick = onToggleOther,
+                    )
                 }
             }
         } else {
@@ -223,10 +285,24 @@ private fun PendingRequestQuestionSection(
 private fun PendingRequestOptionChip(
     option: PendingRequestOptionState,
     highlighted: Boolean,
+    selected: Boolean,
+    onClick: () -> Unit,
 ) {
-    val background = if (highlighted) ThreadColors.InfoSoft else ThreadColors.SurfaceStrong
-    val border = if (highlighted) ThreadColors.Info.copy(alpha = 0.34f) else ThreadColors.Border
-    val foreground = if (highlighted) ThreadColors.Info else ThreadColors.ForegroundSoft
+    val background = when {
+        selected -> ThreadColors.WarningSoft
+        highlighted -> ThreadColors.InfoSoft
+        else -> ThreadColors.SurfaceStrong
+    }
+    val border = when {
+        selected -> ThreadColors.Warning.copy(alpha = 0.48f)
+        highlighted -> ThreadColors.Info.copy(alpha = 0.34f)
+        else -> ThreadColors.Border
+    }
+    val foreground = when {
+        selected -> ThreadColors.Warning
+        highlighted -> ThreadColors.Info
+        else -> ThreadColors.ForegroundSoft
+    }
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
@@ -234,11 +310,12 @@ private fun PendingRequestOptionChip(
             .border(1.dp, border, RoundedCornerShape(999.dp))
             .semantics {
                 contentDescription = if (option.recommended) {
-                    "${option.displayLabel}, recommended"
+                    "${option.displayLabel}, recommended${if (selected) ", selected" else ""}"
                 } else {
-                    option.displayLabel
+                    "${option.displayLabel}${if (selected) ", selected" else ""}"
                 }
             }
+            .clickable(onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),
@@ -263,15 +340,26 @@ private fun PendingRequestOptionChip(
 }
 
 @Composable
-private fun PendingRequestOtherChip(label: String) {
+private fun PendingRequestOtherChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val background = if (selected) ThreadColors.InfoSoft else ThreadColors.SurfaceStrong
+    val border = if (selected) ThreadColors.Info.copy(alpha = 0.42f) else ThreadColors.Border
+    val foreground = if (selected) ThreadColors.Info else ThreadColors.ForegroundSoft
     Text(
         text = label,
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
-            .background(ThreadColors.SurfaceStrong)
-            .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
+            .background(background)
+            .border(1.dp, border, RoundedCornerShape(999.dp))
+            .semantics {
+                contentDescription = "$label${if (selected) ", selected" else ""}"
+            }
+            .clickable(onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 5.dp),
-        color = ThreadColors.ForegroundSoft,
+        color = foreground,
         style = MaterialTheme.typography.labelSmall,
         fontWeight = FontWeight.SemiBold,
         maxLines = 1,

@@ -729,6 +729,7 @@ data class PendingRequestQuestionPreview(
     val options: List<PendingRequestOptionPreview> = emptyList(),
     val multiSelect: Boolean = false,
     val allowOther: Boolean = false,
+    val id: String? = null,
 )
 
 data class PendingRequestOptionPreview(
