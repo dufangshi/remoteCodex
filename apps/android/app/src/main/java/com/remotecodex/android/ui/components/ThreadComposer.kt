@@ -419,11 +419,142 @@ private fun ComposerModeChip(label: String, selected: Boolean) {
 @Composable
 private fun SlashToolboxPanel() {
     ComposerMenuSurface(title = "Slash toolbox", subtitle = "Thread actions") {
-        ToolboxRow(command = "/goal", status = "Open", description = "Create or update the active thread goal.")
+        GoalPreviewGroup()
         ForkPreviewGroup()
         SkillsPreviewGroup()
         McpPreviewGroup()
         HooksPreviewGroup()
+    }
+}
+
+@Composable
+private fun GoalPreviewGroup() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(ThreadColors.Surface)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "/goal",
+                modifier = Modifier.weight(1f),
+                color = ThreadColors.Foreground,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            GraphBadge(
+                label = "Active",
+                variant = GraphBadgeVariant.Default,
+            )
+        }
+        Text(
+            text = "Create or update the active thread goal.",
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        GoalComposePreviewCard()
+        GoalStatusPreviewRow()
+        HookStatusRow(
+            message = "Fast mode is on. Turn it off from the slash toolbox to edit reasoning.",
+            tone = HookStatusTone.Warning,
+        )
+    }
+}
+
+@Composable
+private fun GoalComposePreviewCard() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(ThreadColors.CodeBackground)
+            .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(10.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "Goal",
+                color = ThreadColors.CodeForeground,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+            )
+            GraphBadge(label = "12.5k budget", variant = GraphBadgeVariant.Outline)
+        }
+        Text(
+            text = "Describe the goal the backend should continue working toward...",
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            GraphBadge(label = "Cancel", variant = GraphBadgeVariant.Outline)
+            GraphBadge(label = "Set goal", variant = GraphBadgeVariant.Default)
+            GraphBadge(label = "Setting...", variant = GraphBadgeVariant.Outline)
+        }
+    }
+}
+
+@Composable
+private fun GoalStatusPreviewRow() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(ThreadColors.SurfaceStrong)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(10.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "Current goal",
+                modifier = Modifier.weight(1f),
+                color = ThreadColors.ForegroundSoft,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            GraphBadge(label = "Budget", variant = GraphBadgeVariant.Outline)
+        }
+        Text(
+            text = "Keep Android client parity moving through composer and control surface gaps.",
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        HookStatusRow(
+            message = "Token budget must be a positive number in thousands.",
+            tone = HookStatusTone.Error,
+        )
     }
 }
 
