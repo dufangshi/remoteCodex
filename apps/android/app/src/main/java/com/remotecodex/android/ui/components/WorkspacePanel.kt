@@ -1214,74 +1214,122 @@ private fun WorkspaceExtensionsSurface(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        GraphAccordion {
-            GraphAccordionItem(
-                title = "Plugin Panels",
-                subtitle = "Panels available from thread-ui extension slots.",
-                defaultExpanded = true,
-                leading = { GraphAccordionIcon(label = "P") },
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ActionChip(label = "Terminal")
-                    ActionChip(label = "Artifacts")
-                }
+        WorkspaceInfoCard(label = "Plugin Panels") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ActionChip(label = "Terminal")
+                ActionChip(label = "Artifacts")
             }
-            GraphAccordionItem(
-                title = "Enabled Renderers",
-                subtitle = "Native renderers and WebView fallback candidates.",
-                leading = { GraphAccordionIcon(label = "R") },
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ActionChip(label = workspace.artifact.format)
-                    ActionChip(label = "Text")
-                    ActionChip(label = "Image")
-                }
+        }
+        WorkspaceInfoCard(label = "Enabled Renderers") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ActionChip(label = workspace.artifact.format)
+                ActionChip(label = "Text")
+                ActionChip(label = "Image")
             }
-            GraphAccordionItem(
-                title = "Remote Codex Tools",
-                subtitle = "Thread controls that need host-governed policies.",
-                showDivider = false,
-                leading = { GraphAccordionIcon(label = "T") },
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ExtensionToolRow(
-                        title = "Terminal",
-                        description = "Shell stays available when a thread shell is attached.",
-                    )
-                    ExtensionToolRow(
-                        title = "Composer tools",
-                        description = "Attachments, slash panels, hooks, MCP, goals, and fork controls remain part of chat.",
-                    )
-                    ExtensionToolRow(
-                        title = "Destructive actions",
-                        description = "Delete, interrupt, compact, and trust controls stay explicit and host governed.",
-                    )
-                }
+        }
+        WorkspaceInfoCard(label = "Remote Codex Tools") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ExtensionToolRow(
+                    icon = WorkspaceActionIcon.Open,
+                    title = "Terminal",
+                    description = "Terminal stays available when the Terminal plugin and shell adapter are attached.",
+                )
+                ExtensionToolRow(
+                    icon = WorkspaceActionIcon.Copy,
+                    title = "Composer tools",
+                    description = "Attachments, slash panels, hooks, MCP, goals, and fork controls remain part of the chat surface.",
+                )
+                ExtensionToolRow(
+                    icon = WorkspaceActionIcon.Trash,
+                    title = "Destructive actions",
+                    description = "Delete thread, interrupt, compact, and hook trust controls remain host governed.",
+                )
             }
+        }
+        WorkspaceInfoCard(label = "Thread Meta") {
+            ExtensionMetaRow(label = "Workspace", value = workspace.rootLabel)
+            ExtensionMetaRow(label = "Artifact", value = workspace.artifact.title)
+            ExtensionMetaRow(label = "Tool calls", value = workspace.toolEvents.size.toString())
+        }
+        WorkspaceInfoCard(label = "Settings") {
+            ExtensionMetaRow(label = "Renderer mode", value = "Native with WebView fallback")
+            ExtensionMetaRow(label = "Mobile policy", value = "Host governed")
         }
     }
 }
 
 @Composable
-private fun ExtensionToolRow(title: String, description: String) {
-    Column(
+private fun ExtensionToolRow(
+    icon: WorkspaceActionIcon,
+    title: String,
+    description: String,
+) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(9.dp))
             .background(ThreadColors.Surface)
             .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(26.dp)
+                .clip(RoundedCornerShape(7.dp))
+                .background(ThreadColors.SurfaceStrong)
+                .border(1.dp, ThreadColors.Border, RoundedCornerShape(7.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            WorkspaceActionGlyph(
+                icon = icon,
+                color = ThreadColors.ForegroundMuted,
+                modifier = Modifier.size(13.dp),
+            )
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Text(
+                text = title,
+                color = ThreadColors.Foreground,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = description,
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelMedium,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExtensionMetaRow(
+    label: String,
+    value: String,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = title,
-            color = ThreadColors.Foreground,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.SemiBold,
+            text = label,
+            modifier = Modifier.widthIn(min = 88.dp, max = 128.dp),
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
         Text(
-            text = description,
-            color = ThreadColors.ForegroundMuted,
+            text = value,
+            modifier = Modifier.weight(1f),
+            color = ThreadColors.ForegroundSoft,
             style = MaterialTheme.typography.labelMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }

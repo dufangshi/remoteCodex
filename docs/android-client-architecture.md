@@ -176,7 +176,7 @@ The visual direction is close to the web mobile thread view, but not a literal D
 | `FloatingEdge.tsx` | `WorkspacePanel.kt` graph canvas | Native graph canvas draws curved directed edges with arrowheads between summary nodes. |
 | `FloatingConnectionLine.tsx` | `WorkspacePanel.kt` graph canvas | Native graph canvas includes target markers on directed graph connections. Interactive drag-to-connect is not implemented. |
 | `FloatingHelper.tsx` | `WorkspacePanel.kt` graph helper strip | Native graph helper strip and legend summarize Bezier edges, arrow targets, live nodes, and node categories. |
-| Thread panel extension cards | `WorkspacePanel.kt` | Extensions tab summarizing plugin panels, renderers, and Remote Codex tool surfaces. |
+| Thread panel extension cards | `WorkspacePanel.kt` | Extensions tab uses Web-like WorkspaceInfoCard sections for plugin panels, enabled renderers, Remote Codex tools, thread meta, and settings preview rows. |
 | `ThreadShellPanel.tsx` | `ShellPanel.kt` | Terminal shell frame with Web-like native connection/terminate glyph controls, active process bar, mobile process drawer, new-shell glyph action, floating shell toolbox trigger, tone-matched control chips, output, and command bar. |
 | `styles.css` graph-chat tokens | `ThreadColors.kt` + `RemoteCodexTheme.kt` + `ThemeMode.kt` | Light/dark token sets with persisted System/Light/Dark theme mode. |
 
