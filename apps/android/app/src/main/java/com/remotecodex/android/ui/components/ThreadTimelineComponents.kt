@@ -64,6 +64,9 @@ import com.remotecodex.android.ui.model.ToolCallPreview
 import com.remotecodex.android.ui.model.ToolStatus
 import com.remotecodex.android.ui.model.TurnPreview
 import com.remotecodex.android.ui.presentation.basenameFromAssetPath
+import com.remotecodex.android.ui.presentation.FileChangeSummarySegment
+import com.remotecodex.android.ui.presentation.FileChangeSummaryTone
+import com.remotecodex.android.ui.presentation.fileChangeSummarySegments
 import com.remotecodex.android.ui.presentation.graphChatMessageStatusModel
 import com.remotecodex.android.ui.presentation.parseUserMessageSegments
 import com.remotecodex.android.ui.presentation.planStepStatusLabel
@@ -873,14 +876,13 @@ private fun HistoryGroupCard(
 @Composable
 private fun FileChangeGroupSummary(group: HistoryGroupPreview) {
     Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-        group.changedFiles?.takeIf { it > 0 }?.let { files ->
-            FileCountPill(files = files)
-        }
-        group.addedLines?.takeIf { it > 0 }?.let { added ->
-            DeltaPill(label = "+$added", positive = true)
-        }
-        group.removedLines?.takeIf { it > 0 }?.let { removed ->
-            DeltaPill(label = "-$removed", positive = false)
+        fileChangeSummarySegments(
+            changedFiles = group.changedFiles,
+            addedLines = group.addedLines,
+            removedLines = group.removedLines,
+            previewText = group.countLabel,
+        ).forEach { segment ->
+            FileChangeSummaryPill(segment = segment)
         }
     }
 }
@@ -1298,22 +1300,32 @@ private fun HistoryGroupGlyph(group: HistoryGroupPreview, color: Color) {
 @Composable
 private fun FileChangeDeltaRow(item: HistoryItemPreview) {
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        item.changedFiles?.takeIf { it > 0 }?.let { files ->
-            FileCountPill(files = files)
-        }
-        item.addedLines?.takeIf { it > 0 }?.let { added ->
-            DeltaPill(label = "+$added", positive = true)
-        }
-        item.removedLines?.takeIf { it > 0 }?.let { removed ->
-            DeltaPill(label = "-$removed", positive = false)
+        fileChangeSummarySegments(
+            changedFiles = item.changedFiles,
+            addedLines = item.addedLines,
+            removedLines = item.removedLines,
+            previewText = item.summary,
+        ).forEach { segment ->
+            FileChangeSummaryPill(segment = segment)
         }
     }
 }
 
 @Composable
-private fun FileCountPill(files: Int) {
+private fun FileChangeSummaryPill(segment: FileChangeSummarySegment) {
+    when (segment.tone) {
+        FileChangeSummaryTone.Added -> DeltaPill(label = segment.label, positive = true)
+        FileChangeSummaryTone.Removed -> DeltaPill(label = segment.label, positive = false)
+        FileChangeSummaryTone.Files,
+        FileChangeSummaryTone.Neutral,
+        -> NeutralSummaryPill(label = segment.label)
+    }
+}
+
+@Composable
+private fun NeutralSummaryPill(label: String) {
     Text(
-        text = "$files ${if (files == 1) "file" else "files"}",
+        text = label,
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
             .background(ThreadColors.SurfaceStrong)

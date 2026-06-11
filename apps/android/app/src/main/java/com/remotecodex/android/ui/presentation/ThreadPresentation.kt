@@ -17,6 +17,18 @@ data class MessageStatusModel(
     val tone: MessageStatusTone,
 )
 
+enum class FileChangeSummaryTone {
+    Files,
+    Added,
+    Removed,
+    Neutral,
+}
+
+data class FileChangeSummarySegment(
+    val label: String,
+    val tone: FileChangeSummaryTone,
+)
+
 fun threadStatusLabel(status: ThreadStatus): String {
     return when (status) {
         ThreadStatus.Running -> "Running"
@@ -119,4 +131,41 @@ fun historyItemShortLabel(kind: HistoryItemKind): String {
 
 fun isScrollableHistoryItem(kind: HistoryItemKind): Boolean {
     return kind == HistoryItemKind.Command || kind == HistoryItemKind.Context
+}
+
+fun fileChangeSummarySegments(
+    changedFiles: Int?,
+    addedLines: Int?,
+    removedLines: Int?,
+    previewText: String?,
+): List<FileChangeSummarySegment> {
+    val structured = buildList {
+        changedFiles?.takeIf { it > 0 }?.let { files ->
+            add(FileChangeSummarySegment("${files} ${if (files == 1) "file" else "files"}", FileChangeSummaryTone.Files))
+        }
+        addedLines?.takeIf { it > 0 }?.let { lines ->
+            add(FileChangeSummarySegment("+$lines", FileChangeSummaryTone.Added))
+        }
+        removedLines?.takeIf { it > 0 }?.let { lines ->
+            add(FileChangeSummarySegment("-$lines", FileChangeSummaryTone.Removed))
+        }
+    }
+
+    if (structured.isNotEmpty()) {
+        return structured
+    }
+
+    val fallback = previewText?.trim()?.takeIf { it.isNotEmpty() } ?: return emptyList()
+    return fallback
+        .replace(Regex("\\bfiles changed\\b", RegexOption.IGNORE_CASE), "files")
+        .replace(Regex("\\bfile changed\\b", RegexOption.IGNORE_CASE), "file")
+        .split('·')
+        .mapNotNull { segment ->
+            val label = segment.trim()
+            if (label.isEmpty()) {
+                null
+            } else {
+                FileChangeSummarySegment(label, FileChangeSummaryTone.Neutral)
+            }
+        }
 }
