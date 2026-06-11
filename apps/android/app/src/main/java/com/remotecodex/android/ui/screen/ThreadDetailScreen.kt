@@ -40,6 +40,7 @@ import com.remotecodex.android.api.UntrustThreadHookRequest
 import com.remotecodex.android.api.UpdateThreadGoalRequest
 import com.remotecodex.android.api.UpdateThreadRequest
 import com.remotecodex.android.api.UpdateThreadSettingsRequest
+import com.remotecodex.android.api.UploadWorkspaceFileRequest
 import com.remotecodex.android.settings.ThemeMode
 import com.remotecodex.android.ui.components.GraphButton
 import com.remotecodex.android.ui.components.GraphButtonSize
@@ -90,6 +91,7 @@ fun ThreadDetailScreen(
     var pendingWorkspaceDownloadPath by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingWorkspaceRawOpenPath by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingWorkspaceRawCopyPath by remember(threadId) { mutableStateOf<String?>(null) }
+    var pendingWorkspaceUploadNote by remember(threadId) { mutableStateOf(false) }
     var workspaceActionMessage by remember(threadId) { mutableStateOf<String?>(null) }
     var resolvingRequestId by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingRenameTitle by remember(threadId) { mutableStateOf<String?>(null) }
@@ -479,6 +481,49 @@ fun ThreadDetailScreen(
             .onFailure { throwable -> error = throwable.message ?: "Workspace raw copy failed." }
     }
 
+    LaunchedEffect(pendingWorkspaceUploadNote) {
+        if (!pendingWorkspaceUploadNote) return@LaunchedEffect
+        error = null
+        workspaceActionMessage = null
+        val filename = "android-upload-${System.currentTimeMillis()}.txt"
+        val note = buildString {
+            appendLine("Remote Codex Android upload smoke")
+            appendLine("Thread: $threadId")
+            selectedWorkspaceFilePath?.takeIf { it.isNotBlank() }?.let { path ->
+                appendLine("Selected file: $path")
+            }
+        }
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                val threadDetail = client.fetchThreadDetail(threadId, limit = 1)
+                val upload = client.uploadWorkspaceFile(
+                    workspaceId = threadDetail.workspace.id,
+                    request = UploadWorkspaceFileRequest(
+                        filename = filename,
+                        bytes = note.toByteArray(Charsets.UTF_8),
+                        contentType = "text/plain",
+                    ),
+                )
+                val uploadedPath = upload.file?.path ?: upload.paths.firstOrNull()
+                val preview = client.fetchThreadDetailPreview(
+                    threadId = threadId,
+                    selectedWorkspaceFilePath = uploadedPath ?: selectedWorkspaceFilePath,
+                )
+                upload to preview
+            }
+        }
+        pendingWorkspaceUploadNote = false
+        result
+            .onSuccess { (upload, preview) ->
+                detail = preview
+                selectedWorkspaceFilePath = upload.file?.path ?: preview.workspacePreview.selectedFile.path
+                workspaceActionMessage = upload.file?.let { file ->
+                    "Uploaded ${file.name} (${file.size} bytes)"
+                } ?: "Uploaded ${upload.archiveName ?: "workspace file"}"
+            }
+            .onFailure { throwable -> error = throwable.message ?: "Workspace upload failed." }
+    }
+
     LaunchedEffect(pendingRequestResponse) {
         val response = pendingRequestResponse ?: return@LaunchedEffect
         resolvingRequestId = response.request.id
@@ -638,6 +683,9 @@ fun ThreadDetailScreen(
             },
             onCopyWorkspaceRawFile = { path ->
                 pendingWorkspaceRawCopyPath = path
+            },
+            onUploadWorkspaceNote = {
+                pendingWorkspaceUploadNote = true
             },
             onDenyPendingRequest = { request ->
                 pendingRequestResponse = PendingRequestResponse(

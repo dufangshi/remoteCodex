@@ -73,6 +73,7 @@ fun WorkspacePanel(
     onDownloadFile: ((String) -> Unit)? = null,
     onOpenRawFile: ((String) -> Unit)? = null,
     onCopyRawFile: ((String) -> Unit)? = null,
+    onUploadNote: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var selectedTab by remember { mutableStateOf(WorkspaceTab.Workspace) }
@@ -98,6 +99,7 @@ fun WorkspacePanel(
                     onOpenGarbage = { garbageDialogOpen = true },
                     onSelectFile = onSelectFile,
                     onDownloadFile = onDownloadFile,
+                    onUploadNote = onUploadNote,
                     onLoadMorePreview = onLoadMorePreview,
                     onOpenRawFile = onOpenRawFile,
                     onCopyRawFile = onCopyRawFile,
@@ -208,6 +210,7 @@ private fun WorkspaceBrowserSurface(
     onSelectFile: ((String) -> Unit)?,
     onLoadMorePreview: (() -> Unit)?,
     onDownloadFile: ((String) -> Unit)?,
+    onUploadNote: (() -> Unit)?,
     onOpenRawFile: ((String) -> Unit)?,
     onCopyRawFile: ((String) -> Unit)?,
     modifier: Modifier = Modifier,
@@ -224,6 +227,7 @@ private fun WorkspaceBrowserSurface(
                     onOpenGarbage = onOpenGarbage,
                     onSelectFile = onSelectFile,
                     onDownloadFile = onDownloadFile,
+                    onUploadNote = onUploadNote,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -307,6 +311,7 @@ private fun WorkspaceExplorerCard(
     onOpenGarbage: () -> Unit,
     onSelectFile: ((String) -> Unit)?,
     onDownloadFile: ((String) -> Unit)?,
+    onUploadNote: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -337,6 +342,7 @@ private fun WorkspaceExplorerCard(
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(modifier = Modifier.weight(1f))
+            ActionChip(label = "Upload", icon = WorkspaceActionIcon.Open, onClick = onUploadNote)
             ActionChip(label = "Garbage", icon = WorkspaceActionIcon.Trash, onClick = onOpenGarbage)
             ActionChip(label = "Refresh", icon = WorkspaceActionIcon.Refresh)
         }

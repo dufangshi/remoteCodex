@@ -171,6 +171,23 @@ class SupervisorApiClient(
         )
     }
 
+    fun uploadWorkspaceFile(workspaceId: String, request: UploadWorkspaceFileRequest): SupervisorWorkspaceUploadResult {
+        val boundary = "remoteCodexAndroid${System.currentTimeMillis()}"
+        val body = buildMultipartFileBody(
+            boundary = boundary,
+            fieldName = "file",
+            filename = request.filename,
+            contentType = request.contentType,
+            bytes = request.bytes,
+        )
+        return requestJson(
+            config.restPath("/api/workspaces/${urlEncodePathSegment(workspaceId)}/files/upload"),
+            method = "POST",
+            rawBody = body,
+            contentType = "multipart/form-data; boundary=$boundary",
+        ).toWorkspaceUploadResult()
+    }
+
     fun fetchRelayPortal(): RelayPortalSummary {
         return requestJson("/relay/portal").toRelayPortalSummary()
     }
@@ -418,12 +435,20 @@ class SupervisorApiClient(
         )
     }
 
-    private fun requestJson(path: String, method: String = "GET", body: String? = null): JSONObject {
+    private fun requestJson(
+        path: String,
+        method: String = "GET",
+        body: String? = null,
+        rawBody: ByteArray? = null,
+        contentType: String = "application/json",
+    ): JSONObject {
         val response = transport.request(
             SupervisorHttpRequest(
                 url = config.normalizedBaseUrl + path,
                 method = method,
                 body = body,
+                rawBody = rawBody,
+                contentType = contentType,
                 bearerToken = config.authToken,
             ),
         )
@@ -484,6 +509,8 @@ data class SupervisorHttpRequest(
     val url: String,
     val method: String,
     val body: String? = null,
+    val rawBody: ByteArray? = null,
+    val contentType: String = "application/json",
     val bearerToken: String? = null,
     val accept: String = "application/json",
 )
@@ -510,9 +537,15 @@ class UrlConnectionSupervisorHttpTransport : SupervisorHttpTransport {
                 request.bearerToken?.takeIf { it.isNotBlank() }?.let { token ->
                     setRequestProperty("Authorization", "Bearer $token")
                 }
-                request.body?.let { payload ->
+                request.rawBody?.let { payload ->
                     doOutput = true
-                    setRequestProperty("Content-Type", "application/json")
+                    setRequestProperty("Content-Type", request.contentType)
+                    outputStream.use { stream ->
+                        stream.write(payload)
+                    }
+                } ?: request.body?.let { payload ->
+                    doOutput = true
+                    setRequestProperty("Content-Type", request.contentType)
                     outputStream.use { stream ->
                         stream.write(payload.toByteArray(Charsets.UTF_8))
                     }
@@ -639,6 +672,29 @@ private fun JSONObject.toWorkspaceFilePreview(): SupervisorWorkspaceFilePreview 
         size = optLong("size", 0L),
         truncated = optBoolean("truncated", false),
         nextOffset = optLong("nextOffset", 0L),
+    )
+}
+
+private fun JSONObject.toWorkspaceUploadResult(): SupervisorWorkspaceUploadResult {
+    val pathsJson = optJSONArray("paths") ?: org.json.JSONArray()
+    return SupervisorWorkspaceUploadResult(
+        kind = optString("kind"),
+        file = optJSONObject("file")?.toWorkspaceUploadedFile(),
+        archiveName = optNullableString("archiveName"),
+        extractedCount = if (has("extractedCount") && !isNull("extractedCount")) {
+            optInt("extractedCount")
+        } else {
+            null
+        },
+        paths = List(pathsJson.length()) { index -> pathsJson.optString(index) },
+    )
+}
+
+private fun JSONObject.toWorkspaceUploadedFile(): SupervisorWorkspaceUploadedFile {
+    return SupervisorWorkspaceUploadedFile(
+        path = optString("path"),
+        name = optString("name"),
+        size = optLong("size", 0L),
     )
 }
 
@@ -1033,4 +1089,29 @@ private fun parseContentDispositionFilename(value: String?): String? {
         ?.getOrNull(1)
         ?.trim()
         ?.takeIf { it.isNotBlank() }
+}
+
+private fun buildMultipartFileBody(
+    boundary: String,
+    fieldName: String,
+    filename: String,
+    contentType: String,
+    bytes: ByteArray,
+): ByteArray {
+    val safeFilename = filename.ifBlank { "upload.txt" }.replace("\"", "_")
+    val prefix = buildString {
+        append("--")
+        append(boundary)
+        append("\r\n")
+        append("Content-Disposition: form-data; name=\"")
+        append(fieldName)
+        append("\"; filename=\"")
+        append(safeFilename)
+        append("\"\r\n")
+        append("Content-Type: ")
+        append(contentType.ifBlank { "application/octet-stream" })
+        append("\r\n\r\n")
+    }.toByteArray(Charsets.UTF_8)
+    val suffix = "\r\n--$boundary--\r\n".toByteArray(Charsets.UTF_8)
+    return prefix + bytes + suffix
 }

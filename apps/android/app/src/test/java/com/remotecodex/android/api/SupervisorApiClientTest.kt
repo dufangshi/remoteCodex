@@ -442,6 +442,49 @@ class SupervisorApiClientTest {
     }
 
     @Test
+    fun workspaceUploadUsesMultipartRelayDevicePathAndParsesResult() {
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(
+                200,
+                """{"kind":"file","file":{"path":"android-upload.txt","name":"android-upload.txt","size":12}}""",
+            ),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        val result = client.uploadWorkspaceFile(
+            workspaceId = "workspace-1",
+            request = UploadWorkspaceFileRequest(
+                filename = "android-upload.txt",
+                bytes = "hello upload".toByteArray(),
+                contentType = "text/plain",
+            ),
+        )
+
+        assertEquals("file", result.kind)
+        assertEquals("android-upload.txt", result.file?.path)
+        assertEquals(12L, result.file?.size)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/workspaces/workspace-1/files/upload",
+            transport.requests.single().url,
+        )
+        assertEquals("POST", transport.requests.single().method)
+        assertTrue(transport.requests.single().contentType.startsWith("multipart/form-data; boundary="))
+        assertEquals("relay-token", transport.requests.single().bearerToken)
+        val body = transport.requests.single().rawBody!!.toString(Charsets.UTF_8)
+        assertTrue(body.contains("""name="file"; filename="android-upload.txt""""))
+        assertTrue(body.contains("Content-Type: text/plain"))
+        assertTrue(body.contains("hello upload"))
+    }
+
+    @Test
     fun relayPortalListsDeviceConnectionStatus() {
         val transport = RecordingTransport(
             SupervisorHttpResponse(

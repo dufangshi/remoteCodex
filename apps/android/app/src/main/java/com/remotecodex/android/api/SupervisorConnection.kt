@@ -357,6 +357,26 @@ data class SupervisorWorkspaceRawFile(
         get() = bytes.toString(Charsets.UTF_8)
 }
 
+data class UploadWorkspaceFileRequest(
+    val filename: String,
+    val bytes: ByteArray,
+    val contentType: String = "text/plain",
+)
+
+data class SupervisorWorkspaceUploadResult(
+    val kind: String,
+    val file: SupervisorWorkspaceUploadedFile?,
+    val archiveName: String?,
+    val extractedCount: Int?,
+    val paths: List<String>,
+)
+
+data class SupervisorWorkspaceUploadedFile(
+    val path: String,
+    val name: String,
+    val size: Long,
+)
+
 data class SupervisorThreadSkills(
     val cwd: String,
     val skills: List<SupervisorAgentSkill>,
