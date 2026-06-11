@@ -694,19 +694,31 @@ private fun UserMessageFooter(
 @Composable
 private fun AssistantCopyButton(value: String) {
     val clipboard = LocalClipboardManager.current
-    var copied by remember(value) { mutableStateOf(false) }
+    var copyState by remember(value) { mutableStateOf(TimelineCopyFeedbackState.Idle) }
 
-    LaunchedEffect(copied) {
-        if (copied) {
+    LaunchedEffect(copyState) {
+        if (copyState != TimelineCopyFeedbackState.Idle) {
             delay(1200)
-            copied = false
+            copyState = TimelineCopyFeedbackState.Idle
         }
     }
 
     val shape = RoundedCornerShape(7.dp)
-    val foreground = if (copied) ThreadColors.Info else ThreadColors.ForegroundMuted
-    val background = if (copied) ThreadColors.InfoSoft else ThreadColors.Panel
-    val border = if (copied) ThreadColors.Info.copy(alpha = 0.44f) else ThreadColors.Border
+    val foreground = when (copyState) {
+        TimelineCopyFeedbackState.Idle -> ThreadColors.ForegroundMuted
+        TimelineCopyFeedbackState.Copied -> ThreadColors.Info
+        TimelineCopyFeedbackState.Failed -> ThreadColors.Danger
+    }
+    val background = when (copyState) {
+        TimelineCopyFeedbackState.Idle -> ThreadColors.Panel
+        TimelineCopyFeedbackState.Copied -> ThreadColors.InfoSoft
+        TimelineCopyFeedbackState.Failed -> ThreadColors.DangerSoft
+    }
+    val border = when (copyState) {
+        TimelineCopyFeedbackState.Idle -> ThreadColors.Border
+        TimelineCopyFeedbackState.Copied -> ThreadColors.Info.copy(alpha = 0.44f)
+        TimelineCopyFeedbackState.Failed -> ThreadColors.Danger.copy(alpha = 0.42f)
+    }
     Box(
         modifier = Modifier
             .size(28.dp)
@@ -714,16 +726,28 @@ private fun AssistantCopyButton(value: String) {
             .background(background)
             .border(1.dp, border, shape)
             .semantics {
-                contentDescription = if (copied) "Assistant reply copied" else "Copy assistant reply"
+                contentDescription = when (copyState) {
+                    TimelineCopyFeedbackState.Idle -> "Copy assistant reply"
+                    TimelineCopyFeedbackState.Copied -> "Assistant reply copied"
+                    TimelineCopyFeedbackState.Failed -> "Copy assistant reply failed"
+                }
             }
             .clickable {
-                clipboard.setText(AnnotatedString(value))
-                copied = true
+                copyState = try {
+                    clipboard.setText(AnnotatedString(value))
+                    TimelineCopyFeedbackState.Copied
+                } catch (_: RuntimeException) {
+                    TimelineCopyFeedbackState.Failed
+                }
             },
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = if (copied) "OK" else "C",
+            text = when (copyState) {
+                TimelineCopyFeedbackState.Idle -> "C"
+                TimelineCopyFeedbackState.Copied -> "OK"
+                TimelineCopyFeedbackState.Failed -> "!"
+            },
             color = foreground,
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.SemiBold,
@@ -921,25 +945,47 @@ private fun CopyTextButton(
     contentDescription: String,
 ) {
     val clipboard = LocalClipboardManager.current
-    var copied by remember(value) { mutableStateOf(false) }
+    var copyState by remember(value) { mutableStateOf(TimelineCopyFeedbackState.Idle) }
 
-    LaunchedEffect(copied) {
-        if (copied) {
+    LaunchedEffect(copyState) {
+        if (copyState != TimelineCopyFeedbackState.Idle) {
             delay(1200)
-            copied = false
+            copyState = TimelineCopyFeedbackState.Idle
         }
     }
 
     GraphButton(
-        label = if (copied) copiedLabel else idleLabel,
+        label = when (copyState) {
+            TimelineCopyFeedbackState.Idle -> idleLabel
+            TimelineCopyFeedbackState.Copied -> copiedLabel
+            TimelineCopyFeedbackState.Failed -> "Copy failed"
+        },
         size = GraphButtonSize.Small,
-        variant = if (copied) GraphButtonVariant.Secondary else GraphButtonVariant.Ghost,
-        contentDescription = contentDescription,
+        variant = when (copyState) {
+            TimelineCopyFeedbackState.Idle -> GraphButtonVariant.Ghost
+            TimelineCopyFeedbackState.Copied -> GraphButtonVariant.Secondary
+            TimelineCopyFeedbackState.Failed -> GraphButtonVariant.Destructive
+        },
+        contentDescription = if (copyState == TimelineCopyFeedbackState.Failed) {
+            "$contentDescription failed"
+        } else {
+            contentDescription
+        },
         onClick = {
-            clipboard.setText(AnnotatedString(value))
-            copied = true
+            copyState = try {
+                clipboard.setText(AnnotatedString(value))
+                TimelineCopyFeedbackState.Copied
+            } catch (_: RuntimeException) {
+                TimelineCopyFeedbackState.Failed
+            }
         },
     )
+}
+
+private enum class TimelineCopyFeedbackState {
+    Idle,
+    Copied,
+    Failed,
 }
 
 @Composable

@@ -657,25 +657,47 @@ private fun RichCodeBlock(language: String, code: String) {
 @Composable
 private fun CopyCodeButton(value: String) {
     val clipboard = LocalClipboardManager.current
-    var copied by remember(value) { mutableStateOf(false) }
+    var copyState by remember(value) { mutableStateOf(RichCopyFeedbackState.Idle) }
 
-    LaunchedEffect(copied) {
-        if (copied) {
+    LaunchedEffect(copyState) {
+        if (copyState != RichCopyFeedbackState.Idle) {
             delay(1200)
-            copied = false
+            copyState = RichCopyFeedbackState.Idle
         }
     }
 
     GraphButton(
-        label = if (copied) "Copied" else "Copy",
+        label = when (copyState) {
+            RichCopyFeedbackState.Idle -> "Copy"
+            RichCopyFeedbackState.Copied -> "Copied"
+            RichCopyFeedbackState.Failed -> "Copy failed"
+        },
         size = GraphButtonSize.Small,
-        variant = if (copied) GraphButtonVariant.Secondary else GraphButtonVariant.Ghost,
-        contentDescription = "Copy code",
+        variant = when (copyState) {
+            RichCopyFeedbackState.Idle -> GraphButtonVariant.Ghost
+            RichCopyFeedbackState.Copied -> GraphButtonVariant.Secondary
+            RichCopyFeedbackState.Failed -> GraphButtonVariant.Destructive
+        },
+        contentDescription = if (copyState == RichCopyFeedbackState.Failed) {
+            "Copy code failed"
+        } else {
+            "Copy code"
+        },
         onClick = {
-            clipboard.setText(AnnotatedString(value))
-            copied = true
+            copyState = try {
+                clipboard.setText(AnnotatedString(value))
+                RichCopyFeedbackState.Copied
+            } catch (_: RuntimeException) {
+                RichCopyFeedbackState.Failed
+            }
         },
     )
+}
+
+private enum class RichCopyFeedbackState {
+    Idle,
+    Copied,
+    Failed,
 }
 
 @Composable
