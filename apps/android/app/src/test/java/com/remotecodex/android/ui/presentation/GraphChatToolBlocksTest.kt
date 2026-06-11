@@ -1,6 +1,7 @@
 package com.remotecodex.android.ui.presentation
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GraphChatToolBlocksTest {
@@ -15,6 +16,67 @@ class GraphChatToolBlocksTest {
         assertEquals("call_1", preview.callId)
         assertEquals("""{"path":"README.md"}""", preview.parameters)
         assertEquals(null, preview.result)
+    }
+
+    @Test
+    fun buildsPendingToolCallStateExpandedByDefault() {
+        val state = buildGraphChatToolCallState(
+            language = "tool-call",
+            body = """{"tool":"file.read","call_id":"call_1","args":{"path":"README.md"}}""",
+        )
+
+        assertEquals("file.read", state.title)
+        assertEquals("call_1", state.callId)
+        assertEquals("pending", state.status)
+        assertEquals("Running", state.statusLabel)
+        assertEquals(GraphChatToolCallTone.Running, state.tone)
+        assertEquals("""{"path":"README.md"}""", state.parameters)
+        assertEquals(null, state.result)
+        assertEquals(false, state.hasTextualOutput)
+        assertEquals(true, state.defaultExpanded)
+        assertTrue(state.stateKey.startsWith("tool:file.read:call_1:pending:"))
+    }
+
+    @Test
+    fun buildsCompletedToolCallStateExpandedWhenResultHasTextualOutput() {
+        val state = buildGraphChatToolCallState(
+            language = "tool-merged",
+            body = """
+                tool: shell.exec
+                call_id: call_shell
+                args:
+                {"cmd":"./gradlew test"}
+                result:
+                stdout: BUILD SUCCESSFUL
+            """.trimIndent(),
+        )
+
+        assertEquals("shell.exec", state.title)
+        assertEquals("Completed", state.statusLabel)
+        assertEquals(GraphChatToolCallTone.Completed, state.tone)
+        assertEquals(true, state.hasTextualOutput)
+        assertEquals(true, state.defaultExpanded)
+        assertEquals("stdout: BUILD SUCCESSFUL", state.result)
+    }
+
+    @Test
+    fun buildsCompletedToolCallStateCollapsedWithoutTextualOutput() {
+        val state = buildGraphChatToolCallState(
+            language = "tool-merged",
+            body = """
+                tool: file.read
+                call_id: call_read
+                args:
+                {"path":"README.md"}
+            """.trimIndent(),
+        )
+
+        assertEquals("file.read", state.title)
+        assertEquals("Completed", state.statusLabel)
+        assertEquals(GraphChatToolCallTone.Completed, state.tone)
+        assertEquals(false, state.hasTextualOutput)
+        assertEquals(false, state.defaultExpanded)
+        assertEquals(null, state.result)
     }
 
     @Test

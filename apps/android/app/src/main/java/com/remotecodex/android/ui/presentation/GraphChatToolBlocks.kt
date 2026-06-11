@@ -18,6 +18,25 @@ data class GraphChatToolBlockPreview(
     val result: String?,
 )
 
+enum class GraphChatToolCallTone {
+    Running,
+    Completed,
+    Failed,
+}
+
+data class GraphChatToolCallState(
+    val title: String,
+    val callId: String?,
+    val status: String,
+    val statusLabel: String,
+    val tone: GraphChatToolCallTone,
+    val parameters: String,
+    val result: String?,
+    val hasTextualOutput: Boolean,
+    val defaultExpanded: Boolean,
+    val stateKey: String,
+)
+
 enum class GraphChatToolValueKind {
     String,
     Number,
@@ -145,6 +164,51 @@ fun parseGraphChatToolBlock(language: String, body: String): GraphChatToolBlockP
         parameters = sections["args"]?.trim().orEmpty().ifBlank { "{}" },
         result = sections["result"]?.trim(),
     )
+}
+
+fun buildGraphChatToolCallState(
+    language: String,
+    body: String,
+): GraphChatToolCallState {
+    val status = toolBlockStatus(language, body)
+    val preview = parseGraphChatToolBlock(language, body)
+    val hasTextualOutput = graphChatToolHasTextualOutput(preview.result)
+    val tone = when (status) {
+        "failed" -> GraphChatToolCallTone.Failed
+        "pending" -> GraphChatToolCallTone.Running
+        else -> GraphChatToolCallTone.Completed
+    }
+    return GraphChatToolCallState(
+        title = preview.title,
+        callId = preview.callId,
+        status = status,
+        statusLabel = when (tone) {
+            GraphChatToolCallTone.Completed -> "Completed"
+            GraphChatToolCallTone.Failed -> "Failed"
+            GraphChatToolCallTone.Running -> "Running"
+        },
+        tone = tone,
+        parameters = preview.parameters.ifBlank { "{}" },
+        result = preview.result?.takeIf { it.isNotBlank() },
+        hasTextualOutput = hasTextualOutput,
+        defaultExpanded = status == "pending" || hasTextualOutput,
+        stateKey = "tool:${preview.title}:${preview.callId.orEmpty()}:$status:${body.length}",
+    )
+}
+
+fun graphChatToolHasTextualOutput(result: String?): Boolean {
+    val normalized = result?.trim().orEmpty()
+    if (normalized.isEmpty()) {
+        return false
+    }
+    val entries = graphChatToolEntries(normalized)
+    if (entries.isEmpty()) {
+        return false
+    }
+    return entries.any { entry ->
+        entry.key in setOf("stdout", "stderr", "result", "value") &&
+            entry.value.isNotBlank()
+    }
 }
 
 fun graphChatToolEntries(body: String): List<GraphChatToolEntry> {

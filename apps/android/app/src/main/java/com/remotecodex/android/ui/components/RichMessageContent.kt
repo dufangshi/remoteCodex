@@ -58,11 +58,11 @@ import com.remotecodex.android.ui.presentation.TableAlignment
 import com.remotecodex.android.ui.presentation.TableColumn
 import com.remotecodex.android.ui.presentation.parsePlainRichMessageBlocks
 import com.remotecodex.android.ui.presentation.parseRichMessageBlocks
-import com.remotecodex.android.ui.presentation.parseGraphChatToolBlock
+import com.remotecodex.android.ui.presentation.GraphChatToolCallTone
+import com.remotecodex.android.ui.presentation.buildGraphChatToolCallState
 import com.remotecodex.android.ui.presentation.preprocessGraphChatToolBlocks
 import com.remotecodex.android.ui.presentation.prettyGraphChatToolJsonValue
 import com.remotecodex.android.ui.presentation.shouldShowGraphChatMessageExpansion
-import com.remotecodex.android.ui.presentation.toolBlockStatus
 import com.remotecodex.android.ui.model.ToolStatus
 import com.remotecodex.android.ui.theme.ThreadColors
 import kotlinx.coroutines.delay
@@ -182,27 +182,21 @@ private fun RichMathBlock(expression: String) {
 
 @Composable
 private fun RichToolBlock(language: String, code: String) {
-    val status = toolBlockStatus(language, code)
-    val preview = remember(language, code) { parseGraphChatToolBlock(language, code) }
-    val foreground = when (status) {
-        "failed" -> ThreadColors.Danger
-        "pending" -> ThreadColors.Warning
-        else -> ThreadColors.Success
+    val state = remember(language, code) { buildGraphChatToolCallState(language, code) }
+    val foreground = when (state.tone) {
+        GraphChatToolCallTone.Failed -> ThreadColors.Danger
+        GraphChatToolCallTone.Running -> ThreadColors.Warning
+        GraphChatToolCallTone.Completed -> ThreadColors.Success
     }
-    val background = when (status) {
-        "failed" -> ThreadColors.DangerSoft
-        "pending" -> ThreadColors.WarningSoft
-        else -> ThreadColors.SuccessSoft
+    val background = when (state.tone) {
+        GraphChatToolCallTone.Failed -> ThreadColors.DangerSoft
+        GraphChatToolCallTone.Running -> ThreadColors.WarningSoft
+        GraphChatToolCallTone.Completed -> ThreadColors.SuccessSoft
     }
-    val statusLabel = when (status) {
-        "completed" -> "Completed"
-        "failed" -> "Failed"
-        else -> "Running"
-    }
-    val toolStatus = when (status) {
-        "failed" -> ToolStatus.Failed
-        "pending" -> ToolStatus.Running
-        else -> ToolStatus.Completed
+    val toolStatus = when (state.tone) {
+        GraphChatToolCallTone.Failed -> ToolStatus.Failed
+        GraphChatToolCallTone.Running -> ToolStatus.Running
+        GraphChatToolCallTone.Completed -> ToolStatus.Completed
     }
     GraphAccordion(
         modifier = Modifier
@@ -211,10 +205,10 @@ private fun RichToolBlock(language: String, code: String) {
             .border(1.dp, foreground.copy(alpha = 0.38f), RoundedCornerShape(9.dp)),
     ) {
         GraphAccordionItem(
-            title = preview.title,
-            subtitle = preview.callId,
-            stateKey = "tool:${preview.title}:${preview.callId.orEmpty()}:$status:${code.length}",
-            defaultExpanded = status != "completed" || !preview.result.isNullOrBlank(),
+            title = state.title,
+            subtitle = state.callId,
+            stateKey = state.stateKey,
+            defaultExpanded = state.defaultExpanded,
             showDivider = false,
             titleColor = foreground,
             titleFontFamily = FontFamily.Monospace,
@@ -230,7 +224,7 @@ private fun RichToolBlock(language: String, code: String) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     ToolStatusBadge(
-                        label = statusLabel,
+                        label = state.statusLabel,
                         status = toolStatus,
                         compact = true,
                     )
@@ -238,8 +232,8 @@ private fun RichToolBlock(language: String, code: String) {
             },
         ) {
             ToolBlockActions(copyValue = code.trimEnd())
-            GraphChatToolSection(title = "Parameters", body = preview.parameters.ifBlank { "{}" })
-            preview.result?.takeIf { it.isNotBlank() }?.let { result ->
+            GraphChatToolSection(title = "Parameters", body = state.parameters)
+            state.result?.let { result ->
                 GraphChatToolSection(title = "Result", body = result)
             }
         }
