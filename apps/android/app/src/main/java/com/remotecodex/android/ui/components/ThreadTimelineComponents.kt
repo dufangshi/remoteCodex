@@ -1110,15 +1110,15 @@ private fun HistoryGroupCard(
             .border(1.dp, colors.border, RoundedCornerShape(10.dp))
     ) {
         GraphAccordionItem(
-            title = group.title,
-            subtitle = group.statusLabel ?: "${group.items.size} entries",
+            title = "Batch",
+            subtitle = historyGroupSubtitle(group),
             defaultExpanded = group.expandedByDefault,
             showDivider = false,
             titleColor = colors.foreground,
             backgroundColor = colors.background,
             contentBackgroundColor = colors.background,
             leading = {
-                HistoryGroupGlyph(group = group, color = colors.foreground)
+                HistoryGroupBadge(group = group, colors = colors)
             },
             trailing = {
                 Row(
@@ -1155,6 +1155,15 @@ private fun HistoryGroupCard(
     }
 }
 
+private fun historyGroupSubtitle(group: HistoryGroupPreview): String {
+    return listOfNotNull(
+        group.countLabel.takeIf { it.isNotBlank() },
+        group.statusLabel?.takeIf { it.isNotBlank() },
+    ).joinToString(" · ").ifBlank {
+        "${group.items.size} entries"
+    }
+}
+
 @Composable
 private fun FileChangeGroupSummary(group: HistoryGroupPreview) {
     Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -1166,6 +1175,43 @@ private fun FileChangeGroupSummary(group: HistoryGroupPreview) {
         ).forEach { segment ->
             FileChangeSummaryPill(segment = segment)
         }
+    }
+}
+
+@Composable
+private fun HistoryGroupBadge(
+    group: HistoryGroupPreview,
+    colors: HistoryItemColors,
+) {
+    Box(
+        modifier = Modifier
+            .padding(top = 1.dp, end = 2.dp)
+            .size(36.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .size(31.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(colors.foreground.copy(alpha = 0.12f))
+                .border(1.dp, colors.foreground.copy(alpha = 0.30f), RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            HistoryGroupGlyph(group = group, color = colors.foreground)
+        }
+        Text(
+            text = graphChatHistoryGroupCountLabel(group.countLabel),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .clip(RoundedCornerShape(999.dp))
+                .background(ThreadColors.CodeBackground.copy(alpha = 0.94f))
+                .border(1.dp, colors.foreground.copy(alpha = 0.35f), RoundedCornerShape(999.dp))
+                .padding(horizontal = 5.dp, vertical = 1.dp),
+            color = colors.foreground,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
     }
 }
 
