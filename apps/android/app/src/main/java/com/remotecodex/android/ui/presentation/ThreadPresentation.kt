@@ -5,6 +5,7 @@ import com.remotecodex.android.ui.model.PlanStepStatus
 import com.remotecodex.android.ui.model.ThreadStatus
 import com.remotecodex.android.ui.model.ToolStatus
 import com.remotecodex.android.ui.model.ComposerActiveView
+import com.remotecodex.android.ui.model.ComposerAttachmentKindPreview
 import com.remotecodex.android.ui.model.ComposerContextAvailability
 import com.remotecodex.android.ui.model.ComposerContextPreview
 import com.remotecodex.android.ui.model.ComposerForkTurnOptionsPreview
@@ -172,6 +173,8 @@ data class ComposerAttachmentInsertionState(
     val prompt: String,
     val selection: ComposerPromptSelectionRange,
     val insertedPlaceholders: List<String>,
+    val insertedAttachments: List<ComposerPromptAttachmentPreview> = emptyList(),
+    val insertedAttachmentClientIds: List<String> = emptyList(),
 )
 
 enum class ComposerPromptPasteActionKind {
@@ -2120,11 +2123,20 @@ fun buildAttachmentInsertionState(
     fileNames: List<String>,
     kind: ComposerAttachmentActionKind,
     selection: ComposerPromptSelectionRange?,
+    buildClientId: (Int, ComposerAttachmentActionKind, String) -> String = { index, _, _ -> "attachment-${index + 1}" },
 ): ComposerAttachmentInsertionState {
     val usedPlaceholders = existingAttachments.mapTo(mutableSetOf()) { it.placeholder }
-    val placeholders = fileNames.map { fileName ->
-        buildAttachmentPlaceholder(kind, fileName, usedPlaceholders).also { usedPlaceholders.add(it) }
+    val insertedAttachments = fileNames.mapIndexed { index, fileName ->
+        val placeholder = buildAttachmentPlaceholder(kind, fileName, usedPlaceholders)
+        usedPlaceholders.add(placeholder)
+        ComposerPromptAttachmentPreview(
+            clientId = buildClientId(index, kind, fileName),
+            kind = kind.toPreviewKind(),
+            name = normalizeAttachmentLabel(fileName),
+            placeholder = placeholder,
+        )
     }
+    val placeholders = insertedAttachments.map { attachment -> attachment.placeholder }
     val range = (selection ?: ComposerPromptSelectionRange(prompt.length, prompt.length)).normalizedFor(prompt)
     val insertionText = buildAttachmentInsertionText(prompt, range, placeholders)
     val nextPrompt = prompt.replaceRange(range.start, range.end, insertionText)
@@ -2134,7 +2146,57 @@ fun buildAttachmentInsertionState(
         prompt = nextPrompt,
         selection = ComposerPromptSelectionRange(nextCaret, nextCaret),
         insertedPlaceholders = placeholders,
+        insertedAttachments = insertedAttachments,
+        insertedAttachmentClientIds = insertedAttachments.map { attachment -> attachment.clientId },
     )
+}
+
+fun buildDroppedAttachmentInsertionState(
+    prompt: String,
+    existingAttachments: List<ComposerPromptAttachmentPreview>,
+    droppedFiles: List<Pair<String, ComposerAttachmentActionKind>>,
+    selection: ComposerPromptSelectionRange?,
+    buildClientId: (Int, ComposerAttachmentActionKind, String) -> String = { index, _, _ -> "attachment-${index + 1}" },
+): ComposerAttachmentInsertionState {
+    val orderedFiles = orderDroppedAttachmentFiles(droppedFiles)
+    val usedPlaceholders = existingAttachments.mapTo(mutableSetOf()) { it.placeholder }
+    val insertedAttachments = orderedFiles.mapIndexed { index, file ->
+        val placeholder = buildAttachmentPlaceholder(file.second, file.first, usedPlaceholders)
+        usedPlaceholders.add(placeholder)
+        ComposerPromptAttachmentPreview(
+            clientId = buildClientId(index, file.second, file.first),
+            kind = file.second.toPreviewKind(),
+            name = normalizeAttachmentLabel(file.first),
+            placeholder = placeholder,
+        )
+    }
+    val placeholders = insertedAttachments.map { attachment -> attachment.placeholder }
+    val range = (selection ?: ComposerPromptSelectionRange(prompt.length, prompt.length)).normalizedFor(prompt)
+    val insertionText = buildAttachmentInsertionText(prompt, range, placeholders)
+    val nextPrompt = prompt.replaceRange(range.start, range.end, insertionText)
+    val trailingSpacerOffset = if (insertionText.endsWith(" ")) 1 else 0
+    val nextCaret = range.start + insertionText.length - trailingSpacerOffset
+    return ComposerAttachmentInsertionState(
+        prompt = nextPrompt,
+        selection = ComposerPromptSelectionRange(nextCaret, nextCaret),
+        insertedPlaceholders = placeholders,
+        insertedAttachments = insertedAttachments,
+        insertedAttachmentClientIds = insertedAttachments.map { attachment -> attachment.clientId },
+    )
+}
+
+fun orderDroppedAttachmentFiles(
+    files: List<Pair<String, ComposerAttachmentActionKind>>,
+): List<Pair<String, ComposerAttachmentActionKind>> {
+    return files.filter { file -> file.second == ComposerAttachmentActionKind.Photo } +
+        files.filter { file -> file.second == ComposerAttachmentActionKind.File }
+}
+
+private fun ComposerAttachmentActionKind.toPreviewKind(): ComposerAttachmentKindPreview {
+    return when (this) {
+        ComposerAttachmentActionKind.Photo -> ComposerAttachmentKindPreview.Photo
+        ComposerAttachmentActionKind.File -> ComposerAttachmentKindPreview.File
+    }
 }
 
 fun derivePromptPasteAction(

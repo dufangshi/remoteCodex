@@ -1569,6 +1569,15 @@ class ThreadPresentationTest {
                     end = "see [FILE report.txt]".length,
                 ),
                 insertedPlaceholders = listOf("[FILE report.txt]"),
+                insertedAttachments = listOf(
+                    ComposerPromptAttachmentPreview(
+                        clientId = "new-1",
+                        kind = ComposerAttachmentKindPreview.File,
+                        name = "report.txt",
+                        placeholder = "[FILE report.txt]",
+                    ),
+                ),
+                insertedAttachmentClientIds = listOf("new-1"),
             ),
             buildAttachmentInsertionState(
                 prompt = "see this",
@@ -1583,6 +1592,7 @@ class ThreadPresentationTest {
                 fileNames = listOf("report.txt"),
                 kind = ComposerAttachmentActionKind.File,
                 selection = ComposerPromptSelectionRange(4, 8),
+                buildClientId = { index, _, _ -> "new-${index + 1}" },
             ),
         )
     }
@@ -1597,6 +1607,21 @@ class ThreadPresentationTest {
                     end = "prompt [PHOTO image.png (2)] [PHOTO image.png (3)]".length,
                 ),
                 insertedPlaceholders = listOf("[PHOTO image.png (2)]", "[PHOTO image.png (3)]"),
+                insertedAttachments = listOf(
+                    ComposerPromptAttachmentPreview(
+                        clientId = "photo-1",
+                        kind = ComposerAttachmentKindPreview.Photo,
+                        name = "image.png",
+                        placeholder = "[PHOTO image.png (2)]",
+                    ),
+                    ComposerPromptAttachmentPreview(
+                        clientId = "photo-2",
+                        kind = ComposerAttachmentKindPreview.Photo,
+                        name = "image.png",
+                        placeholder = "[PHOTO image.png (3)]",
+                    ),
+                ),
+                insertedAttachmentClientIds = listOf("photo-1", "photo-2"),
             ),
             buildAttachmentInsertionState(
                 prompt = "prompt",
@@ -1611,6 +1636,53 @@ class ThreadPresentationTest {
                 fileNames = listOf("image.png", "image.png"),
                 kind = ComposerAttachmentActionKind.Photo,
                 selection = null,
+                buildClientId = { index, _, _ -> "photo-${index + 1}" },
+            ),
+        )
+    }
+
+    @Test
+    fun buildsDroppedAttachmentInsertionStateWithPhotosBeforeFiles() {
+        assertEquals(
+            ComposerAttachmentInsertionState(
+                prompt = "prompt [PHOTO image.png (2)] [FILE notes.txt] ",
+                selection = ComposerPromptSelectionRange(
+                    start = "prompt [PHOTO image.png (2)] [FILE notes.txt]".length,
+                    end = "prompt [PHOTO image.png (2)] [FILE notes.txt]".length,
+                ),
+                insertedPlaceholders = listOf("[PHOTO image.png (2)]", "[FILE notes.txt]"),
+                insertedAttachments = listOf(
+                    ComposerPromptAttachmentPreview(
+                        clientId = "drop-1",
+                        kind = ComposerAttachmentKindPreview.Photo,
+                        name = "image.png",
+                        placeholder = "[PHOTO image.png (2)]",
+                    ),
+                    ComposerPromptAttachmentPreview(
+                        clientId = "drop-2",
+                        kind = ComposerAttachmentKindPreview.File,
+                        name = "notes.txt",
+                        placeholder = "[FILE notes.txt]",
+                    ),
+                ),
+                insertedAttachmentClientIds = listOf("drop-1", "drop-2"),
+            ),
+            buildDroppedAttachmentInsertionState(
+                prompt = "prompt",
+                existingAttachments = listOf(
+                    ComposerPromptAttachmentPreview(
+                        clientId = "existing",
+                        kind = ComposerAttachmentKindPreview.Photo,
+                        name = "image.png",
+                        placeholder = "[PHOTO image.png]",
+                    ),
+                ),
+                droppedFiles = listOf(
+                    "notes.txt" to ComposerAttachmentActionKind.File,
+                    "image.png" to ComposerAttachmentActionKind.Photo,
+                ),
+                selection = null,
+                buildClientId = { index, _, _ -> "drop-${index + 1}" },
             ),
         )
     }
