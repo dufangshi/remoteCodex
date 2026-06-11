@@ -129,10 +129,13 @@ data class InlinePreviewSummary(
 )
 
 data class HookHistorySummary(
+    val eventTitle: String,
     val hookLabel: String,
     val hookMetaLabel: String,
+    val displayText: String,
     val firstLine: String,
     val showGap: Boolean,
+    val showMetaLabel: Boolean,
     val outputBacked: Boolean,
 )
 
@@ -3197,6 +3200,11 @@ fun hookHistorySummary(
         ?.takeIf { it.isNotEmpty() }
         ?.let { "$it hook" }
         ?: baseText
+    val eventTitle = hookEventLabel
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?.let { "${it}_hook" }
+        ?: "hook"
     val status = hookStatusMessage?.trim().orEmpty()
     val preview = previewText?.trim().orEmpty()
     val fallbackText = status
@@ -3215,10 +3223,13 @@ fun hookHistorySummary(
     }
 
     return HookHistorySummary(
+        eventTitle = eventTitle,
         hookLabel = hookLabel,
         hookMetaLabel = hookLabel.uppercase(),
+        displayText = firstLine,
         firstLine = firstLine,
         showGap = outputText.isNotEmpty() && summary.showGap,
+        showMetaLabel = outputText.isNotEmpty(),
         outputBacked = outputText.isNotEmpty(),
     )
 }

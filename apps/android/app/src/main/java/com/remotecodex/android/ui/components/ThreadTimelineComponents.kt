@@ -1707,7 +1707,7 @@ private fun HookHistorySummaryRow(
         horizontalArrangement = Arrangement.spacedBy(7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (summary.outputBacked) {
+        if (summary.showMetaLabel) {
             Text(
                 text = summary.hookMetaLabel,
                 modifier = Modifier.widthIn(max = 160.dp),
@@ -1719,7 +1719,7 @@ private fun HookHistorySummaryRow(
             )
         }
         Text(
-            text = summary.firstLine,
+            text = summary.displayText,
             modifier = Modifier.weight(1f),
             color = ThreadColors.ForegroundSoft,
             style = MaterialTheme.typography.bodyMedium,

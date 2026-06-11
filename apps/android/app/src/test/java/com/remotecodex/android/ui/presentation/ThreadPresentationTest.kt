@@ -4327,10 +4327,13 @@ class ThreadPresentationTest {
     fun summarizesHookOutputWithHookLabelAndGap() {
         assertEquals(
             HookHistorySummary(
+                eventTitle = "PreToolUse_hook",
                 hookLabel = "PreToolUse hook",
                 hookMetaLabel = "PRETOOLUSE HOOK",
+                displayText = "lint-command",
                 firstLine = "lint-command",
                 showGap = true,
+                showMetaLabel = true,
                 outputBacked = true,
             ),
             hookHistorySummary(
@@ -4347,10 +4350,13 @@ class ThreadPresentationTest {
     fun summarizesHookStatusWithoutDuplicateLabel() {
         assertEquals(
             HookHistorySummary(
+                eventTitle = "PostToolUse_hook",
                 hookLabel = "PostToolUse hook",
                 hookMetaLabel = "POSTTOOLUSE HOOK",
+                displayText = "PostToolUse hook · Completed with warnings",
                 firstLine = "PostToolUse hook · Completed with warnings",
                 showGap = false,
+                showMetaLabel = false,
                 outputBacked = false,
             ),
             hookHistorySummary(
@@ -4358,6 +4364,29 @@ class ThreadPresentationTest {
                 hookEventLabel = "PostToolUse",
                 hookStatusMessage = "Completed with warnings",
                 previewText = "Completed with warnings",
+                hookOutput = null,
+            ),
+        )
+    }
+
+    @Test
+    fun summarizesHookWithoutEventLabel() {
+        assertEquals(
+            HookHistorySummary(
+                eventTitle = "hook",
+                hookLabel = "fallback hook",
+                hookMetaLabel = "FALLBACK HOOK",
+                displayText = "fallback hook",
+                firstLine = "fallback hook",
+                showGap = false,
+                showMetaLabel = false,
+                outputBacked = false,
+            ),
+            hookHistorySummary(
+                text = "fallback hook",
+                hookEventLabel = null,
+                hookStatusMessage = null,
+                previewText = null,
                 hookOutput = null,
             ),
         )
