@@ -874,12 +874,7 @@ private fun HistoryGroupCard(
 private fun FileChangeGroupSummary(group: HistoryGroupPreview) {
     Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
         group.changedFiles?.takeIf { it > 0 }?.let { files ->
-            Text(
-                text = "$files files",
-                color = ThreadColors.ForegroundMuted,
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-            )
+            FileCountPill(files = files)
         }
         group.addedLines?.takeIf { it > 0 }?.let { added ->
             DeltaPill(label = "+$added", positive = true)
@@ -1303,6 +1298,9 @@ private fun HistoryGroupGlyph(group: HistoryGroupPreview, color: Color) {
 @Composable
 private fun FileChangeDeltaRow(item: HistoryItemPreview) {
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        item.changedFiles?.takeIf { it > 0 }?.let { files ->
+            FileCountPill(files = files)
+        }
         item.addedLines?.takeIf { it > 0 }?.let { added ->
             DeltaPill(label = "+$added", positive = true)
         }
@@ -1310,6 +1308,22 @@ private fun FileChangeDeltaRow(item: HistoryItemPreview) {
             DeltaPill(label = "-$removed", positive = false)
         }
     }
+}
+
+@Composable
+private fun FileCountPill(files: Int) {
+    Text(
+        text = "$files ${if (files == 1) "file" else "files"}",
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(ThreadColors.SurfaceStrong)
+            .border(1.dp, ThreadColors.BorderStrong.copy(alpha = 0.58f), RoundedCornerShape(999.dp))
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        color = ThreadColors.ForegroundSoft,
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 1,
+    )
 }
 
 @Composable

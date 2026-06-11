@@ -79,6 +79,7 @@ data class HistoryItemPreview(
     val detail: String?,
     val actionLabel: String?,
     val meta: String? = null,
+    val changedFiles: Int? = null,
     val addedLines: Int? = null,
     val removedLines: Int? = null,
     val assetPath: String? = null,
