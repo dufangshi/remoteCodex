@@ -12,6 +12,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.remotecodex.android.ui.model.ComposerActiveView
 import com.remotecodex.android.ui.model.ComposerPreview
 import com.remotecodex.android.ui.model.ComposerPromptPreview
+import com.remotecodex.android.ui.model.ComposerShellControlPreview
 import com.remotecodex.android.ui.theme.RemoteCodexTheme
 import org.junit.Rule
 import org.junit.Test
@@ -317,6 +318,40 @@ class ThreadComposerStateTest {
 
         composeRule.onNodeWithContentDescription("CTRL-C").performClick()
         composeRule.onNodeWithText("Sent Ctrl-C preview").assertExists()
+    }
+
+    @Test
+    fun shellToolsPanelKeepsUnavailableControlsDisabled() {
+        setComposerContent(
+            composer = ComposerPreview(
+                activeView = ComposerActiveView.Shell,
+                busy = true,
+                shellControl = ComposerShellControlPreview(
+                    shellInputEnabled = false,
+                    commandRunning = true,
+                ),
+            ),
+        )
+
+        composeRule.onNodeWithContentDescription("Open shell tools").performClick()
+        composeRule.onNodeWithText("Shell tools").assertExists()
+
+        listOf("CLEAR", "CTRL-C", "CTRL-D", "ESC", "TAB", "UP", "DOWN").forEach { label ->
+            composeRule.onNode(
+                SemanticsMatcher.expectValue(
+                    SemanticsProperties.ContentDescription,
+                    listOf(label),
+                ) and SemanticsMatcher.expectValue(
+                    SemanticsProperties.StateDescription,
+                    "Disabled",
+                ),
+            ).assertExists()
+        }
+
+        composeRule.onNodeWithContentDescription("PASTE").performClick()
+        composeRule.onNodeWithText("Shell paste preview").assertExists()
+        composeRule.onNodeWithText("Shell clear preview").assertDoesNotExist()
+        composeRule.onNodeWithText("Sent Ctrl-C preview").assertDoesNotExist()
     }
 
     @Test
