@@ -1232,7 +1232,7 @@ private fun HistoryItemCard(
             }
         }
         when (item.kind) {
-            HistoryItemKind.Hook -> HookHistorySummaryRow(item = item, colors = colors)
+            HistoryItemKind.Hook -> HookHistorySummaryRow(item = item)
             HistoryItemKind.Artifact -> ArtifactHistorySummaryBlock(
                 item = item,
                 colors = colors,
@@ -1282,7 +1282,9 @@ private fun HistoryItemCard(
         if (item.kind == HistoryItemKind.Image) {
             ImageHistoryPreview(item = item, colors = colors, onOpenDetail = onOpenDetail)
         }
-        item.detail?.takeIf { item.kind != HistoryItemKind.Artifact }?.let { detail ->
+        item.detail?.takeIf {
+            item.kind != HistoryItemKind.Artifact && item.kind != HistoryItemKind.Hook
+        }?.let { detail ->
             Text(
                 text = detail,
                 modifier = Modifier
@@ -1460,7 +1462,6 @@ private fun ArtifactHistorySummaryBlock(
 @Composable
 private fun HookHistorySummaryRow(
     item: HistoryItemPreview,
-    colors: HistoryItemColors,
 ) {
     val summary = hookHistorySummary(
         text = item.summary,
@@ -1477,15 +1478,12 @@ private fun HookHistorySummaryRow(
         if (summary.outputBacked) {
             Text(
                 text = summary.hookMetaLabel,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(colors.foreground.copy(alpha = 0.10f))
-                    .border(1.dp, colors.foreground.copy(alpha = 0.22f), RoundedCornerShape(999.dp))
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                color = colors.foreground,
+                modifier = Modifier.widthIn(max = 160.dp),
+                color = ThreadColors.ForegroundMuted,
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         Text(
