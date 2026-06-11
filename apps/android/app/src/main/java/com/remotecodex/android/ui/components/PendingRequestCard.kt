@@ -297,16 +297,10 @@ private fun PendingRequestQuestionSection(
                 )
             }
         } else {
-            Text(
-                text = if (question.multiSelect) "Select one or more answers" else "Enter an answer",
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(ThreadColors.SurfaceStrong)
-                    .border(1.dp, ThreadColors.Border, RoundedCornerShape(10.dp))
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                color = ThreadColors.ForegroundMuted,
-                style = MaterialTheme.typography.bodyMedium,
+            PendingRequestFreeAnswerField(
+                header = question.header,
+                value = customAnswer,
+                onValueChange = onCustomAnswerChange,
             )
         }
     }
@@ -401,6 +395,44 @@ private fun PendingRequestCustomAnswerField(
             unfocusedContainerColor = ThreadColors.SurfaceStrong,
             cursorColor = ThreadColors.Primary,
             focusedBorderColor = ThreadColors.Info.copy(alpha = 0.58f),
+            unfocusedBorderColor = ThreadColors.Border,
+            focusedPlaceholderColor = ThreadColors.ForegroundMuted,
+            unfocusedPlaceholderColor = ThreadColors.ForegroundMuted,
+        ),
+    )
+}
+
+@Composable
+private fun PendingRequestFreeAnswerField(
+    header: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics {
+                contentDescription = header
+            },
+        singleLine = true,
+        placeholder = {
+            Text(
+                text = "Enter an answer",
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        },
+        textStyle = MaterialTheme.typography.bodyMedium.copy(color = ThreadColors.Foreground),
+        shape = RoundedCornerShape(12.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = ThreadColors.Foreground,
+            unfocusedTextColor = ThreadColors.Foreground,
+            focusedContainerColor = ThreadColors.SurfaceStrong,
+            unfocusedContainerColor = ThreadColors.SurfaceStrong,
+            cursorColor = ThreadColors.Primary,
+            focusedBorderColor = ThreadColors.Primary.copy(alpha = 0.58f),
             unfocusedBorderColor = ThreadColors.Border,
             focusedPlaceholderColor = ThreadColors.ForegroundMuted,
             unfocusedPlaceholderColor = ThreadColors.ForegroundMuted,

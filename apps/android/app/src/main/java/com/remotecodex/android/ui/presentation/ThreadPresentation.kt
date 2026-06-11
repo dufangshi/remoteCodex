@@ -232,6 +232,9 @@ fun pendingRequestQuestionHasAnswer(
     selectedLabels: Set<String>,
     customAnswer: String,
 ): Boolean {
+    if (question.options.isEmpty() && question.otherLabel == null) {
+        return customAnswer.trim().isNotEmpty()
+    }
     val otherLabel = question.otherLabel
     if (selectedLabels.isEmpty()) {
         return false

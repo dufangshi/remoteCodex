@@ -604,6 +604,10 @@ object ThreadPreviewSample {
                     ),
                     allowOther = true,
                 ),
+                PendingRequestQuestionPreview(
+                    header = "Follow-up",
+                    question = "What should Codex do after the build finishes?",
+                ),
             ),
         ),
         workspacePreview = WorkspacePreview(

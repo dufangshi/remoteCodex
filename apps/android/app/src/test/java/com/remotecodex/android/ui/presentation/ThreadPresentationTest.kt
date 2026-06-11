@@ -910,6 +910,35 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun requiresFreeFormPendingRequestAnswerWhenQuestionHasNoOptions() {
+        val question = PendingRequestQuestionState(
+            id = "question-0",
+            header = "Details",
+            question = "What should Codex do after the build?",
+            options = emptyList(),
+            multiSelect = false,
+            otherLabel = null,
+        )
+
+        assertEquals(
+            false,
+            pendingRequestQuestionHasAnswer(
+                question = question,
+                selectedLabels = emptySet(),
+                customAnswer = " ",
+            ),
+        )
+        assertEquals(
+            true,
+            pendingRequestQuestionHasAnswer(
+                question = question,
+                selectedLabels = emptySet(),
+                customAnswer = "Continue with timeline parity.",
+            ),
+        )
+    }
+
+    @Test
     fun buildsEnabledComposerSettingsState() {
         assertEquals(
             ComposerSettingsState(
