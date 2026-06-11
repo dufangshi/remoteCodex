@@ -33,8 +33,12 @@ class SupervisorHomeScreenTest {
     @Test
     fun homeShowsNavigationDestinationsAndOpensThreadPreview() {
         var openedThreadId: String? = null
+        var openedWorkspaceId: String? = null
 
-        setHomeContent(onOpenThread = { openedThreadId = it })
+        setHomeContent(
+            onOpenThread = { openedThreadId = it },
+            onOpenWorkspace = { openedWorkspaceId = it },
+        )
 
         composeRule.onNodeWithText("Remote Codex").assertExists()
         composeRule.onNodeWithContentDescription("Open Workspaces").assertExists()
@@ -47,6 +51,8 @@ class SupervisorHomeScreenTest {
         composeRule.onNodeWithContentDescription("Start thread in workspace remoteCodex-main").assertExists()
         composeRule.onNodeWithContentDescription("Delete workspace remoteCodex-main").assertExists()
         composeRule.onNodeWithContentDescription("Create workspace").assertExists()
+        composeRule.onNodeWithContentDescription("Open workspace remoteCodex-main").performClick()
+        assertEquals("workspace-1", openedWorkspaceId)
 
         composeRule.onNodeWithContentDescription("Open Threads").performClick()
         composeRule.onNodeWithText("Android native thread client").assertExists()
@@ -107,7 +113,10 @@ class SupervisorHomeScreenTest {
         composeRule.onNodeWithContentDescription("Import plugin").assertExists()
     }
 
-    private fun setHomeContent(onOpenThread: (String?) -> Unit = {}) {
+    private fun setHomeContent(
+        onOpenThread: (String?) -> Unit = {},
+        onOpenWorkspace: (String) -> Unit = {},
+    ) {
         composeRule.setContent {
             RemoteCodexTheme(dark = false) {
                 SupervisorHomeScreen(
@@ -147,6 +156,7 @@ class SupervisorHomeScreenTest {
                     darkThemeActive = false,
                     onThemeModeSelected = {},
                     onOpenThread = onOpenThread,
+                    onOpenWorkspace = onOpenWorkspace,
                     initialPlugins = listOf(examplePlugin(enabled = true)),
                     initialRuntimeConfig = SupervisorRuntimeConfig(
                         appName = "remote-codex",

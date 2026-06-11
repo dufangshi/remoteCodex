@@ -20,6 +20,7 @@ import com.remotecodex.android.ui.screen.SupervisorConnectionSetupScreen
 import com.remotecodex.android.ui.screen.SupervisorHomeScreen
 import com.remotecodex.android.ui.screen.ThreadDetailScreen
 import com.remotecodex.android.ui.screen.ThreadDetailPreviewScreen
+import com.remotecodex.android.ui.screen.WorkspaceDetailScreen
 import com.remotecodex.android.ui.theme.RemoteCodexTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -88,6 +89,9 @@ class MainActivity : ComponentActivity() {
                                 connectedRoute = threadId?.let(ConnectedRoute::ThreadDetail)
                                     ?: ConnectedRoute.ThreadPreview
                             },
+                            onOpenWorkspace = { workspaceId ->
+                                connectedRoute = ConnectedRoute.WorkspaceDetail(workspaceId)
+                            },
                             onRefreshHomeSnapshot = {
                                 homeSnapshotRefreshNonce += 1
                             },
@@ -145,6 +149,20 @@ class MainActivity : ComponentActivity() {
                             },
                             onBackToHome = { connectedRoute = ConnectedRoute.Home },
                         )
+                        is ConnectedRoute.WorkspaceDetail -> WorkspaceDetailScreen(
+                            workspaceId = (connectedRoute as ConnectedRoute.WorkspaceDetail).workspaceId,
+                            supervisorConnection = connection,
+                            homeSnapshot = homeSnapshot,
+                            homeSnapshotLoading = homeSnapshotLoading,
+                            homeSnapshotError = homeSnapshotError,
+                            onBackToHome = { connectedRoute = ConnectedRoute.Home },
+                            onOpenThread = { threadId ->
+                                connectedRoute = ConnectedRoute.ThreadDetail(threadId)
+                            },
+                            onRefreshHomeSnapshot = {
+                                homeSnapshotRefreshNonce += 1
+                            },
+                        )
                     }
                 }
             }
@@ -156,4 +174,5 @@ private sealed interface ConnectedRoute {
     data object Home : ConnectedRoute
     data object ThreadPreview : ConnectedRoute
     data class ThreadDetail(val threadId: String) : ConnectedRoute
+    data class WorkspaceDetail(val workspaceId: String) : ConnectedRoute
 }

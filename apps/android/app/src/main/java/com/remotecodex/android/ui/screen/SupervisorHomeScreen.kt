@@ -85,6 +85,7 @@ fun SupervisorHomeScreen(
     darkThemeActive: Boolean,
     onThemeModeSelected: (ThemeMode) -> Unit,
     onOpenThread: (String?) -> Unit,
+    onOpenWorkspace: (String) -> Unit = {},
     onRefreshHomeSnapshot: () -> Unit = {},
     onChangeConnection: () -> Unit,
     initialPlugins: List<SupervisorPluginSummary>? = null,
@@ -395,9 +396,7 @@ fun SupervisorHomeScreen(
                                 workspace = workspace,
                                 busy = workspaceActionBusyId == workspace.id,
                                 onOpenWorkspace = {
-                                    runWorkspaceAction(workspace.id) {
-                                        client.openWorkspace(workspace.id)
-                                    }
+                                    onOpenWorkspace(workspace.id)
                                 },
                                 onToggleFavorite = {
                                     runWorkspaceAction(workspace.id) {

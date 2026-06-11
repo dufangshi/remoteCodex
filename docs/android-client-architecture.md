@@ -190,78 +190,31 @@ The visual direction is close to the web mobile thread view, but not a literal D
 
 Shell and terminal access are intentionally paused for Android because exposing a remote command surface needs a separate product and security decision. Existing shell API adapters, presentation models, and `ShellPanel.kt` stay in the tree for now, but Android keeps `AndroidFeatureFlags.ShellEnabled = false`, hides shell destinations and composer controls, skips shell state loading by default, and does not call backend shell APIs in the normal thread-detail path. Shell is not part of the active Android parity backlog; future work should only re-enable it behind an explicit policy and permission model.
 
-### Android Backlog
+### Active Android Implementation Order
 
-This backlog is intentionally unprioritized until the user provides an explicit order. Once ordered, copy the selected sequence into an active implementation list and work through it item by item. Shell and terminal parity are excluded by policy unless they are explicitly re-enabled.
+The user selected the following scope as the completion target for the current Android parity goal. Complete these items in order, keep shell and terminal parity excluded, and move unrelated backlog discussion to [android-deferred-backlog.md](android-deferred-backlog.md).
 
-#### A. App Shell And Settings
-
-- A1. Workspace drill-in page: add a workspace detail route for threads, files, status, and workspace-scoped actions.
-- A2. Thread list filtering and grouping: add status filters, search, sorting, active/needs-attention/recent groupings, and mobile-friendly list controls.
-- A3. Provider config archives: support low-risk archive list/create backup for `/api/config/providers/:provider/archives`; defer apply until restart policy is explicit.
-- A4. Runtime install/update/build/restart actions: expose host-changing runtime operations only after confirmation and recovery UX are defined.
-- A5. Relay device management: add device delete/revoke, richer status refresh, and a smoother claim-code or backend binding flow if the relay model gains one.
-- A6. Plugin policy completion: add uninstall when the backend route exists, plus trusted renderer policy and clearer plugin permission/risk states.
-
-#### B. Thread Timeline And Realtime State
-
-- B1. WebSocket event reducer: apply `thread.*` events locally instead of using full-detail refresh as the primary update path.
-- B2. Streaming output merge: support `thread.output.delta` append, de-duplication, materialized item reconciliation, and reconnect recovery.
-- B3. Timeline scroll behavior: add scroll anchoring, tail visibility, jump-to-latest parity, and stable position when older history loads.
-- B4. Server-managed history paging: implement turn paging, `beforeTurnId`, deferred detail caching, and incremental older-history loading.
-- B5. Request anchoring and answered-note reconciliation: anchor requests by turn/item and reconcile answered notes from events and refreshed detail.
-- B6. Pending request lifecycle: complete WebSocket-created request insertion, immediate plan-decision submit behavior, optimistic busy state, duplicate-submit guards, and richer backend error recovery.
-- B7. History ordering and event cursor: consume persisted event order or a future monotonic cursor instead of relying only on aggregate projection order.
-
-#### C. Composer And Thread Actions
-
-- C1. Composer rich text input: add paste sanitization, drag/drop extraction, and richer attachment text insertion rules.
-- C2. Context usage and slider persistence: drive usage from backend data and persist editable context/reasoning settings where supported.
-- C3. MCP config write: add native editable forms for MCP configuration changes.
-- C4. Hook create/update forms: add native forms for hook creation, editing, and command-template configuration.
-- C5. Export post-flow hardening: improve PDF/HTML edge cases, file naming, duplicate export state, and failure recovery.
-- C6. Thread deletion navigation refresh: complete post-delete home/list/detail navigation and refresh behavior.
-
-#### D. Workspace And Files
-
-- D1. Workspace refresh and file mutation: add refresh behavior plus file write, rename, delete, and other supported mutations.
-- D2. Garbage folder mutation: wire the empty-garbage confirmation to a real backend mutation and refresh the workspace state.
-- D3. Workspace tree parity: add artifact/event/live roots, preview source switching, and Web-like explorer state.
-- D4. File preview drill-in: improve binary, large-file, image, unknown-type, and attachment detail flows.
-- D5. Workspace card reuse: broaden workspace info cards across file previews, graph node detail, and future plugin panels.
-
-#### E. Markdown, Code, And Images
-
-- E1. Full Markdown/GFM parity: improve nested lists, task lists, tables, HTML fallback, and edge-case block parsing.
-- E2. KaTeX-quality math rendering: replace readable monospaced math fallback with real math layout.
-- E3. Markdown image loading: load real markdown image sources instead of stable placeholders when safe and supported.
-- E4. Shiki parity for code blocks: add richer language grammars, themes, token scopes, line metadata, and diff/code viewer details.
-- E5. Non-molecule inline artifacts: define and implement renderers or fallback policy for plugin-rendered inline artifact types.
-
-#### F. Tool Calls, History Items, And Artifacts
-
-- F1. Tool block JSON formatting: make nested object/array formatting robust with clearer disclosure and copy behavior.
-- F2. Streaming tool result reconciliation: merge streaming tool calls/results with materialized history without flicker or duplication.
-- F3. Plugin-aware tool/artifact renderers: decide native renderer, WebView fallback, or server-rendered preview strategy.
-- F4. History item detail content types: expand deferred-detail rendering for richer outputs and attachment drill-in flows.
-- F5. Broader clipboard affordances: align copy actions across every detail, summary, output, and attachment view.
-- F6. Full artifact viewers: implement artifact-specific viewers beyond the current fallbacks.
-- F7. Molecule 3D viewer: add 3D rendering, bond perception, frame slider/playback, atom selection, camera controls, screenshots, and unit-cell toggling.
-- F8. Graph editor/viewer: add pan/zoom, draggable nodes, edge selection, live connection preview, and React Flow layout parity.
-
-#### G. UI Primitive And Interaction Polish
-
-- G1. Graph UI primitive states: complete pressed, loading, focus, active, disabled, and error states across buttons, badges, dialogs, inputs, and sliders.
-- G2. Long-press tooltip/popover behavior: add mobile explanations for dense icon controls where content descriptions are not enough.
-- G3. Dialog trigger/portal parity: align trigger, focus, back/escape, and overlay behavior with the Web primitives.
-- G4. Tablet/desktop resizable panels: implement drag resizing for larger Android form factors.
-- G5. Screenshot-based visual E2E: create repeatable emulator screenshot checks against representative Android surfaces and Web reference states.
-
-#### H. Voice And Notifications
-
-- H1. Native voice session: implement microphone permission, audio session management, push-to-talk, barge-in, Bluetooth headset handling, and foreground/background lifecycle.
-- H2. Voice action protocol: connect Android voice mode to backend voice session, action, and confirmation policy when available.
-- H3. Push notification bridge: add Android notifications for completed turns, failures, permission required, input required, and agent disconnects.
+1. A1. Workspace drill-in page: completed first native route with workspace status, scoped threads, file tree preview, refresh, favorite/open actions, and new-thread entry.
+2. A2. Thread list filtering and grouping: add status filters, search, sorting, active/needs-attention/recent groupings, and mobile-friendly list controls.
+3. A5. Relay device management: add device delete/revoke, richer status refresh, and a smoother claim-code or backend binding flow if the relay model gains one.
+4. B1. WebSocket event reducer: apply `thread.*` events locally instead of using full-detail refresh as the primary update path.
+5. B2. Streaming output merge: support `thread.output.delta` append, de-duplication, materialized item reconciliation, and reconnect recovery.
+6. B3. Timeline scroll behavior: add scroll anchoring, tail visibility, jump-to-latest parity, and stable position when older history loads.
+7. B4. Server-managed history paging: implement turn paging, `beforeTurnId`, deferred detail caching, and incremental older-history loading.
+8. B5. Request anchoring and answered-note reconciliation: anchor requests by turn/item and reconcile answered notes from events and refreshed detail.
+9. B6. Pending request lifecycle: complete WebSocket-created request insertion, immediate plan-decision submit behavior, optimistic busy state, duplicate-submit guards, and richer backend error recovery.
+10. B7. History ordering and event cursor: consume persisted event order or a future monotonic cursor instead of relying only on aggregate projection order.
+11. C1. Composer rich text input: add paste sanitization, drag/drop extraction, and richer attachment text insertion rules.
+12. C2. Context usage and slider persistence: drive usage from backend data and persist editable context/reasoning settings where supported.
+13. C5. Export post-flow hardening: improve PDF/HTML edge cases, file naming, duplicate export state, and failure recovery.
+14. C6. Thread deletion navigation refresh: complete post-delete home/list/detail navigation and refresh behavior.
+15. E1. Full Markdown/GFM parity: improve nested lists, task lists, tables, HTML fallback, and edge-case block parsing.
+16. E2. KaTeX-quality math rendering: replace readable monospaced math fallback with real math layout.
+17. E3. Markdown image loading: load real markdown image sources instead of stable placeholders when safe and supported.
+18. F1. Tool block JSON formatting: make nested object/array formatting robust with clearer disclosure and copy behavior.
+19. F2. Streaming tool result reconciliation: merge streaming tool calls/results with materialized history without flicker or duplication.
+20. F4. History item detail content types: expand deferred-detail rendering for richer outputs and attachment drill-in flows.
+21. F5. Broader clipboard affordances: align copy actions across every detail, summary, output, and attachment view.
 
 ## Build
 
