@@ -421,7 +421,7 @@ private fun SlashToolboxPanel() {
     ComposerMenuSurface(title = "Slash toolbox", subtitle = "Thread actions") {
         ToolboxRow(command = "/goal", status = "Open", description = "Create or update the active thread goal.")
         ForkPreviewGroup()
-        ToolboxRow(command = "/skills", status = "Open", description = "Inspect skills and copy invocation names.")
+        SkillsPreviewGroup()
         ToolboxRow(command = "/mcp", status = "Open", description = "Inspect MCP servers, tools, resources, and auth.")
         ToolboxRow(command = "/hooks", status = "Open", description = "Review hook trust and project hook source.")
     }
@@ -532,6 +532,129 @@ private fun ForkTurnRow(item: ForkTurnPreviewItem) {
         GraphBadge(
             label = item.status,
             variant = GraphBadgeVariant.Outline,
+        )
+    }
+}
+
+@Composable
+private fun SkillsPreviewGroup() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(ThreadColors.Surface)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "/skills",
+                modifier = Modifier.weight(1f),
+                color = ThreadColors.Foreground,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            GraphBadge(
+                label = "Open",
+                variant = GraphBadgeVariant.Outline,
+            )
+        }
+        Text(
+            text = "Inspect skills and copy invocation names.",
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        skillsPreviewItems.forEach { item ->
+            SkillPreviewRow(item = item)
+        }
+        SkillWarningRow(
+            message = "Skill metadata incomplete",
+            path = "~/.codex/skills/local-experiment/SKILL.md",
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SkillPreviewRow(item: SkillPreviewItem) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(ThreadColors.CodeBackground)
+            .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(10.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Text(
+            text = item.displayName,
+            color = ThreadColors.CodeForeground,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            GraphBadge(
+                label = item.scope,
+                variant = GraphBadgeVariant.Outline,
+            )
+            GraphBadge(
+                label = if (item.copied) "Copied ${item.invokeName}" else item.invokeName,
+                variant = if (item.copied) GraphBadgeVariant.Default else GraphBadgeVariant.Outline,
+            )
+        }
+        Text(
+            text = item.description,
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun SkillWarningRow(
+    message: String,
+    path: String,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(ThreadColors.WarningSoft.copy(alpha = 0.52f))
+            .border(1.dp, ThreadColors.Warning.copy(alpha = 0.34f), RoundedCornerShape(10.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = message,
+            color = ThreadColors.Warning,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = path,
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -853,6 +976,14 @@ private data class ForkTurnPreviewItem(
     val status: String,
 )
 
+private data class SkillPreviewItem(
+    val displayName: String,
+    val scope: String,
+    val invokeName: String,
+    val description: String,
+    val copied: Boolean = false,
+)
+
 private enum class ShellToolTone {
     Neutral,
     Info,
@@ -880,6 +1011,22 @@ private val forkTurnPreviewItems = listOf(
     ForkTurnPreviewItem(index = 12, status = "completed"),
     ForkTurnPreviewItem(index = 11, status = "interrupted"),
     ForkTurnPreviewItem(index = 10, status = "failed"),
+)
+
+private val skillsPreviewItems = listOf(
+    SkillPreviewItem(
+        displayName = "Android Client Work",
+        scope = "project",
+        invokeName = "\$android-client",
+        description = "Builds and verifies native Android surfaces against the supervisor UI.",
+        copied = true,
+    ),
+    SkillPreviewItem(
+        displayName = "OpenAI Docs",
+        scope = "global",
+        invokeName = "\$openai-docs",
+        description = "Looks up current OpenAI API guidance and returns source-backed answers.",
+    ),
 )
 
 private enum class ComposerToolIcon {
