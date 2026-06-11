@@ -897,6 +897,299 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun buildsComposerDraftControlStateForHostAndLocalDrafts() {
+        assertEquals(
+            ComposerDraftControlState(
+                controlled = true,
+                promptAvailable = true,
+                attachmentsAvailable = true,
+                hostChangeAvailable = true,
+                shellViewForcesUncontrolled = false,
+                localDraftSourceLabel = "Host draft",
+                stateDescription = "Composer draft controlled by host",
+            ),
+            buildComposerDraftControlState(
+                isShellView = false,
+                draftPromptAvailable = true,
+                draftAttachmentsAvailable = true,
+                hostDraftChangeAvailable = true,
+            ),
+        )
+
+        assertEquals(
+            ComposerDraftControlState(
+                controlled = false,
+                promptAvailable = true,
+                attachmentsAvailable = true,
+                hostChangeAvailable = true,
+                shellViewForcesUncontrolled = true,
+                localDraftSourceLabel = "Local draft",
+                stateDescription = "Shell draft is local",
+            ),
+            buildComposerDraftControlState(
+                isShellView = true,
+                draftPromptAvailable = true,
+                draftAttachmentsAvailable = true,
+                hostDraftChangeAvailable = true,
+            ),
+        )
+
+        assertEquals(
+            ComposerDraftControlState(
+                controlled = false,
+                promptAvailable = true,
+                attachmentsAvailable = false,
+                hostChangeAvailable = false,
+                shellViewForcesUncontrolled = false,
+                localDraftSourceLabel = "Local draft",
+                stateDescription = "Composer draft is local: missing attachments, host callback",
+            ),
+            buildComposerDraftControlState(
+                isShellView = false,
+                draftPromptAvailable = true,
+                draftAttachmentsAvailable = false,
+                hostDraftChangeAvailable = false,
+            ),
+        )
+    }
+
+    @Test
+    fun buildsComposerDraftStateAndSignature() {
+        val draft = buildComposerDraftState(
+            prompt = "inspect",
+            attachments = listOf(
+                ComposerPromptAttachmentPreview(
+                    clientId = "photo-a",
+                    kind = ComposerAttachmentKindPreview.Photo,
+                    name = "capture.png",
+                    placeholder = "[PHOTO capture.png]",
+                ),
+                ComposerPromptAttachmentPreview(
+                    clientId = "file-a",
+                    kind = ComposerAttachmentKindPreview.File,
+                    name = "notes.md",
+                    placeholder = "[FILE notes.md]",
+                ),
+            ),
+        )
+
+        assertEquals("inspect", draft.prompt)
+        assertEquals(
+            "inspect\u001fphoto-a\u001ephoto\u001e[PHOTO capture.png]\u001ecapture.png" +
+                "\u001dfile-a\u001efile\u001e[FILE notes.md]\u001enotes.md",
+            composerDraftSignature(draft),
+        )
+        assertEquals(
+            ComposerDraftState(prompt = "", attachments = emptyList()),
+            buildComposerDraftState(prompt = null, attachments = null),
+        )
+    }
+
+    @Test
+    fun derivesImmediateControlledComposerDraftSyncDecision() {
+        val control = buildComposerDraftControlState(
+            isShellView = false,
+            draftPromptAvailable = true,
+            draftAttachmentsAvailable = true,
+            hostDraftChangeAvailable = true,
+        )
+        val previous = ComposerDraftState(prompt = "host")
+        val next = ComposerDraftState(prompt = "next")
+
+        assertEquals(
+            ComposerDraftSyncDecisionState(
+                controlled = true,
+                event = ComposerDraftSyncEventState.Update,
+                shouldSendToHost = true,
+                shouldScheduleDeferredSync = false,
+                shouldClearPendingTimer = false,
+                shouldUpdateLastSentSignature = true,
+                delayMillis = null,
+                nextSignature = composerDraftSignature(next),
+                stateDescription = "Controlled draft syncs now",
+            ),
+            deriveComposerDraftSyncDecision(
+                controlState = control,
+                event = ComposerDraftSyncEventState.Update,
+                nextDraft = next,
+                lastSentSignature = composerDraftSignature(previous),
+                hasPendingTimer = false,
+                syncMode = ComposerDraftSyncModeState.Immediate,
+            ),
+        )
+    }
+
+    @Test
+    fun derivesDeferredControlledComposerDraftSyncDecision() {
+        val control = buildComposerDraftControlState(
+            isShellView = false,
+            draftPromptAvailable = true,
+            draftAttachmentsAvailable = true,
+            hostDraftChangeAvailable = true,
+        )
+        val next = ComposerDraftState(prompt = "pending")
+
+        assertEquals(
+            ComposerDraftSyncDecisionState(
+                controlled = true,
+                event = ComposerDraftSyncEventState.Update,
+                shouldSendToHost = false,
+                shouldScheduleDeferredSync = true,
+                shouldClearPendingTimer = true,
+                shouldUpdateLastSentSignature = false,
+                delayMillis = COMPOSER_DRAFT_SYNC_DELAY_MS,
+                nextSignature = composerDraftSignature(next),
+                stateDescription = "Controlled draft sync deferred",
+            ),
+            deriveComposerDraftSyncDecision(
+                controlState = control,
+                event = ComposerDraftSyncEventState.Update,
+                nextDraft = next,
+                lastSentSignature = composerDraftSignature(ComposerDraftState(prompt = "host")),
+                hasPendingTimer = true,
+                syncMode = ComposerDraftSyncModeState.Deferred,
+            ),
+        )
+    }
+
+    @Test
+    fun derivesFlushAndDuplicateComposerDraftSyncDecisions() {
+        val control = buildComposerDraftControlState(
+            isShellView = false,
+            draftPromptAvailable = true,
+            draftAttachmentsAvailable = true,
+            hostDraftChangeAvailable = true,
+        )
+        val next = ComposerDraftState(prompt = "pending")
+
+        assertEquals(
+            ComposerDraftSyncDecisionState(
+                controlled = true,
+                event = ComposerDraftSyncEventState.Flush,
+                shouldSendToHost = true,
+                shouldScheduleDeferredSync = false,
+                shouldClearPendingTimer = true,
+                shouldUpdateLastSentSignature = true,
+                delayMillis = null,
+                nextSignature = composerDraftSignature(next),
+                stateDescription = "Controlled draft syncs now",
+            ),
+            deriveComposerDraftSyncDecision(
+                controlState = control,
+                event = ComposerDraftSyncEventState.Flush,
+                nextDraft = next,
+                lastSentSignature = composerDraftSignature(ComposerDraftState(prompt = "host")),
+                hasPendingTimer = true,
+                syncMode = ComposerDraftSyncModeState.Deferred,
+            ),
+        )
+
+        assertEquals(
+            ComposerDraftSyncDecisionState(
+                controlled = true,
+                event = ComposerDraftSyncEventState.Flush,
+                shouldSendToHost = false,
+                shouldScheduleDeferredSync = false,
+                shouldClearPendingTimer = false,
+                shouldUpdateLastSentSignature = false,
+                delayMillis = null,
+                nextSignature = composerDraftSignature(next),
+                stateDescription = "Controlled draft already synced",
+            ),
+            deriveComposerDraftSyncDecision(
+                controlState = control,
+                event = ComposerDraftSyncEventState.Flush,
+                nextDraft = next,
+                lastSentSignature = composerDraftSignature(next),
+                hasPendingTimer = false,
+                syncMode = ComposerDraftSyncModeState.Immediate,
+            ),
+        )
+    }
+
+    @Test
+    fun derivesHostRefreshDisposeAndUncontrolledComposerDraftSyncDecisions() {
+        val control = buildComposerDraftControlState(
+            isShellView = false,
+            draftPromptAvailable = true,
+            draftAttachmentsAvailable = true,
+            hostDraftChangeAvailable = true,
+        )
+        val shellControl = buildComposerDraftControlState(
+            isShellView = true,
+            draftPromptAvailable = true,
+            draftAttachmentsAvailable = true,
+            hostDraftChangeAvailable = true,
+        )
+        val next = ComposerDraftState(prompt = "host refresh")
+
+        assertEquals(
+            ComposerDraftSyncDecisionState(
+                controlled = true,
+                event = ComposerDraftSyncEventState.HostRefresh,
+                shouldSendToHost = false,
+                shouldScheduleDeferredSync = false,
+                shouldClearPendingTimer = true,
+                shouldUpdateLastSentSignature = true,
+                delayMillis = null,
+                nextSignature = composerDraftSignature(next),
+                stateDescription = "Host draft refresh accepted",
+            ),
+            deriveComposerDraftSyncDecision(
+                controlState = control,
+                event = ComposerDraftSyncEventState.HostRefresh,
+                nextDraft = next,
+                lastSentSignature = composerDraftSignature(ComposerDraftState(prompt = "host")),
+                hasPendingTimer = true,
+            ),
+        )
+
+        assertEquals(
+            ComposerDraftSyncDecisionState(
+                controlled = true,
+                event = ComposerDraftSyncEventState.Dispose,
+                shouldSendToHost = true,
+                shouldScheduleDeferredSync = false,
+                shouldClearPendingTimer = true,
+                shouldUpdateLastSentSignature = true,
+                delayMillis = null,
+                nextSignature = composerDraftSignature(next),
+                stateDescription = "Controlled draft syncs now",
+            ),
+            deriveComposerDraftSyncDecision(
+                controlState = control,
+                event = ComposerDraftSyncEventState.Dispose,
+                nextDraft = next,
+                lastSentSignature = composerDraftSignature(ComposerDraftState(prompt = "host")),
+                hasPendingTimer = true,
+                syncMode = ComposerDraftSyncModeState.Deferred,
+            ),
+        )
+
+        assertEquals(
+            ComposerDraftSyncDecisionState(
+                controlled = false,
+                event = ComposerDraftSyncEventState.Update,
+                shouldSendToHost = false,
+                shouldScheduleDeferredSync = false,
+                shouldClearPendingTimer = false,
+                shouldUpdateLastSentSignature = false,
+                delayMillis = null,
+                nextSignature = composerDraftSignature(next),
+                stateDescription = "Local draft only",
+            ),
+            deriveComposerDraftSyncDecision(
+                controlState = shellControl,
+                event = ComposerDraftSyncEventState.Update,
+                nextDraft = next,
+                lastSentSignature = "",
+                hasPendingTimer = true,
+                syncMode = ComposerDraftSyncModeState.Immediate,
+            ),
+        )
+    }
+
+    @Test
     fun buildsChatComposerPromptSlotState() {
         assertEquals(
             ComposerPromptSlotState(

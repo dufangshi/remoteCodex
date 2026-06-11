@@ -344,6 +344,47 @@ data class ComposerAttachmentPreviewLifecycleState(
     val stateDescription: String,
 )
 
+const val COMPOSER_DRAFT_SYNC_DELAY_MS = 180L
+
+enum class ComposerDraftSyncModeState {
+    Immediate,
+    Deferred,
+}
+
+enum class ComposerDraftSyncEventState {
+    Update,
+    Flush,
+    HostRefresh,
+    Dispose,
+}
+
+data class ComposerDraftState(
+    val prompt: String,
+    val attachments: List<ComposerPromptAttachmentPreview> = emptyList(),
+)
+
+data class ComposerDraftControlState(
+    val controlled: Boolean,
+    val promptAvailable: Boolean,
+    val attachmentsAvailable: Boolean,
+    val hostChangeAvailable: Boolean,
+    val shellViewForcesUncontrolled: Boolean,
+    val localDraftSourceLabel: String,
+    val stateDescription: String,
+)
+
+data class ComposerDraftSyncDecisionState(
+    val controlled: Boolean,
+    val event: ComposerDraftSyncEventState,
+    val shouldSendToHost: Boolean,
+    val shouldScheduleDeferredSync: Boolean,
+    val shouldClearPendingTimer: Boolean,
+    val shouldUpdateLastSentSignature: Boolean,
+    val delayMillis: Long?,
+    val nextSignature: String,
+    val stateDescription: String,
+)
+
 data class ComposerShellToolState(
     val label: String,
     val kind: ComposerShellToolKind,
@@ -1642,6 +1683,125 @@ fun buildComposerAttachmentPreviewLifecycleState(
             previewablePhotoClientIds.isEmpty() -> "No photo previews"
             previewablePhotoClientIds.size == 1 -> "1 photo preview"
             else -> "${previewablePhotoClientIds.size} photo previews"
+        },
+    )
+}
+
+fun buildComposerDraftControlState(
+    isShellView: Boolean,
+    draftPromptAvailable: Boolean,
+    draftAttachmentsAvailable: Boolean,
+    hostDraftChangeAvailable: Boolean,
+): ComposerDraftControlState {
+    val controlled = !isShellView &&
+        draftPromptAvailable &&
+        draftAttachmentsAvailable &&
+        hostDraftChangeAvailable
+    val missing = mutableListOf<String>()
+    if (!draftPromptAvailable) {
+        missing += "prompt"
+    }
+    if (!draftAttachmentsAvailable) {
+        missing += "attachments"
+    }
+    if (!hostDraftChangeAvailable) {
+        missing += "host callback"
+    }
+    return ComposerDraftControlState(
+        controlled = controlled,
+        promptAvailable = draftPromptAvailable,
+        attachmentsAvailable = draftAttachmentsAvailable,
+        hostChangeAvailable = hostDraftChangeAvailable,
+        shellViewForcesUncontrolled = isShellView,
+        localDraftSourceLabel = if (controlled) "Host draft" else "Local draft",
+        stateDescription = when {
+            controlled -> "Composer draft controlled by host"
+            isShellView -> "Shell draft is local"
+            missing.isEmpty() -> "Composer draft is local"
+            else -> "Composer draft is local: missing ${missing.joinToString(", ")}"
+        },
+    )
+}
+
+fun buildComposerDraftState(
+    prompt: String?,
+    attachments: List<ComposerPromptAttachmentPreview>?,
+): ComposerDraftState {
+    return ComposerDraftState(
+        prompt = prompt.orEmpty(),
+        attachments = attachments.orEmpty(),
+    )
+}
+
+fun composerDraftSignature(draft: ComposerDraftState): String {
+    val attachmentSignature = draft.attachments.joinToString(separator = "\u001d") { attachment ->
+        val kind = when (attachment.kind) {
+            com.remotecodex.android.ui.model.ComposerAttachmentKindPreview.Photo -> "photo"
+            com.remotecodex.android.ui.model.ComposerAttachmentKindPreview.File -> "file"
+        }
+        "${attachment.clientId}\u001e$kind\u001e${attachment.placeholder}\u001e${attachment.name}"
+    }
+    return "${draft.prompt}\u001f$attachmentSignature"
+}
+
+fun deriveComposerDraftSyncDecision(
+    controlState: ComposerDraftControlState,
+    event: ComposerDraftSyncEventState,
+    nextDraft: ComposerDraftState,
+    lastSentSignature: String,
+    hasPendingTimer: Boolean,
+    syncMode: ComposerDraftSyncModeState = ComposerDraftSyncModeState.Immediate,
+): ComposerDraftSyncDecisionState {
+    val nextSignature = composerDraftSignature(nextDraft)
+    if (!controlState.controlled) {
+        return ComposerDraftSyncDecisionState(
+            controlled = false,
+            event = event,
+            shouldSendToHost = false,
+            shouldScheduleDeferredSync = false,
+            shouldClearPendingTimer = false,
+            shouldUpdateLastSentSignature = false,
+            delayMillis = null,
+            nextSignature = nextSignature,
+            stateDescription = "Local draft only",
+        )
+    }
+
+    if (event == ComposerDraftSyncEventState.HostRefresh) {
+        return ComposerDraftSyncDecisionState(
+            controlled = true,
+            event = event,
+            shouldSendToHost = false,
+            shouldScheduleDeferredSync = false,
+            shouldClearPendingTimer = hasPendingTimer,
+            shouldUpdateLastSentSignature = true,
+            delayMillis = null,
+            nextSignature = nextSignature,
+            stateDescription = "Host draft refresh accepted",
+        )
+    }
+
+    val duplicate = nextSignature == lastSentSignature
+    val immediate = event == ComposerDraftSyncEventState.Flush ||
+        event == ComposerDraftSyncEventState.Dispose ||
+        syncMode == ComposerDraftSyncModeState.Immediate
+    val shouldSendToHost = immediate && !duplicate
+    val shouldScheduleDeferredSync = event == ComposerDraftSyncEventState.Update &&
+        syncMode == ComposerDraftSyncModeState.Deferred
+    return ComposerDraftSyncDecisionState(
+        controlled = true,
+        event = event,
+        shouldSendToHost = shouldSendToHost,
+        shouldScheduleDeferredSync = shouldScheduleDeferredSync,
+        shouldClearPendingTimer = hasPendingTimer,
+        shouldUpdateLastSentSignature = shouldSendToHost,
+        delayMillis = if (shouldScheduleDeferredSync) COMPOSER_DRAFT_SYNC_DELAY_MS else null,
+        nextSignature = nextSignature,
+        stateDescription = when {
+            shouldSendToHost -> "Controlled draft syncs now"
+            shouldScheduleDeferredSync -> "Controlled draft sync deferred"
+            duplicate -> "Controlled draft already synced"
+            else -> "Controlled draft unchanged"
         },
     )
 }
