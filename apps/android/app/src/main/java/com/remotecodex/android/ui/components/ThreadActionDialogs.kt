@@ -212,6 +212,7 @@ private fun ExportTranscriptDialogPreview(
     var exportMode by rememberSaveable { mutableStateOf(ExportMode.Latest) }
     var exportFormat by rememberSaveable { mutableStateOf(ExportFormat.Pdf) }
     var includeTokenAndPrice by rememberSaveable { mutableStateOf(true) }
+    var exportBusy by rememberSaveable { mutableStateOf(false) }
     var selectedTurnIds by rememberSaveable {
         mutableStateOf(exportTurns.filter { it.selected }.map { it.id })
     }
@@ -221,6 +222,12 @@ private fun ExportTranscriptDialogPreview(
         minOf(10, exportTurns.size)
     } else {
         selectedTurnCount
+    }
+    val canExport = !exportBusy && (exportMode == ExportMode.Latest || selectedTurnCount > 0)
+    val exportSummary = if (exportMode == ExportMode.Custom && selectedTurnCount == 0) {
+        "Select at least one turn to export"
+    } else {
+        "$exportCount ${if (exportCount == 1) "turn" else "turns"} will be exported"
     }
     GraphDialogFrame(
         title = "Export transcript",
@@ -234,17 +241,19 @@ private fun ExportTranscriptDialogPreview(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    text = "$exportCount ${if (exportCount == 1) "turn" else "turns"} will be exported",
+                    text = exportSummary,
                     modifier = Modifier.weight(1f),
-                    color = ThreadColors.ForegroundMuted,
+                    color = if (canExport) ThreadColors.ForegroundMuted else ThreadColors.Warning,
                     style = MaterialTheme.typography.labelSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 GraphDialogFooter(
-                    primaryLabel = "Export ${exportFormat.label}",
+                    primaryLabel = if (exportBusy) "Exporting..." else "Export ${exportFormat.label}",
                     primaryTone = GraphDialogActionTone.Warning,
                     onCancel = onClose,
+                    primaryEnabled = canExport,
+                    onPrimary = { exportBusy = true },
                     compact = true,
                 )
             }
@@ -282,10 +291,16 @@ private fun ExportTranscriptDialogPreview(
             Text(
                 text = if (exportMode == ExportMode.Latest) {
                     "Exports the latest 10 turns in chronological order."
+                } else if (selectedTurnCount == 0) {
+                    "Custom export needs at least one selected turn."
                 } else {
                     "Selected $selectedTurnCount of ${exportTurns.size} turns."
                 },
-                color = ThreadColors.ForegroundMuted,
+                color = if (exportMode == ExportMode.Custom && selectedTurnCount == 0) {
+                    ThreadColors.Warning
+                } else {
+                    ThreadColors.ForegroundMuted
+                },
                 style = MaterialTheme.typography.labelSmall,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,

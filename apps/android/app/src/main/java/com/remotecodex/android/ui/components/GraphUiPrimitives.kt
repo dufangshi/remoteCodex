@@ -449,6 +449,7 @@ fun GraphDialogFooter(
     primaryTone: GraphDialogActionTone,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
+    primaryEnabled: Boolean = true,
     onPrimary: () -> Unit = onCancel,
     compact: Boolean = false,
 ) {
@@ -469,7 +470,8 @@ fun GraphDialogFooter(
                 .clip(RoundedCornerShape(999.dp))
                 .background(primaryTone.background())
                 .border(1.dp, primaryTone.foreground().copy(alpha = 0.45f), RoundedCornerShape(999.dp))
-                .clickable(onClick = onPrimary)
+                .then(if (primaryEnabled) Modifier.clickable(onClick = onPrimary) else Modifier)
+                .alpha(if (primaryEnabled) 1f else 0.52f)
                 .padding(horizontal = if (compact) 11.dp else 14.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
