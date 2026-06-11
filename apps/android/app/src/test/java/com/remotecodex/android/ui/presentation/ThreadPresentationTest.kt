@@ -864,6 +864,61 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun buildsShellComposerPromptInputState() {
+        assertEquals(
+            ComposerShellPromptInputState(
+                text = "pnpm test",
+                placeholder = "Shell command",
+                showPlaceholder = false,
+                interruptLabel = "Send Ctrl-C",
+                interruptEnabled = true,
+                sendLabel = "Send",
+                sendEnabled = false,
+                sendAccessibilityLabel = "Send Shell Input",
+                minLines = 2,
+            ),
+            buildComposerShellPromptInputState(
+                ComposerPromptSlotState(
+                    chatVisible = false,
+                    shellVisible = true,
+                    text = "pnpm test",
+                    placeholder = "Shell command",
+                    showPlaceholder = false,
+                    disabled = false,
+                    canInterrupt = true,
+                    interruptLabel = "Send Ctrl-C",
+                    sendButtonLabel = "Send",
+                    sendDisabled = true,
+                    attachmentChips = emptyList(),
+                    inputModeLabel = "Shell input",
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun omitsShellComposerPromptInputStateForChatSlot() {
+        assertNull(
+            buildComposerShellPromptInputState(
+                ComposerPromptSlotState(
+                    chatVisible = true,
+                    shellVisible = false,
+                    text = "",
+                    placeholder = "Ask Codex",
+                    showPlaceholder = true,
+                    disabled = false,
+                    canInterrupt = false,
+                    interruptLabel = "Stop Current Turn",
+                    sendButtonLabel = "Send",
+                    sendDisabled = false,
+                    attachmentChips = emptyList(),
+                    inputModeLabel = "Prompt",
+                ),
+            ),
+        )
+    }
+
+    @Test
     fun derivesAttachmentDisplayLabels() {
         assertEquals("image.png", attachmentDisplayLabel("/tmp/image.png", "[PHOTO image.png]"))
         assertEquals("report.md", attachmentDisplayLabel("", "[FILE report.md]"))

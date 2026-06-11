@@ -29,6 +29,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -57,6 +59,7 @@ import com.remotecodex.android.ui.presentation.ComposerMcpStatusMessageState
 import com.remotecodex.android.ui.presentation.ComposerMcpStatusTone
 import com.remotecodex.android.ui.presentation.ComposerPrimaryActionKind
 import com.remotecodex.android.ui.presentation.ComposerPromptAttachmentState
+import com.remotecodex.android.ui.presentation.ComposerShellPromptInputState
 import com.remotecodex.android.ui.presentation.ComposerPromptSlotState
 import com.remotecodex.android.ui.presentation.ComposerSendButtonState
 import com.remotecodex.android.ui.presentation.ComposerSettingsState
@@ -87,6 +90,7 @@ import com.remotecodex.android.ui.presentation.buildComposerPromptSlotState
 import com.remotecodex.android.ui.presentation.buildComposerReasoningEffortOptions
 import com.remotecodex.android.ui.presentation.buildComposerSettingsState
 import com.remotecodex.android.ui.presentation.buildComposerSettingsToolbarState
+import com.remotecodex.android.ui.presentation.buildComposerShellPromptInputState
 import com.remotecodex.android.ui.presentation.buildComposerShellTools
 import com.remotecodex.android.ui.presentation.buildComposerSkillsPanelState
 import com.remotecodex.android.ui.presentation.buildComposerStatusStrip
@@ -123,6 +127,7 @@ fun ThreadComposer(
         busy = composer.busy,
         goalBusy = composer.goalPanel.busy,
     )
+    val shellPromptInputState = buildComposerShellPromptInputState(promptSlotState)
     val submitInputState = buildComposerSubmitInputState(
         prompt = composer.prompt,
         activeView = composer.activeView,
@@ -238,6 +243,7 @@ fun ThreadComposer(
             frameState = frameState,
             contextState = contextState,
             promptSlotState = promptSlotState,
+            shellPromptInputState = shellPromptInputState,
             goalPanelState = goalPanelState,
             submitReady = submitInputState != null,
         )
@@ -477,6 +483,7 @@ private fun ComposerFrameSlotsPreview(
     frameState: ComposerFrameState,
     contextState: ComposerContextUsageState,
     promptSlotState: ComposerPromptSlotState,
+    shellPromptInputState: ComposerShellPromptInputState?,
     goalPanelState: ComposerGoalPanelState,
     submitReady: Boolean,
 ) {
@@ -494,8 +501,8 @@ private fun ComposerFrameSlotsPreview(
         if (frameState.showGoalSlot) {
             GoalComposePreviewCard(state = goalPanelState.composeCard)
         }
-        if (frameState.showShellPromptSlot) {
-            ShellPromptSlotFooter(state = promptSlotState)
+        if (frameState.showShellPromptSlot && shellPromptInputState != null) {
+            ShellPromptInputPreview(state = shellPromptInputState)
         }
         frameState.errorMessage?.let { message ->
             ComposerFrameError(message = message)
@@ -504,28 +511,106 @@ private fun ComposerFrameSlotsPreview(
 }
 
 @Composable
-private fun ShellPromptSlotFooter(state: ComposerPromptSlotState) {
-    Row(
+private fun ShellPromptInputPreview(state: ComposerShellPromptInputState) {
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(14.dp))
             .background(ThreadColors.CodeBackground)
-            .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(10.dp))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+            .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(14.dp))
+            .padding(10.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(end = 52.dp, bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = if (state.showPlaceholder) state.placeholder else state.text,
+                color = if (state.showPlaceholder) ThreadColors.ForegroundMuted else ThreadColors.CodeForeground,
+                style = MaterialTheme.typography.bodySmall,
+                minLines = state.minLines,
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "Shell input",
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        ComposerShellInterruptButton(
+            label = state.interruptLabel,
+            enabled = state.interruptEnabled,
+            modifier = Modifier.align(Alignment.TopEnd),
+        )
+        ComposerShellSendButton(
+            label = state.sendLabel,
+            enabled = state.sendEnabled,
+            accessibilityLabel = state.sendAccessibilityLabel,
+            modifier = Modifier.align(Alignment.BottomEnd),
+        )
+    }
+}
+
+@Composable
+private fun ComposerShellInterruptButton(
+    label: String,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val foreground = if (enabled) ThreadColors.Danger else ThreadColors.ForegroundMuted.copy(alpha = 0.58f)
+    val background = if (enabled) ThreadColors.DangerSoft.copy(alpha = 0.56f) else ThreadColors.Surface.copy(alpha = 0.42f)
+    val border = if (enabled) ThreadColors.Danger.copy(alpha = 0.42f) else ThreadColors.Border.copy(alpha = 0.54f)
+    Row(
+        modifier = modifier
+            .size(34.dp)
+            .semantics { contentDescription = label }
+            .clip(RoundedCornerShape(999.dp))
+            .background(background)
+            .border(1.dp, border, RoundedCornerShape(999.dp)),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(foreground),
+        )
+    }
+}
+
+@Composable
+private fun ComposerShellSendButton(
+    label: String,
+    enabled: Boolean,
+    accessibilityLabel: String,
+    modifier: Modifier = Modifier,
+) {
+    val background = if (enabled) ThreadColors.Primary else ThreadColors.SurfaceStrong
+    val foreground = if (enabled) ThreadColors.PrimaryForeground else ThreadColors.ForegroundMuted
+    val border = if (enabled) ThreadColors.Primary else ThreadColors.Border
+    Row(
+        modifier = modifier
+            .semantics { contentDescription = accessibilityLabel }
+            .clip(RoundedCornerShape(999.dp))
+            .background(background)
+            .border(1.dp, border, RoundedCornerShape(999.dp))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Text(
-            text = state.text.ifBlank { state.placeholder },
-            modifier = Modifier.weight(1f),
-            color = if (state.text.isBlank()) ThreadColors.ForegroundMuted else ThreadColors.CodeForeground,
+            text = label.ifBlank { accessibilityLabel },
+            color = foreground,
             style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-        )
-        GraphBadge(
-            label = if (state.sendDisabled) "Shell paused" else "Shell ready",
-            variant = GraphBadgeVariant.Outline,
         )
     }
 }

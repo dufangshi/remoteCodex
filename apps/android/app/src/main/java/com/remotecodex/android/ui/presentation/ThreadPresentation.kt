@@ -202,6 +202,18 @@ data class ComposerPromptSlotState(
     val inputModeLabel: String,
 )
 
+data class ComposerShellPromptInputState(
+    val text: String,
+    val placeholder: String,
+    val showPlaceholder: Boolean,
+    val interruptLabel: String,
+    val interruptEnabled: Boolean,
+    val sendLabel: String,
+    val sendEnabled: Boolean,
+    val sendAccessibilityLabel: String,
+    val minLines: Int,
+)
+
 enum class ComposerToolbarMenuState {
     Slash,
     Attachments,
@@ -1204,6 +1216,25 @@ fun buildComposerPromptSlotState(
         sendDisabled = goalBusy || busy || prompt.disabled,
         attachmentChips = activeAttachments.map(::buildComposerPromptAttachmentState),
         inputModeLabel = if (isShellView) "Shell input" else "Prompt",
+    )
+}
+
+fun buildComposerShellPromptInputState(
+    promptSlotState: ComposerPromptSlotState,
+): ComposerShellPromptInputState? {
+    if (!promptSlotState.shellVisible) {
+        return null
+    }
+    return ComposerShellPromptInputState(
+        text = promptSlotState.text,
+        placeholder = promptSlotState.placeholder,
+        showPlaceholder = promptSlotState.text.isBlank(),
+        interruptLabel = promptSlotState.interruptLabel,
+        interruptEnabled = promptSlotState.canInterrupt,
+        sendLabel = promptSlotState.sendButtonLabel,
+        sendEnabled = !promptSlotState.sendDisabled,
+        sendAccessibilityLabel = "Send Shell Input",
+        minLines = 2,
     )
 }
 
