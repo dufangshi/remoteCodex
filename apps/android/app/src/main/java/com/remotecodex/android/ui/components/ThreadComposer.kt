@@ -142,6 +142,7 @@ fun ThreadComposer(
 ) {
     var openMenu by remember { mutableStateOf<ComposerMenu?>(null) }
     var slashPanelView by remember(composer.slashPanelView) { mutableStateOf(composer.slashPanelView.toPanelViewState()) }
+    var copiedSkillName by remember(composer.skillsPanel.copiedSkillName) { mutableStateOf(composer.skillsPanel.copiedSkillName) }
     var mcpPanelMode by remember(composer.mcpPanel.mode) { mutableStateOf(composer.mcpPanel.mode) }
     var mcpPanelServers by remember(composer.mcpPanel.servers) { mutableStateOf(composer.mcpPanel.servers) }
     var mcpPanelSuccess by remember(composer.mcpPanel.configSuccess) { mutableStateOf(composer.mcpPanel.configSuccess) }
@@ -259,7 +260,9 @@ fun ThreadComposer(
         goalComposeMode = goalPanelState.composeCard.visible,
         error = composer.error,
     )
-    val skillsPanelState = buildComposerSkillsPanelState(composer.skillsPanel)
+    val skillsPanelState = buildComposerSkillsPanelState(
+        composer.skillsPanel.copy(copiedSkillName = copiedSkillName),
+    )
     val mcpPanelState = buildComposerMcpPanelState(
         composer.mcpPanel.copy(
             mode = mcpPanelMode,
@@ -296,6 +299,9 @@ fun ThreadComposer(
                     hooksPanelState = hooksPanelState,
                     onSlashPanelViewChange = { view ->
                         slashPanelView = view
+                    },
+                    onCopySkill = { skillName ->
+                        copiedSkillName = skillName
                     },
                     onMcpPanelModeChange = { mode ->
                         mcpPanelMode = mode
@@ -399,6 +405,7 @@ fun ThreadComposer(
                 val nextMenu = openMenu.toggle(menu)
                 if (nextMenu != ComposerMenu.Slash) {
                     slashPanelView = ComposerSlashPanelViewState.Root
+                    copiedSkillName = composer.skillsPanel.copiedSkillName
                     mcpPanelMode = composer.mcpPanel.mode
                     mcpPanelServers = composer.mcpPanel.servers
                     mcpPanelSuccess = composer.mcpPanel.configSuccess
@@ -1522,6 +1529,7 @@ private fun SlashToolboxPanel(
     mcpPanelState: ComposerMcpPanelState,
     hooksPanelState: ComposerHooksPanelState,
     onSlashPanelViewChange: (ComposerSlashPanelViewState) -> Unit,
+    onCopySkill: (String) -> Unit,
     onMcpPanelModeChange: (ComposerMcpPanelModePreview) -> Unit,
     onMcpSave: (ComposerMcpFormState) -> Unit,
     onHooksPanelModeChange: (ComposerHooksPanelModePreview) -> Unit,
@@ -1559,7 +1567,10 @@ private fun SlashToolboxPanel(
                 onSlashPanelViewChange = onSlashPanelViewChange,
             )
             ComposerSlashPanelViewState.ForkTurns -> ForkPreviewGroup(forkPanelState = forkPanelState, showTurnPicker = true)
-            ComposerSlashPanelViewState.Skills -> SkillsPreviewGroup(skillsPanelState = skillsPanelState)
+            ComposerSlashPanelViewState.Skills -> SkillsPreviewGroup(
+                skillsPanelState = skillsPanelState,
+                onCopySkill = onCopySkill,
+            )
             ComposerSlashPanelViewState.Mcp -> McpPreviewGroup(
                 mcpPanelState = mcpPanelState,
                 onMcpPanelModeChange = onMcpPanelModeChange,
@@ -1909,7 +1920,10 @@ private fun ForkTurnMessageRow(
 }
 
 @Composable
-private fun SkillsPreviewGroup(skillsPanelState: ComposerSkillsPanelState) {
+private fun SkillsPreviewGroup(
+    skillsPanelState: ComposerSkillsPanelState,
+    onCopySkill: (String) -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1956,7 +1970,10 @@ private fun SkillsPreviewGroup(skillsPanelState: ComposerSkillsPanelState) {
             )
         }
         skillsPanelState.skills.forEach { item ->
-            SkillPreviewRow(item = item)
+            SkillPreviewRow(
+                item = item,
+                onCopySkill = onCopySkill,
+            )
         }
         skillsPanelState.errors.forEach { error ->
             SkillWarningRow(
@@ -1972,12 +1989,15 @@ private fun SkillsPreviewGroup(skillsPanelState: ComposerSkillsPanelState) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SkillPreviewRow(item: ComposerSkillRowState) {
+private fun SkillPreviewRow(
+    item: ComposerSkillRowState,
+    onCopySkill: (String) -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .semantics {
-                contentDescription = item.copyAccessibilityLabel
+                contentDescription = "Skill ${item.displayName}"
                 stateDescription = skillCopyStateDescription(item)
             }
             .clip(RoundedCornerShape(10.dp))
@@ -2003,9 +2023,10 @@ private fun SkillPreviewRow(item: ComposerSkillRowState) {
                 label = item.scopeLabel,
                 variant = GraphBadgeVariant.Outline,
             )
-            GraphBadge(
+            ComposerPanelActionBadge(
                 label = item.copyLabel,
-                variant = if (item.copied) GraphBadgeVariant.Default else GraphBadgeVariant.Outline,
+                accessibilityLabel = item.copyAccessibilityLabel,
+                onClick = { onCopySkill(item.invokeName.removePrefix("\$")) },
             )
         }
         Text(

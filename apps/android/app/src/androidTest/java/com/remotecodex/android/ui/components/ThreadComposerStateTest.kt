@@ -94,6 +94,19 @@ class ThreadComposerStateTest {
     }
 
     @Test
+    fun skillsPanelCopiesInvocationNamePreviewState() {
+        setComposerContent()
+
+        composeRule.onNodeWithContentDescription("Open slash toolbox").performClick()
+        composeRule.onNodeWithContentDescription("Skills").performClick()
+
+        composeRule.onNodeWithText("OpenAI Docs").assertExists()
+        composeRule.onNodeWithContentDescription("Copy \$openai-docs").performClick()
+
+        composeRule.onNodeWithText("Copied \$openai-docs").assertExists()
+    }
+
+    @Test
     fun hooksPanelNavigatesThroughAddPreviewMode() {
         setComposerContent()
 
