@@ -209,6 +209,19 @@ data class CreateSupervisorWorkspaceRequest(
     val label: String? = null,
 )
 
+data class ImportSupervisorPluginRequest(
+    val manifestJson: String,
+    val enabled: Boolean = true,
+)
+
+data class SupervisorPluginSummary(
+    val id: String,
+    val name: String,
+    val version: String,
+    val enabled: Boolean,
+    val source: String?,
+)
+
 data class UpdateSupervisorWorkspaceRequest(
     val label: String,
 )

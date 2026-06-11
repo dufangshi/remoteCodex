@@ -188,6 +188,18 @@ class SupervisorApiClient(
         ).toWorkspaceUploadResult()
     }
 
+    fun importPlugin(request: ImportSupervisorPluginRequest): SupervisorPluginSummary {
+        val body = JSONObject()
+            .put("manifestJson", request.manifestJson)
+            .put("enabled", request.enabled)
+            .toString()
+        return requestJson(
+            config.restPath("/api/plugins/import"),
+            method = "POST",
+            body = body,
+        ).toPluginSummary()
+    }
+
     fun fetchRelayPortal(): RelayPortalSummary {
         return requestJson("/relay/portal").toRelayPortalSummary()
     }
@@ -721,6 +733,16 @@ private fun JSONObject.toWorkspaceUploadedFile(): SupervisorWorkspaceUploadedFil
         path = optString("path"),
         name = optString("name"),
         size = optLong("size", 0L),
+    )
+}
+
+private fun JSONObject.toPluginSummary(): SupervisorPluginSummary {
+    return SupervisorPluginSummary(
+        id = optString("id"),
+        name = optString("name"),
+        version = optString("version"),
+        enabled = optBoolean("enabled", false),
+        source = optNullableString("source"),
     )
 }
 

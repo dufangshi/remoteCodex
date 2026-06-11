@@ -11,6 +11,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorConnectionMode
 import com.remotecodex.android.api.SupervisorHomeSnapshot
+import com.remotecodex.android.api.SupervisorPluginSummary
 import com.remotecodex.android.api.SupervisorThreadSummary
 import com.remotecodex.android.api.SupervisorWorkspaceSummary
 import com.remotecodex.android.settings.ThemeMode
@@ -84,7 +85,8 @@ class SupervisorHomeScreenTest {
 
         composeRule.onNodeWithContentDescription("Open settings").performClick()
         composeRule.onNodeWithText("Import plugin").assertExists()
-        composeRule.onNodeWithTag("plugin-manifest-input", useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithTag("plugin-manifest-input", useUnmergedTree = true)
+            .assertExists()
         composeRule.onNodeWithContentDescription("Import plugin").assertExists()
     }
 
@@ -128,6 +130,15 @@ class SupervisorHomeScreenTest {
                     darkThemeActive = false,
                     onThemeModeSelected = {},
                     onOpenThread = onOpenThread,
+                    onImportPluginManifest = {
+                        SupervisorPluginSummary(
+                            id = "example-plugin",
+                            name = "Example Plugin",
+                            version = "1.0.0",
+                            enabled = true,
+                            source = "imported",
+                        )
+                    },
                     onChangeConnection = {},
                 )
             }

@@ -40,10 +40,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.AndroidFeatureFlags
 import com.remotecodex.android.api.CreateSupervisorWorkspaceRequest
+import com.remotecodex.android.api.ImportSupervisorPluginRequest
 import com.remotecodex.android.api.SupervisorApiClient
 import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorHomeSnapshot
 import com.remotecodex.android.api.StartSupervisorThreadRequest
+import com.remotecodex.android.api.SupervisorPluginSummary
 import com.remotecodex.android.api.SupervisorThreadSummary
 import com.remotecodex.android.api.SupervisorWorkspaceSummary
 import com.remotecodex.android.api.UpdateSupervisorWorkspaceRequest
@@ -79,6 +81,7 @@ fun SupervisorHomeScreen(
     onOpenThread: (String?) -> Unit,
     onRefreshHomeSnapshot: () -> Unit = {},
     onChangeConnection: () -> Unit,
+    onImportPluginManifest: (suspend (String) -> SupervisorPluginSummary)? = null,
     modifier: Modifier = Modifier,
 ) {
     val appShell = ThreadPreviewSample.appShell
@@ -320,6 +323,16 @@ fun SupervisorHomeScreen(
                 homeSnapshotError = homeSnapshotError,
                 onThemeModeSelected = onThemeModeSelected,
                 onChangeConnection = onChangeConnection,
+                onImportPluginManifest = onImportPluginManifest ?: { manifestJson ->
+                    withContext(Dispatchers.IO) {
+                        client.importPlugin(
+                            ImportSupervisorPluginRequest(
+                                manifestJson = manifestJson,
+                                enabled = true,
+                            ),
+                        )
+                    }
+                },
                 onClose = { settingsOpen = false },
                 modifier = Modifier.fillMaxSize(),
             )

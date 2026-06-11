@@ -31,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,12 +49,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorHomeSnapshot
+import com.remotecodex.android.api.SupervisorPluginSummary
 import com.remotecodex.android.settings.ThemeMode
 import com.remotecodex.android.ui.model.AppShellNavigationItemPreview
 import com.remotecodex.android.ui.model.AppShellPreview
 import com.remotecodex.android.ui.model.PluginPreview
 import com.remotecodex.android.ui.model.RendererPreview
 import com.remotecodex.android.ui.theme.ThreadColors
+import kotlinx.coroutines.launch
 
 @Composable
 fun AppShellNavigationPanel(
@@ -150,6 +153,7 @@ fun AppShellSettingsPanel(
     homeSnapshotError: String?,
     onThemeModeSelected: (ThemeMode) -> Unit,
     onChangeConnection: () -> Unit,
+    onImportPluginManifest: (suspend (String) -> SupervisorPluginSummary)? = null,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -312,18 +316,21 @@ fun AppShellSettingsPanel(
                     }
                 }
 
-                ImportPluginSettingsSection()
+                ImportPluginSettingsSection(onImportPluginManifest = onImportPluginManifest)
             }
         }
     }
 }
 
 @Composable
-private fun ImportPluginSettingsSection() {
+private fun ImportPluginSettingsSection(
+    onImportPluginManifest: (suspend (String) -> SupervisorPluginSummary)?,
+) {
     var draft by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    val coroutineScope = rememberCoroutineScope()
     SettingsSection(title = "Import plugin", detail = "Manifest registration") {
         Column(
             modifier = Modifier
@@ -345,8 +352,8 @@ private fun ImportPluginSettingsSection() {
                     .fillMaxWidth()
                     .testTag("plugin-manifest-input")
                     .semantics { contentDescription = "Plugin manifest input" },
-                label = { Text("Plugin manifest URL or JSON") },
-                placeholder = { Text("https://example.local/plugin.json") },
+                label = { Text("Plugin manifest JSON") },
+                placeholder = { Text("""{"id":"example-plugin", ...}""") },
                 minLines = 3,
                 maxLines = 5,
                 textStyle = MaterialTheme.typography.bodySmall.copy(
@@ -391,20 +398,32 @@ private fun ImportPluginSettingsSection() {
                         if (trimmed.isEmpty()) {
                             return@GraphButton
                         }
-                        busy = true
                         error = null
                         message = null
                         val looksValid = trimmed.startsWith("{") ||
-                            trimmed.startsWith("[") ||
-                            trimmed.startsWith("http://") ||
-                            trimmed.startsWith("https://")
-                        if (looksValid) {
-                            draft = ""
-                            message = "Plugin import queued for supervisor wiring."
-                        } else {
-                            error = "Use a manifest URL or plugin.json payload."
+                            trimmed.startsWith("[")
+                        if (!looksValid) {
+                            error = "Use a plugin.json payload."
+                            return@GraphButton
                         }
-                        busy = false
+                        val importAction = onImportPluginManifest
+                        if (importAction == null) {
+                            draft = ""
+                            message = "Plugin manifest validated in preview mode."
+                            return@GraphButton
+                        }
+                        busy = true
+                        coroutineScope.launch {
+                            runCatching { importAction(trimmed) }
+                                .onSuccess { plugin ->
+                                    draft = ""
+                                    message = "Imported ${plugin.name.ifBlank { plugin.id }}."
+                                }
+                                .onFailure { throwable ->
+                                    error = throwable.message ?: "Plugin import failed."
+                                }
+                            busy = false
+                        }
                     },
                 )
             }

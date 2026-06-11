@@ -1030,6 +1030,46 @@ class SupervisorApiClientTest {
         assertEquals("relay-token", transport.requests.single().bearerToken)
     }
 
+    @Test
+    fun importPluginUsesRelayDevicePathAndManifestJsonBody() {
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(
+                200,
+                """{"id":"example-plugin","name":"Example Plugin","version":"1.0.0","description":"Example","remoteCodex":"0.1","enabled":true,"source":"imported","capabilities":{"artifactTypes":[],"timelineRenderers":[],"threadPanels":[]}}""",
+            ),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        val plugin = client.importPlugin(
+            ImportSupervisorPluginRequest(
+                manifestJson = """{"id":"example-plugin"}""",
+                enabled = true,
+            ),
+        )
+
+        assertEquals("example-plugin", plugin.id)
+        assertEquals("Example Plugin", plugin.name)
+        assertTrue(plugin.enabled)
+        assertEquals("imported", plugin.source)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/plugins/import",
+            transport.requests.single().url,
+        )
+        assertEquals("POST", transport.requests.single().method)
+        assertEquals("relay-token", transport.requests.single().bearerToken)
+        val body = transport.requests.single().body!!
+        assertTrue(body.contains("\"manifestJson\":\"{\\\"id\\\":\\\"example-plugin\\\"}\""))
+        assertTrue(body.contains("\"enabled\":true"))
+    }
+
     private class RecordingTransport(
         private vararg val responses: SupervisorHttpResponse,
     ) : SupervisorHttpTransport {
