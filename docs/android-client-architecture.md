@@ -266,7 +266,7 @@ ANDROID_SDK_ROOT=/home/u/Android/Sdk \
   -accel auto
 ```
 
-This environment currently builds the APK but does not rely on emulator execution. The x86_64 emulator needs `/dev/kvm` access in the active Linux login session. Add the user to the `kvm` group and start a new login session before relying on screenshot-based E2E:
+When running the emulator directly inside WSL, the x86_64 emulator needs `/dev/kvm` access in the active Linux login session. Add the user to the `kvm` group and start a new login session before relying on WSL-hosted screenshot E2E:
 
 ```bash
 sudo gpasswd -a "$USER" kvm
@@ -280,9 +280,25 @@ adb shell am start -n com.remotecodex.android/.MainActivity
 adb exec-out screencap -p > output/android-thread-preview.png
 ```
 
+In this workspace, the Windows-hosted emulator can also be reached from WSL through `/home/u/bin/adb-windows`. Pending request coverage includes a UIAutomator instrumentation smoke test for the Web-like question flow: free-form question rendering, option selection, and disabled submit while the free-form answer is empty.
+
+```bash
+JAVA_HOME=/home/u/.jdks/jdk-17 \
+ANDROID_HOME=/home/u/Android/Sdk \
+ANDROID_SDK_ROOT=/home/u/Android/Sdk \
+./gradlew :app:compileDebugKotlin :app:compileDebugAndroidTestKotlin \
+  :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
+
+/home/u/bin/adb-windows install -r apps/android/app/build/outputs/apk/debug/app-debug.apk
+/home/u/bin/adb-windows install -r apps/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+/home/u/bin/adb-windows shell am instrument -w -r \
+  -e class com.remotecodex.android.ui.components.PendingRequestCardTest \
+  com.remotecodex.android.test/androidx.test.runner.AndroidJUnitRunner
+```
+
 ## Near-Term Roadmap
 
-1. Add screenshot E2E after emulator access is available.
+1. Expand UIAutomator and screenshot E2E coverage across the remaining high-risk thread components.
 2. Add a typed Kotlin supervisor API client with configurable base URL.
 3. Add pairing/token storage before enabling remote network access.
 4. Add a minimal home screen: active threads, workspaces, and pending confirmations.
