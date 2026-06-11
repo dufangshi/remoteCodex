@@ -243,6 +243,85 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun attachesPendingReasoningToNextAgentMessage() {
+        val projection = projectGraphChatMessagesWithReasoning(
+            listOf(
+                GraphChatReasoningProjectionInput.Reasoning(
+                    key = "reasoning:1",
+                    reasoning = ReasoningPreview("Plan first", ToolStatus.Completed),
+                ),
+                GraphChatReasoningProjectionInput.Message(
+                    key = "agent:1",
+                    message = message(MessageAuthor.Assistant, "Agent reply"),
+                ),
+            ),
+        )
+
+        assertEquals(emptyList<ReasoningPreview>(), projection.unattachedReasoningItems)
+        assertEquals(1, projection.messages.size)
+        assertEquals(
+            listOf(ReasoningPreview("Plan first", ToolStatus.Completed)),
+            projection.messages.single().reasoningItems,
+        )
+    }
+
+    @Test
+    fun attachesFollowingReasoningToPreviousAdjacentAgentMessage() {
+        val projection = projectGraphChatMessagesWithReasoning(
+            listOf(
+                GraphChatReasoningProjectionInput.Message(
+                    key = "agent:1",
+                    message = message(
+                        author = MessageAuthor.Assistant,
+                        text = "Agent reply",
+                        reasoningItems = listOf(ReasoningPreview("Existing", ToolStatus.Completed)),
+                    ),
+                ),
+                GraphChatReasoningProjectionInput.Reasoning(
+                    key = "reasoning:1",
+                    reasoning = ReasoningPreview("Follow up", ToolStatus.Running),
+                ),
+            ),
+        )
+
+        assertEquals(emptyList<ReasoningPreview>(), projection.unattachedReasoningItems)
+        assertEquals(
+            listOf(
+                ReasoningPreview("Existing", ToolStatus.Completed),
+                ReasoningPreview("Follow up", ToolStatus.Running),
+            ),
+            projection.messages.single().reasoningItems,
+        )
+    }
+
+    @Test
+    fun keepsReasoningUnattachedWhenUserMessageBreaksAdjacency() {
+        val projection = projectGraphChatMessagesWithReasoning(
+            listOf(
+                GraphChatReasoningProjectionInput.Message(
+                    key = "agent:1",
+                    message = message(MessageAuthor.Assistant, "Agent reply"),
+                ),
+                GraphChatReasoningProjectionInput.Message(
+                    key = "user:1",
+                    message = message(MessageAuthor.User, "Steer"),
+                ),
+                GraphChatReasoningProjectionInput.Reasoning(
+                    key = "reasoning:1",
+                    reasoning = ReasoningPreview("Detached", ToolStatus.Completed),
+                ),
+            ),
+        )
+
+        assertEquals(2, projection.messages.size)
+        assertEquals(emptyList<ReasoningPreview>(), projection.messages.first().reasoningItems)
+        assertEquals(
+            listOf(ReasoningPreview("Detached", ToolStatus.Completed)),
+            projection.unattachedReasoningItems,
+        )
+    }
+
+    @Test
     fun mapsPlanStepStatusAccessibilityLabels() {
         assertEquals("Plan step status: Completed", planStepStatusAccessibilityLabel(PlanStepStatus.Completed))
         assertEquals("Plan step status: In progress", planStepStatusAccessibilityLabel(PlanStepStatus.Running))
@@ -4688,6 +4767,20 @@ class ThreadPresentationTest {
                 artifactSummary = null,
                 hasRenderer = false,
             ),
+        )
+    }
+
+    private fun message(
+        author: MessageAuthor,
+        text: String,
+        reasoningItems: List<ReasoningPreview> = emptyList(),
+    ): MessagePreview {
+        return MessagePreview(
+            author = author,
+            status = if (author == MessageAuthor.Assistant) ThreadStatus.Complete else null,
+            timeLabel = "10:24",
+            text = text,
+            reasoningItems = reasoningItems,
         )
     }
 }

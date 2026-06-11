@@ -2,6 +2,7 @@ package com.remotecodex.android.ui.presentation
 
 import com.remotecodex.android.ui.model.HistoryItemKind
 import com.remotecodex.android.ui.model.MessageAuthor
+import com.remotecodex.android.ui.model.MessagePreview
 import com.remotecodex.android.ui.model.PlanStepStatus
 import com.remotecodex.android.ui.model.ReasoningPreview
 import com.remotecodex.android.ui.model.ThreadStatus
@@ -60,6 +61,23 @@ data class GraphChatMessageFrameState(
     val showCopyAction: Boolean,
     val timeLabel: String?,
 )
+
+data class GraphChatReasoningAttachmentProjection(
+    val messages: List<MessagePreview>,
+    val unattachedReasoningItems: List<ReasoningPreview>,
+)
+
+sealed interface GraphChatReasoningProjectionInput {
+    data class Message(
+        val key: String,
+        val message: MessagePreview,
+    ) : GraphChatReasoningProjectionInput
+
+    data class Reasoning(
+        val key: String,
+        val reasoning: ReasoningPreview,
+    ) : GraphChatReasoningProjectionInput
+}
 
 data class GraphChatReasoningState(
     val visible: Boolean,
@@ -2789,6 +2807,72 @@ fun buildGraphChatReasoningState(items: List<ReasoningPreview>): GraphChatReason
         running = running,
         copyLabel = "Copy thoughts",
         copyAccessibilityLabel = "Copy reasoning text",
+    )
+}
+
+fun attachGraphChatReasoningToAgentMessages(
+    messages: List<MessagePreview>,
+    reasoningItems: List<ReasoningPreview>,
+): GraphChatReasoningAttachmentProjection {
+    return projectGraphChatMessagesWithReasoning(
+        buildList {
+            messages.forEachIndexed { index, message ->
+                add(GraphChatReasoningProjectionInput.Message("message:$index", message))
+            }
+            reasoningItems.forEachIndexed { index, reasoning ->
+                add(GraphChatReasoningProjectionInput.Reasoning("reasoning:$index", reasoning))
+            }
+        },
+    )
+}
+
+fun projectGraphChatMessagesWithReasoning(
+    inputs: List<GraphChatReasoningProjectionInput>,
+): GraphChatReasoningAttachmentProjection {
+    val output = mutableListOf<MessagePreview>()
+    val pendingReasoning = mutableListOf<ReasoningPreview>()
+
+    fun attachReasoningToLastAgent(): Boolean {
+        if (pendingReasoning.isEmpty()) {
+            return true
+        }
+        val lastAgentIndex = output.lastIndex
+        if (lastAgentIndex < 0 || output[lastAgentIndex].author != MessageAuthor.Assistant) {
+            return false
+        }
+        val message = output[lastAgentIndex]
+        output[lastAgentIndex] = message.copy(
+            reasoningItems = message.reasoningItems + pendingReasoning.toList(),
+        )
+        pendingReasoning.clear()
+        return true
+    }
+
+    inputs.forEach { input ->
+        when (input) {
+            is GraphChatReasoningProjectionInput.Message -> {
+                val message = input.message
+                if (message.author == MessageAuthor.Assistant) {
+                    output += if (pendingReasoning.isNotEmpty()) {
+                        message.copy(reasoningItems = message.reasoningItems + pendingReasoning.toList())
+                    } else {
+                        message
+                    }
+                    pendingReasoning.clear()
+                } else {
+                    output += message
+                }
+            }
+            is GraphChatReasoningProjectionInput.Reasoning -> {
+                pendingReasoning += input.reasoning
+                attachReasoningToLastAgent()
+            }
+        }
+    }
+
+    return GraphChatReasoningAttachmentProjection(
+        messages = output,
+        unattachedReasoningItems = pendingReasoning,
     )
 }
 
