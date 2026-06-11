@@ -51,6 +51,8 @@ import com.remotecodex.android.ui.theme.ThreadColors
 @Composable
 fun ShellPanel(
     shell: ShellPreview,
+    onCreateShell: (() -> Unit)? = null,
+    onTerminateShell: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var processesOpen by remember { mutableStateOf(false) }
@@ -70,7 +72,11 @@ fun ShellPanel(
                 .background(ThreadColors.CodeBackground)
                 .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(12.dp)),
         ) {
-            ShellHeader(shell = shell, activeProcess = activeProcess)
+            ShellHeader(
+                shell = shell,
+                activeProcess = activeProcess,
+                onTerminateShell = onTerminateShell,
+            )
             ShellTerminalBar(
                 activeProcess = activeProcess,
                 processesOpen = processesOpen,
@@ -78,7 +84,11 @@ fun ShellPanel(
                 onToggleProcesses = { processesOpen = !processesOpen },
             )
             if (processesOpen) {
-                ShellProcessDrawer(shell = shell)
+                ShellProcessDrawer(
+                    shell = shell,
+                    onCreateShell = onCreateShell,
+                    onTerminateShell = onTerminateShell,
+                )
             }
             Box(modifier = Modifier.weight(1f)) {
                 ShellOutput(shell = shell)
@@ -107,7 +117,11 @@ fun ShellPanel(
 }
 
 @Composable
-private fun ShellHeader(shell: ShellPreview, activeProcess: ShellProcessPreview?) {
+private fun ShellHeader(
+    shell: ShellPreview,
+    activeProcess: ShellProcessPreview?,
+    onTerminateShell: ((String) -> Unit)?,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -142,6 +156,9 @@ private fun ShellHeader(shell: ShellPreview, activeProcess: ShellProcessPreview?
             icon = ShellGlyphKind.Stop,
             tone = ShellControlTone.Danger,
             contentDescription = "Terminate active shell",
+            onClick = activeProcess?.id?.let { shellId ->
+                onTerminateShell?.let { terminate -> { terminate(shellId) } }
+            },
         )
     }
 }
@@ -433,7 +450,11 @@ private fun ShellTerminalBar(
 }
 
 @Composable
-private fun ShellProcessDrawer(shell: ShellPreview) {
+private fun ShellProcessDrawer(
+    shell: ShellPreview,
+    onCreateShell: (() -> Unit)?,
+    onTerminateShell: ((String) -> Unit)?,
+) {
     val liveProcesses = shell.processes.filter { it.isLiveShellProcess() }
     Column(
         modifier = Modifier
@@ -474,7 +495,7 @@ private fun ShellProcessDrawer(shell: ShellPreview) {
             )
         } else {
             liveProcesses.forEach { process ->
-                ShellProcessRow(process = process)
+                ShellProcessRow(process = process, onTerminateShell = onTerminateShell)
             }
         }
         Row(
@@ -485,6 +506,7 @@ private fun ShellProcessDrawer(shell: ShellPreview) {
                 icon = ShellGlyphKind.Plus,
                 tone = ShellControlTone.Info,
                 contentDescription = "New shell",
+                onClick = onCreateShell,
             )
         }
     }
@@ -496,7 +518,10 @@ private fun ShellProcessPreview.isLiveShellProcess(): Boolean =
         runningCommand != null
 
 @Composable
-private fun ShellProcessRow(process: ShellProcessPreview) {
+private fun ShellProcessRow(
+    process: ShellProcessPreview,
+    onTerminateShell: ((String) -> Unit)?,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -546,6 +571,7 @@ private fun ShellProcessRow(process: ShellProcessPreview) {
             icon = ShellGlyphKind.Stop,
             tone = ShellControlTone.Danger,
             contentDescription = "Kill shell process",
+            onClick = onTerminateShell?.let { terminate -> { terminate(process.id) } },
         )
     }
 }

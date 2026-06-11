@@ -3,6 +3,7 @@ package com.remotecodex.android.ui.presentation
 import com.remotecodex.android.api.SupervisorThreadDetail
 import com.remotecodex.android.api.SupervisorThreadActionQuestion
 import com.remotecodex.android.api.SupervisorThreadActionRequest
+import com.remotecodex.android.api.SupervisorThreadShellState
 import com.remotecodex.android.api.SupervisorThreadTurn
 import com.remotecodex.android.api.SupervisorThreadTurnItem
 import com.remotecodex.android.api.SupervisorThreadTurnTokenUsage
@@ -44,6 +45,7 @@ fun buildThreadDetailPreviewFromSupervisor(
     detail: SupervisorThreadDetail,
     workspaceTree: SupervisorWorkspaceTreeNode? = null,
     workspaceFilePreview: SupervisorWorkspaceFilePreview? = null,
+    shellState: SupervisorThreadShellState? = null,
     now: Instant = Instant.now(),
 ): ThreadDetailPreview {
     val workspaceLabel = detail.workspace.label.ifBlank { basename(detail.workspace.absPath) }
@@ -97,7 +99,7 @@ fun buildThreadDetailPreviewFromSupervisor(
             tree = workspaceTree,
             filePreview = workspaceFilePreview,
         ),
-        shellPreview = buildShellPlaceholder(detail.workspace),
+        shellPreview = shellState?.toShellPreview(detail.workspace) ?: buildShellPlaceholder(detail.workspace),
         composer = ComposerPreview(
             busy = status == ThreadStatus.Running,
             threadConnected = true,
@@ -287,6 +289,53 @@ private fun buildShellPlaceholder(workspace: SupervisorWorkspaceSummary): ShellP
         activeProcessId = "workspace-shell",
         connectionLabel = "REST connected",
         inputEnabled = false,
+        commandRunning = false,
+    )
+}
+
+private fun SupervisorThreadShellState.toShellPreview(workspace: SupervisorWorkspaceSummary): ShellPreview {
+    val rootName = workspace.label.ifBlank { basename(workspace.absPath) }
+    val activeId = activeShellId ?: shell?.id ?: shells.firstOrNull()?.id ?: "workspace-shell"
+    val processRows = if (shells.isEmpty()) {
+        listOf(
+            ShellProcessPreview(
+                id = "workspace-shell",
+                label = "No shell",
+                cwd = workspace.absPath,
+                status = state,
+                runningCommand = null,
+                active = true,
+            ),
+        )
+    } else {
+        shells.map { session ->
+            ShellProcessPreview(
+                id = session.id,
+                label = session.label ?: session.tmuxSessionName.ifBlank { "Shell" },
+                cwd = session.cwd,
+                status = session.status,
+                runningCommand = null,
+                active = session.id == activeId,
+            )
+        }
+    }
+    val active = processRows.firstOrNull { it.active } ?: processRows.first()
+    val inputEnabled = state == "running" || state == "attached"
+    return ShellPreview(
+        title = "Thread shell",
+        status = state.replaceFirstChar { it.uppercase() },
+        prompt = "${basename(active.cwd).ifBlank { rootName }} %",
+        lines = listOf(
+            "Shell state: $state",
+            "Workspace: ${workspacePathStatus}",
+            "Active shell: ${shell?.label ?: shell?.tmuxSessionName ?: "none"}",
+            "PTY input/output streaming is pending Android websocket wiring.",
+        ),
+        controls = listOf("Paste", "Copy", "Clear", "Ctrl-C"),
+        processes = processRows,
+        activeProcessId = activeId,
+        connectionLabel = if (inputEnabled) "REST running" else "REST ${state}",
+        inputEnabled = inputEnabled,
         commandRunning = false,
     )
 }

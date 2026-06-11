@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.api.RespondThreadRequest
 import com.remotecodex.android.api.RespondThreadRequestAnswer
+import com.remotecodex.android.api.CreateSupervisorShellRequest
 import com.remotecodex.android.api.SendThreadPromptRequest
 import com.remotecodex.android.api.SupervisorApiClient
 import com.remotecodex.android.api.SupervisorConnectionConfig
@@ -67,6 +68,8 @@ fun ThreadDetailScreen(
     var pendingSettingsUpdate by remember(threadId) { mutableStateOf<UpdateThreadSettingsRequest?>(null) }
     var pendingGoalUpdate by remember(threadId) { mutableStateOf<UpdateThreadGoalRequest?>(null) }
     var pendingCompact by remember(threadId) { mutableStateOf(false) }
+    var pendingCreateShell by remember(threadId) { mutableStateOf(false) }
+    var pendingTerminateShellId by remember(threadId) { mutableStateOf<String?>(null) }
     var resolvingRequestId by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingRenameTitle by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingDelete by remember(threadId) { mutableStateOf(false) }
@@ -197,6 +200,45 @@ fun ThreadDetailScreen(
             .onFailure { throwable -> error = throwable.message ?: "Compact failed." }
     }
 
+    LaunchedEffect(pendingCreateShell) {
+        if (!pendingCreateShell) return@LaunchedEffect
+        error = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                client.createThreadShell(
+                    threadId = threadId,
+                    request = CreateSupervisorShellRequest(cols = 120, rows = 32, label = "Android shell"),
+                )
+                client.fetchThreadDetailPreview(threadId)
+            }
+        }
+        pendingCreateShell = false
+        result
+            .onSuccess { preview ->
+                detail = preview
+                refreshNonce += 1
+            }
+            .onFailure { throwable -> error = throwable.message ?: "Shell create failed." }
+    }
+
+    LaunchedEffect(pendingTerminateShellId) {
+        val shellId = pendingTerminateShellId ?: return@LaunchedEffect
+        error = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                client.terminateShell(shellId)
+                client.fetchThreadDetailPreview(threadId)
+            }
+        }
+        pendingTerminateShellId = null
+        result
+            .onSuccess { preview ->
+                detail = preview
+                refreshNonce += 1
+            }
+            .onFailure { throwable -> error = throwable.message ?: "Shell terminate failed." }
+    }
+
     LaunchedEffect(pendingRequestResponse) {
         val response = pendingRequestResponse ?: return@LaunchedEffect
         resolvingRequestId = response.request.id
@@ -289,6 +331,12 @@ fun ThreadDetailScreen(
             onCompactThread = {
                 pendingCompact = true
             },
+            onCreateShell = {
+                pendingCreateShell = true
+            },
+            onTerminateShell = { shellId ->
+                pendingTerminateShellId = shellId
+            },
             onDenyPendingRequest = { request ->
                 pendingRequestResponse = PendingRequestResponse(
                     request = request,
@@ -344,10 +392,12 @@ private fun SupervisorApiClient.fetchThreadDetailPreview(threadId: String): Thre
             )
         }.getOrNull()
     }
+    val shellState = runCatching { fetchThreadShellState(threadId) }.getOrNull()
     return buildThreadDetailPreviewFromSupervisor(
         detail = detail,
         workspaceTree = tree,
         workspaceFilePreview = filePreview,
+        shellState = shellState,
     )
 }
 

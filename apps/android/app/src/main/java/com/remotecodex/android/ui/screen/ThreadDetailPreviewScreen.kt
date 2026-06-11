@@ -102,6 +102,8 @@ fun ThreadDetailSurface(
     onUpdateThreadSettings: ((UpdateThreadSettingsRequest) -> Unit)? = null,
     onUpdateThreadGoal: ((UpdateThreadGoalRequest) -> Unit)? = null,
     onCompactThread: (() -> Unit)? = null,
+    onCreateShell: (() -> Unit)? = null,
+    onTerminateShell: ((String) -> Unit)? = null,
     onDenyPendingRequest: (PendingRequestPreview) -> Unit = {},
     onSubmitPendingRequest: (PendingRequestPreview, Map<String, List<String>>) -> Unit = { _, _ -> },
     onRenameThread: ((String) -> Unit)? = null,
@@ -185,6 +187,8 @@ fun ThreadDetailSurface(
                             )
                             ThreadSurfaceView.Shell -> ShellPanel(
                                 shell = displayedDetail.shellPreview,
+                                onCreateShell = onCreateShell,
+                                onTerminateShell = onTerminateShell,
                                 modifier = Modifier.fillMaxSize(),
                             )
                         }

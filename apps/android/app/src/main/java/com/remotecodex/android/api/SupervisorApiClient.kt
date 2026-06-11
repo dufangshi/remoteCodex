@@ -132,6 +132,31 @@ class SupervisorApiClient(
         return requestJson(config.restPath("/api/threads/${urlEncodePathSegment(threadId)}$query")).toThreadDetail()
     }
 
+    fun fetchThreadShellState(threadId: String): SupervisorThreadShellState {
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/shell"),
+        ).toThreadShellState()
+    }
+
+    fun createThreadShell(threadId: String, request: CreateSupervisorShellRequest = CreateSupervisorShellRequest()): SupervisorThreadShellState {
+        val body = JSONObject()
+        request.cols?.let { body.put("cols", it) }
+        request.rows?.let { body.put("rows", it) }
+        request.label?.takeIf { it.isNotBlank() }?.let { body.put("label", it) }
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/shell"),
+            method = "POST",
+            body = body.toString(),
+        ).toThreadShellState()
+    }
+
+    fun terminateShell(shellId: String): SupervisorThreadShellState {
+        return requestJson(
+            config.restPath("/api/shells/${urlEncodePathSegment(shellId)}/terminate"),
+            method = "POST",
+        ).toThreadShellState()
+    }
+
     fun sendThreadPrompt(threadId: String, request: SendThreadPromptRequest): SupervisorThreadSummary {
         val body = JSONObject()
             .put("prompt", request.prompt)
@@ -436,6 +461,38 @@ private fun JSONObject.toWorkspaceFilePreview(): SupervisorWorkspaceFilePreview 
         size = optLong("size", 0L),
         truncated = optBoolean("truncated", false),
         nextOffset = optLong("nextOffset", 0L),
+    )
+}
+
+private fun JSONObject.toThreadShellState(): SupervisorThreadShellState {
+    val shellsJson = optJSONArray("shells") ?: org.json.JSONArray()
+    return SupervisorThreadShellState(
+        threadId = optString("threadId"),
+        workspaceId = optString("workspaceId"),
+        workspacePathStatus = optString("workspacePathStatus"),
+        state = optString("state"),
+        shell = optJSONObject("shell")?.toShellSession(),
+        shells = List(shellsJson.length()) { index ->
+            shellsJson.getJSONObject(index).toShellSession()
+        },
+        activeShellId = optNullableString("activeShellId"),
+    )
+}
+
+private fun JSONObject.toShellSession(): SupervisorShellSession {
+    return SupervisorShellSession(
+        id = optString("id"),
+        threadId = optString("threadId"),
+        workspaceId = optString("workspaceId"),
+        label = optNullableString("label"),
+        tmuxSessionName = optString("tmuxSessionName"),
+        backend = optString("backend"),
+        cwd = optString("cwd"),
+        status = optString("status"),
+        attachedViewerId = optNullableString("attachedViewerId"),
+        createdAt = optString("createdAt"),
+        updatedAt = optString("updatedAt"),
+        lastActivityAt = optNullableString("lastActivityAt"),
     )
 }
 

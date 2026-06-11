@@ -173,6 +173,37 @@ data class SupervisorWorkspaceFilePreview(
     val nextOffset: Long,
 )
 
+data class SupervisorShellSession(
+    val id: String,
+    val threadId: String,
+    val workspaceId: String,
+    val label: String?,
+    val tmuxSessionName: String,
+    val backend: String,
+    val cwd: String,
+    val status: String,
+    val attachedViewerId: String?,
+    val createdAt: String,
+    val updatedAt: String,
+    val lastActivityAt: String?,
+)
+
+data class SupervisorThreadShellState(
+    val threadId: String,
+    val workspaceId: String,
+    val workspacePathStatus: String,
+    val state: String,
+    val shell: SupervisorShellSession?,
+    val shells: List<SupervisorShellSession>,
+    val activeShellId: String?,
+)
+
+data class CreateSupervisorShellRequest(
+    val cols: Int? = null,
+    val rows: Int? = null,
+    val label: String? = null,
+)
+
 data class CreateSupervisorWorkspaceRequest(
     val absPath: String,
     val label: String? = null,

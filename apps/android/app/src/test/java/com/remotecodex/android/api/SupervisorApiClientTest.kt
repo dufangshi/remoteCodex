@@ -306,6 +306,58 @@ class SupervisorApiClientTest {
     }
 
     @Test
+    fun threadShellStateCreateAndTerminateUseRelayDevicePath() {
+        val shellJson = """{"id":"shell-1","threadId":"thread-1","workspaceId":"workspace-1","label":"Android shell","tmuxSessionName":"rcd-shell","backend":"tmux","cwd":"/repo","status":"running","attachedViewerId":null,"createdAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:01.000Z","lastActivityAt":"2026-01-01T00:00:02.000Z"}"""
+        val stateJson = """{"threadId":"thread-1","workspaceId":"workspace-1","workspacePathStatus":"present","state":"running","shell":$shellJson,"shells":[$shellJson],"activeShellId":"shell-1"}"""
+        val terminatedStateJson = """{"threadId":"thread-1","workspaceId":"workspace-1","workspacePathStatus":"present","state":"exited","shell":null,"shells":[],"activeShellId":null}"""
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(200, stateJson),
+            SupervisorHttpResponse(200, stateJson),
+            SupervisorHttpResponse(200, terminatedStateJson),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        val state = client.fetchThreadShellState("thread-1")
+        val created = client.createThreadShell(
+            threadId = "thread-1",
+            request = CreateSupervisorShellRequest(cols = 120, rows = 30, label = "Android shell"),
+        )
+        val terminated = client.terminateShell("shell-1")
+
+        assertEquals("running", state.state)
+        assertEquals("Android shell", state.shell!!.label)
+        assertEquals("shell-1", created.activeShellId)
+        assertEquals("exited", terminated.state)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1/shell",
+            transport.requests[0].url,
+        )
+        assertEquals("GET", transport.requests[0].method)
+        assertEquals("relay-token", transport.requests[0].bearerToken)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1/shell",
+            transport.requests[1].url,
+        )
+        assertEquals("POST", transport.requests[1].method)
+        assertTrue(transport.requests[1].body!!.contains("\"cols\":120"))
+        assertTrue(transport.requests[1].body!!.contains("\"rows\":30"))
+        assertTrue(transport.requests[1].body!!.contains("\"label\":\"Android shell\""))
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/shells/shell-1/terminate",
+            transport.requests[2].url,
+        )
+        assertEquals("POST", transport.requests[2].method)
+    }
+
+    @Test
     fun threadRenameAndDeleteUseRelayDevicePath() {
         val renamedThreadJson = """{"id":"thread-1","workspaceId":"workspace-1","title":"Renamed Android API","status":"idle","model":"gpt-5","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":"Wire detail"}"""
         val deletedThreadJson = """{"id":"thread-1","workspaceId":"workspace-1","title":"Renamed Android API","status":"idle","model":"gpt-5","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":"Wire detail"}"""
