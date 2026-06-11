@@ -1,5 +1,6 @@
 package com.remotecodex.android.ui.components
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -14,7 +15,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.ui.model.ThreadStatus
@@ -78,13 +82,46 @@ fun MessageStatusBadge(
         modifier = if (compact) modifier.defaultMinSize(minWidth = 24.dp) else modifier,
         showLabel = !compact,
         leading = {
-            if (model.tone == MessageStatusTone.Running) {
-                RunningDots(color = colors.foreground)
-            } else {
-                Dot(color = colors.foreground)
-            }
+            MessageStatusLeadingIcon(tone = model.tone, color = colors.foreground)
         },
     )
+}
+
+@Composable
+private fun MessageStatusLeadingIcon(
+    tone: MessageStatusTone,
+    color: Color,
+) {
+    if (tone == MessageStatusTone.Running) {
+        RunningDots(color = color)
+        return
+    }
+
+    Canvas(modifier = Modifier.size(14.dp)) {
+        val stroke = Stroke(width = 1.7.dp.toPx(), cap = StrokeCap.Round)
+        val w = size.width
+        val h = size.height
+        fun line(x1: Float, y1: Float, x2: Float, y2: Float) {
+            drawLine(color, Offset(w * x1, h * y1), Offset(w * x2, h * y2), stroke.width, StrokeCap.Round)
+        }
+
+        when (tone) {
+            MessageStatusTone.Success -> {
+                drawCircle(color, radius = w * 0.42f, center = Offset(w * 0.5f, h * 0.5f), style = stroke)
+                line(0.30f, 0.52f, 0.44f, 0.66f)
+                line(0.44f, 0.66f, 0.72f, 0.34f)
+            }
+            MessageStatusTone.Danger -> {
+                drawCircle(color, radius = w * 0.42f, center = Offset(w * 0.5f, h * 0.5f), style = stroke)
+                line(0.34f, 0.34f, 0.66f, 0.66f)
+                line(0.66f, 0.34f, 0.34f, 0.66f)
+            }
+            MessageStatusTone.Neutral -> {
+                drawCircle(color, radius = w * 0.42f, center = Offset(w * 0.5f, h * 0.5f), style = stroke)
+            }
+            MessageStatusTone.Running -> Unit
+        }
+    }
 }
 
 @Composable
