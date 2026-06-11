@@ -1,6 +1,7 @@
 package com.remotecodex.android.ui.components
 
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -111,6 +112,25 @@ class ThreadComposerStateTest {
         composeRule.onNodeWithContentDescription("Back").performClick()
 
         composeRule.onNodeWithText("PreToolUse · Bash").assertExists()
+    }
+
+    @Test
+    fun hooksPanelUpdatesLocalTrustPreviewState() {
+        setComposerContent()
+
+        composeRule.onNodeWithContentDescription("Open slash toolbox").performClick()
+        composeRule.onNodeWithContentDescription("Hooks").performClick()
+
+        composeRule.onNodeWithText("Modified").assertExists()
+        composeRule.onNodeWithContentDescription("Trust PreToolUse · Bash").performClick()
+
+        composeRule.onNodeWithText("Hook trusted: PreToolUse · Bash").assertExists()
+        composeRule.onAllNodesWithText("Trusted").assertCountEquals(2)
+        composeRule.onNodeWithContentDescription("Untrust PreToolUse · Bash").performClick()
+
+        composeRule.onNodeWithText("Hook marked for review: PreToolUse · Bash").assertExists()
+        composeRule.onNodeWithText("Review").assertExists()
+        composeRule.onAllNodesWithText("Trusted").assertCountEquals(1)
     }
 
     @Test

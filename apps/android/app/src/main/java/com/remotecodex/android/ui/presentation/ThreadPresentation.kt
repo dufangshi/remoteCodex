@@ -949,6 +949,7 @@ enum class ComposerHookActionKind {
 }
 
 data class ComposerHookRowState(
+    val key: String,
     val title: String,
     val commandLabel: String,
     val statusMessage: String?,
@@ -1168,6 +1169,7 @@ fun buildComposerHooksPanelState(
                 (hook.trustStatus == ComposerHookTrustStatusPreview.Untrusted ||
                     hook.trustStatus == ComposerHookTrustStatusPreview.Modified)
             ComposerHookRowState(
+                key = hook.key,
                 title = buildString {
                     append(hookEventLabel(hook.eventName))
                     hook.matcher?.takeIf { it.isNotBlank() }?.let { matcher ->

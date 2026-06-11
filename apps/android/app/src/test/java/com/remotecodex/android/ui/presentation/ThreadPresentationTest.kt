@@ -3884,6 +3884,7 @@ class ThreadPresentationTest {
                 form = null,
                 hooks = listOf(
                     ComposerHookRowState(
+                        key = "one",
                         title = "PreToolUse · Bash",
                         commandLabel = "scripts/check-command.sh",
                         statusMessage = "Checking shell command",
@@ -3915,6 +3916,7 @@ class ThreadPresentationTest {
                         timeoutLabel = "30s",
                     ),
                     ComposerHookRowState(
+                        key = "two",
                         title = "UserPromptSubmit",
                         commandLabel = "scripts/log-prompt.sh",
                         statusMessage = null,

@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import com.remotecodex.android.ui.model.ComposerSlashPanelViewPreview
 import com.remotecodex.android.ui.model.ComposerPreview
 import com.remotecodex.android.ui.model.ComposerHookFormPreview
+import com.remotecodex.android.ui.model.ComposerHookTrustStatusPreview
 import com.remotecodex.android.ui.model.ComposerHooksPanelModePreview
 import com.remotecodex.android.ui.model.ComposerMcpPanelModePreview
 import com.remotecodex.android.ui.presentation.ComposerActionState
@@ -60,6 +61,7 @@ import com.remotecodex.android.ui.presentation.ComposerFrameState
 import com.remotecodex.android.ui.presentation.ComposerGoalComposeCardState
 import com.remotecodex.android.ui.presentation.ComposerGoalPanelState
 import com.remotecodex.android.ui.presentation.ComposerCurrentGoalState
+import com.remotecodex.android.ui.presentation.ComposerHookActionKind
 import com.remotecodex.android.ui.presentation.ComposerHookFormState
 import com.remotecodex.android.ui.presentation.ComposerHookRowState
 import com.remotecodex.android.ui.presentation.ComposerHooksPanelState
@@ -135,6 +137,8 @@ fun ThreadComposer(
     var mcpPanelMode by remember(composer.mcpPanel.mode) { mutableStateOf(composer.mcpPanel.mode) }
     var hooksPanelMode by remember(composer.hooksPanel.mode) { mutableStateOf(composer.hooksPanel.mode) }
     var hooksPanelForm by remember(composer.hooksPanel.form) { mutableStateOf(composer.hooksPanel.form) }
+    var hooksPanelHooks by remember(composer.hooksPanel.hooks) { mutableStateOf(composer.hooksPanel.hooks) }
+    var hooksPanelSuccess by remember(composer.hooksPanel.configSuccess) { mutableStateOf(composer.hooksPanel.configSuccess) }
     val statusChips = buildComposerStatusStrip(
         threadConnected = composer.threadConnected,
         busy = composer.busy,
@@ -251,6 +255,8 @@ fun ThreadComposer(
         composer.hooksPanel.copy(
             mode = hooksPanelMode,
             form = hooksPanelForm,
+            configSuccess = hooksPanelSuccess,
+            hooks = hooksPanelHooks,
         ),
     )
     Column(
@@ -284,6 +290,17 @@ fun ThreadComposer(
                     onHookEdit = { form ->
                         hooksPanelForm = form
                         hooksPanelMode = ComposerHooksPanelModePreview.Edit
+                        hooksPanelSuccess = null
+                    },
+                    onHookTrustChange = { key, nextStatus, label ->
+                        hooksPanelHooks = hooksPanelHooks.map { hook ->
+                            if (hook.key == key) {
+                                hook.copy(trustStatus = nextStatus)
+                            } else {
+                                hook
+                            }
+                        }
+                        hooksPanelSuccess = label
                     },
                     onToolboxAction = { actionDecision ->
                         when (actionDecision.kind) {
@@ -331,6 +348,8 @@ fun ThreadComposer(
                     mcpPanelMode = composer.mcpPanel.mode
                     hooksPanelMode = composer.hooksPanel.mode
                     hooksPanelForm = composer.hooksPanel.form
+                    hooksPanelHooks = composer.hooksPanel.hooks
+                    hooksPanelSuccess = composer.hooksPanel.configSuccess
                 }
                 openMenu = nextMenu
             },
@@ -1450,6 +1469,7 @@ private fun SlashToolboxPanel(
     onMcpPanelModeChange: (ComposerMcpPanelModePreview) -> Unit,
     onHooksPanelModeChange: (ComposerHooksPanelModePreview) -> Unit,
     onHookEdit: (ComposerHookFormPreview) -> Unit,
+    onHookTrustChange: (String, ComposerHookTrustStatusPreview, String) -> Unit,
     onToolboxAction: (ComposerToolboxActionDecisionState) -> Unit,
 ) {
     if (!panelState.surfaceVisible) {
@@ -1490,6 +1510,7 @@ private fun SlashToolboxPanel(
                 hooksPanelState = hooksPanelState,
                 onHooksPanelModeChange = onHooksPanelModeChange,
                 onHookEdit = onHookEdit,
+                onHookTrustChange = onHookTrustChange,
             )
         }
     }
@@ -2297,6 +2318,7 @@ private fun HooksPreviewGroup(
     hooksPanelState: ComposerHooksPanelState,
     onHooksPanelModeChange: (ComposerHooksPanelModePreview) -> Unit,
     onHookEdit: (ComposerHookFormPreview) -> Unit,
+    onHookTrustChange: (String, ComposerHookTrustStatusPreview, String) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -2350,6 +2372,7 @@ private fun HooksPreviewGroup(
             HookPreviewRow(
                 item = item,
                 onEdit = onHookEdit,
+                onTrustChange = onHookTrustChange,
             )
         }
         hooksPanelState.emptyMessage?.let { message ->
@@ -2473,6 +2496,7 @@ private fun HookFieldPreview(
 private fun HookPreviewRow(
     item: ComposerHookRowState,
     onEdit: (ComposerHookFormPreview) -> Unit,
+    onTrustChange: (String, ComposerHookTrustStatusPreview, String) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -2522,7 +2546,29 @@ private fun HookPreviewRow(
                 }
             }
             item.trustAction?.let { action ->
-                GraphBadge(label = action.label, variant = if (action.enabled) GraphBadgeVariant.Default else GraphBadgeVariant.Outline)
+                if (action.enabled) {
+                    ComposerPanelActionBadge(
+                        label = action.label,
+                        accessibilityLabel = "${action.label} ${item.title}",
+                        onClick = {
+                            when (action.kind) {
+                                ComposerHookActionKind.Trust -> onTrustChange(
+                                    item.key,
+                                    ComposerHookTrustStatusPreview.Trusted,
+                                    "Hook trusted: ${item.title}",
+                                )
+                                ComposerHookActionKind.Untrust -> onTrustChange(
+                                    item.key,
+                                    ComposerHookTrustStatusPreview.Untrusted,
+                                    "Hook marked for review: ${item.title}",
+                                )
+                                ComposerHookActionKind.Edit -> Unit
+                            }
+                        },
+                    )
+                } else {
+                    GraphBadge(label = action.label, variant = GraphBadgeVariant.Outline)
+                }
             }
             GraphBadge(label = item.trustLabel, variant = GraphBadgeVariant.Outline)
             GraphBadge(label = item.sourceLabel, variant = GraphBadgeVariant.Outline)
