@@ -70,11 +70,16 @@ class SupervisorHomeScreenTest {
         composeRule.onNodeWithContentDescription("Open Workspaces").assertExists()
         composeRule.onNodeWithContentDescription("Open Threads").assertExists()
         composeRule.onNodeWithContentDescription("Open Shells").assertExists()
-        composeRule.onNodeWithText("Android native thread client").assertExists()
         composeRule.onNodeWithText("remoteCodex-main").assertExists()
 
         composeRule.onNodeWithContentDescription("Open Threads").performClick()
+        composeRule.onNodeWithText("Android native thread client").assertExists()
+        composeRule.onNodeWithContentDescription("Open thread Android native thread client").performClick()
 
         assertTrue(openedThreadPreview)
+
+        composeRule.onNodeWithContentDescription("Open Shells").performClick()
+        composeRule.onNodeWithText("Build shell").assertExists()
+        composeRule.onNodeWithText("Shell adapter pending").assertExists()
     }
 }

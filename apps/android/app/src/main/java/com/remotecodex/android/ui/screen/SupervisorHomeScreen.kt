@@ -45,6 +45,7 @@ import com.remotecodex.android.ui.components.GraphButton
 import com.remotecodex.android.ui.components.GraphButtonSize
 import com.remotecodex.android.ui.components.GraphButtonVariant
 import com.remotecodex.android.ui.model.AppShellNavigationItemPreview
+import com.remotecodex.android.ui.model.ShellProcessPreview
 import com.remotecodex.android.ui.sample.ThreadPreviewSample
 import com.remotecodex.android.ui.theme.ThreadColors
 
@@ -62,7 +63,9 @@ fun SupervisorHomeScreen(
     modifier: Modifier = Modifier,
 ) {
     val appShell = ThreadPreviewSample.appShell
+    val detail = ThreadPreviewSample.detail
     var settingsOpen by remember { mutableStateOf(false) }
+    var selectedDestination by remember { mutableStateOf(HomeDestination.Workspaces) }
     Box(modifier = modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier
@@ -95,56 +98,79 @@ fun SupervisorHomeScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     appShell.navigationItems.forEach { item ->
+                        val destination = HomeDestination.fromLabel(item.label)
                         HomeDestinationRow(
                             item = item,
                             snapshot = homeSnapshot,
+                            selected = destination == selectedDestination,
                             onClick = {
-                                if (item.label == "Threads") {
-                                    onOpenThreadPreview()
-                                }
+                                selectedDestination = destination
                             },
                         )
                     }
                 }
             }
 
-            item {
-                HomeSectionTitle(title = "Active Threads", detail = "Recent supervisor list")
-            }
-
-            val threads = homeSnapshot?.threads.orEmpty()
-            if (threads.isEmpty()) {
-                item {
-                    EmptyHomeRow(
-                        title = if (homeSnapshotLoading) "Loading threads" else "No threads loaded",
-                        detail = homeSnapshotError ?: "Connect to a supervisor and open a thread preview while the list endpoint is empty.",
-                        actionLabel = "Open Preview",
-                        onClick = onOpenThreadPreview,
-                    )
+            when (selectedDestination) {
+                HomeDestination.Workspaces -> {
+                    item {
+                        HomeSectionTitle(title = "Workspaces", detail = "Trusted project roots")
+                    }
+                    val workspaces = homeSnapshot?.workspaces.orEmpty()
+                    if (workspaces.isEmpty()) {
+                        item {
+                            EmptyHomeRow(
+                                title = if (homeSnapshotLoading) "Loading workspaces" else "No workspaces loaded",
+                                detail = homeSnapshotError ?: "Workspace rows will appear here after `/api/workspaces` returns data.",
+                                actionLabel = "Thread Preview",
+                                onClick = onOpenThreadPreview,
+                            )
+                        }
+                    } else {
+                        items(workspaces.take(8), key = { it.id }) { workspace ->
+                            WorkspaceSummaryRow(workspace = workspace)
+                        }
+                    }
                 }
-            } else {
-                items(threads.take(6), key = { it.id }) { thread ->
-                    ThreadSummaryRow(thread = thread, onClick = onOpenThreadPreview)
+                HomeDestination.Threads -> {
+                    item {
+                        HomeSectionTitle(title = "Active Threads", detail = "Recent supervisor list")
+                    }
+                    val threads = homeSnapshot?.threads.orEmpty()
+                    if (threads.isEmpty()) {
+                        item {
+                            EmptyHomeRow(
+                                title = if (homeSnapshotLoading) "Loading threads" else "No threads loaded",
+                                detail = homeSnapshotError ?: "Connect to a supervisor and open a thread preview while the list endpoint is empty.",
+                                actionLabel = "Open Preview",
+                                onClick = onOpenThreadPreview,
+                            )
+                        }
+                    } else {
+                        items(threads.take(8), key = { it.id }) { thread ->
+                            ThreadSummaryRow(thread = thread, onClick = onOpenThreadPreview)
+                        }
+                    }
                 }
-            }
-
-            item {
-                HomeSectionTitle(title = "Workspaces", detail = "Trusted project roots")
-            }
-
-            val workspaces = homeSnapshot?.workspaces.orEmpty()
-            if (workspaces.isEmpty()) {
-                item {
-                    EmptyHomeRow(
-                        title = if (homeSnapshotLoading) "Loading workspaces" else "No workspaces loaded",
-                        detail = homeSnapshotError ?: "Workspace rows will appear here after `/api/workspaces` returns data.",
-                        actionLabel = "Thread Preview",
-                        onClick = onOpenThreadPreview,
-                    )
-                }
-            } else {
-                items(workspaces.take(6), key = { it.id }) { workspace ->
-                    WorkspaceSummaryRow(workspace = workspace)
+                HomeDestination.Shells -> {
+                    item {
+                        HomeSectionTitle(title = "Shells", detail = detail.shellPreview.connectionLabel)
+                    }
+                    items(detail.shellPreview.processes, key = { it.id }) { process ->
+                        ShellProcessSummaryRow(
+                            process = process,
+                            activeProcessId = detail.shellPreview.activeProcessId,
+                            onClick = onOpenThreadPreview,
+                        )
+                    }
+                    item {
+                        EmptyHomeRow(
+                            title = "Shell adapter pending",
+                            detail = "Open the thread preview to inspect current native shell controls while backend shell actions are being wired.",
+                            actionLabel = "Open Shell",
+                            onClick = onOpenThreadPreview,
+                        )
+                    }
                 }
             }
         }
@@ -304,6 +330,7 @@ private fun SnapshotMetric(
 private fun HomeDestinationRow(
     item: AppShellNavigationItemPreview,
     snapshot: SupervisorHomeSnapshot?,
+    selected: Boolean,
     onClick: () -> Unit,
 ) {
     val count = when (item.label) {
@@ -316,8 +343,8 @@ private fun HomeDestinationRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
-            .background(if (item.label == "Threads") ThreadColors.SurfaceStrong else ThreadColors.Surface)
-            .border(1.dp, if (item.label == "Threads") ThreadColors.BorderStrong else ThreadColors.Border, RoundedCornerShape(14.dp))
+            .background(if (selected) ThreadColors.SurfaceStrong else ThreadColors.Surface)
+            .border(1.dp, if (selected) ThreadColors.BorderStrong else ThreadColors.Border, RoundedCornerShape(14.dp))
             .clickable(onClick = onClick)
             .semantics { contentDescription = "Open ${item.label}" }
             .padding(12.dp),
@@ -341,7 +368,10 @@ private fun HomeDestinationRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        GraphBadge(label = count?.toString() ?: "Preview", variant = GraphBadgeVariant.Outline)
+        GraphBadge(
+            label = if (selected) "Active" else count?.toString() ?: "Preview",
+            variant = GraphBadgeVariant.Outline,
+        )
     }
 }
 
@@ -412,6 +442,21 @@ private fun WorkspaceSummaryRow(workspace: SupervisorWorkspaceSummary) {
         meta = if (workspace.isFavorite) "favorite" else workspace.lastOpenedAt ?: "workspace",
         contentDescription = "Workspace ${workspace.label}",
         onClick = {},
+    )
+}
+
+@Composable
+private fun ShellProcessSummaryRow(
+    process: ShellProcessPreview,
+    activeProcessId: String,
+    onClick: () -> Unit,
+) {
+    SummaryRowFrame(
+        title = process.label,
+        detail = process.runningCommand ?: process.cwd,
+        meta = if (process.id == activeProcessId) "active / ${process.status}" else process.status,
+        contentDescription = "Open shell ${process.label}",
+        onClick = onClick,
     )
 }
 
@@ -503,5 +548,21 @@ private fun SummaryRowFrame(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+private enum class HomeDestination {
+    Workspaces,
+    Threads,
+    Shells;
+
+    companion object {
+        fun fromLabel(label: String): HomeDestination {
+            return when (label) {
+                "Threads" -> Threads
+                "Shells" -> Shells
+                else -> Workspaces
+            }
+        }
     }
 }
