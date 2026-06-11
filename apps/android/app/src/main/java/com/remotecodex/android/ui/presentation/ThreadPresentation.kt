@@ -124,6 +124,18 @@ data class ComposerPromptAttachmentState(
     val kind: ComposerAttachmentActionKind,
 )
 
+data class ComposerSubmitAttachmentState(
+    val clientId: String,
+    val kind: ComposerAttachmentActionKind,
+    val name: String,
+    val placeholder: String,
+)
+
+data class ComposerSubmitInputState(
+    val prompt: String,
+    val attachments: List<ComposerSubmitAttachmentState> = emptyList(),
+)
+
 data class ComposerPromptSlotState(
     val chatVisible: Boolean,
     val shellVisible: Boolean,
@@ -1070,6 +1082,28 @@ fun buildComposerPromptSlotState(
     )
 }
 
+fun buildComposerSubmitInputState(
+    prompt: ComposerPromptPreview,
+    activeView: ComposerActiveView,
+): ComposerSubmitInputState? {
+    val isShellView = activeView == ComposerActiveView.Shell
+    if (isShellView) {
+        return ComposerSubmitInputState(prompt = prompt.text)
+    }
+
+    val normalizedPrompt = prompt.text.trim()
+    if (normalizedPrompt.isEmpty()) {
+        return null
+    }
+    val activeAttachments = prompt.attachments
+        .filter { attachment -> normalizedPrompt.contains(attachment.placeholder) }
+        .map(::buildComposerSubmitAttachmentState)
+    return ComposerSubmitInputState(
+        prompt = normalizedPrompt,
+        attachments = activeAttachments,
+    )
+}
+
 fun buildComposerToolbarState(
     activeView: ComposerActiveView,
     openMenu: ComposerToolbarMenuState?,
@@ -1116,6 +1150,20 @@ fun buildComposerToolbarState(
             label = if (isShellView) "Switch to chat" else "Switch to shell",
         ),
         shellPromptLabel = shellPromptLabel?.takeIf { isShellView && it.isNotBlank() },
+    )
+}
+
+private fun buildComposerSubmitAttachmentState(
+    attachment: ComposerPromptAttachmentPreview,
+): ComposerSubmitAttachmentState {
+    return ComposerSubmitAttachmentState(
+        clientId = attachment.clientId,
+        kind = when (attachment.kind) {
+            com.remotecodex.android.ui.model.ComposerAttachmentKindPreview.Photo -> ComposerAttachmentActionKind.Photo
+            com.remotecodex.android.ui.model.ComposerAttachmentKindPreview.File -> ComposerAttachmentActionKind.File
+        },
+        name = attachmentDisplayLabel(attachment.name, attachment.placeholder),
+        placeholder = attachment.placeholder,
     )
 }
 

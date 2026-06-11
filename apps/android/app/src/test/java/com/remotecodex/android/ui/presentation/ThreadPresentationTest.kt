@@ -603,6 +603,105 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun buildsTrimmedChatComposerSubmitInputWithActiveAttachmentsOnly() {
+        assertEquals(
+            ComposerSubmitInputState(
+                prompt = "inspect [FILE active.txt]",
+                attachments = listOf(
+                    ComposerSubmitAttachmentState(
+                        clientId = "active",
+                        kind = ComposerAttachmentActionKind.File,
+                        name = "active.txt",
+                        placeholder = "[FILE active.txt]",
+                    ),
+                ),
+            ),
+            buildComposerSubmitInputState(
+                prompt = ComposerPromptPreview(
+                    text = "  inspect [FILE active.txt]  ",
+                    attachments = listOf(
+                        ComposerPromptAttachmentPreview(
+                            clientId = "active",
+                            kind = ComposerAttachmentKindPreview.File,
+                            name = "active.txt",
+                            placeholder = "[FILE active.txt]",
+                        ),
+                        ComposerPromptAttachmentPreview(
+                            clientId = "inactive",
+                            kind = ComposerAttachmentKindPreview.Photo,
+                            name = "inactive.png",
+                            placeholder = "[PHOTO inactive.png]",
+                        ),
+                    ),
+                ),
+                activeView = ComposerActiveView.Chat,
+            ),
+        )
+    }
+
+    @Test
+    fun omitsChatComposerSubmitAttachmentsWhenNoActiveAttachments() {
+        assertEquals(
+            ComposerSubmitInputState(prompt = "plain prompt"),
+            buildComposerSubmitInputState(
+                prompt = ComposerPromptPreview(
+                    text = "  plain prompt  ",
+                    attachments = listOf(
+                        ComposerPromptAttachmentPreview(
+                            clientId = "unused",
+                            kind = ComposerAttachmentKindPreview.File,
+                            name = "unused.txt",
+                            placeholder = "[FILE unused.txt]",
+                        ),
+                    ),
+                ),
+                activeView = ComposerActiveView.Chat,
+            ),
+        )
+    }
+
+    @Test
+    fun returnsNullForEmptyChatComposerSubmitInput() {
+        assertNull(
+            buildComposerSubmitInputState(
+                prompt = ComposerPromptPreview(
+                    text = "   ",
+                    attachments = listOf(
+                        ComposerPromptAttachmentPreview(
+                            clientId = "unused",
+                            kind = ComposerAttachmentKindPreview.File,
+                            name = "unused.txt",
+                            placeholder = "[FILE unused.txt]",
+                        ),
+                    ),
+                ),
+                activeView = ComposerActiveView.Chat,
+            ),
+        )
+    }
+
+    @Test
+    fun preservesShellComposerSubmitInputAndIgnoresAttachments() {
+        assertEquals(
+            ComposerSubmitInputState(prompt = "  pnpm test  "),
+            buildComposerSubmitInputState(
+                prompt = ComposerPromptPreview(
+                    text = "  pnpm test  ",
+                    attachments = listOf(
+                        ComposerPromptAttachmentPreview(
+                            clientId = "unused",
+                            kind = ComposerAttachmentKindPreview.File,
+                            name = "unused.txt",
+                            placeholder = "[FILE unused.txt]",
+                        ),
+                    ),
+                ),
+                activeView = ComposerActiveView.Shell,
+            ),
+        )
+    }
+
+    @Test
     fun buildsChatComposerToolbarState() {
         assertEquals(
             ComposerToolbarState(

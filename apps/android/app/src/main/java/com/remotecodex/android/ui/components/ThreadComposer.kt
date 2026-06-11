@@ -84,6 +84,7 @@ import com.remotecodex.android.ui.presentation.buildComposerSettingsState
 import com.remotecodex.android.ui.presentation.buildComposerShellTools
 import com.remotecodex.android.ui.presentation.buildComposerSkillsPanelState
 import com.remotecodex.android.ui.presentation.buildComposerStatusStrip
+import com.remotecodex.android.ui.presentation.buildComposerSubmitInputState
 import com.remotecodex.android.ui.presentation.buildComposerToolbarState
 import com.remotecodex.android.ui.presentation.buildComposerToolboxItems
 import com.remotecodex.android.ui.theme.ThreadColors
@@ -119,6 +120,10 @@ fun ThreadComposer(
         actionState = actionState,
         busy = composer.busy,
         goalBusy = composer.goalPanel.busy,
+    )
+    val submitInputState = buildComposerSubmitInputState(
+        prompt = composer.prompt,
+        activeView = composer.activeView,
     )
     val settingsState = buildComposerSettingsState(
         context = composer.context,
@@ -209,6 +214,7 @@ fun ThreadComposer(
         ComposerInputGroupPreview(
             contextState = contextState,
             promptSlotState = promptSlotState,
+            submitReady = submitInputState != null,
         )
         ComposerStatusStrip(chips = statusChips)
         Row(
@@ -438,6 +444,7 @@ private fun ComposerStatusChip(chip: ComposerStatusChipModel) {
 private fun ComposerInputGroupPreview(
     contextState: ComposerContextUsageState,
     promptSlotState: ComposerPromptSlotState,
+    submitReady: Boolean,
 ) {
     GraphInputGroup(
         blockStart = {
@@ -465,7 +472,7 @@ private fun ComposerInputGroupPreview(
                 if (promptSlotState.shellVisible) {
                     GraphInputGroupText(text = if (promptSlotState.sendDisabled) "Shell send disabled" else "Shell ready")
                 } else {
-                    GraphInputGroupText(text = contextState.usageLabel)
+                    GraphInputGroupText(text = if (submitReady) contextState.usageLabel else "Nothing to send")
                 }
             }
         },
