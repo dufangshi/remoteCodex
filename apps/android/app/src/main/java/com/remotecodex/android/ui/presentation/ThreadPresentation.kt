@@ -7,6 +7,13 @@ import com.remotecodex.android.ui.model.ToolStatus
 import com.remotecodex.android.ui.model.ComposerActiveView
 import com.remotecodex.android.ui.model.ComposerContextAvailability
 import com.remotecodex.android.ui.model.ComposerContextPreview
+import com.remotecodex.android.ui.model.ComposerHookEventNamePreview
+import com.remotecodex.android.ui.model.ComposerHookHandlerTypePreview
+import com.remotecodex.android.ui.model.ComposerHookScopePreview
+import com.remotecodex.android.ui.model.ComposerHookSourcePreview
+import com.remotecodex.android.ui.model.ComposerHookTrustStatusPreview
+import com.remotecodex.android.ui.model.ComposerHooksPanelModePreview
+import com.remotecodex.android.ui.model.ComposerHooksPanelPreview
 import com.remotecodex.android.ui.model.ComposerMcpAuthStatusPreview
 import com.remotecodex.android.ui.model.ComposerMcpPanelModePreview
 import com.remotecodex.android.ui.model.ComposerMcpPanelPreview
@@ -257,6 +264,216 @@ data class ComposerMcpPanelState(
     val form: ComposerMcpFormState?,
     val emptyMessage: String?,
 )
+
+data class ComposerHookStatusMessageState(
+    val message: String,
+    val tone: ComposerMcpStatusTone,
+    val path: String? = null,
+)
+
+data class ComposerHookFormState(
+    val editingLabel: String?,
+    val primaryLabel: String,
+    val primaryEnabled: Boolean,
+    val fields: List<Pair<String, String>>,
+)
+
+data class ComposerHookActionState(
+    val label: String,
+    val enabled: Boolean,
+)
+
+data class ComposerHookRowState(
+    val title: String,
+    val commandLabel: String,
+    val statusMessage: String?,
+    val editAction: ComposerHookActionState?,
+    val trustAction: ComposerHookActionState?,
+    val trustLabel: String,
+    val sourceLabel: String,
+    val enabledLabel: String,
+    val timeoutLabel: String,
+)
+
+data class ComposerHooksPanelState(
+    val configSourceLabel: String,
+    val showAddAction: Boolean,
+    val mode: ComposerHooksPanelModePreview,
+    val statusMessages: List<ComposerHookStatusMessageState>,
+    val form: ComposerHookFormState?,
+    val hooks: List<ComposerHookRowState>,
+    val emptyMessage: String?,
+)
+
+fun buildComposerHooksPanelState(
+    panel: ComposerHooksPanelPreview,
+): ComposerHooksPanelState {
+    val statusMessages = buildList {
+        if (panel.status == ComposerPanelLoadStatusPreview.Loading && panel.hooks.isEmpty()) {
+            add(ComposerHookStatusMessageState("Loading hooks...", ComposerMcpStatusTone.Neutral))
+        }
+        panel.error?.takeIf { it.isNotBlank() }?.let { error ->
+            add(ComposerHookStatusMessageState(error, ComposerMcpStatusTone.Error))
+        }
+        panel.configError?.takeIf { it.isNotBlank() }?.let { error ->
+            add(ComposerHookStatusMessageState(error, ComposerMcpStatusTone.Error))
+        }
+        panel.configSuccess?.takeIf { it.isNotBlank() }?.let { success ->
+            add(ComposerHookStatusMessageState(success, ComposerMcpStatusTone.Success))
+        }
+        if (panel.mode == ComposerHooksPanelModePreview.List) {
+            panel.warnings.forEach { warning ->
+                add(ComposerHookStatusMessageState(warning, ComposerMcpStatusTone.Neutral))
+            }
+            panel.errors.forEach { error ->
+                add(ComposerHookStatusMessageState(error.message, ComposerMcpStatusTone.Error, path = error.path))
+            }
+        }
+    }
+    val hooks = if (panel.mode == ComposerHooksPanelModePreview.List) {
+        panel.hooks.map { hook ->
+            val editable = editableHookTargetAvailable(hook.source, hook.handlerType, hook.command, hook.isManaged)
+            val canUntrust = panel.hookTrustAvailable &&
+                hook.trustStatus == ComposerHookTrustStatusPreview.Trusted &&
+                !hook.isManaged
+            val canTrust = panel.hookTrustAvailable &&
+                !hook.isManaged &&
+                hook.currentHash?.isNotBlank() == true &&
+                (hook.trustStatus == ComposerHookTrustStatusPreview.Untrusted ||
+                    hook.trustStatus == ComposerHookTrustStatusPreview.Modified)
+            ComposerHookRowState(
+                title = buildString {
+                    append(hookEventLabel(hook.eventName))
+                    hook.matcher?.takeIf { it.isNotBlank() }?.let { matcher ->
+                        append(" · ")
+                        append(matcher)
+                    }
+                },
+                commandLabel = hook.command?.takeIf { it.isNotBlank() } ?: hook.handlerType.name.lowercase(),
+                statusMessage = hook.statusMessage?.takeIf { it.isNotBlank() },
+                editAction = if (editable) ComposerHookActionState("Edit", enabled = true) else null,
+                trustAction = when {
+                    canUntrust -> ComposerHookActionState("Untrust", enabled = !panel.configBusy)
+                    canTrust -> ComposerHookActionState("Trust", enabled = !panel.configBusy)
+                    else -> null
+                },
+                trustLabel = hookTrustLabel(hook.trustStatus),
+                sourceLabel = hookSourceLabel(hook.source),
+                enabledLabel = if (hook.enabled) "Enabled" else "Disabled",
+                timeoutLabel = "${hook.timeoutSec}s",
+            )
+        }
+    } else {
+        emptyList()
+    }
+    val empty = panel.mode == ComposerHooksPanelModePreview.List &&
+        panel.status != ComposerPanelLoadStatusPreview.Loading &&
+        panel.error.isNullOrBlank() &&
+        panel.hooks.isEmpty()
+
+    return ComposerHooksPanelState(
+        configSourceLabel = panel.projectHooksPath?.takeIf { it.isNotBlank() } ?: "<workspace hooks config>",
+        showAddAction = panel.mode == ComposerHooksPanelModePreview.List && panel.hostConfigFilesAvailable,
+        mode = panel.mode,
+        statusMessages = statusMessages,
+        form = buildComposerHookFormState(panel),
+        hooks = hooks,
+        emptyMessage = if (empty) "No hooks configured for this workspace." else null,
+    )
+}
+
+private fun buildComposerHookFormState(panel: ComposerHooksPanelPreview): ComposerHookFormState? {
+    if (panel.mode != ComposerHooksPanelModePreview.Add && panel.mode != ComposerHooksPanelModePreview.Edit) {
+        return null
+    }
+    val form = panel.form
+    val editingLabel = if (panel.mode == ComposerHooksPanelModePreview.Edit) {
+        val eventName = form.editingEventName ?: form.eventName
+        val scope = form.editingScope ?: form.scope
+        "Editing ${hookEventJsonKey(eventName)} in ${hookScopeLabel(scope).lowercase()} hooks.json"
+    } else {
+        null
+    }
+    return ComposerHookFormState(
+        editingLabel = editingLabel,
+        primaryLabel = when {
+            panel.configBusy -> "Saving..."
+            panel.mode == ComposerHooksPanelModePreview.Edit -> "Update Hook"
+            else -> "Write Hook"
+        },
+        primaryEnabled = !panel.configBusy,
+        fields = listOf(
+            "Scope" to hookScopeLabel(form.scope),
+            "Event" to hookEventLabel(form.eventName),
+            "Matcher" to form.matcher,
+            "Command" to form.command,
+            "Timeout" to "${form.timeoutSec}s",
+            "Status" to form.statusMessage,
+        ),
+    )
+}
+
+private fun editableHookTargetAvailable(
+    source: ComposerHookSourcePreview,
+    handlerType: ComposerHookHandlerTypePreview,
+    command: String?,
+    isManaged: Boolean,
+): Boolean {
+    val scopeAvailable = source == ComposerHookSourcePreview.User || source == ComposerHookSourcePreview.Project
+    return scopeAvailable &&
+        handlerType == ComposerHookHandlerTypePreview.Command &&
+        !command.isNullOrBlank() &&
+        !isManaged
+}
+
+fun hookSourceLabel(source: ComposerHookSourcePreview): String {
+    return when (source) {
+        ComposerHookSourcePreview.CloudRequirements -> "Cloud"
+        ComposerHookSourcePreview.LegacyManagedConfigFile,
+        ComposerHookSourcePreview.LegacyManagedConfigMdm,
+        -> "Managed"
+        ComposerHookSourcePreview.SessionFlags -> "Session"
+        ComposerHookSourcePreview.System -> "System"
+        ComposerHookSourcePreview.User -> "User"
+        ComposerHookSourcePreview.Project -> "Project"
+        ComposerHookSourcePreview.Mdm -> "Mdm"
+        ComposerHookSourcePreview.Plugin -> "Plugin"
+        ComposerHookSourcePreview.Unknown -> "Unknown"
+    }
+}
+
+fun hookTrustLabel(status: ComposerHookTrustStatusPreview): String {
+    return when (status) {
+        ComposerHookTrustStatusPreview.Managed -> "Managed"
+        ComposerHookTrustStatusPreview.Modified -> "Modified"
+        ComposerHookTrustStatusPreview.Trusted -> "Trusted"
+        ComposerHookTrustStatusPreview.Untrusted -> "Review"
+    }
+}
+
+fun hookEventLabel(eventName: ComposerHookEventNamePreview): String {
+    return hookEventJsonKey(eventName)
+}
+
+fun hookEventJsonKey(eventName: ComposerHookEventNamePreview): String {
+    return when (eventName) {
+        ComposerHookEventNamePreview.PreToolUse -> "PreToolUse"
+        ComposerHookEventNamePreview.PermissionRequest -> "PermissionRequest"
+        ComposerHookEventNamePreview.PostToolUse -> "PostToolUse"
+        ComposerHookEventNamePreview.PreCompact -> "PreCompact"
+        ComposerHookEventNamePreview.PostCompact -> "PostCompact"
+        ComposerHookEventNamePreview.SessionStart -> "SessionStart"
+        ComposerHookEventNamePreview.UserPromptSubmit -> "UserPromptSubmit"
+        ComposerHookEventNamePreview.Stop -> "Stop"
+    }
+}
+
+fun hookScopeLabel(scope: ComposerHookScopePreview): String {
+    return when (scope) {
+        ComposerHookScopePreview.Project -> "Project"
+        ComposerHookScopePreview.Global -> "Global"
+    }
+}
 
 fun buildComposerMcpPanelState(
     panel: ComposerMcpPanelPreview,

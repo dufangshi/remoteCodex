@@ -180,6 +180,7 @@ data class ComposerPreview(
     val toolboxItems: List<ComposerToolboxItemPreview> = defaultComposerToolboxItems,
     val skillsPanel: ComposerSkillsPanelPreview = ComposerSkillsPanelPreview(),
     val mcpPanel: ComposerMcpPanelPreview = ComposerMcpPanelPreview(),
+    val hooksPanel: ComposerHooksPanelPreview = ComposerHooksPanelPreview(),
 )
 
 data class ComposerShellControlPreview(
@@ -387,6 +388,138 @@ val defaultComposerMcpServers = listOf(
         ),
         resourceCount = 3,
         resourceTemplateCount = 2,
+    ),
+)
+
+enum class ComposerHooksPanelModePreview {
+    List,
+    Add,
+    Edit,
+}
+
+enum class ComposerHookScopePreview {
+    Project,
+    Global,
+}
+
+enum class ComposerHookEventNamePreview {
+    PreToolUse,
+    PermissionRequest,
+    PostToolUse,
+    PreCompact,
+    PostCompact,
+    SessionStart,
+    UserPromptSubmit,
+    Stop,
+}
+
+enum class ComposerHookHandlerTypePreview {
+    Command,
+    Prompt,
+    Agent,
+}
+
+enum class ComposerHookSourcePreview {
+    System,
+    User,
+    Project,
+    Mdm,
+    SessionFlags,
+    Plugin,
+    CloudRequirements,
+    LegacyManagedConfigFile,
+    LegacyManagedConfigMdm,
+    Unknown,
+}
+
+enum class ComposerHookTrustStatusPreview {
+    Managed,
+    Untrusted,
+    Trusted,
+    Modified,
+}
+
+data class ComposerHookPreview(
+    val key: String,
+    val eventName: ComposerHookEventNamePreview,
+    val handlerType: ComposerHookHandlerTypePreview,
+    val matcher: String?,
+    val command: String?,
+    val timeoutSec: Int,
+    val statusMessage: String?,
+    val source: ComposerHookSourcePreview,
+    val enabled: Boolean,
+    val isManaged: Boolean,
+    val currentHash: String?,
+    val trustStatus: ComposerHookTrustStatusPreview,
+)
+
+data class ComposerHookErrorPreview(
+    val path: String,
+    val message: String,
+)
+
+data class ComposerHookFormPreview(
+    val scope: ComposerHookScopePreview = ComposerHookScopePreview.Project,
+    val eventName: ComposerHookEventNamePreview = ComposerHookEventNamePreview.PreToolUse,
+    val matcher: String = "Bash",
+    val command: String = "scripts/check-command.sh",
+    val timeoutSec: String = "30",
+    val statusMessage: String = "Checking shell command",
+    val editingScope: ComposerHookScopePreview? = null,
+    val editingEventName: ComposerHookEventNamePreview? = null,
+)
+
+data class ComposerHooksPanelPreview(
+    val mode: ComposerHooksPanelModePreview = ComposerHooksPanelModePreview.List,
+    val status: ComposerPanelLoadStatusPreview = ComposerPanelLoadStatusPreview.Ready,
+    val error: String? = null,
+    val configError: String? = null,
+    val configSuccess: String? = null,
+    val configBusy: Boolean = false,
+    val hostConfigFilesAvailable: Boolean = true,
+    val hookTrustAvailable: Boolean = true,
+    val projectHooksPath: String? = ".codex/hooks.json",
+    val warnings: List<String> = defaultComposerHookWarnings,
+    val errors: List<ComposerHookErrorPreview> = defaultComposerHookErrors,
+    val hooks: List<ComposerHookPreview> = defaultComposerHookPreviews,
+    val form: ComposerHookFormPreview = ComposerHookFormPreview(),
+)
+
+val defaultComposerHookWarnings = listOf(
+    "Project hook changed since last trust.",
+)
+
+val defaultComposerHookErrors = emptyList<ComposerHookErrorPreview>()
+
+val defaultComposerHookPreviews = listOf(
+    ComposerHookPreview(
+        key = "project-pretooluse-bash",
+        eventName = ComposerHookEventNamePreview.PreToolUse,
+        handlerType = ComposerHookHandlerTypePreview.Command,
+        matcher = "Bash",
+        command = "scripts/check-command.sh",
+        timeoutSec = 30,
+        statusMessage = "Checking shell command",
+        source = ComposerHookSourcePreview.Project,
+        enabled = true,
+        isManaged = false,
+        currentHash = "hash-project",
+        trustStatus = ComposerHookTrustStatusPreview.Modified,
+    ),
+    ComposerHookPreview(
+        key = "global-userpromptsubmit",
+        eventName = ComposerHookEventNamePreview.UserPromptSubmit,
+        handlerType = ComposerHookHandlerTypePreview.Command,
+        matcher = null,
+        command = "scripts/log-prompt.sh",
+        timeoutSec = 10,
+        statusMessage = "Prompt audit",
+        source = ComposerHookSourcePreview.User,
+        enabled = true,
+        isManaged = false,
+        currentHash = "hash-global",
+        trustStatus = ComposerHookTrustStatusPreview.Trusted,
     ),
 )
 

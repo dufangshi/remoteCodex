@@ -5,6 +5,16 @@ import com.remotecodex.android.ui.model.PlanStepStatus
 import com.remotecodex.android.ui.model.ComposerActiveView
 import com.remotecodex.android.ui.model.ComposerContextAvailability
 import com.remotecodex.android.ui.model.ComposerContextPreview
+import com.remotecodex.android.ui.model.ComposerHookErrorPreview
+import com.remotecodex.android.ui.model.ComposerHookEventNamePreview
+import com.remotecodex.android.ui.model.ComposerHookFormPreview
+import com.remotecodex.android.ui.model.ComposerHookHandlerTypePreview
+import com.remotecodex.android.ui.model.ComposerHookPreview
+import com.remotecodex.android.ui.model.ComposerHookScopePreview
+import com.remotecodex.android.ui.model.ComposerHookSourcePreview
+import com.remotecodex.android.ui.model.ComposerHookTrustStatusPreview
+import com.remotecodex.android.ui.model.ComposerHooksPanelModePreview
+import com.remotecodex.android.ui.model.ComposerHooksPanelPreview
 import com.remotecodex.android.ui.model.ComposerMcpAuthStatusPreview
 import com.remotecodex.android.ui.model.ComposerMcpPanelModePreview
 import com.remotecodex.android.ui.model.ComposerMcpPanelPreview
@@ -833,6 +843,211 @@ class ThreadPresentationTest {
         assertEquals("Login", authStatusLabel(ComposerMcpAuthStatusPreview.NotLoggedIn))
         assertEquals("Token", authStatusLabel(ComposerMcpAuthStatusPreview.BearerToken))
         assertEquals("OAuth", authStatusLabel(ComposerMcpAuthStatusPreview.OAuth))
+    }
+
+    @Test
+    fun buildsComposerHooksListPanelState() {
+        assertEquals(
+            ComposerHooksPanelState(
+                configSourceLabel = "/repo/.codex/hooks.json",
+                showAddAction = true,
+                mode = ComposerHooksPanelModePreview.List,
+                statusMessages = listOf(
+                    ComposerHookStatusMessageState("Project hook changed", ComposerMcpStatusTone.Neutral),
+                ),
+                form = null,
+                hooks = listOf(
+                    ComposerHookRowState(
+                        title = "PreToolUse · Bash",
+                        commandLabel = "scripts/check-command.sh",
+                        statusMessage = "Checking shell command",
+                        editAction = ComposerHookActionState("Edit", enabled = true),
+                        trustAction = ComposerHookActionState("Trust", enabled = true),
+                        trustLabel = "Modified",
+                        sourceLabel = "Project",
+                        enabledLabel = "Enabled",
+                        timeoutLabel = "30s",
+                    ),
+                    ComposerHookRowState(
+                        title = "UserPromptSubmit",
+                        commandLabel = "scripts/log-prompt.sh",
+                        statusMessage = null,
+                        editAction = ComposerHookActionState("Edit", enabled = true),
+                        trustAction = ComposerHookActionState("Untrust", enabled = true),
+                        trustLabel = "Trusted",
+                        sourceLabel = "User",
+                        enabledLabel = "Disabled",
+                        timeoutLabel = "10s",
+                    ),
+                ),
+                emptyMessage = null,
+            ),
+            buildComposerHooksPanelState(
+                ComposerHooksPanelPreview(
+                    mode = ComposerHooksPanelModePreview.List,
+                    status = ComposerPanelLoadStatusPreview.Ready,
+                    projectHooksPath = "/repo/.codex/hooks.json",
+                    hostConfigFilesAvailable = true,
+                    hookTrustAvailable = true,
+                    configBusy = false,
+                    warnings = listOf("Project hook changed"),
+                    errors = emptyList(),
+                    hooks = listOf(
+                        ComposerHookPreview(
+                            key = "one",
+                            eventName = ComposerHookEventNamePreview.PreToolUse,
+                            handlerType = ComposerHookHandlerTypePreview.Command,
+                            matcher = "Bash",
+                            command = "scripts/check-command.sh",
+                            timeoutSec = 30,
+                            statusMessage = "Checking shell command",
+                            source = ComposerHookSourcePreview.Project,
+                            enabled = true,
+                            isManaged = false,
+                            currentHash = "hash",
+                            trustStatus = ComposerHookTrustStatusPreview.Modified,
+                        ),
+                        ComposerHookPreview(
+                            key = "two",
+                            eventName = ComposerHookEventNamePreview.UserPromptSubmit,
+                            handlerType = ComposerHookHandlerTypePreview.Command,
+                            matcher = null,
+                            command = "scripts/log-prompt.sh",
+                            timeoutSec = 10,
+                            statusMessage = null,
+                            source = ComposerHookSourcePreview.User,
+                            enabled = false,
+                            isManaged = false,
+                            currentHash = "hash",
+                            trustStatus = ComposerHookTrustStatusPreview.Trusted,
+                        ),
+                    ),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun buildsComposerHooksAddAndEditForms() {
+        assertEquals(
+            ComposerHookFormState(
+                editingLabel = null,
+                primaryLabel = "Write Hook",
+                primaryEnabled = true,
+                fields = listOf(
+                    "Scope" to "Project",
+                    "Event" to "PreToolUse",
+                    "Matcher" to "Bash",
+                    "Command" to "scripts/check-command.sh",
+                    "Timeout" to "30s",
+                    "Status" to "Checking shell command",
+                ),
+            ),
+            buildComposerHooksPanelState(
+                ComposerHooksPanelPreview(
+                    mode = ComposerHooksPanelModePreview.Add,
+                    configBusy = false,
+                    hooks = emptyList(),
+                    warnings = emptyList(),
+                    errors = emptyList(),
+                ),
+            ).form,
+        )
+
+        assertEquals(
+            ComposerHookFormState(
+                editingLabel = "Editing PostToolUse in global hooks.json",
+                primaryLabel = "Saving...",
+                primaryEnabled = false,
+                fields = listOf(
+                    "Scope" to "Global",
+                    "Event" to "PostToolUse",
+                    "Matcher" to "Write",
+                    "Command" to "scripts/post-write.sh",
+                    "Timeout" to "12s",
+                    "Status" to "Post write check",
+                ),
+            ),
+            buildComposerHooksPanelState(
+                ComposerHooksPanelPreview(
+                    mode = ComposerHooksPanelModePreview.Edit,
+                    configBusy = true,
+                    hooks = emptyList(),
+                    warnings = emptyList(),
+                    errors = emptyList(),
+                    form = ComposerHookFormPreview(
+                        scope = ComposerHookScopePreview.Global,
+                        eventName = ComposerHookEventNamePreview.PostToolUse,
+                        matcher = "Write",
+                        command = "scripts/post-write.sh",
+                        timeoutSec = "12",
+                        statusMessage = "Post write check",
+                        editingScope = ComposerHookScopePreview.Global,
+                        editingEventName = ComposerHookEventNamePreview.PostToolUse,
+                    ),
+                ),
+            ).form,
+        )
+    }
+
+    @Test
+    fun buildsComposerHooksStatusMessagesAndEmptyState() {
+        assertEquals(
+            listOf(
+                ComposerHookStatusMessageState("Loading hooks...", ComposerMcpStatusTone.Neutral),
+                ComposerHookStatusMessageState("Unable to load hooks", ComposerMcpStatusTone.Error),
+                ComposerHookStatusMessageState("Invalid hooks config", ComposerMcpStatusTone.Error),
+                ComposerHookStatusMessageState("Hook saved", ComposerMcpStatusTone.Success),
+                ComposerHookStatusMessageState("Project warning", ComposerMcpStatusTone.Neutral),
+                ComposerHookStatusMessageState("Broken hook", ComposerMcpStatusTone.Error, path = "/bad/hooks.json"),
+            ),
+            buildComposerHooksPanelState(
+                ComposerHooksPanelPreview(
+                    mode = ComposerHooksPanelModePreview.List,
+                    status = ComposerPanelLoadStatusPreview.Loading,
+                    error = "Unable to load hooks",
+                    configError = "Invalid hooks config",
+                    configSuccess = "Hook saved",
+                    warnings = listOf("Project warning"),
+                    errors = listOf(
+                        ComposerHookErrorPreview(path = "/bad/hooks.json", message = "Broken hook"),
+                    ),
+                    hooks = emptyList(),
+                ),
+            ).statusMessages,
+        )
+
+        assertEquals(
+            "No hooks configured for this workspace.",
+            buildComposerHooksPanelState(
+                ComposerHooksPanelPreview(
+                    mode = ComposerHooksPanelModePreview.List,
+                    status = ComposerPanelLoadStatusPreview.Ready,
+                    error = null,
+                    projectHooksPath = null,
+                    hostConfigFilesAvailable = false,
+                    warnings = emptyList(),
+                    errors = emptyList(),
+                    hooks = emptyList(),
+                ),
+            ).emptyMessage,
+        )
+    }
+
+    @Test
+    fun labelsComposerHooksMetadata() {
+        assertEquals("Cloud", hookSourceLabel(ComposerHookSourcePreview.CloudRequirements))
+        assertEquals("Managed", hookSourceLabel(ComposerHookSourcePreview.LegacyManagedConfigFile))
+        assertEquals("Session", hookSourceLabel(ComposerHookSourcePreview.SessionFlags))
+        assertEquals("Project", hookSourceLabel(ComposerHookSourcePreview.Project))
+
+        assertEquals("Managed", hookTrustLabel(ComposerHookTrustStatusPreview.Managed))
+        assertEquals("Modified", hookTrustLabel(ComposerHookTrustStatusPreview.Modified))
+        assertEquals("Trusted", hookTrustLabel(ComposerHookTrustStatusPreview.Trusted))
+        assertEquals("Review", hookTrustLabel(ComposerHookTrustStatusPreview.Untrusted))
+
+        assertEquals("PermissionRequest", hookEventJsonKey(ComposerHookEventNamePreview.PermissionRequest))
+        assertEquals("Global", hookScopeLabel(ComposerHookScopePreview.Global))
     }
 
     @Test

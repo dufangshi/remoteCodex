@@ -38,6 +38,10 @@ import com.remotecodex.android.ui.presentation.ComposerAttachmentActionState
 import com.remotecodex.android.ui.presentation.ComposerContextUsageState
 import com.remotecodex.android.ui.presentation.ComposerForkActionState
 import com.remotecodex.android.ui.presentation.ComposerForkPanelState
+import com.remotecodex.android.ui.presentation.ComposerHookFormState
+import com.remotecodex.android.ui.presentation.ComposerHookRowState
+import com.remotecodex.android.ui.presentation.ComposerHooksPanelState
+import com.remotecodex.android.ui.presentation.ComposerHookStatusMessageState
 import com.remotecodex.android.ui.presentation.ComposerJumpLatestState
 import com.remotecodex.android.ui.presentation.ComposerMcpAddOptionState
 import com.remotecodex.android.ui.presentation.ComposerMcpFormState
@@ -61,6 +65,7 @@ import com.remotecodex.android.ui.presentation.buildComposerActionState
 import com.remotecodex.android.ui.presentation.buildComposerAttachmentActions
 import com.remotecodex.android.ui.presentation.buildComposerContextUsageState
 import com.remotecodex.android.ui.presentation.buildComposerForkPanelState
+import com.remotecodex.android.ui.presentation.buildComposerHooksPanelState
 import com.remotecodex.android.ui.presentation.buildComposerJumpLatestState
 import com.remotecodex.android.ui.presentation.buildComposerMcpPanelState
 import com.remotecodex.android.ui.presentation.buildComposerModelOptions
@@ -134,6 +139,7 @@ fun ThreadComposer(
     )
     val skillsPanelState = buildComposerSkillsPanelState(composer.skillsPanel)
     val mcpPanelState = buildComposerMcpPanelState(composer.mcpPanel)
+    val hooksPanelState = buildComposerHooksPanelState(composer.hooksPanel)
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -150,6 +156,7 @@ fun ThreadComposer(
                     forkPanelState = forkPanelState,
                     skillsPanelState = skillsPanelState,
                     mcpPanelState = mcpPanelState,
+                    hooksPanelState = hooksPanelState,
                 )
                 ComposerMenu.Attachments -> AttachmentPanel()
                 ComposerMenu.Model -> ModelPickerPanel(modelOptions = modelOptions)
@@ -760,6 +767,7 @@ private fun SlashToolboxPanel(
     forkPanelState: ComposerForkPanelState,
     skillsPanelState: ComposerSkillsPanelState,
     mcpPanelState: ComposerMcpPanelState,
+    hooksPanelState: ComposerHooksPanelState,
 ) {
     ComposerMenuSurface(title = "Slash toolbox", subtitle = "Thread actions") {
         if (toolboxItems.isEmpty()) {
@@ -773,7 +781,7 @@ private fun SlashToolboxPanel(
         ForkPreviewGroup(forkPanelState = forkPanelState)
         SkillsPreviewGroup(skillsPanelState = skillsPanelState)
         McpPreviewGroup(mcpPanelState = mcpPanelState)
-        HooksPreviewGroup()
+        HooksPreviewGroup(hooksPanelState = hooksPanelState)
     }
 }
 
@@ -1419,7 +1427,7 @@ private fun McpServerRow(item: ComposerMcpServerRowState) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun HooksPreviewGroup() {
+private fun HooksPreviewGroup(hooksPanelState: ComposerHooksPanelState) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1444,31 +1452,67 @@ private fun HooksPreviewGroup() {
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = ".codex/hooks.json",
+                    text = hooksPanelState.configSourceLabel,
                     color = ThreadColors.ForegroundMuted,
                     style = MaterialTheme.typography.labelSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            GraphBadge(
-                label = "Add Hook",
-                variant = GraphBadgeVariant.Outline,
-            )
+            if (hooksPanelState.showAddAction) {
+                GraphBadge(
+                    label = "Add Hook",
+                    variant = GraphBadgeVariant.Outline,
+                )
+            }
         }
-        HookFormPreview()
-        HookStatusRow(
-            message = "Project hook changed since last trust.",
-            tone = HookStatusTone.Warning,
-        )
-        hooksPreviewItems.forEach { item ->
+        hooksPanelState.statusMessages.forEach { message ->
+            HookPanelStatusRow(message = message)
+        }
+        hooksPanelState.form?.let { form ->
+            HookFormPreview(form = form)
+        }
+        hooksPanelState.hooks.forEach { item ->
             HookPreviewRow(item = item)
+        }
+        hooksPanelState.emptyMessage?.let { message ->
+            HookPanelMessageRow(message = message)
         }
     }
 }
 
 @Composable
-private fun HookFormPreview() {
+private fun HookPanelStatusRow(message: ComposerHookStatusMessageState) {
+    val tone = when (message.tone) {
+        ComposerMcpStatusTone.Error -> HookStatusTone.Error
+        ComposerMcpStatusTone.Success -> HookStatusTone.Success
+        ComposerMcpStatusTone.Neutral -> HookStatusTone.Warning
+    }
+    HookStatusRow(
+        message = if (message.path.isNullOrBlank()) message.message else "${message.message} · ${message.path}",
+        tone = tone,
+    )
+}
+
+@Composable
+private fun HookPanelMessageRow(message: String) {
+    Text(
+        text = message,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(ThreadColors.CodeBackground)
+            .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(10.dp))
+            .padding(10.dp),
+        color = ThreadColors.ForegroundMuted,
+        style = MaterialTheme.typography.labelSmall,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+@Composable
+private fun HookFormPreview(form: ComposerHookFormState) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1478,15 +1522,21 @@ private fun HookFormPreview() {
             .padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            HookFieldPreview(label = "Scope", value = "Project", modifier = Modifier.weight(1f))
-            HookFieldPreview(label = "Event", value = "PreToolUse", modifier = Modifier.weight(1f))
+        form.editingLabel?.let { label ->
+            HookFieldPreview(label = "Editing", value = label)
         }
-        HookFieldPreview(label = "Matcher", value = "Bash")
-        HookFieldPreview(label = "Command", value = "scripts/check-command.sh", mono = true)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            HookFieldPreview(label = "Timeout", value = "30s", modifier = Modifier.weight(1f))
-            HookFieldPreview(label = "Status", value = "Checking shell command", modifier = Modifier.weight(1f))
+            form.fields.take(2).forEach { (label, value) ->
+                HookFieldPreview(label = label, value = value, modifier = Modifier.weight(1f))
+            }
+        }
+        form.fields.drop(2).take(2).forEach { (label, value) ->
+            HookFieldPreview(label = label, value = value, mono = label == "Command")
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            form.fields.drop(4).forEach { (label, value) ->
+                HookFieldPreview(label = label, value = value, modifier = Modifier.weight(1f))
+            }
         }
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1494,7 +1544,10 @@ private fun HookFormPreview() {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             GraphBadge(label = "Back", variant = GraphBadgeVariant.Outline)
-            GraphBadge(label = "Write Hook", variant = GraphBadgeVariant.Default)
+            GraphBadge(
+                label = form.primaryLabel,
+                variant = if (form.primaryEnabled) GraphBadgeVariant.Default else GraphBadgeVariant.Outline,
+            )
         }
     }
 }
@@ -1534,7 +1587,7 @@ private fun HookFieldPreview(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun HookPreviewRow(item: HookPreviewItem) {
+private fun HookPreviewRow(item: ComposerHookRowState) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1545,7 +1598,7 @@ private fun HookPreviewRow(item: HookPreviewItem) {
         verticalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         Text(
-            text = if (item.matcher.isBlank()) item.event else "${item.event} | ${item.matcher}",
+            text = item.title,
             color = ThreadColors.CodeForeground,
             style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.SemiBold,
@@ -1553,15 +1606,15 @@ private fun HookPreviewRow(item: HookPreviewItem) {
             overflow = TextOverflow.Ellipsis,
         )
         Text(
-            text = item.command,
+            text = item.commandLabel,
             color = ThreadColors.ForegroundMuted,
             style = MaterialTheme.typography.labelSmall,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        if (item.statusMessage.isNotBlank()) {
+        item.statusMessage?.let { statusMessage ->
             Text(
-                text = item.statusMessage,
+                text = statusMessage,
                 color = ThreadColors.ForegroundMuted,
                 style = MaterialTheme.typography.labelSmall,
                 maxLines = 1,
@@ -1573,11 +1626,16 @@ private fun HookPreviewRow(item: HookPreviewItem) {
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            GraphBadge(label = "Edit", variant = GraphBadgeVariant.Outline)
-            GraphBadge(label = item.trust, variant = GraphBadgeVariant.Outline)
-            GraphBadge(label = item.source, variant = GraphBadgeVariant.Outline)
-            GraphBadge(label = if (item.enabled) "Enabled" else "Disabled", variant = GraphBadgeVariant.Outline)
-            GraphBadge(label = "${item.timeoutSec}s", variant = GraphBadgeVariant.Outline)
+            item.editAction?.let { action ->
+                GraphBadge(label = action.label, variant = GraphBadgeVariant.Outline)
+            }
+            item.trustAction?.let { action ->
+                GraphBadge(label = action.label, variant = if (action.enabled) GraphBadgeVariant.Default else GraphBadgeVariant.Outline)
+            }
+            GraphBadge(label = item.trustLabel, variant = GraphBadgeVariant.Outline)
+            GraphBadge(label = item.sourceLabel, variant = GraphBadgeVariant.Outline)
+            GraphBadge(label = item.enabledLabel, variant = GraphBadgeVariant.Outline)
+            GraphBadge(label = item.timeoutLabel, variant = GraphBadgeVariant.Outline)
         }
     }
 }
@@ -1973,17 +2031,6 @@ private data class ForkTurnPreviewItem(
     val status: String,
 )
 
-private data class HookPreviewItem(
-    val event: String,
-    val matcher: String,
-    val command: String,
-    val statusMessage: String,
-    val trust: String,
-    val source: String,
-    val enabled: Boolean,
-    val timeoutSec: Int,
-)
-
 private enum class HookStatusTone {
     Warning,
     Error,
@@ -1999,29 +2046,6 @@ private val forkTurnPreviewItems = listOf(
     ForkTurnPreviewItem(index = 12, status = "completed"),
     ForkTurnPreviewItem(index = 11, status = "interrupted"),
     ForkTurnPreviewItem(index = 10, status = "failed"),
-)
-
-private val hooksPreviewItems = listOf(
-    HookPreviewItem(
-        event = "PreToolUse",
-        matcher = "Bash",
-        command = "scripts/check-command.sh",
-        statusMessage = "Checking shell command",
-        trust = "modified",
-        source = "project",
-        enabled = true,
-        timeoutSec = 30,
-    ),
-    HookPreviewItem(
-        event = "UserPromptSubmit",
-        matcher = "",
-        command = "scripts/log-prompt.sh",
-        statusMessage = "Prompt audit",
-        trust = "trusted",
-        source = "global",
-        enabled = true,
-        timeoutSec = 10,
-    ),
 )
 
 private enum class ComposerToolIcon {
