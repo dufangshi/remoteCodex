@@ -82,7 +82,10 @@ fun MessageStatusBadge(
         modifier = if (compact) modifier.defaultMinSize(minWidth = 24.dp) else modifier,
         showLabel = !compact,
         leading = {
-            MessageStatusLeadingIcon(tone = model.tone, color = colors.foreground)
+            MessageStatusLeadingIcon(
+                tone = model.tone,
+                color = colors.foreground,
+            )
         },
     )
 }
@@ -97,31 +100,15 @@ private fun MessageStatusLeadingIcon(
         return
     }
 
-    Canvas(modifier = Modifier.size(14.dp)) {
-        val stroke = Stroke(width = 1.7.dp.toPx(), cap = StrokeCap.Round)
-        val w = size.width
-        val h = size.height
-        fun line(x1: Float, y1: Float, x2: Float, y2: Float) {
-            drawLine(color, Offset(w * x1, h * y1), Offset(w * x2, h * y2), stroke.width, StrokeCap.Round)
-        }
-
-        when (tone) {
-            MessageStatusTone.Success -> {
-                drawCircle(color, radius = w * 0.42f, center = Offset(w * 0.5f, h * 0.5f), style = stroke)
-                line(0.30f, 0.52f, 0.44f, 0.66f)
-                line(0.44f, 0.66f, 0.72f, 0.34f)
-            }
-            MessageStatusTone.Danger -> {
-                drawCircle(color, radius = w * 0.42f, center = Offset(w * 0.5f, h * 0.5f), style = stroke)
-                line(0.34f, 0.34f, 0.66f, 0.66f)
-                line(0.66f, 0.34f, 0.34f, 0.66f)
-            }
-            MessageStatusTone.Neutral -> {
-                drawCircle(color, radius = w * 0.42f, center = Offset(w * 0.5f, h * 0.5f), style = stroke)
-            }
-            MessageStatusTone.Running -> Unit
-        }
-    }
+    CircleStatusIcon(
+        color = color,
+        glyph = when (tone) {
+            MessageStatusTone.Success -> CircleStatusGlyph.Check
+            MessageStatusTone.Danger -> CircleStatusGlyph.X
+            MessageStatusTone.Neutral -> CircleStatusGlyph.Circle
+            MessageStatusTone.Running -> CircleStatusGlyph.Circle
+        },
+    )
 }
 
 @Composable
@@ -154,13 +141,66 @@ fun ToolStatusBadge(
         modifier = if (compact) modifier.defaultMinSize(minWidth = 24.dp) else modifier,
         showLabel = !compact,
         leading = {
-            if (status == ToolStatus.Running) {
-                RunningDots(color = colors.foreground)
-            } else {
-                Dot(color = colors.foreground)
-            }
+            ToolStatusLeadingIcon(status = status, color = colors.foreground)
         },
     )
+}
+
+@Composable
+private fun ToolStatusLeadingIcon(
+    status: ToolStatus,
+    color: Color,
+) {
+    when (status) {
+        ToolStatus.Running -> RunningDots(color = color)
+        ToolStatus.Completed -> CircleStatusIcon(color = color, glyph = CircleStatusGlyph.Check)
+        ToolStatus.Failed -> CircleStatusIcon(color = color, glyph = CircleStatusGlyph.X)
+    }
+}
+
+private enum class CircleStatusGlyph {
+    Check,
+    X,
+    Circle,
+}
+
+@Composable
+private fun CircleStatusIcon(
+    color: Color,
+    glyph: CircleStatusGlyph,
+) {
+    Canvas(modifier = Modifier.size(14.dp)) {
+        val stroke = Stroke(width = 1.7.dp.toPx(), cap = StrokeCap.Round)
+        val w = size.width
+        val h = size.height
+        fun line(x1: Float, y1: Float, x2: Float, y2: Float) {
+            drawLine(
+                color = color,
+                start = Offset(w * x1, h * y1),
+                end = Offset(w * x2, h * y2),
+                strokeWidth = stroke.width,
+                cap = StrokeCap.Round,
+            )
+        }
+
+        drawCircle(
+            color = color,
+            radius = w * 0.42f,
+            center = Offset(w * 0.5f, h * 0.5f),
+            style = stroke,
+        )
+        when (glyph) {
+            CircleStatusGlyph.Check -> {
+                line(0.30f, 0.52f, 0.44f, 0.66f)
+                line(0.44f, 0.66f, 0.72f, 0.34f)
+            }
+            CircleStatusGlyph.X -> {
+                line(0.34f, 0.34f, 0.66f, 0.66f)
+                line(0.66f, 0.34f, 0.34f, 0.66f)
+            }
+            CircleStatusGlyph.Circle -> Unit
+        }
+    }
 }
 
 @Composable
