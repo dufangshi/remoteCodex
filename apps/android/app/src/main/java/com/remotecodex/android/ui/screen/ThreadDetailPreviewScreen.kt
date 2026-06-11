@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -39,7 +38,6 @@ import com.remotecodex.android.ui.components.GraphChatShellRoot
 import com.remotecodex.android.ui.components.GraphChatSplitRegion
 import com.remotecodex.android.ui.components.GraphChatTopbarShell
 import com.remotecodex.android.ui.components.LongTextDialog
-import com.remotecodex.android.ui.components.PendingRequestCard
 import com.remotecodex.android.ui.components.ShellPanel
 import com.remotecodex.android.ui.components.ThreadActionDialog
 import com.remotecodex.android.ui.components.ThreadActionDialogOverlay
@@ -220,27 +218,12 @@ private fun ChatPreviewSurface(
     Column(
         modifier = modifier.background(ThreadColors.Workspace),
     ) {
-        LazyColumn(
-            modifier = Modifier
-                .weight(1f)
-                .background(ThreadColors.Workspace),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                start = 8.dp,
-                end = 8.dp,
-                top = 8.dp,
-                bottom = 8.dp,
-            ),
-        ) {
-            item {
-                PendingRequestCard(request = detail.pendingRequest)
-            }
-        }
         ThreadTimeline(
             turns = detail.turns,
             auxiliary = detail.timelineAuxiliary,
+            pendingRequest = detail.pendingRequest,
             onOpenDetail = onOpenDetail,
-            modifier = Modifier.weight(4f),
+            modifier = Modifier.weight(1f),
         )
         ThreadUsageFooter(detail = detail)
     }

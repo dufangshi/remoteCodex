@@ -59,6 +59,7 @@ import com.remotecodex.android.ui.model.HistoryItemPreview
 import com.remotecodex.android.ui.model.DetailPreview
 import com.remotecodex.android.ui.model.LivePlanPreview
 import com.remotecodex.android.ui.model.MessagePreview
+import com.remotecodex.android.ui.model.PendingRequestPreview
 import com.remotecodex.android.ui.model.PlanStepStatus
 import com.remotecodex.android.ui.model.ReasoningPreview
 import com.remotecodex.android.ui.model.TimelineAuxiliaryPreview
@@ -122,6 +123,7 @@ fun ThreadTimeline(
     turns: List<TurnPreview>,
     modifier: Modifier = Modifier,
     auxiliary: TimelineAuxiliaryPreview = TimelineAuxiliaryPreview(),
+    pendingRequest: PendingRequestPreview? = null,
     onOpenDetail: (DetailPreview) -> Unit = {},
 ) {
     LazyColumn(
@@ -136,6 +138,11 @@ fun ThreadTimeline(
             bottom = 132.dp,
         ),
     ) {
+        pendingRequest?.let { request ->
+            item(key = "pending-request") {
+                PendingRequestCard(request = request)
+            }
+        }
         if (auxiliary.canLoadEarlier) {
             item(key = "load-earlier") {
                 LoadEarlierRow(loading = auxiliary.loadingEarlier)
