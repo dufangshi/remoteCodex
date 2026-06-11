@@ -95,7 +95,9 @@ data class GraphChatHistoryItemFrameState(
     val fileChangeOpenAccessibilityLabel: String?,
     val showImagePreview: Boolean,
     val showAction: Boolean,
+    val actionLabel: String?,
     val actionAccessibilityLabel: String?,
+    val detailTitle: String,
     val showCopy: Boolean,
     val copyText: String,
 )
@@ -2946,13 +2948,19 @@ fun buildGraphChatHistoryItemFrameState(
 ): GraphChatHistoryItemFrameState {
     val normalizedSummary = graphChatHistoryItemSummary(kind, summary)
     val normalizedDetail = detail?.takeIf { it.isNotBlank() }
-    val normalizedAction = actionLabel?.trim()?.takeIf { it.isNotEmpty() }
+    val toolAction = graphChatHistoryToolActionState(kind)
+    val normalizedAction = toolAction?.label
+        ?: actionLabel?.trim()?.takeIf { it.isNotEmpty() }
     val isFileChange = kind == HistoryItemKind.FileChange
     val showAction = normalizedAction != null &&
         kind != HistoryItemKind.Artifact &&
         !isFileChange
+    val displayTitle = toolAction?.eventTitle ?: title
+    val detailTitle = toolAction?.detailTitle
+        ?: normalizedAction
+        ?: title
     val copyText = graphChatHistoryItemCopyText(
-        title = title,
+        title = displayTitle,
         meta = meta,
         status = status,
         summary = summary,
@@ -2960,7 +2968,7 @@ fun buildGraphChatHistoryItemFrameState(
     )
 
     return GraphChatHistoryItemFrameState(
-        title = title,
+        title = displayTitle,
         status = graphChatHistoryStatusState(status),
         summary = normalizedSummary,
         running = status == ToolStatus.Running,
@@ -2988,12 +2996,63 @@ fun buildGraphChatHistoryItemFrameState(
         },
         showImagePreview = kind == HistoryItemKind.Image,
         showAction = showAction,
+        actionLabel = normalizedAction?.takeIf { showAction },
         actionAccessibilityLabel = normalizedAction
             ?.takeIf { showAction }
-            ?.let { "Open ${it.lowercase()}" },
+            ?.let { toolAction?.accessibilityLabel ?: "Open ${it.lowercase()}" },
+        detailTitle = detailTitle,
         showCopy = copyText.isNotBlank(),
         copyText = copyText,
     )
+}
+
+data class GraphChatHistoryToolActionState(
+    val eventTitle: String,
+    val label: String,
+    val accessibilityLabel: String,
+    val detailTitle: String,
+)
+
+fun graphChatHistoryToolActionState(kind: HistoryItemKind): GraphChatHistoryToolActionState? {
+    return when (kind) {
+        HistoryItemKind.Command -> GraphChatHistoryToolActionState(
+            eventTitle = "command",
+            label = "Command Output",
+            accessibilityLabel = "Open full command",
+            detailTitle = "Command Output",
+        )
+        HistoryItemKind.ToolCall -> GraphChatHistoryToolActionState(
+            eventTitle = "tool_call",
+            label = "Tool Call Details",
+            accessibilityLabel = "Open full tool call",
+            detailTitle = "Tool Call Details",
+        )
+        HistoryItemKind.AgentTool -> GraphChatHistoryToolActionState(
+            eventTitle = "agent",
+            label = "Agent Details",
+            accessibilityLabel = "Open agent details",
+            detailTitle = "Agent Details",
+        )
+        HistoryItemKind.SkillTool -> GraphChatHistoryToolActionState(
+            eventTitle = "skill",
+            label = "Skill Details",
+            accessibilityLabel = "Open skill details",
+            detailTitle = "Skill Details",
+        )
+        HistoryItemKind.WebSearch -> GraphChatHistoryToolActionState(
+            eventTitle = "web_search",
+            label = "Web Search Details",
+            accessibilityLabel = "Open full web search",
+            detailTitle = "Web Search Details",
+        )
+        HistoryItemKind.FileRead -> GraphChatHistoryToolActionState(
+            eventTitle = "file_read",
+            label = "File Read Details",
+            accessibilityLabel = "Open full file read",
+            detailTitle = "File Read Details",
+        )
+        else -> null
+    }
 }
 
 fun graphChatHistoryItemSummary(kind: HistoryItemKind, summary: String): String {

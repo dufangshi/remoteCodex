@@ -4171,7 +4171,9 @@ class ThreadPresentationTest {
                 fileChangeOpenAccessibilityLabel = null,
                 showImagePreview = false,
                 showAction = true,
-                actionAccessibilityLabel = "Open command output",
+                actionLabel = "Command Output",
+                actionAccessibilityLabel = "Open full command",
+                detailTitle = "Command Output",
                 showCopy = true,
                 copyText = "command\nRunning\n./gradlew :app:test\n\nBUILD SUCCESSFUL",
             ),
@@ -4185,6 +4187,48 @@ class ThreadPresentationTest {
                 actionLabel = "Command Output",
             ),
         )
+    }
+
+    @Test
+    fun derivesWebAlignedToolHistoryFrameActions() {
+        val fileRead = buildGraphChatHistoryItemFrameState(
+            kind = HistoryItemKind.FileRead,
+            title = "File Read",
+            status = ToolStatus.Completed,
+            meta = null,
+            summary = "ThreadPresentation.kt",
+            detail = "source excerpt",
+            actionLabel = "Open",
+        )
+        val webSearch = buildGraphChatHistoryItemFrameState(
+            kind = HistoryItemKind.WebSearch,
+            title = "Search",
+            status = ToolStatus.Completed,
+            meta = null,
+            summary = "Compose accessibility guidance",
+            detail = "search result detail",
+            actionLabel = null,
+        )
+        val toolCall = buildGraphChatHistoryItemFrameState(
+            kind = HistoryItemKind.ToolCall,
+            title = "Tool",
+            status = null,
+            meta = null,
+            summary = "read_file",
+            detail = "tool payload",
+            actionLabel = null,
+        )
+
+        assertEquals("file_read", fileRead.title)
+        assertEquals("File Read Details", fileRead.actionLabel)
+        assertEquals("Open full file read", fileRead.actionAccessibilityLabel)
+        assertEquals("File Read Details", fileRead.detailTitle)
+        assertEquals("web_search", webSearch.title)
+        assertEquals("Web Search Details", webSearch.actionLabel)
+        assertEquals("Open full web search", webSearch.actionAccessibilityLabel)
+        assertEquals("Tool Call Details", toolCall.actionLabel)
+        assertEquals("Open full tool call", toolCall.actionAccessibilityLabel)
+        assertEquals("tool_call", toolCall.title)
     }
 
     @Test
@@ -4220,7 +4264,9 @@ class ThreadPresentationTest {
         assertEquals("Open file change details", state.fileChangeOpenAccessibilityLabel)
         assertEquals(false, state.showImagePreview)
         assertEquals(false, state.showAction)
+        assertEquals(null, state.actionLabel)
         assertEquals(null, state.actionAccessibilityLabel)
+        assertEquals("Diff", state.detailTitle)
         assertEquals(true, state.showCopy)
         assertEquals(
             "File Change\nworkspace\nDone\n/home/u/dev/remoteCodex-main/apps/android/app/src/main/java/com/remotecodex/android/ui/components/ThreadTimelineComponents.kt\n\ndiff --git",
@@ -4244,7 +4290,9 @@ class ThreadPresentationTest {
                 fileChangeOpenAccessibilityLabel = null,
                 showImagePreview = false,
                 showAction = false,
+                actionLabel = null,
                 actionAccessibilityLabel = null,
+                detailTitle = "Artifact Inspector",
                 showCopy = true,
                 copyText = "Artifact\nchart rendered\n\nartifact detail",
             ),

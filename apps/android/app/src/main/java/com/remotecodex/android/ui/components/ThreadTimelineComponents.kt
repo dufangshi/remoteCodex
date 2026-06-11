@@ -1385,7 +1385,7 @@ private fun HistoryItemCard(
             HistoryItemKind.FileChange -> FileChangeInlineSummary(
                 state = frameState,
                 colors = colors,
-                onOpen = { openHistoryItemDetail(item, null, onOpenDetail) },
+                onOpen = { openHistoryItemDetail(item, null, onOpenDetail, frameState.detailTitle) },
             )
             else -> {
                 Text(
@@ -1452,13 +1452,12 @@ private fun HistoryItemCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (frameState.showAction) {
-                val label = item.actionLabel.orEmpty()
                 GraphButton(
-                    label = label,
+                    label = frameState.actionLabel.orEmpty(),
                     variant = GraphButtonVariant.Ghost,
                     icon = GraphActionIcon.Open,
                     contentDescription = frameState.actionAccessibilityLabel,
-                    onClick = { openHistoryItemDetail(item, null, onOpenDetail) },
+                    onClick = { openHistoryItemDetail(item, null, onOpenDetail, frameState.detailTitle) },
                 )
             }
             Spacer(modifier = Modifier.weight(1f))
@@ -1820,9 +1819,11 @@ private fun openHistoryItemDetail(
     item: HistoryItemPreview,
     index: Int?,
     onOpenDetail: (DetailPreview) -> Unit,
+    titleOverride: String? = null,
 ) {
-    val title = item.actionLabel
+    val title = titleOverride
         ?: item.meta
+        ?: item.actionLabel
         ?: item.title
     val indexedTitle = index?.let { "$title $it" } ?: title
     val body = item.detail
