@@ -243,8 +243,8 @@ class ThreadEventReducerTest {
 
         assertFalse(first.needsRefresh)
         assertEquals(2, first.detail.turns.single().items.size)
-        assertEquals("hello", first.detail.turns.single().items.last().text)
-        assertEquals("running", first.detail.turns.single().items.last().status)
+        assertEquals("hello", first.detail.turns.single().items.single { it.id == "item-1" }.text)
+        assertEquals("running", first.detail.turns.single().items.single { it.id == "item-1" }.status)
 
         val duplicate = reduceThreadEvent(
             state = first.state,
@@ -254,7 +254,7 @@ class ThreadEventReducerTest {
             ),
         )
         assertFalse(duplicate.needsRefresh)
-        assertEquals("hello", duplicate.detail.turns.single().items.last().text)
+        assertEquals("hello", duplicate.detail.turns.single().items.single { it.id == "item-1" }.text)
 
         val second = reduceThreadEvent(
             state = duplicate.state,
@@ -264,7 +264,7 @@ class ThreadEventReducerTest {
             ),
         )
         assertFalse(second.needsRefresh)
-        assertEquals("hello world", second.detail.turns.single().items.last().text)
+        assertEquals("hello world", second.detail.turns.single().items.single { it.id == "item-1" }.text)
     }
 
     @Test
@@ -297,8 +297,71 @@ class ThreadEventReducerTest {
 
         assertFalse(completed.needsRefresh)
         assertEquals(2, completed.detail.turns.single().items.size)
-        assertEquals("complete", completed.detail.turns.single().items.last().text)
-        assertEquals("completed", completed.detail.turns.single().items.last().status)
+        assertEquals("complete", completed.detail.turns.single().items.single { it.id == "item-1" }.text)
+        assertEquals("completed", completed.detail.turns.single().items.single { it.id == "item-1" }.status)
+    }
+
+    @Test
+    fun duplicateEventEnvelopeIsIgnoredAndLastCursorIsTracked() {
+        val event = event(
+            type = "thread.turn.started",
+            payload = """{"turnId":"turn-2"}""",
+            eventId = "event-1",
+            cursor = "cursor-1",
+            sequence = 7,
+        )
+
+        val first = reduceThreadEvent(detail = baseDetail(turns = emptyList()), event = event)
+        val duplicate = reduceThreadEvent(state = first.state, event = event)
+
+        assertEquals(1, first.detail.turns.size)
+        assertEquals(1, duplicate.detail.turns.size)
+        assertEquals("cursor-1", duplicate.state.lastEventCursor)
+    }
+
+    @Test
+    fun itemSequenceOrdersMaterializedItemsWithinTurn() {
+        val first = reduceThreadEvent(
+            detail = baseDetail(),
+            event = event(
+                type = "thread.item.completed",
+                payload = """
+                    {
+                      "turnId": "turn-1",
+                      "item": {
+                        "id": "item-late",
+                        "kind": "agentMessage",
+                        "text": "Late",
+                        "status": "completed",
+                        "sequence": 3
+                      }
+                    }
+                """.trimIndent(),
+            ),
+        )
+        val second = reduceThreadEvent(
+            state = first.state,
+            event = event(
+                type = "thread.item.completed",
+                payload = """
+                    {
+                      "turnId": "turn-1",
+                      "item": {
+                        "id": "item-early",
+                        "kind": "agentMessage",
+                        "text": "Early",
+                        "status": "completed",
+                        "sequence": 1
+                      }
+                    }
+                """.trimIndent(),
+            ),
+        )
+
+        assertEquals(
+            listOf("item-early", "item-late", "item-0"),
+            second.detail.turns.single().items.map { item -> item.id },
+        )
     }
 
     @Test
@@ -328,12 +391,21 @@ class ThreadEventReducerTest {
         assertTrue(result.needsRefresh)
     }
 
-    private fun event(type: String, payload: String): SupervisorThreadEvent {
+    private fun event(
+        type: String,
+        payload: String,
+        eventId: String? = null,
+        cursor: String? = null,
+        sequence: Long? = null,
+    ): SupervisorThreadEvent {
         return SupervisorThreadEvent(
             type = type,
             threadId = "thread-1",
             timestamp = "2026-06-11T12:00:10.000Z",
             payload = JSONObject(payload),
+            eventId = eventId,
+            cursor = cursor,
+            sequence = sequence,
         )
     }
 

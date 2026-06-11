@@ -304,6 +304,7 @@ data class SupervisorThreadTurnItem(
     val artifactTitle: String? = null,
     val artifactSummary: String? = null,
     val artifactHasRenderer: Boolean = true,
+    val sequence: Int? = null,
 )
 
 data class SupervisorThreadHistoryItemDetail(

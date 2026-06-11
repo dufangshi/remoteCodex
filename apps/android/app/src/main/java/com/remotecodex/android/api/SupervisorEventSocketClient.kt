@@ -103,6 +103,9 @@ data class SupervisorThreadEvent(
     val threadId: String,
     val timestamp: String?,
     val payload: JSONObject,
+    val eventId: String? = null,
+    val cursor: String? = null,
+    val sequence: Long? = null,
 )
 
 data class SupervisorShellEvent(
@@ -137,6 +140,10 @@ internal fun parseSupervisorThreadEvent(rawMessage: String): SupervisorThreadEve
         threadId = threadId,
         timestamp = json.optNullableString("timestamp"),
         payload = payload,
+        eventId = json.optNullableString("eventId")
+            ?: json.optNullableString("id"),
+        cursor = json.optNullableString("cursor"),
+        sequence = json.optNullableLong("sequence"),
     )
 }
 
@@ -201,4 +208,8 @@ private val sharedEventSocketOkHttpClient = OkHttpClient.Builder().build()
 
 private fun JSONObject.optNullableString(name: String): String? {
     return if (has(name) && !isNull(name)) optString(name) else null
+}
+
+private fun JSONObject.optNullableLong(name: String): Long? {
+    return if (has(name) && !isNull(name)) optLong(name) else null
 }

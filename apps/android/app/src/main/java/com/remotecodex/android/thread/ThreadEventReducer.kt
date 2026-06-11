@@ -15,6 +15,8 @@ data class ThreadProjectionState(
     val detail: SupervisorThreadDetail,
     val seenOutputDeltaKeys: Set<String> = emptySet(),
     val provisionalAnsweredRequestNotes: Map<String, SupervisorThreadAnsweredRequestNote> = emptyMap(),
+    val seenEventKeys: Set<String> = emptySet(),
+    val lastEventCursor: String? = null,
 )
 
 data class ThreadEventReduceResult(
@@ -43,27 +45,35 @@ fun reduceThreadEvent(
     if (event.threadId != detail.thread.id) {
         return ThreadEventReduceResult(state = state)
     }
+    val eventKey = event.stableEventKey()
+    if (eventKey in state.seenEventKeys) {
+        return ThreadEventReduceResult(state = state)
+    }
+    val nextBaseState = state.copy(
+        seenEventKeys = (state.seenEventKeys + eventKey).takeLastEventKeys(),
+        lastEventCursor = event.cursor ?: event.eventId ?: event.sequence?.toString() ?: state.lastEventCursor,
+    )
     return when (event.type) {
-        "thread.updated" -> reduceThreadUpdated(state, event)
-        "thread.goal.updated" -> reduceGoalUpdated(state, event.payload)
+        "thread.updated" -> reduceThreadUpdated(nextBaseState, event)
+        "thread.goal.updated" -> reduceGoalUpdated(nextBaseState, event.payload)
         "thread.goal.cleared" -> ThreadEventReduceResult(
-            state = state.withDetail(detail.copy(goalStatus = null, goalObjective = null)),
+            state = nextBaseState.withDetail(detail.copy(goalStatus = null, goalObjective = null)),
         )
-        "thread.turn.started" -> reduceTurnStarted(state, event)
+        "thread.turn.started" -> reduceTurnStarted(nextBaseState, event)
         "thread.turn.completed",
         "thread.turn.failed",
-        -> reduceTurnFinished(state, event)
-        "thread.turn.token.updated" -> reduceTurnTokenUpdated(state, event.payload)
+        -> reduceTurnFinished(nextBaseState, event)
+        "thread.turn.token.updated" -> reduceTurnTokenUpdated(nextBaseState, event.payload)
         "thread.item.started",
         "thread.item.completed",
-        -> reduceThreadItem(state, event.payload)
-        "thread.request.created" -> reduceRequestCreated(state, event.payload)
-        "thread.request.resolved" -> reduceRequestResolved(state, event)
-        "thread.output.delta" -> reduceOutputDelta(state, event.payload)
+        -> reduceThreadItem(nextBaseState, event.payload)
+        "thread.request.created" -> reduceRequestCreated(nextBaseState, event.payload)
+        "thread.request.resolved" -> reduceRequestResolved(nextBaseState, event)
+        "thread.output.delta" -> reduceOutputDelta(nextBaseState, event.payload)
         "thread.context.updated",
         "thread.plan.updated",
-        -> ThreadEventReduceResult(state = state, needsRefresh = true)
-        else -> ThreadEventReduceResult(state = state, needsRefresh = true)
+        -> ThreadEventReduceResult(state = nextBaseState, needsRefresh = true)
+        else -> ThreadEventReduceResult(state = nextBaseState, needsRefresh = true)
     }
 }
 
@@ -295,7 +305,7 @@ private fun reduceOutputDelta(
     val turns = detail.turns.map { turn ->
         if (turn.id == turnId) {
             changed = true
-            turn.copy(items = appendOutputDelta(turn.items, itemId, delta))
+            turn.copy(items = appendOutputDelta(turn.items, itemId, sequence, delta))
         } else {
             turn
         }
@@ -318,6 +328,7 @@ private fun reduceOutputDelta(
 private fun appendOutputDelta(
     items: List<SupervisorThreadTurnItem>,
     itemId: String,
+    sequence: Int,
     delta: String,
 ): List<SupervisorThreadTurnItem> {
     var changed = false
@@ -335,12 +346,13 @@ private fun appendOutputDelta(
     if (changed) {
         return next
     }
-    return next + SupervisorThreadTurnItem(
+    return (next + SupervisorThreadTurnItem(
         id = itemId,
         kind = "agentMessage",
         text = delta,
         status = "running",
-    )
+        sequence = sequence,
+    )).sortBySequence()
 }
 
 private fun upsertItem(
@@ -356,7 +368,7 @@ private fun upsertItem(
             existing
         }
     }
-    return if (replaced) next else next + item
+    return (if (replaced) next else next + item).sortBySequence()
 }
 
 private fun upsertRequest(
@@ -447,6 +459,58 @@ private fun ThreadProjectionState.withDetail(
     )
 }
 
+private fun List<SupervisorThreadTurnItem>.sortBySequence(): List<SupervisorThreadTurnItem> {
+    return mapIndexed { index, item -> index to item }
+        .sortedWith(
+            compareBy<Pair<Int, SupervisorThreadTurnItem>>(
+                { (_, item) -> item.sequence ?: Int.MAX_VALUE },
+                { (index, _) -> index },
+            ),
+        )
+        .map { (_, item) -> item }
+}
+
+private fun SupervisorThreadEvent.stableEventKey(): String {
+    eventId?.takeIf { it.isNotBlank() }?.let { return "event-id:$it" }
+    cursor?.takeIf { it.isNotBlank() }?.let { return "cursor:$it" }
+    sequence?.let { return "sequence:$threadId:$it" }
+    return when (type) {
+        "thread.output.delta" -> {
+            val turnId = payload.optString("turnId")
+            val itemId = payload.optString("itemId")
+            val itemSequence = payload.optNullableInt("sequence")
+            val deltaHash = payload.optString("delta").hashCode()
+            "$type:$threadId:$turnId:$itemId:$itemSequence:$deltaHash"
+        }
+        "thread.item.started",
+        "thread.item.completed",
+        -> {
+            val turnId = payload.optString("turnId")
+            val itemId = payload.optJSONObject("item")?.optString("id").orEmpty()
+            "$type:$threadId:$turnId:$itemId:${timestamp.orEmpty()}"
+        }
+        "thread.request.created" -> {
+            val requestId = payload.optJSONObject("request")?.optString("id").orEmpty()
+            "$type:$threadId:$requestId:${timestamp.orEmpty()}"
+        }
+        "thread.request.resolved" -> {
+            "$type:$threadId:${payload.optString("requestId")}:${timestamp.orEmpty()}"
+        }
+        else -> "$type:$threadId:${timestamp.orEmpty()}:${payload.toString().hashCode()}"
+    }
+}
+
+private fun Set<String>.takeLastEventKeys(limit: Int = 512): Set<String> {
+    if (size <= limit) {
+        return this
+    }
+    return toList().takeLast(limit).toSet()
+}
+
 private fun JSONObject.optNullableString(name: String): String? {
     return if (has(name) && !isNull(name)) optString(name) else null
+}
+
+private fun JSONObject.optNullableInt(name: String): Int? {
+    return if (has(name) && !isNull(name)) optInt(name) else null
 }

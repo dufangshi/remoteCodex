@@ -12,6 +12,9 @@ class SupervisorEventSocketClientTest {
             {
               "type": "thread.output.delta",
               "threadId": "thread-1",
+              "eventId": "event-1",
+              "cursor": "cursor-1",
+              "sequence": 42,
               "timestamp": "2026-06-11T20:00:00.000Z",
               "payload": {
                 "turnId": "turn-1",
@@ -25,6 +28,9 @@ class SupervisorEventSocketClientTest {
 
         assertEquals("thread.output.delta", event?.type)
         assertEquals("thread-1", event?.threadId)
+        assertEquals("event-1", event?.eventId)
+        assertEquals("cursor-1", event?.cursor)
+        assertEquals(42L, event?.sequence)
         assertEquals("2026-06-11T20:00:00.000Z", event?.timestamp)
         assertEquals("turn-1", event?.payload?.optString("turnId"))
         assertEquals("hello", event?.payload?.optString("delta"))

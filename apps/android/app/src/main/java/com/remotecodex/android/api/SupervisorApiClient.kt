@@ -1210,6 +1210,7 @@ internal fun JSONObject.toThreadTurnItem(): SupervisorThreadTurnItem {
         artifactTitle = artifact?.optNullableString("title"),
         artifactSummary = artifact?.optNullableString("summaryText"),
         artifactHasRenderer = artifact?.optJSONArray("assets")?.length()?.let { it > 0 } ?: true,
+        sequence = optNullableInt("sequence"),
     )
 }
 
