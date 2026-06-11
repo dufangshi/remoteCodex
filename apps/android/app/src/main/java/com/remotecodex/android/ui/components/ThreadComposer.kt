@@ -1267,6 +1267,7 @@ private fun GoalPreviewGroup(goalPanelState: ComposerGoalPanelState) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .semantics { stateDescription = goalPanelState.lifecycle.stateDescription }
             .clip(RoundedCornerShape(12.dp))
             .background(ThreadColors.Surface)
             .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
@@ -1332,14 +1333,18 @@ private fun GoalComposePreviewCard(state: ComposerGoalComposeCardState) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = "Goal",
+                text = state.label,
                 color = ThreadColors.CodeForeground,
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
             )
             GraphBadge(
-                label = if (state.tokenBudgetLabel.isBlank()) "Optional budget" else "${state.tokenBudgetLabel}k budget",
+                label = if (state.tokenBudgetLabel.isBlank()) {
+                    "${state.tokenBudgetInputLabel}: ${state.tokenBudgetPlaceholder}"
+                } else {
+                    "${state.tokenBudgetInputLabel}: ${state.tokenBudgetLabel}"
+                },
                 variant = GraphBadgeVariant.Outline,
             )
         }

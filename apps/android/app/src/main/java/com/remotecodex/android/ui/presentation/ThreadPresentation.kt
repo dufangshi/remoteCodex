@@ -611,11 +611,15 @@ data class ComposerHooksPanelLifecycleState(
 
 data class ComposerGoalComposeCardState(
     val visible: Boolean,
+    val label: String,
+    val tokenBudgetInputLabel: String,
     val tokenBudgetLabel: String,
+    val tokenBudgetPlaceholder: String,
     val errorMessage: String?,
     val primaryLabel: String,
     val primaryEnabled: Boolean,
     val cancelLabel: String,
+    val lifecycle: ComposerGoalComposeLifecycleState,
 )
 
 data class ComposerCurrentGoalState(
@@ -632,6 +636,29 @@ data class ComposerGoalPanelState(
     val composeCard: ComposerGoalComposeCardState,
     val currentGoal: ComposerCurrentGoalState?,
     val notice: ComposerHookStatusMessageState?,
+    val lifecycle: ComposerGoalPanelLifecycleState,
+)
+
+data class ComposerGoalComposeLifecycleState(
+    val seedsTokenBudgetFromCurrentGoal: Boolean,
+    val clearsLocalErrorOnEnter: Boolean,
+    val clearsLocalErrorOnExit: Boolean,
+    val clearsDraftOnSuccess: Boolean,
+    val exitsComposeOnSuccess: Boolean,
+    val keepsComposeOpenOnFailure: Boolean,
+    val focusesPromptOnEnter: Boolean,
+)
+
+data class ComposerGoalPanelLifecycleState(
+    val composeMode: Boolean,
+    val updateAvailable: Boolean,
+    val busy: Boolean,
+    val canSubmit: Boolean,
+    val canCancel: Boolean,
+    val closeMenuOnEnter: Boolean,
+    val resetSlashPanelOnEnter: Boolean,
+    val openGoalOnEnter: Boolean,
+    val stateDescription: String,
 )
 
 fun buildComposerGoalPanelState(
@@ -640,11 +667,15 @@ fun buildComposerGoalPanelState(
     val currentGoal = panel.currentGoal
     val composeCard = ComposerGoalComposeCardState(
         visible = panel.composeMode,
+        label = "Goal",
+        tokenBudgetInputLabel = "Max tokens (k)",
         tokenBudgetLabel = formatGoalTokenBudgetThousands(panel.tokenBudget),
+        tokenBudgetPlaceholder = "Optional",
         errorMessage = panel.localError?.takeIf { it.isNotBlank() },
         primaryLabel = if (panel.busy) "Setting..." else "Set goal",
         primaryEnabled = panel.updateAvailable && !panel.busy,
         cancelLabel = "Cancel",
+        lifecycle = buildComposerGoalComposeLifecycleState(panel),
     )
     val statusLabel = when {
         panel.composeMode -> "Composing"
@@ -669,7 +700,45 @@ fun buildComposerGoalPanelState(
         composeCard = composeCard,
         currentGoal = currentGoal?.let(::buildComposerCurrentGoalState),
         notice = notice,
+        lifecycle = buildComposerGoalPanelLifecycleState(panel),
     )
+}
+
+private fun buildComposerGoalComposeLifecycleState(
+    panel: ComposerGoalPanelPreview,
+): ComposerGoalComposeLifecycleState {
+    return ComposerGoalComposeLifecycleState(
+        seedsTokenBudgetFromCurrentGoal = panel.currentGoal?.tokenBudget != null,
+        clearsLocalErrorOnEnter = true,
+        clearsLocalErrorOnExit = true,
+        clearsDraftOnSuccess = true,
+        exitsComposeOnSuccess = true,
+        keepsComposeOpenOnFailure = true,
+        focusesPromptOnEnter = true,
+    )
+}
+
+private fun buildComposerGoalPanelLifecycleState(
+    panel: ComposerGoalPanelPreview,
+): ComposerGoalPanelLifecycleState {
+    return ComposerGoalPanelLifecycleState(
+        composeMode = panel.composeMode,
+        updateAvailable = panel.updateAvailable,
+        busy = panel.busy,
+        canSubmit = panel.composeMode && panel.updateAvailable && !panel.busy,
+        canCancel = panel.composeMode && !panel.busy,
+        closeMenuOnEnter = true,
+        resetSlashPanelOnEnter = true,
+        openGoalOnEnter = true,
+        stateDescription = buildComposerGoalPanelStateDescription(panel),
+    )
+}
+
+private fun buildComposerGoalPanelStateDescription(panel: ComposerGoalPanelPreview): String {
+    val mode = if (panel.composeMode) "compose" else "summary"
+    val availability = if (panel.updateAvailable) "available" else "unavailable"
+    val busy = if (panel.busy) ", setting" else ""
+    return "Goal panel: $mode, $availability$busy"
 }
 
 private fun buildComposerCurrentGoalState(goal: ThreadGoalPreview): ComposerCurrentGoalState {

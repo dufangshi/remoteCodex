@@ -2941,11 +2941,23 @@ class ThreadPresentationTest {
                 description = "Create or update the active thread goal.",
                 composeCard = ComposerGoalComposeCardState(
                     visible = true,
+                    label = "Goal",
+                    tokenBudgetInputLabel = "Max tokens (k)",
                     tokenBudgetLabel = "12.5",
+                    tokenBudgetPlaceholder = "Optional",
                     errorMessage = "Token budget must be a positive number in thousands.",
                     primaryLabel = "Setting...",
                     primaryEnabled = false,
                     cancelLabel = "Cancel",
+                    lifecycle = ComposerGoalComposeLifecycleState(
+                        seedsTokenBudgetFromCurrentGoal = true,
+                        clearsLocalErrorOnEnter = true,
+                        clearsLocalErrorOnExit = true,
+                        clearsDraftOnSuccess = true,
+                        exitsComposeOnSuccess = true,
+                        keepsComposeOpenOnFailure = true,
+                        focusesPromptOnEnter = true,
+                    ),
                 ),
                 currentGoal = ComposerCurrentGoalState(
                     title = "Current goal",
@@ -2955,6 +2967,17 @@ class ThreadPresentationTest {
                     tokenUsageLabel = "4.2k / 12.5k used",
                 ),
                 notice = null,
+                lifecycle = ComposerGoalPanelLifecycleState(
+                    composeMode = true,
+                    updateAvailable = true,
+                    busy = true,
+                    canSubmit = false,
+                    canCancel = false,
+                    closeMenuOnEnter = true,
+                    resetSlashPanelOnEnter = true,
+                    openGoalOnEnter = true,
+                    stateDescription = "Goal panel: compose, available, setting",
+                ),
             ),
             buildComposerGoalPanelState(
                 ComposerGoalPanelPreview(
@@ -2981,14 +3004,37 @@ class ThreadPresentationTest {
                 description = "Create or update the active thread goal.",
                 composeCard = ComposerGoalComposeCardState(
                     visible = false,
+                    label = "Goal",
+                    tokenBudgetInputLabel = "Max tokens (k)",
                     tokenBudgetLabel = "",
+                    tokenBudgetPlaceholder = "Optional",
                     errorMessage = null,
                     primaryLabel = "Set goal",
                     primaryEnabled = true,
                     cancelLabel = "Cancel",
+                    lifecycle = ComposerGoalComposeLifecycleState(
+                        seedsTokenBudgetFromCurrentGoal = false,
+                        clearsLocalErrorOnEnter = true,
+                        clearsLocalErrorOnExit = true,
+                        clearsDraftOnSuccess = true,
+                        exitsComposeOnSuccess = true,
+                        keepsComposeOpenOnFailure = true,
+                        focusesPromptOnEnter = true,
+                    ),
                 ),
                 currentGoal = null,
                 notice = null,
+                lifecycle = ComposerGoalPanelLifecycleState(
+                    composeMode = false,
+                    updateAvailable = true,
+                    busy = false,
+                    canSubmit = false,
+                    canCancel = false,
+                    closeMenuOnEnter = true,
+                    resetSlashPanelOnEnter = true,
+                    openGoalOnEnter = true,
+                    stateDescription = "Goal panel: summary, available",
+                ),
             ),
             buildComposerGoalPanelState(
                 ComposerGoalPanelPreview(
@@ -3008,16 +3054,39 @@ class ThreadPresentationTest {
                 description = "Create or update the active thread goal.",
                 composeCard = ComposerGoalComposeCardState(
                     visible = false,
+                    label = "Goal",
+                    tokenBudgetInputLabel = "Max tokens (k)",
                     tokenBudgetLabel = "12",
+                    tokenBudgetPlaceholder = "Optional",
                     errorMessage = null,
                     primaryLabel = "Set goal",
                     primaryEnabled = false,
                     cancelLabel = "Cancel",
+                    lifecycle = ComposerGoalComposeLifecycleState(
+                        seedsTokenBudgetFromCurrentGoal = false,
+                        clearsLocalErrorOnEnter = true,
+                        clearsLocalErrorOnExit = true,
+                        clearsDraftOnSuccess = true,
+                        exitsComposeOnSuccess = true,
+                        keepsComposeOpenOnFailure = true,
+                        focusesPromptOnEnter = true,
+                    ),
                 ),
                 currentGoal = null,
                 notice = ComposerHookStatusMessageState(
                     message = "/goal is unavailable in this view.",
                     tone = ComposerMcpStatusTone.Error,
+                ),
+                lifecycle = ComposerGoalPanelLifecycleState(
+                    composeMode = false,
+                    updateAvailable = false,
+                    busy = false,
+                    canSubmit = false,
+                    canCancel = false,
+                    closeMenuOnEnter = true,
+                    resetSlashPanelOnEnter = true,
+                    openGoalOnEnter = true,
+                    stateDescription = "Goal panel: summary, unavailable",
                 ),
             ),
             buildComposerGoalPanelState(
@@ -3028,6 +3097,51 @@ class ThreadPresentationTest {
                     currentGoal = null,
                 ),
             ),
+        )
+    }
+
+    @Test
+    fun buildsGoalComposeLifecycleState() {
+        assertEquals(
+            ComposerGoalPanelLifecycleState(
+                composeMode = true,
+                updateAvailable = true,
+                busy = false,
+                canSubmit = true,
+                canCancel = true,
+                closeMenuOnEnter = true,
+                resetSlashPanelOnEnter = true,
+                openGoalOnEnter = true,
+                stateDescription = "Goal panel: compose, available",
+            ),
+            buildComposerGoalPanelState(
+                ComposerGoalPanelPreview(
+                    composeMode = true,
+                    busy = false,
+                    updateAvailable = true,
+                ),
+            ).lifecycle,
+        )
+
+        assertEquals(
+            ComposerGoalComposeLifecycleState(
+                seedsTokenBudgetFromCurrentGoal = true,
+                clearsLocalErrorOnEnter = true,
+                clearsLocalErrorOnExit = true,
+                clearsDraftOnSuccess = true,
+                exitsComposeOnSuccess = true,
+                keepsComposeOpenOnFailure = true,
+                focusesPromptOnEnter = true,
+            ),
+            buildComposerGoalPanelState(
+                ComposerGoalPanelPreview(
+                    currentGoal = ThreadGoalPreview(
+                        objective = "Ship Android composer parity.",
+                        status = ThreadGoalStatusPreview.Active,
+                        tokenBudget = 42_000,
+                    ),
+                ),
+            ).composeCard.lifecycle,
         )
     }
 
