@@ -162,6 +162,7 @@ data class ComposerPreview(
     val threadConnected: Boolean = true,
     val followTail: Boolean = true,
     val canInterrupt: Boolean = true,
+    val error: String? = null,
     val workspaceModeLabel: String = "workspace write",
     val prompt: ComposerPromptPreview = ComposerPromptPreview(),
     val context: ComposerContextPreview = ComposerContextPreview(),

@@ -111,6 +111,16 @@ data class ComposerJumpLatestState(
     val title: String,
 )
 
+data class ComposerFrameState(
+    val activeView: ComposerActiveView,
+    val formTestTag: String?,
+    val jumpLatest: ComposerJumpLatestState,
+    val showPromptSlot: Boolean,
+    val showGoalSlot: Boolean,
+    val showShellPromptSlot: Boolean,
+    val errorMessage: String?,
+)
+
 data class ComposerContextUsageState(
     val modelLabel: String,
     val usageLabel: String,
@@ -1224,6 +1234,24 @@ fun buildComposerToolbarState(
             label = if (isShellView) "Switch to chat" else "Switch to shell",
         ),
         shellPromptLabel = shellPromptLabel?.takeIf { isShellView && it.isNotBlank() },
+    )
+}
+
+fun buildComposerFrameState(
+    activeView: ComposerActiveView,
+    followTail: Boolean,
+    goalComposeMode: Boolean,
+    error: String?,
+): ComposerFrameState {
+    val isShellView = activeView == ComposerActiveView.Shell
+    return ComposerFrameState(
+        activeView = activeView,
+        formTestTag = if (isShellView) null else "chat-composer",
+        jumpLatest = buildComposerJumpLatestState(activeView, followTail),
+        showPromptSlot = !isShellView,
+        showGoalSlot = goalComposeMode && !isShellView,
+        showShellPromptSlot = isShellView,
+        errorMessage = error?.trim()?.takeIf { it.isNotEmpty() },
     )
 }
 

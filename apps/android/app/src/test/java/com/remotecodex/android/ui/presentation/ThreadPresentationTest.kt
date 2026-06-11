@@ -239,6 +239,56 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun buildsChatComposerFrameStateWithPromptGoalAndJumpLatest() {
+        assertEquals(
+            ComposerFrameState(
+                activeView = ComposerActiveView.Chat,
+                formTestTag = "chat-composer",
+                jumpLatest = ComposerJumpLatestState(
+                    visible = true,
+                    active = false,
+                    title = "Jump to latest",
+                ),
+                showPromptSlot = true,
+                showGoalSlot = true,
+                showShellPromptSlot = false,
+                errorMessage = null,
+            ),
+            buildComposerFrameState(
+                activeView = ComposerActiveView.Chat,
+                followTail = false,
+                goalComposeMode = true,
+                error = " ",
+            ),
+        )
+    }
+
+    @Test
+    fun buildsShellComposerFrameStateWithShellPromptAndTrimmedError() {
+        assertEquals(
+            ComposerFrameState(
+                activeView = ComposerActiveView.Shell,
+                formTestTag = null,
+                jumpLatest = ComposerJumpLatestState(
+                    visible = false,
+                    active = false,
+                    title = "Latest turn is in view",
+                ),
+                showPromptSlot = false,
+                showGoalSlot = false,
+                showShellPromptSlot = true,
+                errorMessage = "failed to submit",
+            ),
+            buildComposerFrameState(
+                activeView = ComposerActiveView.Shell,
+                followTail = true,
+                goalComposeMode = true,
+                error = " failed to submit ",
+            ),
+        )
+    }
+
+    @Test
     fun buildsAvailableComposerContextUsageState() {
         assertEquals(
             ComposerContextUsageState(

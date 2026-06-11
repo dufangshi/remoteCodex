@@ -28,6 +28,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -39,6 +40,7 @@ import com.remotecodex.android.ui.presentation.ComposerAttachmentPanelState
 import com.remotecodex.android.ui.presentation.ComposerContextUsageState
 import com.remotecodex.android.ui.presentation.ComposerForkActionState
 import com.remotecodex.android.ui.presentation.ComposerForkPanelState
+import com.remotecodex.android.ui.presentation.ComposerFrameState
 import com.remotecodex.android.ui.presentation.ComposerGoalComposeCardState
 import com.remotecodex.android.ui.presentation.ComposerGoalPanelState
 import com.remotecodex.android.ui.presentation.ComposerCurrentGoalState
@@ -76,9 +78,9 @@ import com.remotecodex.android.ui.presentation.buildComposerActionState
 import com.remotecodex.android.ui.presentation.buildComposerAttachmentPanelState
 import com.remotecodex.android.ui.presentation.buildComposerContextUsageState
 import com.remotecodex.android.ui.presentation.buildComposerForkPanelState
+import com.remotecodex.android.ui.presentation.buildComposerFrameState
 import com.remotecodex.android.ui.presentation.buildComposerGoalPanelState
 import com.remotecodex.android.ui.presentation.buildComposerHooksPanelState
-import com.remotecodex.android.ui.presentation.buildComposerJumpLatestState
 import com.remotecodex.android.ui.presentation.buildComposerMcpPanelState
 import com.remotecodex.android.ui.presentation.buildComposerModelOptions
 import com.remotecodex.android.ui.presentation.buildComposerPromptSlotState
@@ -112,10 +114,6 @@ fun ThreadComposer(
         busy = composer.busy,
         activeView = composer.activeView,
         canInterrupt = composer.canInterrupt,
-    )
-    val jumpLatestState = buildComposerJumpLatestState(
-        activeView = composer.activeView,
-        followTail = composer.followTail,
     )
     val contextState = buildComposerContextUsageState(composer.context)
     val promptSlotState = buildComposerPromptSlotState(
@@ -190,6 +188,12 @@ fun ThreadComposer(
             fastMode = composer.fastMode || composer.goalPanel.fastMode,
         ),
     )
+    val frameState = buildComposerFrameState(
+        activeView = composer.activeView,
+        followTail = composer.followTail,
+        goalComposeMode = goalPanelState.composeCard.visible,
+        error = composer.error,
+    )
     val skillsPanelState = buildComposerSkillsPanelState(composer.skillsPanel)
     val mcpPanelState = buildComposerMcpPanelState(composer.mcpPanel)
     val hooksPanelState = buildComposerHooksPanelState(composer.hooksPanel)
@@ -199,6 +203,7 @@ fun ThreadComposer(
             .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
             .background(ThreadColors.Panel)
             .border(1.dp, ThreadColors.Border, RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
+            .then(frameState.formTestTag?.let { Modifier.testTag(it) } ?: Modifier)
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -223,15 +228,17 @@ fun ThreadComposer(
             }
         }
 
-        ComposerJumpLatestButton(state = jumpLatestState)
+        ComposerJumpLatestButton(state = frameState.jumpLatest)
         ComposerToolbarRow(
             toolbarState = toolbarState,
             settingsToolbarState = settingsToolbarState,
             onToggleMenu = { menu -> openMenu = openMenu.toggle(menu) },
         )
-        ComposerInputGroupPreview(
+        ComposerFrameSlotsPreview(
+            frameState = frameState,
             contextState = contextState,
             promptSlotState = promptSlotState,
+            goalPanelState = goalPanelState,
             submitReady = submitInputState != null,
         )
         ComposerStatusStrip(chips = statusChips)
@@ -462,6 +469,83 @@ private fun ComposerStatusChip(chip: ComposerStatusChipModel) {
             overflow = TextOverflow.Ellipsis,
         )
     }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ComposerFrameSlotsPreview(
+    frameState: ComposerFrameState,
+    contextState: ComposerContextUsageState,
+    promptSlotState: ComposerPromptSlotState,
+    goalPanelState: ComposerGoalPanelState,
+    submitReady: Boolean,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (frameState.showPromptSlot) {
+            ComposerInputGroupPreview(
+                contextState = contextState,
+                promptSlotState = promptSlotState,
+                submitReady = submitReady,
+            )
+        }
+        if (frameState.showGoalSlot) {
+            GoalComposePreviewCard(state = goalPanelState.composeCard)
+        }
+        if (frameState.showShellPromptSlot) {
+            ShellPromptSlotFooter(state = promptSlotState)
+        }
+        frameState.errorMessage?.let { message ->
+            ComposerFrameError(message = message)
+        }
+    }
+}
+
+@Composable
+private fun ShellPromptSlotFooter(state: ComposerPromptSlotState) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(ThreadColors.CodeBackground)
+            .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(10.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = state.text.ifBlank { state.placeholder },
+            modifier = Modifier.weight(1f),
+            color = if (state.text.isBlank()) ThreadColors.ForegroundMuted else ThreadColors.CodeForeground,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        GraphBadge(
+            label = if (state.sendDisabled) "Shell paused" else "Shell ready",
+            variant = GraphBadgeVariant.Outline,
+        )
+    }
+}
+
+@Composable
+private fun ComposerFrameError(message: String) {
+    Text(
+        text = message,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(ThreadColors.DangerSoft.copy(alpha = 0.58f))
+            .border(1.dp, ThreadColors.Danger.copy(alpha = 0.38f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        color = ThreadColors.Danger,
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)
