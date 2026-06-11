@@ -93,31 +93,10 @@ private fun CreateThreadDialogPreview(
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
             )
-            OutlinedTextField(
+            ThreadTitleField(
                 value = titleDraft,
                 onValueChange = { titleDraft = it },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                placeholder = {
-                    Text(
-                        text = "Chat name",
-                        color = ThreadColors.ForegroundMuted,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                },
-                textStyle = MaterialTheme.typography.bodyMedium.copy(color = ThreadColors.Foreground),
-                shape = RoundedCornerShape(14.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = ThreadColors.Foreground,
-                    unfocusedTextColor = ThreadColors.Foreground,
-                    focusedContainerColor = ThreadColors.SurfaceStrong,
-                    unfocusedContainerColor = ThreadColors.SurfaceStrong,
-                    cursorColor = ThreadColors.Primary,
-                    focusedBorderColor = ThreadColors.Primary.copy(alpha = 0.58f),
-                    unfocusedBorderColor = ThreadColors.Border,
-                    focusedPlaceholderColor = ThreadColors.ForegroundMuted,
-                    unfocusedPlaceholderColor = ThreadColors.ForegroundMuted,
-                ),
+                placeholder = "Chat name",
             )
             Text(
                 text = if (titleReady) {
@@ -139,6 +118,8 @@ private fun RenameThreadDialogPreview(
     threadTitle: String,
     onClose: () -> Unit,
 ) {
+    var titleDraft by rememberSaveable(threadTitle) { mutableStateOf(threadTitle) }
+    val normalizedTitle = titleDraft.trim()
     GraphDialogFrame(
         title = "Rename thread",
         subtitle = "Changes are saved only after confirmation.",
@@ -158,21 +139,59 @@ private fun RenameThreadDialogPreview(
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
             )
+            ThreadTitleField(
+                value = titleDraft,
+                onValueChange = { titleDraft = it },
+                placeholder = "Thread name",
+            )
             Text(
-                text = threadTitle,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(ThreadColors.CodeBackground)
-                    .border(1.dp, ThreadColors.Border, RoundedCornerShape(14.dp))
-                    .padding(horizontal = 13.dp, vertical = 12.dp),
-                color = ThreadColors.CodeForeground,
-                style = MaterialTheme.typography.bodyMedium,
+                text = if (normalizedTitle.isEmpty()) {
+                    "Enter a thread name before saving."
+                } else {
+                    "Will save: $normalizedTitle"
+                },
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }
     }
+}
+
+@Composable
+private fun ThreadTitleField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier.fillMaxWidth(),
+        singleLine = true,
+        placeholder = {
+            Text(
+                text = placeholder,
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        },
+        textStyle = MaterialTheme.typography.bodyMedium.copy(color = ThreadColors.Foreground),
+        shape = RoundedCornerShape(14.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = ThreadColors.Foreground,
+            unfocusedTextColor = ThreadColors.Foreground,
+            focusedContainerColor = ThreadColors.SurfaceStrong,
+            unfocusedContainerColor = ThreadColors.SurfaceStrong,
+            cursorColor = ThreadColors.Primary,
+            focusedBorderColor = ThreadColors.Primary.copy(alpha = 0.58f),
+            unfocusedBorderColor = ThreadColors.Border,
+            focusedPlaceholderColor = ThreadColors.ForegroundMuted,
+            unfocusedPlaceholderColor = ThreadColors.ForegroundMuted,
+        ),
+    )
 }
 
 @Composable
