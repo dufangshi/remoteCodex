@@ -5232,9 +5232,9 @@ class ThreadPresentationTest {
     @Test
     fun buildsQueuedLikePendingSteerCardState() {
         assertEquals(
-            PendingSteerCardState(
+            AuxiliaryUserNoteCardState(
                 statusLabel = "Accepted",
-                prompt = "Continue Android parity.",
+                text = "Continue Android parity.",
                 timeLabel = "13:43",
                 tone = PendingSteerToneState.QueuedUserMessage,
             ),
@@ -5251,9 +5251,9 @@ class ThreadPresentationTest {
     @Test
     fun buildsFallbackPendingSteerCardState() {
         assertEquals(
-            PendingSteerCardState(
+            AuxiliaryUserNoteCardState(
                 statusLabel = "Queued",
-                prompt = "Wait for approval.",
+                text = "Wait for approval.",
                 timeLabel = null,
                 tone = PendingSteerToneState.Warning,
             ),
@@ -5264,6 +5264,19 @@ class ThreadPresentationTest {
                     timeLabel = " ",
                 ),
             ),
+        )
+    }
+
+    @Test
+    fun buildsEphemeralUserNoteCardStateWithoutStatusLabel() {
+        assertEquals(
+            AuxiliaryUserNoteCardState(
+                statusLabel = "",
+                text = "Keep going component by component.",
+                timeLabel = null,
+                tone = PendingSteerToneState.QueuedUserMessage,
+            ),
+            buildEphemeralUserNoteCardState(" Keep going component by component. "),
         )
     }
 

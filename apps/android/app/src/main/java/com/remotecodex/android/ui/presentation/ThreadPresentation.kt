@@ -224,9 +224,9 @@ enum class PendingSteerToneState {
     Warning,
 }
 
-data class PendingSteerCardState(
+data class AuxiliaryUserNoteCardState(
     val statusLabel: String,
-    val prompt: String,
+    val text: String,
     val timeLabel: String?,
     val tone: PendingSteerToneState,
 )
@@ -3505,17 +3505,26 @@ fun buildTimelineNoteCardState(
     )
 }
 
-fun buildPendingSteerCardState(steer: TimelineSteerPreview): PendingSteerCardState {
+fun buildPendingSteerCardState(steer: TimelineSteerPreview): AuxiliaryUserNoteCardState {
     val statusLabel = steer.statusLabel?.trim()?.takeIf { it.isNotEmpty() } ?: "Queued"
-    return PendingSteerCardState(
+    return AuxiliaryUserNoteCardState(
         statusLabel = statusLabel,
-        prompt = steer.prompt.trim(),
+        text = steer.prompt.trim(),
         timeLabel = steer.timeLabel.trim().takeIf { it.isNotEmpty() },
         tone = if (isGraphChatQueuedLikeUserStatus(statusLabel)) {
             PendingSteerToneState.QueuedUserMessage
         } else {
             PendingSteerToneState.Warning
         },
+    )
+}
+
+fun buildEphemeralUserNoteCardState(text: String): AuxiliaryUserNoteCardState {
+    return AuxiliaryUserNoteCardState(
+        statusLabel = "",
+        text = text.trim(),
+        timeLabel = null,
+        tone = PendingSteerToneState.QueuedUserMessage,
     )
 }
 

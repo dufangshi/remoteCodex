@@ -89,12 +89,14 @@ import com.remotecodex.android.ui.presentation.GraphChatHistoryStatusState
 import com.remotecodex.android.ui.presentation.GraphChatHistoryStatusTone
 import com.remotecodex.android.ui.presentation.MessageStatusModel
 import com.remotecodex.android.ui.presentation.ComposerStatusTone
+import com.remotecodex.android.ui.presentation.AuxiliaryUserNoteCardState
 import com.remotecodex.android.ui.presentation.GraphChatPlainTextSegment
 import com.remotecodex.android.ui.presentation.PendingSteerToneState
 import com.remotecodex.android.ui.presentation.TimelineNoteToneState
 import com.remotecodex.android.ui.presentation.UserMessageAttachmentState
 import com.remotecodex.android.ui.presentation.buildGraphChatImageHistoryState
 import com.remotecodex.android.ui.presentation.buildGraphChatLivePlanCardState
+import com.remotecodex.android.ui.presentation.buildEphemeralUserNoteCardState
 import com.remotecodex.android.ui.presentation.buildPendingSteerCardState
 import com.remotecodex.android.ui.presentation.buildTimelineNoteCardState
 import com.remotecodex.android.ui.presentation.parseUserMessageSegments
@@ -395,6 +397,17 @@ private fun TimelineNoteCard(
 @Composable
 private fun PendingSteerCard(steer: TimelineSteerPreview) {
     val state = buildPendingSteerCardState(steer)
+    AuxiliaryUserNoteCard(state = state)
+}
+
+@Composable
+private fun EphemeralUserNoteCard(text: String) {
+    val state = buildEphemeralUserNoteCardState(text)
+    AuxiliaryUserNoteCard(state = state)
+}
+
+@Composable
+private fun AuxiliaryUserNoteCard(state: AuxiliaryUserNoteCardState) {
     val queuedLike = state.tone == PendingSteerToneState.QueuedUserMessage
     val background = if (queuedLike) ThreadColors.UserBubble else ThreadColors.WarningSoft.copy(alpha = 0.46f)
     val border = if (queuedLike) ThreadColors.UserBubbleBorder else ThreadColors.Warning.copy(alpha = 0.36f)
@@ -411,18 +424,20 @@ private fun PendingSteerCard(steer: TimelineSteerPreview) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        if (state.statusLabel.isNotEmpty()) {
+            Text(
+                text = state.statusLabel,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(ThreadColors.Panel.copy(alpha = 0.72f))
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                color = statusColor,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
         Text(
-            text = state.statusLabel,
-            modifier = Modifier
-                .clip(RoundedCornerShape(999.dp))
-                .background(ThreadColors.Panel.copy(alpha = 0.72f))
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            color = statusColor,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Text(
-            text = state.prompt,
+            text = state.text,
             modifier = Modifier.weight(1f),
             color = promptColor,
             style = MaterialTheme.typography.labelMedium,
@@ -437,33 +452,6 @@ private fun PendingSteerCard(steer: TimelineSteerPreview) {
                 maxLines = 1,
             )
         }
-    }
-}
-
-@Composable
-private fun EphemeralUserNoteCard(text: String) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(ThreadColors.UserBubble)
-            .border(1.dp, ThreadColors.UserBubbleBorder, RoundedCornerShape(14.dp))
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Text(
-            text = "Pending prompt",
-            color = ThreadColors.UserBubbleText.copy(alpha = 0.72f),
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Text(
-            text = text,
-            color = ThreadColors.UserBubbleText,
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 4,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }
 
