@@ -44,6 +44,9 @@ import com.remotecodex.android.ui.presentation.ComposerSettingsState
 import com.remotecodex.android.ui.presentation.ComposerSelectionOptionState
 import com.remotecodex.android.ui.presentation.ComposerShellToolState
 import com.remotecodex.android.ui.presentation.ComposerShellToolTone
+import com.remotecodex.android.ui.presentation.ComposerSkillErrorState
+import com.remotecodex.android.ui.presentation.ComposerSkillRowState
+import com.remotecodex.android.ui.presentation.ComposerSkillsPanelState
 import com.remotecodex.android.ui.presentation.ComposerStatusChipModel
 import com.remotecodex.android.ui.presentation.ComposerStatusTone
 import com.remotecodex.android.ui.presentation.ComposerToolboxItemState
@@ -57,6 +60,7 @@ import com.remotecodex.android.ui.presentation.buildComposerModelOptions
 import com.remotecodex.android.ui.presentation.buildComposerReasoningEffortOptions
 import com.remotecodex.android.ui.presentation.buildComposerSettingsState
 import com.remotecodex.android.ui.presentation.buildComposerShellTools
+import com.remotecodex.android.ui.presentation.buildComposerSkillsPanelState
 import com.remotecodex.android.ui.presentation.buildComposerStatusStrip
 import com.remotecodex.android.ui.presentation.buildComposerToolboxItems
 import com.remotecodex.android.ui.theme.ThreadColors
@@ -121,6 +125,7 @@ fun ThreadComposer(
         busy = composer.busy,
         forkBusy = composer.forkBusy,
     )
+    val skillsPanelState = buildComposerSkillsPanelState(composer.skillsPanel)
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -135,6 +140,7 @@ fun ThreadComposer(
                 ComposerMenu.Slash -> SlashToolboxPanel(
                     toolboxItems = toolboxItems,
                     forkPanelState = forkPanelState,
+                    skillsPanelState = skillsPanelState,
                 )
                 ComposerMenu.Attachments -> AttachmentPanel()
                 ComposerMenu.Model -> ModelPickerPanel(modelOptions = modelOptions)
@@ -743,6 +749,7 @@ private fun ComposerModeChip(label: String, selected: Boolean) {
 private fun SlashToolboxPanel(
     toolboxItems: List<ComposerToolboxItemState>,
     forkPanelState: ComposerForkPanelState,
+    skillsPanelState: ComposerSkillsPanelState,
 ) {
     ComposerMenuSurface(title = "Slash toolbox", subtitle = "Thread actions") {
         if (toolboxItems.isEmpty()) {
@@ -754,7 +761,7 @@ private fun SlashToolboxPanel(
         }
         GoalPreviewGroup()
         ForkPreviewGroup(forkPanelState = forkPanelState)
-        SkillsPreviewGroup()
+        SkillsPreviewGroup(skillsPanelState = skillsPanelState)
         McpPreviewGroup()
         HooksPreviewGroup()
     }
@@ -1002,7 +1009,7 @@ private fun ForkTurnRow(item: ForkTurnPreviewItem) {
 }
 
 @Composable
-private fun SkillsPreviewGroup() {
+private fun SkillsPreviewGroup(skillsPanelState: ComposerSkillsPanelState) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1038,19 +1045,34 @@ private fun SkillsPreviewGroup() {
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
-        skillsPreviewItems.forEach { item ->
+        skillsPanelState.loadingMessage?.let { message ->
+            SkillPanelMessageRow(message = message)
+        }
+        skillsPanelState.errorMessage?.let { message ->
+            SkillWarningRow(
+                message = message,
+                path = "",
+                error = true,
+            )
+        }
+        skillsPanelState.skills.forEach { item ->
             SkillPreviewRow(item = item)
         }
-        SkillWarningRow(
-            message = "Skill metadata incomplete",
-            path = "~/.codex/skills/local-experiment/SKILL.md",
-        )
+        skillsPanelState.errors.forEach { error ->
+            SkillWarningRow(
+                message = error.message,
+                path = error.path,
+            )
+        }
+        skillsPanelState.emptyMessage?.let { message ->
+            SkillPanelMessageRow(message = message)
+        }
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SkillPreviewRow(item: SkillPreviewItem) {
+private fun SkillPreviewRow(item: ComposerSkillRowState) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1074,11 +1096,11 @@ private fun SkillPreviewRow(item: SkillPreviewItem) {
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             GraphBadge(
-                label = item.scope,
+                label = item.scopeLabel,
                 variant = GraphBadgeVariant.Outline,
             )
             GraphBadge(
-                label = if (item.copied) "Copied ${item.invokeName}" else item.invokeName,
+                label = item.copyLabel,
                 variant = if (item.copied) GraphBadgeVariant.Default else GraphBadgeVariant.Outline,
             )
         }
@@ -1093,34 +1115,56 @@ private fun SkillPreviewRow(item: SkillPreviewItem) {
 }
 
 @Composable
+private fun SkillPanelMessageRow(message: String) {
+    Text(
+        text = message,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(ThreadColors.CodeBackground)
+            .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(10.dp))
+            .padding(10.dp),
+        color = ThreadColors.ForegroundMuted,
+        style = MaterialTheme.typography.labelSmall,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+@Composable
 private fun SkillWarningRow(
     message: String,
     path: String,
+    error: Boolean = false,
 ) {
+    val foreground = if (error) ThreadColors.Danger else ThreadColors.Warning
+    val background = if (error) ThreadColors.DangerSoft.copy(alpha = 0.56f) else ThreadColors.WarningSoft.copy(alpha = 0.52f)
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .background(ThreadColors.WarningSoft.copy(alpha = 0.52f))
-            .border(1.dp, ThreadColors.Warning.copy(alpha = 0.34f), RoundedCornerShape(10.dp))
+            .background(background)
+            .border(1.dp, foreground.copy(alpha = 0.34f), RoundedCornerShape(10.dp))
             .padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(
             text = message,
-            color = ThreadColors.Warning,
+            color = foreground,
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        Text(
-            text = path,
-            color = ThreadColors.ForegroundMuted,
-            style = MaterialTheme.typography.labelSmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        if (path.isNotBlank()) {
+            Text(
+                text = path,
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -1829,14 +1873,6 @@ private data class ForkTurnPreviewItem(
     val status: String,
 )
 
-private data class SkillPreviewItem(
-    val displayName: String,
-    val scope: String,
-    val invokeName: String,
-    val description: String,
-    val copied: Boolean = false,
-)
-
 private data class McpServerPreviewItem(
     val name: String,
     val toolCount: Int,
@@ -1872,22 +1908,6 @@ private val forkTurnPreviewItems = listOf(
     ForkTurnPreviewItem(index = 12, status = "completed"),
     ForkTurnPreviewItem(index = 11, status = "interrupted"),
     ForkTurnPreviewItem(index = 10, status = "failed"),
-)
-
-private val skillsPreviewItems = listOf(
-    SkillPreviewItem(
-        displayName = "Android Client Work",
-        scope = "project",
-        invokeName = "\$android-client",
-        description = "Builds and verifies native Android surfaces against the supervisor UI.",
-        copied = true,
-    ),
-    SkillPreviewItem(
-        displayName = "OpenAI Docs",
-        scope = "global",
-        invokeName = "\$openai-docs",
-        description = "Looks up current OpenAI API guidance and returns source-backed answers.",
-    ),
 )
 
 private val mcpServerPreviewItems = listOf(

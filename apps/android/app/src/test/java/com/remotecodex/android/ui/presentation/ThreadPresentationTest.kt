@@ -6,8 +6,13 @@ import com.remotecodex.android.ui.model.ComposerActiveView
 import com.remotecodex.android.ui.model.ComposerContextAvailability
 import com.remotecodex.android.ui.model.ComposerContextPreview
 import com.remotecodex.android.ui.model.ComposerModelOptionPreview
+import com.remotecodex.android.ui.model.ComposerPanelLoadStatusPreview
 import com.remotecodex.android.ui.model.ComposerReasoningEffortOptionPreview
 import com.remotecodex.android.ui.model.ComposerShellControlPreview
+import com.remotecodex.android.ui.model.ComposerSkillErrorPreview
+import com.remotecodex.android.ui.model.ComposerSkillPreview
+import com.remotecodex.android.ui.model.ComposerSkillScopePreview
+import com.remotecodex.android.ui.model.ComposerSkillsPanelPreview
 import com.remotecodex.android.ui.model.ComposerToolboxActionPreview
 import com.remotecodex.android.ui.model.ComposerToolboxItemPreview
 import com.remotecodex.android.ui.model.ThreadGoalStatusPreview
@@ -539,6 +544,131 @@ class ThreadPresentationTest {
                 forkBusy = true,
             ).actions,
         )
+    }
+
+    @Test
+    fun buildsComposerSkillsPanelRows() {
+        assertEquals(
+            ComposerSkillsPanelState(
+                loadingMessage = null,
+                errorMessage = null,
+                skills = listOf(
+                    ComposerSkillRowState(
+                        displayName = "Code Reviewer",
+                        scopeLabel = "Repo",
+                        invokeName = "\$reviewer",
+                        copyLabel = "Copied \$reviewer",
+                        description = "Review changed code",
+                        copied = true,
+                        enabled = true,
+                    ),
+                    ComposerSkillRowState(
+                        displayName = "docs",
+                        scopeLabel = "User",
+                        invokeName = "\$docs",
+                        copyLabel = "\$docs",
+                        description = "Read docs quickly",
+                        copied = false,
+                        enabled = false,
+                    ),
+                ),
+                errors = emptyList(),
+                emptyMessage = null,
+            ),
+            buildComposerSkillsPanelState(
+                ComposerSkillsPanelPreview(
+                    status = ComposerPanelLoadStatusPreview.Ready,
+                    error = null,
+                    skills = listOf(
+                        ComposerSkillPreview(
+                            name = "reviewer",
+                            displayName = "Code Reviewer",
+                            scope = ComposerSkillScopePreview.Repo,
+                            description = "Review code",
+                            shortDescription = "Review code succinctly",
+                            interfaceShortDescription = "Review changed code",
+                            path = "/skills/reviewer/SKILL.md",
+                        ),
+                        ComposerSkillPreview(
+                            name = "docs",
+                            displayName = "",
+                            scope = ComposerSkillScopePreview.User,
+                            description = "Read docs in detail",
+                            shortDescription = "Read docs quickly",
+                            interfaceShortDescription = "",
+                            path = "/skills/docs/SKILL.md",
+                            enabled = false,
+                        ),
+                    ),
+                    errors = emptyList(),
+                    copiedSkillName = "reviewer",
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun buildsComposerSkillsPanelLoadingEmptyAndErrorStates() {
+        assertEquals(
+            "Loading skills...",
+            buildComposerSkillsPanelState(
+                ComposerSkillsPanelPreview(
+                    status = ComposerPanelLoadStatusPreview.Loading,
+                    skills = emptyList(),
+                    errors = emptyList(),
+                    copiedSkillName = null,
+                ),
+            ).loadingMessage,
+        )
+
+        assertEquals(
+            "No skills available right now.",
+            buildComposerSkillsPanelState(
+                ComposerSkillsPanelPreview(
+                    status = ComposerPanelLoadStatusPreview.Ready,
+                    skills = emptyList(),
+                    errors = emptyList(),
+                    copiedSkillName = null,
+                ),
+            ).emptyMessage,
+        )
+
+        assertEquals(
+            ComposerSkillsPanelState(
+                loadingMessage = null,
+                errorMessage = "Unable to load skills",
+                skills = emptyList(),
+                errors = listOf(
+                    ComposerSkillErrorState(
+                        message = "Invalid front matter",
+                        path = "/broken/SKILL.md",
+                    ),
+                ),
+                emptyMessage = null,
+            ),
+            buildComposerSkillsPanelState(
+                ComposerSkillsPanelPreview(
+                    status = ComposerPanelLoadStatusPreview.Failed,
+                    error = "Unable to load skills",
+                    skills = emptyList(),
+                    errors = listOf(
+                        ComposerSkillErrorPreview(
+                            path = "/broken/SKILL.md",
+                            message = "Invalid front matter",
+                        ),
+                    ),
+                    copiedSkillName = null,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun labelsComposerSkillScopes() {
+        assertEquals("Repo", skillScopeLabel(ComposerSkillScopePreview.Repo))
+        assertEquals("System", skillScopeLabel(ComposerSkillScopePreview.System))
+        assertEquals("Admin", skillScopeLabel(ComposerSkillScopePreview.Admin))
+        assertEquals("User", skillScopeLabel(ComposerSkillScopePreview.User))
     }
 
     @Test

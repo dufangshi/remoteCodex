@@ -8,8 +8,11 @@ import com.remotecodex.android.ui.model.ComposerActiveView
 import com.remotecodex.android.ui.model.ComposerContextAvailability
 import com.remotecodex.android.ui.model.ComposerContextPreview
 import com.remotecodex.android.ui.model.ComposerModelOptionPreview
+import com.remotecodex.android.ui.model.ComposerPanelLoadStatusPreview
 import com.remotecodex.android.ui.model.ComposerReasoningEffortOptionPreview
 import com.remotecodex.android.ui.model.ComposerShellControlPreview
+import com.remotecodex.android.ui.model.ComposerSkillScopePreview
+import com.remotecodex.android.ui.model.ComposerSkillsPanelPreview
 import com.remotecodex.android.ui.model.ComposerToolboxActionPreview
 import com.remotecodex.android.ui.model.ComposerToolboxItemPreview
 import com.remotecodex.android.ui.model.ThreadGoalStatusPreview
@@ -185,6 +188,79 @@ data class ComposerForkPanelState(
     val showIdleOnlyNotice: Boolean,
     val notice: String?,
 )
+
+data class ComposerSkillRowState(
+    val displayName: String,
+    val scopeLabel: String,
+    val invokeName: String,
+    val copyLabel: String,
+    val description: String,
+    val copied: Boolean,
+    val enabled: Boolean,
+)
+
+data class ComposerSkillErrorState(
+    val message: String,
+    val path: String,
+)
+
+data class ComposerSkillsPanelState(
+    val loadingMessage: String?,
+    val errorMessage: String?,
+    val skills: List<ComposerSkillRowState>,
+    val errors: List<ComposerSkillErrorState>,
+    val emptyMessage: String?,
+)
+
+fun buildComposerSkillsPanelState(
+    panel: ComposerSkillsPanelPreview,
+): ComposerSkillsPanelState {
+    val skills = panel.skills.map { skill ->
+        val invokeName = "$${skill.name}"
+        val copied = panel.copiedSkillName == skill.name
+        ComposerSkillRowState(
+            displayName = skill.displayName?.takeIf { it.isNotBlank() } ?: skill.name,
+            scopeLabel = skillScopeLabel(skill.scope),
+            invokeName = invokeName,
+            copyLabel = if (copied) "Copied $invokeName" else invokeName,
+            description = skill.interfaceShortDescription
+                ?.takeIf { it.isNotBlank() }
+                ?: skill.shortDescription
+                    ?.takeIf { it.isNotBlank() }
+                ?: skill.description,
+            copied = copied,
+            enabled = skill.enabled,
+        )
+    }
+    val errors = panel.errors.map { error ->
+        ComposerSkillErrorState(
+            message = error.message,
+            path = error.path,
+        )
+    }
+    val loading = panel.status == ComposerPanelLoadStatusPreview.Loading && panel.skills.isEmpty()
+    val empty = panel.status != ComposerPanelLoadStatusPreview.Loading &&
+        panel.error.isNullOrBlank() &&
+        skills.isEmpty() &&
+        errors.isEmpty()
+
+    return ComposerSkillsPanelState(
+        loadingMessage = if (loading) "Loading skills..." else null,
+        errorMessage = panel.error?.takeIf { it.isNotBlank() },
+        skills = skills,
+        errors = errors,
+        emptyMessage = if (empty) "No skills available right now." else null,
+    )
+}
+
+fun skillScopeLabel(scope: ComposerSkillScopePreview): String {
+    return when (scope) {
+        ComposerSkillScopePreview.Repo -> "Repo"
+        ComposerSkillScopePreview.System -> "System"
+        ComposerSkillScopePreview.Admin -> "Admin"
+        ComposerSkillScopePreview.User -> "User"
+    }
+}
 
 fun buildComposerForkPanelState(
     busy: Boolean,

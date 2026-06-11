@@ -178,6 +178,7 @@ data class ComposerPreview(
     val goalComposeMode: Boolean = false,
     val goalStatus: ThreadGoalStatusPreview? = ThreadGoalStatusPreview.Active,
     val toolboxItems: List<ComposerToolboxItemPreview> = defaultComposerToolboxItems,
+    val skillsPanel: ComposerSkillsPanelPreview = ComposerSkillsPanelPreview(),
 )
 
 data class ComposerShellControlPreview(
@@ -251,6 +252,70 @@ val defaultComposerToolboxItems = listOf(
         command = "/hooks",
         label = "Hooks",
         description = "Inspect, edit, and trust agent hooks.",
+    ),
+)
+
+enum class ComposerPanelLoadStatusPreview {
+    Idle,
+    Loading,
+    Ready,
+    Failed,
+}
+
+enum class ComposerSkillScopePreview {
+    Repo,
+    System,
+    Admin,
+    User,
+}
+
+data class ComposerSkillPreview(
+    val name: String,
+    val displayName: String? = null,
+    val scope: ComposerSkillScopePreview,
+    val description: String,
+    val shortDescription: String? = null,
+    val interfaceShortDescription: String? = null,
+    val path: String,
+    val enabled: Boolean = true,
+)
+
+data class ComposerSkillErrorPreview(
+    val path: String,
+    val message: String,
+)
+
+data class ComposerSkillsPanelPreview(
+    val status: ComposerPanelLoadStatusPreview = ComposerPanelLoadStatusPreview.Ready,
+    val error: String? = null,
+    val skills: List<ComposerSkillPreview> = defaultComposerSkillPreviews,
+    val errors: List<ComposerSkillErrorPreview> = defaultComposerSkillErrors,
+    val copiedSkillName: String? = "android-client",
+)
+
+val defaultComposerSkillPreviews = listOf(
+    ComposerSkillPreview(
+        name = "android-client",
+        displayName = "Android Client Work",
+        scope = ComposerSkillScopePreview.Repo,
+        description = "Builds and verifies native Android surfaces against the supervisor UI.",
+        interfaceShortDescription = "Builds and verifies native Android surfaces against the supervisor UI.",
+        path = "~/.codex/skills/android-client/SKILL.md",
+    ),
+    ComposerSkillPreview(
+        name = "openai-docs",
+        displayName = "OpenAI Docs",
+        scope = ComposerSkillScopePreview.User,
+        description = "Looks up current OpenAI API guidance and returns source-backed answers.",
+        shortDescription = "Looks up current OpenAI API guidance.",
+        path = "~/.codex/skills/openai-docs/SKILL.md",
+    ),
+)
+
+val defaultComposerSkillErrors = listOf(
+    ComposerSkillErrorPreview(
+        path = "~/.codex/skills/local-experiment/SKILL.md",
+        message = "Skill metadata incomplete",
     ),
 )
 
