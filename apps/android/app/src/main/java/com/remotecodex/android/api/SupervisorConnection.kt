@@ -155,6 +155,27 @@ data class SupervisorHomeSnapshot(
     val activeThreadCount: Int = threads.count { it.status == "running" }
 }
 
+data class SupervisorRuntimeConfig(
+    val appName: String,
+    val appVersion: String,
+    val mode: String,
+    val host: String,
+    val port: Int,
+    val workspaceRoot: String,
+    val environment: String,
+)
+
+data class SupervisorWorkspaceSettings(
+    val workspaceRoot: String,
+    val devHome: String,
+    val defaultBackend: String,
+)
+
+data class UpdateSupervisorWorkspaceSettingsRequest(
+    val devHome: String,
+    val defaultBackend: String? = null,
+)
+
 data class SupervisorWorkspaceTreeNode(
     val name: String,
     val path: String,

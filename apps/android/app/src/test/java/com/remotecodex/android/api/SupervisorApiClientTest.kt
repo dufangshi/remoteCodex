@@ -790,6 +790,66 @@ class SupervisorApiClientTest {
     }
 
     @Test
+    fun runtimeAndWorkspaceSettingsUseRelayDevicePath() {
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(
+                200,
+                """{"appName":"remote-codex","appVersion":"0.1.0","mode":"local","host":"127.0.0.1","port":8787,"workspaceRoot":"/workspaces","environment":"test"}""",
+            ),
+            SupervisorHttpResponse(
+                200,
+                """{"workspaceRoot":"/workspaces","devHome":"/home/u/dev","defaultBackend":"codex"}""",
+            ),
+            SupervisorHttpResponse(
+                200,
+                """{"workspaceRoot":"/workspaces","devHome":"/home/u/projects","defaultBackend":"codex"}""",
+            ),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        val runtime = client.fetchRuntimeConfig()
+        val settings = client.fetchWorkspaceSettings()
+        val updated = client.updateWorkspaceSettings(
+            UpdateSupervisorWorkspaceSettingsRequest(
+                devHome = "/home/u/projects",
+                defaultBackend = "codex",
+            ),
+        )
+
+        assertEquals("remote-codex", runtime.appName)
+        assertEquals(8787, runtime.port)
+        assertEquals("/home/u/dev", settings.devHome)
+        assertEquals("/home/u/projects", updated.devHome)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/config/runtime",
+            transport.requests[0].url,
+        )
+        assertEquals("GET", transport.requests[0].method)
+        assertEquals("relay-token", transport.requests[0].bearerToken)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/config/workspace-settings",
+            transport.requests[1].url,
+        )
+        assertEquals("GET", transport.requests[1].method)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/config/workspace-settings",
+            transport.requests[2].url,
+        )
+        assertEquals("PATCH", transport.requests[2].method)
+        assertEquals("relay-token", transport.requests[2].bearerToken)
+        assertTrue(transport.requests[2].body!!.contains("\"devHome\":\"/home/u/projects\""))
+        assertTrue(transport.requests[2].body!!.contains("\"defaultBackend\":\"codex\""))
+    }
+
+    @Test
     fun threadRenameAndDeleteUseRelayDevicePath() {
         val renamedThreadJson = """{"id":"thread-1","workspaceId":"workspace-1","title":"Renamed Android API","status":"idle","model":"gpt-5","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":"Wire detail"}"""
         val deletedThreadJson = """{"id":"thread-1","workspaceId":"workspace-1","title":"Renamed Android API","status":"idle","model":"gpt-5","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":"Wire detail"}"""

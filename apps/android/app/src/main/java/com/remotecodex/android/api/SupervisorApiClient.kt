@@ -127,6 +127,27 @@ class SupervisorApiClient(
         )
     }
 
+    fun fetchRuntimeConfig(): SupervisorRuntimeConfig {
+        return requestJson(config.restPath("/api/config/runtime")).toRuntimeConfig()
+    }
+
+    fun fetchWorkspaceSettings(): SupervisorWorkspaceSettings {
+        return requestJson(config.restPath("/api/config/workspace-settings")).toWorkspaceSettings()
+    }
+
+    fun updateWorkspaceSettings(
+        request: UpdateSupervisorWorkspaceSettingsRequest,
+    ): SupervisorWorkspaceSettings {
+        val body = JSONObject()
+            .put("devHome", request.devHome)
+        request.defaultBackend?.takeIf { it.isNotBlank() }?.let { body.put("defaultBackend", it) }
+        return requestJson(
+            config.restPath("/api/config/workspace-settings"),
+            method = "PATCH",
+            body = body.toString(),
+        ).toWorkspaceSettings()
+    }
+
     fun fetchWorkspaceTree(workspaceId: String, path: String? = null): SupervisorWorkspaceTreeNode {
         val query = buildQuery("path" to path)
         return requestJson(
@@ -702,6 +723,26 @@ private fun JSONObject.toWorkspaceSummary(): SupervisorWorkspaceSummary {
         absPath = optString("absPath"),
         isFavorite = optBoolean("isFavorite", false),
         lastOpenedAt = optNullableString("lastOpenedAt"),
+    )
+}
+
+private fun JSONObject.toRuntimeConfig(): SupervisorRuntimeConfig {
+    return SupervisorRuntimeConfig(
+        appName = optString("appName"),
+        appVersion = optString("appVersion"),
+        mode = optString("mode"),
+        host = optString("host"),
+        port = optInt("port", 0),
+        workspaceRoot = optString("workspaceRoot"),
+        environment = optString("environment"),
+    )
+}
+
+private fun JSONObject.toWorkspaceSettings(): SupervisorWorkspaceSettings {
+    return SupervisorWorkspaceSettings(
+        workspaceRoot = optString("workspaceRoot"),
+        devHome = optString("devHome"),
+        defaultBackend = optString("defaultBackend"),
     )
 }
 

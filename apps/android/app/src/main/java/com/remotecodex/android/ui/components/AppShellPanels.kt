@@ -50,6 +50,8 @@ import androidx.compose.ui.unit.dp
 import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorHomeSnapshot
 import com.remotecodex.android.api.SupervisorPluginSummary
+import com.remotecodex.android.api.SupervisorRuntimeConfig
+import com.remotecodex.android.api.SupervisorWorkspaceSettings
 import com.remotecodex.android.settings.ThemeMode
 import com.remotecodex.android.ui.model.AppShellNavigationItemPreview
 import com.remotecodex.android.ui.model.AppShellPreview
@@ -154,8 +156,16 @@ fun AppShellSettingsPanel(
     plugins: List<SupervisorPluginSummary>? = null,
     pluginsLoading: Boolean = false,
     pluginsError: String? = null,
+    runtimeConfig: SupervisorRuntimeConfig? = null,
+    workspaceSettings: SupervisorWorkspaceSettings? = null,
+    backendSettingsLoading: Boolean = false,
+    backendSettingsSaving: Boolean = false,
+    backendSettingsError: String? = null,
+    backendSettingsMessage: String? = null,
     onThemeModeSelected: (ThemeMode) -> Unit,
     onChangeConnection: () -> Unit,
+    onRefreshBackendSettings: (() -> Unit)? = null,
+    onSaveWorkspaceSettings: ((String, String?) -> Unit)? = null,
     onImportPluginManifest: (suspend (String) -> SupervisorPluginSummary)? = null,
     onRefreshPlugins: (() -> Unit)? = null,
     onSetPluginEnabled: ((String, Boolean) -> Unit)? = null,
@@ -244,35 +254,17 @@ fun AppShellSettingsPanel(
                 }
 
                 SettingsSection(title = "Backend", detail = "Default runtime target") {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(ThreadColors.SurfaceStrong)
-                            .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Text(
-                            text = appShell.defaultBackend,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(999.dp))
-                                .background(ThreadColors.Primary)
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
-                            color = ThreadColors.PrimaryForeground,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                        )
-                        Text(
-                            text = "Used as the default backend for new native thread sessions in this preview.",
-                            color = ThreadColors.ForegroundSoft,
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 3,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
+                    BackendSettingsSection(
+                        fallbackDefaultBackend = appShell.defaultBackend,
+                        runtimeConfig = runtimeConfig,
+                        workspaceSettings = workspaceSettings,
+                        loading = backendSettingsLoading,
+                        saving = backendSettingsSaving,
+                        error = backendSettingsError,
+                        message = backendSettingsMessage,
+                        onRefresh = onRefreshBackendSettings,
+                        onSaveWorkspaceSettings = onSaveWorkspaceSettings,
+                    )
                 }
 
                 SettingsSection(title = "Connection", detail = supervisorConnection.mode.label) {
@@ -497,6 +489,162 @@ private fun BackendSnapshotSummary(
         )
     }
 }
+
+@Composable
+private fun BackendSettingsSection(
+    fallbackDefaultBackend: String,
+    runtimeConfig: SupervisorRuntimeConfig?,
+    workspaceSettings: SupervisorWorkspaceSettings?,
+    loading: Boolean,
+    saving: Boolean,
+    error: String?,
+    message: String?,
+    onRefresh: (() -> Unit)?,
+    onSaveWorkspaceSettings: ((String, String?) -> Unit)?,
+) {
+    var devHomeDraft by remember(workspaceSettings?.devHome) {
+        mutableStateOf(workspaceSettings?.devHome.orEmpty())
+    }
+    var backendDraft by remember(workspaceSettings?.defaultBackend, fallbackDefaultBackend) {
+        mutableStateOf(workspaceSettings?.defaultBackend ?: fallbackDefaultBackend)
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(ThreadColors.SurfaceStrong)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            GraphBadge(
+                label = workspaceSettings?.defaultBackend ?: fallbackDefaultBackend,
+                variant = GraphBadgeVariant.Outline,
+            )
+            Text(
+                text = when {
+                    loading -> "Loading backend settings..."
+                    runtimeConfig != null -> "${runtimeConfig.appName} ${runtimeConfig.appVersion} / ${runtimeConfig.environment}"
+                    else -> "Default backend and workspace settings from the supervisor."
+                },
+                modifier = Modifier.weight(1f),
+                color = ThreadColors.ForegroundSoft,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            onRefresh?.let { refresh ->
+                GraphButton(
+                    label = if (loading) "Loading..." else "Refresh",
+                    enabled = !loading && !saving,
+                    variant = GraphButtonVariant.Secondary,
+                    size = GraphButtonSize.Small,
+                    contentDescription = "Refresh backend settings",
+                    onClick = refresh,
+                )
+            }
+        }
+        runtimeConfig?.let { config ->
+            ConnectionSettingLine(
+                label = "Runtime",
+                value = "${config.mode} ${config.host}:${config.port}",
+            )
+        }
+        ConnectionSettingLine(
+            label = "Root",
+            value = workspaceSettings?.workspaceRoot ?: runtimeConfig?.workspaceRoot ?: "Unavailable",
+        )
+        OutlinedTextField(
+            value = devHomeDraft,
+            onValueChange = { devHomeDraft = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics { contentDescription = "Workspace dev home input" },
+            label = { Text("Dev home") },
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodySmall.copy(
+                color = ThreadColors.Foreground,
+                fontFamily = FontFamily.Monospace,
+            ),
+            colors = backendTextFieldColors(),
+        )
+        OutlinedTextField(
+            value = backendDraft,
+            onValueChange = { backendDraft = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics { contentDescription = "Default backend input" },
+            label = { Text("Default backend") },
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodySmall.copy(
+                color = ThreadColors.Foreground,
+                fontFamily = FontFamily.Monospace,
+            ),
+            colors = backendTextFieldColors(),
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "Saved defaults affect new workspaces and backend selection.",
+                modifier = Modifier.weight(1f),
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            GraphButton(
+                label = if (saving) "Saving..." else "Save",
+                enabled = !loading && !saving && devHomeDraft.isNotBlank(),
+                variant = GraphButtonVariant.Default,
+                size = GraphButtonSize.Default,
+                contentDescription = "Save workspace defaults",
+                onClick = {
+                    onSaveWorkspaceSettings?.invoke(
+                        devHomeDraft.trim(),
+                        backendDraft.trim().takeIf { it.isNotBlank() },
+                    )
+                },
+            )
+        }
+        error?.let { text ->
+            Text(
+                text = text,
+                color = ThreadColors.Danger,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        message?.let { text ->
+            Text(
+                text = text,
+                color = ThreadColors.Success,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
+
+@Composable
+private fun backendTextFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = ThreadColors.Foreground,
+    unfocusedTextColor = ThreadColors.Foreground,
+    focusedContainerColor = ThreadColors.SurfaceStrong,
+    unfocusedContainerColor = ThreadColors.SurfaceStrong,
+    focusedBorderColor = ThreadColors.Primary.copy(alpha = 0.58f),
+    unfocusedBorderColor = ThreadColors.Border,
+    cursorColor = ThreadColors.Primary,
+    focusedLabelColor = ThreadColors.ForegroundSoft,
+    unfocusedLabelColor = ThreadColors.ForegroundMuted,
+)
 
 @Composable
 private fun ConnectionSettingLine(

@@ -3,6 +3,7 @@ package com.remotecodex.android.ui.screen
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -12,7 +13,9 @@ import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorConnectionMode
 import com.remotecodex.android.api.SupervisorHomeSnapshot
 import com.remotecodex.android.api.SupervisorPluginSummary
+import com.remotecodex.android.api.SupervisorRuntimeConfig
 import com.remotecodex.android.api.SupervisorThreadSummary
+import com.remotecodex.android.api.SupervisorWorkspaceSettings
 import com.remotecodex.android.api.SupervisorWorkspaceSummary
 import com.remotecodex.android.settings.ThemeMode
 import com.remotecodex.android.ui.theme.RemoteCodexTheme
@@ -84,6 +87,12 @@ class SupervisorHomeScreenTest {
         setHomeContent()
 
         composeRule.onNodeWithContentDescription("Open settings").performClick()
+        composeRule.onNodeWithText("remote-codex 0.1.0 / test").assertExists()
+        composeRule.onNodeWithText("local 127.0.0.1:8787").assertExists()
+        composeRule.onAllNodesWithText("/home/u/dev").assertCountEquals(2)
+        composeRule.onNodeWithContentDescription("Workspace dev home input").assertExists()
+        composeRule.onNodeWithContentDescription("Default backend input").assertExists()
+        composeRule.onNodeWithContentDescription("Save workspace defaults").assertExists()
         composeRule.onNodeWithText("Example Plugin").assertExists()
         composeRule.onNodeWithText("chemistry.molecule3d").assertExists()
         composeRule.onNodeWithContentDescription("Disable plugin Example Plugin").assertExists()
@@ -135,6 +144,20 @@ class SupervisorHomeScreenTest {
                     onThemeModeSelected = {},
                     onOpenThread = onOpenThread,
                     initialPlugins = listOf(examplePlugin(enabled = true)),
+                    initialRuntimeConfig = SupervisorRuntimeConfig(
+                        appName = "remote-codex",
+                        appVersion = "0.1.0",
+                        mode = "local",
+                        host = "127.0.0.1",
+                        port = 8787,
+                        workspaceRoot = "/home/u/dev",
+                        environment = "test",
+                    ),
+                    initialWorkspaceSettings = SupervisorWorkspaceSettings(
+                        workspaceRoot = "/home/u/dev",
+                        devHome = "/home/u/dev",
+                        defaultBackend = "codex",
+                    ),
                     onImportPluginManifest = {
                         examplePlugin(enabled = true)
                     },

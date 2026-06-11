@@ -47,9 +47,12 @@ import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorHomeSnapshot
 import com.remotecodex.android.api.StartSupervisorThreadRequest
 import com.remotecodex.android.api.SupervisorPluginSummary
+import com.remotecodex.android.api.SupervisorRuntimeConfig
 import com.remotecodex.android.api.SupervisorThreadSummary
+import com.remotecodex.android.api.SupervisorWorkspaceSettings
 import com.remotecodex.android.api.SupervisorWorkspaceSummary
 import com.remotecodex.android.api.UpdateSupervisorPluginRequest
+import com.remotecodex.android.api.UpdateSupervisorWorkspaceSettingsRequest
 import com.remotecodex.android.api.UpdateSupervisorWorkspaceRequest
 import com.remotecodex.android.settings.ThemeMode
 import com.remotecodex.android.ui.components.AppShellSettingsPanel
@@ -84,8 +87,11 @@ fun SupervisorHomeScreen(
     onRefreshHomeSnapshot: () -> Unit = {},
     onChangeConnection: () -> Unit,
     initialPlugins: List<SupervisorPluginSummary>? = null,
+    initialRuntimeConfig: SupervisorRuntimeConfig? = null,
+    initialWorkspaceSettings: SupervisorWorkspaceSettings? = null,
     onImportPluginManifest: (suspend (String) -> SupervisorPluginSummary)? = null,
     onSetPluginEnabled: (suspend (String, Boolean) -> SupervisorPluginSummary)? = null,
+    onSaveWorkspaceSettings: (suspend (String, String?) -> SupervisorWorkspaceSettings)? = null,
     modifier: Modifier = Modifier,
 ) {
     val appShell = ThreadPreviewSample.appShell
@@ -100,9 +106,71 @@ fun SupervisorHomeScreen(
     var plugins by remember(supervisorConnection) { mutableStateOf(initialPlugins) }
     var pluginsLoading by remember { mutableStateOf(false) }
     var pluginsError by remember { mutableStateOf<String?>(null) }
+    var runtimeConfig by remember(supervisorConnection) { mutableStateOf(initialRuntimeConfig) }
+    var workspaceSettings by remember(supervisorConnection) { mutableStateOf(initialWorkspaceSettings) }
+    var backendSettingsLoading by remember { mutableStateOf(false) }
+    var backendSettingsSaving by remember { mutableStateOf(false) }
+    var backendSettingsError by remember { mutableStateOf<String?>(null) }
+    var backendSettingsMessage by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(initialPlugins) {
         if (initialPlugins != null) {
             plugins = initialPlugins
+        }
+    }
+    LaunchedEffect(initialRuntimeConfig, initialWorkspaceSettings) {
+        initialRuntimeConfig?.let { runtimeConfig = it }
+        initialWorkspaceSettings?.let { workspaceSettings = it }
+    }
+    fun refreshBackendSettings() {
+        backendSettingsLoading = true
+        backendSettingsError = null
+        backendSettingsMessage = null
+        coroutineScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    client.fetchRuntimeConfig() to client.fetchWorkspaceSettings()
+                }
+            }
+            backendSettingsLoading = false
+            result
+                .onSuccess { (runtime, settings) ->
+                    runtimeConfig = runtime
+                    workspaceSettings = settings
+                }
+                .onFailure { error ->
+                    backendSettingsError = error.message ?: "Backend settings failed."
+                }
+        }
+    }
+    fun saveWorkspaceSettings(devHome: String, defaultBackend: String?) {
+        backendSettingsSaving = true
+        backendSettingsError = null
+        backendSettingsMessage = null
+        coroutineScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val action = onSaveWorkspaceSettings
+                    if (action != null) {
+                        action(devHome, defaultBackend)
+                    } else {
+                        client.updateWorkspaceSettings(
+                            UpdateSupervisorWorkspaceSettingsRequest(
+                                devHome = devHome,
+                                defaultBackend = defaultBackend,
+                            ),
+                        )
+                    }
+                }
+            }
+            backendSettingsSaving = false
+            result
+                .onSuccess { settings ->
+                    workspaceSettings = settings
+                    backendSettingsMessage = "Workspace defaults saved."
+                }
+                .onFailure { error ->
+                    backendSettingsError = error.message ?: "Workspace defaults save failed."
+                }
         }
     }
     fun refreshPlugins() {
@@ -152,6 +220,13 @@ fun SupervisorHomeScreen(
         }
     }
     LaunchedEffect(settingsOpen, supervisorConnection) {
+        if (
+            settingsOpen &&
+            (runtimeConfig == null || workspaceSettings == null) &&
+            !backendSettingsLoading
+        ) {
+            refreshBackendSettings()
+        }
         if (settingsOpen && plugins == null && !pluginsLoading) {
             refreshPlugins()
         }
@@ -387,8 +462,18 @@ fun SupervisorHomeScreen(
                 plugins = plugins,
                 pluginsLoading = pluginsLoading,
                 pluginsError = pluginsError,
+                runtimeConfig = runtimeConfig,
+                workspaceSettings = workspaceSettings,
+                backendSettingsLoading = backendSettingsLoading,
+                backendSettingsSaving = backendSettingsSaving,
+                backendSettingsError = backendSettingsError,
+                backendSettingsMessage = backendSettingsMessage,
                 onThemeModeSelected = onThemeModeSelected,
                 onChangeConnection = onChangeConnection,
+                onRefreshBackendSettings = { refreshBackendSettings() },
+                onSaveWorkspaceSettings = { devHome, defaultBackend ->
+                    saveWorkspaceSettings(devHome, defaultBackend)
+                },
                 onImportPluginManifest = onImportPluginManifest ?: { manifestJson ->
                     withContext(Dispatchers.IO) {
                         client.importPlugin(
