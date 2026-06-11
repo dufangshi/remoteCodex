@@ -28,6 +28,8 @@ import com.remotecodex.android.api.SupervisorApiClient
 import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorEventSocketClient
 import com.remotecodex.android.api.SupervisorHomeSnapshot
+import com.remotecodex.android.api.SupervisorShellEvent
+import com.remotecodex.android.api.SupervisorSocketConnection
 import com.remotecodex.android.api.SupervisorWorkspaceTreeNode
 import com.remotecodex.android.api.UpdateThreadGoalRequest
 import com.remotecodex.android.api.UpdateThreadRequest
@@ -37,6 +39,7 @@ import com.remotecodex.android.ui.components.GraphButton
 import com.remotecodex.android.ui.components.GraphButtonSize
 import com.remotecodex.android.ui.components.GraphButtonVariant
 import com.remotecodex.android.ui.model.PendingRequestPreview
+import com.remotecodex.android.ui.model.ShellPreview
 import com.remotecodex.android.ui.model.ThreadDetailPreview
 import com.remotecodex.android.ui.presentation.buildThreadDetailPreviewFromSupervisor
 import com.remotecodex.android.ui.sample.ThreadPreviewSample
@@ -78,6 +81,9 @@ fun ThreadDetailScreen(
     var pendingDelete by remember(threadId) { mutableStateOf(false) }
     var threadActionBusy by remember(threadId) { mutableStateOf(false) }
     var threadActionError by remember(threadId) { mutableStateOf<String?>(null) }
+    var socketConnection by remember(threadId, supervisorConnection) {
+        mutableStateOf<SupervisorSocketConnection?>(null)
+    }
     var pendingRequestResponse by remember(threadId) {
         mutableStateOf<PendingRequestResponse?>(null)
     }
@@ -108,10 +114,22 @@ fun ThreadDetailScreen(
     }
 
     LaunchedEffect(threadId, eventSocketClient) {
-        eventSocketClient.threadEvents().collect { event ->
-            if (event.threadId == threadId) {
-                refreshNonce += 1
-            }
+        val connection = eventSocketClient.connect(
+            onThreadEvent = { event ->
+                if (event.threadId == threadId) {
+                    refreshNonce += 1
+                }
+            },
+            onShellEvent = { event ->
+                detail = detail?.withShellEvent(event)
+            },
+        )
+        socketConnection = connection
+        try {
+            kotlinx.coroutines.awaitCancellation()
+        } finally {
+            socketConnection = null
+            connection.close()
         }
     }
 
@@ -407,6 +425,30 @@ fun ThreadDetailScreen(
             onTerminateShell = { shellId ->
                 pendingTerminateShellId = shellId
             },
+            onSendShellInput = { data ->
+                detail?.shellPreview?.let { shell ->
+                    val shellId = shell.activeProcessId
+                    val viewerId = shell.viewerId
+                    val connection = socketConnection
+                    if (viewerId.isNullOrBlank()) {
+                        connection?.attachShell(shellId)
+                    } else {
+                        connection?.sendShellInput(shellId, viewerId, data)
+                    }
+                }
+            },
+            onSendShellControl = { data ->
+                detail?.shellPreview?.let { shell ->
+                    val shellId = shell.activeProcessId
+                    val viewerId = shell.viewerId
+                    val connection = socketConnection
+                    if (viewerId.isNullOrBlank()) {
+                        connection?.attachShell(shellId)
+                    } else {
+                        connection?.sendShellInput(shellId, viewerId, data)
+                    }
+                }
+            },
             onSelectWorkspaceFile = { path ->
                 pendingWorkspaceFilePath = path
             },
@@ -498,6 +540,53 @@ private fun SupervisorWorkspaceTreeNode.firstFilePath(): String? {
         return path
     }
     return children.firstNotNullOfOrNull { child -> child.firstFilePath() }
+}
+
+private fun ThreadDetailPreview.withShellEvent(event: SupervisorShellEvent): ThreadDetailPreview {
+    val shell = shellPreview
+    if (event.shellId != shell.activeProcessId) {
+        return this
+    }
+    val nextShell = when (event.type) {
+        "shell.connected" -> shell.copy(
+            viewerId = event.viewerId ?: shell.viewerId,
+            connectionLabel = "WS attached",
+            inputEnabled = true,
+        )
+        "shell.status" -> shell.copy(
+            status = event.message ?: event.type.removePrefix("shell."),
+            connectionLabel = "WS status",
+            inputEnabled = event.viewerId != null || shell.viewerId != null || shell.inputEnabled,
+        )
+        "shell.output" -> {
+            val output = event.data.orEmpty()
+            val nextLines = if (event.replace) {
+                output.lines()
+            } else {
+                (shell.lines + output.lines()).takeLast(300)
+            }.filter { it.isNotEmpty() }
+            shell.copy(
+                lines = nextLines.ifEmpty { shell.lines },
+                commandRunning = event.isCommandRunning ?: shell.commandRunning,
+                connectionLabel = "WS streaming",
+                inputEnabled = true,
+            )
+        }
+        "shell.error" -> shell.copy(
+            lines = (shell.lines + "Shell error: ${event.message ?: "unknown"}").takeLast(300),
+            connectionLabel = "WS error",
+        )
+        "shell.detached",
+        "shell.exited",
+        -> shell.copy(
+            status = event.type.removePrefix("shell.").replaceFirstChar { it.uppercase() },
+            connectionLabel = "WS ${event.type.removePrefix("shell.")}",
+            inputEnabled = false,
+            commandRunning = false,
+        )
+        else -> shell
+    }
+    return copy(shellPreview = nextShell)
 }
 
 @Composable

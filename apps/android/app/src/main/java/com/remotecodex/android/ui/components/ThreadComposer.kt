@@ -161,6 +161,8 @@ fun ThreadComposer(
     onUpdateSettings: ((UpdateThreadSettingsRequest) -> Unit)? = null,
     onUpdateGoal: ((UpdateThreadGoalRequest) -> Unit)? = null,
     onCompactThread: (() -> Unit)? = null,
+    onSendShellInput: ((String) -> Unit)? = null,
+    onSendShellControl: ((String) -> Unit)? = null,
 ) {
     var openMenu by remember { mutableStateOf<ComposerMenu?>(null) }
     var activeViewPreview by remember(composer.activeView) { mutableStateOf(composer.activeView) }
@@ -653,16 +655,26 @@ fun ThreadComposer(
             onPromptInterrupt = stopCurrentTurnPreview,
             onShellInterrupt = {
                 if (shellPromptInputState?.interruptEnabled == true) {
-                    shellPromptPreviewStatus = "Sent Ctrl-C preview"
+                    if (onSendShellControl != null) {
+                        onSendShellControl("\u0003")
+                        shellPromptPreviewStatus = null
+                    } else {
+                        shellPromptPreviewStatus = "Sent Ctrl-C preview"
+                    }
                 }
             },
             onShellSend = {
                 if (shellPromptInputState?.sendEnabled == true) {
                     val command = shellDraft.trim()
-                    shellPromptPreviewStatus = if (command.isEmpty()) {
-                        "Shell input preview sent"
+                    if (onSendShellInput != null) {
+                        onSendShellInput(if (command.isEmpty()) "\n" else "$command\n")
+                        shellPromptPreviewStatus = null
                     } else {
-                        "Shell input preview sent: $command"
+                        shellPromptPreviewStatus = if (command.isEmpty()) {
+                            "Shell input preview sent"
+                        } else {
+                            "Shell input preview sent: $command"
+                        }
                     }
                     shellDraft = ""
                 }

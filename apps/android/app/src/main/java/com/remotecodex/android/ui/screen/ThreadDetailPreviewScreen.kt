@@ -104,6 +104,8 @@ fun ThreadDetailSurface(
     onCompactThread: (() -> Unit)? = null,
     onCreateShell: (() -> Unit)? = null,
     onTerminateShell: ((String) -> Unit)? = null,
+    onSendShellInput: ((String) -> Unit)? = null,
+    onSendShellControl: ((String) -> Unit)? = null,
     onSelectWorkspaceFile: ((String) -> Unit)? = null,
     onLoadMoreWorkspacePreview: (() -> Unit)? = null,
     onDenyPendingRequest: (PendingRequestPreview) -> Unit = {},
@@ -209,6 +211,8 @@ fun ThreadDetailSurface(
                     onUpdateSettings = onUpdateThreadSettings,
                     onUpdateGoal = onUpdateThreadGoal,
                     onCompactThread = onCompactThread,
+                    onSendShellInput = onSendShellInput,
+                    onSendShellControl = onSendShellControl,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(start = contentStartPadding)

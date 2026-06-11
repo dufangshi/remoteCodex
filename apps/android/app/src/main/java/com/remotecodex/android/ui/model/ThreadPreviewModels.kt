@@ -807,6 +807,7 @@ data class ShellPreview(
     val controls: List<String>,
     val processes: List<ShellProcessPreview>,
     val activeProcessId: String,
+    val viewerId: String? = null,
     val connectionLabel: String,
     val inputEnabled: Boolean,
     val commandRunning: Boolean,

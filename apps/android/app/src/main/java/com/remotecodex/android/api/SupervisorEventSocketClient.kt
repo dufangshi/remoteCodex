@@ -10,6 +10,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
 import java.io.Closeable
+import java.time.Instant
 
 class SupervisorEventSocketClient(
     private val config: SupervisorConnectionConfig,
@@ -27,20 +28,73 @@ class SupervisorEventSocketClient(
 
     fun connect(
         onThreadEvent: (SupervisorThreadEvent) -> Unit,
+        onShellEvent: (SupervisorShellEvent) -> Unit = {},
         onState: (SupervisorSocketState) -> Unit = {},
-    ): Closeable {
+    ): SupervisorSocketConnection {
         val requestBuilder = Request.Builder().url(config.websocketUrl())
         config.authToken?.takeIf { it.isNotBlank() }?.let { token ->
             requestBuilder.header("Authorization", "Bearer $token")
         }
         val listener = SupervisorEventSocketListener(
             onThreadEvent = onThreadEvent,
+            onShellEvent = onShellEvent,
             onState = onState,
         )
         val socket = okHttpClient.newWebSocket(requestBuilder.build(), listener)
-        return Closeable {
+        return SupervisorSocketConnection(socket)
+    }
+}
+
+class SupervisorSocketConnection internal constructor(
+    private val socket: WebSocket,
+) : Closeable {
+    fun attachShell(shellId: String, cols: Int = 120, rows: Int = 32) {
+        send(
+            JSONObject()
+                .put("type", "shell.attach")
+                .put("shellId", shellId)
+                .put("cols", cols)
+                .put("rows", rows),
+        )
+    }
+
+    fun sendShellInput(shellId: String, viewerId: String, data: String) {
+        send(
+            JSONObject()
+                .put("type", "shell.input")
+                .put("shellId", shellId)
+                .put("viewerId", viewerId)
+                .put("data", data),
+        )
+    }
+
+    fun resizeShell(shellId: String, viewerId: String, cols: Int, rows: Int) {
+        send(
+            JSONObject()
+                .put("type", "shell.resize")
+                .put("shellId", shellId)
+                .put("viewerId", viewerId)
+                .put("cols", cols)
+                .put("rows", rows),
+        )
+    }
+
+    fun clearShell(shellId: String, viewerId: String) {
+        send(
+            JSONObject()
+                .put("type", "shell.clear")
+                .put("shellId", shellId)
+                .put("viewerId", viewerId),
+        )
+    }
+
+    private fun send(message: JSONObject) {
+        message.put("timestamp", Instant.now().toString())
+        socket.send(message.toString())
+    }
+
+    override fun close() {
             socket.close(1000, "Android thread detail closed")
-        }
     }
 }
 
@@ -48,6 +102,18 @@ data class SupervisorThreadEvent(
     val type: String,
     val threadId: String,
     val timestamp: String?,
+)
+
+data class SupervisorShellEvent(
+    val type: String,
+    val shellId: String,
+    val threadId: String?,
+    val timestamp: String?,
+    val viewerId: String?,
+    val data: String?,
+    val replace: Boolean,
+    val isCommandRunning: Boolean?,
+    val message: String?,
 )
 
 enum class SupervisorSocketState {
@@ -72,8 +138,34 @@ internal fun parseSupervisorThreadEvent(rawMessage: String): SupervisorThreadEve
     )
 }
 
+internal fun parseSupervisorShellEvent(rawMessage: String): SupervisorShellEvent? {
+    val json = runCatching { JSONObject(rawMessage) }.getOrNull() ?: return null
+    val type = json.optString("type").takeIf { it.startsWith("shell.") } ?: return null
+    val shellId = json.optString("shellId").takeIf { it.isNotBlank() } ?: return null
+    val payload = json.optJSONObject("payload") ?: return null
+    if (payload.length() == 0) {
+        return null
+    }
+    return SupervisorShellEvent(
+        type = type,
+        shellId = shellId,
+        threadId = payload.optNullableString("threadId"),
+        timestamp = json.optNullableString("timestamp"),
+        viewerId = payload.optNullableString("viewerId"),
+        data = payload.optNullableString("data"),
+        replace = payload.optBoolean("replace", false),
+        isCommandRunning = if (payload.has("isCommandRunning") && !payload.isNull("isCommandRunning")) {
+            payload.optBoolean("isCommandRunning")
+        } else {
+            null
+        },
+        message = payload.optNullableString("message"),
+    )
+}
+
 private class SupervisorEventSocketListener(
     private val onThreadEvent: (SupervisorThreadEvent) -> Unit,
+    private val onShellEvent: (SupervisorShellEvent) -> Unit,
     private val onState: (SupervisorSocketState) -> Unit,
 ) : WebSocketListener() {
     init {
@@ -86,6 +178,7 @@ private class SupervisorEventSocketListener(
 
     override fun onMessage(webSocket: WebSocket, text: String) {
         parseSupervisorThreadEvent(text)?.let(onThreadEvent)
+        parseSupervisorShellEvent(text)?.let(onShellEvent)
     }
 
     override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
