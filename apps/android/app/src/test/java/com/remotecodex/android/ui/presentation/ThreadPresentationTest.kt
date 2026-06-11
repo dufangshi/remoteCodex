@@ -2,6 +2,7 @@ package com.remotecodex.android.ui.presentation
 
 import com.remotecodex.android.ui.model.HistoryItemKind
 import com.remotecodex.android.ui.model.PlanStepStatus
+import com.remotecodex.android.ui.model.ComposerActiveView
 import com.remotecodex.android.ui.model.ThreadStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -67,6 +68,43 @@ class ThreadPresentationTest {
         assertEquals("Plan step status: Failed", planStepStatusAccessibilityLabel(PlanStepStatus.Failed))
         assertEquals("Plan step status: Pending", planStepStatusAccessibilityLabel(PlanStepStatus.Pending))
         assertEquals("Plan step status: Unknown", planStepStatusAccessibilityLabel(PlanStepStatus.Unknown))
+    }
+
+    @Test
+    fun buildsComposerStatusStripForRunningChat() {
+        assertEquals(
+            listOf(
+                ComposerStatusChipModel("Running", ComposerStatusTone.Running),
+                ComposerStatusChipModel("Following", ComposerStatusTone.Success),
+                ComposerStatusChipModel("Chat", ComposerStatusTone.Neutral),
+                ComposerStatusChipModel("workspace write", ComposerStatusTone.Neutral),
+            ),
+            buildComposerStatusStrip(
+                threadConnected = true,
+                busy = true,
+                followTail = true,
+                activeView = ComposerActiveView.Chat,
+                workspaceModeLabel = "workspace write",
+            ),
+        )
+    }
+
+    @Test
+    fun buildsComposerStatusStripForDisconnectedShell() {
+        assertEquals(
+            listOf(
+                ComposerStatusChipModel("Offline", ComposerStatusTone.Danger),
+                ComposerStatusChipModel("Paused", ComposerStatusTone.Neutral),
+                ComposerStatusChipModel("Shell", ComposerStatusTone.Neutral),
+            ),
+            buildComposerStatusStrip(
+                threadConnected = false,
+                busy = false,
+                followTail = false,
+                activeView = ComposerActiveView.Shell,
+                workspaceModeLabel = " ",
+            ),
+        )
     }
 
     @Test

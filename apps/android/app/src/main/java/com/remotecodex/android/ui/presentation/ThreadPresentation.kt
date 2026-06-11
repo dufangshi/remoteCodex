@@ -4,6 +4,7 @@ import com.remotecodex.android.ui.model.HistoryItemKind
 import com.remotecodex.android.ui.model.PlanStepStatus
 import com.remotecodex.android.ui.model.ThreadStatus
 import com.remotecodex.android.ui.model.ToolStatus
+import com.remotecodex.android.ui.model.ComposerActiveView
 
 enum class MessageStatusTone {
     Neutral,
@@ -50,6 +51,58 @@ data class ArtifactHistorySummary(
     val typeLabel: String,
     val rendererLabel: String?,
 )
+
+enum class ComposerStatusTone {
+    Neutral,
+    Running,
+    Success,
+    Danger,
+    Warning,
+}
+
+data class ComposerStatusChipModel(
+    val label: String,
+    val tone: ComposerStatusTone,
+)
+
+fun buildComposerStatusStrip(
+    threadConnected: Boolean,
+    busy: Boolean,
+    followTail: Boolean,
+    activeView: ComposerActiveView,
+    workspaceModeLabel: String?,
+): List<ComposerStatusChipModel> {
+    val connectionChip = when {
+        !threadConnected && busy -> ComposerStatusChipModel("Connecting", ComposerStatusTone.Warning)
+        !threadConnected -> ComposerStatusChipModel("Offline", ComposerStatusTone.Danger)
+        busy -> ComposerStatusChipModel("Running", ComposerStatusTone.Running)
+        else -> ComposerStatusChipModel("Connected", ComposerStatusTone.Success)
+    }
+    val followChip = ComposerStatusChipModel(
+        label = if (followTail) "Following" else "Paused",
+        tone = if (followTail) ComposerStatusTone.Success else ComposerStatusTone.Neutral,
+    )
+    val viewChip = ComposerStatusChipModel(
+        label = when (activeView) {
+            ComposerActiveView.Chat -> "Chat"
+            ComposerActiveView.Shell -> "Shell"
+        },
+        tone = ComposerStatusTone.Neutral,
+    )
+    val workspaceChip = workspaceModeLabel
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?.let { ComposerStatusChipModel(it, ComposerStatusTone.Neutral) }
+
+    return buildList {
+        add(connectionChip)
+        add(followChip)
+        add(viewChip)
+        if (workspaceChip != null) {
+            add(workspaceChip)
+        }
+    }
+}
 
 fun threadStatusLabel(status: ThreadStatus): String {
     return when (status) {

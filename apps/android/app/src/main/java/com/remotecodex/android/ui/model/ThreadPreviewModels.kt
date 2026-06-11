@@ -153,7 +153,21 @@ data class ThreadDetailPreview(
     val pendingRequest: PendingRequestPreview,
     val workspacePreview: WorkspacePreview,
     val shellPreview: ShellPreview,
+    val composer: ComposerPreview = ComposerPreview(),
 )
+
+data class ComposerPreview(
+    val activeView: ComposerActiveView = ComposerActiveView.Chat,
+    val busy: Boolean = true,
+    val threadConnected: Boolean = true,
+    val followTail: Boolean = true,
+    val workspaceModeLabel: String = "workspace write",
+)
+
+enum class ComposerActiveView {
+    Chat,
+    Shell,
+}
 
 data class TimelineAuxiliaryPreview(
     val canLoadEarlier: Boolean = false,

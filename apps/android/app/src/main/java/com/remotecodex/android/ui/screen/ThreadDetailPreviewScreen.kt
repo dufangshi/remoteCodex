@@ -102,6 +102,7 @@ fun ThreadDetailPreviewScreen(
         }
         if (selectedView == ThreadSurfaceView.Chat) {
             ThreadComposer(
+                composer = detail.composer,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding(),

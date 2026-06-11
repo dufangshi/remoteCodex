@@ -31,14 +31,26 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.remotecodex.android.ui.model.ComposerPreview
+import com.remotecodex.android.ui.presentation.ComposerStatusChipModel
+import com.remotecodex.android.ui.presentation.ComposerStatusTone
+import com.remotecodex.android.ui.presentation.buildComposerStatusStrip
 import com.remotecodex.android.ui.theme.ThreadColors
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ThreadComposer(
     modifier: Modifier = Modifier,
+    composer: ComposerPreview = ComposerPreview(),
 ) {
     var openMenu by remember { mutableStateOf<ComposerMenu?>(null) }
+    val statusChips = buildComposerStatusStrip(
+        threadConnected = composer.threadConnected,
+        busy = composer.busy,
+        followTail = composer.followTail,
+        activeView = composer.activeView,
+        workspaceModeLabel = composer.workspaceModeLabel,
+    )
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -93,6 +105,7 @@ fun ThreadComposer(
             )
         }
         ComposerInputGroupPreview()
+        ComposerStatusStrip(chips = statusChips)
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -100,13 +113,6 @@ fun ThreadComposer(
         ) {
             ComposerModeChip(label = "Plan", selected = false)
             ComposerModeChip(label = "2 files", selected = true)
-            Text(
-                text = "workspace write",
-                color = ThreadColors.ForegroundSoft,
-                style = MaterialTheme.typography.labelMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
             Box(modifier = Modifier.weight(1f))
             ComposerViewToggleButton(
                 icon = ComposerToolIcon.Terminal,
@@ -114,6 +120,68 @@ fun ThreadComposer(
             )
             ComposerSendButton()
         }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ComposerStatusStrip(chips: List<ComposerStatusChipModel>) {
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        chips.forEach { chip ->
+            ComposerStatusChip(chip = chip)
+        }
+    }
+}
+
+@Composable
+private fun ComposerStatusChip(chip: ComposerStatusChipModel) {
+    val foreground = when (chip.tone) {
+        ComposerStatusTone.Neutral -> ThreadColors.ForegroundMuted
+        ComposerStatusTone.Running -> ThreadColors.Warning
+        ComposerStatusTone.Success -> ThreadColors.Success
+        ComposerStatusTone.Danger -> ThreadColors.Danger
+        ComposerStatusTone.Warning -> ThreadColors.Warning
+    }
+    val background = when (chip.tone) {
+        ComposerStatusTone.Neutral -> ThreadColors.SurfaceStrong
+        ComposerStatusTone.Running -> ThreadColors.WarningSoft.copy(alpha = 0.58f)
+        ComposerStatusTone.Success -> ThreadColors.SuccessSoft.copy(alpha = 0.56f)
+        ComposerStatusTone.Danger -> ThreadColors.DangerSoft.copy(alpha = 0.58f)
+        ComposerStatusTone.Warning -> ThreadColors.WarningSoft.copy(alpha = 0.58f)
+    }
+    val border = when (chip.tone) {
+        ComposerStatusTone.Neutral -> ThreadColors.Border
+        else -> foreground.copy(alpha = 0.38f)
+    }
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(background)
+            .border(1.dp, border, RoundedCornerShape(999.dp))
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        if (chip.tone != ComposerStatusTone.Neutral) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(foreground),
+            )
+        }
+        Text(
+            text = chip.label,
+            color = foreground,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
