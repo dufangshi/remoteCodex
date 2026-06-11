@@ -132,7 +132,7 @@ fun parseRichMessageBlocks(content: String): List<RichMessageBlock> {
             continue
         }
 
-        val heading = Regex("^(#{1,4})\\s+(.+)$").matchEntire(trimmed.trim())
+        val heading = Regex("^(#{1,6})\\s+(.+)$").matchEntire(trimmed.trim())
         if (heading != null) {
             flushParagraph()
             blocks += RichMessageBlock.Heading(

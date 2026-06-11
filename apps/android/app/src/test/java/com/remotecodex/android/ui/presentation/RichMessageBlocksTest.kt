@@ -31,6 +31,34 @@ class RichMessageBlocksTest {
     }
 
     @Test
+    fun parsesAllWebMarkdownHeadingLevels() {
+        val blocks = parseRichMessageBlocks(
+            """
+            # One
+            ## Two
+            ### Three
+            #### Four
+            ##### Five
+            ###### Six
+            ####### Not a heading
+            """.trimIndent(),
+        )
+
+        assertEquals(
+            listOf(
+                RichMessageBlock.Heading(level = 1, text = "One"),
+                RichMessageBlock.Heading(level = 2, text = "Two"),
+                RichMessageBlock.Heading(level = 3, text = "Three"),
+                RichMessageBlock.Heading(level = 4, text = "Four"),
+                RichMessageBlock.Heading(level = 5, text = "Five"),
+                RichMessageBlock.Heading(level = 6, text = "Six"),
+                RichMessageBlock.Paragraph("####### Not a heading"),
+            ),
+            blocks,
+        )
+    }
+
+    @Test
     fun parsesGfmBlocks() {
         val blocks = parseRichMessageBlocks(
             """
