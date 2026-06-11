@@ -36,11 +36,13 @@ import com.remotecodex.android.ui.presentation.ComposerActionState
 import com.remotecodex.android.ui.presentation.ComposerContextUsageState
 import com.remotecodex.android.ui.presentation.ComposerJumpLatestState
 import com.remotecodex.android.ui.presentation.ComposerPrimaryActionKind
+import com.remotecodex.android.ui.presentation.ComposerSettingsState
 import com.remotecodex.android.ui.presentation.ComposerStatusChipModel
 import com.remotecodex.android.ui.presentation.ComposerStatusTone
 import com.remotecodex.android.ui.presentation.buildComposerActionState
 import com.remotecodex.android.ui.presentation.buildComposerContextUsageState
 import com.remotecodex.android.ui.presentation.buildComposerJumpLatestState
+import com.remotecodex.android.ui.presentation.buildComposerSettingsState
 import com.remotecodex.android.ui.presentation.buildComposerStatusStrip
 import com.remotecodex.android.ui.theme.ThreadColors
 
@@ -69,6 +71,15 @@ fun ThreadComposer(
         followTail = composer.followTail,
     )
     val contextState = buildComposerContextUsageState(composer.context)
+    val settingsState = buildComposerSettingsState(
+        context = composer.context,
+        reasoningEffort = composer.reasoningEffort,
+        supportedReasoningEffortCount = composer.supportedReasoningEffortCount,
+        settingsBusy = composer.settingsBusy,
+        fastMode = composer.fastMode,
+        planModeAvailable = composer.planModeAvailable,
+        planModeActive = composer.planModeActive,
+    )
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -112,14 +123,16 @@ fun ThreadComposer(
             )
             Box(modifier = Modifier.weight(1f))
             InlineToggle(
-                label = contextState.modelLabel,
+                label = settingsState.modelLabel,
                 selected = openMenu == ComposerMenu.Model,
+                enabled = settingsState.modelEnabled,
                 onClick = { openMenu = openMenu.toggle(ComposerMenu.Model) },
                 modifier = Modifier.weight(1.25f, fill = false),
             )
             InlineToggle(
-                label = "medium",
+                label = settingsState.effortLabel,
                 selected = openMenu == ComposerMenu.Effort,
+                enabled = settingsState.effortEnabled,
                 onClick = { openMenu = openMenu.toggle(ComposerMenu.Effort) },
             )
         }
@@ -130,7 +143,9 @@ fun ThreadComposer(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            ComposerModeChip(label = "Plan", selected = false)
+            if (settingsState.planVisible) {
+                ComposerModeChip(label = "Plan", selected = settingsState.planSelected)
+            }
             ComposerModeChip(label = "2 files", selected = true)
             Box(modifier = Modifier.weight(1f))
             ComposerViewToggleButton(
@@ -640,17 +655,19 @@ private fun InlineToggle(
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     val background = if (selected) ThreadColors.SurfaceStrong else ThreadColors.Panel
+    val foreground = if (enabled) ThreadColors.ForegroundSoft else ThreadColors.ForegroundMuted.copy(alpha = 0.62f)
     Text(
         text = label,
         modifier = modifier
             .clip(RoundedCornerShape(999.dp))
             .background(background)
             .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
-            .clickable(onClick = onClick)
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 9.dp, vertical = 7.dp),
-        color = ThreadColors.ForegroundSoft,
+        color = foreground,
         style = MaterialTheme.typography.labelSmall,
         fontWeight = FontWeight.SemiBold,
         maxLines = 1,

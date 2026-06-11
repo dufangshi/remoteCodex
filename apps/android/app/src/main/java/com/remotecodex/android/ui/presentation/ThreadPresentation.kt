@@ -95,6 +95,56 @@ data class ComposerContextUsageState(
     val available: Boolean,
 )
 
+data class ComposerSettingsState(
+    val modelLabel: String,
+    val modelEnabled: Boolean,
+    val effortLabel: String,
+    val effortEnabled: Boolean,
+    val effortTitle: String,
+    val planVisible: Boolean,
+    val planSelected: Boolean,
+)
+
+fun buildComposerSettingsState(
+    context: ComposerContextPreview,
+    reasoningEffort: String?,
+    supportedReasoningEffortCount: Int,
+    settingsBusy: Boolean,
+    fastMode: Boolean,
+    planModeAvailable: Boolean,
+    planModeActive: Boolean,
+): ComposerSettingsState {
+    val supportedEfforts = supportedReasoningEffortCount.coerceAtLeast(0)
+    val modelLabel = context.model.takeIf { it.isNotBlank() } ?: "Select model"
+    val modelEnabled = !settingsBusy
+    val effortEnabled = modelEnabled && supportedEfforts > 0
+    val effortTitle = when {
+        fastMode -> "Fast mode is on. Turn it off from the slash toolbox to edit reasoning."
+        supportedEfforts == 0 -> "The selected model does not expose adjustable reasoning effort."
+        else -> "Select reasoning effort"
+    }
+
+    return ComposerSettingsState(
+        modelLabel = modelLabel,
+        modelEnabled = modelEnabled,
+        effortLabel = formatReasoningEffortLabel(reasoningEffort),
+        effortEnabled = effortEnabled,
+        effortTitle = effortTitle,
+        planVisible = planModeAvailable,
+        planSelected = planModeAvailable && planModeActive,
+    )
+}
+
+fun formatReasoningEffortLabel(value: String?): String {
+    val normalized = value?.trim().orEmpty()
+    if (normalized.isEmpty()) {
+        return "Auto"
+    }
+    return normalized.replaceFirstChar { char ->
+        if (char.isLowerCase()) char.titlecase() else char.toString()
+    }
+}
+
 fun buildComposerContextUsageState(context: ComposerContextPreview): ComposerContextUsageState {
     val available = context.availability == ComposerContextAvailability.Available &&
         context.modelContextWindow > 0

@@ -259,6 +259,78 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun buildsEnabledComposerSettingsState() {
+        assertEquals(
+            ComposerSettingsState(
+                modelLabel = "gpt-test",
+                modelEnabled = true,
+                effortLabel = "Medium",
+                effortEnabled = true,
+                effortTitle = "Select reasoning effort",
+                planVisible = true,
+                planSelected = true,
+            ),
+            buildComposerSettingsState(
+                context = ComposerContextPreview(model = "gpt-test"),
+                reasoningEffort = "medium",
+                supportedReasoningEffortCount = 3,
+                settingsBusy = false,
+                fastMode = false,
+                planModeAvailable = true,
+                planModeActive = true,
+            ),
+        )
+    }
+
+    @Test
+    fun buildsFastModeComposerSettingsState() {
+        assertEquals(
+            ComposerSettingsState(
+                modelLabel = "gpt-test",
+                modelEnabled = true,
+                effortLabel = "High",
+                effortEnabled = true,
+                effortTitle = "Fast mode is on. Turn it off from the slash toolbox to edit reasoning.",
+                planVisible = false,
+                planSelected = false,
+            ),
+            buildComposerSettingsState(
+                context = ComposerContextPreview(model = "gpt-test"),
+                reasoningEffort = "high",
+                supportedReasoningEffortCount = 3,
+                settingsBusy = false,
+                fastMode = true,
+                planModeAvailable = false,
+                planModeActive = true,
+            ),
+        )
+    }
+
+    @Test
+    fun disablesComposerSettingsWhenNoEffortsOrBusy() {
+        assertEquals(
+            ComposerSettingsState(
+                modelLabel = "Select model",
+                modelEnabled = false,
+                effortLabel = "Auto",
+                effortEnabled = false,
+                effortTitle = "The selected model does not expose adjustable reasoning effort.",
+                planVisible = true,
+                planSelected = false,
+            ),
+            buildComposerSettingsState(
+                context = ComposerContextPreview(model = ""),
+                reasoningEffort = null,
+                supportedReasoningEffortCount = 0,
+                settingsBusy = true,
+                fastMode = false,
+                planModeAvailable = true,
+                planModeActive = false,
+            ),
+        )
+    }
+
+    @Test
     fun buildsStructuredFileChangeSummarySegments() {
         assertEquals(
             listOf(

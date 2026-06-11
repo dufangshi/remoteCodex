@@ -164,6 +164,12 @@ data class ComposerPreview(
     val canInterrupt: Boolean = true,
     val workspaceModeLabel: String = "workspace write",
     val context: ComposerContextPreview = ComposerContextPreview(),
+    val reasoningEffort: String = "medium",
+    val supportedReasoningEffortCount: Int = 3,
+    val settingsBusy: Boolean = false,
+    val fastMode: Boolean = false,
+    val planModeAvailable: Boolean = true,
+    val planModeActive: Boolean = false,
 )
 
 data class ComposerContextPreview(
