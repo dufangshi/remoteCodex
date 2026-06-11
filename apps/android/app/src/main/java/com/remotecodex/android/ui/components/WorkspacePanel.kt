@@ -51,6 +51,7 @@ import com.remotecodex.android.ui.presentation.toolStatusLabel
 import com.remotecodex.android.ui.theme.ThreadColors
 import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.max
 import kotlin.math.sin
 
 @Composable
@@ -192,6 +193,11 @@ private fun ToolUsageSurface(
     events: List<ToolCallPreview>,
     modifier: Modifier = Modifier,
 ) {
+    if (events.isEmpty()) {
+        ToolUsageEmptyState(modifier = modifier)
+        return
+    }
+
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -296,10 +302,73 @@ private fun WorkspaceExplorerCard(
 }
 
 @Composable
+private fun ToolUsageEmptyState(modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(ThreadColors.Panel)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
+            .padding(18.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(ThreadColors.Surface)
+                .border(1.dp, ThreadColors.Border, RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            WorkspaceActionGlyph(
+                icon = WorkspaceActionIcon.Refresh,
+                color = ThreadColors.ForegroundMuted,
+                modifier = Modifier.size(17.dp),
+            )
+        }
+        Text(
+            text = "No tool calls yet",
+            modifier = Modifier.padding(top = 12.dp),
+            color = ThreadColors.ForegroundSoft,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+        Text(
+            text = "Run the agent to see usage.",
+            modifier = Modifier.padding(top = 3.dp),
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.bodySmall,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+        Text(
+            text = "Reload from workspace",
+            modifier = Modifier
+                .padding(top = 12.dp)
+                .clip(RoundedCornerShape(7.dp))
+                .background(ThreadColors.SurfaceStrong)
+                .border(1.dp, ThreadColors.Border, RoundedCornerShape(7.dp))
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
 private fun ToolUsageCard(
     events: List<ToolCallPreview>,
     modifier: Modifier = Modifier,
 ) {
+    val toolCounts = events
+        .groupingBy { it.name }
+        .eachCount()
+        .entries
+        .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+    val maxToolCount = max(1, toolCounts.maxOfOrNull { it.value } ?: 1)
+
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
@@ -314,7 +383,7 @@ private fun ToolUsageCard(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = "Tool usage",
+                text = "Calls this session",
                 color = ThreadColors.Foreground,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
@@ -336,9 +405,59 @@ private fun ToolUsageCard(
                 style = MaterialTheme.typography.labelSmall,
             )
         }
-        events.take(2).forEach { event ->
-            ToolUsageRow(event = event)
+        toolCounts.forEach { (name, count) ->
+            ToolCountRow(
+                name = name,
+                count = count,
+                maxCount = maxToolCount,
+            )
         }
+    }
+}
+
+@Composable
+private fun ToolCountRow(
+    name: String,
+    count: Int,
+    maxCount: Int,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        Text(
+            text = name,
+            modifier = Modifier.widthIn(min = 96.dp, max = 148.dp),
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(14.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(ThreadColors.SurfaceStrong),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(count.toFloat() / maxCount.toFloat())
+                    .height(14.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(ThreadColors.Primary.copy(alpha = 0.78f)),
+            )
+        }
+        Text(
+            text = count.toString(),
+            modifier = Modifier.widthIn(min = 18.dp),
+            color = ThreadColors.ForegroundSoft,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+        )
     }
 }
 

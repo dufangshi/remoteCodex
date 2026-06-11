@@ -170,7 +170,7 @@ The visual direction is close to the web mobile thread view, but not a literal D
 | `GraphMoleculeViewerControls.tsx` | `ArtifactPreviewCard.kt` | Native molecule control chips for copy/download/screenshot, zoom/reset, measurement, selection, staging, and unit-cell affordances. |
 | `GraphMoleculeViewerUpperButtonGroup.tsx` | `ArtifactPreviewCard.kt` | Upper molecule control group represented as native chips above the schematic preview. |
 | `GraphMoleculeViewerLowerButtonGroup.tsx` | `ArtifactPreviewCard.kt` | Lower molecule control group represented as measurement and selection/staging rows with disabled unavailable actions. |
-| `GraphToolUsagePanel.tsx` | `WorkspacePanel.kt` | Compact tool usage summary rows plus a native call log with input and output sections. |
+| `GraphToolUsagePanel.tsx` | `WorkspacePanel.kt` | Compact tool usage empty state, calls-this-session count bars, disabled reload affordance, and a native call log with input and output sections. |
 | `GraphGuidePanel.tsx` | `WorkspacePanel.kt` | Mobile guide tab covering getting started, workspace explorer, previews, and tool usage. |
 | `GraphVisualization.tsx` | `WorkspacePanel.kt` | Native graph summary with static relationship sketch and node list. Full interactive graph is still open. |
 | `FloatingEdge.tsx` | `WorkspacePanel.kt` graph canvas | Native graph canvas draws curved directed edges with arrowheads between summary nodes. |
