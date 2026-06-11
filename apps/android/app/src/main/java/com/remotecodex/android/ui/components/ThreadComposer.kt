@@ -155,6 +155,7 @@ fun ThreadComposer(
     modifier: Modifier = Modifier,
     composer: ComposerPreview = ComposerPreview(),
     onSubmitPrompt: ((String) -> Unit)? = null,
+    onInterruptThread: (() -> Unit)? = null,
 ) {
     var openMenu by remember { mutableStateOf<ComposerMenu?>(null) }
     var activeViewPreview by remember(composer.activeView) { mutableStateOf(composer.activeView) }
@@ -710,12 +711,20 @@ fun ThreadComposer(
                 actionState = actionState,
                 sendButtonState = sendButtonState,
                 onInterrupt = {
-                    stopCurrentTurnPreview()
+                    if (onInterruptThread != null) {
+                        onInterruptThread()
+                    } else {
+                        stopCurrentTurnPreview()
+                    }
                 },
                 onPrimaryAction = {
                     when (sendButtonState.primaryKind) {
                         ComposerPrimaryActionKind.Stop -> {
-                            stopCurrentTurnPreview()
+                            if (onInterruptThread != null) {
+                                onInterruptThread()
+                            } else {
+                                stopCurrentTurnPreview()
+                            }
                         }
                         ComposerPrimaryActionKind.Connecting -> Unit
                         ComposerPrimaryActionKind.Send -> {

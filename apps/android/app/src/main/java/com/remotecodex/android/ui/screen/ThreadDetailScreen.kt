@@ -60,6 +60,7 @@ fun ThreadDetailScreen(
     var refreshNonce by remember(threadId) { mutableIntStateOf(0) }
     var submittingPrompt by remember(threadId) { mutableStateOf(false) }
     var pendingPrompt by remember(threadId) { mutableStateOf<String?>(null) }
+    var pendingInterrupt by remember(threadId) { mutableStateOf(false) }
     var resolvingRequestId by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingRenameTitle by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingDelete by remember(threadId) { mutableStateOf(false) }
@@ -114,6 +115,26 @@ fun ThreadDetailScreen(
                 refreshNonce += 1
             }
             .onFailure { throwable -> error = throwable.message ?: "Prompt send failed." }
+    }
+
+    LaunchedEffect(pendingInterrupt) {
+        if (!pendingInterrupt) return@LaunchedEffect
+        submittingPrompt = true
+        error = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                client.interruptThread(threadId)
+                client.fetchThreadDetail(threadId, limit = 30)
+            }
+        }
+        submittingPrompt = false
+        pendingInterrupt = false
+        result
+            .onSuccess { dto ->
+                detail = buildThreadDetailPreviewFromSupervisor(dto)
+                refreshNonce += 1
+            }
+            .onFailure { throwable -> error = throwable.message ?: "Interrupt failed." }
     }
 
     LaunchedEffect(pendingRequestResponse) {
@@ -192,6 +213,11 @@ fun ThreadDetailScreen(
             onThemeModeSelected = onThemeModeSelected,
             onChangeConnection = onChangeConnection,
             onSubmitPrompt = { prompt -> pendingPrompt = prompt },
+            onInterruptThread = {
+                if (!submittingPrompt) {
+                    pendingInterrupt = true
+                }
+            },
             onDenyPendingRequest = { request ->
                 pendingRequestResponse = PendingRequestResponse(
                     request = request,

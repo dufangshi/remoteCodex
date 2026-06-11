@@ -139,6 +139,16 @@ class SupervisorApiClient(
         ).toThreadSummary()
     }
 
+    fun interruptThread(threadId: String, turnId: String? = null): SupervisorThreadSummary {
+        val body = JSONObject()
+        turnId?.takeIf { it.isNotBlank() }?.let { body.put("turnId", it) }
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/interrupt"),
+            method = "POST",
+            body = body.toString(),
+        ).toThreadSummary()
+    }
+
     fun respondToThreadRequest(
         threadId: String,
         requestId: String,

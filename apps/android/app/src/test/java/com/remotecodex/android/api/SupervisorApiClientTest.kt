@@ -294,6 +294,34 @@ class SupervisorApiClientTest {
         assertEquals("relay-token", transport.requests[1].bearerToken)
     }
 
+    @Test
+    fun interruptThreadUsesRelayDevicePath() {
+        val interruptedThreadJson = """{"id":"thread-1","workspaceId":"workspace-1","title":"Android API","status":"interrupted","model":"gpt-5","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":"Stopped"}"""
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(200, interruptedThreadJson),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        val interrupted = client.interruptThread("thread-1", turnId = "turn-1")
+
+        assertEquals("interrupted", interrupted.status)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1/interrupt",
+            transport.requests.single().url,
+        )
+        assertEquals("POST", transport.requests.single().method)
+        assertEquals("relay-token", transport.requests.single().bearerToken)
+        assertTrue(transport.requests.single().body!!.contains("\"turnId\":\"turn-1\""))
+    }
+
     private class RecordingTransport(
         private vararg val responses: SupervisorHttpResponse,
     ) : SupervisorHttpTransport {

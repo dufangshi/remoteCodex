@@ -96,6 +96,7 @@ fun ThreadDetailSurface(
     onThemeModeSelected: (ThemeMode) -> Unit,
     onChangeConnection: () -> Unit,
     onSubmitPrompt: ((String) -> Unit)? = null,
+    onInterruptThread: (() -> Unit)? = null,
     onDenyPendingRequest: (PendingRequestPreview) -> Unit = {},
     onSubmitPendingRequest: (PendingRequestPreview, Map<String, List<String>>) -> Unit = { _, _ -> },
     onRenameThread: ((String) -> Unit)? = null,
@@ -191,6 +192,7 @@ fun ThreadDetailSurface(
                         busy = displayedDetail.composer.busy || submittingPrompt,
                     ),
                     onSubmitPrompt = onSubmitPrompt,
+                    onInterruptThread = onInterruptThread,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(start = contentStartPadding)
