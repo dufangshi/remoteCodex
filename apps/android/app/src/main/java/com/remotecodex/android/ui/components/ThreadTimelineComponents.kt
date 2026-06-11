@@ -1277,7 +1277,6 @@ private fun HistoryGroupBadge(
         ) {
             HistoryGroupGlyph(
                 group = group,
-                countBadgeLabel = frameState.countBadgeLabel,
                 color = colors.foreground,
             )
         }
@@ -2025,7 +2024,6 @@ private fun HistoryKindGlyph(kind: HistoryItemKind, color: Color) {
 @Composable
 private fun HistoryGroupGlyph(
     group: HistoryGroupPreview,
-    countBadgeLabel: String,
     color: Color,
 ) {
     Box(
@@ -2034,19 +2032,6 @@ private fun HistoryGroupGlyph(
             .height(30.dp),
     ) {
         HistoryKindGlyph(kind = group.kind, color = color)
-        Text(
-            text = countBadgeLabel,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .clip(RoundedCornerShape(999.dp))
-                .background(ThreadColors.CodeBackground)
-                .border(1.dp, color.copy(alpha = 0.38f), RoundedCornerShape(999.dp))
-                .padding(horizontal = 4.dp, vertical = 1.dp),
-            color = color,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-        )
     }
 }
 
