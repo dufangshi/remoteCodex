@@ -1833,11 +1833,7 @@ private fun ToolCallCard(toolCall: ToolCallPreview) {
             showDivider = false,
             backgroundColor = ThreadColors.Surface,
             leading = {
-                Text(
-                    text = "⌘",
-                    color = ThreadColors.ForegroundMuted,
-                    style = MaterialTheme.typography.titleMedium,
-                )
+                ToolCallGlyph(color = ThreadColors.ForegroundMuted)
             },
             trailing = {
                 ToolStatusBadge(
@@ -1855,6 +1851,35 @@ private fun ToolCallCard(toolCall: ToolCallPreview) {
                 CodeBlock(title = "Result", code = it)
             }
         }
+    }
+}
+
+@Composable
+private fun ToolCallGlyph(color: Color) {
+    Canvas(
+        modifier = Modifier
+            .padding(top = 2.dp)
+            .size(18.dp),
+    ) {
+        val strokeWidth = 1.8.dp.toPx()
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.30f, size.height * 0.72f),
+            end = Offset(size.width * 0.68f, size.height * 0.34f),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round,
+        )
+        drawCircle(
+            color = color,
+            radius = 3.1.dp.toPx(),
+            center = Offset(size.width * 0.72f, size.height * 0.28f),
+            style = Stroke(width = strokeWidth),
+        )
+        drawCircle(
+            color = color,
+            radius = 1.9.dp.toPx(),
+            center = Offset(size.width * 0.24f, size.height * 0.78f),
+        )
     }
 }
 
