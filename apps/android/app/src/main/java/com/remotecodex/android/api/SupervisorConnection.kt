@@ -461,6 +461,16 @@ data class SendThreadPromptRequest(
     val prompt: String,
     val clientRequestId: String? = null,
     val model: String? = null,
+    val attachments: List<PromptAttachmentUploadRequest> = emptyList(),
+)
+
+data class PromptAttachmentUploadRequest(
+    val clientId: String,
+    val kind: String,
+    val originalName: String,
+    val placeholder: String,
+    val bytes: ByteArray,
+    val contentType: String = "application/octet-stream",
 )
 
 data class UpdateThreadRequest(

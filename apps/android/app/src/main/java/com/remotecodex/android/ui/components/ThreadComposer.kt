@@ -49,6 +49,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.AndroidFeatureFlags
+import com.remotecodex.android.api.PromptAttachmentUploadRequest
+import com.remotecodex.android.api.SendThreadPromptRequest
 import com.remotecodex.android.api.UpdateThreadGoalRequest
 import com.remotecodex.android.api.UpdateThreadSettingsRequest
 import com.remotecodex.android.ui.model.ComposerActiveView
@@ -158,6 +160,7 @@ fun ThreadComposer(
     modifier: Modifier = Modifier,
     composer: ComposerPreview = ComposerPreview(),
     onSubmitPrompt: ((String) -> Unit)? = null,
+    onSubmitPromptRequest: ((SendThreadPromptRequest) -> Unit)? = null,
     onInterruptThread: (() -> Unit)? = null,
     onUpdateSettings: ((UpdateThreadSettingsRequest) -> Unit)? = null,
     onUpdateGoal: ((UpdateThreadGoalRequest) -> Unit)? = null,
@@ -166,6 +169,8 @@ fun ThreadComposer(
     onForkTurn: ((String) -> Unit)? = null,
     onTrustHook: ((String, String) -> Unit)? = null,
     onUntrustHook: ((String) -> Unit)? = null,
+    onPickPromptAttachment: ((ComposerAttachmentActionKind) -> Unit)? = null,
+    pendingPromptAttachment: PendingPromptAttachmentUpload? = null,
     onSendShellInput: ((String) -> Unit)? = null,
     onSendShellControl: ((String) -> Unit)? = null,
 ) {
@@ -185,6 +190,7 @@ fun ThreadComposer(
     var selectedModel by remember(composer.context.model) { mutableStateOf(composer.context.model) }
     var selectedReasoningEffort by remember(composer.reasoningEffort) { mutableStateOf(composer.reasoningEffort) }
     var draftPrompt by remember(composer.prompt) { mutableStateOf(composer.prompt) }
+    var draftAttachmentUploads by remember(composer.prompt) { mutableStateOf<List<PendingPromptAttachmentUpload>>(emptyList()) }
     var shellDraft by remember(composer.prompt.text) { mutableStateOf(composer.prompt.text) }
     var followTailPreview by remember(composer.followTail) { mutableStateOf(composer.followTail) }
     var planModeSelected by remember(composer.planModeActive) { mutableStateOf(composer.planModeActive) }
@@ -370,7 +376,31 @@ fun ThreadComposer(
                 .trim(),
             attachments = draftPrompt.attachments.filterNot { it.clientId == attachment.clientId },
         )
+        draftAttachmentUploads = draftAttachmentUploads.filterNot { it.clientId == attachment.clientId }
         attachmentPreviewStatus = "Removed attachment: ${attachment.label}"
+    }
+    androidx.compose.runtime.LaunchedEffect(pendingPromptAttachment) {
+        val upload = pendingPromptAttachment ?: return@LaunchedEffect
+        if (draftPrompt.attachments.any { it.clientId == upload.clientId }) {
+            return@LaunchedEffect
+        }
+        val kind = upload.kind.toComposerAttachmentActionKind()
+        val insertion = buildAttachmentInsertionState(
+            prompt = draftPrompt.text,
+            existingAttachments = draftPrompt.attachments,
+            fileNames = listOf(upload.originalName),
+            kind = kind,
+            selection = null,
+            buildClientId = { _, _, _ -> upload.clientId },
+        )
+        draftPrompt = draftPrompt.copy(
+            text = insertion.prompt,
+            attachments = draftPrompt.attachments + insertion.insertedAttachments,
+        )
+        draftAttachmentUploads = draftAttachmentUploads + upload.copy(
+            placeholder = insertion.insertedAttachments.firstOrNull()?.placeholder ?: upload.placeholder,
+        )
+        attachmentPreviewStatus = "Attached ${upload.originalName}"
     }
     Column(
         modifier = modifier
@@ -538,24 +568,28 @@ fun ThreadComposer(
                 ComposerMenu.Attachments -> AttachmentPanel(
                     panelState = attachmentPanelState,
                     onPickAttachment = { kind ->
-                        val insertion = buildAttachmentInsertionState(
-                            prompt = draftPrompt.text,
-                            existingAttachments = draftPrompt.attachments,
-                            fileNames = listOf(kind.previewAttachmentFileName()),
-                            kind = kind,
-                            selection = null,
-                            buildClientId = { index, actionKind, fileName ->
-                                val prefix = when (actionKind) {
-                                    ComposerAttachmentActionKind.Photo -> "preview-photo"
-                                    ComposerAttachmentActionKind.File -> "preview-file"
-                                }
-                                "$prefix-${draftPrompt.attachments.size + index + 1}-${fileName.hashCode().toString().replace("-", "m")}"
-                            },
-                        )
-                        draftPrompt = draftPrompt.copy(
-                            text = insertion.prompt,
-                            attachments = draftPrompt.attachments + insertion.insertedAttachments,
-                        )
+                        if (onPickPromptAttachment != null) {
+                            onPickPromptAttachment(kind)
+                        } else {
+                            val insertion = buildAttachmentInsertionState(
+                                prompt = draftPrompt.text,
+                                existingAttachments = draftPrompt.attachments,
+                                fileNames = listOf(kind.previewAttachmentFileName()),
+                                kind = kind,
+                                selection = null,
+                                buildClientId = { index, actionKind, fileName ->
+                                    val prefix = when (actionKind) {
+                                        ComposerAttachmentActionKind.Photo -> "preview-photo"
+                                        ComposerAttachmentActionKind.File -> "preview-file"
+                                    }
+                                    "$prefix-${draftPrompt.attachments.size + index + 1}-${fileName.hashCode().toString().replace("-", "m")}"
+                                },
+                            )
+                            draftPrompt = draftPrompt.copy(
+                                text = insertion.prompt,
+                                attachments = draftPrompt.attachments + insertion.insertedAttachments,
+                            )
+                        }
                         openMenu = null
                     },
                     onRemoveAttachment = removeAttachmentPreview,
@@ -667,12 +701,17 @@ fun ThreadComposer(
             goalTokenBudgetDraft = goalTokenBudgetDraft,
             onRemoveAttachment = removeAttachmentPreview,
             onPromptChange = { value ->
+                val nextAttachments = draftPrompt.attachments.filter { attachment ->
+                    value.contains(attachment.placeholder)
+                }
                 draftPrompt = draftPrompt.copy(
                     text = value,
-                    attachments = draftPrompt.attachments.filter { attachment ->
-                        value.contains(attachment.placeholder)
-                    },
+                    attachments = nextAttachments,
                 )
+                val nextAttachmentIds = nextAttachments.map { it.clientId }.toSet()
+                draftAttachmentUploads = draftAttachmentUploads.filter { upload ->
+                    nextAttachmentIds.contains(upload.clientId)
+                }
             },
             onShellDraftChange = { value ->
                 shellDraft = value
@@ -814,10 +853,25 @@ fun ThreadComposer(
                         ComposerPrimaryActionKind.Send -> {
                             if (sendButtonState.enabled) {
                                 val promptText = draftPrompt.text.trim()
-                                if (onSubmitPrompt != null) {
+                                if (onSubmitPromptRequest != null) {
+                                    val activeUploads = draftAttachmentUploads
+                                        .filter { upload -> promptText.contains(upload.placeholder) }
+                                        .map { upload -> upload.toPromptAttachmentUploadRequest() }
+                                    if (promptText.isNotEmpty()) {
+                                        onSubmitPromptRequest(
+                                            SendThreadPromptRequest(
+                                                prompt = promptText,
+                                                attachments = activeUploads,
+                                            ),
+                                        )
+                                        draftPrompt = draftPrompt.copy(text = "", attachments = emptyList())
+                                        draftAttachmentUploads = emptyList()
+                                    }
+                                } else if (onSubmitPrompt != null) {
                                     if (promptText.isNotEmpty()) {
                                         onSubmitPrompt(promptText)
                                         draftPrompt = draftPrompt.copy(text = "", attachments = emptyList())
+                                        draftAttachmentUploads = emptyList()
                                     }
                                 } else {
                                     promptPreviewStatus = if (promptText.isEmpty()) {
@@ -826,6 +880,7 @@ fun ThreadComposer(
                                         "Prompt preview sent: $promptText"
                                     }
                                     draftPrompt = draftPrompt.copy(text = "", attachments = emptyList())
+                                    draftAttachmentUploads = emptyList()
                                 }
                             }
                         }
@@ -834,6 +889,41 @@ fun ThreadComposer(
             )
         }
     }
+}
+
+data class PendingPromptAttachmentUpload(
+    val clientId: String,
+    val kind: PendingPromptAttachmentKind,
+    val originalName: String,
+    val placeholder: String,
+    val bytes: ByteArray,
+    val contentType: String,
+)
+
+enum class PendingPromptAttachmentKind {
+    Photo,
+    File,
+}
+
+private fun PendingPromptAttachmentKind.toComposerAttachmentActionKind(): ComposerAttachmentActionKind {
+    return when (this) {
+        PendingPromptAttachmentKind.Photo -> ComposerAttachmentActionKind.Photo
+        PendingPromptAttachmentKind.File -> ComposerAttachmentActionKind.File
+    }
+}
+
+private fun PendingPromptAttachmentUpload.toPromptAttachmentUploadRequest(): PromptAttachmentUploadRequest {
+    return PromptAttachmentUploadRequest(
+        clientId = clientId,
+        kind = when (kind) {
+            PendingPromptAttachmentKind.Photo -> "photo"
+            PendingPromptAttachmentKind.File -> "file"
+        },
+        originalName = originalName,
+        placeholder = placeholder,
+        bytes = bytes,
+        contentType = contentType,
+    )
 }
 
 @Composable

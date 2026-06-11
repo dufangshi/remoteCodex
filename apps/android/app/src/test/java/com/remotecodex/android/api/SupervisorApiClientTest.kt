@@ -485,6 +485,61 @@ class SupervisorApiClientTest {
     }
 
     @Test
+    fun promptAttachmentsUseMultipartRelayDevicePath() {
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(
+                200,
+                """{"id":"thread-1","workspaceId":"workspace-1","title":"Android attachments","status":"running","model":"gpt-5","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":"Attached"}""",
+            ),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        val thread = client.sendThreadPrompt(
+            "thread-1",
+            SendThreadPromptRequest(
+                prompt = "Review [FILE notes.txt]",
+                attachments = listOf(
+                    PromptAttachmentUploadRequest(
+                        clientId = "attachment-1",
+                        kind = "file",
+                        originalName = "notes.txt",
+                        placeholder = "[FILE notes.txt]",
+                        bytes = "hello notes".toByteArray(),
+                        contentType = "text/plain",
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals("thread-1", thread.id)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1/prompt",
+            transport.requests.single().url,
+        )
+        assertEquals("POST", transport.requests.single().method)
+        assertTrue(transport.requests.single().contentType.startsWith("multipart/form-data; boundary="))
+        assertEquals("relay-token", transport.requests.single().bearerToken)
+        val body = transport.requests.single().rawBody!!.toString(Charsets.UTF_8)
+        assertTrue(body.contains("""name="prompt""""))
+        assertTrue(body.contains("Review [FILE notes.txt]"))
+        assertTrue(body.contains("""name="attachmentManifest""""))
+        assertTrue(body.contains(""""clientId":"attachment-1""""))
+        assertTrue(body.contains(""""kind":"file""""))
+        assertTrue(body.contains(""""placeholder":"[FILE notes.txt]""""))
+        assertTrue(body.contains("""name="attachments"; filename="notes.txt""""))
+        assertTrue(body.contains("Content-Type: text/plain"))
+        assertTrue(body.contains("hello notes"))
+    }
+
+    @Test
     fun relayPortalListsDeviceConnectionStatus() {
         val transport = RecordingTransport(
             SupervisorHttpResponse(

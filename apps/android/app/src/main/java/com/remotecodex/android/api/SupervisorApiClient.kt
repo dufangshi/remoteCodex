@@ -318,6 +318,16 @@ class SupervisorApiClient(
     }
 
     fun sendThreadPrompt(threadId: String, request: SendThreadPromptRequest): SupervisorThreadSummary {
+        if (request.attachments.isNotEmpty()) {
+            val boundary = "remoteCodexAndroidPrompt${System.currentTimeMillis()}"
+            val body = buildPromptMultipartBody(boundary, request)
+            return requestJson(
+                config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/prompt"),
+                method = "POST",
+                rawBody = body,
+                contentType = "multipart/form-data; boundary=$boundary",
+            ).toThreadSummary()
+        }
         val body = JSONObject()
             .put("prompt", request.prompt)
         request.clientRequestId?.takeIf { it.isNotBlank() }?.let { body.put("clientRequestId", it) }
@@ -1114,4 +1124,81 @@ private fun buildMultipartFileBody(
     }.toByteArray(Charsets.UTF_8)
     val suffix = "\r\n--$boundary--\r\n".toByteArray(Charsets.UTF_8)
     return prefix + bytes + suffix
+}
+
+private fun buildPromptMultipartBody(
+    boundary: String,
+    request: SendThreadPromptRequest,
+): ByteArray {
+    val parts = mutableListOf<ByteArray>()
+    parts += buildMultipartTextPart(boundary, "prompt", request.prompt)
+    request.clientRequestId?.takeIf { it.isNotBlank() }?.let { value ->
+        parts += buildMultipartTextPart(boundary, "clientRequestId", value)
+    }
+    request.model?.takeIf { it.isNotBlank() }?.let { value ->
+        parts += buildMultipartTextPart(boundary, "model", value)
+    }
+    val manifest = org.json.JSONArray()
+    request.attachments.forEach { attachment ->
+        manifest.put(
+            JSONObject()
+                .put("clientId", attachment.clientId)
+                .put("kind", attachment.kind)
+                .put("originalName", attachment.originalName)
+                .put("placeholder", attachment.placeholder),
+        )
+    }
+    parts += buildMultipartTextPart(boundary, "attachmentManifest", manifest.toString())
+    request.attachments.forEach { attachment ->
+        parts += buildMultipartBinaryPart(
+            boundary = boundary,
+            fieldName = "attachments",
+            filename = attachment.originalName,
+            contentType = attachment.contentType,
+            bytes = attachment.bytes,
+        )
+    }
+    parts += "--$boundary--\r\n".toByteArray(Charsets.UTF_8)
+    return parts.fold(ByteArray(0)) { acc, bytes -> acc + bytes }
+}
+
+private fun buildMultipartTextPart(
+    boundary: String,
+    fieldName: String,
+    value: String,
+): ByteArray {
+    return buildString {
+        append("--")
+        append(boundary)
+        append("\r\n")
+        append("Content-Disposition: form-data; name=\"")
+        append(fieldName)
+        append("\"\r\n\r\n")
+        append(value)
+        append("\r\n")
+    }.toByteArray(Charsets.UTF_8)
+}
+
+private fun buildMultipartBinaryPart(
+    boundary: String,
+    fieldName: String,
+    filename: String,
+    contentType: String,
+    bytes: ByteArray,
+): ByteArray {
+    val safeFilename = filename.ifBlank { "attachment" }.replace("\"", "_")
+    val prefix = buildString {
+        append("--")
+        append(boundary)
+        append("\r\n")
+        append("Content-Disposition: form-data; name=\"")
+        append(fieldName)
+        append("\"; filename=\"")
+        append(safeFilename)
+        append("\"\r\n")
+        append("Content-Type: ")
+        append(contentType.ifBlank { "application/octet-stream" })
+        append("\r\n\r\n")
+    }.toByteArray(Charsets.UTF_8)
+    return prefix + bytes + "\r\n".toByteArray(Charsets.UTF_8)
 }

@@ -30,6 +30,7 @@ import com.remotecodex.android.settings.ThemeMode
 import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorHomeSnapshot
 import com.remotecodex.android.api.ExportThreadRequest
+import com.remotecodex.android.api.SendThreadPromptRequest
 import com.remotecodex.android.api.UpdateThreadGoalRequest
 import com.remotecodex.android.api.UpdateThreadSettingsRequest
 import com.remotecodex.android.ui.model.DetailPreview
@@ -46,6 +47,7 @@ import com.remotecodex.android.ui.components.GraphChatShellRoot
 import com.remotecodex.android.ui.components.GraphChatSplitRegion
 import com.remotecodex.android.ui.components.GraphChatTopbarShell
 import com.remotecodex.android.ui.components.LongTextDialog
+import com.remotecodex.android.ui.components.PendingPromptAttachmentUpload
 import com.remotecodex.android.ui.components.ShellPanel
 import com.remotecodex.android.ui.components.ThreadActionDialog
 import com.remotecodex.android.ui.components.ThreadActionDialogOverlay
@@ -100,6 +102,9 @@ fun ThreadDetailSurface(
     onThemeModeSelected: (ThemeMode) -> Unit,
     onChangeConnection: () -> Unit,
     onSubmitPrompt: ((String) -> Unit)? = null,
+    onSubmitPromptRequest: ((SendThreadPromptRequest) -> Unit)? = null,
+    onPickPromptAttachment: ((com.remotecodex.android.ui.presentation.ComposerAttachmentActionKind) -> Unit)? = null,
+    pendingPromptAttachment: PendingPromptAttachmentUpload? = null,
     onInterruptThread: (() -> Unit)? = null,
     onUpdateThreadSettings: ((UpdateThreadSettingsRequest) -> Unit)? = null,
     onUpdateThreadGoal: ((UpdateThreadGoalRequest) -> Unit)? = null,
@@ -239,6 +244,7 @@ fun ThreadDetailSurface(
                         busy = displayedDetail.composer.busy || submittingPrompt,
                     ),
                     onSubmitPrompt = onSubmitPrompt,
+                    onSubmitPromptRequest = onSubmitPromptRequest,
                     onInterruptThread = onInterruptThread,
                     onUpdateSettings = onUpdateThreadSettings,
                     onUpdateGoal = onUpdateThreadGoal,
@@ -247,6 +253,8 @@ fun ThreadDetailSurface(
                     onForkTurn = onForkTurn,
                     onTrustHook = onTrustHook,
                     onUntrustHook = onUntrustHook,
+                    onPickPromptAttachment = onPickPromptAttachment,
+                    pendingPromptAttachment = pendingPromptAttachment,
                     onSendShellInput = if (AndroidFeatureFlags.ShellEnabled) onSendShellInput else null,
                     onSendShellControl = if (AndroidFeatureFlags.ShellEnabled) onSendShellControl else null,
                     modifier = Modifier

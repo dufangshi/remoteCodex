@@ -52,10 +52,13 @@ import com.remotecodex.android.storage.shareSavedExport
 import com.remotecodex.android.ui.components.GraphButton
 import com.remotecodex.android.ui.components.GraphButtonSize
 import com.remotecodex.android.ui.components.GraphButtonVariant
+import com.remotecodex.android.ui.components.PendingPromptAttachmentKind
+import com.remotecodex.android.ui.components.PendingPromptAttachmentUpload
 import com.remotecodex.android.ui.model.PendingRequestPreview
 import com.remotecodex.android.ui.model.ShellPreview
 import com.remotecodex.android.ui.model.ThreadDetailPreview
 import com.remotecodex.android.ui.presentation.buildThreadDetailPreviewFromSupervisor
+import com.remotecodex.android.ui.presentation.ComposerAttachmentActionKind
 import com.remotecodex.android.ui.sample.ThreadPreviewSample
 import com.remotecodex.android.ui.theme.ThreadColors
 import kotlinx.coroutines.Dispatchers
@@ -82,6 +85,9 @@ fun ThreadDetailScreen(
     var refreshNonce by remember(threadId) { mutableIntStateOf(0) }
     var submittingPrompt by remember(threadId) { mutableStateOf(false) }
     var pendingPrompt by remember(threadId) { mutableStateOf<String?>(null) }
+    var pendingPromptRequest by remember(threadId) { mutableStateOf<SendThreadPromptRequest?>(null) }
+    var pendingPromptAttachmentKind by remember(threadId) { mutableStateOf<ComposerAttachmentActionKind?>(null) }
+    var pendingPromptAttachment by remember(threadId) { mutableStateOf<PendingPromptAttachmentUpload?>(null) }
     var pendingInterrupt by remember(threadId) { mutableStateOf(false) }
     var pendingSettingsUpdate by remember(threadId) { mutableStateOf<UpdateThreadSettingsRequest?>(null) }
     var pendingGoalUpdate by remember(threadId) { mutableStateOf<UpdateThreadGoalRequest?>(null) }
@@ -129,6 +135,19 @@ fun ThreadDetailScreen(
         request
             .onSuccess { pendingWorkspaceUploadFile = it }
             .onFailure { throwable -> error = throwable.message ?: "Could not read selected file." }
+    }
+    val promptAttachmentPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        val kind = pendingPromptAttachmentKind
+        pendingPromptAttachmentKind = null
+        if (uri == null || kind == null) {
+            return@rememberLauncherForActivityResult
+        }
+        val request = runCatching { context.readPromptAttachment(uri, kind) }
+        request
+            .onSuccess { pendingPromptAttachment = it }
+            .onFailure { throwable -> error = throwable.message ?: "Could not read selected attachment." }
     }
 
     LaunchedEffect(threadId, refreshNonce) {
@@ -190,6 +209,30 @@ fun ThreadDetailScreen(
         pendingPrompt = null
         result
             .onSuccess {
+                refreshNonce += 1
+                delay(900)
+                refreshNonce += 1
+            }
+            .onFailure { throwable -> error = throwable.message ?: "Prompt send failed." }
+    }
+
+    LaunchedEffect(pendingPromptRequest) {
+        val promptRequest = pendingPromptRequest ?: return@LaunchedEffect
+        submittingPrompt = true
+        error = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                client.sendThreadPrompt(
+                    threadId = threadId,
+                    request = promptRequest,
+                )
+            }
+        }
+        submittingPrompt = false
+        pendingPromptRequest = null
+        result
+            .onSuccess {
+                pendingPromptAttachment = null
                 refreshNonce += 1
                 delay(900)
                 refreshNonce += 1
@@ -696,6 +739,17 @@ fun ThreadDetailScreen(
             onThemeModeSelected = onThemeModeSelected,
             onChangeConnection = onChangeConnection,
             onSubmitPrompt = { prompt -> pendingPrompt = prompt },
+            onSubmitPromptRequest = { request -> pendingPromptRequest = request },
+            onPickPromptAttachment = { kind ->
+                pendingPromptAttachmentKind = kind
+                promptAttachmentPicker.launch(
+                    when (kind) {
+                        ComposerAttachmentActionKind.Photo -> arrayOf("image/*")
+                        ComposerAttachmentActionKind.File -> arrayOf("*/*")
+                    },
+                )
+            },
+            pendingPromptAttachment = pendingPromptAttachment,
             onInterruptThread = {
                 if (!submittingPrompt) {
                     pendingInterrupt = true
@@ -922,6 +976,46 @@ private fun Context.readUploadRequest(uri: Uri): UploadWorkspaceFileRequest {
         bytes = bytes,
         contentType = contentType,
     )
+}
+
+private fun Context.readPromptAttachment(
+    uri: Uri,
+    kind: ComposerAttachmentActionKind,
+): PendingPromptAttachmentUpload {
+    val bytes = contentResolver.openInputStream(uri)?.use { stream ->
+        stream.readBytes()
+    } ?: throw IllegalStateException("Could not open selected attachment.")
+    val filename = queryDisplayName(uri)
+        ?: uri.lastPathSegment?.substringAfterLast('/')
+        ?: kind.defaultPromptAttachmentName()
+    val contentType = contentResolver.getType(uri) ?: filename.inferPromptAttachmentContentType(kind)
+    return PendingPromptAttachmentUpload(
+        clientId = "android-${System.currentTimeMillis()}-${filename.hashCode().toString().replace("-", "m")}",
+        kind = when (kind) {
+            ComposerAttachmentActionKind.Photo -> PendingPromptAttachmentKind.Photo
+            ComposerAttachmentActionKind.File -> PendingPromptAttachmentKind.File
+        },
+        originalName = filename,
+        placeholder = "",
+        bytes = bytes,
+        contentType = contentType,
+    )
+}
+
+private fun ComposerAttachmentActionKind.defaultPromptAttachmentName(): String {
+    return when (this) {
+        ComposerAttachmentActionKind.Photo -> "android-photo.jpg"
+        ComposerAttachmentActionKind.File -> "android-file"
+    }
+}
+
+private fun String.inferPromptAttachmentContentType(kind: ComposerAttachmentActionKind): String {
+    return when {
+        kind == ComposerAttachmentActionKind.Photo -> "image/*"
+        substringAfterLast('.', "").equals("txt", ignoreCase = true) -> "text/plain"
+        substringAfterLast('.', "").equals("md", ignoreCase = true) -> "text/markdown"
+        else -> "application/octet-stream"
+    }
 }
 
 private fun Context.queryDisplayName(uri: Uri): String? {
