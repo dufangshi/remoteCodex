@@ -151,9 +151,14 @@ fun AppShellSettingsPanel(
     homeSnapshot: SupervisorHomeSnapshot?,
     homeSnapshotLoading: Boolean,
     homeSnapshotError: String?,
+    plugins: List<SupervisorPluginSummary>? = null,
+    pluginsLoading: Boolean = false,
+    pluginsError: String? = null,
     onThemeModeSelected: (ThemeMode) -> Unit,
     onChangeConnection: () -> Unit,
     onImportPluginManifest: (suspend (String) -> SupervisorPluginSummary)? = null,
+    onRefreshPlugins: (() -> Unit)? = null,
+    onSetPluginEnabled: ((String, Boolean) -> Unit)? = null,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -301,11 +306,14 @@ fun AppShellSettingsPanel(
                 }
 
                 SettingsSection(title = "Plugins", detail = "Thread UI capabilities") {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        appShell.plugins.forEach { plugin ->
-                            PluginSettingsRow(plugin = plugin)
-                        }
-                    }
+                    PluginManagementSection(
+                        plugins = plugins,
+                        fallbackPlugins = appShell.plugins,
+                        loading = pluginsLoading,
+                        error = pluginsError,
+                        onRefresh = onRefreshPlugins,
+                        onSetPluginEnabled = onSetPluginEnabled,
+                    )
                 }
 
                 SettingsSection(title = "Renderers", detail = "Native and fallback surfaces") {
@@ -316,7 +324,10 @@ fun AppShellSettingsPanel(
                     }
                 }
 
-                ImportPluginSettingsSection(onImportPluginManifest = onImportPluginManifest)
+                ImportPluginSettingsSection(
+                    onImportPluginManifest = onImportPluginManifest,
+                    onImported = onRefreshPlugins,
+                )
             }
         }
     }
@@ -325,6 +336,7 @@ fun AppShellSettingsPanel(
 @Composable
 private fun ImportPluginSettingsSection(
     onImportPluginManifest: (suspend (String) -> SupervisorPluginSummary)?,
+    onImported: (() -> Unit)?,
 ) {
     var draft by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
@@ -418,6 +430,7 @@ private fun ImportPluginSettingsSection(
                                 .onSuccess { plugin ->
                                     draft = ""
                                     message = "Imported ${plugin.name.ifBlank { plugin.id }}."
+                                    onImported?.invoke()
                                 }
                                 .onFailure { throwable ->
                                     error = throwable.message ?: "Plugin import failed."
@@ -755,6 +768,168 @@ private fun ThemeModeGlyph(
 }
 
 @Composable
+private fun PluginManagementSection(
+    plugins: List<SupervisorPluginSummary>?,
+    fallbackPlugins: List<PluginPreview>,
+    loading: Boolean,
+    error: String?,
+    onRefresh: (() -> Unit)?,
+    onSetPluginEnabled: ((String, Boolean) -> Unit)?,
+) {
+    val backendPlugins = plugins.orEmpty()
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (plugins != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = when {
+                        loading -> "Loading plugin registry..."
+                        backendPlugins.isEmpty() -> "No backend plugins registered."
+                        else -> "${backendPlugins.count { it.enabled }}/${backendPlugins.size} enabled from supervisor"
+                    },
+                    modifier = Modifier.weight(1f),
+                    color = ThreadColors.ForegroundMuted,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                onRefresh?.let { refresh ->
+                    GraphButton(
+                        label = if (loading) "Loading..." else "Refresh",
+                        enabled = !loading,
+                        variant = GraphButtonVariant.Secondary,
+                        size = GraphButtonSize.Small,
+                        contentDescription = "Refresh plugins",
+                        onClick = refresh,
+                    )
+                }
+            }
+            error?.let { text ->
+                Text(
+                    text = text,
+                    color = ThreadColors.Danger,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            if (backendPlugins.isEmpty() && !loading && error == null) {
+                EmptyPluginRegistryRow()
+            } else {
+                backendPlugins.forEach { plugin ->
+                    BackendPluginSettingsRow(
+                        plugin = plugin,
+                        onSetEnabled = onSetPluginEnabled,
+                    )
+                }
+            }
+        } else {
+            fallbackPlugins.forEach { plugin ->
+                PluginSettingsRow(plugin = plugin)
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyPluginRegistryRow() {
+    Text(
+        text = "No plugins are registered.",
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(ThreadColors.SurfaceStrong)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
+            .padding(11.dp),
+        color = ThreadColors.ForegroundMuted,
+        style = MaterialTheme.typography.bodySmall,
+    )
+}
+
+@Composable
+private fun BackendPluginSettingsRow(
+    plugin: SupervisorPluginSummary,
+    onSetEnabled: ((String, Boolean) -> Unit)?,
+) {
+    val nextEnabled = !plugin.enabled
+    val sourceLabel = when (plugin.source) {
+        "imported" -> "Imported manifest"
+        "builtin" -> "Built-in module"
+        null,
+        "",
+        -> "Plugin"
+        else -> plugin.source.replaceFirstChar { it.uppercase() }
+    }
+    val capabilityLabel = plugin.capabilityLabel()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(ThreadColors.SurfaceStrong)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
+            .then(
+                if (onSetEnabled != null) {
+                    Modifier.clickable(onClick = { onSetEnabled(plugin.id, nextEnabled) })
+                } else {
+                    Modifier
+                },
+            )
+            .semantics {
+                contentDescription = if (plugin.enabled) {
+                    "Disable plugin ${plugin.name.ifBlank { plugin.id }}"
+                } else {
+                    "Enable plugin ${plugin.name.ifBlank { plugin.id }}"
+                }
+            }
+            .padding(11.dp),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                text = plugin.name.ifBlank { plugin.id },
+                color = ThreadColors.Foreground,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = plugin.description.ifBlank { "No plugin description provided." },
+                color = ThreadColors.ForegroundSoft,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = capabilityLabel,
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Column(
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            GraphBadge(
+                label = sourceLabel,
+                modifier = Modifier.widthIn(max = 132.dp),
+                variant = if (plugin.source == "imported") {
+                    GraphBadgeVariant.Secondary
+                } else {
+                    GraphBadgeVariant.Outline
+                },
+            )
+            ToggleDot(enabled = plugin.enabled)
+        }
+    }
+}
+
+@Composable
 private fun PluginSettingsRow(plugin: PluginPreview) {
     Row(
         modifier = Modifier
@@ -859,4 +1034,13 @@ private fun themeModeDetail(mode: ThemeMode): String {
         ThemeMode.Light -> "Light"
         ThemeMode.Dark -> "Dark"
     }
+}
+
+private fun SupervisorPluginSummary.capabilityLabel(): String {
+    val labels = artifactTypes + threadPanels + timelineRenderers + modelHints + mcpServers
+    return labels
+        .distinct()
+        .take(4)
+        .joinToString(", ")
+        .ifBlank { "utility" }
 }

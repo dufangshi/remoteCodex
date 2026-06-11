@@ -84,6 +84,10 @@ class SupervisorHomeScreenTest {
         setHomeContent()
 
         composeRule.onNodeWithContentDescription("Open settings").performClick()
+        composeRule.onNodeWithText("Example Plugin").assertExists()
+        composeRule.onNodeWithText("chemistry.molecule3d").assertExists()
+        composeRule.onNodeWithContentDescription("Disable plugin Example Plugin").assertExists()
+        composeRule.onNodeWithContentDescription("Refresh plugins").assertExists()
         composeRule.onNodeWithText("Import plugin").assertExists()
         composeRule.onNodeWithTag("plugin-manifest-input", useUnmergedTree = true)
             .assertExists()
@@ -130,18 +134,26 @@ class SupervisorHomeScreenTest {
                     darkThemeActive = false,
                     onThemeModeSelected = {},
                     onOpenThread = onOpenThread,
+                    initialPlugins = listOf(examplePlugin(enabled = true)),
                     onImportPluginManifest = {
-                        SupervisorPluginSummary(
-                            id = "example-plugin",
-                            name = "Example Plugin",
-                            version = "1.0.0",
-                            enabled = true,
-                            source = "imported",
-                        )
+                        examplePlugin(enabled = true)
                     },
                     onChangeConnection = {},
                 )
             }
         }
+    }
+
+    private fun examplePlugin(enabled: Boolean): SupervisorPluginSummary {
+        return SupervisorPluginSummary(
+            id = "example-plugin",
+            name = "Example Plugin",
+            version = "1.0.0",
+            description = "Example manifest plugin",
+            remoteCodex = "0.1",
+            enabled = enabled,
+            source = "imported",
+            artifactTypes = listOf("chemistry.molecule3d"),
+        )
     }
 }

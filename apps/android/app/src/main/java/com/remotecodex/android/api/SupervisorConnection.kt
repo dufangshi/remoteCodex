@@ -218,8 +218,19 @@ data class SupervisorPluginSummary(
     val id: String,
     val name: String,
     val version: String,
+    val description: String,
+    val remoteCodex: String,
     val enabled: Boolean,
     val source: String?,
+    val artifactTypes: List<String> = emptyList(),
+    val timelineRenderers: List<String> = emptyList(),
+    val threadPanels: List<String> = emptyList(),
+    val modelHints: List<String> = emptyList(),
+    val mcpServers: List<String> = emptyList(),
+)
+
+data class UpdateSupervisorPluginRequest(
+    val enabled: Boolean,
 )
 
 data class UpdateSupervisorWorkspaceRequest(

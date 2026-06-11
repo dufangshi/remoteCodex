@@ -23,6 +23,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,6 +49,7 @@ import com.remotecodex.android.api.StartSupervisorThreadRequest
 import com.remotecodex.android.api.SupervisorPluginSummary
 import com.remotecodex.android.api.SupervisorThreadSummary
 import com.remotecodex.android.api.SupervisorWorkspaceSummary
+import com.remotecodex.android.api.UpdateSupervisorPluginRequest
 import com.remotecodex.android.api.UpdateSupervisorWorkspaceRequest
 import com.remotecodex.android.settings.ThemeMode
 import com.remotecodex.android.ui.components.AppShellSettingsPanel
@@ -81,7 +83,9 @@ fun SupervisorHomeScreen(
     onOpenThread: (String?) -> Unit,
     onRefreshHomeSnapshot: () -> Unit = {},
     onChangeConnection: () -> Unit,
+    initialPlugins: List<SupervisorPluginSummary>? = null,
     onImportPluginManifest: (suspend (String) -> SupervisorPluginSummary)? = null,
+    onSetPluginEnabled: (suspend (String, Boolean) -> SupervisorPluginSummary)? = null,
     modifier: Modifier = Modifier,
 ) {
     val appShell = ThreadPreviewSample.appShell
@@ -93,6 +97,65 @@ fun SupervisorHomeScreen(
     var workspaceActionBusyId by remember { mutableStateOf<String?>(null) }
     var workspaceActionError by remember { mutableStateOf<String?>(null) }
     var workspaceDialog by remember { mutableStateOf<WorkspaceActionDialog?>(null) }
+    var plugins by remember(supervisorConnection) { mutableStateOf(initialPlugins) }
+    var pluginsLoading by remember { mutableStateOf(false) }
+    var pluginsError by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(initialPlugins) {
+        if (initialPlugins != null) {
+            plugins = initialPlugins
+        }
+    }
+    fun refreshPlugins() {
+        pluginsLoading = true
+        pluginsError = null
+        coroutineScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { client.listPlugins() }
+            }
+            pluginsLoading = false
+            result
+                .onSuccess { loaded -> plugins = loaded }
+                .onFailure { error -> pluginsError = error.message ?: "Plugin registry failed." }
+        }
+    }
+    fun setPluginEnabled(pluginId: String, enabled: Boolean) {
+        plugins = plugins?.map { plugin ->
+            if (plugin.id == pluginId) plugin.copy(enabled = enabled) else plugin
+        }
+        pluginsError = null
+        coroutineScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val action = onSetPluginEnabled
+                    if (action != null) {
+                        action(pluginId, enabled)
+                    } else {
+                        client.updatePlugin(
+                            pluginId,
+                            UpdateSupervisorPluginRequest(enabled = enabled),
+                        )
+                    }
+                }
+            }
+            result
+                .onSuccess { updated ->
+                    plugins = plugins?.map { plugin ->
+                        if (plugin.id == updated.id) updated else plugin
+                    }
+                }
+                .onFailure { error ->
+                    plugins = plugins?.map { plugin ->
+                        if (plugin.id == pluginId) plugin.copy(enabled = !enabled) else plugin
+                    }
+                    pluginsError = error.message ?: "Plugin update failed."
+                }
+        }
+    }
+    LaunchedEffect(settingsOpen, supervisorConnection) {
+        if (settingsOpen && plugins == null && !pluginsLoading) {
+            refreshPlugins()
+        }
+    }
     fun runWorkspaceCreate(absPath: String, label: String?) {
         workspaceActionBusyId = CreateWorkspaceBusyId
         workspaceActionError = null
@@ -321,6 +384,9 @@ fun SupervisorHomeScreen(
                 homeSnapshot = homeSnapshot,
                 homeSnapshotLoading = homeSnapshotLoading,
                 homeSnapshotError = homeSnapshotError,
+                plugins = plugins,
+                pluginsLoading = pluginsLoading,
+                pluginsError = pluginsError,
                 onThemeModeSelected = onThemeModeSelected,
                 onChangeConnection = onChangeConnection,
                 onImportPluginManifest = onImportPluginManifest ?: { manifestJson ->
@@ -333,6 +399,8 @@ fun SupervisorHomeScreen(
                         )
                     }
                 },
+                onRefreshPlugins = { refreshPlugins() },
+                onSetPluginEnabled = { pluginId, enabled -> setPluginEnabled(pluginId, enabled) },
                 onClose = { settingsOpen = false },
                 modifier = Modifier.fillMaxSize(),
             )

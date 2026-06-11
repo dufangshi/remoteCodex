@@ -188,6 +188,12 @@ class SupervisorApiClient(
         ).toWorkspaceUploadResult()
     }
 
+    fun listPlugins(): List<SupervisorPluginSummary> {
+        return requestArray(config.restPath("/api/plugins")).map { item ->
+            item.toPluginSummary()
+        }
+    }
+
     fun importPlugin(request: ImportSupervisorPluginRequest): SupervisorPluginSummary {
         val body = JSONObject()
             .put("manifestJson", request.manifestJson)
@@ -196,6 +202,17 @@ class SupervisorApiClient(
         return requestJson(
             config.restPath("/api/plugins/import"),
             method = "POST",
+            body = body,
+        ).toPluginSummary()
+    }
+
+    fun updatePlugin(pluginId: String, request: UpdateSupervisorPluginRequest): SupervisorPluginSummary {
+        val body = JSONObject()
+            .put("enabled", request.enabled)
+            .toString()
+        return requestJson(
+            config.restPath("/api/plugins/${urlEncodePathSegment(pluginId)}"),
+            method = "PATCH",
             body = body,
         ).toPluginSummary()
     }
@@ -737,12 +754,20 @@ private fun JSONObject.toWorkspaceUploadedFile(): SupervisorWorkspaceUploadedFil
 }
 
 private fun JSONObject.toPluginSummary(): SupervisorPluginSummary {
+    val capabilities = optJSONObject("capabilities")
     return SupervisorPluginSummary(
         id = optString("id"),
         name = optString("name"),
         version = optString("version"),
+        description = optString("description"),
+        remoteCodex = optString("remoteCodex"),
         enabled = optBoolean("enabled", false),
         source = optNullableString("source"),
+        artifactTypes = capabilities?.optJSONArray("artifactTypes").stringListFromObjects("type").orEmpty(),
+        timelineRenderers = capabilities?.optJSONArray("timelineRenderers").stringList().orEmpty(),
+        threadPanels = capabilities?.optJSONArray("threadPanels").stringListFromObjects("kind", "id").orEmpty(),
+        modelHints = capabilities?.optJSONArray("modelHints").stringListFromObjects("text", "id").orEmpty(),
+        mcpServers = capabilities?.optJSONArray("mcpServers").stringListFromObjects("name", "id").orEmpty(),
     )
 }
 
@@ -1117,6 +1142,30 @@ private fun JSONObject.optNullableString(name: String): String? {
 
 private fun JSONObject.optNullableInt(name: String): Int? {
     return if (has(name) && !isNull(name)) optInt(name) else null
+}
+
+private fun org.json.JSONArray?.stringList(): List<String> {
+    if (this == null) {
+        return emptyList()
+    }
+    return List(length()) { index -> optString(index) }
+        .filter { it.isNotBlank() }
+}
+
+private fun org.json.JSONArray?.stringListFromObjects(vararg keys: String): List<String> {
+    if (this == null) {
+        return emptyList()
+    }
+    return List(length()) { index ->
+        val value = opt(index)
+        when (value) {
+            is JSONObject -> keys.firstNotNullOfOrNull { key ->
+                value.optNullableString(key)?.takeIf { it.isNotBlank() }
+            }.orEmpty()
+            is String -> value
+            else -> ""
+        }
+    }.filter { it.isNotBlank() }
 }
 
 private fun org.json.JSONArray.joinTextEntries(): String {

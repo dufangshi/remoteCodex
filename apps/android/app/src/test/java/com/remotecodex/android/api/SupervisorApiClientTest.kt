@@ -1,6 +1,7 @@
 package com.remotecodex.android.api
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -1057,6 +1058,7 @@ class SupervisorApiClientTest {
 
         assertEquals("example-plugin", plugin.id)
         assertEquals("Example Plugin", plugin.name)
+        assertEquals("Example", plugin.description)
         assertTrue(plugin.enabled)
         assertEquals("imported", plugin.source)
         assertEquals(
@@ -1068,6 +1070,53 @@ class SupervisorApiClientTest {
         val body = transport.requests.single().body!!
         assertTrue(body.contains("\"manifestJson\":\"{\\\"id\\\":\\\"example-plugin\\\"}\""))
         assertTrue(body.contains("\"enabled\":true"))
+    }
+
+    @Test
+    fun listAndUpdatePluginsUseRelayDevicePathAndCapabilities() {
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(
+                200,
+                """[{"id":"molecule","name":"Molecule","version":"1.0.0","description":"Molecule renderer","remoteCodex":"0.1","enabled":true,"source":"builtin","capabilities":{"artifactTypes":[{"type":"chemistry.molecule3d","title":"Molecule"}],"timelineRenderers":["xyz"],"threadPanels":[{"id":"molecules","label":"Molecules","kind":"artifact","artifactTypes":["chemistry.molecule3d"]}],"modelHints":[{"id":"hint-1","text":"Use XYZ"}],"mcpServers":[{"id":"server-1","name":"Molecule MCP","command":"molecule"}]}}]""",
+            ),
+            SupervisorHttpResponse(
+                200,
+                """{"id":"molecule","name":"Molecule","version":"1.0.0","description":"Molecule renderer","remoteCodex":"0.1","enabled":false,"source":"builtin","capabilities":{"artifactTypes":[{"type":"chemistry.molecule3d","title":"Molecule"}],"timelineRenderers":["xyz"],"threadPanels":[]}}""",
+            ),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        val plugins = client.listPlugins()
+        val updated = client.updatePlugin("molecule", UpdateSupervisorPluginRequest(enabled = false))
+
+        assertEquals(1, plugins.size)
+        assertEquals("chemistry.molecule3d", plugins.single().artifactTypes.single())
+        assertEquals("xyz", plugins.single().timelineRenderers.single())
+        assertEquals("artifact", plugins.single().threadPanels.single())
+        assertEquals("Use XYZ", plugins.single().modelHints.single())
+        assertEquals("Molecule MCP", plugins.single().mcpServers.single())
+        assertFalse(updated.enabled)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/plugins",
+            transport.requests[0].url,
+        )
+        assertEquals("GET", transport.requests[0].method)
+        assertEquals("relay-token", transport.requests[0].bearerToken)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/plugins/molecule",
+            transport.requests[1].url,
+        )
+        assertEquals("PATCH", transport.requests[1].method)
+        assertEquals("relay-token", transport.requests[1].bearerToken)
+        assertTrue(transport.requests[1].body!!.contains("\"enabled\":false"))
     }
 
     private class RecordingTransport(
