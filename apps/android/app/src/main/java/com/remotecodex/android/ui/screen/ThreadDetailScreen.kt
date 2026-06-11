@@ -47,6 +47,8 @@ import com.remotecodex.android.api.UpdateThreadRequest
 import com.remotecodex.android.api.UpdateThreadSettingsRequest
 import com.remotecodex.android.api.UploadWorkspaceFileRequest
 import com.remotecodex.android.settings.ThemeMode
+import com.remotecodex.android.storage.saveExportToDownloads
+import com.remotecodex.android.storage.shareSavedExport
 import com.remotecodex.android.ui.components.GraphButton
 import com.remotecodex.android.ui.components.GraphButtonSize
 import com.remotecodex.android.ui.components.GraphButtonVariant
@@ -290,13 +292,17 @@ fun ThreadDetailScreen(
         threadActionBusy = true
         threadActionError = null
         val result = withContext(Dispatchers.IO) {
-            runCatching { client.downloadThreadTranscriptExport(threadId, exportRequest) }
+            runCatching {
+                val download = client.downloadThreadTranscriptExport(threadId, exportRequest)
+                context.saveExportToDownloads(download)
+            }
         }
         threadActionBusy = false
         pendingExportRequest = null
         result
-            .onSuccess { download ->
-                threadActionError = "Export ready: ${download.filename} (${download.bytes.size} bytes)"
+            .onSuccess { savedFile ->
+                threadActionError = "Export saved: ${savedFile.filename} (${savedFile.sizeBytes} bytes)"
+                runCatching { context.shareSavedExport(savedFile) }
             }
             .onFailure { throwable -> threadActionError = throwable.message ?: "Export failed." }
     }
