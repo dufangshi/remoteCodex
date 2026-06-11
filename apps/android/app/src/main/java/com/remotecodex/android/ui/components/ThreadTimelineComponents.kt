@@ -1583,6 +1583,7 @@ private fun ArtifactHistorySummaryBlock(
         artifactTitle = item.artifactTitle,
         artifactSummary = item.artifactSummary,
         hasRenderer = item.artifactHasRenderer,
+        actionLabel = item.actionLabel,
     )
     Column(
         modifier = Modifier
@@ -1621,7 +1622,7 @@ private fun ArtifactHistorySummaryBlock(
                 maxLines = 1,
             )
         }
-        if (summary.rendererLabel != null || item.actionLabel != null) {
+        if (summary.rendererLabel != null || summary.inspectLabel != null) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(7.dp),
@@ -1633,12 +1634,12 @@ private fun ArtifactHistorySummaryBlock(
                         variant = GraphBadgeVariant.Outline,
                     )
                 }
-                item.actionLabel?.let { label ->
+                summary.inspectLabel?.let { label ->
                     GraphButton(
                         label = label,
                         variant = GraphButtonVariant.Ghost,
                         icon = GraphActionIcon.Package,
-                        contentDescription = "Open artifact inspector for ${summary.title}",
+                        contentDescription = summary.inspectAccessibilityLabel,
                         onClick = { openHistoryItemDetail(item, null, onOpenDetail) },
                     )
                 }
@@ -1659,7 +1660,7 @@ private fun ArtifactHistorySummaryBlock(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = if (expanded) "Hide" else "Open",
+                text = if (expanded) summary.expandedToggleLabel else summary.collapsedToggleLabel,
                 modifier = Modifier
                     .clip(RoundedCornerShape(999.dp))
                     .background(colors.foreground.copy(alpha = 0.10f))

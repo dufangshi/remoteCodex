@@ -4372,6 +4372,10 @@ class ThreadPresentationTest {
                 detailText = "preview fallback",
                 typeLabel = "chemistry.molecule3d",
                 rendererLabel = null,
+                inspectLabel = "Inspect",
+                inspectAccessibilityLabel = "Open artifact inspector for Ethanol molecule",
+                collapsedToggleLabel = "Open",
+                expandedToggleLabel = "Hide",
             ),
             artifactHistorySummary(
                 text = "artifact fallback",
@@ -4380,6 +4384,7 @@ class ThreadPresentationTest {
                 artifactTitle = "Ethanol molecule",
                 artifactSummary = "XYZ, 9 atoms, 1 frame",
                 hasRenderer = true,
+                actionLabel = "Inspect",
             ),
         )
     }
@@ -4393,6 +4398,10 @@ class ThreadPresentationTest {
                 detailText = "preview fallback",
                 typeLabel = "artifact",
                 rendererLabel = "No renderer",
+                inspectLabel = null,
+                inspectAccessibilityLabel = null,
+                collapsedToggleLabel = "Open",
+                expandedToggleLabel = "Hide",
             ),
             artifactHistorySummary(
                 text = "artifact fallback",

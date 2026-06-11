@@ -142,6 +142,10 @@ data class ArtifactHistorySummary(
     val detailText: String,
     val typeLabel: String,
     val rendererLabel: String?,
+    val inspectLabel: String?,
+    val inspectAccessibilityLabel: String?,
+    val collapsedToggleLabel: String,
+    val expandedToggleLabel: String,
 )
 
 enum class ComposerStatusTone {
@@ -3226,6 +3230,7 @@ fun artifactHistorySummary(
     artifactTitle: String?,
     artifactSummary: String?,
     hasRenderer: Boolean,
+    actionLabel: String? = null,
 ): ArtifactHistorySummary {
     val title = artifactTitle?.trim()?.takeIf { it.isNotEmpty() } ?: text.trim()
     val summary = artifactSummary?.trim()
@@ -3243,5 +3248,15 @@ fun artifactHistorySummary(
         detailText = detailText,
         typeLabel = typeLabel,
         rendererLabel = if (hasRenderer) null else "No renderer",
+        inspectLabel = actionLabel
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { "Inspect" },
+        inspectAccessibilityLabel = actionLabel
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { "Open artifact inspector for $title" },
+        collapsedToggleLabel = "Open",
+        expandedToggleLabel = "Hide",
     )
 }
