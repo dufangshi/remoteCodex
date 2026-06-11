@@ -3,6 +3,8 @@ package com.remotecodex.android.ui.screen
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.unit.dp
@@ -46,5 +48,6 @@ class ThreadDetailPreviewScreenTest {
         composeRule.onNodeWithContentDescription("New Chat").assertExists()
         composeRule.onNodeWithContentDescription("Open thread Android native thread client").assertExists()
         composeRule.onNodeWithContentDescription("Open thread Auth runtime modes").assertExists()
+        composeRule.onAllNodesWithText("Shell").assertCountEquals(0)
     }
 }

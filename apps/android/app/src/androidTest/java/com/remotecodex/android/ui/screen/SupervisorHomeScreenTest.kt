@@ -1,6 +1,8 @@
 package com.remotecodex.android.ui.screen
 
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -32,7 +34,7 @@ class SupervisorHomeScreenTest {
         composeRule.onNodeWithText("Remote Codex").assertExists()
         composeRule.onNodeWithContentDescription("Open Workspaces").assertExists()
         composeRule.onNodeWithContentDescription("Open Threads").assertExists()
-        composeRule.onNodeWithContentDescription("Open Shells").assertExists()
+        composeRule.onAllNodesWithContentDescription("Open Shells").assertCountEquals(0)
         composeRule.onNodeWithText("remoteCodex-main").assertExists()
         composeRule.onNodeWithContentDescription("Open workspace remoteCodex-main").assertExists()
         composeRule.onNodeWithContentDescription("Toggle favorite workspace remoteCodex-main").assertExists()
@@ -45,10 +47,6 @@ class SupervisorHomeScreenTest {
         composeRule.onNodeWithContentDescription("Open thread Android native thread client").performClick()
 
         assertEquals("thread-1", openedThreadId)
-
-        composeRule.onNodeWithContentDescription("Open Shells").performClick()
-        composeRule.onNodeWithText("Build shell").assertExists()
-        composeRule.onNodeWithText("Shell adapter pending").assertExists()
     }
 
     @Test

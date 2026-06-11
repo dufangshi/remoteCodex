@@ -49,6 +49,7 @@ fun ThreadTopBar(
     detail: ThreadDetailPreview,
     selectedView: ThreadSurfaceView,
     onViewSelected: (ThreadSurfaceView) -> Unit,
+    shellEnabled: Boolean = false,
     onOpenAppNav: () -> Unit,
     onOpenRooms: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -142,12 +143,14 @@ fun ThreadTopBar(
                 onClick = { onViewSelected(ThreadSurfaceView.Workspace) },
                 modifier = Modifier.weight(1f),
             )
-            SegmentButton(
-                label = "Shell",
-                selected = selectedView == ThreadSurfaceView.Shell,
-                onClick = { onViewSelected(ThreadSurfaceView.Shell) },
-                modifier = Modifier.weight(1f),
-            )
+            if (shellEnabled) {
+                SegmentButton(
+                    label = "Shell",
+                    selected = selectedView == ThreadSurfaceView.Shell,
+                    onClick = { onViewSelected(ThreadSurfaceView.Shell) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
         FlowRow(
             modifier = Modifier.fillMaxWidth(),

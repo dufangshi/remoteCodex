@@ -38,6 +38,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.remotecodex.android.AndroidFeatureFlags
 import com.remotecodex.android.api.SupervisorApiClient
 import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorHomeSnapshot
@@ -165,7 +166,9 @@ fun SupervisorHomeScreen(
 
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    appShell.navigationItems.forEach { item ->
+                    appShell.navigationItems
+                        .filter { item -> AndroidFeatureFlags.ShellEnabled || HomeDestination.fromLabel(item.label) != HomeDestination.Shells }
+                        .forEach { item ->
                         val destination = HomeDestination.fromLabel(item.label)
                         HomeDestinationRow(
                             item = item,

@@ -27,11 +27,11 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.remotecodex.android.AndroidFeatureFlags
 import com.remotecodex.android.api.ExportThreadRequest
 import com.remotecodex.android.api.ForkThreadRequest
 import com.remotecodex.android.api.RespondThreadRequest
 import com.remotecodex.android.api.RespondThreadRequestAnswer
-import com.remotecodex.android.api.CreateSupervisorShellRequest
 import com.remotecodex.android.api.SendThreadPromptRequest
 import com.remotecodex.android.api.SupervisorApiClient
 import com.remotecodex.android.api.SupervisorConnectionConfig
@@ -158,7 +158,9 @@ fun ThreadDetailScreen(
                 }
             },
             onShellEvent = { event ->
-                detail = detail?.withShellEvent(event)
+                if (AndroidFeatureFlags.ShellEnabled) {
+                    detail = detail?.withShellEvent(event)
+                }
             },
         )
         socketConnection = connection
@@ -341,13 +343,15 @@ fun ThreadDetailScreen(
 
     LaunchedEffect(pendingCreateShell) {
         if (!pendingCreateShell) return@LaunchedEffect
+        if (!AndroidFeatureFlags.ShellEnabled) {
+            pendingCreateShell = false
+            error = "Shell access is disabled on Android."
+            return@LaunchedEffect
+        }
         error = null
         val result = withContext(Dispatchers.IO) {
             runCatching {
-                client.createThreadShell(
-                    threadId = threadId,
-                    request = CreateSupervisorShellRequest(cols = 120, rows = 32, label = "Android shell"),
-                )
+                client.createThreadShell(threadId = threadId)
                 client.fetchThreadDetailPreview(threadId, selectedWorkspaceFilePath = selectedWorkspaceFilePath)
             }
         }
@@ -362,6 +366,11 @@ fun ThreadDetailScreen(
 
     LaunchedEffect(pendingTerminateShellId) {
         val shellId = pendingTerminateShellId ?: return@LaunchedEffect
+        if (!AndroidFeatureFlags.ShellEnabled) {
+            pendingTerminateShellId = null
+            error = "Shell access is disabled on Android."
+            return@LaunchedEffect
+        }
         error = null
         val result = withContext(Dispatchers.IO) {
             runCatching {
@@ -710,15 +719,19 @@ fun ThreadDetailScreen(
             onUntrustHook = { key ->
                 pendingUntrustHook = UntrustThreadHookRequest(key = key)
             },
-            onCreateShell = {
-                pendingCreateShell = true
+            onCreateShell = if (AndroidFeatureFlags.ShellEnabled) {
+                { pendingCreateShell = true }
+            } else {
+                null
             },
-            onTerminateShell = { shellId ->
-                pendingTerminateShellId = shellId
+            onTerminateShell = if (AndroidFeatureFlags.ShellEnabled) {
+                { shellId -> pendingTerminateShellId = shellId }
+            } else {
+                null
             },
-            onSendShellInput = sendActiveShellInput,
-            onSendShellControl = sendActiveShellInput,
-            onClearShell = clearActiveShell,
+            onSendShellInput = if (AndroidFeatureFlags.ShellEnabled) sendActiveShellInput else null,
+            onSendShellControl = if (AndroidFeatureFlags.ShellEnabled) sendActiveShellInput else null,
+            onClearShell = if (AndroidFeatureFlags.ShellEnabled) clearActiveShell else null,
             onSelectWorkspaceFile = { path ->
                 pendingWorkspaceFilePath = path
             },
@@ -785,6 +798,7 @@ private fun SupervisorApiClient.fetchThreadDetailPreview(
     overrideWorkspaceContent: String? = null,
     overrideWorkspaceNextOffset: Long? = null,
     overrideWorkspaceTruncated: Boolean? = null,
+    includeShell: Boolean = AndroidFeatureFlags.ShellEnabled,
 ): ThreadDetailPreview {
     val detail = fetchThreadDetail(threadId, limit = 30)
     val tree = runCatching { fetchWorkspaceTree(detail.workspace.id) }.getOrNull()
@@ -808,7 +822,11 @@ private fun SupervisorApiClient.fetchThreadDetailPreview(
             )
         }
     }
-    val shellState = runCatching { fetchThreadShellState(threadId) }.getOrNull()
+    val shellState = if (includeShell) {
+        runCatching { fetchThreadShellState(threadId) }.getOrNull()
+    } else {
+        null
+    }
     val exportTurnsResult = runCatching { fetchThreadExportTurns(threadId) }
     val forkTurnsResult = runCatching { fetchThreadForkTurns(threadId) }
     val skillsResult = runCatching { fetchThreadSkills(threadId) }

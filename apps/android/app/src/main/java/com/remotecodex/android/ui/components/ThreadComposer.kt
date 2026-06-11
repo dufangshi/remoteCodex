@@ -48,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.remotecodex.android.AndroidFeatureFlags
 import com.remotecodex.android.api.UpdateThreadGoalRequest
 import com.remotecodex.android.api.UpdateThreadSettingsRequest
 import com.remotecodex.android.ui.model.ComposerActiveView
@@ -169,7 +170,8 @@ fun ThreadComposer(
     onSendShellControl: ((String) -> Unit)? = null,
 ) {
     var openMenu by remember { mutableStateOf<ComposerMenu?>(null) }
-    var activeViewPreview by remember(composer.activeView) { mutableStateOf(composer.activeView) }
+    val initialActiveView = if (AndroidFeatureFlags.ShellEnabled) composer.activeView else ComposerActiveView.Chat
+    var activeViewPreview by remember(initialActiveView) { mutableStateOf(initialActiveView) }
     var slashPanelView by remember(composer.slashPanelView) { mutableStateOf(composer.slashPanelView.toPanelViewState()) }
     var copiedSkillName by remember(composer.skillsPanel.copiedSkillName) { mutableStateOf(composer.skillsPanel.copiedSkillName) }
     var mcpPanelMode by remember(composer.mcpPanel.mode) { mutableStateOf(composer.mcpPanel.mode) }
@@ -273,7 +275,7 @@ fun ThreadComposer(
         activeView = activeViewPreview,
         openMenu = openMenu.toToolbarMenuState(),
         settingsState = settingsState,
-        canToggleShellView = true,
+        canToggleShellView = AndroidFeatureFlags.ShellEnabled,
         shellPromptLabel = shellDraft.ifBlank { null },
     )
     val modelOptions = buildComposerModelOptions(
@@ -351,9 +353,10 @@ fun ThreadComposer(
     )
     val toggleActiveViewPreview = {
         openMenu = null
-        activeViewPreview = when (activeViewPreview) {
-            ComposerActiveView.Chat -> ComposerActiveView.Shell
-            ComposerActiveView.Shell -> ComposerActiveView.Chat
+        activeViewPreview = when {
+            !AndroidFeatureFlags.ShellEnabled -> ComposerActiveView.Chat
+            activeViewPreview == ComposerActiveView.Chat -> ComposerActiveView.Shell
+            else -> ComposerActiveView.Chat
         }
     }
     val stopCurrentTurnPreview = {

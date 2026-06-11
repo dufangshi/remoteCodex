@@ -25,6 +25,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.remotecodex.android.AndroidFeatureFlags
 import com.remotecodex.android.settings.ThemeMode
 import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorHomeSnapshot
@@ -173,7 +174,14 @@ fun ThreadDetailSurface(
                         ThreadTopBar(
                             detail = displayedDetail,
                             selectedView = selectedView,
-                            onViewSelected = { selectedView = it },
+                            onViewSelected = { view ->
+                                selectedView = if (view == ThreadSurfaceView.Shell && !AndroidFeatureFlags.ShellEnabled) {
+                                    ThreadSurfaceView.Chat
+                                } else {
+                                    view
+                                }
+                            },
+                            shellEnabled = AndroidFeatureFlags.ShellEnabled,
                             onOpenAppNav = { appNavOpen = true },
                             onOpenRooms = { roomsOpen = true },
                             onOpenSettings = { settingsOpen = true },
@@ -206,15 +214,21 @@ fun ThreadDetailSurface(
                                 onUploadNote = onUploadWorkspaceNote,
                                 modifier = Modifier.fillMaxSize(),
                             )
-                            ThreadSurfaceView.Shell -> ShellPanel(
-                                shell = displayedDetail.shellPreview,
-                                onCreateShell = onCreateShell,
-                                onTerminateShell = onTerminateShell,
-                                onSendShellInput = onSendShellInput,
-                                onSendShellControl = onSendShellControl,
-                                onClearShell = onClearShell,
-                                modifier = Modifier.fillMaxSize(),
-                            )
+                            ThreadSurfaceView.Shell -> {
+                                if (AndroidFeatureFlags.ShellEnabled) {
+                                    ShellPanel(
+                                        shell = displayedDetail.shellPreview,
+                                        onCreateShell = onCreateShell,
+                                        onTerminateShell = onTerminateShell,
+                                        onSendShellInput = onSendShellInput,
+                                        onSendShellControl = onSendShellControl,
+                                        onClearShell = onClearShell,
+                                        modifier = Modifier.fillMaxSize(),
+                                    )
+                                } else {
+                                    selectedView = ThreadSurfaceView.Chat
+                                }
+                            }
                         }
                     }
                 }
@@ -233,8 +247,8 @@ fun ThreadDetailSurface(
                     onForkTurn = onForkTurn,
                     onTrustHook = onTrustHook,
                     onUntrustHook = onUntrustHook,
-                    onSendShellInput = onSendShellInput,
-                    onSendShellControl = onSendShellControl,
+                    onSendShellInput = if (AndroidFeatureFlags.ShellEnabled) onSendShellInput else null,
+                    onSendShellControl = if (AndroidFeatureFlags.ShellEnabled) onSendShellControl else null,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(start = contentStartPadding)
