@@ -1933,7 +1933,7 @@ fun buildComposerShellTools(
     val shellInputEnabled = shellControl.shellInputEnabled
     val commandRunning = shellControl.commandRunning
     return listOf(
-        ComposerShellToolState("PASTE", ComposerShellToolKind.Paste, ComposerShellToolTone.Neutral, enabled = true),
+        ComposerShellToolState("PASTE", ComposerShellToolKind.Paste, ComposerShellToolTone.Info, enabled = true),
         ComposerShellToolState("COPY", ComposerShellToolKind.Copy, ComposerShellToolTone.Neutral, enabled = true),
         ComposerShellToolState("CLEAR", ComposerShellToolKind.Clear, ComposerShellToolTone.Info, enabled = !busy),
         ComposerShellToolState("CTRL-C", ComposerShellToolKind.CtrlC, ComposerShellToolTone.Danger, enabled = shellInputEnabled && commandRunning),

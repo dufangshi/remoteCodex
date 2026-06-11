@@ -3106,7 +3106,7 @@ class ThreadPresentationTest {
     fun buildsEnabledComposerShellTools() {
         assertEquals(
             listOf(
-                ComposerShellToolState("PASTE", ComposerShellToolKind.Paste, ComposerShellToolTone.Neutral, true),
+                ComposerShellToolState("PASTE", ComposerShellToolKind.Paste, ComposerShellToolTone.Info, true),
                 ComposerShellToolState("COPY", ComposerShellToolKind.Copy, ComposerShellToolTone.Neutral, true),
                 ComposerShellToolState("CLEAR", ComposerShellToolKind.Clear, ComposerShellToolTone.Info, true),
                 ComposerShellToolState("CTRL-C", ComposerShellToolKind.CtrlC, ComposerShellToolTone.Danger, true),
