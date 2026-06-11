@@ -391,6 +391,31 @@ fun ThreadDetailScreen(
             }
     }
 
+    val sendActiveShellInput: (String) -> Unit = { data ->
+        detail?.shellPreview?.let { shell ->
+            val shellId = shell.activeProcessId
+            val viewerId = shell.viewerId
+            val connection = socketConnection
+            if (viewerId.isNullOrBlank()) {
+                connection?.attachShell(shellId)
+            } else {
+                connection?.sendShellInput(shellId, viewerId, data)
+            }
+        }
+    }
+    val clearActiveShell: () -> Unit = {
+        detail?.shellPreview?.let { shell ->
+            val shellId = shell.activeProcessId
+            val viewerId = shell.viewerId
+            val connection = socketConnection
+            if (viewerId.isNullOrBlank()) {
+                connection?.attachShell(shellId)
+            } else {
+                connection?.clearShell(shellId, viewerId)
+            }
+        }
+    }
+
     val currentDetail = detail
     if (currentDetail != null) {
         ThreadDetailSurface(
@@ -425,30 +450,9 @@ fun ThreadDetailScreen(
             onTerminateShell = { shellId ->
                 pendingTerminateShellId = shellId
             },
-            onSendShellInput = { data ->
-                detail?.shellPreview?.let { shell ->
-                    val shellId = shell.activeProcessId
-                    val viewerId = shell.viewerId
-                    val connection = socketConnection
-                    if (viewerId.isNullOrBlank()) {
-                        connection?.attachShell(shellId)
-                    } else {
-                        connection?.sendShellInput(shellId, viewerId, data)
-                    }
-                }
-            },
-            onSendShellControl = { data ->
-                detail?.shellPreview?.let { shell ->
-                    val shellId = shell.activeProcessId
-                    val viewerId = shell.viewerId
-                    val connection = socketConnection
-                    if (viewerId.isNullOrBlank()) {
-                        connection?.attachShell(shellId)
-                    } else {
-                        connection?.sendShellInput(shellId, viewerId, data)
-                    }
-                }
-            },
+            onSendShellInput = sendActiveShellInput,
+            onSendShellControl = sendActiveShellInput,
+            onClearShell = clearActiveShell,
             onSelectWorkspaceFile = { path ->
                 pendingWorkspaceFilePath = path
             },

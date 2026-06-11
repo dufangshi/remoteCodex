@@ -106,6 +106,7 @@ fun ThreadDetailSurface(
     onTerminateShell: ((String) -> Unit)? = null,
     onSendShellInput: ((String) -> Unit)? = null,
     onSendShellControl: ((String) -> Unit)? = null,
+    onClearShell: (() -> Unit)? = null,
     onSelectWorkspaceFile: ((String) -> Unit)? = null,
     onLoadMoreWorkspacePreview: (() -> Unit)? = null,
     onDenyPendingRequest: (PendingRequestPreview) -> Unit = {},
@@ -195,6 +196,9 @@ fun ThreadDetailSurface(
                                 shell = displayedDetail.shellPreview,
                                 onCreateShell = onCreateShell,
                                 onTerminateShell = onTerminateShell,
+                                onSendShellInput = onSendShellInput,
+                                onSendShellControl = onSendShellControl,
+                                onClearShell = onClearShell,
                                 modifier = Modifier.fillMaxSize(),
                             )
                         }

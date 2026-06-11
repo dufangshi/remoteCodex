@@ -35,6 +35,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -53,12 +55,63 @@ fun ShellPanel(
     shell: ShellPreview,
     onCreateShell: (() -> Unit)? = null,
     onTerminateShell: ((String) -> Unit)? = null,
+    onSendShellInput: ((String) -> Unit)? = null,
+    onSendShellControl: ((String) -> Unit)? = null,
+    onClearShell: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var processesOpen by remember { mutableStateOf(false) }
     var toolboxOpen by remember { mutableStateOf(false) }
+    var toolboxFeedback by remember { mutableStateOf<String?>(null) }
+    val clipboardManager = LocalClipboardManager.current
     val activeProcess = shell.processes.firstOrNull { it.id == shell.activeProcessId }
     val liveProcessCount = shell.processes.count { it.isLiveShellProcess() }
+    val handleShellControl: (String) -> Unit = { control ->
+        when (control.lowercase()) {
+            "paste" -> {
+                val text = clipboardManager.getText()?.text.orEmpty()
+                if (text.isBlank()) {
+                    toolboxFeedback = "Clipboard is empty"
+                } else {
+                    onSendShellInput?.invoke(text)
+                    toolboxFeedback = "Pasted clipboard"
+                }
+            }
+            "copy" -> {
+                clipboardManager.setText(AnnotatedString(shell.lines.joinToString("\n")))
+                toolboxFeedback = "Copied visible output"
+            }
+            "clear" -> {
+                onClearShell?.invoke()
+                toolboxFeedback = "Clear requested"
+            }
+            "ctrl-c" -> {
+                onSendShellControl?.invoke("\u0003")
+                toolboxFeedback = "Sent Ctrl-C"
+            }
+            "ctrl-d" -> {
+                onSendShellControl?.invoke("\u0004")
+                toolboxFeedback = "Sent Ctrl-D"
+            }
+            "esc" -> {
+                onSendShellControl?.invoke("\u001B")
+                toolboxFeedback = "Sent Esc"
+            }
+            "tab" -> {
+                onSendShellControl?.invoke("\t")
+                toolboxFeedback = "Sent Tab"
+            }
+            "up" -> {
+                onSendShellControl?.invoke("\u001B[A")
+                toolboxFeedback = "Sent Up"
+            }
+            "down" -> {
+                onSendShellControl?.invoke("\u001B[B")
+                toolboxFeedback = "Sent Down"
+            }
+            else -> toolboxFeedback = null
+        }
+    }
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -97,6 +150,8 @@ fun ShellPanel(
                         controls = shell.controls,
                         inputEnabled = shell.inputEnabled,
                         commandRunning = shell.commandRunning,
+                        feedbackOverride = toolboxFeedback,
+                        onControl = handleShellControl,
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .padding(12.dp),
@@ -607,13 +662,15 @@ private fun ShellToolbox(
     controls: List<String>,
     inputEnabled: Boolean,
     commandRunning: Boolean,
+    feedbackOverride: String?,
+    onControl: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val feedback = when {
-        !inputEnabled -> "Connect the shell first"
-        commandRunning -> "Shell is running"
-        else -> "Shell tools ready"
-    }
+    val feedback = feedbackOverride ?: when {
+            !inputEnabled -> "Connect the shell first"
+            commandRunning -> "Shell is running"
+            else -> "Shell tools ready"
+        }
     Column(
         modifier = modifier
             .fillMaxWidth(0.72f)
@@ -666,7 +723,15 @@ private fun ShellToolbox(
                     requiresInput -> inputEnabled
                     else -> true
                 }
-                ShellControlPill(label = control, enabled = enabled)
+                ShellControlPill(
+                    label = control,
+                    enabled = enabled,
+                    onClick = if (enabled) {
+                        { onControl(control) }
+                    } else {
+                        null
+                    },
+                )
             }
         }
     }
@@ -703,7 +768,11 @@ private fun ShellToolboxTrigger(
 }
 
 @Composable
-private fun ShellControlPill(label: String, enabled: Boolean = true) {
+private fun ShellControlPill(
+    label: String,
+    enabled: Boolean = true,
+    onClick: (() -> Unit)? = null,
+) {
     val tone = when {
         label.equals("Ctrl-C", ignoreCase = true) -> ShellControlTone.Danger
         label.equals("Clear", ignoreCase = true) -> ShellControlTone.Info
@@ -718,6 +787,7 @@ private fun ShellControlPill(label: String, enabled: Boolean = true) {
             .clip(RoundedCornerShape(999.dp))
             .background(background)
             .border(1.dp, border, RoundedCornerShape(999.dp))
+            .then(if (enabled && onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 10.dp, vertical = 7.dp),
         color = foreground,
         style = MaterialTheme.typography.labelSmall,

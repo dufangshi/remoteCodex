@@ -280,7 +280,7 @@ private fun buildShellPlaceholder(workspace: SupervisorWorkspaceSummary): ShellP
         status = "Not attached",
         prompt = "$rootName %",
         lines = listOf("Shell actions are not attached in this Android build yet."),
-        controls = listOf("Paste", "Copy", "Clear", "Ctrl-C"),
+        controls = shellControlLabels,
         processes = listOf(
             ShellProcessPreview(
                 id = "workspace-shell",
@@ -336,7 +336,7 @@ private fun SupervisorThreadShellState.toShellPreview(workspace: SupervisorWorks
             "Active shell: ${shell?.label ?: shell?.tmuxSessionName ?: "none"}",
             "PTY input/output streaming is pending Android websocket wiring.",
         ),
-        controls = listOf("Paste", "Copy", "Clear", "Ctrl-C"),
+        controls = shellControlLabels,
         processes = processRows,
         activeProcessId = activeId,
         connectionLabel = if (inputEnabled) "REST running" else "REST ${state}",
@@ -344,6 +344,18 @@ private fun SupervisorThreadShellState.toShellPreview(workspace: SupervisorWorks
         commandRunning = false,
     )
 }
+
+private val shellControlLabels = listOf(
+    "Paste",
+    "Copy",
+    "Clear",
+    "Ctrl-C",
+    "Ctrl-D",
+    "Esc",
+    "Tab",
+    "Up",
+    "Down",
+)
 
 private fun summarizeThreadUsage(detail: SupervisorThreadDetail): String {
     val totals = detail.turns.mapNotNull { it.tokenUsage?.total }
