@@ -38,6 +38,9 @@ import com.remotecodex.android.ui.presentation.ComposerAttachmentActionState
 import com.remotecodex.android.ui.presentation.ComposerContextUsageState
 import com.remotecodex.android.ui.presentation.ComposerForkActionState
 import com.remotecodex.android.ui.presentation.ComposerForkPanelState
+import com.remotecodex.android.ui.presentation.ComposerGoalComposeCardState
+import com.remotecodex.android.ui.presentation.ComposerGoalPanelState
+import com.remotecodex.android.ui.presentation.ComposerCurrentGoalState
 import com.remotecodex.android.ui.presentation.ComposerHookFormState
 import com.remotecodex.android.ui.presentation.ComposerHookRowState
 import com.remotecodex.android.ui.presentation.ComposerHooksPanelState
@@ -65,6 +68,7 @@ import com.remotecodex.android.ui.presentation.buildComposerActionState
 import com.remotecodex.android.ui.presentation.buildComposerAttachmentActions
 import com.remotecodex.android.ui.presentation.buildComposerContextUsageState
 import com.remotecodex.android.ui.presentation.buildComposerForkPanelState
+import com.remotecodex.android.ui.presentation.buildComposerGoalPanelState
 import com.remotecodex.android.ui.presentation.buildComposerHooksPanelState
 import com.remotecodex.android.ui.presentation.buildComposerJumpLatestState
 import com.remotecodex.android.ui.presentation.buildComposerMcpPanelState
@@ -137,6 +141,12 @@ fun ThreadComposer(
         busy = composer.busy,
         forkBusy = composer.forkBusy,
     )
+    val goalPanelState = buildComposerGoalPanelState(
+        composer.goalPanel.copy(
+            composeMode = composer.goalComposeMode || composer.goalPanel.composeMode,
+            fastMode = composer.fastMode || composer.goalPanel.fastMode,
+        ),
+    )
     val skillsPanelState = buildComposerSkillsPanelState(composer.skillsPanel)
     val mcpPanelState = buildComposerMcpPanelState(composer.mcpPanel)
     val hooksPanelState = buildComposerHooksPanelState(composer.hooksPanel)
@@ -154,6 +164,7 @@ fun ThreadComposer(
                 ComposerMenu.Slash -> SlashToolboxPanel(
                     toolboxItems = toolboxItems,
                     forkPanelState = forkPanelState,
+                    goalPanelState = goalPanelState,
                     skillsPanelState = skillsPanelState,
                     mcpPanelState = mcpPanelState,
                     hooksPanelState = hooksPanelState,
@@ -765,6 +776,7 @@ private fun ComposerModeChip(label: String, selected: Boolean) {
 private fun SlashToolboxPanel(
     toolboxItems: List<ComposerToolboxItemState>,
     forkPanelState: ComposerForkPanelState,
+    goalPanelState: ComposerGoalPanelState,
     skillsPanelState: ComposerSkillsPanelState,
     mcpPanelState: ComposerMcpPanelState,
     hooksPanelState: ComposerHooksPanelState,
@@ -777,7 +789,7 @@ private fun SlashToolboxPanel(
                 ToolboxRow(item = item)
             }
         }
-        GoalPreviewGroup()
+        GoalPreviewGroup(goalPanelState = goalPanelState)
         ForkPreviewGroup(forkPanelState = forkPanelState)
         SkillsPreviewGroup(skillsPanelState = skillsPanelState)
         McpPreviewGroup(mcpPanelState = mcpPanelState)
@@ -786,7 +798,7 @@ private fun SlashToolboxPanel(
 }
 
 @Composable
-private fun GoalPreviewGroup() {
+private fun GoalPreviewGroup(goalPanelState: ComposerGoalPanelState) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -811,28 +823,35 @@ private fun GoalPreviewGroup() {
                 overflow = TextOverflow.Ellipsis,
             )
             GraphBadge(
-                label = "Active",
+                label = goalPanelState.statusLabel,
                 variant = GraphBadgeVariant.Default,
             )
         }
         Text(
-            text = "Create or update the active thread goal.",
+            text = goalPanelState.description,
             color = ThreadColors.ForegroundMuted,
             style = MaterialTheme.typography.labelSmall,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
-        GoalComposePreviewCard()
-        GoalStatusPreviewRow()
-        HookStatusRow(
-            message = "Fast mode is on. Turn it off from the slash toolbox to edit reasoning.",
-            tone = HookStatusTone.Warning,
-        )
+        GoalComposePreviewCard(state = goalPanelState.composeCard)
+        goalPanelState.currentGoal?.let { goal ->
+            GoalStatusPreviewRow(goal = goal)
+        }
+        goalPanelState.notice?.let { notice ->
+            HookStatusRow(
+                message = notice.message,
+                tone = goalNoticeTone(notice.tone),
+            )
+        }
     }
 }
 
 @Composable
-private fun GoalComposePreviewCard() {
+private fun GoalComposePreviewCard(state: ComposerGoalComposeCardState) {
+    if (!state.visible) {
+        return
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -854,29 +873,38 @@ private fun GoalComposePreviewCard() {
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
             )
-            GraphBadge(label = "12.5k budget", variant = GraphBadgeVariant.Outline)
+            GraphBadge(
+                label = if (state.tokenBudgetLabel.isBlank()) "Optional budget" else "${state.tokenBudgetLabel}k budget",
+                variant = GraphBadgeVariant.Outline,
+            )
         }
         Text(
-            text = "Describe the goal the backend should continue working toward...",
+            text = "Describe the goal the backend should continue working toward.",
             color = ThreadColors.ForegroundMuted,
             style = MaterialTheme.typography.labelSmall,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
+        state.errorMessage?.let { message ->
+            HookStatusRow(message = message, tone = HookStatusTone.Error)
+        }
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            GraphBadge(label = "Cancel", variant = GraphBadgeVariant.Outline)
-            GraphBadge(label = "Set goal", variant = GraphBadgeVariant.Default)
-            GraphBadge(label = "Setting...", variant = GraphBadgeVariant.Outline)
+            GraphBadge(label = state.cancelLabel, variant = GraphBadgeVariant.Outline)
+            GraphBadge(
+                label = state.primaryLabel,
+                variant = if (state.primaryEnabled) GraphBadgeVariant.Default else GraphBadgeVariant.Outline,
+            )
         }
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun GoalStatusPreviewRow() {
+private fun GoalStatusPreviewRow(goal: ComposerCurrentGoalState) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -892,7 +920,7 @@ private fun GoalStatusPreviewRow() {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = "Current goal",
+                text = goal.title,
                 modifier = Modifier.weight(1f),
                 color = ThreadColors.ForegroundSoft,
                 style = MaterialTheme.typography.bodySmall,
@@ -900,19 +928,27 @@ private fun GoalStatusPreviewRow() {
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            GraphBadge(label = "Budget", variant = GraphBadgeVariant.Outline)
+            GraphBadge(label = goal.statusLabel, variant = GraphBadgeVariant.Outline)
         }
         Text(
-            text = "Keep Android client parity moving through composer and control surface gaps.",
+            text = goal.objective,
             color = ThreadColors.ForegroundMuted,
             style = MaterialTheme.typography.labelSmall,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
-        HookStatusRow(
-            message = "Token budget must be a positive number in thousands.",
-            tone = HookStatusTone.Error,
-        )
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            goal.tokenBudgetLabel?.let { label ->
+                GraphBadge(label = label, variant = GraphBadgeVariant.Outline)
+            }
+            goal.tokenUsageLabel?.let { label ->
+                GraphBadge(label = label, variant = GraphBadgeVariant.Outline)
+            }
+        }
     }
 }
 
@@ -1483,15 +1519,18 @@ private fun HooksPreviewGroup(hooksPanelState: ComposerHooksPanelState) {
 
 @Composable
 private fun HookPanelStatusRow(message: ComposerHookStatusMessageState) {
-    val tone = when (message.tone) {
+    HookStatusRow(
+        message = if (message.path.isNullOrBlank()) message.message else "${message.message} · ${message.path}",
+        tone = goalNoticeTone(message.tone),
+    )
+}
+
+private fun goalNoticeTone(tone: ComposerMcpStatusTone): HookStatusTone {
+    return when (tone) {
         ComposerMcpStatusTone.Error -> HookStatusTone.Error
         ComposerMcpStatusTone.Success -> HookStatusTone.Success
         ComposerMcpStatusTone.Neutral -> HookStatusTone.Warning
     }
-    HookStatusRow(
-        message = if (message.path.isNullOrBlank()) message.message else "${message.message} · ${message.path}",
-        tone = tone,
-    )
 }
 
 @Composable

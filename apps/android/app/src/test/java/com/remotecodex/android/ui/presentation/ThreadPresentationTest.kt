@@ -5,6 +5,7 @@ import com.remotecodex.android.ui.model.PlanStepStatus
 import com.remotecodex.android.ui.model.ComposerActiveView
 import com.remotecodex.android.ui.model.ComposerContextAvailability
 import com.remotecodex.android.ui.model.ComposerContextPreview
+import com.remotecodex.android.ui.model.ComposerGoalPanelPreview
 import com.remotecodex.android.ui.model.ComposerHookErrorPreview
 import com.remotecodex.android.ui.model.ComposerHookEventNamePreview
 import com.remotecodex.android.ui.model.ComposerHookFormPreview
@@ -30,6 +31,7 @@ import com.remotecodex.android.ui.model.ComposerSkillScopePreview
 import com.remotecodex.android.ui.model.ComposerSkillsPanelPreview
 import com.remotecodex.android.ui.model.ComposerToolboxActionPreview
 import com.remotecodex.android.ui.model.ComposerToolboxItemPreview
+import com.remotecodex.android.ui.model.ThreadGoalPreview
 import com.remotecodex.android.ui.model.ThreadGoalStatusPreview
 import com.remotecodex.android.ui.model.ThreadStatus
 import org.junit.Assert.assertEquals
@@ -1204,10 +1206,128 @@ class ThreadPresentationTest {
                 fastMode = false,
                 compactBusy = false,
                 goalComposeMode = false,
-                goalStatus = ThreadGoalStatusPreview.Completed,
+                goalStatus = ThreadGoalStatusPreview.Complete,
                 busy = false,
                 settingsBusy = true,
                 forkBusy = true,
+            ),
+        )
+    }
+
+    @Test
+    fun parsesAndFormatsGoalTokenBudgetsInThousands() {
+        assertNull(parseGoalTokenBudgetThousands(""))
+        assertEquals(12_500, parseGoalTokenBudgetThousands("12.5"))
+        assertEquals(Int.MIN_VALUE, parseGoalTokenBudgetThousands("-1"))
+        assertEquals(Int.MIN_VALUE, parseGoalTokenBudgetThousands("abc"))
+        assertEquals("", formatGoalTokenBudgetThousands(null))
+        assertEquals("12", formatGoalTokenBudgetThousands(12_000))
+        assertEquals("12.5", formatGoalTokenBudgetThousands(12_500))
+    }
+
+    @Test
+    fun mapsGoalStatusesToWebLabels() {
+        assertEquals("Active", goalStatusLabel(ThreadGoalStatusPreview.Active))
+        assertEquals("Paused", goalStatusLabel(ThreadGoalStatusPreview.Paused))
+        assertEquals("Budget", goalStatusLabel(ThreadGoalStatusPreview.BudgetLimited))
+        assertEquals("Complete", goalStatusLabel(ThreadGoalStatusPreview.Complete))
+        assertEquals("Terminated", goalStatusLabel(ThreadGoalStatusPreview.Terminated))
+    }
+
+    @Test
+    fun buildsVisibleGoalComposePanelState() {
+        assertEquals(
+            ComposerGoalPanelState(
+                statusLabel = "Composing",
+                description = "Create or update the active thread goal.",
+                composeCard = ComposerGoalComposeCardState(
+                    visible = true,
+                    tokenBudgetLabel = "12.5",
+                    errorMessage = "Token budget must be a positive number in thousands.",
+                    primaryLabel = "Setting...",
+                    primaryEnabled = false,
+                    cancelLabel = "Cancel",
+                ),
+                currentGoal = ComposerCurrentGoalState(
+                    title = "Current goal",
+                    objective = "Ship Android composer parity.",
+                    statusLabel = "Budget",
+                    tokenBudgetLabel = "12.5k budget",
+                    tokenUsageLabel = "4.2k / 12.5k used",
+                ),
+                notice = null,
+            ),
+            buildComposerGoalPanelState(
+                ComposerGoalPanelPreview(
+                    composeMode = true,
+                    tokenBudget = 12_500,
+                    busy = true,
+                    localError = "Token budget must be a positive number in thousands.",
+                    currentGoal = ThreadGoalPreview(
+                        objective = "Ship Android composer parity.",
+                        status = ThreadGoalStatusPreview.BudgetLimited,
+                        tokenBudget = 12_500,
+                        tokensUsed = 4_200,
+                    ),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun buildsHiddenGoalComposePanelStateWhenIdle() {
+        assertEquals(
+            ComposerGoalPanelState(
+                statusLabel = "Open",
+                description = "Create or update the active thread goal.",
+                composeCard = ComposerGoalComposeCardState(
+                    visible = false,
+                    tokenBudgetLabel = "",
+                    errorMessage = null,
+                    primaryLabel = "Set goal",
+                    primaryEnabled = true,
+                    cancelLabel = "Cancel",
+                ),
+                currentGoal = null,
+                notice = null,
+            ),
+            buildComposerGoalPanelState(
+                ComposerGoalPanelPreview(
+                    composeMode = false,
+                    tokenBudget = null,
+                    currentGoal = null,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun buildsUnavailableGoalPanelNotice() {
+        assertEquals(
+            ComposerGoalPanelState(
+                statusLabel = "Unavailable",
+                description = "Create or update the active thread goal.",
+                composeCard = ComposerGoalComposeCardState(
+                    visible = false,
+                    tokenBudgetLabel = "12",
+                    errorMessage = null,
+                    primaryLabel = "Set goal",
+                    primaryEnabled = false,
+                    cancelLabel = "Cancel",
+                ),
+                currentGoal = null,
+                notice = ComposerHookStatusMessageState(
+                    message = "/goal is unavailable in this view.",
+                    tone = ComposerMcpStatusTone.Error,
+                ),
+            ),
+            buildComposerGoalPanelState(
+                ComposerGoalPanelPreview(
+                    composeMode = false,
+                    tokenBudget = 12_000,
+                    updateAvailable = false,
+                    currentGoal = null,
+                ),
             ),
         )
     }

@@ -7,6 +7,7 @@ import com.remotecodex.android.ui.model.ToolStatus
 import com.remotecodex.android.ui.model.ComposerActiveView
 import com.remotecodex.android.ui.model.ComposerContextAvailability
 import com.remotecodex.android.ui.model.ComposerContextPreview
+import com.remotecodex.android.ui.model.ComposerGoalPanelPreview
 import com.remotecodex.android.ui.model.ComposerHookEventNamePreview
 import com.remotecodex.android.ui.model.ComposerHookHandlerTypePreview
 import com.remotecodex.android.ui.model.ComposerHookScopePreview
@@ -25,7 +26,9 @@ import com.remotecodex.android.ui.model.ComposerSkillScopePreview
 import com.remotecodex.android.ui.model.ComposerSkillsPanelPreview
 import com.remotecodex.android.ui.model.ComposerToolboxActionPreview
 import com.remotecodex.android.ui.model.ComposerToolboxItemPreview
+import com.remotecodex.android.ui.model.ThreadGoalPreview
 import com.remotecodex.android.ui.model.ThreadGoalStatusPreview
+import kotlin.math.round
 
 enum class MessageStatusTone {
     Neutral,
@@ -304,6 +307,83 @@ data class ComposerHooksPanelState(
     val hooks: List<ComposerHookRowState>,
     val emptyMessage: String?,
 )
+
+data class ComposerGoalComposeCardState(
+    val visible: Boolean,
+    val tokenBudgetLabel: String,
+    val errorMessage: String?,
+    val primaryLabel: String,
+    val primaryEnabled: Boolean,
+    val cancelLabel: String,
+)
+
+data class ComposerCurrentGoalState(
+    val title: String,
+    val objective: String,
+    val statusLabel: String,
+    val tokenBudgetLabel: String?,
+    val tokenUsageLabel: String?,
+)
+
+data class ComposerGoalPanelState(
+    val statusLabel: String,
+    val description: String,
+    val composeCard: ComposerGoalComposeCardState,
+    val currentGoal: ComposerCurrentGoalState?,
+    val notice: ComposerHookStatusMessageState?,
+)
+
+fun buildComposerGoalPanelState(
+    panel: ComposerGoalPanelPreview,
+): ComposerGoalPanelState {
+    val currentGoal = panel.currentGoal
+    val composeCard = ComposerGoalComposeCardState(
+        visible = panel.composeMode,
+        tokenBudgetLabel = formatGoalTokenBudgetThousands(panel.tokenBudget),
+        errorMessage = panel.localError?.takeIf { it.isNotBlank() },
+        primaryLabel = if (panel.busy) "Setting..." else "Set goal",
+        primaryEnabled = panel.updateAvailable && !panel.busy,
+        cancelLabel = "Cancel",
+    )
+    val statusLabel = when {
+        panel.composeMode -> "Composing"
+        currentGoal != null -> goalStatusLabel(currentGoal.status)
+        panel.updateAvailable -> "Open"
+        else -> "Unavailable"
+    }
+    val notice = when {
+        !panel.updateAvailable -> ComposerHookStatusMessageState(
+            "/goal is unavailable in this view.",
+            ComposerMcpStatusTone.Error,
+        )
+        panel.fastMode -> ComposerHookStatusMessageState(
+            "Fast mode is on. Turn it off from the slash toolbox to edit reasoning.",
+            ComposerMcpStatusTone.Neutral,
+        )
+        else -> null
+    }
+    return ComposerGoalPanelState(
+        statusLabel = statusLabel,
+        description = "Create or update the active thread goal.",
+        composeCard = composeCard,
+        currentGoal = currentGoal?.let(::buildComposerCurrentGoalState),
+        notice = notice,
+    )
+}
+
+private fun buildComposerCurrentGoalState(goal: ThreadGoalPreview): ComposerCurrentGoalState {
+    val tokenBudgetLabel = goal.tokenBudget?.let { "${formatGoalTokenBudgetThousands(it)}k budget" }
+    val tokenUsageLabel = goal.tokenBudget?.let { budget ->
+        "${formatContextTokenKilocount(goal.tokensUsed)} / ${formatContextTokenKilocount(budget)} used"
+    }
+    return ComposerCurrentGoalState(
+        title = "Current goal",
+        objective = goal.objective,
+        statusLabel = goalStatusLabel(goal.status),
+        tokenBudgetLabel = tokenBudgetLabel,
+        tokenUsageLabel = tokenUsageLabel,
+    )
+}
 
 fun buildComposerHooksPanelState(
     panel: ComposerHooksPanelPreview,
@@ -751,9 +831,36 @@ private fun composerToolboxItemTone(
 fun goalStatusLabel(status: ThreadGoalStatusPreview): String {
     return when (status) {
         ThreadGoalStatusPreview.Active -> "Active"
-        ThreadGoalStatusPreview.Completed -> "Complete"
-        ThreadGoalStatusPreview.Cancelled -> "Cancelled"
-        ThreadGoalStatusPreview.Failed -> "Failed"
+        ThreadGoalStatusPreview.Paused -> "Paused"
+        ThreadGoalStatusPreview.BudgetLimited -> "Budget"
+        ThreadGoalStatusPreview.Complete -> "Complete"
+        ThreadGoalStatusPreview.Terminated -> "Terminated"
+    }
+}
+
+fun parseGoalTokenBudgetThousands(value: String): Int? {
+    val normalized = value.trim()
+    if (normalized.isEmpty()) {
+        return null
+    }
+    val thousands = normalized.toDoubleOrNull()
+    if (thousands == null || !thousands.isFinite() || thousands <= 0) {
+        return Int.MIN_VALUE
+    }
+    return round(thousands * 1_000).toInt()
+}
+
+fun formatGoalTokenBudgetThousands(value: Int?): String {
+    val budget = value ?: return ""
+    if (budget <= 0) {
+        return ""
+    }
+    val thousands = budget / 1_000.0
+    return if (thousands % 1.0 == 0.0) {
+        thousands.toInt().toString()
+    } else {
+        val rounded = round(thousands * 10) / 10
+        if (rounded % 1.0 == 0.0) rounded.toInt().toString() else rounded.toString()
     }
 }
 

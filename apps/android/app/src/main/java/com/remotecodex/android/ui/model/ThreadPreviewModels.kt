@@ -177,6 +177,7 @@ data class ComposerPreview(
     val forkBusy: Boolean = false,
     val goalComposeMode: Boolean = false,
     val goalStatus: ThreadGoalStatusPreview? = ThreadGoalStatusPreview.Active,
+    val goalPanel: ComposerGoalPanelPreview = ComposerGoalPanelPreview(),
     val toolboxItems: List<ComposerToolboxItemPreview> = defaultComposerToolboxItems,
     val skillsPanel: ComposerSkillsPanelPreview = ComposerSkillsPanelPreview(),
     val mcpPanel: ComposerMcpPanelPreview = ComposerMcpPanelPreview(),
@@ -190,10 +191,35 @@ data class ComposerShellControlPreview(
 
 enum class ThreadGoalStatusPreview {
     Active,
-    Completed,
-    Cancelled,
-    Failed,
+    Paused,
+    BudgetLimited,
+    Complete,
+    Terminated,
 }
+
+data class ThreadGoalPreview(
+    val objective: String,
+    val status: ThreadGoalStatusPreview,
+    val tokenBudget: Int? = null,
+    val tokensUsed: Int = 0,
+)
+
+data class ComposerGoalPanelPreview(
+    val composeMode: Boolean = false,
+    val tokenBudget: Int? = 12_500,
+    val busy: Boolean = false,
+    val localError: String? = null,
+    val updateAvailable: Boolean = true,
+    val currentGoal: ThreadGoalPreview? = defaultThreadGoalPreview,
+    val fastMode: Boolean = false,
+)
+
+val defaultThreadGoalPreview = ThreadGoalPreview(
+    objective = "Keep Android client parity moving through composer and control surface gaps.",
+    status = ThreadGoalStatusPreview.Active,
+    tokenBudget = 12_500,
+    tokensUsed = 4_200,
+)
 
 enum class ComposerToolboxActionPreview {
     Fast,
