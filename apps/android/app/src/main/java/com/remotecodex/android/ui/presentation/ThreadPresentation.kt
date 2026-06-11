@@ -250,6 +250,13 @@ data class ComposerSettingsState(
     val effortTitle: String,
     val planVisible: Boolean,
     val planSelected: Boolean,
+    val updateActions: ComposerSettingsActionState = ComposerSettingsActionState(),
+)
+
+data class ComposerSettingsActionState(
+    val displayedCollaborationMode: String = "default",
+    val closeMenuOnSuccess: Boolean = true,
+    val resetOptimisticModeOnHostChange: Boolean = true,
 )
 
 data class ComposerSendButtonState(
@@ -270,6 +277,14 @@ data class ComposerSettingsToolbarState(
     val planButton: ComposerToolbarButtonState,
     val planPressed: Boolean,
     val sendButton: ComposerSendButtonState,
+    val updateActions: ComposerSettingsActionState,
+)
+
+data class ComposerSettingsUpdateDecisionState(
+    val optimisticMode: String?,
+    val rollbackMode: String?,
+    val shouldRollbackMode: Boolean,
+    val closeMenuOnSuccess: Boolean,
 )
 
 data class ComposerSelectionOptionState(
@@ -1629,6 +1644,8 @@ fun buildComposerSettingsState(
     fastMode: Boolean,
     planModeAvailable: Boolean,
     planModeActive: Boolean,
+    collaborationMode: String = if (planModeActive) "plan" else "default",
+    optimisticCollaborationMode: String? = null,
 ): ComposerSettingsState {
     val supportedEfforts = supportedReasoningEffortCount.coerceAtLeast(0)
     val modelLabel = context.model.takeIf { it.isNotBlank() } ?: "Select model"
@@ -1648,6 +1665,11 @@ fun buildComposerSettingsState(
         effortTitle = effortTitle,
         planVisible = planModeAvailable,
         planSelected = planModeAvailable && planModeActive,
+        updateActions = ComposerSettingsActionState(
+            displayedCollaborationMode = optimisticCollaborationMode ?: collaborationMode,
+            closeMenuOnSuccess = true,
+            resetOptimisticModeOnHostChange = true,
+        ),
     )
 }
 
@@ -1692,6 +1714,19 @@ fun buildComposerSettingsToolbarState(
             enabled = !goalBusy && if (isChatView) !promptDisabled else true,
             primaryKind = actionState.primaryKind,
         ),
+        updateActions = settingsState.updateActions,
+    )
+}
+
+fun deriveComposerSettingsUpdateDecision(
+    nextCollaborationMode: String?,
+    previousOptimisticMode: String?,
+): ComposerSettingsUpdateDecisionState {
+    return ComposerSettingsUpdateDecisionState(
+        optimisticMode = nextCollaborationMode,
+        rollbackMode = if (nextCollaborationMode != null) previousOptimisticMode else null,
+        shouldRollbackMode = nextCollaborationMode != null,
+        closeMenuOnSuccess = true,
     )
 }
 

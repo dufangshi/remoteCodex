@@ -358,6 +358,11 @@ class ThreadPresentationTest {
                 effortTitle = "Select reasoning effort",
                 planVisible = true,
                 planSelected = true,
+                updateActions = ComposerSettingsActionState(
+                    displayedCollaborationMode = "plan",
+                    closeMenuOnSuccess = true,
+                    resetOptimisticModeOnHostChange = true,
+                ),
             ),
             buildComposerSettingsState(
                 context = ComposerContextPreview(model = "gpt-test"),
@@ -382,6 +387,11 @@ class ThreadPresentationTest {
                 effortTitle = "Fast mode is on. Turn it off from the slash toolbox to edit reasoning.",
                 planVisible = false,
                 planSelected = false,
+                updateActions = ComposerSettingsActionState(
+                    displayedCollaborationMode = "plan",
+                    closeMenuOnSuccess = true,
+                    resetOptimisticModeOnHostChange = true,
+                ),
             ),
             buildComposerSettingsState(
                 context = ComposerContextPreview(model = "gpt-test"),
@@ -452,6 +462,11 @@ class ThreadPresentationTest {
                     title = "Send",
                     enabled = true,
                     primaryKind = ComposerPrimaryActionKind.Send,
+                ),
+                updateActions = ComposerSettingsActionState(
+                    displayedCollaborationMode = "default",
+                    closeMenuOnSuccess = true,
+                    resetOptimisticModeOnHostChange = true,
                 ),
             ),
             buildComposerSettingsToolbarState(
@@ -562,6 +577,68 @@ class ThreadPresentationTest {
             state.sendButton,
         )
         assertEquals(false, state.planButton.enabled)
+    }
+
+    @Test
+    fun buildsComposerSettingsActionStateWithOptimisticMode() {
+        assertEquals(
+            ComposerSettingsActionState(
+                displayedCollaborationMode = "plan",
+                closeMenuOnSuccess = true,
+                resetOptimisticModeOnHostChange = true,
+            ),
+            buildComposerSettingsState(
+                context = ComposerContextPreview(model = "gpt-test"),
+                reasoningEffort = "medium",
+                supportedReasoningEffortCount = 3,
+                settingsBusy = false,
+                fastMode = false,
+                planModeAvailable = true,
+                planModeActive = false,
+                collaborationMode = "default",
+                optimisticCollaborationMode = "plan",
+            ).updateActions,
+        )
+    }
+
+    @Test
+    fun derivesComposerSettingsUpdateDecision() {
+        assertEquals(
+            ComposerSettingsUpdateDecisionState(
+                optimisticMode = "plan",
+                rollbackMode = "default",
+                shouldRollbackMode = true,
+                closeMenuOnSuccess = true,
+            ),
+            deriveComposerSettingsUpdateDecision(
+                nextCollaborationMode = "plan",
+                previousOptimisticMode = "default",
+            ),
+        )
+        assertEquals(
+            ComposerSettingsUpdateDecisionState(
+                optimisticMode = null,
+                rollbackMode = null,
+                shouldRollbackMode = false,
+                closeMenuOnSuccess = true,
+            ),
+            deriveComposerSettingsUpdateDecision(
+                nextCollaborationMode = null,
+                previousOptimisticMode = "plan",
+            ),
+        )
+        assertEquals(
+            ComposerSettingsUpdateDecisionState(
+                optimisticMode = "default",
+                rollbackMode = null,
+                shouldRollbackMode = true,
+                closeMenuOnSuccess = true,
+            ),
+            deriveComposerSettingsUpdateDecision(
+                nextCollaborationMode = "default",
+                previousOptimisticMode = null,
+            ),
+        )
     }
 
     @Test
