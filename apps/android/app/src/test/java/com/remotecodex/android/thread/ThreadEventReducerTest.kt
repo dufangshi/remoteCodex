@@ -379,7 +379,34 @@ class ThreadEventReducerTest {
     }
 
     @Test
-    fun contextAndPlanEventsStillUseAggregateRefreshFallback() {
+    fun contextUpdatedAppliesUsageLocally() {
+        val result = reduceThreadEvent(
+            detail = baseDetail(),
+            event = event(
+                type = "thread.context.updated",
+                payload = """
+                    {
+                      "contextUsage": {
+                        "availability": "available",
+                        "remainingPercent": 38,
+                        "tokensInContextWindow": 160000,
+                        "modelContextWindow": 258400,
+                        "updatedAt": "2026-06-11T12:00:12.000Z"
+                      }
+                    }
+                """.trimIndent(),
+            ),
+        )
+
+        assertFalse(result.needsRefresh)
+        assertEquals("available", result.detail.contextUsage?.availability)
+        assertEquals(38, result.detail.contextUsage?.remainingPercent)
+        assertEquals(160000, result.detail.contextUsage?.tokensInContextWindow)
+        assertEquals(258400, result.detail.contextUsage?.modelContextWindow)
+    }
+
+    @Test
+    fun planEventsStillUseAggregateRefreshFallback() {
         val result = reduceThreadEvent(
             detail = baseDetail(),
             event = event(

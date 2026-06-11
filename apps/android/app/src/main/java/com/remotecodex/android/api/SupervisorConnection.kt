@@ -371,6 +371,14 @@ data class SupervisorThreadAnsweredRequestNote(
     val itemId: String? = null,
 )
 
+data class SupervisorThreadContextUsage(
+    val availability: String,
+    val remainingPercent: Int?,
+    val tokensInContextWindow: Int?,
+    val modelContextWindow: Int?,
+    val updatedAt: String?,
+)
+
 data class SupervisorThreadDetail(
     val thread: SupervisorThreadSummary,
     val workspace: SupervisorWorkspaceSummary,
@@ -382,6 +390,7 @@ data class SupervisorThreadDetail(
     val liveItemCount: Int,
     val goalStatus: String?,
     val goalObjective: String?,
+    val contextUsage: SupervisorThreadContextUsage? = null,
 ) {
     val latestAgentMessage: String? = turns
         .asReversed()

@@ -952,6 +952,17 @@ private fun JSONObject.toThreadDetail(): SupervisorThreadDetail {
         liveItemCount = liveItemsJson?.optJSONArray("items")?.length() ?: 0,
         goalStatus = goalJson?.optNullableString("status"),
         goalObjective = goalJson?.optNullableString("objective"),
+        contextUsage = threadJson.optJSONObject("contextUsage")?.toThreadContextUsage(),
+    )
+}
+
+internal fun JSONObject.toThreadContextUsage(): SupervisorThreadContextUsage {
+    return SupervisorThreadContextUsage(
+        availability = optString("availability", "unavailable"),
+        remainingPercent = optNullableInt("remainingPercent"),
+        tokensInContextWindow = optNullableInt("tokensInContextWindow"),
+        modelContextWindow = optNullableInt("modelContextWindow"),
+        updatedAt = optNullableString("updatedAt"),
     )
 }
 

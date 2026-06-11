@@ -5,6 +5,7 @@ import com.remotecodex.android.api.SupervisorThreadActionQuestion
 import com.remotecodex.android.api.SupervisorThreadActionQuestionOption
 import com.remotecodex.android.api.SupervisorThreadActionRequest
 import com.remotecodex.android.api.SupervisorThreadAnsweredRequestNote
+import com.remotecodex.android.api.SupervisorThreadContextUsage
 import com.remotecodex.android.api.SupervisorAgentHook
 import com.remotecodex.android.api.SupervisorAgentMcpServer
 import com.remotecodex.android.api.SupervisorAgentMcpTool
@@ -141,6 +142,13 @@ class ThreadDetailMapperTest {
                 liveItemCount = 2,
                 goalStatus = "active",
                 goalObjective = "Ship Android client",
+                contextUsage = SupervisorThreadContextUsage(
+                    availability = "available",
+                    remainingPercent = 38,
+                    tokensInContextWindow = 160_000,
+                    modelContextWindow = 258_400,
+                    updatedAt = "2026-06-11T18:59:50Z",
+                ),
             ),
             forkTurns = listOf(
                 SupervisorThreadForkTurnOption(
@@ -235,6 +243,9 @@ class ThreadDetailMapperTest {
         assertEquals("turn-1", preview.timelineAuxiliary.answeredRequestNotes.single().turnId)
         assertEquals("Ship Android client", preview.composer.goalPanel.currentGoal?.objective)
         assertEquals("Message Android API...", preview.composer.prompt.placeholder)
+        assertEquals(160_000, preview.composer.context.tokensInContextWindow)
+        assertEquals(258_400, preview.composer.context.modelContextWindow)
+        assertEquals(38, preview.composer.context.remainingPercent)
         assertEquals("high", preview.composer.reasoningEffort)
         assertTrue(preview.composer.fastMode)
         assertTrue(preview.composer.planModeActive)

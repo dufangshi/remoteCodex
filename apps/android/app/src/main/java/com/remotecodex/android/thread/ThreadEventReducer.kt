@@ -6,6 +6,7 @@ import com.remotecodex.android.api.SupervisorThreadDetail
 import com.remotecodex.android.api.SupervisorThreadEvent
 import com.remotecodex.android.api.SupervisorThreadTurn
 import com.remotecodex.android.api.SupervisorThreadTurnItem
+import com.remotecodex.android.api.toThreadContextUsage
 import com.remotecodex.android.api.toThreadActionRequest
 import com.remotecodex.android.api.toThreadTurnItem
 import com.remotecodex.android.api.toThreadTurnTokenUsage
@@ -70,9 +71,8 @@ fun reduceThreadEvent(
         "thread.request.created" -> reduceRequestCreated(nextBaseState, event.payload)
         "thread.request.resolved" -> reduceRequestResolved(nextBaseState, event)
         "thread.output.delta" -> reduceOutputDelta(nextBaseState, event.payload)
-        "thread.context.updated",
-        "thread.plan.updated",
-        -> ThreadEventReduceResult(state = nextBaseState, needsRefresh = true)
+        "thread.context.updated" -> reduceContextUpdated(nextBaseState, event.payload)
+        "thread.plan.updated" -> ThreadEventReduceResult(state = nextBaseState, needsRefresh = true)
         else -> ThreadEventReduceResult(state = nextBaseState, needsRefresh = true)
     }
 }
@@ -203,6 +203,17 @@ private fun reduceTurnTokenUpdated(
     return ThreadEventReduceResult(
         state = state.withDetail(detail.copy(turns = turns)),
         needsRefresh = !changed,
+    )
+}
+
+private fun reduceContextUpdated(
+    state: ThreadProjectionState,
+    payload: JSONObject,
+): ThreadEventReduceResult {
+    val usage = payload.optJSONObject("contextUsage")?.toThreadContextUsage()
+        ?: return ThreadEventReduceResult(state = state, needsRefresh = true)
+    return ThreadEventReduceResult(
+        state = state.withDetail(state.detail.copy(contextUsage = usage)),
     )
 }
 

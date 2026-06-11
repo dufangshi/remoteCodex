@@ -3,6 +3,7 @@ package com.remotecodex.android.ui.presentation
 import com.remotecodex.android.api.SupervisorThreadDetail
 import com.remotecodex.android.api.SupervisorThreadActionQuestion
 import com.remotecodex.android.api.SupervisorThreadActionRequest
+import com.remotecodex.android.api.SupervisorThreadContextUsage
 import com.remotecodex.android.api.SupervisorThreadExportTurns
 import com.remotecodex.android.api.SupervisorThreadHooks
 import com.remotecodex.android.api.SupervisorThreadForkTurnOption
@@ -170,7 +171,10 @@ fun buildThreadDetailPreviewFromSupervisor(
             ),
             context = ComposerContextPreview(
                 model = detail.thread.model ?: "codex",
-                availability = ComposerContextAvailability.Available,
+                tokensInContextWindow = detail.contextUsage?.tokensInContextWindow ?: 0,
+                modelContextWindow = detail.contextUsage?.modelContextWindow ?: 0,
+                remainingPercent = detail.contextUsage?.remainingPercent ?: 0,
+                availability = detail.contextUsage.toComposerContextAvailability(),
             ),
             reasoningEffort = detail.thread.reasoningEffort ?: "medium",
             fastMode = detail.thread.fastMode,
@@ -383,6 +387,18 @@ private fun SupervisorThreadActionRequest.toPendingRequestPreview(): PendingRequ
         itemId = itemId,
         questions = questions.map { question -> question.toPendingRequestQuestionPreview() },
     )
+}
+
+private fun SupervisorThreadContextUsage?.toComposerContextAvailability(): ComposerContextAvailability {
+    return if (
+        this?.availability == "available" &&
+        modelContextWindow != null &&
+        tokensInContextWindow != null
+    ) {
+        ComposerContextAvailability.Available
+    } else {
+        ComposerContextAvailability.Unavailable
+    }
 }
 
 private fun SupervisorThreadActionQuestion.toPendingRequestQuestionPreview(): PendingRequestQuestionPreview {
