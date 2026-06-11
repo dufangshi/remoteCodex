@@ -195,7 +195,7 @@ Shell and terminal access are intentionally paused for Android because exposing 
 The user selected the following scope as the completion target for the current Android parity goal. Complete these items in order, keep shell and terminal parity excluded, and move unrelated backlog discussion to [android-deferred-backlog.md](android-deferred-backlog.md).
 
 1. A1. Workspace drill-in page: completed first native route with workspace status, scoped threads, file tree preview, refresh, favorite/open actions, and new-thread entry.
-2. A2. Thread list filtering and grouping: add status filters, search, sorting, active/needs-attention/recent groupings, and mobile-friendly list controls.
+2. A2. Thread list filtering and grouping: completed native search, status filter chips, sort controls, and grouped thread sections for running, attention, failed, recent, and completed sessions.
 3. A5. Relay device management: add device delete/revoke, richer status refresh, and a smoother claim-code or backend binding flow if the relay model gains one.
 4. B1. WebSocket event reducer: apply `thread.*` events locally instead of using full-detail refresh as the primary update path.
 5. B2. Streaming output merge: support `thread.output.delta` append, de-duplication, materialized item reconciliation, and reconnect recovery.

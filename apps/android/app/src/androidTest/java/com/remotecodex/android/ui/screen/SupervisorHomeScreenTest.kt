@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorConnectionMode
@@ -55,10 +56,36 @@ class SupervisorHomeScreenTest {
         assertEquals("workspace-1", openedWorkspaceId)
 
         composeRule.onNodeWithContentDescription("Open Threads").performClick()
+        composeRule.onNodeWithContentDescription("Thread search input").assertExists()
+        composeRule.onNodeWithContentDescription("Filter threads Running").assertExists()
+        composeRule.onNodeWithContentDescription("Filter threads Attention").assertExists()
         composeRule.onNodeWithText("Android native thread client").assertExists()
         composeRule.onNodeWithContentDescription("Open thread Android native thread client").performClick()
 
         assertEquals("thread-1", openedThreadId)
+    }
+
+    @Test
+    fun threadListFiltersSearchesSortsAndGroups() {
+        setHomeContent()
+
+        composeRule.onNodeWithContentDescription("Open Threads").performClick()
+        composeRule.onNodeWithText("Needs Attention").assertExists()
+        composeRule.onNodeWithText("Waiting for approval").assertExists()
+        composeRule.onNodeWithText("Completed").assertExists()
+        composeRule.onNodeWithText("Finished transcript export").assertExists()
+
+        composeRule.onNodeWithContentDescription("Filter threads Attention").performClick()
+        composeRule.onNodeWithText("Waiting for approval").assertExists()
+        composeRule.onNodeWithText("Android native thread client").assertDoesNotExist()
+
+        composeRule.onNodeWithContentDescription("Thread search input").performTextInput("transcript")
+        composeRule.onNodeWithText("No matching threads").assertExists()
+
+        composeRule.onNodeWithContentDescription("Filter threads All").performClick()
+        composeRule.onNodeWithText("Finished transcript export").assertExists()
+        composeRule.onNodeWithContentDescription("Sort threads by Title").performClick()
+        composeRule.onNodeWithText("Completed").assertExists()
     }
 
     @Test
@@ -147,6 +174,32 @@ class SupervisorHomeScreenTest {
                                 sandboxMode = "workspace-write",
                                 updatedAt = "2026-06-11T12:01:00.000Z",
                                 summaryText = "Align Android app shell with thread-ui.",
+                            ),
+                            SupervisorThreadSummary(
+                                id = "thread-2",
+                                workspaceId = "workspace-1",
+                                title = "Waiting for approval",
+                                status = "waiting",
+                                model = "gpt-5",
+                                reasoningEffort = "medium",
+                                fastMode = false,
+                                collaborationMode = "default",
+                                sandboxMode = "workspace-write",
+                                updatedAt = "2026-06-11T12:02:00.000Z",
+                                summaryText = "Permission required before editing files.",
+                            ),
+                            SupervisorThreadSummary(
+                                id = "thread-3",
+                                workspaceId = "workspace-1",
+                                title = "Finished transcript export",
+                                status = "completed",
+                                model = "gpt-5",
+                                reasoningEffort = "low",
+                                fastMode = false,
+                                collaborationMode = "default",
+                                sandboxMode = "workspace-write",
+                                updatedAt = "2026-06-11T11:58:00.000Z",
+                                summaryText = "Exported PDF and HTML artifacts.",
                             ),
                         ),
                     ),

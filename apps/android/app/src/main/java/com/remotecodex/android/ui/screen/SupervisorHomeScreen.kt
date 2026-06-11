@@ -103,6 +103,9 @@ fun SupervisorHomeScreen(
     val client = remember(supervisorConnection) { SupervisorApiClient(supervisorConnection) }
     var settingsOpen by remember { mutableStateOf(false) }
     var selectedDestination by remember { mutableStateOf(HomeDestination.Workspaces) }
+    var threadFilter by rememberSaveable { mutableStateOf(ThreadListFilter.All) }
+    var threadSort by rememberSaveable { mutableStateOf(ThreadListSort.Updated) }
+    var threadQuery by rememberSaveable { mutableStateOf("") }
     var workspaceActionBusyId by remember { mutableStateOf<String?>(null) }
     var workspaceActionError by remember { mutableStateOf<String?>(null) }
     var workspaceDialog by remember { mutableStateOf<WorkspaceActionDialog?>(null) }
@@ -421,7 +424,7 @@ fun SupervisorHomeScreen(
                 }
                 HomeDestination.Threads -> {
                     item {
-                        HomeSectionTitle(title = "Active Threads", detail = "Recent supervisor list")
+                        HomeSectionTitle(title = "Threads", detail = "Filter and resume supervisor sessions")
                     }
                     val threads = homeSnapshot?.threads.orEmpty()
                     if (threads.isEmpty()) {
@@ -434,8 +437,49 @@ fun SupervisorHomeScreen(
                             )
                         }
                     } else {
-                        items(threads.take(8), key = { it.id }) { thread ->
-                            ThreadSummaryRow(thread = thread, onClick = { onOpenThread(thread.id) })
+                        item {
+                            ThreadListControls(
+                                threads = threads,
+                                query = threadQuery,
+                                filter = threadFilter,
+                                sort = threadSort,
+                                onQueryChange = { threadQuery = it },
+                                onFilterChange = { threadFilter = it },
+                                onSortChange = { threadSort = it },
+                            )
+                        }
+                        val filteredThreads = buildFilteredThreads(
+                            threads = threads,
+                            query = threadQuery,
+                            filter = threadFilter,
+                            sort = threadSort,
+                        )
+                        if (filteredThreads.isEmpty()) {
+                            item {
+                                EmptyHomeRow(
+                                    title = "No matching threads",
+                                    detail = "Adjust the search text or status filter to show more supervisor sessions.",
+                                    actionLabel = "Clear",
+                                    onClick = {
+                                        threadQuery = ""
+                                        threadFilter = ThreadListFilter.All
+                                    },
+                                )
+                            }
+                        } else {
+                            val grouped = groupThreads(filteredThreads)
+                            grouped.forEach { group ->
+                                item(key = "group-${group.key}") {
+                                    ThreadGroupHeader(group = group)
+                                }
+                                items(group.threads, key = { it.id }) { thread ->
+                                    ThreadSummaryRow(
+                                        thread = thread,
+                                        workspace = homeSnapshot?.workspaces?.firstOrNull { it.id == thread.workspaceId },
+                                        onClick = { onOpenThread(thread.id) },
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -789,15 +833,110 @@ private fun HomeSectionTitle(
 @Composable
 private fun ThreadSummaryRow(
     thread: SupervisorThreadSummary,
+    workspace: SupervisorWorkspaceSummary? = null,
     onClick: () -> Unit,
 ) {
     SummaryRowFrame(
         title = thread.title.ifBlank { "Untitled thread" },
-        detail = thread.summaryText ?: "Updated ${thread.updatedAt}",
-        meta = listOfNotNull(thread.status, thread.model).joinToString(" / "),
+        detail = listOfNotNull(
+            workspace?.label?.ifBlank { workspace.absPath },
+            thread.summaryText ?: "Updated ${thread.updatedAt}",
+        ).joinToString(" / "),
+        meta = listOfNotNull(thread.status.threadStatusLabel(), thread.model).joinToString(" / "),
         contentDescription = "Open thread ${thread.title}",
         onClick = onClick,
     )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ThreadListControls(
+    threads: List<SupervisorThreadSummary>,
+    query: String,
+    filter: ThreadListFilter,
+    sort: ThreadListSort,
+    onQueryChange: (String) -> Unit,
+    onFilterChange: (ThreadListFilter) -> Unit,
+    onSortChange: (ThreadListSort) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(ThreadColors.SurfaceStrong)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(14.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics { contentDescription = "Thread search input" },
+            label = { Text("Search threads") },
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodySmall.copy(color = ThreadColors.Foreground),
+            colors = workspaceTextFieldColors(),
+        )
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            ThreadListFilter.entries.forEach { candidate ->
+                GraphButton(
+                    label = "${candidate.label} ${threads.count(candidate::matches)}",
+                    enabled = filter != candidate,
+                    variant = if (filter == candidate) GraphButtonVariant.Default else GraphButtonVariant.Outline,
+                    size = GraphButtonSize.Small,
+                    contentDescription = "Filter threads ${candidate.label}",
+                    onClick = { onFilterChange(candidate) },
+                )
+            }
+        }
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            ThreadListSort.entries.forEach { candidate ->
+                GraphButton(
+                    label = candidate.label,
+                    enabled = sort != candidate,
+                    variant = if (sort == candidate) GraphButtonVariant.Secondary else GraphButtonVariant.Outline,
+                    size = GraphButtonSize.Small,
+                    contentDescription = "Sort threads by ${candidate.label}",
+                    onClick = { onSortChange(candidate) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThreadGroupHeader(group: ThreadGroup) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = group.title,
+            modifier = Modifier.weight(1f),
+            color = ThreadColors.Foreground,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        GraphBadge(
+            label = group.threads.size.toString(),
+            variant = GraphBadgeVariant.Secondary,
+        )
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -1304,6 +1443,142 @@ private fun SummaryRowFrame(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+private enum class ThreadListFilter(val label: String) {
+    All("All"),
+    Running("Running"),
+    NeedsAttention("Attention"),
+    Recent("Recent"),
+    Completed("Done"),
+    Failed("Failed");
+
+    fun matches(thread: SupervisorThreadSummary): Boolean {
+        return when (this) {
+            All -> true
+            Running -> thread.status.normalizedThreadStatus() == "running"
+            NeedsAttention -> thread.needsAttention()
+            Recent -> !thread.needsAttention() && thread.status.normalizedThreadStatus() !in setOf("running", "completed", "failed")
+            Completed -> thread.status.normalizedThreadStatus() == "completed"
+            Failed -> thread.status.normalizedThreadStatus() == "failed"
+        }
+    }
+}
+
+private enum class ThreadListSort(val label: String) {
+    Updated("Updated"),
+    Status("Status"),
+    Title("Title");
+}
+
+private data class ThreadGroup(
+    val key: String,
+    val title: String,
+    val threads: List<SupervisorThreadSummary>,
+)
+
+private fun buildFilteredThreads(
+    threads: List<SupervisorThreadSummary>,
+    query: String,
+    filter: ThreadListFilter,
+    sort: ThreadListSort,
+): List<SupervisorThreadSummary> {
+    val normalizedQuery = query.trim().lowercase()
+    return threads
+        .asSequence()
+        .filter(filter::matches)
+        .filter { thread ->
+            normalizedQuery.isBlank() || listOfNotNull(
+                thread.title,
+                thread.summaryText,
+                thread.status,
+                thread.model,
+                thread.workspaceId,
+            ).any { value -> value.lowercase().contains(normalizedQuery) }
+        }
+        .toList()
+        .let { filtered ->
+            when (sort) {
+                ThreadListSort.Updated -> filtered.sortedByDescending { it.updatedAt }
+                ThreadListSort.Status -> filtered.sortedWith(
+                    compareBy<SupervisorThreadSummary> { it.threadGroupRank() }
+                        .thenByDescending { it.updatedAt },
+                )
+                ThreadListSort.Title -> filtered.sortedWith(
+                    compareBy<SupervisorThreadSummary> { it.title.lowercase() }
+                        .thenByDescending { it.updatedAt },
+                )
+            }
+        }
+}
+
+private fun groupThreads(threads: List<SupervisorThreadSummary>): List<ThreadGroup> {
+    return threads
+        .groupBy { it.threadGroupKey() }
+        .toList()
+        .sortedBy { (key, _) -> threadGroupRank(key) }
+        .map { (key, items) ->
+            ThreadGroup(
+                key = key,
+                title = threadGroupTitle(key),
+                threads = items,
+            )
+        }
+}
+
+private fun SupervisorThreadSummary.threadGroupKey(): String {
+    val status = this.status.normalizedThreadStatus()
+    return when {
+        status == "running" -> "running"
+        needsAttention() -> "attention"
+        status == "failed" -> "failed"
+        status == "completed" -> "completed"
+        else -> "recent"
+    }
+}
+
+private fun SupervisorThreadSummary.threadGroupRank(): Int = threadGroupRank(threadGroupKey())
+
+private fun threadGroupRank(key: String): Int {
+    return when (key) {
+        "running" -> 0
+        "attention" -> 1
+        "failed" -> 2
+        "recent" -> 3
+        "completed" -> 4
+        else -> 5
+    }
+}
+
+private fun threadGroupTitle(key: String): String {
+    return when (key) {
+        "running" -> "Running"
+        "attention" -> "Needs Attention"
+        "failed" -> "Failed"
+        "completed" -> "Completed"
+        else -> "Recent"
+    }
+}
+
+private fun SupervisorThreadSummary.needsAttention(): Boolean {
+    val status = this.status.normalizedThreadStatus()
+    val summary = summaryText.orEmpty().lowercase()
+    return status in setOf("waiting", "blocked", "needs-input", "needs_attention", "requires-action", "requires_action") ||
+        summary.contains("permission") ||
+        summary.contains("confirmation") ||
+        summary.contains("input required")
+}
+
+private fun String.normalizedThreadStatus(): String = trim().lowercase()
+
+private fun String.threadStatusLabel(): String {
+    return when (normalizedThreadStatus()) {
+        "running" -> "running"
+        "completed" -> "done"
+        "failed" -> "failed"
+        "waiting", "blocked", "needs-input", "needs_attention", "requires-action", "requires_action" -> "attention"
+        else -> trim().ifBlank { "thread" }
     }
 }
 
