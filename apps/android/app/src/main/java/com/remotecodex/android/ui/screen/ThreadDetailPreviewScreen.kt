@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -44,6 +45,7 @@ import com.remotecodex.android.ui.components.ShellPanel
 import com.remotecodex.android.ui.components.ThreadActionDialog
 import com.remotecodex.android.ui.components.ThreadActionDialogOverlay
 import com.remotecodex.android.ui.components.ThreadComposer
+import com.remotecodex.android.ui.components.ThreadRoomsCollapsedRail
 import com.remotecodex.android.ui.components.ThreadRoomsPanel
 import com.remotecodex.android.ui.components.ThreadTimeline
 import com.remotecodex.android.ui.components.ThreadSurfaceView
@@ -66,6 +68,16 @@ fun ThreadDetailPreviewScreen(
 ) {
     val appShell = ThreadPreviewSample.appShell
     val detail = ThreadPreviewSample.detail
+    var activeRoomId by remember {
+        mutableStateOf(detail.rooms.firstOrNull { it.active }?.id ?: detail.rooms.firstOrNull()?.id)
+    }
+    val rooms = detail.rooms.map { room -> room.copy(active = room.id == activeRoomId) }
+    val activeRoom = rooms.firstOrNull { it.active }
+    val displayedDetail = detail.copy(
+        title = activeRoom?.title ?: detail.title,
+        workspace = activeRoom?.workspaceLabel ?: detail.workspace,
+        rooms = rooms,
+    )
     var selectedView by remember { mutableStateOf(ThreadSurfaceView.Chat) }
     var appNavOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
@@ -75,148 +87,170 @@ fun ThreadDetailPreviewScreen(
     var copiedSessionRoomId by remember { mutableStateOf<String?>(null) }
     var openDetail by remember { mutableStateOf<DetailPreview?>(null) }
     GraphChatShellRoot {
-        GraphChatShellFrame {
-            GraphChatMainShell {
-                GraphChatTopbarShell {
-                    ThreadTopBar(
-                        detail = detail,
-                        selectedView = selectedView,
-                        onViewSelected = { selectedView = it },
-                        onOpenAppNav = { appNavOpen = true },
-                        onOpenRooms = { roomsOpen = true },
-                        onOpenSettings = { settingsOpen = true },
-                        onOpenThreadAction = { threadActionDialog = it },
-                        onReturnToWorkspace = { selectedView = ThreadSurfaceView.Workspace },
-                        onCreateThreadShortcut = {
-                            threadActionRoom = null
-                            threadActionDialog = ThreadActionDialog.Create
-                        },
-                        themeMode = themeMode,
-                        darkThemeActive = darkThemeActive,
-                    )
-                }
-                GraphChatSplitRegion(modifier = Modifier.weight(1f)) {
-                    when (selectedView) {
-                        ThreadSurfaceView.Chat -> ChatPreviewSurface(
-                            detail = detail,
-                            onOpenDetail = { openDetail = it },
-                            modifier = Modifier.fillMaxSize(),
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val showCollapsedRoomsRail = maxWidth >= 720.dp
+            val contentStartPadding = if (showCollapsedRoomsRail) 72.dp else 0.dp
+            if (showCollapsedRoomsRail) {
+                ThreadRoomsCollapsedRail(
+                    workspaceLabel = displayedDetail.workspacePreview.rootLabel,
+                    rooms = displayedDetail.rooms,
+                    activeRoomId = activeRoomId,
+                    onCreateThread = {
+                        threadActionRoom = null
+                        threadActionDialog = ThreadActionDialog.Create
+                    },
+                    onOpenThread = { room ->
+                        activeRoomId = room.id
+                        roomsOpen = false
+                    },
+                    onExpandRooms = { roomsOpen = true },
+                    modifier = Modifier.align(Alignment.CenterStart),
+                )
+            }
+            GraphChatShellFrame(modifier = Modifier.padding(start = contentStartPadding)) {
+                GraphChatMainShell {
+                    GraphChatTopbarShell {
+                        ThreadTopBar(
+                            detail = displayedDetail,
+                            selectedView = selectedView,
+                            onViewSelected = { selectedView = it },
+                            onOpenAppNav = { appNavOpen = true },
+                            onOpenRooms = { roomsOpen = true },
+                            onOpenSettings = { settingsOpen = true },
+                            onOpenThreadAction = { threadActionDialog = it },
+                            onReturnToWorkspace = { selectedView = ThreadSurfaceView.Workspace },
+                            onCreateThreadShortcut = {
+                                threadActionRoom = null
+                                threadActionDialog = ThreadActionDialog.Create
+                            },
+                            themeMode = themeMode,
+                            darkThemeActive = darkThemeActive,
                         )
-                        ThreadSurfaceView.Workspace -> WorkspacePanel(
-                            workspace = detail.workspacePreview,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                        ThreadSurfaceView.Shell -> ShellPanel(
-                            shell = detail.shellPreview,
-                            modifier = Modifier.fillMaxSize(),
-                        )
+                    }
+                    GraphChatSplitRegion(modifier = Modifier.weight(1f)) {
+                        when (selectedView) {
+                            ThreadSurfaceView.Chat -> ChatPreviewSurface(
+                                detail = displayedDetail,
+                                onOpenDetail = { openDetail = it },
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                            ThreadSurfaceView.Workspace -> WorkspacePanel(
+                                workspace = displayedDetail.workspacePreview,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                            ThreadSurfaceView.Shell -> ShellPanel(
+                                shell = displayedDetail.shellPreview,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
                     }
                 }
             }
-        }
-        if (selectedView == ThreadSurfaceView.Chat) {
-            ThreadComposer(
-                composer = detail.composer,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding(),
-            )
-        }
-        GraphChatMobileScrim(
-            open = roomsOpen,
-            onClose = { roomsOpen = false },
-        )
-        GraphChatRoomsRailShell(
-            mobileOpen = roomsOpen,
-            modifier = Modifier
-                .align(Alignment.CenterStart)
-                .fillMaxWidth(0.86f),
-        ) {
-            ThreadRoomsPanel(
-                workspaceLabel = detail.workspacePreview.rootLabel,
-                rooms = detail.rooms,
+            if (selectedView == ThreadSurfaceView.Chat) {
+                ThreadComposer(
+                    composer = displayedDetail.composer,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(start = contentStartPadding)
+                        .navigationBarsPadding(),
+                )
+            }
+            GraphChatMobileScrim(
+                open = roomsOpen,
                 onClose = { roomsOpen = false },
-                onCreateThread = {
-                    roomsOpen = false
-                    threadActionRoom = null
-                    threadActionDialog = ThreadActionDialog.Create
-                },
-                copiedSessionRoomId = copiedSessionRoomId,
-                onRenameThread = { room ->
-                    roomsOpen = false
-                    threadActionRoom = room
-                    threadActionDialog = ThreadActionDialog.Rename
-                },
-                onCopySessionId = { room ->
-                    copiedSessionRoomId = room.id
-                },
-                onDeleteThread = { room ->
-                    roomsOpen = false
-                    threadActionRoom = room
-                    threadActionDialog = ThreadActionDialog.Delete
-                },
-                modifier = Modifier.fillMaxSize(),
             )
-        }
-        if (appNavOpen) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(ThreadColors.Primary.copy(alpha = 0.30f))
-                    .clickable { appNavOpen = false },
-            )
-            AppShellNavigationPanel(
-                appShell = appShell,
-                onOpenSettings = {
-                    appNavOpen = false
-                    settingsOpen = true
-                },
-                onClose = { appNavOpen = false },
+            GraphChatRoomsRailShell(
+                mobileOpen = roomsOpen,
                 modifier = Modifier
                     .align(Alignment.CenterStart)
-                    .navigationBarsPadding()
-                    .fillMaxWidth(0.86f),
-            )
-        }
-        if (settingsOpen) {
-            AppShellSettingsPanel(
-                appShell = appShell,
-                themeMode = themeMode,
-                darkThemeActive = darkThemeActive,
-                supervisorConnection = supervisorConnection,
-                homeSnapshot = homeSnapshot,
-                homeSnapshotLoading = homeSnapshotLoading,
-                homeSnapshotError = homeSnapshotError,
-                onThemeModeSelected = onThemeModeSelected,
-                onChangeConnection = onChangeConnection,
-                onClose = { settingsOpen = false },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .navigationBarsPadding(),
-            )
-        }
-        threadActionDialog?.let { dialog ->
-            ThreadActionDialogOverlay(
-                dialog = dialog,
-                threadTitle = threadActionRoom?.title ?: detail.title,
-                exportTurns = ThreadPreviewSample.exportTurns,
-                onClose = {
-                    threadActionDialog = null
-                    threadActionRoom = null
-                },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .navigationBarsPadding(),
-            )
-        }
-        openDetail?.let { detailPreview ->
-            LongTextDialog(
-                detail = detailPreview,
-                onClose = { openDetail = null },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .navigationBarsPadding(),
-            )
+                    .fillMaxWidth(if (showCollapsedRoomsRail) 0.40f else 0.86f),
+            ) {
+                ThreadRoomsPanel(
+                    workspaceLabel = displayedDetail.workspacePreview.rootLabel,
+                    rooms = displayedDetail.rooms,
+                    onClose = { roomsOpen = false },
+                    onCreateThread = {
+                        roomsOpen = false
+                        threadActionRoom = null
+                        threadActionDialog = ThreadActionDialog.Create
+                    },
+                    copiedSessionRoomId = copiedSessionRoomId,
+                    onRenameThread = { room ->
+                        roomsOpen = false
+                        threadActionRoom = room
+                        threadActionDialog = ThreadActionDialog.Rename
+                    },
+                    onCopySessionId = { room ->
+                        copiedSessionRoomId = room.id
+                    },
+                    onDeleteThread = { room ->
+                        roomsOpen = false
+                        threadActionRoom = room
+                        threadActionDialog = ThreadActionDialog.Delete
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            if (appNavOpen) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(ThreadColors.Primary.copy(alpha = 0.30f))
+                        .clickable { appNavOpen = false },
+                )
+                AppShellNavigationPanel(
+                    appShell = appShell,
+                    onOpenSettings = {
+                        appNavOpen = false
+                        settingsOpen = true
+                    },
+                    onClose = { appNavOpen = false },
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .navigationBarsPadding()
+                        .fillMaxWidth(0.86f),
+                )
+            }
+            if (settingsOpen) {
+                AppShellSettingsPanel(
+                    appShell = appShell,
+                    themeMode = themeMode,
+                    darkThemeActive = darkThemeActive,
+                    supervisorConnection = supervisorConnection,
+                    homeSnapshot = homeSnapshot,
+                    homeSnapshotLoading = homeSnapshotLoading,
+                    homeSnapshotError = homeSnapshotError,
+                    onThemeModeSelected = onThemeModeSelected,
+                    onChangeConnection = onChangeConnection,
+                    onClose = { settingsOpen = false },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .navigationBarsPadding(),
+                )
+            }
+            threadActionDialog?.let { dialog ->
+                ThreadActionDialogOverlay(
+                    dialog = dialog,
+                    threadTitle = threadActionRoom?.title ?: displayedDetail.title,
+                    exportTurns = ThreadPreviewSample.exportTurns,
+                    onClose = {
+                        threadActionDialog = null
+                        threadActionRoom = null
+                    },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .navigationBarsPadding(),
+                )
+            }
+            openDetail?.let { detailPreview ->
+                LongTextDialog(
+                    detail = detailPreview,
+                    onClose = { openDetail = null },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .navigationBarsPadding(),
+                )
+            }
         }
     }
 }

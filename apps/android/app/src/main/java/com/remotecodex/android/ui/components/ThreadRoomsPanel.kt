@@ -11,8 +11,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -33,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.ui.model.ThreadRoomPreview
+import com.remotecodex.android.ui.model.ThreadStatus
 import com.remotecodex.android.ui.presentation.threadStatusLabel
 import com.remotecodex.android.ui.theme.ThreadColors
 
@@ -131,6 +134,158 @@ fun ThreadRoomsPanel(
             }
         }
     }
+}
+
+@Composable
+fun ThreadRoomsCollapsedRail(
+    workspaceLabel: String,
+    rooms: List<ThreadRoomPreview>,
+    activeRoomId: String?,
+    onCreateThread: () -> Unit,
+    onOpenThread: (ThreadRoomPreview) -> Unit,
+    onExpandRooms: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxHeight()
+            .width(72.dp)
+            .background(ThreadColors.Panel)
+            .border(1.dp, ThreadColors.Border)
+            .padding(horizontal = 8.dp, vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(42.dp)
+                .clip(CircleShape)
+                .background(ThreadColors.Primary)
+                .semantics { contentDescription = "Workspace ${workspaceLabel}" },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = workspaceLabel.take(1).uppercase(),
+                color = ThreadColors.PrimaryForeground,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        CollapsedRailButton(
+            kind = RoomsGlyphKind.Rows,
+            contentDescription = "Expand thread rooms",
+            onClick = onExpandRooms,
+        )
+        CollapsedRailButton(
+            kind = RoomsGlyphKind.Plus,
+            selected = true,
+            contentDescription = "New Chat",
+            onClick = onCreateThread,
+        )
+        CollapsedRailSeparator()
+        Column(
+            modifier = Modifier.weight(1f),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            rooms.take(8).forEach { room ->
+                CollapsedRoomButton(
+                    room = room,
+                    selected = room.id == activeRoomId || room.active,
+                    onClick = { onOpenThread(room) },
+                )
+            }
+            if (rooms.size > 8) {
+                Text(
+                    text = "+${rooms.size - 8}",
+                    color = ThreadColors.ForegroundMuted,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CollapsedRoomButton(
+    room: ThreadRoomPreview,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val statusColor = when (room.status) {
+        ThreadStatus.Running -> ThreadColors.Warning
+        ThreadStatus.Complete -> ThreadColors.Success
+        ThreadStatus.Failed -> ThreadColors.Danger
+        ThreadStatus.Waiting -> ThreadColors.Info
+    }
+    Box(
+        modifier = Modifier
+            .size(46.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (selected) ThreadColors.SurfaceStrong else ThreadColors.Surface)
+            .border(
+                1.dp,
+                if (selected) ThreadColors.Primary.copy(alpha = 0.58f) else ThreadColors.Border,
+                RoundedCornerShape(14.dp),
+            )
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = "Open thread ${room.title}" },
+        contentAlignment = Alignment.Center,
+    ) {
+        RoomsGlyph(
+            kind = RoomsGlyphKind.Message,
+            color = if (selected) ThreadColors.Primary else ThreadColors.ForegroundMuted,
+            modifier = Modifier.size(18.dp),
+        )
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .size(10.dp)
+                .clip(CircleShape)
+                .background(statusColor)
+                .border(1.dp, ThreadColors.Panel, CircleShape),
+        )
+    }
+}
+
+@Composable
+private fun CollapsedRailButton(
+    kind: RoomsGlyphKind,
+    contentDescription: String,
+    selected: Boolean = false,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(42.dp)
+            .clip(RoundedCornerShape(13.dp))
+            .background(if (selected) ThreadColors.Primary else ThreadColors.SurfaceStrong)
+            .border(
+                1.dp,
+                if (selected) ThreadColors.Primary else ThreadColors.Border,
+                RoundedCornerShape(13.dp),
+            )
+            .clickable(onClick = onClick)
+            .semantics { this.contentDescription = contentDescription },
+        contentAlignment = Alignment.Center,
+    ) {
+        RoomsGlyph(
+            kind = kind,
+            color = if (selected) ThreadColors.PrimaryForeground else ThreadColors.ForegroundMuted,
+            modifier = Modifier.size(17.dp),
+        )
+    }
+}
+
+@Composable
+private fun CollapsedRailSeparator() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth(0.72f)
+            .height(1.dp)
+            .background(ThreadColors.Border),
+    )
 }
 
 @Composable
