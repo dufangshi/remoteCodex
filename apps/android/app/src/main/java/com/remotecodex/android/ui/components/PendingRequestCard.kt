@@ -33,6 +33,7 @@ import com.remotecodex.android.ui.model.PendingRequestPreview
 import com.remotecodex.android.ui.presentation.PendingRequestOptionState
 import com.remotecodex.android.ui.presentation.PendingRequestQuestionState
 import com.remotecodex.android.ui.presentation.buildPendingRequestCardState
+import com.remotecodex.android.ui.presentation.pendingRequestQuestionHasAnswer
 import com.remotecodex.android.ui.theme.ThreadColors
 
 @Composable
@@ -50,7 +51,11 @@ fun PendingRequestCard(
         mutableStateMapOf<String, String>()
     }
     val hasSelectedAnswers = state.questions.all { question ->
-        selectedAnswers[question.id].orEmpty().isNotEmpty()
+        pendingRequestQuestionHasAnswer(
+            question = question,
+            selectedLabels = selectedAnswers[question.id].orEmpty(),
+            customAnswer = customAnswers[question.id].orEmpty(),
+        )
     }
     val submitEnabled = !questionMode || hasSelectedAnswers
     Column(
@@ -171,7 +176,7 @@ fun PendingRequestCard(
                         contentDescription = if (submitEnabled) {
                             state.approveAccessibilityLabel
                         } else {
-                            "Select an answer before submitting ${state.title}"
+                            "Answer each question before submitting ${state.title}"
                         }
                         if (!submitEnabled) {
                             disabled()

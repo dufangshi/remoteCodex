@@ -224,6 +224,21 @@ data class PendingRequestOptionState(
     val recommended: Boolean,
 )
 
+fun pendingRequestQuestionHasAnswer(
+    question: PendingRequestQuestionState,
+    selectedLabels: Set<String>,
+    customAnswer: String,
+): Boolean {
+    val otherLabel = question.otherLabel
+    if (selectedLabels.isEmpty()) {
+        return false
+    }
+    if (selectedLabels.size == 1 && otherLabel != null && otherLabel in selectedLabels) {
+        return customAnswer.trim().isNotEmpty()
+    }
+    return true
+}
+
 enum class TimelineNoteToneState {
     Activity,
     Answered,

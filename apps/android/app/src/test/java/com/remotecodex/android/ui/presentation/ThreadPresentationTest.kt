@@ -813,6 +813,71 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun requiresCustomAnswerWhenOnlyPendingRequestOtherOptionIsSelected() {
+        val question = PendingRequestQuestionState(
+            id = "question-0",
+            header = "Approval",
+            question = "How should Codex proceed?",
+            options = emptyList(),
+            multiSelect = false,
+            otherLabel = "Not from above",
+        )
+
+        assertEquals(
+            false,
+            pendingRequestQuestionHasAnswer(
+                question = question,
+                selectedLabels = setOf("Not from above"),
+                customAnswer = " ",
+            ),
+        )
+        assertEquals(
+            true,
+            pendingRequestQuestionHasAnswer(
+                question = question,
+                selectedLabels = setOf("Not from above"),
+                customAnswer = "Run after tests finish",
+            ),
+        )
+    }
+
+    @Test
+    fun treatsConcretePendingRequestOptionAsAnswered() {
+        val question = PendingRequestQuestionState(
+            id = "question-0",
+            header = "Approval",
+            question = "Allow the build?",
+            options = listOf(
+                PendingRequestOptionState(
+                    rawLabel = "Approve once (recommended)",
+                    displayLabel = "Approve once",
+                    description = "",
+                    recommended = true,
+                ),
+            ),
+            multiSelect = false,
+            otherLabel = "Not from above",
+        )
+
+        assertEquals(
+            true,
+            pendingRequestQuestionHasAnswer(
+                question = question,
+                selectedLabels = setOf("Approve once (recommended)"),
+                customAnswer = "",
+            ),
+        )
+        assertEquals(
+            true,
+            pendingRequestQuestionHasAnswer(
+                question = question,
+                selectedLabels = setOf("Approve once (recommended)", "Not from above"),
+                customAnswer = "",
+            ),
+        )
+    }
+
+    @Test
     fun buildsEnabledComposerSettingsState() {
         assertEquals(
             ComposerSettingsState(
