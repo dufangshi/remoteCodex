@@ -61,6 +61,7 @@ import com.remotecodex.android.ui.presentation.parseRichMessageBlocks
 import com.remotecodex.android.ui.presentation.GraphChatToolCallTone
 import com.remotecodex.android.ui.presentation.GraphChatToolEntryDisplayKind
 import com.remotecodex.android.ui.presentation.GraphChatToolEntryValueTone
+import com.remotecodex.android.ui.presentation.GraphChatToolEntryUsage
 import com.remotecodex.android.ui.presentation.buildGraphChatToolCallState
 import com.remotecodex.android.ui.presentation.buildGraphChatToolEntryDisplayState
 import com.remotecodex.android.ui.presentation.preprocessGraphChatToolBlocks
@@ -293,7 +294,8 @@ fun GraphChatToolSection(
     body: String,
     copyText: String? = null,
 ) {
-    val entries = remember(body) { graphChatToolEntries(body) }
+    val usage = if (title == "Result") GraphChatToolEntryUsage.Result else GraphChatToolEntryUsage.Parameter
+    val entries = remember(body, usage) { graphChatToolEntries(body, usage) }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         GraphChatToolSectionHeader(title = title, copyText = copyText)
         if (

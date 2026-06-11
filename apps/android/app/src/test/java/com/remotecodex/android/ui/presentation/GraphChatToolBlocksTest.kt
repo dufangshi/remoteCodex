@@ -284,6 +284,71 @@ class GraphChatToolBlocksTest {
     }
 
     @Test
+    fun readsPrimitiveJsonResultValuesAsValueEntries() {
+        assertEquals(
+            listOf(GraphChatToolEntry("value", "\"done\"", GraphChatToolValueKind.String)),
+            graphChatToolEntries("\"done\"", GraphChatToolEntryUsage.Result),
+        )
+        assertEquals(
+            listOf(GraphChatToolEntry("value", "42", GraphChatToolValueKind.Number)),
+            graphChatToolEntries("42", GraphChatToolEntryUsage.Result),
+        )
+        assertEquals(
+            listOf(GraphChatToolEntry("value", "false", GraphChatToolValueKind.Boolean)),
+            graphChatToolEntries("false", GraphChatToolEntryUsage.Result),
+        )
+    }
+
+    @Test
+    fun omitsBlankJsonResultScalars() {
+        assertEquals(emptyList<GraphChatToolEntry>(), graphChatToolEntries("null", GraphChatToolEntryUsage.Result))
+        assertEquals(emptyList<GraphChatToolEntry>(), graphChatToolEntries("\"\"", GraphChatToolEntryUsage.Result))
+    }
+
+    @Test
+    fun detectsTextualOutputLikeWebToolCall() {
+        assertEquals(true, graphChatToolHasTextualOutput("plain output"))
+        assertEquals(true, graphChatToolHasTextualOutput("\"plain output\""))
+        assertEquals(true, graphChatToolHasTextualOutput("""{"stdout":"ok"}"""))
+        assertEquals(false, graphChatToolHasTextualOutput("""{"stdout":""}"""))
+        assertEquals(false, graphChatToolHasTextualOutput("42"))
+        assertEquals(false, graphChatToolHasTextualOutput("false"))
+        assertEquals(false, graphChatToolHasTextualOutput("null"))
+        assertEquals(false, graphChatToolHasTextualOutput("\"\""))
+    }
+
+    @Test
+    fun expandsCompletedToolCallForPrimitiveStringResultOnly() {
+        val stringState = buildGraphChatToolCallState(
+            language = "tool-merged",
+            body = """
+                tool: task.note
+                call_id: call_note
+                args:
+                {}
+                result:
+                "saved"
+            """.trimIndent(),
+        )
+        val numberState = buildGraphChatToolCallState(
+            language = "tool-merged",
+            body = """
+                tool: task.count
+                call_id: call_count
+                args:
+                {}
+                result:
+                42
+            """.trimIndent(),
+        )
+
+        assertEquals(true, stringState.hasTextualOutput)
+        assertEquals(true, stringState.defaultExpanded)
+        assertEquals(false, numberState.hasTextualOutput)
+        assertEquals(false, numberState.defaultExpanded)
+    }
+
+    @Test
     fun prettyPrintsToolJsonValues() {
         assertEquals(
             """

@@ -66,6 +66,11 @@ enum class GraphChatToolEntryValueTone {
     Raw,
 }
 
+enum class GraphChatToolEntryUsage {
+    Parameter,
+    Result,
+}
+
 data class GraphChatToolEntryDisplayState(
     val key: String,
     val value: String,
@@ -224,27 +229,35 @@ fun graphChatToolHasTextualOutput(result: String?): Boolean {
     if (normalized.isEmpty()) {
         return false
     }
-    val entries = graphChatToolEntries(normalized)
+    if (isBlankJsonScalar(normalized)) {
+        return false
+    }
+    val entries = graphChatToolEntries(normalized, GraphChatToolEntryUsage.Result)
     if (entries.isEmpty()) {
         return false
     }
     return entries.any { entry ->
-        entry.key in setOf("stdout", "stderr", "result", "value") &&
-            entry.value.isNotBlank()
+        entry.key in setOf("stdout", "stderr", "result", "value") && graphChatToolEntryHasTextualOutput(entry)
     }
 }
 
-fun graphChatToolEntries(body: String): List<GraphChatToolEntry> {
+fun graphChatToolEntries(
+    body: String,
+    usage: GraphChatToolEntryUsage = GraphChatToolEntryUsage.Parameter,
+): List<GraphChatToolEntry> {
     val objectEntries = readFlatJsonObjectEntries(body)
     if (objectEntries.isNotEmpty() || isJsonObjectLiteral(body)) {
         return objectEntries
     }
-    if (isJsonArrayLiteral(body)) {
+    if (isJsonArrayLiteral(body) || isJsonScalarLiteral(body)) {
+        if (usage == GraphChatToolEntryUsage.Result && isBlankJsonScalar(body)) {
+            return emptyList()
+        }
         return listOf(
             GraphChatToolEntry(
                 key = "value",
                 value = body.trim(),
-                kind = GraphChatToolValueKind.Object,
+                kind = graphChatToolValueKind(key = "value", rawValue = body, fromJson = true),
             ),
         )
     }
@@ -270,6 +283,9 @@ fun graphChatToolEntries(body: String): List<GraphChatToolEntry> {
         return colonEntries
     }
 
+    if (usage == GraphChatToolEntryUsage.Result && body.isBlank()) {
+        return emptyList()
+    }
     return body.takeIf { it.isNotBlank() }?.let {
         listOf(GraphChatToolEntry(key = "value", value = it.trim(), kind = GraphChatToolValueKind.Raw))
     }.orEmpty()
@@ -323,6 +339,30 @@ fun graphChatToolEntryInlineDisplayValue(entry: GraphChatToolEntry): String {
         GraphChatToolValueKind.Null -> "null"
         else -> entry.value.ifBlank { "(empty)" }
     }
+}
+
+private fun graphChatToolEntryHasTextualOutput(entry: GraphChatToolEntry): Boolean {
+    return when (entry.kind) {
+        GraphChatToolValueKind.String -> unquoteJsonStringLiteral(entry.value).isNotEmpty()
+        GraphChatToolValueKind.Raw -> entry.value.isNotBlank()
+        GraphChatToolValueKind.Number,
+        GraphChatToolValueKind.Boolean,
+        GraphChatToolValueKind.Null,
+        GraphChatToolValueKind.Object,
+        -> false
+    }
+}
+
+private fun unquoteJsonStringLiteral(value: String): String {
+    val trimmed = value.trim()
+    if (!trimmed.startsWith("\"") || !trimmed.endsWith("\"") || trimmed.length < 2) {
+        return trimmed
+    }
+    return trimmed
+        .substring(1, trimmed.lastIndex)
+        .replace("\\n", "\n")
+        .replace("\\\"", "\"")
+        .replace("\\\\", "\\")
 }
 
 private fun GraphChatToolValueKind.toDisplayTone(): GraphChatToolEntryValueTone {
@@ -406,6 +446,20 @@ private fun isJsonObjectLiteral(body: String): Boolean {
 private fun isJsonArrayLiteral(body: String): Boolean {
     val trimmed = body.trim()
     return trimmed.startsWith("[") && trimmed.endsWith("]")
+}
+
+private fun isJsonScalarLiteral(body: String): Boolean {
+    val trimmed = body.trim()
+    return trimmed.startsWith("\"") && trimmed.endsWith("\"") ||
+        trimmed == "true" ||
+        trimmed == "false" ||
+        trimmed == "null" ||
+        Regex("-?(0|[1-9][0-9]*)(\\.[0-9]+)?([eE][+-]?[0-9]+)?").matches(trimmed)
+}
+
+private fun isBlankJsonScalar(body: String): Boolean {
+    val trimmed = body.trim()
+    return trimmed == "null" || trimmed == "\"\""
 }
 
 private fun readFlatJsonObjectEntries(body: String): List<GraphChatToolEntry> {
