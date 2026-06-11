@@ -63,6 +63,7 @@ fun ThreadDetailScreen(
     var pendingPrompt by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingInterrupt by remember(threadId) { mutableStateOf(false) }
     var pendingSettingsUpdate by remember(threadId) { mutableStateOf<UpdateThreadSettingsRequest?>(null) }
+    var pendingCompact by remember(threadId) { mutableStateOf(false) }
     var resolvingRequestId by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingRenameTitle by remember(threadId) { mutableStateOf<String?>(null) }
     var pendingDelete by remember(threadId) { mutableStateOf(false) }
@@ -157,6 +158,24 @@ fun ThreadDetailScreen(
             .onFailure { throwable -> error = throwable.message ?: "Settings update failed." }
     }
 
+    LaunchedEffect(pendingCompact) {
+        if (!pendingCompact) return@LaunchedEffect
+        error = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                client.compactThread(threadId)
+                client.fetchThreadDetail(threadId, limit = 30)
+            }
+        }
+        pendingCompact = false
+        result
+            .onSuccess { dto ->
+                detail = buildThreadDetailPreviewFromSupervisor(dto)
+                refreshNonce += 1
+            }
+            .onFailure { throwable -> error = throwable.message ?: "Compact failed." }
+    }
+
     LaunchedEffect(pendingRequestResponse) {
         val response = pendingRequestResponse ?: return@LaunchedEffect
         resolvingRequestId = response.request.id
@@ -240,6 +259,9 @@ fun ThreadDetailScreen(
             },
             onUpdateThreadSettings = { settings ->
                 pendingSettingsUpdate = settings
+            },
+            onCompactThread = {
+                pendingCompact = true
             },
             onDenyPendingRequest = { request ->
                 pendingRequestResponse = PendingRequestResponse(

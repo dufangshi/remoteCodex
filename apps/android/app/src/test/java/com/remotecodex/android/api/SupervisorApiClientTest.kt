@@ -368,6 +368,33 @@ class SupervisorApiClientTest {
         assertTrue(body.contains("\"sandboxMode\":\"danger-full-access\""))
     }
 
+    @Test
+    fun compactThreadUsesRelayDevicePath() {
+        val compactedThreadJson = """{"id":"thread-1","workspaceId":"workspace-1","title":"Android API","status":"idle","model":"gpt-5","reasoningEffort":"medium","fastMode":false,"collaborationMode":"default","sandboxMode":"workspace-write","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":"Compacted"}"""
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(200, compactedThreadJson),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        val compacted = client.compactThread("thread-1")
+
+        assertEquals("Compacted", compacted.summaryText)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1/compact",
+            transport.requests.single().url,
+        )
+        assertEquals("POST", transport.requests.single().method)
+        assertEquals("relay-token", transport.requests.single().bearerToken)
+    }
+
     private class RecordingTransport(
         private vararg val responses: SupervisorHttpResponse,
     ) : SupervisorHttpTransport {

@@ -158,6 +158,7 @@ fun ThreadComposer(
     onSubmitPrompt: ((String) -> Unit)? = null,
     onInterruptThread: (() -> Unit)? = null,
     onUpdateSettings: ((UpdateThreadSettingsRequest) -> Unit)? = null,
+    onCompactThread: (() -> Unit)? = null,
 ) {
     var openMenu by remember { mutableStateOf<ComposerMenu?>(null) }
     var activeViewPreview by remember(composer.activeView) { mutableStateOf(composer.activeView) }
@@ -462,8 +463,13 @@ fun ThreadComposer(
                                 }
                             }
                             ComposerToolboxActionDecisionKind.RunCompact -> {
-                                compactBusyPreview = true
-                                compactPreviewStatus = "Compact preview started"
+                                if (onCompactThread != null) {
+                                    onCompactThread()
+                                    compactPreviewStatus = null
+                                } else {
+                                    compactBusyPreview = true
+                                    compactPreviewStatus = "Compact preview started"
+                                }
                                 if (actionDecision.closeMenu) {
                                     slashPanelView = ComposerSlashPanelViewState.Root
                                     openMenu = null

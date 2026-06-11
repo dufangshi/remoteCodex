@@ -99,6 +99,7 @@ fun ThreadDetailSurface(
     onSubmitPrompt: ((String) -> Unit)? = null,
     onInterruptThread: (() -> Unit)? = null,
     onUpdateThreadSettings: ((UpdateThreadSettingsRequest) -> Unit)? = null,
+    onCompactThread: (() -> Unit)? = null,
     onDenyPendingRequest: (PendingRequestPreview) -> Unit = {},
     onSubmitPendingRequest: (PendingRequestPreview, Map<String, List<String>>) -> Unit = { _, _ -> },
     onRenameThread: ((String) -> Unit)? = null,
@@ -196,6 +197,7 @@ fun ThreadDetailSurface(
                     onSubmitPrompt = onSubmitPrompt,
                     onInterruptThread = onInterruptThread,
                     onUpdateSettings = onUpdateThreadSettings,
+                    onCompactThread = onCompactThread,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(start = contentStartPadding)

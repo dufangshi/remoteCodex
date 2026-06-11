@@ -163,6 +163,13 @@ class SupervisorApiClient(
         ).toThreadSummary()
     }
 
+    fun compactThread(threadId: String): SupervisorThreadSummary {
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/compact"),
+            method = "POST",
+        ).toThreadSummary()
+    }
+
     fun respondToThreadRequest(
         threadId: String,
         requestId: String,
