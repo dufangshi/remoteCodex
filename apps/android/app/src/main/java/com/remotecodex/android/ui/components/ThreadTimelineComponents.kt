@@ -659,13 +659,16 @@ private fun MessageBubble(
                 }
             }
         }
+        if (!frameState.isUser && frameState.showReasoningBeforeContent && message.reasoningItems.isNotEmpty()) {
+            ReasoningAccordion(items = message.reasoningItems)
+        }
         if (frameState.isUser) {
             UserMessageBody(text = message.richText)
             UserMessageFooter(frameState = frameState)
         } else {
             RichMessageContent(content = message.richText)
         }
-        if (!frameState.isUser && message.reasoningItems.isNotEmpty()) {
+        if (!frameState.isUser && !frameState.showReasoningBeforeContent && message.reasoningItems.isNotEmpty()) {
             ReasoningAccordion(items = message.reasoningItems)
         }
         message.toolCall?.let {
