@@ -1645,6 +1645,10 @@ private fun SkillPreviewRow(item: ComposerSkillRowState) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .semantics {
+                contentDescription = item.copyAccessibilityLabel
+                stateDescription = skillCopyStateDescription(item)
+            }
             .clip(RoundedCornerShape(10.dp))
             .background(ThreadColors.CodeBackground)
             .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(10.dp))
@@ -1680,6 +1684,14 @@ private fun SkillPreviewRow(item: ComposerSkillRowState) {
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+private fun skillCopyStateDescription(item: ComposerSkillRowState): String {
+    return if (item.copied) {
+        "${item.copyTitle}, copied"
+    } else {
+        item.copyTitle
     }
 }
 

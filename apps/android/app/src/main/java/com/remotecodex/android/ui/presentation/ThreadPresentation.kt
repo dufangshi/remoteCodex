@@ -457,6 +457,8 @@ data class ComposerSkillRowState(
     val scopeLabel: String,
     val invokeName: String,
     val copyLabel: String,
+    val copyAccessibilityLabel: String,
+    val copyTitle: String,
     val description: String,
     val copied: Boolean,
     val enabled: Boolean,
@@ -473,6 +475,15 @@ data class ComposerSkillsPanelState(
     val skills: List<ComposerSkillRowState>,
     val errors: List<ComposerSkillErrorState>,
     val emptyMessage: String?,
+    val copyLifecycle: ComposerSkillsCopyLifecycleState,
+)
+
+data class ComposerSkillsCopyLifecycleState(
+    val copiedSkillName: String?,
+    val copiedInvokeName: String?,
+    val clipboardText: String?,
+    val shouldClearCopiedState: Boolean,
+    val clearDelayMillis: Long,
 )
 
 enum class ComposerMcpStatusTone {
@@ -909,6 +920,7 @@ fun authStatusLabel(status: ComposerMcpAuthStatusPreview): String {
 fun buildComposerSkillsPanelState(
     panel: ComposerSkillsPanelPreview,
 ): ComposerSkillsPanelState {
+    val copyLifecycle = buildComposerSkillsCopyLifecycleState(panel.copiedSkillName)
     val skills = panel.skills.map { skill ->
         val invokeName = "$${skill.name}"
         val copied = panel.copiedSkillName == skill.name
@@ -917,6 +929,8 @@ fun buildComposerSkillsPanelState(
             scopeLabel = skillScopeLabel(skill.scope),
             invokeName = invokeName,
             copyLabel = if (copied) "Copied $invokeName" else invokeName,
+            copyAccessibilityLabel = "Copy $invokeName",
+            copyTitle = "Copy $invokeName",
             description = skill.interfaceShortDescription
                 ?.takeIf { it.isNotBlank() }
                 ?: skill.shortDescription
@@ -944,6 +958,21 @@ fun buildComposerSkillsPanelState(
         skills = skills,
         errors = errors,
         emptyMessage = if (empty) "No skills available right now." else null,
+        copyLifecycle = copyLifecycle,
+    )
+}
+
+fun buildComposerSkillsCopyLifecycleState(
+    copiedSkillName: String?,
+): ComposerSkillsCopyLifecycleState {
+    val copiedName = copiedSkillName?.takeIf { it.isNotBlank() }
+    val invokeName = copiedName?.let { "\$$it" }
+    return ComposerSkillsCopyLifecycleState(
+        copiedSkillName = copiedName,
+        copiedInvokeName = invokeName,
+        clipboardText = invokeName,
+        shouldClearCopiedState = copiedName != null,
+        clearDelayMillis = 1_400L,
     )
 }
 

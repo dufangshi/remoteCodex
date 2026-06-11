@@ -1781,6 +1781,8 @@ class ThreadPresentationTest {
                         scopeLabel = "Repo",
                         invokeName = "\$reviewer",
                         copyLabel = "Copied \$reviewer",
+                        copyAccessibilityLabel = "Copy \$reviewer",
+                        copyTitle = "Copy \$reviewer",
                         description = "Review changed code",
                         copied = true,
                         enabled = true,
@@ -1790,6 +1792,8 @@ class ThreadPresentationTest {
                         scopeLabel = "User",
                         invokeName = "\$docs",
                         copyLabel = "\$docs",
+                        copyAccessibilityLabel = "Copy \$docs",
+                        copyTitle = "Copy \$docs",
                         description = "Read docs quickly",
                         copied = false,
                         enabled = false,
@@ -1797,6 +1801,13 @@ class ThreadPresentationTest {
                 ),
                 errors = emptyList(),
                 emptyMessage = null,
+                copyLifecycle = ComposerSkillsCopyLifecycleState(
+                    copiedSkillName = "reviewer",
+                    copiedInvokeName = "\$reviewer",
+                    clipboardText = "\$reviewer",
+                    shouldClearCopiedState = true,
+                    clearDelayMillis = 1_400L,
+                ),
             ),
             buildComposerSkillsPanelState(
                 ComposerSkillsPanelPreview(
@@ -1868,6 +1879,7 @@ class ThreadPresentationTest {
                     ),
                 ),
                 emptyMessage = null,
+                copyLifecycle = emptyComposerSkillsCopyLifecycleState(),
             ),
             buildComposerSkillsPanelState(
                 ComposerSkillsPanelPreview(
@@ -1883,6 +1895,34 @@ class ThreadPresentationTest {
                     copiedSkillName = null,
                 ),
             ),
+        )
+    }
+
+    @Test
+    fun buildsComposerSkillsCopyLifecycleState() {
+        assertEquals(
+            ComposerSkillsCopyLifecycleState(
+                copiedSkillName = "reviewer",
+                copiedInvokeName = "\$reviewer",
+                clipboardText = "\$reviewer",
+                shouldClearCopiedState = true,
+                clearDelayMillis = 1_400L,
+            ),
+            buildComposerSkillsCopyLifecycleState("reviewer"),
+        )
+        assertEquals(
+            emptyComposerSkillsCopyLifecycleState(),
+            buildComposerSkillsCopyLifecycleState(" "),
+        )
+    }
+
+    private fun emptyComposerSkillsCopyLifecycleState(): ComposerSkillsCopyLifecycleState {
+        return ComposerSkillsCopyLifecycleState(
+            copiedSkillName = null,
+            copiedInvokeName = null,
+            clipboardText = null,
+            shouldClearCopiedState = false,
+            clearDelayMillis = 1_400L,
         )
     }
 
