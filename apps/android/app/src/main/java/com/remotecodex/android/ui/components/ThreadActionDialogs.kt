@@ -212,7 +212,11 @@ private fun ExportTranscriptDialogPreview(
     var exportMode by rememberSaveable { mutableStateOf(ExportMode.Latest) }
     var exportFormat by rememberSaveable { mutableStateOf(ExportFormat.Pdf) }
     var includeTokenAndPrice by rememberSaveable { mutableStateOf(true) }
-    val selectedTurnCount = exportTurns.count { it.selected }
+    var selectedTurnIds by rememberSaveable {
+        mutableStateOf(exportTurns.filter { it.selected }.map { it.id })
+    }
+    val selectedTurnIdSet = selectedTurnIds.toSet()
+    val selectedTurnCount = selectedTurnIdSet.size
     val exportCount = if (exportMode == ExportMode.Latest) {
         minOf(10, exportTurns.size)
     } else {
@@ -279,24 +283,63 @@ private fun ExportTranscriptDialogPreview(
                 text = if (exportMode == ExportMode.Latest) {
                     "Exports the latest 10 turns in chronological order."
                 } else {
-                    "Custom selection uses the checked turns below."
+                    "Selected $selectedTurnCount of ${exportTurns.size} turns."
                 },
                 color = ThreadColors.ForegroundMuted,
                 style = MaterialTheme.typography.labelSmall,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(ThreadColors.Surface)
-                    .border(1.dp, ThreadColors.Border, RoundedCornerShape(14.dp))
-                    .padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(7.dp),
-            ) {
-                exportTurns.forEach { turn ->
-                    ExportTurnRow(turn = turn)
+            if (exportMode == ExportMode.Custom) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(ThreadColors.Surface)
+                        .border(1.dp, ThreadColors.Border, RoundedCornerShape(14.dp))
+                        .padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            text = "Selected $selectedTurnCount of ${exportTurns.size}",
+                            modifier = Modifier.weight(1f),
+                            color = ThreadColors.ForegroundMuted,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        GraphButton(
+                            label = "Select all",
+                            variant = GraphButtonVariant.Ghost,
+                            size = GraphButtonSize.Small,
+                            onClick = { selectedTurnIds = exportTurns.map { it.id } },
+                        )
+                        GraphButton(
+                            label = "Clear",
+                            variant = GraphButtonVariant.Ghost,
+                            size = GraphButtonSize.Small,
+                            onClick = { selectedTurnIds = emptyList() },
+                        )
+                    }
+                    exportTurns.forEach { turn ->
+                        val selected = selectedTurnIdSet.contains(turn.id)
+                        ExportTurnRow(
+                            turn = turn,
+                            selected = selected,
+                            onToggle = {
+                                selectedTurnIds = if (selected) {
+                                    selectedTurnIds.filterNot { it == turn.id }
+                                } else {
+                                    selectedTurnIds + turn.id
+                                }
+                            },
+                        )
+                    }
                 }
             }
             Row(
@@ -404,20 +447,25 @@ private fun ChoicePill(
 }
 
 @Composable
-private fun ExportTurnRow(turn: ExportTurnPreview) {
+private fun ExportTurnRow(
+    turn: ExportTurnPreview,
+    selected: Boolean,
+    onToggle: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(11.dp))
-            .background(if (turn.selected) ThreadColors.SurfaceStrong else ThreadColors.Panel)
+            .background(if (selected) ThreadColors.SurfaceStrong else ThreadColors.Panel)
             .border(1.dp, ThreadColors.Border, RoundedCornerShape(11.dp))
+            .clickable(onClick = onToggle)
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         GraphSelectionGlyph(
-            selected = turn.selected,
-            contentDescription = if (turn.selected) "Turn selected" else "Turn not selected",
+            selected = selected,
+            contentDescription = if (selected) "Turn selected" else "Turn not selected",
         )
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
