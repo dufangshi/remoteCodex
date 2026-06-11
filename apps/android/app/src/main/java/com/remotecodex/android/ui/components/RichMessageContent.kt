@@ -115,6 +115,7 @@ fun RichMessageContent(
                 is RichMessageBlock.Quote -> RichQuote(text = block.text)
                 RichMessageBlock.HorizontalRule -> RichHorizontalRule()
                 is RichMessageBlock.Math -> RichMathBlock(expression = block.expression)
+                is RichMessageBlock.Html -> RichHtmlBlock(source = block.source)
                 is RichMessageBlock.Table -> RichTable(columns = block.columns, rows = block.rows)
                 is RichMessageBlock.Code -> {
                     if (block.language.startsWith("tool-")) {
@@ -154,6 +155,41 @@ private fun isMoleculeCodeBlock(language: String, code: String): Boolean {
         return false
     }
     return looksLikeMoleculeStructure(code, normalized)
+}
+
+@Composable
+private fun RichHtmlBlock(source: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(9.dp))
+            .background(ThreadColors.CodeBackground)
+            .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(9.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "HTML",
+                modifier = Modifier.weight(1f),
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            CopyCodeButton(value = source)
+        }
+        Text(
+            text = source,
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            color = ThreadColors.CodeForeground,
+            style = MaterialTheme.typography.bodyMedium,
+            fontFamily = FontFamily.Monospace,
+        )
+    }
 }
 
 @Composable

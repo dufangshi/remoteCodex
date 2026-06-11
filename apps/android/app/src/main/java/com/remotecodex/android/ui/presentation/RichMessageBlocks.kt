@@ -8,6 +8,7 @@ sealed interface RichMessageBlock {
     data class Quote(val text: String) : RichMessageBlock
     data object HorizontalRule : RichMessageBlock
     data class Math(val expression: String) : RichMessageBlock
+    data class Html(val source: String) : RichMessageBlock
     data class Table(
         val columns: List<TableColumn>,
         val rows: List<List<String>>,
@@ -132,6 +133,17 @@ fun parseRichMessageBlocks(content: String): List<RichMessageBlock> {
             continue
         }
 
+        val setextHeading = readSetextHeading(lines, index)
+        if (setextHeading != null) {
+            flushParagraph()
+            blocks += RichMessageBlock.Heading(
+                level = setextHeading.level,
+                text = setextHeading.text,
+            )
+            index = setextHeading.nextIndex
+            continue
+        }
+
         val heading = Regex("^(#{1,6})\\s+(.+)$").matchEntire(trimmed.trim())
         if (heading != null) {
             flushParagraph()
@@ -162,6 +174,14 @@ fun parseRichMessageBlocks(content: String): List<RichMessageBlock> {
                 index += 1
             }
             blocks += RichMessageBlock.Quote(quoteLines.joinToString("\n").trim())
+            continue
+        }
+
+        val html = readHtmlBlock(lines, index)
+        if (html != null) {
+            flushParagraph()
+            blocks += RichMessageBlock.Html(html.source)
+            index = html.nextIndex
             continue
         }
 
@@ -303,10 +323,73 @@ private data class TableReadResult(
     val nextIndex: Int,
 )
 
+private data class SetextHeadingReadResult(
+    val level: Int,
+    val text: String,
+    val nextIndex: Int,
+)
+
+private data class HtmlReadResult(
+    val source: String,
+    val nextIndex: Int,
+)
+
 private data class MathReadResult(
     val expression: String,
     val nextIndex: Int,
 )
+
+private fun readSetextHeading(lines: List<String>, startIndex: Int): SetextHeadingReadResult? {
+    if (startIndex + 1 >= lines.size) return null
+    val text = lines[startIndex].trim()
+    if (text.isEmpty() || text.startsWith("#") || text.startsWith(">")) return null
+    if (isListItemLine(text) || readCodeFenceOpening(text) != null || text.contains("|")) return null
+    val marker = lines[startIndex + 1].trim()
+    val level = when {
+        Regex("=+").matches(marker) -> 1
+        Regex("-+").matches(marker) -> 2
+        else -> return null
+    }
+    return SetextHeadingReadResult(
+        level = level,
+        text = text,
+        nextIndex = startIndex + 2,
+    )
+}
+
+private fun readHtmlBlock(lines: List<String>, startIndex: Int): HtmlReadResult? {
+    val first = lines[startIndex].trim()
+    if (!looksLikeHtmlBlockStart(first)) return null
+    val htmlLines = mutableListOf(lines[startIndex].trimEnd())
+    var index = startIndex + 1
+    while (index < lines.size) {
+        val line = lines[index]
+        if (line.isBlank()) break
+        val trimmed = line.trimEnd()
+        if (
+            readCodeFenceOpening(trimmed.trim()) != null ||
+            readSimpleMarkdownTable(lines, index) != null ||
+            Regex("^(#{1,6})\\s+.+$").matches(trimmed.trim()) ||
+            isListItemLine(trimmed.trim())
+        ) {
+            break
+        }
+        htmlLines += trimmed
+        index += 1
+    }
+    return HtmlReadResult(
+        source = htmlLines.joinToString("\n").trim(),
+        nextIndex = index,
+    )
+}
+
+private fun looksLikeHtmlBlockStart(trimmed: String): Boolean {
+    if (trimmed.startsWith("<!--")) return true
+    if (trimmed.startsWith("<![CDATA[")) return true
+    if (trimmed.startsWith("<?")) return true
+    return Regex("^</?[A-Za-z][A-Za-z0-9-]*(?:\\s+[^>]*)?>\\s*$").matches(trimmed) ||
+        Regex("^<([A-Za-z][A-Za-z0-9-]*)(?:\\s+[^>]*)?>.*</\\1>\\s*$").matches(trimmed)
+}
 
 private fun readDelimitedMathBlock(
     lines: List<String>,
@@ -372,20 +455,45 @@ private fun readSimpleMarkdownTable(lines: List<String>, startIndex: Int): Table
     var index = startIndex + 2
     while (index < lines.size) {
         val row = parseTableRow(lines[index]) ?: break
-        if (row.size < 2) break
-        rows += row
+        if (row.isEmpty()) break
+        rows += row.normalizeTableRow(columns.size)
         index += 1
     }
     return TableReadResult(columns = columns, rows = rows, nextIndex = index)
 }
 
+private fun List<String>.normalizeTableRow(columnCount: Int): List<String> {
+    return when {
+        size == columnCount -> this
+        size > columnCount -> take(columnCount)
+        else -> this + List(columnCount - size) { "" }
+    }
+}
+
 private fun parseTableRow(line: String): List<String>? {
     val trimmed = line.trim()
     if (!trimmed.contains("|")) return null
-    return trimmed
-        .trim('|')
-        .split('|')
-        .map { it.trim() }
+    val body = trimmed.trim('|')
+    val cells = mutableListOf<String>()
+    val current = StringBuilder()
+    var index = 0
+    while (index < body.length) {
+        val char = body[index]
+        if (char == '\\' && index + 1 < body.length && body[index + 1] == '|') {
+            current.append('|')
+            index += 2
+            continue
+        }
+        if (char == '|') {
+            cells += current.toString().trim()
+            current.clear()
+        } else {
+            current.append(char)
+        }
+        index += 1
+    }
+    cells += current.toString().trim()
+    return cells
 }
 
 private fun parseTableSeparator(line: String): List<TableAlignment>? {

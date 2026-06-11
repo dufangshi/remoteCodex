@@ -131,6 +131,82 @@ class RichMessageBlocksTest {
     }
 
     @Test
+    fun parsesTablesWithEscapedPipesAndPadsShortRows() {
+        val blocks = parseRichMessageBlocks(
+            """
+            | Pattern | Meaning |
+            | --- | --- |
+            | `a\|b` | literal pipe |
+            | only first |
+            """.trimIndent(),
+        )
+
+        assertEquals(
+            listOf(
+                RichMessageBlock.Table(
+                    columns = listOf(
+                        TableColumn("Pattern", TableAlignment.Left),
+                        TableColumn("Meaning", TableAlignment.Left),
+                    ),
+                    rows = listOf(
+                        listOf("`a|b`", "literal pipe"),
+                        listOf("only first", ""),
+                    ),
+                ),
+            ),
+            blocks,
+        )
+    }
+
+    @Test
+    fun parsesSetextHeadingsLikeGfm() {
+        val blocks = parseRichMessageBlocks(
+            """
+            Major heading
+            =
+
+            Minor heading
+            ---
+
+            - not a heading
+            ---
+            """.trimIndent(),
+        )
+
+        assertEquals(
+            listOf(
+                RichMessageBlock.Heading(level = 1, text = "Major heading"),
+                RichMessageBlock.Heading(level = 2, text = "Minor heading"),
+                RichMessageBlock.Bullet("not a heading", level = 0),
+                RichMessageBlock.HorizontalRule,
+            ),
+            blocks,
+        )
+    }
+
+    @Test
+    fun preservesHtmlBlocksAsSafeFallback() {
+        val blocks = parseRichMessageBlocks(
+            """
+            <details>
+            <summary>Trace</summary>
+            <pre>raw output</pre>
+            </details>
+
+            After
+            """.trimIndent(),
+        )
+
+        assertEquals(
+            listOf(
+                RichMessageBlock.Html("<details>\n<summary>Trace</summary>\n<pre>raw output</pre>\n</details>"),
+                RichMessageBlock.Paragraph("After"),
+            ),
+            blocks,
+        )
+    }
+
+    @Test
     fun preservesNestedListLevels() {
         val blocks = parseRichMessageBlocks(
             """
