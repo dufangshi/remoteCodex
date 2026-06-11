@@ -141,6 +141,7 @@ fun ThreadComposer(
         actionState = actionState,
         busy = composer.busy,
         goalBusy = composer.goalPanel.busy,
+        goalComposeMode = composer.goalComposeMode || composer.goalPanel.composeMode,
     )
     val shellPromptInputState = buildComposerShellPromptInputState(promptSlotState)
     val submitInputState = buildComposerSubmitInputState(

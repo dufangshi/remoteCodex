@@ -1930,6 +1930,46 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun usesGoalPlaceholderOnlyForChatGoalComposerPromptSlot() {
+        val actionState = ComposerActionState(
+            primaryLabel = "Set goal",
+            primaryKind = ComposerPrimaryActionKind.Send,
+            interruptLabel = "Stop Current Turn",
+            showInterrupt = false,
+            sendEnabled = true,
+        )
+
+        assertEquals(
+            "Describe the goal the backend should continue working toward...",
+            buildComposerPromptSlotState(
+                prompt = ComposerPromptPreview(
+                    text = "",
+                    placeholder = "Ask the backend to inspect code...",
+                ),
+                activeView = ComposerActiveView.Chat,
+                actionState = actionState,
+                busy = false,
+                goalBusy = false,
+                goalComposeMode = true,
+            ).placeholder,
+        )
+        assertEquals(
+            "Shell command",
+            buildComposerPromptSlotState(
+                prompt = ComposerPromptPreview(
+                    text = "",
+                    placeholder = "Shell command",
+                ),
+                activeView = ComposerActiveView.Shell,
+                actionState = actionState.copy(interruptLabel = "Send Ctrl-C"),
+                busy = false,
+                goalBusy = false,
+                goalComposeMode = true,
+            ).placeholder,
+        )
+    }
+
+    @Test
     fun disablesShellComposerPromptSlotFromActionState() {
         assertEquals(
             true,
