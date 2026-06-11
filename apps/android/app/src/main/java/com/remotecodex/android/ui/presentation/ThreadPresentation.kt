@@ -110,6 +110,12 @@ data class GraphChatImageHistoryState(
     val copyAccessibilityLabel: String?,
 )
 
+data class ContextCompactionHistoryState(
+    val primaryText: String,
+    val secondaryText: String?,
+    val running: Boolean,
+)
+
 enum class FileChangeSummaryTone {
     Files,
     Added,
@@ -3047,6 +3053,25 @@ fun buildGraphChatImageHistoryState(
         openText = openText,
         pathAccessibilityLabel = normalizedAssetPath?.let { "Open image path" },
         copyAccessibilityLabel = normalizedAssetPath?.let { "Copy image path" },
+    )
+}
+
+fun buildContextCompactionHistoryState(
+    text: String,
+    status: ToolStatus?,
+    detailText: String?,
+): ContextCompactionHistoryState {
+    val normalizedText = text.trim()
+    val running = status == ToolStatus.Running || normalizedText == "Compacting context"
+    val primaryText = if (running) "Compacting context" else "Context compacted"
+    val secondaryText = detailText
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() && it != primaryText }
+
+    return ContextCompactionHistoryState(
+        primaryText = primaryText,
+        secondaryText = secondaryText,
+        running = running,
     )
 }
 

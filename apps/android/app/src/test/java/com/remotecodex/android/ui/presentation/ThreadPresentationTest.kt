@@ -4324,6 +4324,54 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun buildsRunningContextCompactionHistoryStateFromStatus() {
+        assertEquals(
+            ContextCompactionHistoryState(
+                primaryText = "Compacting context",
+                secondaryText = "Pruning old turns",
+                running = true,
+            ),
+            buildContextCompactionHistoryState(
+                text = "Context compacted",
+                status = ToolStatus.Running,
+                detailText = "Pruning old turns",
+            ),
+        )
+    }
+
+    @Test
+    fun buildsRunningContextCompactionHistoryStateFromText() {
+        assertEquals(
+            ContextCompactionHistoryState(
+                primaryText = "Compacting context",
+                secondaryText = null,
+                running = true,
+            ),
+            buildContextCompactionHistoryState(
+                text = "Compacting context",
+                status = null,
+                detailText = "Compacting context",
+            ),
+        )
+    }
+
+    @Test
+    fun buildsCompletedContextCompactionHistoryStateWithoutDuplicateSecondaryText() {
+        assertEquals(
+            ContextCompactionHistoryState(
+                primaryText = "Context compacted",
+                secondaryText = null,
+                running = false,
+            ),
+            buildContextCompactionHistoryState(
+                text = "Context compacted",
+                status = ToolStatus.Completed,
+                detailText = "Context compacted",
+            ),
+        )
+    }
+
+    @Test
     fun summarizesHookOutputWithHookLabelAndGap() {
         assertEquals(
             HookHistorySummary(

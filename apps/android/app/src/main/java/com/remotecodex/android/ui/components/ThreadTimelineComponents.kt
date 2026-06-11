@@ -66,6 +66,7 @@ import com.remotecodex.android.ui.presentation.artifactHistorySummary
 import com.remotecodex.android.ui.presentation.basenameFromAssetPath
 import com.remotecodex.android.ui.presentation.buildGraphChatHistoryGroupFrameState
 import com.remotecodex.android.ui.presentation.buildGraphChatMessageFrameState
+import com.remotecodex.android.ui.presentation.buildContextCompactionHistoryState
 import com.remotecodex.android.ui.presentation.FileChangeSummarySegment
 import com.remotecodex.android.ui.presentation.FileChangeSummaryTone
 import com.remotecodex.android.ui.presentation.fileChangeSummarySegments
@@ -1374,6 +1375,7 @@ private fun HistoryItemCard(
             }
         }
         when (item.kind) {
+            HistoryItemKind.Context -> ContextCompactionSummaryRow(item = item)
             HistoryItemKind.Hook -> HookHistorySummaryRow(item = item)
             HistoryItemKind.Artifact -> ArtifactHistorySummaryBlock(
                 item = item,
@@ -1685,6 +1687,49 @@ private fun ArtifactHistorySummaryBlock(
                 style = MaterialTheme.typography.labelSmall,
                 fontFamily = FontFamily.Monospace,
                 maxLines = 8,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ContextCompactionSummaryRow(
+    item: HistoryItemPreview,
+) {
+    val state = buildContextCompactionHistoryState(
+        text = item.summary,
+        status = item.status,
+        detailText = item.detail,
+    )
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = state.primaryText,
+                modifier = Modifier.weight(1f),
+                color = ThreadColors.ForegroundSoft,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (state.running) {
+                RunningDots(color = ThreadColors.Success, dotSize = 4.dp, spacing = 2.dp)
+            }
+        }
+        state.secondaryText?.let { secondary ->
+            Text(
+                text = secondary,
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }
