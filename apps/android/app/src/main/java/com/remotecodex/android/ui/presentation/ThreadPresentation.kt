@@ -186,6 +186,20 @@ data class ComposerSettingsState(
     val planSelected: Boolean,
 )
 
+data class ComposerSendButtonState(
+    val label: String,
+    val accessibilityLabel: String,
+    val enabled: Boolean,
+    val primaryKind: ComposerPrimaryActionKind,
+)
+
+data class ComposerSettingsToolbarState(
+    val modelButton: ComposerToolbarButtonState,
+    val effortButton: ComposerToolbarButtonState,
+    val planButton: ComposerToolbarButtonState,
+    val sendButton: ComposerSendButtonState,
+)
+
 data class ComposerSelectionOptionState(
     val label: String,
     val detail: String,
@@ -1037,6 +1051,44 @@ fun buildComposerSettingsState(
         effortTitle = effortTitle,
         planVisible = planModeAvailable,
         planSelected = planModeAvailable && planModeActive,
+    )
+}
+
+fun buildComposerSettingsToolbarState(
+    settingsState: ComposerSettingsState,
+    openMenu: ComposerToolbarMenuState?,
+    actionState: ComposerActionState,
+    activeView: ComposerActiveView,
+    promptDisabled: Boolean,
+    goalComposeMode: Boolean,
+    goalBusy: Boolean,
+): ComposerSettingsToolbarState {
+    val isChatView = activeView == ComposerActiveView.Chat
+    return ComposerSettingsToolbarState(
+        modelButton = ComposerToolbarButtonState(
+            visible = isChatView,
+            selected = openMenu == ComposerToolbarMenuState.Model,
+            enabled = settingsState.modelEnabled,
+            label = settingsState.modelLabel,
+        ),
+        effortButton = ComposerToolbarButtonState(
+            visible = isChatView,
+            selected = openMenu == ComposerToolbarMenuState.Effort,
+            enabled = settingsState.effortEnabled,
+            label = settingsState.effortLabel,
+        ),
+        planButton = ComposerToolbarButtonState(
+            visible = isChatView && settingsState.planVisible,
+            selected = settingsState.planSelected,
+            enabled = !goalBusy,
+            label = "Plan",
+        ),
+        sendButton = ComposerSendButtonState(
+            label = actionState.primaryLabel,
+            accessibilityLabel = if (goalComposeMode) "Set goal" else "Send Prompt",
+            enabled = !goalBusy && if (isChatView) !promptDisabled else true,
+            primaryKind = actionState.primaryKind,
+        ),
     )
 }
 

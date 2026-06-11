@@ -56,7 +56,9 @@ import com.remotecodex.android.ui.presentation.ComposerMcpStatusTone
 import com.remotecodex.android.ui.presentation.ComposerPrimaryActionKind
 import com.remotecodex.android.ui.presentation.ComposerPromptAttachmentState
 import com.remotecodex.android.ui.presentation.ComposerPromptSlotState
+import com.remotecodex.android.ui.presentation.ComposerSendButtonState
 import com.remotecodex.android.ui.presentation.ComposerSettingsState
+import com.remotecodex.android.ui.presentation.ComposerSettingsToolbarState
 import com.remotecodex.android.ui.presentation.ComposerSelectionOptionState
 import com.remotecodex.android.ui.presentation.ComposerShellToolState
 import com.remotecodex.android.ui.presentation.ComposerShellToolTone
@@ -82,6 +84,7 @@ import com.remotecodex.android.ui.presentation.buildComposerModelOptions
 import com.remotecodex.android.ui.presentation.buildComposerPromptSlotState
 import com.remotecodex.android.ui.presentation.buildComposerReasoningEffortOptions
 import com.remotecodex.android.ui.presentation.buildComposerSettingsState
+import com.remotecodex.android.ui.presentation.buildComposerSettingsToolbarState
 import com.remotecodex.android.ui.presentation.buildComposerShellTools
 import com.remotecodex.android.ui.presentation.buildComposerSkillsPanelState
 import com.remotecodex.android.ui.presentation.buildComposerStatusStrip
@@ -138,6 +141,15 @@ fun ThreadComposer(
         fastMode = composer.fastMode,
         planModeAvailable = composer.planModeAvailable,
         planModeActive = composer.planModeActive,
+    )
+    val settingsToolbarState = buildComposerSettingsToolbarState(
+        settingsState = settingsState,
+        openMenu = openMenu.toToolbarMenuState(),
+        actionState = actionState,
+        activeView = composer.activeView,
+        promptDisabled = composer.prompt.disabled,
+        goalComposeMode = composer.goalComposeMode || composer.goalPanel.composeMode,
+        goalBusy = composer.goalPanel.busy,
     )
     val toolbarState = buildComposerToolbarState(
         activeView = composer.activeView,
@@ -214,6 +226,7 @@ fun ThreadComposer(
         ComposerJumpLatestButton(state = jumpLatestState)
         ComposerToolbarRow(
             toolbarState = toolbarState,
+            settingsToolbarState = settingsToolbarState,
             onToggleMenu = { menu -> openMenu = openMenu.toggle(menu) },
         )
         ComposerInputGroupPreview(
@@ -227,8 +240,11 @@ fun ThreadComposer(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (settingsState.planVisible) {
-                ComposerModeChip(label = "Plan", selected = settingsState.planSelected)
+            if (settingsToolbarState.planButton.visible) {
+                ComposerModeChip(
+                    label = settingsToolbarState.planButton.label,
+                    selected = settingsToolbarState.planButton.selected,
+                )
             }
             ComposerModeChip(label = "2 files", selected = true)
             Box(modifier = Modifier.weight(1f))
@@ -238,7 +254,10 @@ fun ThreadComposer(
                     label = if (toolbarState.viewToggleButton.selected) "Chat" else "Shell",
                 )
             }
-            ComposerActionControls(actionState = actionState)
+            ComposerActionControls(
+                actionState = actionState,
+                sendButtonState = settingsToolbarState.sendButton,
+            )
         }
     }
 }
@@ -281,6 +300,7 @@ private fun ComposerJumpLatestButton(state: ComposerJumpLatestState) {
 @Composable
 private fun ComposerToolbarRow(
     toolbarState: ComposerToolbarState,
+    settingsToolbarState: ComposerSettingsToolbarState,
     onToggleMenu: (ComposerMenu) -> Unit,
 ) {
     Row(
@@ -315,12 +335,12 @@ private fun ComposerToolbarRow(
             )
         } ?: Box(modifier = Modifier.weight(1f))
         ToolbarInlineToggle(
-            state = toolbarState.modelButton,
+            state = settingsToolbarState.modelButton,
             onClick = { onToggleMenu(ComposerMenu.Model) },
             modifier = Modifier.weight(1.25f, fill = false),
         )
         ToolbarInlineToggle(
-            state = toolbarState.effortButton,
+            state = settingsToolbarState.effortButton,
             onClick = { onToggleMenu(ComposerMenu.Effort) },
         )
     }
@@ -784,7 +804,10 @@ private fun ComposerToolGlyph(icon: ComposerToolIcon, color: Color) {
 }
 
 @Composable
-private fun ComposerActionControls(actionState: ComposerActionState) {
+private fun ComposerActionControls(
+    actionState: ComposerActionState,
+    sendButtonState: ComposerSendButtonState,
+) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(7.dp),
@@ -792,7 +815,7 @@ private fun ComposerActionControls(actionState: ComposerActionState) {
         if (actionState.showInterrupt) {
             ComposerInterruptButton(label = actionState.interruptLabel)
         }
-        ComposerPrimaryActionButton(actionState = actionState)
+        ComposerPrimaryActionButton(sendButtonState = sendButtonState)
     }
 }
 
@@ -825,10 +848,10 @@ private fun ComposerInterruptButton(label: String) {
 }
 
 @Composable
-private fun ComposerPrimaryActionButton(actionState: ComposerActionState) {
-    val enabled = actionState.sendEnabled
-    val isStop = actionState.primaryKind == ComposerPrimaryActionKind.Stop
-    val isConnecting = actionState.primaryKind == ComposerPrimaryActionKind.Connecting
+private fun ComposerPrimaryActionButton(sendButtonState: ComposerSendButtonState) {
+    val enabled = sendButtonState.enabled
+    val isStop = sendButtonState.primaryKind == ComposerPrimaryActionKind.Stop
+    val isConnecting = sendButtonState.primaryKind == ComposerPrimaryActionKind.Connecting
     val background = when {
         isStop -> ThreadColors.Danger
         isConnecting -> ThreadColors.WarningSoft
@@ -847,11 +870,11 @@ private fun ComposerPrimaryActionButton(actionState: ComposerActionState) {
         enabled -> ThreadColors.Primary
         else -> ThreadColors.Border
     }
-    val horizontalPadding = if (actionState.primaryLabel == "Send") 0.dp else 11.dp
+    val horizontalPadding = if (sendButtonState.label == "Send") 0.dp else 11.dp
     Row(
         modifier = Modifier
             .then(
-                if (actionState.primaryLabel == "Send") {
+                if (sendButtonState.label == "Send") {
                     Modifier.size(36.dp)
                 } else {
                     Modifier
@@ -862,16 +885,16 @@ private fun ComposerPrimaryActionButton(actionState: ComposerActionState) {
             .border(1.dp, border, RoundedCornerShape(999.dp))
             .padding(horizontal = horizontalPadding, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = if (actionState.primaryLabel == "Send") {
+        horizontalArrangement = if (sendButtonState.label == "Send") {
             Arrangement.Center
         } else {
             Arrangement.spacedBy(7.dp)
         },
     ) {
-        ComposerPrimaryActionGlyph(kind = actionState.primaryKind, color = foreground)
-        if (actionState.primaryLabel != "Send") {
+        ComposerPrimaryActionGlyph(kind = sendButtonState.primaryKind, color = foreground)
+        if (sendButtonState.label != "Send") {
             Text(
-                text = actionState.primaryLabel,
+                text = sendButtonState.label,
                 color = foreground,
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.SemiBold,

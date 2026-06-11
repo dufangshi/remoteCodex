@@ -362,6 +362,144 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun buildsChatComposerSettingsToolbarState() {
+        assertEquals(
+            ComposerSettingsToolbarState(
+                modelButton = ComposerToolbarButtonState(
+                    visible = true,
+                    selected = true,
+                    enabled = true,
+                    label = "gpt-test",
+                ),
+                effortButton = ComposerToolbarButtonState(
+                    visible = true,
+                    selected = false,
+                    enabled = true,
+                    label = "Medium",
+                ),
+                planButton = ComposerToolbarButtonState(
+                    visible = true,
+                    selected = true,
+                    enabled = true,
+                    label = "Plan",
+                ),
+                sendButton = ComposerSendButtonState(
+                    label = "Send",
+                    accessibilityLabel = "Send Prompt",
+                    enabled = true,
+                    primaryKind = ComposerPrimaryActionKind.Send,
+                ),
+            ),
+            buildComposerSettingsToolbarState(
+                settingsState = ComposerSettingsState(
+                    modelLabel = "gpt-test",
+                    modelEnabled = true,
+                    effortLabel = "Medium",
+                    effortEnabled = true,
+                    effortTitle = "Select reasoning effort",
+                    planVisible = true,
+                    planSelected = true,
+                ),
+                openMenu = ComposerToolbarMenuState.Model,
+                actionState = ComposerActionState(
+                    primaryLabel = "Send",
+                    primaryKind = ComposerPrimaryActionKind.Send,
+                    interruptLabel = "Stop Current Turn",
+                    showInterrupt = false,
+                    sendEnabled = true,
+                ),
+                activeView = ComposerActiveView.Chat,
+                promptDisabled = false,
+                goalComposeMode = false,
+                goalBusy = false,
+            ),
+        )
+    }
+
+    @Test
+    fun disablesChatSendButtonFromPromptDisabledButNotShellSendButton() {
+        val settings = ComposerSettingsState(
+            modelLabel = "gpt-test",
+            modelEnabled = true,
+            effortLabel = "Medium",
+            effortEnabled = true,
+            effortTitle = "Select reasoning effort",
+            planVisible = false,
+            planSelected = false,
+        )
+        val action = ComposerActionState(
+            primaryLabel = "Send",
+            primaryKind = ComposerPrimaryActionKind.Send,
+            interruptLabel = "Send Ctrl-C",
+            showInterrupt = true,
+            sendEnabled = false,
+        )
+
+        assertEquals(
+            false,
+            buildComposerSettingsToolbarState(
+                settingsState = settings,
+                openMenu = null,
+                actionState = action,
+                activeView = ComposerActiveView.Chat,
+                promptDisabled = true,
+                goalComposeMode = false,
+                goalBusy = false,
+            ).sendButton.enabled,
+        )
+        assertEquals(
+            true,
+            buildComposerSettingsToolbarState(
+                settingsState = settings,
+                openMenu = null,
+                actionState = action,
+                activeView = ComposerActiveView.Shell,
+                promptDisabled = true,
+                goalComposeMode = false,
+                goalBusy = false,
+            ).sendButton.enabled,
+        )
+    }
+
+    @Test
+    fun disablesSettingsToolbarSendButtonWhileGoalBusyAndLabelsGoalSubmit() {
+        val state = buildComposerSettingsToolbarState(
+            settingsState = ComposerSettingsState(
+                modelLabel = "gpt-test",
+                modelEnabled = true,
+                effortLabel = "Medium",
+                effortEnabled = true,
+                effortTitle = "Select reasoning effort",
+                planVisible = true,
+                planSelected = false,
+            ),
+            openMenu = null,
+            actionState = ComposerActionState(
+                primaryLabel = "Set goal",
+                primaryKind = ComposerPrimaryActionKind.Send,
+                interruptLabel = "Stop Current Turn",
+                showInterrupt = false,
+                sendEnabled = true,
+            ),
+            activeView = ComposerActiveView.Chat,
+            promptDisabled = false,
+            goalComposeMode = true,
+            goalBusy = true,
+        )
+
+        assertEquals(
+            ComposerSendButtonState(
+                label = "Set goal",
+                accessibilityLabel = "Set goal",
+                enabled = false,
+                primaryKind = ComposerPrimaryActionKind.Send,
+            ),
+            state.sendButton,
+        )
+        assertEquals(false, state.planButton.enabled)
+    }
+
+    @Test
     fun buildsComposerModelOptions() {
         assertEquals(
             listOf(
