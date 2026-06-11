@@ -12,6 +12,7 @@ import com.remotecodex.android.ui.model.ExportTurnPreview
 import com.remotecodex.android.ui.model.LivePlanPreview
 import com.remotecodex.android.ui.model.LivePlanStepPreview
 import com.remotecodex.android.ui.model.PendingRequestPreview
+import com.remotecodex.android.ui.model.PendingRequestKindPreview
 import com.remotecodex.android.ui.model.PendingRequestOptionPreview
 import com.remotecodex.android.ui.model.PendingRequestQuestionPreview
 import com.remotecodex.android.ui.model.PlanStepStatus
@@ -583,30 +584,57 @@ object ThreadPreviewSample {
             ),
             ephemeralUserNote = "Keep going component by component; do not wait for emulator access.",
         ),
-        pendingRequest = PendingRequestPreview(
-            title = "Permission required",
-            description = "Codex wants to run the Android debug build from the project workspace.",
-            command = "./gradlew :app:assembleDebug",
-            riskLabel = "Workspace write, local build",
-            questions = listOf(
-                PendingRequestQuestionPreview(
-                    header = "Approval",
-                    question = "Allow this build command to run in the Android workspace?",
-                    options = listOf(
-                        PendingRequestOptionPreview(
-                            label = "Approve once (recommended)",
-                            description = "Run the command for this turn only.",
-                        ),
-                        PendingRequestOptionPreview(
-                            label = "Deny",
-                            description = "Keep the agent waiting and do not run the build.",
+        pendingRequests = listOf(
+            PendingRequestPreview(
+                id = "plan-decision",
+                title = "Choose next step",
+                description = "Codex prepared a focused plan for the next Android alignment pass.",
+                command = "",
+                riskLabel = "Decision required",
+                kind = PendingRequestKindPreview.PlanDecision,
+                questions = listOf(
+                    PendingRequestQuestionPreview(
+                        header = "Plan decision",
+                        question = "Start the next Android component parity pass?",
+                        options = listOf(
+                            PendingRequestOptionPreview(
+                                label = "Implement (recommended)",
+                                description = "Apply the proposed native component changes.",
+                            ),
+                            PendingRequestOptionPreview(
+                                label = "Discuss",
+                                description = "Pause for clarification before changing files.",
+                            ),
                         ),
                     ),
-                    allowOther = true,
                 ),
-                PendingRequestQuestionPreview(
-                    header = "Follow-up",
-                    question = "What should Codex do after the build finishes?",
+            ),
+            PendingRequestPreview(
+                id = "android-build-approval",
+                title = "Permission required",
+                description = "Codex wants to run the Android debug build from the project workspace.",
+                command = "./gradlew :app:assembleDebug",
+                riskLabel = "Workspace write, local build",
+                questions = listOf(
+                    PendingRequestQuestionPreview(
+                        header = "Approval",
+                        question = "Allow this build command to run in the Android workspace?",
+                        options = listOf(
+                            PendingRequestOptionPreview(
+                                label = "Approve once (recommended)",
+                                description = "Run the command for this turn only.",
+                            ),
+                            PendingRequestOptionPreview(
+                                label = "Deny",
+                                description = "Keep the agent waiting and do not run the build.",
+                            ),
+                        ),
+                        allowOther = true,
+                    ),
+                    PendingRequestQuestionPreview(
+                        header = "Follow-up",
+                        question = "What should Codex do after the build finishes?",
+                    ),
                 ),
             ),
         ),

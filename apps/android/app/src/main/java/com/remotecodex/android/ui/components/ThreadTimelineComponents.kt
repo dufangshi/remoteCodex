@@ -123,7 +123,7 @@ fun ThreadTimeline(
     turns: List<TurnPreview>,
     modifier: Modifier = Modifier,
     auxiliary: TimelineAuxiliaryPreview = TimelineAuxiliaryPreview(),
-    pendingRequest: PendingRequestPreview? = null,
+    pendingRequests: List<PendingRequestPreview> = emptyList(),
     onOpenDetail: (DetailPreview) -> Unit = {},
 ) {
     LazyColumn(
@@ -138,10 +138,8 @@ fun ThreadTimeline(
             bottom = 132.dp,
         ),
     ) {
-        pendingRequest?.let { request ->
-            item(key = "pending-request") {
-                PendingRequestCard(request = request)
-            }
+        items(pendingRequests, key = { request -> "pending-request:${request.id}" }) { request ->
+            PendingRequestCard(request = request)
         }
         if (auxiliary.canLoadEarlier) {
             item(key = "load-earlier") {

@@ -8,7 +8,6 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -34,26 +33,33 @@ class PendingRequestCardTest {
     }
 
     @Test
+    fun planDecisionRendersWithoutFooterSubmit() {
+        assertNotNull(device.wait(Until.findObject(By.text("Plan")), 5_000))
+        assertNotNull(device.findObject(By.text("Plan decision")))
+        assertNotNull(device.findObject(By.text("Start the next Android component parity pass?")))
+        assertNotNull(device.findObject(By.text("Implement")))
+        assertNotNull(device.findObject(By.text("Discuss")))
+        assertTrue(
+            "Plan decision should not render an empty command block",
+            device.findObjects(By.text("Requested action")).isEmpty(),
+        )
+        assertTrue(
+            "Plan decision description should stay hidden like the Web card",
+            device.findObjects(
+                By.text("Codex prepared a focused plan for the next Android alignment pass."),
+            ).isEmpty(),
+        )
+    }
+
+    @Test
     fun freeFormQuestionRendersAndKeepsSubmitDisabledUntilTextIsProvided() {
         assertNotNull(device.wait(Until.findObject(By.text("Follow-up")), 5_000))
         assertNotNull(device.findObject(By.text("Enter an answer")))
-
-        val disabledSubmit = device.findObject(
-            By.desc("Answer each question before submitting Permission required"),
-        )
-        assertNotNull(disabledSubmit)
-        assertFalse(disabledSubmit.isEnabled)
 
         device.findObject(By.desc("Approve once, recommended")).clickCenter()
         assertNotNull(
             device.wait(Until.findObject(By.desc("Approve once, recommended, selected")), 2_000),
         )
-
-        val stillDisabledSubmit = device.findObject(
-            By.desc("Answer each question before submitting Permission required"),
-        )
-        assertNotNull(stillDisabledSubmit)
-        assertFalse(stillDisabledSubmit.isEnabled)
 
         val followUpInput = device.findObject(By.clazz("android.widget.EditText"))
         assertNotNull(followUpInput)

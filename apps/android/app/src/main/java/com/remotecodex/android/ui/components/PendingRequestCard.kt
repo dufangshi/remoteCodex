@@ -142,16 +142,20 @@ fun PendingRequestCard(
                     planDecisionMode = state.planDecisionMode,
                 )
             }
-            PendingRequestCommandBlock(
-                label = state.commandLabel,
-                command = state.command,
-                compact = true,
-            )
+            if (state.showCommand) {
+                PendingRequestCommandBlock(
+                    label = state.commandLabel,
+                    command = state.command,
+                    compact = true,
+                )
+            }
         } else {
-            PendingRequestCommandBlock(
-                label = state.commandLabel,
-                command = state.command,
-            )
+            if (state.showCommand) {
+                PendingRequestCommandBlock(
+                    label = state.commandLabel,
+                    command = state.command,
+                )
+            }
         }
         if (state.showFooterActions) {
             Row(

@@ -221,7 +221,7 @@ private fun ChatPreviewSurface(
         ThreadTimeline(
             turns = detail.turns,
             auxiliary = detail.timelineAuxiliary,
-            pendingRequest = detail.pendingRequest,
+            pendingRequests = detail.pendingRequests,
             onOpenDetail = onOpenDetail,
             modifier = Modifier.weight(1f),
         )

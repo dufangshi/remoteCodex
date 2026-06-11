@@ -151,7 +151,7 @@ data class ThreadDetailPreview(
     val rooms: List<ThreadRoomPreview>,
     val turns: List<TurnPreview>,
     val timelineAuxiliary: TimelineAuxiliaryPreview = TimelineAuxiliaryPreview(),
-    val pendingRequest: PendingRequestPreview,
+    val pendingRequests: List<PendingRequestPreview> = emptyList(),
     val workspacePreview: WorkspacePreview,
     val shellPreview: ShellPreview,
     val composer: ComposerPreview = ComposerPreview(),
@@ -722,6 +722,7 @@ enum class PendingRequestKindPreview {
 }
 
 data class PendingRequestPreview(
+    val id: String,
     val title: String,
     val description: String,
     val command: String,

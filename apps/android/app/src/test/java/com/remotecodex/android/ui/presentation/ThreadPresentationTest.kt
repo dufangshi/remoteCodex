@@ -728,6 +728,7 @@ class ThreadPresentationTest {
                 riskLabel = "Permission required",
                 commandLabel = "Requested action",
                 command = "./gradlew :app:assembleDebug",
+                showCommand = true,
                 questions = listOf(
                     PendingRequestQuestionState(
                         id = "question-0",
@@ -763,6 +764,7 @@ class ThreadPresentationTest {
             ),
             buildPendingRequestCardState(
                 PendingRequestPreview(
+                    id = "request-1",
                     title = " ",
                     description = " Run the build from the Android workspace. ",
                     command = " ./gradlew :app:assembleDebug ",
@@ -800,6 +802,7 @@ class ThreadPresentationTest {
                 riskLabel = "Manual approval",
                 commandLabel = "Requested action",
                 command = "pnpm test",
+                showCommand = true,
                 questions = emptyList(),
                 planDecisionMode = false,
                 showFooterActions = true,
@@ -813,6 +816,7 @@ class ThreadPresentationTest {
             ),
             buildPendingRequestCardState(
                 PendingRequestPreview(
+                    id = "request-2",
                     title = "Permission required",
                     description = "Run shell command",
                     command = "pnpm test",
@@ -826,6 +830,7 @@ class ThreadPresentationTest {
     fun mapsPendingRequestUserInputTitle() {
         val state = buildPendingRequestCardState(
             PendingRequestPreview(
+                id = "request-3",
                 title = "Custom title",
                 description = "Need a choice before continuing.",
                 command = "",
@@ -845,6 +850,7 @@ class ThreadPresentationTest {
     fun mapsPendingPlanDecisionPresentation() {
         val state = buildPendingRequestCardState(
             PendingRequestPreview(
+                id = "request-4",
                 title = "Choose next step",
                 description = "This plan description is represented by the choices.",
                 command = "",
@@ -868,6 +874,7 @@ class ThreadPresentationTest {
         assertEquals("Plan", state.title)
         assertEquals("This plan description is represented by the choices.", state.description)
         assertEquals(false, state.showDescription)
+        assertEquals(false, state.showCommand)
         assertEquals(true, state.planDecisionMode)
         assertEquals(false, state.showFooterActions)
         assertEquals("Implement", state.questions.single().options.single().displayLabel)
@@ -878,6 +885,7 @@ class ThreadPresentationTest {
     fun preservesPendingRequestQuestionIds() {
         val state = buildPendingRequestCardState(
             PendingRequestPreview(
+                id = "request-5",
                 title = "Answer Required",
                 description = "",
                 command = "",

@@ -155,7 +155,7 @@ The visual direction is close to the web mobile thread view, but not a literal D
 | `Separator.tsx` | `GraphUiPrimitives.kt` + `ArtifactPreviewCard.kt` | Native horizontal/vertical separator primitive used inside grouped molecule controls. |
 | `Tooltip.tsx` | `GraphUiPrimitives.kt` + `ArtifactPreviewCard.kt` | Android equivalent uses semantic content descriptions for compact controls. Pointer hover popovers are intentionally not part of the first mobile pass. |
 | `Dialog.tsx` | `GraphUiPrimitives.kt` + `ThreadActionDialogs.kt` | Native dialog overlay, frame, header, scrollable content body, icon-only close action, and icon-labeled footer actions now back rename/export/delete thread dialogs. |
-| `ConfirmDialog.tsx` and pending request flows | `PendingRequestCard.kt` + `ThreadPresentation.kt` | Inline mobile permission card with risk label, command preview, deny, command approval, question submit, disabled-until-answered state, Web-like option selection, custom answer input, free-form answer input, matching accessibility labels, and explicit `approval`/`requestUserInput`/`planDecision` presentation semantics. Plan decisions use the Web-like `Plan` title, hide descriptive body copy, and omit the footer submit row. |
+| `ConfirmDialog.tsx` and pending request flows | `PendingRequestCard.kt` + `ThreadPresentation.kt` | Inline mobile pending request stack with stable request keys, risk label, command preview, deny, command approval, question submit, disabled-until-answered state, Web-like option selection, custom answer input, free-form answer input, matching accessibility labels, and explicit `approval`/`requestUserInput`/`planDecision` presentation semantics. Plan decisions use the Web-like `Plan` title, hide descriptive body copy, and omit the footer submit row. |
 | `ThreadGraphWorkspacePanel.tsx` | `WorkspacePanel.kt` | Native Workspace/Tool Usage/Guide/Graph/Extensions tabs inside the mobile Workspace surface. |
 | `GraphWorkspaceExplorer.tsx` | `WorkspacePanel.kt` | Workspace file tree, selected row state, root label, row-level download glyph action, refresh/garbage action glyph chips, workspace summary strip, empty workspace state, and Web-like native folder/file/artifact/event glyphs. |
 | `workspaceTree.ts` | `WorkspaceTree.kt` + `WorkspacePanel.kt` | Native path helpers for extension/name extraction, ancestor expansion, directory-first sorting, and flat preview nodes used by the workspace explorer. |
@@ -281,7 +281,7 @@ adb shell am start -n com.remotecodex.android/.MainActivity
 adb exec-out screencap -p > output/android-thread-preview.png
 ```
 
-In this workspace, the Windows-hosted emulator can also be reached from WSL through `/home/u/bin/adb-windows`. Pending request coverage includes a UIAutomator instrumentation smoke test for the Web-like question flow: free-form question rendering, option selection, and disabled submit while the free-form answer is empty.
+In this workspace, the Windows-hosted emulator can also be reached from WSL through `/home/u/bin/adb-windows`. Pending request coverage includes UIAutomator instrumentation smoke tests for the Web-like question flow and plan-decision flow: free-form question rendering, option selection, free-form input availability, the `Plan` title, immediate decision options, hidden plan-decision body copy, and the absence of an empty plan command block. Disabled-submit behavior is covered in presentation unit tests.
 
 ```bash
 JAVA_HOME=/home/u/.jdks/jdk-17 \
