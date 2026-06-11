@@ -67,6 +67,7 @@ import com.remotecodex.android.ui.presentation.basenameFromAssetPath
 import com.remotecodex.android.ui.presentation.buildGraphChatHistoryGroupFrameState
 import com.remotecodex.android.ui.presentation.buildGraphChatMessageFrameState
 import com.remotecodex.android.ui.presentation.buildContextCompactionHistoryState
+import com.remotecodex.android.ui.presentation.buildGraphChatReasoningState
 import com.remotecodex.android.ui.presentation.FileChangeSummarySegment
 import com.remotecodex.android.ui.presentation.FileChangeSummaryTone
 import com.remotecodex.android.ui.presentation.fileChangeSummarySegments
@@ -947,25 +948,27 @@ private fun UserFileGlyph(
 
 @Composable
 private fun ReasoningAccordion(items: List<ReasoningPreview>) {
-    val running = items.any { it.status == ToolStatus.Running }
-    val reasoningText = items.joinToString(separator = "\n\n") { it.text.trim() }
+    val state = buildGraphChatReasoningState(items)
+    if (!state.visible) {
+        return
+    }
     GraphAccordion(
         modifier = Modifier
             .clip(RoundedCornerShape(10.dp)),
     ) {
         GraphAccordionItem(
-            title = if (running) "Thinking..." else "Thought Process",
-            subtitle = "${items.size} reasoning item${if (items.size == 1) "" else "s"}",
+            title = state.title,
+            subtitle = state.subtitle,
             backgroundColor = ThreadColors.Surface,
             showDivider = false,
             leading = {
                 ReasoningGlyph(
-                    running = running,
-                    color = if (running) ThreadColors.Info else ThreadColors.ForegroundMuted,
+                    running = state.running,
+                    color = if (state.running) ThreadColors.Info else ThreadColors.ForegroundMuted,
                 )
             },
             trailing = {
-                if (running) {
+                if (state.running) {
                     RunningDots(color = ThreadColors.Info)
                 }
             },
@@ -975,14 +978,14 @@ private fun ReasoningAccordion(items: List<ReasoningPreview>) {
                 horizontalArrangement = Arrangement.End,
             ) {
                 CopyTextButton(
-                    value = reasoningText,
-                    idleLabel = "Copy thoughts",
+                    value = state.text,
+                    idleLabel = state.copyLabel,
                     copiedLabel = "Copied",
-                    contentDescription = "Copy reasoning text",
+                    contentDescription = state.copyAccessibilityLabel,
                 )
             }
             Text(
-                text = reasoningText,
+                text = state.text,
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(max = 224.dp)

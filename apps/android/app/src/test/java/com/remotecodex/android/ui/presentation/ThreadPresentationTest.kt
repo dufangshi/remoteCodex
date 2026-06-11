@@ -38,6 +38,7 @@ import com.remotecodex.android.ui.model.ComposerSlashPanelViewPreview
 import com.remotecodex.android.ui.model.ComposerToolboxActionPreview
 import com.remotecodex.android.ui.model.ComposerToolboxItemPreview
 import com.remotecodex.android.ui.model.ComposerAttachmentKindPreview
+import com.remotecodex.android.ui.model.ReasoningPreview
 import com.remotecodex.android.ui.model.ThreadGoalPreview
 import com.remotecodex.android.ui.model.ThreadGoalStatusPreview
 import com.remotecodex.android.ui.model.ThreadStatus
@@ -185,6 +186,55 @@ class ThreadPresentationTest {
         assertEquals(
             "Status: Steering update",
             graphChatMessageStatusModel("Steering update")?.accessibilityLabel,
+        )
+    }
+
+    @Test
+    fun classifiesQueuedLikeUserMessageStatuses() {
+        assertEquals(true, isGraphChatQueuedLikeUserStatus("Steering"))
+        assertEquals(true, isGraphChatQueuedLikeUserStatus("Accepted"))
+        assertEquals(true, isGraphChatQueuedLikeUserStatus("Awaiting response"))
+        assertEquals(false, isGraphChatQueuedLikeUserStatus("Queued"))
+        assertEquals(false, isGraphChatQueuedLikeUserStatus(" accepted "))
+        assertEquals(false, isGraphChatQueuedLikeUserStatus(null))
+    }
+
+    @Test
+    fun buildsRunningGraphChatReasoningState() {
+        assertEquals(
+            GraphChatReasoningState(
+                visible = true,
+                title = "Thinking...",
+                subtitle = "2 reasoning items",
+                text = "Inspecting model state\n\nWaiting for tests",
+                running = true,
+                copyLabel = "Copy thoughts",
+                copyAccessibilityLabel = "Copy reasoning text",
+            ),
+            buildGraphChatReasoningState(
+                listOf(
+                    ReasoningPreview(" Inspecting model state ", ToolStatus.Completed),
+                    ReasoningPreview("Waiting for tests", ToolStatus.Running),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun hidesBlankGraphChatReasoningState() {
+        assertEquals(
+            GraphChatReasoningState(
+                visible = false,
+                title = "Thought Process",
+                subtitle = "1 reasoning item",
+                text = "",
+                running = false,
+                copyLabel = "Copy thoughts",
+                copyAccessibilityLabel = "Copy reasoning text",
+            ),
+            buildGraphChatReasoningState(
+                listOf(ReasoningPreview("  ", ToolStatus.Completed)),
+            ),
         )
     }
 

@@ -3,6 +3,7 @@ package com.remotecodex.android.ui.presentation
 import com.remotecodex.android.ui.model.HistoryItemKind
 import com.remotecodex.android.ui.model.MessageAuthor
 import com.remotecodex.android.ui.model.PlanStepStatus
+import com.remotecodex.android.ui.model.ReasoningPreview
 import com.remotecodex.android.ui.model.ThreadStatus
 import com.remotecodex.android.ui.model.ToolStatus
 import com.remotecodex.android.ui.model.ComposerActiveView
@@ -57,6 +58,16 @@ data class GraphChatMessageFrameState(
     val showFooterMetadata: Boolean,
     val showCopyAction: Boolean,
     val timeLabel: String?,
+)
+
+data class GraphChatReasoningState(
+    val visible: Boolean,
+    val title: String,
+    val subtitle: String,
+    val text: String,
+    val running: Boolean,
+    val copyLabel: String,
+    val copyAccessibilityLabel: String,
 )
 
 data class GraphChatHistoryGroupFrameState(
@@ -2724,6 +2735,32 @@ fun buildGraphChatMessageFrameState(
         showFooterMetadata = isUser && (footerStatus != null || normalizedTimeLabel != null),
         showCopyAction = !isUser && !copyText.isNullOrBlank(),
         timeLabel = normalizedTimeLabel,
+    )
+}
+
+fun isGraphChatQueuedLikeUserStatus(status: String?): Boolean {
+    val normalized = status?.trim() ?: return false
+    return normalized == "Steering" ||
+        normalized == "Accepted" ||
+        normalized == "Awaiting response"
+}
+
+fun buildGraphChatReasoningState(items: List<ReasoningPreview>): GraphChatReasoningState {
+    val reasoningText = items
+        .map { it.text.trim() }
+        .filter { it.isNotEmpty() }
+        .joinToString(separator = "\n\n")
+    val running = items.any { it.status == ToolStatus.Running }
+    val itemCount = items.size
+
+    return GraphChatReasoningState(
+        visible = reasoningText.isNotEmpty(),
+        title = if (running) "Thinking..." else "Thought Process",
+        subtitle = "$itemCount reasoning item${if (itemCount == 1) "" else "s"}",
+        text = reasoningText,
+        running = running,
+        copyLabel = "Copy thoughts",
+        copyAccessibilityLabel = "Copy reasoning text",
     )
 }
 
