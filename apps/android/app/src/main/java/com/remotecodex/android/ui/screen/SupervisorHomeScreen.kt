@@ -39,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.AndroidFeatureFlags
+import com.remotecodex.android.api.CreateSupervisorWorkspaceRequest
 import com.remotecodex.android.api.SupervisorApiClient
 import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorHomeSnapshot
@@ -89,6 +90,31 @@ fun SupervisorHomeScreen(
     var workspaceActionBusyId by remember { mutableStateOf<String?>(null) }
     var workspaceActionError by remember { mutableStateOf<String?>(null) }
     var workspaceDialog by remember { mutableStateOf<WorkspaceActionDialog?>(null) }
+    fun runWorkspaceCreate(absPath: String, label: String?) {
+        workspaceActionBusyId = CreateWorkspaceBusyId
+        workspaceActionError = null
+        coroutineScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    client.createWorkspace(
+                        CreateSupervisorWorkspaceRequest(
+                            absPath = absPath,
+                            label = label?.takeIf { it.isNotBlank() },
+                        ),
+                    )
+                }
+            }
+            workspaceActionBusyId = null
+            result
+                .onSuccess {
+                    workspaceDialog = null
+                    onRefreshHomeSnapshot()
+                }
+                .onFailure { error ->
+                    workspaceActionError = error.message ?: "Workspace create failed."
+                }
+        }
+    }
     fun runWorkspaceAction(workspaceId: String, action: suspend () -> Unit) {
         workspaceActionBusyId = workspaceId
         workspaceActionError = null
@@ -185,16 +211,28 @@ fun SupervisorHomeScreen(
             when (selectedDestination) {
                 HomeDestination.Workspaces -> {
                     item {
-                        HomeSectionTitle(title = "Workspaces", detail = "Trusted project roots")
+                        HomeSectionTitle(
+                            title = "Workspaces",
+                            detail = "Trusted project roots",
+                            actionLabel = "New",
+                            actionContentDescription = "Create workspace",
+                            onAction = {
+                                workspaceActionError = null
+                                workspaceDialog = WorkspaceActionDialog.Create
+                            },
+                        )
                     }
                     val workspaces = homeSnapshot?.workspaces.orEmpty()
                     if (workspaces.isEmpty()) {
                         item {
                             EmptyHomeRow(
                                 title = if (homeSnapshotLoading) "Loading workspaces" else "No workspaces loaded",
-                                detail = homeSnapshotError ?: "Workspace rows will appear here after `/api/workspaces` returns data.",
-                                actionLabel = "Thread Preview",
-                                onClick = { onOpenThread(null) },
+                                detail = homeSnapshotError ?: "Add a trusted project root to start threads from this Android client.",
+                                actionLabel = "New Workspace",
+                                onClick = {
+                                    workspaceActionError = null
+                                    workspaceDialog = WorkspaceActionDialog.Create
+                                },
                             )
                         }
                     } else {
@@ -289,7 +327,7 @@ fun SupervisorHomeScreen(
         workspaceDialog?.let { dialog ->
             WorkspaceActionDialogOverlay(
                 dialog = dialog,
-                busy = dialog.workspace.id == workspaceActionBusyId,
+                busy = dialog.busyId == workspaceActionBusyId,
                 error = workspaceActionError,
                 onClose = {
                     if (workspaceActionBusyId == null) {
@@ -297,17 +335,26 @@ fun SupervisorHomeScreen(
                         workspaceActionError = null
                     }
                 },
+                onCreateWorkspace = { absPath, label ->
+                    runWorkspaceCreate(absPath, label)
+                },
                 onRenameWorkspace = { label ->
-                    runWorkspaceAction(dialog.workspace.id) {
-                        client.updateWorkspace(dialog.workspace.id, UpdateSupervisorWorkspaceRequest(label = label))
+                    dialog.workspace?.let { workspace ->
+                        runWorkspaceAction(workspace.id) {
+                            client.updateWorkspace(workspace.id, UpdateSupervisorWorkspaceRequest(label = label))
+                        }
                     }
                 },
                 onStartThread = { title, model ->
-                    runWorkspaceThreadStart(dialog.workspace.id, title, model)
+                    dialog.workspace?.let { workspace ->
+                        runWorkspaceThreadStart(workspace.id, title, model)
+                    }
                 },
                 onDeleteWorkspace = {
-                    runWorkspaceAction(dialog.workspace.id) {
-                        client.deleteWorkspace(dialog.workspace.id)
+                    dialog.workspace?.let { workspace ->
+                        runWorkspaceAction(workspace.id) {
+                            client.deleteWorkspace(workspace.id)
+                        }
                     }
                 },
                 modifier = Modifier.fillMaxSize(),
@@ -518,7 +565,13 @@ private fun DestinationMark(label: String) {
 }
 
 @Composable
-private fun HomeSectionTitle(title: String, detail: String) {
+private fun HomeSectionTitle(
+    title: String,
+    detail: String,
+    actionLabel: String? = null,
+    actionContentDescription: String? = null,
+    onAction: (() -> Unit)? = null,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -535,11 +588,22 @@ private fun HomeSectionTitle(title: String, detail: String) {
         )
         Text(
             text = detail,
+            modifier = Modifier.weight(1f, fill = false),
             color = ThreadColors.ForegroundMuted,
             style = MaterialTheme.typography.labelSmall,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+        if (actionLabel != null && onAction != null) {
+            GraphButton(
+                label = actionLabel,
+                icon = GraphActionIcon.Open,
+                variant = GraphButtonVariant.Secondary,
+                size = GraphButtonSize.Small,
+                contentDescription = actionContentDescription ?: actionLabel,
+                onClick = onAction,
+            )
+        }
     }
 }
 
@@ -668,12 +732,20 @@ private fun SupervisorWorkspaceSummary.workspaceMetaLabel(): String {
     }
 }
 
-private sealed class WorkspaceActionDialog(
-    val workspace: SupervisorWorkspaceSummary,
-) {
-    class Rename(workspace: SupervisorWorkspaceSummary) : WorkspaceActionDialog(workspace)
-    class StartThread(workspace: SupervisorWorkspaceSummary) : WorkspaceActionDialog(workspace)
-    class Delete(workspace: SupervisorWorkspaceSummary) : WorkspaceActionDialog(workspace)
+private const val CreateWorkspaceBusyId = "__create_workspace__"
+
+private sealed class WorkspaceActionDialog {
+    abstract val workspace: SupervisorWorkspaceSummary?
+    val busyId: String
+        get() = workspace?.id ?: CreateWorkspaceBusyId
+
+    object Create : WorkspaceActionDialog() {
+        override val workspace: SupervisorWorkspaceSummary? = null
+    }
+
+    class Rename(override val workspace: SupervisorWorkspaceSummary) : WorkspaceActionDialog()
+    class StartThread(override val workspace: SupervisorWorkspaceSummary) : WorkspaceActionDialog()
+    class Delete(override val workspace: SupervisorWorkspaceSummary) : WorkspaceActionDialog()
 }
 
 @Composable
@@ -682,6 +754,7 @@ private fun WorkspaceActionDialogOverlay(
     busy: Boolean,
     error: String?,
     onClose: () -> Unit,
+    onCreateWorkspace: (String, String?) -> Unit,
     onRenameWorkspace: (String) -> Unit,
     onStartThread: (String?, String) -> Unit,
     onDeleteWorkspace: () -> Unit,
@@ -689,6 +762,12 @@ private fun WorkspaceActionDialogOverlay(
 ) {
     GraphDialogOverlay(onDismiss = onClose, modifier = modifier) {
         when (dialog) {
+            is WorkspaceActionDialog.Create -> CreateWorkspaceDialog(
+                busy = busy,
+                error = error,
+                onClose = onClose,
+                onCreateWorkspace = onCreateWorkspace,
+            )
             is WorkspaceActionDialog.Rename -> RenameWorkspaceDialog(
                 workspace = dialog.workspace,
                 busy = busy,
@@ -709,6 +788,71 @@ private fun WorkspaceActionDialogOverlay(
                 error = error,
                 onClose = onClose,
                 onDeleteWorkspace = onDeleteWorkspace,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CreateWorkspaceDialog(
+    busy: Boolean,
+    error: String?,
+    onClose: () -> Unit,
+    onCreateWorkspace: (String, String?) -> Unit,
+) {
+    var absPath by rememberSaveable { mutableStateOf("") }
+    var label by rememberSaveable { mutableStateOf("") }
+    val normalizedPath = absPath.trim()
+    val normalizedLabel = label.trim()
+    GraphDialogFrame(
+        title = "New Workspace",
+        subtitle = "Trusted project root",
+        onClose = onClose,
+        footer = {
+            GraphDialogFooter(
+                primaryLabel = if (busy) "Creating" else "Create",
+                primaryTone = GraphDialogActionTone.Success,
+                primaryEnabled = !busy && normalizedPath.isNotBlank(),
+                onCancel = onClose,
+                onPrimary = {
+                    onCreateWorkspace(
+                        normalizedPath,
+                        normalizedLabel.takeIf { it.isNotBlank() },
+                    )
+                },
+            )
+        },
+    ) {
+        OutlinedTextField(
+            value = absPath,
+            onValueChange = { absPath = it },
+            enabled = !busy,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Workspace path") },
+            placeholder = { Text("/home/u/dev/project") },
+            singleLine = true,
+            colors = workspaceTextFieldColors(),
+        )
+        OutlinedTextField(
+            value = label,
+            onValueChange = { label = it },
+            enabled = !busy,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Label") },
+            placeholder = { Text("Optional") },
+            singleLine = true,
+            colors = workspaceTextFieldColors(),
+        )
+        Text(
+            text = "The supervisor must be able to access this absolute path.",
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+        )
+        error?.let { message ->
+            Text(
+                text = message,
+                color = ThreadColors.Danger,
+                style = MaterialTheme.typography.labelSmall,
             )
         }
     }

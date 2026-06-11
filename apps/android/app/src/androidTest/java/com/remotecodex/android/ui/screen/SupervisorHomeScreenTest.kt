@@ -41,6 +41,7 @@ class SupervisorHomeScreenTest {
         composeRule.onNodeWithContentDescription("Rename workspace remoteCodex-main").assertExists()
         composeRule.onNodeWithContentDescription("Start thread in workspace remoteCodex-main").assertExists()
         composeRule.onNodeWithContentDescription("Delete workspace remoteCodex-main").assertExists()
+        composeRule.onNodeWithContentDescription("Create workspace").assertExists()
 
         composeRule.onNodeWithContentDescription("Open Threads").performClick()
         composeRule.onNodeWithText("Android native thread client").assertExists()
@@ -52,6 +53,13 @@ class SupervisorHomeScreenTest {
     @Test
     fun workspaceRowsExposeRenameAndDeleteDialogs() {
         setHomeContent()
+
+        composeRule.onNodeWithContentDescription("Create workspace").performClick()
+        composeRule.onNodeWithText("New Workspace").assertExists()
+        composeRule.onNodeWithText("Workspace path").assertExists()
+        composeRule.onNodeWithText("Label").assertExists()
+        composeRule.onNodeWithText("The supervisor must be able to access this absolute path.").assertExists()
+        composeRule.onNodeWithContentDescription("Close dialog").performClick()
 
         composeRule.onNodeWithContentDescription("Start thread in workspace remoteCodex-main").performClick()
         composeRule.onNodeWithText("Thread title").assertExists()
