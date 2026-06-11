@@ -36,6 +36,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.remotecodex.android.ui.model.ComposerSlashPanelViewPreview
 import com.remotecodex.android.ui.model.ComposerPreview
 import com.remotecodex.android.ui.presentation.ComposerActionState
 import com.remotecodex.android.ui.presentation.ComposerAttachmentActionKind
@@ -121,6 +122,7 @@ fun ThreadComposer(
     composer: ComposerPreview = ComposerPreview(),
 ) {
     var openMenu by remember { mutableStateOf<ComposerMenu?>(null) }
+    var slashPanelView by remember(composer.slashPanelView) { mutableStateOf(composer.slashPanelView.toPanelViewState()) }
     val statusChips = buildComposerStatusStrip(
         threadConnected = composer.threadConnected,
         busy = composer.busy,
@@ -206,17 +208,17 @@ fun ThreadComposer(
     )
     val slashToolboxPanelState = buildComposerSlashToolboxPanelState(
         open = openMenu == ComposerMenu.Slash,
-        view = composer.slashPanelView,
+        view = slashPanelView.toPreviewPanelView(),
         items = toolboxItems,
     )
     val menuLifecycleState = buildComposerMenuLifecycleState(
         openMenu = openMenu.toToolbarMenuState(),
-        slashPanelView = composer.slashPanelView,
+        slashPanelView = slashPanelView.toPreviewPanelView(),
     )
     val forkPanelState = buildComposerForkPanelState(
         busy = composer.busy,
         forkBusy = composer.forkBusy,
-        slashPanelView = composer.slashPanelView,
+        slashPanelView = slashPanelView.toPreviewPanelView(),
         forkTurnOptions = composer.forkTurnOptions,
     )
     val goalPanelState = buildComposerGoalPanelState(
@@ -253,6 +255,24 @@ fun ThreadComposer(
                     skillsPanelState = skillsPanelState,
                     mcpPanelState = mcpPanelState,
                     hooksPanelState = hooksPanelState,
+                    onToolboxAction = { actionDecision ->
+                        when (actionDecision.kind) {
+                            ComposerToolboxActionDecisionKind.OpenPanel -> {
+                                actionDecision.targetPanel?.let { targetPanel ->
+                                    slashPanelView = targetPanel
+                                }
+                            }
+                            ComposerToolboxActionDecisionKind.RunCompact,
+                            ComposerToolboxActionDecisionKind.ExitGoalCompose,
+                            -> if (actionDecision.closeMenu) {
+                                openMenu = null
+                            }
+                            ComposerToolboxActionDecisionKind.ToggleFast,
+                            ComposerToolboxActionDecisionKind.EnterGoalCompose,
+                            ComposerToolboxActionDecisionKind.Noop,
+                            -> Unit
+                        }
+                    },
                 )
                 ComposerMenu.Attachments -> AttachmentPanel(panelState = attachmentPanelState)
                 ComposerMenu.Model -> ModelPickerPanel(
@@ -274,7 +294,13 @@ fun ThreadComposer(
             settingsToolbarState = settingsToolbarState,
             attachmentPanelState = attachmentPanelState,
             slashToolboxPanelState = slashToolboxPanelState,
-            onToggleMenu = { menu -> openMenu = openMenu.toggle(menu) },
+            onToggleMenu = { menu ->
+                val nextMenu = openMenu.toggle(menu)
+                if (nextMenu != ComposerMenu.Slash) {
+                    slashPanelView = ComposerSlashPanelViewState.Root
+                }
+                openMenu = nextMenu
+            },
         )
         ComposerFrameSlotsPreview(
             frameState = frameState,
@@ -1387,6 +1413,7 @@ private fun SlashToolboxPanel(
     skillsPanelState: ComposerSkillsPanelState,
     mcpPanelState: ComposerMcpPanelState,
     hooksPanelState: ComposerHooksPanelState,
+    onToolboxAction: (ComposerToolboxActionDecisionState) -> Unit,
 ) {
     if (!panelState.surfaceVisible) {
         return
@@ -1401,7 +1428,10 @@ private fun SlashToolboxPanel(
                 EmptyToolboxState(message = panelState.emptyMessage.orEmpty())
             } else {
                 panelState.items.forEach { item ->
-                    ToolboxRow(item = item)
+                    ToolboxRow(
+                        item = item,
+                        onClick = { onToolboxAction(item.actionDecision) },
+                    )
                 }
             }
             return@ComposerMenuSurface
@@ -2587,7 +2617,10 @@ private fun EmptyToolboxState(message: String) {
 }
 
 @Composable
-private fun ToolboxRow(item: ComposerToolboxItemState) {
+private fun ToolboxRow(
+    item: ComposerToolboxItemState,
+    onClick: () -> Unit,
+) {
     val foreground = when (item.tone) {
         ComposerToolboxItemTone.Active -> ThreadColors.Warning
         ComposerToolboxItemTone.Disabled -> ThreadColors.ForegroundMuted.copy(alpha = 0.58f)
@@ -2613,6 +2646,7 @@ private fun ToolboxRow(item: ComposerToolboxItemState) {
             .clip(RoundedCornerShape(12.dp))
             .background(background)
             .border(1.dp, border, RoundedCornerShape(12.dp))
+            .then(if (item.enabled) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
@@ -2868,6 +2902,28 @@ private fun ComposerMenu?.toToolbarMenuState(): ComposerToolbarMenuState? {
         ComposerMenu.Effort -> ComposerToolbarMenuState.Effort
         ComposerMenu.ShellTools -> ComposerToolbarMenuState.ShellTools
         null -> null
+    }
+}
+
+private fun ComposerSlashPanelViewPreview.toPanelViewState(): ComposerSlashPanelViewState {
+    return when (this) {
+        ComposerSlashPanelViewPreview.Root -> ComposerSlashPanelViewState.Root
+        ComposerSlashPanelViewPreview.Skills -> ComposerSlashPanelViewState.Skills
+        ComposerSlashPanelViewPreview.Mcp -> ComposerSlashPanelViewState.Mcp
+        ComposerSlashPanelViewPreview.Hooks -> ComposerSlashPanelViewState.Hooks
+        ComposerSlashPanelViewPreview.Fork -> ComposerSlashPanelViewState.Fork
+        ComposerSlashPanelViewPreview.ForkTurns -> ComposerSlashPanelViewState.ForkTurns
+    }
+}
+
+private fun ComposerSlashPanelViewState.toPreviewPanelView(): ComposerSlashPanelViewPreview {
+    return when (this) {
+        ComposerSlashPanelViewState.Root -> ComposerSlashPanelViewPreview.Root
+        ComposerSlashPanelViewState.Skills -> ComposerSlashPanelViewPreview.Skills
+        ComposerSlashPanelViewState.Mcp -> ComposerSlashPanelViewPreview.Mcp
+        ComposerSlashPanelViewState.Hooks -> ComposerSlashPanelViewPreview.Hooks
+        ComposerSlashPanelViewState.Fork -> ComposerSlashPanelViewPreview.Fork
+        ComposerSlashPanelViewState.ForkTurns -> ComposerSlashPanelViewPreview.ForkTurns
     }
 }
 

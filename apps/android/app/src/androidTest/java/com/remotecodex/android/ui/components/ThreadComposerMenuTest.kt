@@ -85,4 +85,21 @@ class ThreadComposerMenuTest {
             device.findObjects(By.text("No backend tools are available for this thread.")).isEmpty(),
         )
     }
+
+    @Test
+    fun slashToolboxRoutesToSkillsPanel() {
+        val slashButton = device.wait(Until.findObject(By.desc("Open slash toolbox")), 5_000)
+            ?: error("Slash toolbox button was not visible")
+        slashButton.click()
+        assertNotNull(device.wait(Until.findObject(By.text("/skills")), 2_000))
+
+        device.findObject(By.desc("Skills")).click()
+
+        assertNotNull(device.wait(Until.findObject(By.text("/skills")), 2_000))
+        assertNotNull(device.findObject(By.text("Open")))
+        assertNotNull(device.findObject(By.text("Inspect skills and copy invocation names.")))
+        assertNotNull(device.findObject(By.text("Android Client Work")))
+        assertNotNull(device.findObject(By.text("OpenAI Docs")))
+        assertNotNull(device.findObject(By.text("Skill metadata incomplete")))
+    }
 }
