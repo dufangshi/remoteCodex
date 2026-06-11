@@ -1847,8 +1847,8 @@ private fun ToolCallCard(toolCall: ToolCallPreview) {
                 entries = toolCall.parameters,
                 copyText = parametersText,
             )
-            toolCall.result?.let {
-                CodeBlock(title = "Result", code = it)
+            toolCall.result?.takeIf { it.isNotBlank() }?.let { result ->
+                CodeBlock(title = "Result", code = result)
             }
         }
     }
