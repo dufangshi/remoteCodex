@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateMapOf
@@ -43,6 +45,9 @@ fun PendingRequestCard(
     val questionMode = state.questions.isNotEmpty()
     val selectedAnswers = remember(request) {
         mutableStateMapOf<String, Set<String>>()
+    }
+    val customAnswers = remember(request) {
+        mutableStateMapOf<String, String>()
     }
     val hasSelectedAnswers = state.questions.all { question ->
         selectedAnswers[question.id].orEmpty().isNotEmpty()
@@ -94,6 +99,10 @@ fun PendingRequestCard(
                 PendingRequestQuestionSection(
                     question = question,
                     selectedLabels = selectedAnswers[question.id].orEmpty(),
+                    customAnswer = customAnswers[question.id].orEmpty(),
+                    onCustomAnswerChange = { value ->
+                        customAnswers[question.id] = value
+                    },
                     onToggleOption = { option ->
                         val currentLabels = selectedAnswers[question.id].orEmpty()
                         selectedAnswers[question.id] = if (question.multiSelect) {
@@ -217,9 +226,13 @@ private fun PendingRequestCommandBlock(
 private fun PendingRequestQuestionSection(
     question: PendingRequestQuestionState,
     selectedLabels: Set<String>,
+    customAnswer: String,
+    onCustomAnswerChange: (String) -> Unit,
     onToggleOption: (PendingRequestOptionState) -> Unit,
     onToggleOther: () -> Unit,
 ) {
+    val otherLabel = question.otherLabel
+    val showOtherInput = otherLabel != null && otherLabel in selectedLabels
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -257,13 +270,20 @@ private fun PendingRequestQuestionSection(
                         onClick = { onToggleOption(option) },
                     )
                 }
-                question.otherLabel?.let { otherLabel ->
+                otherLabel?.let {
                     PendingRequestOtherChip(
-                        label = otherLabel,
-                        selected = otherLabel in selectedLabels,
+                        label = it,
+                        selected = it in selectedLabels,
                         onClick = onToggleOther,
                     )
                 }
+            }
+            if (showOtherInput) {
+                PendingRequestCustomAnswerField(
+                    header = question.header,
+                    value = customAnswer,
+                    onValueChange = onCustomAnswerChange,
+                )
             }
         } else {
             Text(
@@ -337,6 +357,44 @@ private fun PendingRequestOptionChip(
             )
         }
     }
+}
+
+@Composable
+private fun PendingRequestCustomAnswerField(
+    header: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics {
+                contentDescription = "$header custom answer"
+            },
+        singleLine = true,
+        placeholder = {
+            Text(
+                text = "Enter a custom answer",
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        },
+        textStyle = MaterialTheme.typography.bodyMedium.copy(color = ThreadColors.Foreground),
+        shape = RoundedCornerShape(12.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = ThreadColors.Foreground,
+            unfocusedTextColor = ThreadColors.Foreground,
+            focusedContainerColor = ThreadColors.SurfaceStrong,
+            unfocusedContainerColor = ThreadColors.SurfaceStrong,
+            cursorColor = ThreadColors.Primary,
+            focusedBorderColor = ThreadColors.Info.copy(alpha = 0.58f),
+            unfocusedBorderColor = ThreadColors.Border,
+            focusedPlaceholderColor = ThreadColors.ForegroundMuted,
+            unfocusedPlaceholderColor = ThreadColors.ForegroundMuted,
+        ),
+    )
 }
 
 @Composable

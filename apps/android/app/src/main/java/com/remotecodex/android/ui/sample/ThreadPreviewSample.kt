@@ -602,6 +602,7 @@ object ThreadPreviewSample {
                             description = "Keep the agent waiting and do not run the build.",
                         ),
                     ),
+                    allowOther = true,
                 ),
             ),
         ),
