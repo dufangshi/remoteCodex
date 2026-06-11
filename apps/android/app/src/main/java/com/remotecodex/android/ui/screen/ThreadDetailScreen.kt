@@ -86,6 +86,7 @@ fun ThreadDetailScreen(
     onChangeConnection: () -> Unit,
     onOpenThread: (String) -> Unit,
     onBackToHome: () -> Unit,
+    onThreadDeleted: () -> Unit = onBackToHome,
 ) {
     var detail by remember(threadId) { mutableStateOf<ThreadDetailPreview?>(null) }
     var threadProjectionState by remember(threadId) { mutableStateOf<ThreadProjectionState?>(null) }
@@ -849,7 +850,7 @@ fun ThreadDetailScreen(
         threadActionBusy = false
         pendingDelete = false
         result
-            .onSuccess { onBackToHome() }
+            .onSuccess { onThreadDeleted() }
             .onFailure { throwable ->
                 threadActionError = throwable.message ?: "Delete failed."
             }

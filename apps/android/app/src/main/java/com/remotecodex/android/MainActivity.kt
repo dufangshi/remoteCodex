@@ -148,6 +148,10 @@ class MainActivity : ComponentActivity() {
                                 connectedRoute = ConnectedRoute.ThreadDetail(nextThreadId)
                             },
                             onBackToHome = { connectedRoute = ConnectedRoute.Home },
+                            onThreadDeleted = {
+                                homeSnapshotRefreshNonce += 1
+                                connectedRoute = ConnectedRoute.Home
+                            },
                         )
                         is ConnectedRoute.WorkspaceDetail -> WorkspaceDetailScreen(
                             workspaceId = (connectedRoute as ConnectedRoute.WorkspaceDetail).workspaceId,
