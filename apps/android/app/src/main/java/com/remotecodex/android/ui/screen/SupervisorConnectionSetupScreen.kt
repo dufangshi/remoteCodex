@@ -50,11 +50,16 @@ import com.remotecodex.android.api.SupervisorClientError
 import com.remotecodex.android.api.SupervisorConnectionCheck
 import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorConnectionMode
+import com.remotecodex.android.ui.components.GraphActionIcon
 import com.remotecodex.android.ui.components.GraphBadge
 import com.remotecodex.android.ui.components.GraphBadgeVariant
 import com.remotecodex.android.ui.components.GraphButton
 import com.remotecodex.android.ui.components.GraphButtonSize
 import com.remotecodex.android.ui.components.GraphButtonVariant
+import com.remotecodex.android.ui.components.GraphDialogActionTone
+import com.remotecodex.android.ui.components.GraphDialogFooter
+import com.remotecodex.android.ui.components.GraphDialogFrame
+import com.remotecodex.android.ui.components.GraphDialogOverlay
 import com.remotecodex.android.ui.components.GraphSelectionGlyph
 import com.remotecodex.android.ui.theme.ThreadColors
 import kotlinx.coroutines.Dispatchers
@@ -76,6 +81,7 @@ fun SupervisorConnectionSetupScreen(
     var relayPortal by remember { mutableStateOf<RelayPortalSummary?>(null) }
     var createdDevice by remember { mutableStateOf<RelayCreateDeviceResult?>(null) }
     var newDeviceName by remember { mutableStateOf("Android workstation") }
+    var revokeDeviceTarget by remember { mutableStateOf<RelayDeviceSummary?>(null) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -107,14 +113,11 @@ fun SupervisorConnectionSetupScreen(
             result
                 .onSuccess { portal ->
                     relayPortal = portal
-                    val selectedStillExists = portal.devices.any { it.id == relayDeviceId }
-                    if (!selectedStillExists) {
-                        relayDeviceId = portal.devices.firstOrNull()?.id.orEmpty()
-                    }
+                    relayDeviceId = chooseRelayDeviceId(portal.devices, relayDeviceId)
                     statusMessage = if (portal.devices.isEmpty()) {
                         "Relay login succeeded. Register a device to connect a backend."
                     } else {
-                        "Relay login succeeded. Select a backend device."
+                        relayPortalStatusMessage(portal.devices, relayDeviceId)
                     }
                 }
                 .onFailure { error ->
@@ -226,14 +229,11 @@ fun SupervisorConnectionSetupScreen(
                                         .onSuccess { (token, portal) ->
                                             authToken = token
                                             relayPortal = portal
-                                            val selectedStillExists = portal.devices.any { it.id == relayDeviceId }
-                                            if (!selectedStillExists) {
-                                                relayDeviceId = portal.devices.firstOrNull()?.id.orEmpty()
-                                            }
+                                            relayDeviceId = chooseRelayDeviceId(portal.devices, relayDeviceId)
                                             statusMessage = if (portal.devices.isEmpty()) {
                                                 "Relay login succeeded. Register a device to connect a backend."
                                             } else {
-                                                "Relay login succeeded. Select a backend device."
+                                                relayPortalStatusMessage(portal.devices, relayDeviceId)
                                             }
                                         }
                                         .onFailure { error ->
@@ -257,6 +257,7 @@ fun SupervisorConnectionSetupScreen(
                     onSelectDevice = { relayDeviceId = it },
                     onNewDeviceNameChange = { newDeviceName = it },
                     onRefresh = { loadRelayPortal() },
+                    onRevokeDevice = { revokeDeviceTarget = it },
                     onCreateDevice = {
                         val token = authToken
                         if (token.isBlank()) {
@@ -283,6 +284,58 @@ fun SupervisorConnectionSetupScreen(
                                     relayPortal = portal
                                     relayDeviceId = created.device.id
                                     statusMessage = "Device registered. Use the one-time token on the backend."
+                                }
+                                .onFailure { error ->
+                                    errorMessage = userFacingConnectionError(error)
+                                }
+                        }
+                    },
+                )
+            }
+
+            revokeDeviceTarget?.let { target ->
+                RevokeRelayDeviceDialog(
+                    device = target,
+                    busy = busy,
+                    onClose = {
+                        if (!busy) {
+                            revokeDeviceTarget = null
+                        }
+                    },
+                    onConfirm = {
+                        val token = authToken
+                        if (token.isBlank()) {
+                            errorMessage = "Log in to the relay before revoking a device."
+                            statusMessage = null
+                            revokeDeviceTarget = null
+                            return@RevokeRelayDeviceDialog
+                        }
+                        busy = true
+                        errorMessage = null
+                        statusMessage = null
+                        scope.launch {
+                            val result = withContext(Dispatchers.IO) {
+                                runCatching {
+                                    val client = SupervisorApiClient(buildBaseConfig(token))
+                                    val revokedId = client.deleteRelayDevice(target.id)
+                                    val portal = client.fetchRelayPortal()
+                                    revokedId to portal
+                                }
+                            }
+                            busy = false
+                            result
+                                .onSuccess { (revokedId, portal) ->
+                                    revokeDeviceTarget = null
+                                    relayPortal = portal
+                                    relayDeviceId = chooseRelayDeviceId(portal.devices, relayDeviceId.takeIf { it != revokedId }.orEmpty())
+                                    if (createdDevice?.device?.id == revokedId) {
+                                        createdDevice = null
+                                    }
+                                    statusMessage = if (portal.devices.isEmpty()) {
+                                        "Device revoked. Register another backend device to connect."
+                                    } else {
+                                        "Device revoked. ${relayPortalStatusMessage(portal.devices, relayDeviceId)}"
+                                    }
                                 }
                                 .onFailure { error ->
                                     errorMessage = userFacingConnectionError(error)
@@ -384,6 +437,7 @@ private fun RelayDevicesPanel(
     onSelectDevice: (String) -> Unit,
     onNewDeviceNameChange: (String) -> Unit,
     onRefresh: () -> Unit,
+    onRevokeDevice: (RelayDeviceSummary) -> Unit,
     onCreateDevice: () -> Unit,
 ) {
     ConnectionPanel(
@@ -402,6 +456,8 @@ private fun RelayDevicesPanel(
                     device = device,
                     selected = device.id == selectedDeviceId,
                     onClick = { onSelectDevice(device.id) },
+                    onRevoke = { onRevokeDevice(device) },
+                    busy = busy,
                 )
             }
         }
@@ -442,7 +498,9 @@ private fun RelayDevicesPanel(
 private fun RelayDeviceRow(
     device: RelayDeviceSummary,
     selected: Boolean,
+    busy: Boolean,
     onClick: () -> Unit,
+    onRevoke: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -477,6 +535,21 @@ private fun RelayDeviceRow(
                     variant = if (device.connected) GraphBadgeVariant.Outline else GraphBadgeVariant.Secondary,
                 )
             }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                GraphBadge(
+                    label = if (selected) "Selected" else "Backend",
+                    variant = if (selected) GraphBadgeVariant.Outline else GraphBadgeVariant.Secondary,
+                )
+                GraphButton(
+                    label = "Revoke",
+                    enabled = !busy,
+                    variant = GraphButtonVariant.Destructive,
+                    size = GraphButtonSize.Small,
+                    icon = GraphActionIcon.Delete,
+                    contentDescription = "Revoke relay device ${device.name}",
+                    onClick = onRevoke,
+                )
+            }
             Text(
                 text = device.tokenPreview.ifBlank { device.id },
                 color = ThreadColors.ForegroundMuted,
@@ -492,6 +565,52 @@ private fun RelayDeviceRow(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+    }
+}
+
+@Composable
+private fun RevokeRelayDeviceDialog(
+    device: RelayDeviceSummary,
+    busy: Boolean,
+    onClose: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    GraphDialogOverlay(onDismiss = onClose) {
+        GraphDialogFrame(
+            title = "Revoke device",
+            subtitle = "Remove this backend device from the relay account.",
+            onClose = onClose,
+            footer = {
+                GraphDialogFooter(
+                    primaryLabel = if (busy) "Revoking..." else "Revoke",
+                    primaryTone = GraphDialogActionTone.Danger,
+                    primaryEnabled = !busy,
+                    onCancel = onClose,
+                    onPrimary = onConfirm,
+                )
+            },
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = device.name,
+                    color = ThreadColors.Foreground,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "The relay token for this backend stops working, existing shares for the device are removed, and Android will select another available backend if one exists.",
+                    color = ThreadColors.ForegroundMuted,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+                Text(
+                    text = deviceStatusLine(device),
+                    color = ThreadColors.ForegroundSoft,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
         }
     }
 }
@@ -688,6 +807,24 @@ private fun deviceStatusLine(device: RelayDeviceSummary): String {
     } else {
         "Last online: $lastSeen"
     }
+}
+
+private fun chooseRelayDeviceId(devices: List<RelayDeviceSummary>, currentDeviceId: String): String {
+    if (devices.any { it.id == currentDeviceId }) {
+        return currentDeviceId
+    }
+    return devices.firstOrNull { it.connected }?.id ?: devices.firstOrNull()?.id.orEmpty()
+}
+
+private fun relayPortalStatusMessage(devices: List<RelayDeviceSummary>, selectedDeviceId: String): String {
+    val onlineCount = devices.count { it.connected }
+    val selected = devices.firstOrNull { it.id == selectedDeviceId }
+    val selectedStatus = when {
+        selected == null -> "Select a backend device."
+        selected.connected -> "Selected backend is online."
+        else -> "Selected backend is offline."
+    }
+    return "Loaded ${devices.size} device${if (devices.size == 1) "" else "s"}; $onlineCount online. $selectedStatus"
 }
 
 private fun relaySupervisorCommand(relayBaseUrl: String, token: String): String {

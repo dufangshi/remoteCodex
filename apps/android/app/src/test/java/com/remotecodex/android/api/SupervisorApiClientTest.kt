@@ -594,6 +594,28 @@ class SupervisorApiClientTest {
     }
 
     @Test
+    fun deleteRelayDeviceRevokesDeviceWithBearerToken() {
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(200, """{"id":"device-1"}"""),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+            ),
+            transport,
+        )
+
+        val revokedId = client.deleteRelayDevice("device-1")
+
+        assertEquals("device-1", revokedId)
+        assertEquals("https://relay.example.test/relay/devices/device-1", transport.requests.single().url)
+        assertEquals("DELETE", transport.requests.single().method)
+        assertEquals("relay-token", transport.requests.single().bearerToken)
+    }
+
+    @Test
     fun workspaceThreadDetailAndPromptUseRelayDevicePath() {
         val workspaceJson = """{"id":"workspace-1","hostId":"host","label":"Remote Codex","absPath":"/repo","isFavorite":false,"createdAt":"2026-01-01T00:00:00.000Z","lastOpenedAt":null}"""
         val threadJson = """{"id":"thread-1","workspaceId":"workspace-1","title":"Android API","status":"idle","model":"gpt-5","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":"Wire detail"}"""

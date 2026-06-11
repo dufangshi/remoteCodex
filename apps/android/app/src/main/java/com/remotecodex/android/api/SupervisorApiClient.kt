@@ -255,6 +255,14 @@ class SupervisorApiClient(
         return requestJson("/relay/devices", method = "POST", body = body).toRelayCreateDeviceResult()
     }
 
+    fun deleteRelayDevice(deviceId: String): String {
+        val response = requestJson(
+            "/relay/devices/${urlEncodePathSegment(deviceId)}",
+            method = "DELETE",
+        )
+        return response.optString("id", deviceId)
+    }
+
     fun fetchThreadDetail(threadId: String, limit: Int? = null, beforeTurnId: String? = null): SupervisorThreadDetail {
         val query = buildQuery(
             "limit" to limit?.toString(),
