@@ -29,6 +29,10 @@ class ThreadDetailMapperTest {
                     title = "Android API",
                     status = "running",
                     model = "gpt-5",
+                    reasoningEffort = "high",
+                    fastMode = true,
+                    collaborationMode = "plan",
+                    sandboxMode = "danger-full-access",
                     updatedAt = "2026-06-11T18:59:00Z",
                     summaryText = "Wire real detail",
                 ),
@@ -122,6 +126,10 @@ class ThreadDetailMapperTest {
         assertEquals("Branch selected", preview.timelineAuxiliary.answeredRequestNotes.single().title)
         assertEquals("Ship Android client", preview.composer.goalPanel.currentGoal?.objective)
         assertEquals("Message Android API...", preview.composer.prompt.placeholder)
+        assertEquals("high", preview.composer.reasoningEffort)
+        assertTrue(preview.composer.fastMode)
+        assertTrue(preview.composer.planModeActive)
+        assertEquals("danger-full-access", preview.composer.workspaceModeLabel)
 
         val turn = preview.turns.single()
         assertEquals("complete", turn.statusLabel)

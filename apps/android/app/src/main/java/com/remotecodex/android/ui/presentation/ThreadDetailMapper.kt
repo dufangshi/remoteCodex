@@ -96,7 +96,6 @@ fun buildThreadDetailPreviewFromSupervisor(
             threadConnected = true,
             followTail = true,
             canInterrupt = status == ThreadStatus.Running,
-            workspaceModeLabel = "workspace write",
             prompt = ComposerPromptPreview(
                 text = "",
                 placeholder = "Message ${detail.thread.title.ifBlank { "this thread" }}...",
@@ -106,6 +105,10 @@ fun buildThreadDetailPreviewFromSupervisor(
                 model = detail.thread.model ?: "codex",
                 availability = ComposerContextAvailability.Available,
             ),
+            reasoningEffort = detail.thread.reasoningEffort ?: "medium",
+            fastMode = detail.thread.fastMode,
+            planModeActive = detail.thread.collaborationMode == "plan",
+            workspaceModeLabel = detail.thread.sandboxMode ?: "workspace write",
             goalPanel = com.remotecodex.android.ui.model.ComposerGoalPanelPreview(
                 currentGoal = detail.goalObjective?.takeIf { it.isNotBlank() }?.let { objective ->
                     ThreadGoalPreview(

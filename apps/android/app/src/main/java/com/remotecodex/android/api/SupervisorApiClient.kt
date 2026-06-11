@@ -132,6 +132,20 @@ class SupervisorApiClient(
         ).toThreadSummary()
     }
 
+    fun updateThreadSettings(threadId: String, request: UpdateThreadSettingsRequest): SupervisorThreadSummary {
+        val body = JSONObject()
+        request.model?.takeIf { it.isNotBlank() }?.let { body.put("model", it) }
+        request.reasoningEffort?.let { body.put("reasoningEffort", it) }
+        request.fastMode?.let { body.put("fastMode", it) }
+        request.collaborationMode?.takeIf { it.isNotBlank() }?.let { body.put("collaborationMode", it) }
+        request.sandboxMode?.let { body.put("sandboxMode", it) }
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/settings"),
+            method = "PATCH",
+            body = body.toString(),
+        ).toThreadSummary()
+    }
+
     fun deleteThread(threadId: String): SupervisorThreadSummary {
         return requestJson(
             config.restPath("/api/threads/${urlEncodePathSegment(threadId)}"),
@@ -393,6 +407,10 @@ private fun JSONObject.toThreadSummary(): SupervisorThreadSummary {
         title = optString("title"),
         status = optString("status"),
         model = optNullableString("model"),
+        reasoningEffort = optNullableString("reasoningEffort"),
+        fastMode = optBoolean("fastMode", false),
+        collaborationMode = optString("collaborationMode", "default"),
+        sandboxMode = optNullableString("sandboxMode"),
         updatedAt = optString("updatedAt"),
         summaryText = optNullableString("summaryText"),
     )

@@ -48,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.remotecodex.android.api.UpdateThreadSettingsRequest
 import com.remotecodex.android.ui.model.ComposerActiveView
 import com.remotecodex.android.ui.model.ComposerSlashPanelViewPreview
 import com.remotecodex.android.ui.model.ComposerPreview
@@ -156,6 +157,7 @@ fun ThreadComposer(
     composer: ComposerPreview = ComposerPreview(),
     onSubmitPrompt: ((String) -> Unit)? = null,
     onInterruptThread: (() -> Unit)? = null,
+    onUpdateSettings: ((UpdateThreadSettingsRequest) -> Unit)? = null,
 ) {
     var openMenu by remember { mutableStateOf<ComposerMenu?>(null) }
     var activeViewPreview by remember(composer.activeView) { mutableStateOf(composer.activeView) }
@@ -482,10 +484,15 @@ fun ThreadComposer(
                             ComposerToolboxActionDecisionKind.ToggleFast -> {
                                 val nextFastMode = actionDecision.targetFastMode ?: !fastModeSelected
                                 fastModeSelected = nextFastMode
-                                fastModePreviewStatus = if (nextFastMode) {
-                                    "Fast mode preview on"
+                                if (onUpdateSettings != null) {
+                                    onUpdateSettings(UpdateThreadSettingsRequest(fastMode = nextFastMode))
+                                    fastModePreviewStatus = null
                                 } else {
-                                    "Fast mode preview off"
+                                    fastModePreviewStatus = if (nextFastMode) {
+                                        "Fast mode preview on"
+                                    } else {
+                                        "Fast mode preview off"
+                                    }
                                 }
                             }
                             ComposerToolboxActionDecisionKind.Noop,
@@ -523,10 +530,19 @@ fun ThreadComposer(
                     modelOptions = modelOptions,
                     onSelectModel = { model ->
                         selectedModel = model
-                        selectedReasoningEffort = composer.modelOptions
+                        val nextReasoningEffort = composer.modelOptions
                             .firstOrNull { it.model == model }
                             ?.defaultReasoningEffort
                             ?: selectedReasoningEffort
+                        selectedReasoningEffort = nextReasoningEffort
+                        onUpdateSettings?.let { updateSettings ->
+                            updateSettings(
+                                UpdateThreadSettingsRequest(
+                                    model = model,
+                                    reasoningEffort = nextReasoningEffort,
+                                ),
+                            )
+                        }
                         openMenu = null
                     },
                 )
@@ -535,6 +551,9 @@ fun ThreadComposer(
                     effortOptions = reasoningEffortOptions,
                     onSelectEffort = { effort ->
                         selectedReasoningEffort = effort
+                        onUpdateSettings?.let { updateSettings ->
+                            updateSettings(UpdateThreadSettingsRequest(reasoningEffort = effort))
+                        }
                         openMenu = null
                     },
                 )
@@ -691,7 +710,15 @@ fun ThreadComposer(
                     enabled = settingsToolbarState.planButton.enabled,
                     onClick = {
                         if (settingsToolbarState.planButton.enabled) {
-                            planModeSelected = !planModeSelected
+                            val nextPlanMode = !planModeSelected
+                            planModeSelected = nextPlanMode
+                            onUpdateSettings?.let { updateSettings ->
+                                updateSettings(
+                                    UpdateThreadSettingsRequest(
+                                        collaborationMode = if (nextPlanMode) "plan" else "default",
+                                    ),
+                                )
+                            }
                         }
                     },
                 )

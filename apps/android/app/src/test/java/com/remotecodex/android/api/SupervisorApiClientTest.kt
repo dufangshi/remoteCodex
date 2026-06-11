@@ -322,6 +322,52 @@ class SupervisorApiClientTest {
         assertTrue(transport.requests.single().body!!.contains("\"turnId\":\"turn-1\""))
     }
 
+    @Test
+    fun updateThreadSettingsUsesRelayDevicePath() {
+        val updatedThreadJson = """{"id":"thread-1","workspaceId":"workspace-1","title":"Android API","status":"idle","model":"gpt-5.1","reasoningEffort":"high","fastMode":true,"collaborationMode":"plan","sandboxMode":"danger-full-access","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":"Settings updated"}"""
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(200, updatedThreadJson),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        val updated = client.updateThreadSettings(
+            "thread-1",
+            UpdateThreadSettingsRequest(
+                model = "gpt-5.1",
+                reasoningEffort = "high",
+                fastMode = true,
+                collaborationMode = "plan",
+                sandboxMode = "danger-full-access",
+            ),
+        )
+
+        assertEquals("gpt-5.1", updated.model)
+        assertEquals("high", updated.reasoningEffort)
+        assertTrue(updated.fastMode)
+        assertEquals("plan", updated.collaborationMode)
+        assertEquals("danger-full-access", updated.sandboxMode)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1/settings",
+            transport.requests.single().url,
+        )
+        assertEquals("PATCH", transport.requests.single().method)
+        assertEquals("relay-token", transport.requests.single().bearerToken)
+        val body = transport.requests.single().body!!
+        assertTrue(body.contains("\"model\":\"gpt-5.1\""))
+        assertTrue(body.contains("\"reasoningEffort\":\"high\""))
+        assertTrue(body.contains("\"fastMode\":true"))
+        assertTrue(body.contains("\"collaborationMode\":\"plan\""))
+        assertTrue(body.contains("\"sandboxMode\":\"danger-full-access\""))
+    }
+
     private class RecordingTransport(
         private vararg val responses: SupervisorHttpResponse,
     ) : SupervisorHttpTransport {

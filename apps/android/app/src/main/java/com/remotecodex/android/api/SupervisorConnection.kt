@@ -140,6 +140,10 @@ data class SupervisorThreadSummary(
     val title: String,
     val status: String,
     val model: String?,
+    val reasoningEffort: String?,
+    val fastMode: Boolean,
+    val collaborationMode: String,
+    val sandboxMode: String?,
     val updatedAt: String,
     val summaryText: String?,
 )
@@ -250,6 +254,14 @@ data class SendThreadPromptRequest(
 
 data class UpdateThreadRequest(
     val title: String,
+)
+
+data class UpdateThreadSettingsRequest(
+    val model: String? = null,
+    val reasoningEffort: String? = null,
+    val fastMode: Boolean? = null,
+    val collaborationMode: String? = null,
+    val sandboxMode: String? = null,
 )
 
 data class RespondThreadRequestAnswer(

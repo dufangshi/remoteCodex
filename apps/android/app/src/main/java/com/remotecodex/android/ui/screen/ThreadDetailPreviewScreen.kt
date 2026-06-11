@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import com.remotecodex.android.settings.ThemeMode
 import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorHomeSnapshot
+import com.remotecodex.android.api.UpdateThreadSettingsRequest
 import com.remotecodex.android.ui.model.DetailPreview
 import com.remotecodex.android.ui.model.PendingRequestPreview
 import com.remotecodex.android.ui.model.ThreadRoomPreview
@@ -97,6 +98,7 @@ fun ThreadDetailSurface(
     onChangeConnection: () -> Unit,
     onSubmitPrompt: ((String) -> Unit)? = null,
     onInterruptThread: (() -> Unit)? = null,
+    onUpdateThreadSettings: ((UpdateThreadSettingsRequest) -> Unit)? = null,
     onDenyPendingRequest: (PendingRequestPreview) -> Unit = {},
     onSubmitPendingRequest: (PendingRequestPreview, Map<String, List<String>>) -> Unit = { _, _ -> },
     onRenameThread: ((String) -> Unit)? = null,
@@ -193,6 +195,7 @@ fun ThreadDetailSurface(
                     ),
                     onSubmitPrompt = onSubmitPrompt,
                     onInterruptThread = onInterruptThread,
+                    onUpdateSettings = onUpdateThreadSettings,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(start = contentStartPadding)
