@@ -177,8 +177,8 @@ class ThreadEventReducerTest {
     }
 
     @Test
-    fun streamingOutputDeltaRequiresDedicatedRefreshUntilB2() {
-        val result = reduceThreadEvent(
+    fun streamingOutputDeltaAppendsAndDeduplicatesBySequence() {
+        val first = reduceThreadEvent(
             detail = baseDetail(),
             event = event(
                 type = "thread.output.delta",
@@ -186,8 +186,91 @@ class ThreadEventReducerTest {
             ),
         )
 
+        assertFalse(first.needsRefresh)
+        assertEquals(2, first.detail.turns.single().items.size)
+        assertEquals("hello", first.detail.turns.single().items.last().text)
+        assertEquals("running", first.detail.turns.single().items.last().status)
+
+        val duplicate = reduceThreadEvent(
+            state = first.state,
+            event = event(
+                type = "thread.output.delta",
+                payload = """{"turnId":"turn-1","itemId":"item-1","sequence":1,"delta":"hello"}""",
+            ),
+        )
+        assertFalse(duplicate.needsRefresh)
+        assertEquals("hello", duplicate.detail.turns.single().items.last().text)
+
+        val second = reduceThreadEvent(
+            state = duplicate.state,
+            event = event(
+                type = "thread.output.delta",
+                payload = """{"turnId":"turn-1","itemId":"item-1","sequence":2,"delta":" world"}""",
+            ),
+        )
+        assertFalse(second.needsRefresh)
+        assertEquals("hello world", second.detail.turns.single().items.last().text)
+    }
+
+    @Test
+    fun materializedItemReplacesStreamingItemWithoutDuplication() {
+        val streaming = reduceThreadEvent(
+            detail = baseDetail(),
+            event = event(
+                type = "thread.output.delta",
+                payload = """{"turnId":"turn-1","itemId":"item-1","sequence":1,"delta":"partial"}""",
+            ),
+        )
+
+        val completed = reduceThreadEvent(
+            state = streaming.state,
+            event = event(
+                type = "thread.item.completed",
+                payload = """
+                    {
+                      "turnId": "turn-1",
+                      "item": {
+                        "id": "item-1",
+                        "kind": "agentMessage",
+                        "text": "complete",
+                        "status": "completed"
+                      }
+                    }
+                """.trimIndent(),
+            ),
+        )
+
+        assertFalse(completed.needsRefresh)
+        assertEquals(2, completed.detail.turns.single().items.size)
+        assertEquals("complete", completed.detail.turns.single().items.last().text)
+        assertEquals("completed", completed.detail.turns.single().items.last().status)
+    }
+
+    @Test
+    fun outputDeltaForMissingTurnFallsBackToRefresh() {
+        val result = reduceThreadEvent(
+            detail = baseDetail(),
+            event = event(
+                type = "thread.output.delta",
+                payload = """{"turnId":"missing","itemId":"item-1","sequence":1,"delta":"hello"}""",
+            ),
+        )
+
         assertTrue(result.needsRefresh)
         assertEquals(baseDetail().turns, result.detail.turns)
+    }
+
+    @Test
+    fun contextAndPlanEventsStillUseAggregateRefreshFallback() {
+        val result = reduceThreadEvent(
+            detail = baseDetail(),
+            event = event(
+                type = "thread.plan.updated",
+                payload = """{"turnId":"turn-1","explanation":"Plan","plan":[]}""",
+            ),
+        )
+
+        assertTrue(result.needsRefresh)
     }
 
     private fun event(type: String, payload: String): SupervisorThreadEvent {

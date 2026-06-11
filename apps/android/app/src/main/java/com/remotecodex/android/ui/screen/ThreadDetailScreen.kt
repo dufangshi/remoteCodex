@@ -66,6 +66,7 @@ import com.remotecodex.android.ui.presentation.buildThreadDetailPreviewFromSuper
 import com.remotecodex.android.ui.presentation.ComposerAttachmentActionKind
 import com.remotecodex.android.ui.sample.ThreadPreviewSample
 import com.remotecodex.android.ui.theme.ThreadColors
+import com.remotecodex.android.thread.ThreadProjectionState
 import com.remotecodex.android.thread.reduceThreadEvent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -86,7 +87,7 @@ fun ThreadDetailScreen(
     onBackToHome: () -> Unit,
 ) {
     var detail by remember(threadId) { mutableStateOf<ThreadDetailPreview?>(null) }
-    var threadDetailDto by remember(threadId) { mutableStateOf<SupervisorThreadDetail?>(null) }
+    var threadProjectionState by remember(threadId) { mutableStateOf<ThreadProjectionState?>(null) }
     var loading by remember(threadId) { mutableStateOf(true) }
     var error by remember(threadId) { mutableStateOf<String?>(null) }
     var refreshNonce by remember(threadId) { mutableIntStateOf(0) }
@@ -173,7 +174,7 @@ fun ThreadDetailScreen(
         loading = false
         result
             .onSuccess { bundle ->
-                threadDetailDto = bundle.dto
+                threadProjectionState = ThreadProjectionState(detail = bundle.dto)
                 detail = bundle.preview
                 selectedWorkspaceFilePath = bundle.preview.workspacePreview.selectedFile.path.takeIf { it.isNotBlank() }
                     ?: selectedWorkspaceFilePath
@@ -185,13 +186,13 @@ fun ThreadDetailScreen(
         val connection = eventSocketClient.connect(
             onThreadEvent = { event ->
                 if (event.threadId == threadId) {
-                    val currentDto = threadDetailDto
+                    val currentProjection = threadProjectionState
                     val currentPreview = detail
-                    if (currentDto == null || currentPreview == null) {
+                    if (currentProjection == null || currentPreview == null) {
                         refreshNonce += 1
                     } else {
-                        val reduced = reduceThreadEvent(currentDto, event)
-                        threadDetailDto = reduced.detail
+                        val reduced = reduceThreadEvent(currentProjection, event)
+                        threadProjectionState = reduced.state
                         detail = mergeThreadEventPreview(
                             current = currentPreview,
                             next = buildThreadDetailPreviewFromSupervisor(reduced.detail),
@@ -341,7 +342,7 @@ fun ThreadDetailScreen(
         result
             .onSuccess { preview ->
                 detail = preview
-                threadDetailDto = null
+                threadProjectionState = null
                 refreshNonce += 1
             }
             .onFailure { throwable -> error = throwable.message ?: "Interrupt failed." }
@@ -360,7 +361,7 @@ fun ThreadDetailScreen(
         result
             .onSuccess { preview ->
                 detail = preview
-                threadDetailDto = null
+                threadProjectionState = null
                 refreshNonce += 1
             }
             .onFailure { throwable -> error = throwable.message ?: "Settings update failed." }
