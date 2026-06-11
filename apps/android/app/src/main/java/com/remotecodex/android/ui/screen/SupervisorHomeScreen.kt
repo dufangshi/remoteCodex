@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import com.remotecodex.android.api.SupervisorApiClient
 import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorHomeSnapshot
+import com.remotecodex.android.api.StartSupervisorThreadRequest
 import com.remotecodex.android.api.SupervisorThreadSummary
 import com.remotecodex.android.api.SupervisorWorkspaceSummary
 import com.remotecodex.android.api.UpdateSupervisorWorkspaceRequest
@@ -102,6 +103,34 @@ fun SupervisorHomeScreen(
                 }
                 .onFailure { error ->
                     workspaceActionError = error.message ?: "Workspace action failed."
+                }
+        }
+    }
+    fun runWorkspaceThreadStart(workspaceId: String, title: String?, model: String) {
+        workspaceActionBusyId = workspaceId
+        workspaceActionError = null
+        coroutineScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    client.startThread(
+                        StartSupervisorThreadRequest(
+                            workspaceId = workspaceId,
+                            title = title?.takeIf { it.isNotBlank() },
+                            model = model,
+                            approvalMode = "yolo",
+                        ),
+                    )
+                }
+            }
+            workspaceActionBusyId = null
+            result
+                .onSuccess { thread ->
+                    workspaceDialog = null
+                    onRefreshHomeSnapshot()
+                    onOpenThread(thread.id)
+                }
+                .onFailure { error ->
+                    workspaceActionError = error.message ?: "Thread start failed."
                 }
         }
     }
@@ -184,6 +213,10 @@ fun SupervisorHomeScreen(
                                     workspaceActionError = null
                                     workspaceDialog = WorkspaceActionDialog.Rename(workspace)
                                 },
+                                onStartThread = {
+                                    workspaceActionError = null
+                                    workspaceDialog = WorkspaceActionDialog.StartThread(workspace)
+                                },
                                 onDeleteWorkspace = {
                                     workspaceActionError = null
                                     workspaceDialog = WorkspaceActionDialog.Delete(workspace)
@@ -265,6 +298,9 @@ fun SupervisorHomeScreen(
                     runWorkspaceAction(dialog.workspace.id) {
                         client.updateWorkspace(dialog.workspace.id, UpdateSupervisorWorkspaceRequest(label = label))
                     }
+                },
+                onStartThread = { title, model ->
+                    runWorkspaceThreadStart(dialog.workspace.id, title, model)
                 },
                 onDeleteWorkspace = {
                     runWorkspaceAction(dialog.workspace.id) {
@@ -526,6 +562,7 @@ private fun WorkspaceSummaryRow(
     onOpenWorkspace: () -> Unit,
     onToggleFavorite: () -> Unit,
     onRenameWorkspace: () -> Unit,
+    onStartThread: () -> Unit,
     onDeleteWorkspace: () -> Unit,
 ) {
     Column(
@@ -600,6 +637,14 @@ private fun WorkspaceSummaryRow(
                 onClick = onRenameWorkspace,
             )
             GraphButton(
+                label = "New Thread",
+                enabled = !busy,
+                variant = GraphButtonVariant.Default,
+                size = GraphButtonSize.Small,
+                contentDescription = "Start thread in workspace ${workspace.label}",
+                onClick = onStartThread,
+            )
+            GraphButton(
                 label = "Delete",
                 icon = GraphActionIcon.Delete,
                 enabled = !busy,
@@ -624,6 +669,7 @@ private sealed class WorkspaceActionDialog(
     val workspace: SupervisorWorkspaceSummary,
 ) {
     class Rename(workspace: SupervisorWorkspaceSummary) : WorkspaceActionDialog(workspace)
+    class StartThread(workspace: SupervisorWorkspaceSummary) : WorkspaceActionDialog(workspace)
     class Delete(workspace: SupervisorWorkspaceSummary) : WorkspaceActionDialog(workspace)
 }
 
@@ -634,6 +680,7 @@ private fun WorkspaceActionDialogOverlay(
     error: String?,
     onClose: () -> Unit,
     onRenameWorkspace: (String) -> Unit,
+    onStartThread: (String?, String) -> Unit,
     onDeleteWorkspace: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -646,12 +693,83 @@ private fun WorkspaceActionDialogOverlay(
                 onClose = onClose,
                 onRenameWorkspace = onRenameWorkspace,
             )
+            is WorkspaceActionDialog.StartThread -> StartThreadDialog(
+                workspace = dialog.workspace,
+                busy = busy,
+                error = error,
+                onClose = onClose,
+                onStartThread = onStartThread,
+            )
             is WorkspaceActionDialog.Delete -> DeleteWorkspaceDialog(
                 workspace = dialog.workspace,
                 busy = busy,
                 error = error,
                 onClose = onClose,
                 onDeleteWorkspace = onDeleteWorkspace,
+            )
+        }
+    }
+}
+
+@Composable
+private fun StartThreadDialog(
+    workspace: SupervisorWorkspaceSummary,
+    busy: Boolean,
+    error: String?,
+    onClose: () -> Unit,
+    onStartThread: (String?, String) -> Unit,
+) {
+    var title by rememberSaveable(workspace.id) { mutableStateOf("") }
+    var model by rememberSaveable(workspace.id) { mutableStateOf(DefaultStartThreadModel) }
+    val normalizedTitle = title.trim()
+    val normalizedModel = model.trim()
+    GraphDialogFrame(
+        title = "New Thread",
+        subtitle = workspace.label.ifBlank { workspace.absPath },
+        onClose = onClose,
+        footer = {
+            GraphDialogFooter(
+                primaryLabel = if (busy) "Starting" else "Start",
+                primaryTone = GraphDialogActionTone.Success,
+                primaryEnabled = !busy && normalizedModel.isNotBlank(),
+                onCancel = onClose,
+                onPrimary = {
+                    onStartThread(
+                        normalizedTitle.takeIf { it.isNotBlank() },
+                        normalizedModel,
+                    )
+                },
+            )
+        },
+    ) {
+        OutlinedTextField(
+            value = title,
+            onValueChange = { title = it },
+            enabled = !busy,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Thread title") },
+            singleLine = true,
+            colors = workspaceTextFieldColors(),
+        )
+        OutlinedTextField(
+            value = model,
+            onValueChange = { model = it },
+            enabled = !busy,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Model") },
+            singleLine = true,
+            colors = workspaceTextFieldColors(),
+        )
+        Text(
+            text = "Starts a Codex thread in ${workspace.absPath}.",
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+        )
+        error?.let { message ->
+            Text(
+                text = message,
+                color = ThreadColors.Danger,
+                style = MaterialTheme.typography.labelSmall,
             )
         }
     }
@@ -878,3 +996,5 @@ private enum class HomeDestination {
         }
     }
 }
+
+private const val DefaultStartThreadModel = "gpt-5"

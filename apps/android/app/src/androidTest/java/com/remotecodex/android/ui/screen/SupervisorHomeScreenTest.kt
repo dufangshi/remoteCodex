@@ -37,6 +37,7 @@ class SupervisorHomeScreenTest {
         composeRule.onNodeWithContentDescription("Open workspace remoteCodex-main").assertExists()
         composeRule.onNodeWithContentDescription("Toggle favorite workspace remoteCodex-main").assertExists()
         composeRule.onNodeWithContentDescription("Rename workspace remoteCodex-main").assertExists()
+        composeRule.onNodeWithContentDescription("Start thread in workspace remoteCodex-main").assertExists()
         composeRule.onNodeWithContentDescription("Delete workspace remoteCodex-main").assertExists()
 
         composeRule.onNodeWithContentDescription("Open Threads").performClick()
@@ -53,6 +54,13 @@ class SupervisorHomeScreenTest {
     @Test
     fun workspaceRowsExposeRenameAndDeleteDialogs() {
         setHomeContent()
+
+        composeRule.onNodeWithContentDescription("Start thread in workspace remoteCodex-main").performClick()
+        composeRule.onNodeWithText("Thread title").assertExists()
+        composeRule.onNodeWithText("Model").assertExists()
+        composeRule.onNodeWithText("gpt-5").assertExists()
+        composeRule.onNodeWithText("Starts a Codex thread in /home/u/dev/remoteCodex-main.").assertExists()
+        composeRule.onNodeWithContentDescription("Close dialog").performClick()
 
         composeRule.onNodeWithContentDescription("Rename workspace remoteCodex-main").performClick()
         composeRule.onNodeWithText("Rename Workspace").assertExists()

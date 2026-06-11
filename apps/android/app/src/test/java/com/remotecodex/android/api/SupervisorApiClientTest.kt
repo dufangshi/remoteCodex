@@ -115,6 +115,48 @@ class SupervisorApiClientTest {
     }
 
     @Test
+    fun startThreadPostsWorkspaceModelAndTitleThroughRelayDevicePath() {
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(
+                200,
+                """{"id":"thread-1","workspaceId":"workspace-1","title":"Android started thread","status":"idle","model":"gpt-5","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":null}""",
+            ),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        val thread = client.startThread(
+            StartSupervisorThreadRequest(
+                workspaceId = "workspace-1",
+                title = "Android started thread",
+                model = "gpt-5",
+                approvalMode = "yolo",
+                provider = "codex",
+            ),
+        )
+
+        assertEquals("thread-1", thread.id)
+        assertEquals("workspace-1", thread.workspaceId)
+        assertEquals("Android started thread", thread.title)
+        assertEquals("https://relay.example.test/relay/devices/device-1/api/threads/start", transport.requests.single().url)
+        assertEquals("POST", transport.requests.single().method)
+        assertEquals("relay-token", transport.requests.single().bearerToken)
+        val body = transport.requests.single().body!!
+        assertTrue(body.contains("\"workspaceId\":\"workspace-1\""))
+        assertTrue(body.contains("\"title\":\"Android started thread\""))
+        assertTrue(body.contains("\"model\":\"gpt-5\""))
+        assertTrue(body.contains("\"approvalMode\":\"yolo\""))
+        assertTrue(body.contains("\"provider\":\"codex\""))
+    }
+
+    @Test
     fun workspaceTreeAndPreviewUseRelayDevicePath() {
         val transport = RecordingTransport(
             SupervisorHttpResponse(
