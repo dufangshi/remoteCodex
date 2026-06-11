@@ -57,7 +57,13 @@ fun PendingRequestCard(
             customAnswer = customAnswers[question.id].orEmpty(),
         )
     }
-    val submitEnabled = !questionMode || hasSelectedAnswers
+    val primaryActionLabel = if (questionMode) state.submitLabel else state.approveLabel
+    val primaryActionAccessibilityLabel = if (questionMode) {
+        state.submitAccessibilityLabel
+    } else {
+        state.approveAccessibilityLabel
+    }
+    val primaryActionEnabled = !questionMode || hasSelectedAnswers
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -162,28 +168,28 @@ fun PendingRequestCard(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = if (questionMode && hasSelectedAnswers) "Submit" else state.approveLabel,
+                text = primaryActionLabel,
                 modifier = Modifier
                     .padding(start = 8.dp)
                     .clip(RoundedCornerShape(999.dp))
-                    .background(if (submitEnabled) ThreadColors.Primary else ThreadColors.SurfaceStrong)
+                    .background(if (primaryActionEnabled) ThreadColors.Primary else ThreadColors.SurfaceStrong)
                     .border(
                         1.dp,
-                        if (submitEnabled) ThreadColors.Primary else ThreadColors.Border,
+                        if (primaryActionEnabled) ThreadColors.Primary else ThreadColors.Border,
                         RoundedCornerShape(999.dp),
                     )
                     .semantics {
-                        contentDescription = if (submitEnabled) {
-                            state.approveAccessibilityLabel
+                        contentDescription = if (primaryActionEnabled) {
+                            primaryActionAccessibilityLabel
                         } else {
-                            "Answer each question before submitting ${state.title}"
+                            state.disabledSubmitAccessibilityLabel
                         }
-                        if (!submitEnabled) {
+                        if (!primaryActionEnabled) {
                             disabled()
                         }
                     }
                     .padding(horizontal = 14.dp, vertical = 8.dp),
-                color = if (submitEnabled) ThreadColors.PrimaryForeground else ThreadColors.ForegroundMuted,
+                color = if (primaryActionEnabled) ThreadColors.PrimaryForeground else ThreadColors.ForegroundMuted,
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
             )

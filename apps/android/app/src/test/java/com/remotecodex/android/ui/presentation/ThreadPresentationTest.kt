@@ -751,8 +751,11 @@ class ThreadPresentationTest {
                 ),
                 denyLabel = "Deny",
                 approveLabel = "Approve",
+                submitLabel = "Submit",
                 approveAccessibilityLabel = "Approve Answer Required",
+                submitAccessibilityLabel = "Submit Answer Required",
                 denyAccessibilityLabel = "Deny Answer Required",
+                disabledSubmitAccessibilityLabel = "Answer each question before submitting Answer Required",
             ),
             buildPendingRequestCardState(
                 PendingRequestPreview(
@@ -778,6 +781,35 @@ class ThreadPresentationTest {
                             id = " ",
                         ),
                     ),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun buildsPendingRequestCommandApprovalLabels() {
+        assertEquals(
+            PendingRequestCardState(
+                title = "Permission required",
+                description = "Run shell command",
+                riskLabel = "Manual approval",
+                commandLabel = "Requested action",
+                command = "pnpm test",
+                questions = emptyList(),
+                denyLabel = "Deny",
+                approveLabel = "Approve",
+                submitLabel = "Submit",
+                approveAccessibilityLabel = "Approve Permission required",
+                submitAccessibilityLabel = "Submit Permission required",
+                denyAccessibilityLabel = "Deny Permission required",
+                disabledSubmitAccessibilityLabel = "Answer each question before submitting Permission required",
+            ),
+            buildPendingRequestCardState(
+                PendingRequestPreview(
+                    title = "Permission required",
+                    description = "Run shell command",
+                    command = "pnpm test",
+                    riskLabel = "Manual approval",
                 ),
             ),
         )

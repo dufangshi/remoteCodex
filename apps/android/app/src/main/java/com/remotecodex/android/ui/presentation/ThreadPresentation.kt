@@ -204,8 +204,11 @@ data class PendingRequestCardState(
     val questions: List<PendingRequestQuestionState>,
     val denyLabel: String,
     val approveLabel: String,
+    val submitLabel: String,
     val approveAccessibilityLabel: String,
+    val submitAccessibilityLabel: String,
     val denyAccessibilityLabel: String,
+    val disabledSubmitAccessibilityLabel: String,
 )
 
 data class PendingRequestQuestionState(
@@ -3525,8 +3528,11 @@ fun buildPendingRequestCardState(request: PendingRequestPreview): PendingRequest
         questions = questions,
         denyLabel = "Deny",
         approveLabel = "Approve",
+        submitLabel = "Submit",
         denyAccessibilityLabel = "Deny $title",
         approveAccessibilityLabel = "Approve $title",
+        submitAccessibilityLabel = "Submit $title",
+        disabledSubmitAccessibilityLabel = "Answer each question before submitting $title",
     )
 }
 
