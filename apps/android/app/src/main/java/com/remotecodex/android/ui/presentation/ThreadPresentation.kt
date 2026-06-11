@@ -173,6 +173,17 @@ fun historyGroupRowOrdinalLabel(kind: HistoryItemKind, index: Int): String? {
     }
 }
 
+fun shouldShowHistoryGroupRowTitle(kind: HistoryItemKind): Boolean {
+    return when (kind) {
+        HistoryItemKind.Command,
+        HistoryItemKind.WebSearch,
+        HistoryItemKind.FileRead,
+        HistoryItemKind.FileChange,
+        -> false
+        else -> true
+    }
+}
+
 fun isScrollableHistoryItem(kind: HistoryItemKind): Boolean {
     return kind == HistoryItemKind.Command || kind == HistoryItemKind.Context
 }

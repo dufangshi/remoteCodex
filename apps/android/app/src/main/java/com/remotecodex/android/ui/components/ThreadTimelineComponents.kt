@@ -76,6 +76,7 @@ import com.remotecodex.android.ui.presentation.hookHistorySummary
 import com.remotecodex.android.ui.presentation.MessageStatusModel
 import com.remotecodex.android.ui.presentation.parseUserMessageSegments
 import com.remotecodex.android.ui.presentation.planStepStatusAccessibilityLabel
+import com.remotecodex.android.ui.presentation.shouldShowHistoryGroupRowTitle
 import com.remotecodex.android.ui.presentation.summarizeInlinePreviewText
 import com.remotecodex.android.ui.presentation.threadStatusLabel
 import com.remotecodex.android.ui.presentation.toolResultStatusLabel
@@ -1250,15 +1251,19 @@ private fun HistoryGroupRow(
                     fontWeight = FontWeight.Bold,
                 )
             }
-            Text(
-                text = item.title,
-                modifier = Modifier.weight(1f),
-                color = ThreadColors.ForegroundSoft,
-                style = MaterialTheme.typography.labelMedium,
-                fontFamily = FontFamily.Monospace,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            if (shouldShowHistoryGroupRowTitle(item.kind)) {
+                Text(
+                    text = item.title,
+                    modifier = Modifier.weight(1f),
+                    color = ThreadColors.ForegroundSoft,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            } else {
+                Spacer(modifier = Modifier.weight(1f))
+            }
             item.status?.let { status ->
                 ToolStatusBadge(
                     label = toolResultStatusLabel(status),

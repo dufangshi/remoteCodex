@@ -203,6 +203,16 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun hidesNoisyTitlesForTypedHistoryGroupRows() {
+        assertEquals(false, shouldShowHistoryGroupRowTitle(HistoryItemKind.Command))
+        assertEquals(false, shouldShowHistoryGroupRowTitle(HistoryItemKind.WebSearch))
+        assertEquals(false, shouldShowHistoryGroupRowTitle(HistoryItemKind.FileRead))
+        assertEquals(false, shouldShowHistoryGroupRowTitle(HistoryItemKind.FileChange))
+        assertEquals(true, shouldShowHistoryGroupRowTitle(HistoryItemKind.Artifact))
+        assertEquals(true, shouldShowHistoryGroupRowTitle(HistoryItemKind.Generic))
+    }
+
+    @Test
     fun summarizesHookOutputWithHookLabelAndGap() {
         assertEquals(
             HookHistorySummary(
