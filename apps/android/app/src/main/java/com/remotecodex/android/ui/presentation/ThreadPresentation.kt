@@ -7,6 +7,8 @@ import com.remotecodex.android.ui.model.ToolStatus
 import com.remotecodex.android.ui.model.ComposerActiveView
 import com.remotecodex.android.ui.model.ComposerContextAvailability
 import com.remotecodex.android.ui.model.ComposerContextPreview
+import com.remotecodex.android.ui.model.ComposerModelOptionPreview
+import com.remotecodex.android.ui.model.ComposerReasoningEffortOptionPreview
 
 enum class MessageStatusTone {
     Neutral,
@@ -104,6 +106,43 @@ data class ComposerSettingsState(
     val planVisible: Boolean,
     val planSelected: Boolean,
 )
+
+data class ComposerSelectionOptionState(
+    val label: String,
+    val detail: String,
+    val selected: Boolean,
+)
+
+fun buildComposerModelOptions(
+    currentModel: String?,
+    options: List<ComposerModelOptionPreview>,
+): List<ComposerSelectionOptionState> {
+    return options.map { option ->
+        val defaultEffort = option.defaultReasoningEffort
+            ?.takeIf { it.isNotBlank() }
+            ?.let { "default ${formatReasoningEffortLabel(it)}" }
+            ?: "available"
+        ComposerSelectionOptionState(
+            label = option.model,
+            detail = if (option.model == currentModel) "current" else defaultEffort,
+            selected = option.model == currentModel,
+        )
+    }
+}
+
+fun buildComposerReasoningEffortOptions(
+    currentEffort: String?,
+    options: List<ComposerReasoningEffortOptionPreview>,
+): List<ComposerSelectionOptionState> {
+    return options.map { option ->
+        val label = formatReasoningEffortLabel(option.reasoningEffort)
+        ComposerSelectionOptionState(
+            label = label,
+            detail = if (option.reasoningEffort == currentEffort) "current" else "available",
+            selected = option.reasoningEffort == currentEffort,
+        )
+    }
+}
 
 fun buildComposerSettingsState(
     context: ComposerContextPreview,

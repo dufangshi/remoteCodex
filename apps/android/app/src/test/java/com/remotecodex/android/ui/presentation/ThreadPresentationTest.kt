@@ -5,6 +5,8 @@ import com.remotecodex.android.ui.model.PlanStepStatus
 import com.remotecodex.android.ui.model.ComposerActiveView
 import com.remotecodex.android.ui.model.ComposerContextAvailability
 import com.remotecodex.android.ui.model.ComposerContextPreview
+import com.remotecodex.android.ui.model.ComposerModelOptionPreview
+import com.remotecodex.android.ui.model.ComposerReasoningEffortOptionPreview
 import com.remotecodex.android.ui.model.ThreadStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -326,6 +328,62 @@ class ThreadPresentationTest {
                 fastMode = false,
                 planModeAvailable = true,
                 planModeActive = false,
+            ),
+        )
+    }
+
+    @Test
+    fun buildsComposerModelOptions() {
+        assertEquals(
+            listOf(
+                ComposerSelectionOptionState(
+                    label = "gpt-test",
+                    detail = "current",
+                    selected = true,
+                ),
+                ComposerSelectionOptionState(
+                    label = "gpt-next",
+                    detail = "default High",
+                    selected = false,
+                ),
+                ComposerSelectionOptionState(
+                    label = "local",
+                    detail = "available",
+                    selected = false,
+                ),
+            ),
+            buildComposerModelOptions(
+                currentModel = "gpt-test",
+                options = listOf(
+                    ComposerModelOptionPreview(model = "gpt-test", defaultReasoningEffort = "medium"),
+                    ComposerModelOptionPreview(model = "gpt-next", defaultReasoningEffort = "high"),
+                    ComposerModelOptionPreview(model = "local", defaultReasoningEffort = null),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun buildsComposerReasoningEffortOptions() {
+        assertEquals(
+            listOf(
+                ComposerSelectionOptionState(
+                    label = "Low",
+                    detail = "available",
+                    selected = false,
+                ),
+                ComposerSelectionOptionState(
+                    label = "Medium",
+                    detail = "current",
+                    selected = true,
+                ),
+            ),
+            buildComposerReasoningEffortOptions(
+                currentEffort = "medium",
+                options = listOf(
+                    ComposerReasoningEffortOptionPreview(reasoningEffort = "low"),
+                    ComposerReasoningEffortOptionPreview(reasoningEffort = "medium"),
+                ),
             ),
         )
     }

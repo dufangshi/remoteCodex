@@ -37,11 +37,14 @@ import com.remotecodex.android.ui.presentation.ComposerContextUsageState
 import com.remotecodex.android.ui.presentation.ComposerJumpLatestState
 import com.remotecodex.android.ui.presentation.ComposerPrimaryActionKind
 import com.remotecodex.android.ui.presentation.ComposerSettingsState
+import com.remotecodex.android.ui.presentation.ComposerSelectionOptionState
 import com.remotecodex.android.ui.presentation.ComposerStatusChipModel
 import com.remotecodex.android.ui.presentation.ComposerStatusTone
 import com.remotecodex.android.ui.presentation.buildComposerActionState
 import com.remotecodex.android.ui.presentation.buildComposerContextUsageState
 import com.remotecodex.android.ui.presentation.buildComposerJumpLatestState
+import com.remotecodex.android.ui.presentation.buildComposerModelOptions
+import com.remotecodex.android.ui.presentation.buildComposerReasoningEffortOptions
 import com.remotecodex.android.ui.presentation.buildComposerSettingsState
 import com.remotecodex.android.ui.presentation.buildComposerStatusStrip
 import com.remotecodex.android.ui.theme.ThreadColors
@@ -80,6 +83,14 @@ fun ThreadComposer(
         planModeAvailable = composer.planModeAvailable,
         planModeActive = composer.planModeActive,
     )
+    val modelOptions = buildComposerModelOptions(
+        currentModel = composer.context.model,
+        options = composer.modelOptions,
+    )
+    val reasoningEffortOptions = buildComposerReasoningEffortOptions(
+        currentEffort = composer.reasoningEffort,
+        options = composer.reasoningEffortOptions,
+    )
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -93,8 +104,11 @@ fun ThreadComposer(
             when (openMenu) {
                 ComposerMenu.Slash -> SlashToolboxPanel()
                 ComposerMenu.Attachments -> AttachmentPanel()
-                ComposerMenu.Model -> ModelPickerPanel()
-                ComposerMenu.Effort -> EffortPickerPanel()
+                ComposerMenu.Model -> ModelPickerPanel(modelOptions = modelOptions)
+                ComposerMenu.Effort -> EffortPickerPanel(
+                    settingsState = settingsState,
+                    effortOptions = reasoningEffortOptions,
+                )
                 ComposerMenu.ShellTools -> ShellToolsPanel()
                 null -> Unit
             }
@@ -1436,21 +1450,35 @@ private fun AttachmentPanel() {
 }
 
 @Composable
-private fun ModelPickerPanel() {
+private fun ModelPickerPanel(modelOptions: List<ComposerSelectionOptionState>) {
     ComposerMenuSurface(title = "Model", subtitle = "Runtime preference") {
         ContextUsageRow()
-        listOf("gpt-5.4", "gpt-5-codex", "gpt-4.1").forEachIndexed { index, model ->
-            SelectionRow(label = model, detail = if (index == 0) "current" else "available", selected = index == 0)
+        modelOptions.forEach { option ->
+            SelectionRow(label = option.label, detail = option.detail, selected = option.selected)
         }
     }
 }
 
 @Composable
-private fun EffortPickerPanel() {
+private fun EffortPickerPanel(
+    settingsState: ComposerSettingsState,
+    effortOptions: List<ComposerSelectionOptionState>,
+) {
     ComposerMenuSurface(title = "Reasoning effort", subtitle = "Per-thread setting") {
-        ValueSliderPreview(label = "Effort budget", valueLabel = "medium", fraction = 0.58f)
-        listOf("low", "medium", "high").forEach { effort ->
-            SelectionRow(label = effort, detail = if (effort == "medium") "current" else "available", selected = effort == "medium")
+        ValueSliderPreview(
+            label = "Effort budget",
+            valueLabel = settingsState.effortLabel,
+            fraction = if (settingsState.effortEnabled) 0.58f else 0f,
+        )
+        Text(
+            text = settingsState.effortTitle,
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        effortOptions.forEach { option ->
+            SelectionRow(label = option.label, detail = option.detail, selected = option.selected)
         }
     }
 }

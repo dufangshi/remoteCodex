@@ -170,6 +170,29 @@ data class ComposerPreview(
     val fastMode: Boolean = false,
     val planModeAvailable: Boolean = true,
     val planModeActive: Boolean = false,
+    val modelOptions: List<ComposerModelOptionPreview> = defaultComposerModelOptions,
+    val reasoningEffortOptions: List<ComposerReasoningEffortOptionPreview> = defaultComposerReasoningEffortOptions,
+)
+
+data class ComposerModelOptionPreview(
+    val model: String,
+    val defaultReasoningEffort: String?,
+)
+
+data class ComposerReasoningEffortOptionPreview(
+    val reasoningEffort: String,
+)
+
+val defaultComposerModelOptions = listOf(
+    ComposerModelOptionPreview(model = "gpt-5.4", defaultReasoningEffort = "medium"),
+    ComposerModelOptionPreview(model = "gpt-5-codex", defaultReasoningEffort = "high"),
+    ComposerModelOptionPreview(model = "gpt-4.1", defaultReasoningEffort = "low"),
+)
+
+val defaultComposerReasoningEffortOptions = listOf(
+    ComposerReasoningEffortOptionPreview(reasoningEffort = "low"),
+    ComposerReasoningEffortOptionPreview(reasoningEffort = "medium"),
+    ComposerReasoningEffortOptionPreview(reasoningEffort = "high"),
 )
 
 data class ComposerContextPreview(
