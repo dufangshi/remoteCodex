@@ -1174,9 +1174,10 @@ class ThreadPresentationTest {
         assertEquals(
             ComposerSettingsState(
                 modelLabel = "gpt-test",
-                modelEnabled = true,
+                modelEnabled = false,
+                modelTitle = "Fast mode is on. Turn it off from the slash toolbox to edit model.",
                 effortLabel = "High",
-                effortEnabled = true,
+                effortEnabled = false,
                 effortTitle = "Fast mode is on. Turn it off from the slash toolbox to edit reasoning.",
                 planVisible = false,
                 planSelected = false,
@@ -1196,6 +1197,40 @@ class ThreadPresentationTest {
                 planModeActive = true,
             ),
         )
+    }
+
+    @Test
+    fun disablesComposerModelAndEffortToolbarButtonsInFastMode() {
+        val settings = buildComposerSettingsState(
+            context = ComposerContextPreview(model = "gpt-test"),
+            reasoningEffort = "high",
+            supportedReasoningEffortCount = 3,
+            settingsBusy = false,
+            fastMode = true,
+            planModeAvailable = true,
+            planModeActive = false,
+        )
+
+        val toolbar = buildComposerSettingsToolbarState(
+            settingsState = settings,
+            openMenu = null,
+            actionState = ComposerActionState(
+                primaryLabel = "Send",
+                primaryKind = ComposerPrimaryActionKind.Send,
+                interruptLabel = "Stop Current Turn",
+                showInterrupt = false,
+                sendEnabled = true,
+            ),
+            activeView = ComposerActiveView.Chat,
+            promptDisabled = false,
+            goalComposeMode = false,
+            goalBusy = false,
+        )
+
+        assertEquals(false, toolbar.modelButton.enabled)
+        assertEquals("Fast mode is on. Turn it off from the slash toolbox to edit model.", toolbar.modelTitle)
+        assertEquals(false, toolbar.effortButton.enabled)
+        assertEquals("Fast mode is on. Turn it off from the slash toolbox to edit reasoning.", toolbar.effortTitle)
     }
 
     @Test

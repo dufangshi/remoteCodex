@@ -549,6 +549,7 @@ data class ComposerToolbarState(
 data class ComposerSettingsState(
     val modelLabel: String,
     val modelEnabled: Boolean,
+    val modelTitle: String = modelLabel,
     val effortLabel: String,
     val effortEnabled: Boolean,
     val effortTitle: String,
@@ -2157,7 +2158,12 @@ fun buildComposerSettingsState(
     val supportedEfforts = supportedReasoningEffortCount.coerceAtLeast(0)
     val availableModels = modelOptionCount.coerceAtLeast(0)
     val modelLabel = context.model.takeIf { it.isNotBlank() } ?: "Select model"
-    val modelEnabled = !settingsBusy && availableModels > 0
+    val modelTitle = if (fastMode) {
+        "Fast mode is on. Turn it off from the slash toolbox to edit model."
+    } else {
+        context.model.takeIf { it.isNotBlank() } ?: "Select model"
+    }
+    val modelEnabled = !settingsBusy && !fastMode && availableModels > 0
     val effortEnabled = modelEnabled && supportedEfforts > 0
     val effortTitle = when {
         fastMode -> "Fast mode is on. Turn it off from the slash toolbox to edit reasoning."
@@ -2168,6 +2174,7 @@ fun buildComposerSettingsState(
     return ComposerSettingsState(
         modelLabel = modelLabel,
         modelEnabled = modelEnabled,
+        modelTitle = modelTitle,
         effortLabel = formatReasoningEffortLabel(reasoningEffort),
         effortEnabled = effortEnabled,
         effortTitle = effortTitle,
@@ -2199,7 +2206,7 @@ fun buildComposerSettingsToolbarState(
             enabled = settingsState.modelEnabled,
             label = settingsState.modelLabel,
         ),
-        modelTitle = settingsState.modelLabel,
+        modelTitle = settingsState.modelTitle,
         modelMenuExpanded = openMenu == ComposerToolbarMenuState.Model,
         effortButton = ComposerToolbarButtonState(
             visible = isChatView,
