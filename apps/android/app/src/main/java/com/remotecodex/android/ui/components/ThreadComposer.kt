@@ -64,6 +64,7 @@ import com.remotecodex.android.ui.presentation.ComposerMcpStatusTone
 import com.remotecodex.android.ui.presentation.ComposerMenuLifecycleState
 import com.remotecodex.android.ui.presentation.ComposerPrimaryActionKind
 import com.remotecodex.android.ui.presentation.ComposerPromptAttachmentState
+import com.remotecodex.android.ui.presentation.ComposerPromptSegmentState
 import com.remotecodex.android.ui.presentation.ComposerShellPromptInputState
 import com.remotecodex.android.ui.presentation.ComposerPromptSlotState
 import com.remotecodex.android.ui.presentation.ComposerSendButtonState
@@ -724,14 +725,21 @@ private fun ComposerPromptControl(state: ComposerPromptSlotState) {
             verticalAlignment = Alignment.Top,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
-                text = if (state.showPlaceholder) state.placeholder else state.text,
-                modifier = Modifier.weight(1f),
-                color = if (state.showPlaceholder) ThreadColors.ForegroundMuted else foreground,
-                style = if (state.shellVisible) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodyLarge,
-                maxLines = if (state.shellVisible) 3 else 4,
-                overflow = TextOverflow.Ellipsis,
-            )
+            if (state.showPlaceholder || state.promptSegments.isEmpty()) {
+                Text(
+                    text = if (state.showPlaceholder) state.placeholder else state.text,
+                    modifier = Modifier.weight(1f),
+                    color = if (state.showPlaceholder) ThreadColors.ForegroundMuted else foreground,
+                    style = if (state.shellVisible) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodyLarge,
+                    maxLines = if (state.shellVisible) 3 else 4,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            } else {
+                ComposerPromptSegmentsPreview(
+                    segments = state.promptSegments,
+                    modifier = Modifier.weight(1f),
+                )
+            }
             if (state.canInterrupt) {
                 ComposerMiniStopButton(label = state.interruptLabel)
             }
@@ -749,6 +757,83 @@ private fun ComposerPromptControl(state: ComposerPromptSlotState) {
                 )
             }
         }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ComposerPromptSegmentsPreview(
+    segments: List<ComposerPromptSegmentState>,
+    modifier: Modifier = Modifier,
+) {
+    FlowRow(
+        modifier = modifier.semantics {
+            contentDescription = "Prompt with ${segments.size} segments"
+        },
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        segments.forEach { segment ->
+            when (segment) {
+                is ComposerPromptSegmentState.Text -> ComposerPromptTextSegment(segment.text)
+                is ComposerPromptSegmentState.Attachment -> ComposerPromptAttachmentSegment(segment)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ComposerPromptTextSegment(text: String) {
+    Text(
+        text = text,
+        color = ThreadColors.ForegroundSoft,
+        style = MaterialTheme.typography.bodyLarge,
+        maxLines = 3,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+@Composable
+private fun ComposerPromptAttachmentSegment(segment: ComposerPromptSegmentState.Attachment) {
+    Row(
+        modifier = Modifier
+            .semantics {
+                contentDescription = "Prompt attachment ${segment.attachment.label}"
+            }
+            .clip(RoundedCornerShape(9.dp))
+            .background(
+                when (segment.attachment.kind) {
+                    ComposerAttachmentActionKind.Photo -> ThreadColors.Info.copy(alpha = 0.16f)
+                    ComposerAttachmentActionKind.File -> ThreadColors.SurfaceStrong
+                },
+            )
+            .border(
+                1.dp,
+                when (segment.attachment.kind) {
+                    ComposerAttachmentActionKind.Photo -> ThreadColors.Info.copy(alpha = 0.36f)
+                    ComposerAttachmentActionKind.File -> ThreadColors.BorderStrong
+                },
+                RoundedCornerShape(9.dp),
+            )
+            .padding(horizontal = 7.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        AttachmentTileGlyph(
+            icon = when (segment.attachment.kind) {
+                ComposerAttachmentActionKind.Photo -> AttachmentTileIcon.Photo
+                ComposerAttachmentActionKind.File -> AttachmentTileIcon.File
+            },
+            color = ThreadColors.Info,
+        )
+        Text(
+            text = segment.attachment.label,
+            color = ThreadColors.ForegroundSoft,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
