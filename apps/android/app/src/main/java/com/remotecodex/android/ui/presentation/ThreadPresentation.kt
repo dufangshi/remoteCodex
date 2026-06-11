@@ -29,6 +29,12 @@ data class FileChangeSummarySegment(
     val tone: FileChangeSummaryTone,
 )
 
+data class InlinePreviewSummary(
+    val firstLine: String,
+    val showGap: Boolean,
+    val isTruncated: Boolean,
+)
+
 fun threadStatusLabel(status: ThreadStatus): String {
     return when (status) {
         ThreadStatus.Running -> "Running"
@@ -242,4 +248,19 @@ fun formatTrailingPathLabel(label: String, maxLength: Int = 42): String {
 
     val tailLength = (safeMaxLength - suffix.length - 3).coerceAtLeast(1)
     return "..." + base.takeLast(tailLength) + suffix
+}
+
+fun summarizeInlinePreviewText(text: String): InlinePreviewSummary {
+    val lines = text.replace("\r\n", "\n").split('\n').toMutableList()
+    while (lines.size > 1 && lines.last().trim().isEmpty()) {
+        lines.removeAt(lines.lastIndex)
+    }
+
+    val firstLine = lines.firstOrNull().orEmpty()
+    val truncated = lines.size > 1
+    return InlinePreviewSummary(
+        firstLine = firstLine,
+        showGap = truncated,
+        isTruncated = truncated,
+    )
 }

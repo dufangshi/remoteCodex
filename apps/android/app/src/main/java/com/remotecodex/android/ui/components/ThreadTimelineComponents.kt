@@ -71,6 +71,7 @@ import com.remotecodex.android.ui.presentation.formatTrailingPathLabel
 import com.remotecodex.android.ui.presentation.graphChatMessageStatusModel
 import com.remotecodex.android.ui.presentation.parseUserMessageSegments
 import com.remotecodex.android.ui.presentation.planStepStatusLabel
+import com.remotecodex.android.ui.presentation.summarizeInlinePreviewText
 import com.remotecodex.android.ui.presentation.threadStatusLabel
 import com.remotecodex.android.ui.presentation.toolResultStatusLabel
 import com.remotecodex.android.ui.presentation.toolStatusLabel
@@ -947,13 +948,7 @@ private fun HistoryGroupRow(
                 }
             }
         }
-        Text(
-            text = historyGroupRowSummary(item),
-            color = ThreadColors.ForegroundMuted,
-            style = MaterialTheme.typography.labelMedium,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
+        HistoryGroupRowSummary(item = item)
         if (item.kind == HistoryItemKind.FileChange) {
             FileChangeDeltaRow(item = item)
         }
@@ -1115,6 +1110,34 @@ private fun historyItemCopyText(item: HistoryItemPreview): String {
             appendLine(it)
         }
     }.trim()
+}
+
+@Composable
+private fun HistoryGroupRowSummary(item: HistoryItemPreview) {
+    val summary = summarizeInlinePreviewText(historyGroupRowSummary(item))
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = summary.firstLine,
+            modifier = Modifier.weight(1f),
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (summary.showGap) {
+            Text(
+                text = "...",
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+            )
+        }
+    }
 }
 
 private fun historyItemSummary(item: HistoryItemPreview): String {

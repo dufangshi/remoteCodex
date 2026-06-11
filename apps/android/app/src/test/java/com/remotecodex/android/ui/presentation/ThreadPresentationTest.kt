@@ -145,4 +145,40 @@ class ThreadPresentationTest {
             ),
         )
     }
+
+    @Test
+    fun summarizesSingleLineInlinePreviewText() {
+        assertEquals(
+            InlinePreviewSummary(
+                firstLine = "./gradlew :app:assembleDebug",
+                showGap = false,
+                isTruncated = false,
+            ),
+            summarizeInlinePreviewText("./gradlew :app:assembleDebug"),
+        )
+    }
+
+    @Test
+    fun summarizesMultilineInlinePreviewTextWithGap() {
+        assertEquals(
+            InlinePreviewSummary(
+                firstLine = "BUILD SUCCESSFUL in 17s",
+                showGap = true,
+                isTruncated = true,
+            ),
+            summarizeInlinePreviewText("BUILD SUCCESSFUL in 17s\n35 actionable tasks: 35 executed\n"),
+        )
+    }
+
+    @Test
+    fun preservesCarriageReturnInlinePreviewText() {
+        assertEquals(
+            InlinePreviewSummary(
+                firstLine = "first",
+                showGap = true,
+                isTruncated = true,
+            ),
+            summarizeInlinePreviewText("first\r\nsecond"),
+        )
+    }
 }
