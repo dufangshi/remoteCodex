@@ -715,11 +715,18 @@ data class ThreadRoomPreview(
     val active: Boolean = false,
 )
 
+enum class PendingRequestKindPreview {
+    Approval,
+    RequestUserInput,
+    PlanDecision,
+}
+
 data class PendingRequestPreview(
     val title: String,
     val description: String,
     val command: String,
     val riskLabel: String,
+    val kind: PendingRequestKindPreview = PendingRequestKindPreview.Approval,
     val questions: List<PendingRequestQuestionPreview> = emptyList(),
 )
 

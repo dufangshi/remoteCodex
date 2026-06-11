@@ -52,6 +52,7 @@ import com.remotecodex.android.ui.model.MessagePreview
 import com.remotecodex.android.ui.model.PendingRequestOptionPreview
 import com.remotecodex.android.ui.model.PendingRequestQuestionPreview
 import com.remotecodex.android.ui.model.PendingRequestPreview
+import com.remotecodex.android.ui.model.PendingRequestKindPreview
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -721,8 +722,9 @@ class ThreadPresentationTest {
     fun buildsPendingRequestCardState() {
         assertEquals(
             PendingRequestCardState(
-                title = "Answer Required",
+                title = "Permission required",
                 description = "Run the build from the Android workspace.",
+                showDescription = true,
                 riskLabel = "Permission required",
                 commandLabel = "Requested action",
                 command = "./gradlew :app:assembleDebug",
@@ -749,13 +751,15 @@ class ThreadPresentationTest {
                         otherLabel = "Not from above",
                     ),
                 ),
+                planDecisionMode = false,
+                showFooterActions = true,
                 denyLabel = "Deny",
                 approveLabel = "Approve",
                 submitLabel = "Submit",
-                approveAccessibilityLabel = "Approve Answer Required",
-                submitAccessibilityLabel = "Submit Answer Required",
-                denyAccessibilityLabel = "Deny Answer Required",
-                disabledSubmitAccessibilityLabel = "Answer each question before submitting Answer Required",
+                approveAccessibilityLabel = "Approve Permission required",
+                submitAccessibilityLabel = "Submit Permission required",
+                denyAccessibilityLabel = "Deny Permission required",
+                disabledSubmitAccessibilityLabel = "Answer each question before submitting Permission required",
             ),
             buildPendingRequestCardState(
                 PendingRequestPreview(
@@ -792,10 +796,13 @@ class ThreadPresentationTest {
             PendingRequestCardState(
                 title = "Permission required",
                 description = "Run shell command",
+                showDescription = true,
                 riskLabel = "Manual approval",
                 commandLabel = "Requested action",
                 command = "pnpm test",
                 questions = emptyList(),
+                planDecisionMode = false,
+                showFooterActions = true,
                 denyLabel = "Deny",
                 approveLabel = "Approve",
                 submitLabel = "Submit",
@@ -813,6 +820,58 @@ class ThreadPresentationTest {
                 ),
             ),
         )
+    }
+
+    @Test
+    fun mapsPendingRequestUserInputTitle() {
+        val state = buildPendingRequestCardState(
+            PendingRequestPreview(
+                title = "Custom title",
+                description = "Need a choice before continuing.",
+                command = "",
+                riskLabel = "",
+                kind = PendingRequestKindPreview.RequestUserInput,
+            ),
+        )
+
+        assertEquals("Answer Required", state.title)
+        assertEquals(true, state.showDescription)
+        assertEquals(false, state.planDecisionMode)
+        assertEquals(true, state.showFooterActions)
+        assertEquals("Submit Answer Required", state.submitAccessibilityLabel)
+    }
+
+    @Test
+    fun mapsPendingPlanDecisionPresentation() {
+        val state = buildPendingRequestCardState(
+            PendingRequestPreview(
+                title = "Choose next step",
+                description = "This plan description is represented by the choices.",
+                command = "",
+                riskLabel = "",
+                kind = PendingRequestKindPreview.PlanDecision,
+                questions = listOf(
+                    PendingRequestQuestionPreview(
+                        header = "Decision",
+                        question = "How should Codex proceed?",
+                        options = listOf(
+                            PendingRequestOptionPreview(
+                                label = "Implement (recommended)",
+                                description = "Start changing files.",
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals("Plan", state.title)
+        assertEquals("This plan description is represented by the choices.", state.description)
+        assertEquals(false, state.showDescription)
+        assertEquals(true, state.planDecisionMode)
+        assertEquals(false, state.showFooterActions)
+        assertEquals("Implement", state.questions.single().options.single().displayLabel)
+        assertEquals(true, state.questions.single().options.single().recommended)
     }
 
     @Test

@@ -5,6 +5,7 @@ import com.remotecodex.android.ui.model.MessageAuthor
 import com.remotecodex.android.ui.model.MessagePreview
 import com.remotecodex.android.ui.model.LivePlanPreview
 import com.remotecodex.android.ui.model.PendingRequestPreview
+import com.remotecodex.android.ui.model.PendingRequestKindPreview
 import com.remotecodex.android.ui.model.PlanStepStatus
 import com.remotecodex.android.ui.model.PendingRequestOptionPreview
 import com.remotecodex.android.ui.model.ReasoningPreview
@@ -198,10 +199,13 @@ data class GraphChatImageHistoryState(
 data class PendingRequestCardState(
     val title: String,
     val description: String,
+    val showDescription: Boolean,
     val riskLabel: String,
     val commandLabel: String,
     val command: String,
     val questions: List<PendingRequestQuestionState>,
+    val planDecisionMode: Boolean,
+    val showFooterActions: Boolean,
     val denyLabel: String,
     val approveLabel: String,
     val submitLabel: String,
@@ -3500,7 +3504,13 @@ fun buildGraphChatImageHistoryState(
 }
 
 fun buildPendingRequestCardState(request: PendingRequestPreview): PendingRequestCardState {
-    val title = request.title.trim().ifEmpty { "Answer Required" }
+    val trimmedTitle = request.title.trim()
+    val planDecisionMode = request.kind == PendingRequestKindPreview.PlanDecision
+    val title = when (request.kind) {
+        PendingRequestKindPreview.PlanDecision -> "Plan"
+        PendingRequestKindPreview.RequestUserInput -> "Answer Required"
+        PendingRequestKindPreview.Approval -> trimmedTitle.ifEmpty { "Permission required" }
+    }
     val description = request.description.trim()
     val riskLabel = request.riskLabel.trim().ifEmpty { "Permission required" }
     val command = request.command.trim()
@@ -3525,10 +3535,13 @@ fun buildPendingRequestCardState(request: PendingRequestPreview): PendingRequest
     return PendingRequestCardState(
         title = title,
         description = description,
+        showDescription = description.isNotEmpty() && !planDecisionMode,
         riskLabel = riskLabel,
         commandLabel = "Requested action",
         command = command,
         questions = questions,
+        planDecisionMode = planDecisionMode,
+        showFooterActions = !planDecisionMode,
         denyLabel = "Deny",
         approveLabel = "Approve",
         submitLabel = "Submit",

@@ -96,7 +96,7 @@ fun PendingRequestCard(
                 style = MaterialTheme.typography.labelSmall,
             )
         }
-        if (state.description.isNotEmpty()) {
+        if (state.showDescription) {
             Text(
                 text = state.description,
                 color = ThreadColors.ForegroundSoft,
@@ -139,6 +139,7 @@ fun PendingRequestCard(
                             setOf(otherLabel)
                         }
                     },
+                    planDecisionMode = state.planDecisionMode,
                 )
             }
             PendingRequestCommandBlock(
@@ -152,47 +153,49 @@ fun PendingRequestCard(
                 command = state.command,
             )
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
-        ) {
-            Text(
-                text = state.denyLabel,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(999.dp))
-                    .semantics { contentDescription = state.denyAccessibilityLabel }
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                color = ThreadColors.ForegroundSoft,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = primaryActionLabel,
-                modifier = Modifier
-                    .padding(start = 8.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(if (primaryActionEnabled) ThreadColors.Primary else ThreadColors.SurfaceStrong)
-                    .border(
-                        1.dp,
-                        if (primaryActionEnabled) ThreadColors.Primary else ThreadColors.Border,
-                        RoundedCornerShape(999.dp),
-                    )
-                    .semantics {
-                        contentDescription = if (primaryActionEnabled) {
-                            primaryActionAccessibilityLabel
-                        } else {
-                            state.disabledSubmitAccessibilityLabel
+        if (state.showFooterActions) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                Text(
+                    text = state.denyLabel,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(999.dp))
+                        .semantics { contentDescription = state.denyAccessibilityLabel }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    color = ThreadColors.ForegroundSoft,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = primaryActionLabel,
+                    modifier = Modifier
+                        .padding(start = 8.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(if (primaryActionEnabled) ThreadColors.Primary else ThreadColors.SurfaceStrong)
+                        .border(
+                            1.dp,
+                            if (primaryActionEnabled) ThreadColors.Primary else ThreadColors.Border,
+                            RoundedCornerShape(999.dp),
+                        )
+                        .semantics {
+                            contentDescription = if (primaryActionEnabled) {
+                                primaryActionAccessibilityLabel
+                            } else {
+                                state.disabledSubmitAccessibilityLabel
+                            }
+                            if (!primaryActionEnabled) {
+                                disabled()
+                            }
                         }
-                        if (!primaryActionEnabled) {
-                            disabled()
-                        }
-                    }
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                color = if (primaryActionEnabled) ThreadColors.PrimaryForeground else ThreadColors.ForegroundMuted,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    color = if (primaryActionEnabled) ThreadColors.PrimaryForeground else ThreadColors.ForegroundMuted,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
         }
     }
 }
@@ -241,6 +244,7 @@ private fun PendingRequestQuestionSection(
     onCustomAnswerChange: (String) -> Unit,
     onToggleOption: (PendingRequestOptionState) -> Unit,
     onToggleOther: () -> Unit,
+    planDecisionMode: Boolean,
 ) {
     val otherLabel = question.otherLabel
     val showOtherInput = otherLabel != null && otherLabel in selectedLabels
@@ -276,8 +280,9 @@ private fun PendingRequestQuestionSection(
                 question.options.forEachIndexed { index, option ->
                     PendingRequestOptionChip(
                         option = option,
-                        highlighted = index == 0 || option.recommended,
+                        highlighted = if (planDecisionMode) index == 0 else index == 0 || option.recommended,
                         selected = option.rawLabel in selectedLabels,
+                        planDecisionMode = planDecisionMode,
                         onClick = { onToggleOption(option) },
                     )
                 }
@@ -311,20 +316,24 @@ private fun PendingRequestOptionChip(
     option: PendingRequestOptionState,
     highlighted: Boolean,
     selected: Boolean,
+    planDecisionMode: Boolean,
     onClick: () -> Unit,
 ) {
     val background = when {
         selected -> ThreadColors.WarningSoft
+        planDecisionMode && highlighted -> ThreadColors.InfoSoft
         highlighted -> ThreadColors.InfoSoft
         else -> ThreadColors.SurfaceStrong
     }
     val border = when {
         selected -> ThreadColors.Warning.copy(alpha = 0.48f)
+        planDecisionMode && highlighted -> ThreadColors.Info.copy(alpha = 0.48f)
         highlighted -> ThreadColors.Info.copy(alpha = 0.34f)
         else -> ThreadColors.Border
     }
     val foreground = when {
         selected -> ThreadColors.Warning
+        planDecisionMode && highlighted -> ThreadColors.Info
         highlighted -> ThreadColors.Info
         else -> ThreadColors.ForegroundSoft
     }
