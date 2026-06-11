@@ -979,6 +979,7 @@ private fun HistoryItemCard(
     onOpenDetail: (DetailPreview) -> Unit,
 ) {
     val colors = historyItemColors(item.kind)
+    val running = item.status == ToolStatus.Running
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1026,6 +1027,34 @@ private fun HistoryItemCard(
             maxLines = 3,
             overflow = TextOverflow.Ellipsis,
         )
+        if (running) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(ThreadColors.WarningSoft.copy(alpha = 0.72f))
+                    .border(1.dp, ThreadColors.Warning.copy(alpha = 0.34f), RoundedCornerShape(7.dp))
+                    .padding(horizontal = 9.dp, vertical = 7.dp),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(7.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(ThreadColors.Warning),
+                )
+                Text(
+                    text = "Running from thread events",
+                    modifier = Modifier.weight(1f),
+                    color = ThreadColors.Warning,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
         if (item.kind == HistoryItemKind.FileChange) {
             FileChangeDeltaRow(item = item)
         }
