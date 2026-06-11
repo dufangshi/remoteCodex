@@ -67,6 +67,7 @@ import com.remotecodex.android.ui.presentation.ComposerAttachmentActionKind
 import com.remotecodex.android.ui.sample.ThreadPreviewSample
 import com.remotecodex.android.ui.theme.ThreadColors
 import com.remotecodex.android.thread.ThreadProjectionState
+import com.remotecodex.android.thread.reconcileWithDetail
 import com.remotecodex.android.thread.reduceThreadEvent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -179,8 +180,13 @@ fun ThreadDetailScreen(
         loading = false
         result
             .onSuccess { bundle ->
-                threadProjectionState = ThreadProjectionState(detail = bundle.dto)
-                detail = bundle.preview
+                val reconciledState = threadProjectionState?.reconcileWithDetail(bundle.dto)
+                    ?: ThreadProjectionState(detail = bundle.dto)
+                threadProjectionState = reconciledState
+                detail = mergeThreadEventPreview(
+                    current = bundle.preview,
+                    next = buildThreadDetailPreviewFromSupervisor(reconciledState.detail),
+                )
                 selectedWorkspaceFilePath = bundle.preview.workspacePreview.selectedFile.path.takeIf { it.isNotBlank() }
                     ?: selectedWorkspaceFilePath
             }
@@ -754,11 +760,12 @@ fun ThreadDetailScreen(
         result
             .onSuccess { page ->
                 val merged = mergeEarlierThreadDetail(currentState.detail, page)
-                threadProjectionState = ThreadProjectionState(detail = merged)
+                val reconciledState = currentState.reconcileWithDetail(merged)
+                threadProjectionState = reconciledState
                 detail = detail?.let { currentPreview ->
                     mergeThreadEventPreview(
                         current = currentPreview,
-                        next = buildThreadDetailPreviewFromSupervisor(merged),
+                        next = buildThreadDetailPreviewFromSupervisor(reconciledState.detail),
                     )
                 } ?: buildThreadDetailPreviewFromSupervisor(merged)
             }
@@ -786,6 +793,8 @@ fun ThreadDetailScreen(
         pendingRequestResponse = null
         result
             .onSuccess { dto ->
+                threadProjectionState = threadProjectionState?.reconcileWithDetail(dto)
+                    ?: ThreadProjectionState(detail = dto)
                 detail = buildThreadDetailPreviewFromSupervisor(dto)
             }
             .onFailure { throwable -> error = throwable.message ?: "Request response failed." }

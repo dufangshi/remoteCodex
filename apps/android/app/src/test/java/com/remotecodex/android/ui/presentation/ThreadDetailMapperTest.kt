@@ -110,6 +110,8 @@ class ThreadDetailMapperTest {
                         title = "Pick a branch",
                         description = "Choose where to continue.",
                         createdAt = "2026-06-11T18:59:30Z",
+                        turnId = "turn-1",
+                        itemId = "item-3",
                         questions = listOf(
                             SupervisorThreadActionQuestion(
                                 id = "question-1",
@@ -133,6 +135,7 @@ class ThreadDetailMapperTest {
                         title = "Branch selected",
                         summaryLines = listOf("main"),
                         createdAt = "2026-06-11T18:59:40Z",
+                        turnId = "turn-1",
                     ),
                 ),
                 liveItemCount = 2,
@@ -224,9 +227,12 @@ class ThreadDetailMapperTest {
         assertTrue(preview.timelineAuxiliary.canLoadEarlier)
         assertEquals("Goal", preview.timelineAuxiliary.activityNotes.single().title)
         assertEquals("Pick a branch", preview.pendingRequests.single().title)
+        assertEquals("turn-1", preview.pendingRequests.single().turnId)
+        assertEquals("item-3", preview.pendingRequests.single().itemId)
         assertEquals("question-1", preview.pendingRequests.single().questions.single().id)
         assertEquals("main", preview.pendingRequests.single().questions.single().options.single().label)
         assertEquals("Branch selected", preview.timelineAuxiliary.answeredRequestNotes.single().title)
+        assertEquals("turn-1", preview.timelineAuxiliary.answeredRequestNotes.single().turnId)
         assertEquals("Ship Android client", preview.composer.goalPanel.currentGoal?.objective)
         assertEquals("Message Android API...", preview.composer.prompt.placeholder)
         assertEquals("high", preview.composer.reasoningEffort)

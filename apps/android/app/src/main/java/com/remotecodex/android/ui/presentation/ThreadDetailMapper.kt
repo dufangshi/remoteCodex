@@ -128,6 +128,9 @@ fun buildThreadDetailPreviewFromSupervisor(
                     summaryLines = note.summaryLines,
                     timeLabel = shortTimeLabel(note.createdAt),
                     sortKey = note.createdAt,
+                    turnId = note.turnId,
+                    itemId = note.itemId,
+                    sourceRequestId = note.id,
                 )
             },
         ),
@@ -376,6 +379,8 @@ private fun SupervisorThreadActionRequest.toPendingRequestPreview(): PendingRequ
             else -> PendingRequestKindPreview.Approval
         },
         sortKey = createdAt,
+        turnId = turnId,
+        itemId = itemId,
         questions = questions.map { question -> question.toPendingRequestQuestionPreview() },
     )
 }

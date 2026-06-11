@@ -1,6 +1,7 @@
 package com.remotecodex.android.thread
 
 import com.remotecodex.android.api.SupervisorThreadActionRequest
+import com.remotecodex.android.api.SupervisorThreadAnsweredRequestNote
 import com.remotecodex.android.api.SupervisorThreadDetail
 import com.remotecodex.android.api.SupervisorThreadEvent
 import com.remotecodex.android.api.SupervisorThreadSummary
@@ -59,6 +60,8 @@ class ThreadEventReducerTest {
                         "kind": "requestUserInput",
                         "title": "Choose",
                         "description": "Pick one",
+                        "turnId": "turn-1",
+                        "itemId": "item-0",
                         "createdAt": "2026-06-11T12:00:11.000Z",
                         "questions": [
                           {
@@ -81,6 +84,8 @@ class ThreadEventReducerTest {
         assertFalse(created.needsRefresh)
         assertEquals(1, created.detail.pendingRequests.size)
         assertEquals("request-1", created.detail.pendingRequests.single().id)
+        assertEquals("turn-1", created.detail.pendingRequests.single().turnId)
+        assertEquals("item-0", created.detail.pendingRequests.single().itemId)
         assertEquals("Which mode?", created.detail.pendingRequests.single().questions.single().question)
 
         val resolved = reduceThreadEvent(
@@ -93,6 +98,56 @@ class ThreadEventReducerTest {
 
         assertTrue(resolved.needsRefresh)
         assertEquals(0, resolved.detail.pendingRequests.size)
+        assertEquals(1, resolved.detail.answeredRequestNotes.size)
+        assertEquals("request-1", resolved.detail.answeredRequestNotes.single().id)
+        assertEquals("turn-1", resolved.detail.answeredRequestNotes.single().turnId)
+        assertEquals("item-0", resolved.detail.answeredRequestNotes.single().itemId)
+        assertEquals(listOf("Resolved"), resolved.detail.answeredRequestNotes.single().summaryLines)
+    }
+
+    @Test
+    fun reconciledRefreshKeepsProvisionalAnsweredNoteUntilServerNoteArrives() {
+        val request = SupervisorThreadActionRequest(
+            id = "request-1",
+            kind = "requestUserInput",
+            title = "Choose",
+            description = null,
+            createdAt = "2026-06-11T12:00:11.000Z",
+            questions = emptyList(),
+            turnId = "turn-1",
+            itemId = "item-0",
+        )
+        val resolved = reduceThreadEvent(
+            detail = baseDetail(pendingRequests = listOf(request)),
+            event = event(
+                type = "thread.request.resolved",
+                payload = """{"requestId":"request-1"}""",
+            ),
+        )
+
+        val refreshWithoutNote = resolved.state.reconcileWithDetail(
+            baseDetail(pendingRequests = emptyList(), answeredRequestNotes = emptyList()),
+        )
+        assertEquals(1, refreshWithoutNote.detail.answeredRequestNotes.size)
+        assertEquals("request-1", refreshWithoutNote.detail.answeredRequestNotes.single().id)
+
+        val refreshWithServerNote = refreshWithoutNote.reconcileWithDetail(
+            baseDetail(
+                pendingRequests = emptyList(),
+                answeredRequestNotes = listOf(
+                    SupervisorThreadAnsweredRequestNote(
+                        id = "request-1",
+                        title = "Choose",
+                        summaryLines = listOf("Mode: Implement"),
+                        createdAt = "2026-06-11T12:00:12.000Z",
+                        turnId = "turn-1",
+                    ),
+                ),
+            ),
+        )
+        assertEquals(1, refreshWithServerNote.detail.answeredRequestNotes.size)
+        assertEquals(listOf("Mode: Implement"), refreshWithServerNote.detail.answeredRequestNotes.single().summaryLines)
+        assertTrue(refreshWithServerNote.provisionalAnsweredRequestNotes.isEmpty())
     }
 
     @Test
@@ -301,6 +356,7 @@ class ThreadEventReducerTest {
             ),
         ),
         pendingRequests: List<SupervisorThreadActionRequest> = emptyList(),
+        answeredRequestNotes: List<SupervisorThreadAnsweredRequestNote> = emptyList(),
     ): SupervisorThreadDetail {
         return SupervisorThreadDetail(
             thread = SupervisorThreadSummary(
@@ -327,7 +383,7 @@ class ThreadEventReducerTest {
             turnCount = turns.size,
             totalTurnCount = turns.size,
             pendingRequests = pendingRequests,
-            answeredRequestNotes = emptyList(),
+            answeredRequestNotes = answeredRequestNotes,
             liveItemCount = 0,
             goalStatus = null,
             goalObjective = null,

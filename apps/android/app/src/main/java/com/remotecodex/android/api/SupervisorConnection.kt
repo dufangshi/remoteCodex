@@ -357,6 +357,8 @@ data class SupervisorThreadActionRequest(
     val description: String?,
     val createdAt: String,
     val questions: List<SupervisorThreadActionQuestion>,
+    val turnId: String? = null,
+    val itemId: String? = null,
 )
 
 data class SupervisorThreadAnsweredRequestNote(
@@ -364,6 +366,8 @@ data class SupervisorThreadAnsweredRequestNote(
     val title: String,
     val summaryLines: List<String>,
     val createdAt: String,
+    val turnId: String? = null,
+    val itemId: String? = null,
 )
 
 data class SupervisorThreadDetail(

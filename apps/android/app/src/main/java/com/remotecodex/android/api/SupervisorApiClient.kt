@@ -1117,6 +1117,8 @@ internal fun JSONObject.toThreadActionRequest(): SupervisorThreadActionRequest {
         questions = List(questionsJson.length()) { index ->
             questionsJson.getJSONObject(index).toThreadActionQuestion()
         },
+        turnId = optNullableString("turnId"),
+        itemId = optNullableString("itemId"),
     )
 }
 
@@ -1148,6 +1150,8 @@ internal fun JSONObject.toAnsweredRequestNote(): SupervisorThreadAnsweredRequest
         title = optString("title"),
         summaryLines = List(linesJson.length()) { index -> linesJson.optString(index) },
         createdAt = optString("createdAt"),
+        turnId = optNullableString("turnId"),
+        itemId = optNullableString("itemId"),
     )
 }
 

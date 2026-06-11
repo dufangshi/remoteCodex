@@ -1,6 +1,7 @@
 package com.remotecodex.android.thread
 
 import com.remotecodex.android.api.SupervisorThreadActionRequest
+import com.remotecodex.android.api.SupervisorThreadAnsweredRequestNote
 import com.remotecodex.android.api.SupervisorThreadDetail
 import com.remotecodex.android.api.SupervisorThreadEvent
 import com.remotecodex.android.api.SupervisorThreadTurn
@@ -13,6 +14,7 @@ import org.json.JSONObject
 data class ThreadProjectionState(
     val detail: SupervisorThreadDetail,
     val seenOutputDeltaKeys: Set<String> = emptySet(),
+    val provisionalAnsweredRequestNotes: Map<String, SupervisorThreadAnsweredRequestNote> = emptyMap(),
 )
 
 data class ThreadEventReduceResult(
@@ -56,7 +58,7 @@ fun reduceThreadEvent(
         "thread.item.completed",
         -> reduceThreadItem(state, event.payload)
         "thread.request.created" -> reduceRequestCreated(state, event.payload)
-        "thread.request.resolved" -> reduceRequestResolved(state, event.payload)
+        "thread.request.resolved" -> reduceRequestResolved(state, event)
         "thread.output.delta" -> reduceOutputDelta(state, event.payload)
         "thread.context.updated",
         "thread.plan.updated",
@@ -234,15 +236,37 @@ private fun reduceRequestCreated(
 
 private fun reduceRequestResolved(
     state: ThreadProjectionState,
-    payload: JSONObject,
+    event: SupervisorThreadEvent,
 ): ThreadEventReduceResult {
     val detail = state.detail
+    val payload = event.payload
     val requestId = payload.optString("requestId").takeIf { it.isNotBlank() }
         ?: return ThreadEventReduceResult(state = state, needsRefresh = true)
+    val request = detail.pendingRequests.firstOrNull { it.id == requestId }
+    val answeredNote = request?.toResolvedAnsweredNote(
+        requestId = requestId,
+        timestamp = payload.optNullableString("createdAt")
+            ?: payload.optNullableString("resolvedAt")
+            ?: event.timestamp,
+        summaryLines = payload.optJSONArray("summaryLines")?.toStringList(),
+    )
+    val nextDetail = detail.copy(
+        pendingRequests = detail.pendingRequests.filterNot { it.id == requestId },
+        answeredRequestNotes = if (answeredNote == null) {
+            detail.answeredRequestNotes
+        } else {
+            upsertAnsweredRequestNote(detail.answeredRequestNotes, answeredNote)
+        },
+    )
     return ThreadEventReduceResult(
-        state = state.withDetail(detail.copy(
-            pendingRequests = detail.pendingRequests.filterNot { it.id == requestId },
-        )),
+        state = state.copy(
+            detail = nextDetail,
+            provisionalAnsweredRequestNotes = if (answeredNote == null) {
+                state.provisionalAnsweredRequestNotes
+            } else {
+                state.provisionalAnsweredRequestNotes + (requestId to answeredNote)
+            },
+        ),
         needsRefresh = true,
     )
 }
@@ -351,7 +375,64 @@ private fun upsertRequest(
     return if (replaced) next else next + request
 }
 
-private fun ThreadProjectionState.withDetail(detail: SupervisorThreadDetail): ThreadProjectionState {
+private fun upsertAnsweredRequestNote(
+    notes: List<SupervisorThreadAnsweredRequestNote>,
+    note: SupervisorThreadAnsweredRequestNote,
+): List<SupervisorThreadAnsweredRequestNote> {
+    var replaced = false
+    val next = notes.map { existing ->
+        if (existing.id == note.id) {
+            replaced = true
+            note
+        } else {
+            existing
+        }
+    }
+    return if (replaced) next else next + note
+}
+
+private fun SupervisorThreadActionRequest.toResolvedAnsweredNote(
+    requestId: String,
+    timestamp: String?,
+    summaryLines: List<String>?,
+): SupervisorThreadAnsweredRequestNote {
+    return SupervisorThreadAnsweredRequestNote(
+        id = requestId,
+        title = title.ifBlank { "Request resolved" },
+        summaryLines = summaryLines
+            ?.map { line -> line.trim() }
+            ?.filter { line -> line.isNotEmpty() }
+            ?.takeIf { it.isNotEmpty() }
+            ?: listOf("Resolved"),
+        createdAt = timestamp ?: createdAt,
+        turnId = turnId,
+        itemId = itemId,
+    )
+}
+
+private fun org.json.JSONArray.toStringList(): List<String> {
+    return List(length()) { index -> optString(index) }
+}
+
+fun ThreadProjectionState.reconcileWithDetail(detail: SupervisorThreadDetail): ThreadProjectionState {
+    return withDetail(detail, provisionalAnsweredRequestNotes = provisionalAnsweredRequestNotes)
+}
+
+private fun ThreadProjectionState.withDetail(
+    detail: SupervisorThreadDetail,
+    provisionalAnsweredRequestNotes: Map<String, SupervisorThreadAnsweredRequestNote> = this.provisionalAnsweredRequestNotes,
+): ThreadProjectionState {
+    val serverAnsweredIds = detail.answeredRequestNotes.map { note -> note.id }.toSet()
+    val retainedProvisionalNotes = provisionalAnsweredRequestNotes.filterKeys { requestId ->
+        requestId !in serverAnsweredIds
+    }
+    val reconciledDetail = if (retainedProvisionalNotes.isEmpty()) {
+        detail
+    } else {
+        detail.copy(
+            answeredRequestNotes = detail.answeredRequestNotes + retainedProvisionalNotes.values,
+        )
+    }
     val liveIds = detail.turns
         .asSequence()
         .flatMap { turn -> turn.items.asSequence().map { item -> "${turn.id}:${item.id}:" } }
@@ -360,8 +441,9 @@ private fun ThreadProjectionState.withDetail(detail: SupervisorThreadDetail): Th
         liveIds.any { prefix -> key.startsWith(prefix) }
     }.toSet()
     return copy(
-        detail = detail,
+        detail = reconciledDetail,
         seenOutputDeltaKeys = retainedDeltaKeys,
+        provisionalAnsweredRequestNotes = retainedProvisionalNotes,
     )
 }
 
