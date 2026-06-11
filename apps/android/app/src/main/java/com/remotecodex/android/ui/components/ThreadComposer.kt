@@ -173,6 +173,7 @@ fun ThreadComposer(
     var compactBusyPreview by remember(composer.compactBusy) { mutableStateOf(composer.compactBusy) }
     var compactPreviewStatus by remember { mutableStateOf<String?>(null) }
     var shellToolPreviewStatus by remember { mutableStateOf<String?>(null) }
+    var attachmentPreviewStatus by remember { mutableStateOf<String?>(null) }
     val selectedContext = composer.context.copy(model = selectedModel)
     val queuedAttachmentCount = draftPrompt.attachments.size
     val statusChips = buildComposerStatusStrip(
@@ -311,6 +312,16 @@ fun ThreadComposer(
             ComposerActiveView.Chat -> ComposerActiveView.Shell
             ComposerActiveView.Shell -> ComposerActiveView.Chat
         }
+    }
+    val removeAttachmentPreview = { attachment: ComposerPromptAttachmentState ->
+        draftPrompt = draftPrompt.copy(
+            text = draftPrompt.text
+                .replace(attachment.placeholder, " ")
+                .replace(Regex("\\s+"), " ")
+                .trim(),
+            attachments = draftPrompt.attachments.filterNot { it.clientId == attachment.clientId },
+        )
+        attachmentPreviewStatus = "Removed attachment: ${attachment.label}"
     }
     Column(
         modifier = modifier
@@ -470,6 +481,7 @@ fun ThreadComposer(
                         )
                         openMenu = null
                     },
+                    onRemoveAttachment = removeAttachmentPreview,
                 )
                 ComposerMenu.Model -> ModelPickerPanel(
                     settingsState = settingsState,
@@ -517,6 +529,9 @@ fun ThreadComposer(
         shellToolPreviewStatus?.let { status ->
             ComposerPreviewFeedback(message = status)
         }
+        attachmentPreviewStatus?.let { status ->
+            ComposerPreviewFeedback(message = status)
+        }
         ComposerToolbarRow(
             toolbarState = toolbarState,
             settingsToolbarState = settingsToolbarState,
@@ -545,6 +560,7 @@ fun ThreadComposer(
             promptSlotState = promptSlotState,
             shellPromptInputState = shellPromptInputState,
             goalPanelState = goalPanelState,
+            onRemoveAttachment = removeAttachmentPreview,
             onCancelGoal = {
                 goalComposeMode = false
                 goalLocalError = null
@@ -827,6 +843,7 @@ private fun ComposerFrameSlotsPreview(
     promptSlotState: ComposerPromptSlotState,
     shellPromptInputState: ComposerShellPromptInputState?,
     goalPanelState: ComposerGoalPanelState,
+    onRemoveAttachment: (ComposerPromptAttachmentState) -> Unit,
     onCancelGoal: () -> Unit,
     onSubmitGoal: () -> Unit,
     submitReady: Boolean,
@@ -840,6 +857,7 @@ private fun ComposerFrameSlotsPreview(
                 contextState = contextState,
                 promptSlotState = promptSlotState,
                 submitReady = submitReady,
+                onRemoveAttachment = onRemoveAttachment,
             )
         }
         if (frameState.showGoalSlot) {
@@ -1018,6 +1036,7 @@ private fun ComposerInputGroupPreview(
     contextState: ComposerContextUsageState,
     promptSlotState: ComposerPromptSlotState,
     submitReady: Boolean,
+    onRemoveAttachment: (ComposerPromptAttachmentState) -> Unit,
 ) {
     GraphInputGroup(
         blockStart = {
@@ -1028,7 +1047,10 @@ private fun ComposerInputGroupPreview(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     promptSlotState.attachmentChips.forEach { attachment ->
-                        AttachmentChip(attachment = attachment)
+                        AttachmentChip(
+                            attachment = attachment,
+                            onRemove = { onRemoveAttachment(attachment) },
+                        )
                     }
                 }
             }
@@ -1283,6 +1305,8 @@ private fun ContextProgressPreview(contextState: ComposerContextUsageState) {
 private fun AttachmentChip(
     icon: AttachmentTileIcon,
     name: String,
+    removeLabel: String? = null,
+    onRemove: (() -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier
@@ -1296,22 +1320,43 @@ private fun AttachmentChip(
         AttachmentTileGlyph(icon = icon, color = ThreadColors.Info)
         Text(
             text = name,
+            modifier = if (onRemove == null) Modifier else Modifier.weight(1f, fill = false),
             color = ThreadColors.ForegroundSoft,
             style = MaterialTheme.typography.labelSmall,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+        if (onRemove != null && removeLabel != null) {
+            Text(
+                text = "x",
+                modifier = Modifier
+                    .semantics { contentDescription = removeLabel }
+                    .clip(CircleShape)
+                    .background(ThreadColors.Surface)
+                    .border(1.dp, ThreadColors.Border, CircleShape)
+                    .clickable(onClick = onRemove)
+                    .padding(horizontal = 6.dp, vertical = 1.dp),
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+            )
+        }
     }
 }
 
 @Composable
-private fun AttachmentChip(attachment: ComposerPromptAttachmentState) {
+private fun AttachmentChip(
+    attachment: ComposerPromptAttachmentState,
+    onRemove: (() -> Unit)? = null,
+) {
     AttachmentChip(
         icon = when (attachment.kind) {
             ComposerAttachmentActionKind.Photo -> AttachmentTileIcon.Photo
             ComposerAttachmentActionKind.File -> AttachmentTileIcon.File
         },
         name = attachment.label,
+        removeLabel = "Remove attachment ${attachment.label}",
+        onRemove = onRemove,
     )
 }
 
@@ -1372,6 +1417,7 @@ private fun ValueSliderPreview(
 private fun AttachmentPreviewStrip(
     attachments: List<ComposerPromptAttachmentState>,
     emptyMessage: String?,
+    onRemoveAttachment: (ComposerPromptAttachmentState) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -1403,7 +1449,10 @@ private fun AttachmentPreviewStrip(
                 verticalArrangement = Arrangement.spacedBy(7.dp),
             ) {
                 attachments.forEach { attachment ->
-                    AttachmentChip(attachment = attachment)
+                    AttachmentChip(
+                        attachment = attachment,
+                        onRemove = { onRemoveAttachment(attachment) },
+                    )
                 }
             }
         }
@@ -2976,6 +3025,7 @@ private fun HookStatusRow(
 private fun AttachmentPanel(
     panelState: ComposerAttachmentPanelState,
     onPickAttachment: (ComposerAttachmentActionKind) -> Unit,
+    onRemoveAttachment: (ComposerPromptAttachmentState) -> Unit,
 ) {
     ComposerMenuSurface(
         title = panelState.triggerLabel,
@@ -2993,6 +3043,7 @@ private fun AttachmentPanel(
         AttachmentPreviewStrip(
             attachments = panelState.queuedAttachments,
             emptyMessage = panelState.emptyMessage,
+            onRemoveAttachment = onRemoveAttachment,
         )
     }
 }
@@ -3299,6 +3350,7 @@ private fun AttachmentButton(
     }
     Row(
         modifier = modifier
+            .semantics { contentDescription = action.label }
             .clip(RoundedCornerShape(12.dp))
             .background(ThreadColors.Surface)
             .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))

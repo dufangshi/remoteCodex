@@ -321,6 +321,27 @@ class ThreadComposerStateTest {
     }
 
     @Test
+    fun attachmentChipRemovalUpdatesDraftPreviewState() {
+        setComposerContent(
+            composer = ComposerPreview(
+                prompt = ComposerPromptPreview(text = "", attachments = emptyList()),
+            ),
+        )
+
+        composeRule.onNodeWithText("No files").assertExists()
+        composeRule.onNodeWithContentDescription("Add attachment").performClick()
+        composeRule.onNodeWithContentDescription("File").performClick()
+
+        composeRule.onNodeWithText("1 file").assertExists()
+        composeRule.onAllNodesWithText("android-client-notes.txt").assertCountEquals(2)
+        composeRule.onNodeWithContentDescription("Remove attachment android-client-notes.txt").performClick()
+
+        composeRule.onNodeWithText("Removed attachment: android-client-notes.txt").assertExists()
+        composeRule.onNodeWithText("No files").assertExists()
+        composeRule.onAllNodesWithText("android-client-notes.txt").assertCountEquals(0)
+    }
+
+    @Test
     fun shellToolsPanelActionsShowPreviewFeedback() {
         setComposerContent(
             composer = ComposerPreview(

@@ -415,6 +415,8 @@ data class ComposerContextUsageState(
 data class ComposerPromptAttachmentState(
     val label: String,
     val kind: ComposerAttachmentActionKind,
+    val clientId: String = "",
+    val placeholder: String = "",
 )
 
 enum class ComposerPromptAttachmentTokenTone {
@@ -2814,6 +2816,8 @@ private fun buildComposerPromptAttachmentState(
             com.remotecodex.android.ui.model.ComposerAttachmentKindPreview.Photo -> ComposerAttachmentActionKind.Photo
             com.remotecodex.android.ui.model.ComposerAttachmentKindPreview.File -> ComposerAttachmentActionKind.File
         },
+        clientId = attachment.clientId,
+        placeholder = attachment.placeholder,
     )
 }
 

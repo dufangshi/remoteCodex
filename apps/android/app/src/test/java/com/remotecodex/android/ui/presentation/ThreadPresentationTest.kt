@@ -1668,10 +1668,14 @@ class ThreadPresentationTest {
                     ComposerPromptAttachmentState(
                         label = "capture.png",
                         kind = ComposerAttachmentActionKind.Photo,
+                        clientId = "photo",
+                        placeholder = "[PHOTO capture.png]",
                     ),
                     ComposerPromptAttachmentState(
                         label = "notes.md",
                         kind = ComposerAttachmentActionKind.File,
+                        clientId = "file",
+                        placeholder = "[FILE notes.md]",
                     ),
                 ),
                 queuedCountLabel = "2 queued attachments",
@@ -2134,6 +2138,8 @@ class ThreadPresentationTest {
                     ComposerPromptAttachmentState(
                         label = "active.txt",
                         kind = ComposerAttachmentActionKind.File,
+                        clientId = "active",
+                        placeholder = "[FILE active.txt]",
                     ),
                 ),
                 inputModeLabel = "Prompt",
@@ -2147,6 +2153,8 @@ class ThreadPresentationTest {
                         attachment = ComposerPromptAttachmentState(
                             label = "active.txt",
                             kind = ComposerAttachmentActionKind.File,
+                            clientId = "active",
+                            placeholder = "[FILE active.txt]",
                         ),
                         clientId = "active",
                         placeholder = "[FILE active.txt]",
@@ -2214,6 +2222,8 @@ class ThreadPresentationTest {
                     attachment = ComposerPromptAttachmentState(
                         label = "a-long.txt",
                         kind = ComposerAttachmentActionKind.File,
+                        clientId = "long",
+                        placeholder = "[FILE a long]",
                     ),
                     clientId = "long",
                     placeholder = "[FILE a long]",
@@ -2229,6 +2239,8 @@ class ThreadPresentationTest {
                     attachment = ComposerPromptAttachmentState(
                         label = "a.txt",
                         kind = ComposerAttachmentActionKind.File,
+                        clientId = "short",
+                        placeholder = "[FILE a]",
                     ),
                     clientId = "short",
                     placeholder = "[FILE a]",
@@ -2271,6 +2283,8 @@ class ThreadPresentationTest {
                     attachment = ComposerPromptAttachmentState(
                         label = "image.png",
                         kind = ComposerAttachmentActionKind.Photo,
+                        clientId = "drop-1",
+                        placeholder = "[PHOTO image.png]",
                     ),
                     clientId = "drop-1",
                     placeholder = "[PHOTO image.png]",
@@ -2288,6 +2302,8 @@ class ThreadPresentationTest {
                     attachment = ComposerPromptAttachmentState(
                         label = "notes.txt",
                         kind = ComposerAttachmentActionKind.File,
+                        clientId = "drop-2",
+                        placeholder = "[FILE notes.txt]",
                     ),
                     clientId = "drop-2",
                     placeholder = "[FILE notes.txt]",
@@ -2347,10 +2363,14 @@ class ThreadPresentationTest {
                     ComposerPromptAttachmentState(
                         label = "capture.png",
                         kind = ComposerAttachmentActionKind.Photo,
+                        clientId = "photo",
+                        placeholder = "[PHOTO capture.png]",
                     ),
                     ComposerPromptAttachmentState(
                         label = "report.md",
                         kind = ComposerAttachmentActionKind.File,
+                        clientId = "file",
+                        placeholder = "[FILE report.md]",
                     ),
                 ),
                 inputModeLabel = "Prompt",
