@@ -364,6 +364,22 @@ class ThreadComposerStateTest {
     }
 
     @Test
+    fun chatPromptMiniStopButtonShowsPreviewInterruptState() {
+        setComposerContent(
+            composer = ComposerPreview(
+                activeView = ComposerActiveView.Chat,
+                busy = true,
+                canInterrupt = true,
+                prompt = ComposerPromptPreview(text = "Still streaming", attachments = emptyList()),
+            ),
+        )
+
+        composeRule.onAllNodesWithContentDescription("Stop Current Turn")[0].performClick()
+
+        composeRule.onNodeWithText("Stop current turn preview").assertExists()
+    }
+
+    @Test
     fun viewToggleSwitchesBetweenChatAndShellPreviewSurfaces() {
         setComposerContent(composer = ComposerPreview(activeView = ComposerActiveView.Chat))
 

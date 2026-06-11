@@ -343,6 +343,9 @@ fun ThreadComposer(
             ComposerActiveView.Shell -> ComposerActiveView.Chat
         }
     }
+    val stopCurrentTurnPreview = {
+        promptPreviewStatus = "Stop current turn preview"
+    }
     val removeAttachmentPreview = { attachment: ComposerPromptAttachmentState ->
         draftPrompt = draftPrompt.copy(
             text = draftPrompt.text
@@ -618,6 +621,7 @@ fun ThreadComposer(
             onShellDraftChange = { value ->
                 shellDraft = value
             },
+            onPromptInterrupt = stopCurrentTurnPreview,
             onShellInterrupt = {
                 if (shellPromptInputState?.interruptEnabled == true) {
                     shellPromptPreviewStatus = "Sent Ctrl-C preview"
@@ -700,12 +704,12 @@ fun ThreadComposer(
                 actionState = actionState,
                 sendButtonState = sendButtonState,
                 onInterrupt = {
-                    promptPreviewStatus = "Stop current turn preview"
+                    stopCurrentTurnPreview()
                 },
                 onPrimaryAction = {
                     when (sendButtonState.primaryKind) {
                         ComposerPrimaryActionKind.Stop -> {
-                            promptPreviewStatus = "Stop current turn preview"
+                            stopCurrentTurnPreview()
                         }
                         ComposerPrimaryActionKind.Connecting -> Unit
                         ComposerPrimaryActionKind.Send -> {
@@ -960,6 +964,7 @@ private fun ComposerFrameSlotsPreview(
     onRemoveAttachment: (ComposerPromptAttachmentState) -> Unit,
     onPromptChange: (String) -> Unit,
     onShellDraftChange: (String) -> Unit,
+    onPromptInterrupt: () -> Unit,
     onShellInterrupt: () -> Unit,
     onShellSend: () -> Unit,
     onCancelGoal: () -> Unit,
@@ -978,6 +983,7 @@ private fun ComposerFrameSlotsPreview(
                 submitReady = submitReady,
                 onRemoveAttachment = onRemoveAttachment,
                 onPromptChange = onPromptChange,
+                onInterrupt = onPromptInterrupt,
             )
         }
         if (frameState.showGoalSlot) {
@@ -1212,6 +1218,7 @@ private fun ComposerInputGroupPreview(
     submitReady: Boolean,
     onRemoveAttachment: (ComposerPromptAttachmentState) -> Unit,
     onPromptChange: (String) -> Unit,
+    onInterrupt: () -> Unit,
 ) {
     GraphInputGroup(
         blockStart = {
@@ -1234,6 +1241,7 @@ private fun ComposerInputGroupPreview(
             ComposerPromptControl(
                 state = promptSlotState,
                 onValueChange = onPromptChange,
+                onInterrupt = onInterrupt,
             )
             ContextProgressPreview(contextState = contextState)
         },
@@ -1256,6 +1264,7 @@ private fun ComposerInputGroupPreview(
 private fun ComposerPromptControl(
     state: ComposerPromptSlotState,
     onValueChange: (String) -> Unit,
+    onInterrupt: () -> Unit,
 ) {
     val foreground = if (state.disabled) ThreadColors.ForegroundMuted else ThreadColors.ForegroundSoft
     Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -1322,7 +1331,10 @@ private fun ComposerPromptControl(
                 )
             }
             if (state.canInterrupt) {
-                ComposerMiniStopButton(label = state.interruptLabel)
+                ComposerMiniStopButton(
+                    label = state.interruptLabel,
+                    onClick = onInterrupt,
+                )
             }
         }
         if (state.shellVisible) {
@@ -1483,10 +1495,18 @@ private fun Modifier.promptAttachmentTokenSemantics(
 }
 
 @Composable
-private fun ComposerMiniStopButton(label: String) {
+private fun ComposerMiniStopButton(
+    label: String,
+    onClick: () -> Unit,
+) {
     Row(
         modifier = Modifier
+            .semantics {
+                contentDescription = label
+                role = Role.Button
+            }
             .clip(RoundedCornerShape(999.dp))
+            .clickable(onClick = onClick)
             .background(ThreadColors.DangerSoft.copy(alpha = 0.58f))
             .border(1.dp, ThreadColors.Danger.copy(alpha = 0.42f), RoundedCornerShape(999.dp))
             .padding(horizontal = 8.dp, vertical = 5.dp),
