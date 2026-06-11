@@ -138,6 +138,11 @@ data class ComposerPromptAttachmentState(
     val kind: ComposerAttachmentActionKind,
 )
 
+enum class ComposerPromptAttachmentTokenTone {
+    Photo,
+    File,
+}
+
 sealed interface ComposerPromptSegmentState {
     data class Text(
         val key: String,
@@ -149,6 +154,10 @@ sealed interface ComposerPromptSegmentState {
         val attachment: ComposerPromptAttachmentState,
         val clientId: String,
         val placeholder: String,
+        val tone: ComposerPromptAttachmentTokenTone,
+        val newlyInserted: Boolean = false,
+        val restoresCaretAfterInsert: Boolean = false,
+        val stateDescription: String,
     ) : ComposerPromptSegmentState
 }
 
@@ -2366,11 +2375,14 @@ private fun activePromptAttachments(
 fun tokenizeComposerPrompt(
     promptText: String,
     attachments: List<ComposerPromptAttachmentPreview>,
+    pendingInsertedAttachmentClientIds: List<String> = emptyList(),
 ): List<ComposerPromptSegmentState> {
     if (promptText.isEmpty()) {
         return emptyList()
     }
 
+    val pendingIds = pendingInsertedAttachmentClientIds.toSet()
+    val lastPendingId = pendingInsertedAttachmentClientIds.lastOrNull()
     val placeholders = attachments
         .filter { attachment -> attachment.placeholder.isNotEmpty() }
         .sortedByDescending { attachment -> attachment.placeholder.length }
@@ -2383,11 +2395,21 @@ fun tokenizeComposerPrompt(
             promptText.startsWith(attachment.placeholder, cursor)
         }
         if (matchingAttachment != null) {
+            val attachmentState = buildComposerPromptAttachmentState(matchingAttachment)
+            val newlyInserted = pendingIds.contains(matchingAttachment.clientId)
             segments += ComposerPromptSegmentState.Attachment(
                 key = "${matchingAttachment.clientId}-$cursor",
-                attachment = buildComposerPromptAttachmentState(matchingAttachment),
+                attachment = attachmentState,
                 clientId = matchingAttachment.clientId,
                 placeholder = matchingAttachment.placeholder,
+                tone = attachmentState.kind.toPromptAttachmentTokenTone(),
+                newlyInserted = newlyInserted,
+                restoresCaretAfterInsert = matchingAttachment.clientId == lastPendingId,
+                stateDescription = buildComposerPromptAttachmentSegmentStateDescription(
+                    attachmentState = attachmentState,
+                    newlyInserted = newlyInserted,
+                    restoresCaretAfterInsert = matchingAttachment.clientId == lastPendingId,
+                ),
             )
             cursor += matchingAttachment.placeholder.length
             continue
@@ -2413,6 +2435,27 @@ fun tokenizeComposerPrompt(
     }
 
     return segments
+}
+
+private fun ComposerAttachmentActionKind.toPromptAttachmentTokenTone(): ComposerPromptAttachmentTokenTone {
+    return when (this) {
+        ComposerAttachmentActionKind.Photo -> ComposerPromptAttachmentTokenTone.Photo
+        ComposerAttachmentActionKind.File -> ComposerPromptAttachmentTokenTone.File
+    }
+}
+
+private fun buildComposerPromptAttachmentSegmentStateDescription(
+    attachmentState: ComposerPromptAttachmentState,
+    newlyInserted: Boolean,
+    restoresCaretAfterInsert: Boolean,
+): String {
+    val type = when (attachmentState.kind) {
+        ComposerAttachmentActionKind.Photo -> "Photo"
+        ComposerAttachmentActionKind.File -> "File"
+    }
+    val inserted = if (newlyInserted) ", newly inserted" else ""
+    val caret = if (restoresCaretAfterInsert) ", caret resumes after this attachment" else ""
+    return "$type attachment ${attachmentState.label}$inserted$caret"
 }
 
 private fun buildComposerPromptAttachmentState(

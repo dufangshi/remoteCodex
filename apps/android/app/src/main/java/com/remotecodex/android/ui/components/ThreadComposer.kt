@@ -64,6 +64,7 @@ import com.remotecodex.android.ui.presentation.ComposerMcpStatusTone
 import com.remotecodex.android.ui.presentation.ComposerMenuLifecycleState
 import com.remotecodex.android.ui.presentation.ComposerPrimaryActionKind
 import com.remotecodex.android.ui.presentation.ComposerPromptAttachmentState
+import com.remotecodex.android.ui.presentation.ComposerPromptAttachmentTokenTone
 import com.remotecodex.android.ui.presentation.ComposerPromptSegmentState
 import com.remotecodex.android.ui.presentation.ComposerShellPromptInputState
 import com.remotecodex.android.ui.presentation.ComposerPromptSlotState
@@ -798,20 +799,29 @@ private fun ComposerPromptAttachmentSegment(segment: ComposerPromptSegmentState.
     Row(
         modifier = Modifier
             .semantics {
-                contentDescription = "Prompt attachment ${segment.attachment.label}"
+                contentDescription = segment.stateDescription
+                stateDescription = if (segment.restoresCaretAfterInsert) {
+                    "Caret resumes after this attachment"
+                } else if (segment.newlyInserted) {
+                    "Newly inserted attachment"
+                } else {
+                    "Prompt attachment"
+                }
             }
             .clip(RoundedCornerShape(9.dp))
             .background(
-                when (segment.attachment.kind) {
-                    ComposerAttachmentActionKind.Photo -> ThreadColors.Info.copy(alpha = 0.16f)
-                    ComposerAttachmentActionKind.File -> ThreadColors.SurfaceStrong
+                when {
+                    segment.newlyInserted -> ThreadColors.Primary.copy(alpha = 0.14f)
+                    segment.tone == ComposerPromptAttachmentTokenTone.Photo -> ThreadColors.Info.copy(alpha = 0.16f)
+                    else -> ThreadColors.SurfaceStrong
                 },
             )
             .border(
                 1.dp,
-                when (segment.attachment.kind) {
-                    ComposerAttachmentActionKind.Photo -> ThreadColors.Info.copy(alpha = 0.36f)
-                    ComposerAttachmentActionKind.File -> ThreadColors.BorderStrong
+                when {
+                    segment.restoresCaretAfterInsert -> ThreadColors.Primary.copy(alpha = 0.58f)
+                    segment.tone == ComposerPromptAttachmentTokenTone.Photo -> ThreadColors.Info.copy(alpha = 0.36f)
+                    else -> ThreadColors.BorderStrong
                 },
                 RoundedCornerShape(9.dp),
             )
@@ -820,11 +830,11 @@ private fun ComposerPromptAttachmentSegment(segment: ComposerPromptSegmentState.
         horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         AttachmentTileGlyph(
-            icon = when (segment.attachment.kind) {
-                ComposerAttachmentActionKind.Photo -> AttachmentTileIcon.Photo
-                ComposerAttachmentActionKind.File -> AttachmentTileIcon.File
+            icon = when (segment.tone) {
+                ComposerPromptAttachmentTokenTone.Photo -> AttachmentTileIcon.Photo
+                ComposerPromptAttachmentTokenTone.File -> AttachmentTileIcon.File
             },
-            color = ThreadColors.Info,
+            color = if (segment.newlyInserted) ThreadColors.Primary else ThreadColors.Info,
         )
         Text(
             text = segment.attachment.label,

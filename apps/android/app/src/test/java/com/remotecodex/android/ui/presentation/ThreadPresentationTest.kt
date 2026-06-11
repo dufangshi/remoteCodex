@@ -1223,6 +1223,8 @@ class ThreadPresentationTest {
                         ),
                         clientId = "active",
                         placeholder = "[FILE active.txt]",
+                        tone = ComposerPromptAttachmentTokenTone.File,
+                        stateDescription = "File attachment active.txt",
                     ),
                 ),
             ),
@@ -1288,6 +1290,8 @@ class ThreadPresentationTest {
                     ),
                     clientId = "long",
                     placeholder = "[FILE a long]",
+                    tone = ComposerPromptAttachmentTokenTone.File,
+                    stateDescription = "File attachment a-long.txt",
                 ),
                 ComposerPromptSegmentState.Text(
                     key = "text-1",
@@ -1301,12 +1305,76 @@ class ThreadPresentationTest {
                     ),
                     clientId = "short",
                     placeholder = "[FILE a]",
+                    tone = ComposerPromptAttachmentTokenTone.File,
+                    stateDescription = "File attachment a.txt",
                 ),
             ),
             tokenizeComposerPrompt(
                 promptText = "see [FILE a long] then [FILE a]",
                 attachments = listOf(shortAttachment, longAttachment),
             ),
+        )
+    }
+
+    @Test
+    fun tokenizesComposerPromptWithInsertedAttachmentFocusMetadata() {
+        val segments = tokenizeComposerPrompt(
+            promptText = "[PHOTO image.png] [FILE notes.txt] ",
+            attachments = listOf(
+                ComposerPromptAttachmentPreview(
+                    clientId = "drop-1",
+                    kind = ComposerAttachmentKindPreview.Photo,
+                    name = "image.png",
+                    placeholder = "[PHOTO image.png]",
+                ),
+                ComposerPromptAttachmentPreview(
+                    clientId = "drop-2",
+                    kind = ComposerAttachmentKindPreview.File,
+                    name = "notes.txt",
+                    placeholder = "[FILE notes.txt]",
+                ),
+            ),
+            pendingInsertedAttachmentClientIds = listOf("drop-1", "drop-2"),
+        )
+
+        assertEquals(
+            listOf(
+                ComposerPromptSegmentState.Attachment(
+                    key = "drop-1-0",
+                    attachment = ComposerPromptAttachmentState(
+                        label = "image.png",
+                        kind = ComposerAttachmentActionKind.Photo,
+                    ),
+                    clientId = "drop-1",
+                    placeholder = "[PHOTO image.png]",
+                    tone = ComposerPromptAttachmentTokenTone.Photo,
+                    newlyInserted = true,
+                    restoresCaretAfterInsert = false,
+                    stateDescription = "Photo attachment image.png, newly inserted",
+                ),
+                ComposerPromptSegmentState.Text(
+                    key = "text-0",
+                    text = " ",
+                ),
+                ComposerPromptSegmentState.Attachment(
+                    key = "drop-2-18",
+                    attachment = ComposerPromptAttachmentState(
+                        label = "notes.txt",
+                        kind = ComposerAttachmentActionKind.File,
+                    ),
+                    clientId = "drop-2",
+                    placeholder = "[FILE notes.txt]",
+                    tone = ComposerPromptAttachmentTokenTone.File,
+                    newlyInserted = true,
+                    restoresCaretAfterInsert = true,
+                    stateDescription = "File attachment notes.txt, newly inserted, caret resumes after this attachment",
+                ),
+                ComposerPromptSegmentState.Text(
+                    key = "text-1",
+                    text = " ",
+                ),
+            ),
+            segments,
         )
     }
 
