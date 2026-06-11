@@ -87,8 +87,6 @@ import com.remotecodex.android.ui.presentation.GraphChatHistoryGroupFrameState
 import com.remotecodex.android.ui.presentation.GraphChatMessageFrameState
 import com.remotecodex.android.ui.presentation.GraphChatHistoryStatusState
 import com.remotecodex.android.ui.presentation.GraphChatHistoryStatusTone
-import com.remotecodex.android.ui.presentation.MessageStatusModel
-import com.remotecodex.android.ui.presentation.MessageStatusTone
 import com.remotecodex.android.ui.presentation.ComposerStatusTone
 import com.remotecodex.android.ui.presentation.AuxiliaryUserNoteCardState
 import com.remotecodex.android.ui.presentation.GraphChatPlainTextSegment
@@ -412,9 +410,7 @@ private fun AuxiliaryUserNoteCard(state: AuxiliaryUserNoteCardState) {
         isUser = true,
         senderLabel = null,
         headerStatus = null,
-        footerStatus = state.statusLabel
-            .takeIf { it.isNotEmpty() }
-            ?.let { label -> MessageStatusModel(label, MessageStatusTone.Neutral) },
+        footerStatus = state.footerStatus,
         showReasoningBeforeContent = false,
         showFooterMetadata = state.statusLabel.isNotEmpty() || state.timeLabel != null,
         showCopyAction = false,

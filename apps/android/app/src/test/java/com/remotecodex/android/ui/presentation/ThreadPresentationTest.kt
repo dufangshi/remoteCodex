@@ -5234,6 +5234,7 @@ class ThreadPresentationTest {
         assertEquals(
             AuxiliaryUserNoteCardState(
                 statusLabel = "Accepted",
+                footerStatus = MessageStatusModel("Accepted", MessageStatusTone.Success),
                 text = "Continue Android parity.",
                 timeLabel = "13:43",
                 tone = PendingSteerToneState.QueuedUserMessage,
@@ -5249,10 +5250,25 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun buildsSteeringPendingSteerCardStateWithRunningStatusTone() {
+        assertEquals(
+            MessageStatusModel("Steering", MessageStatusTone.Running),
+            buildPendingSteerCardState(
+                TimelineSteerPreview(
+                    prompt = "Continue while streaming.",
+                    statusLabel = "Steering",
+                    timeLabel = "13:44",
+                ),
+            ).footerStatus,
+        )
+    }
+
+    @Test
     fun buildsFallbackPendingSteerCardState() {
         assertEquals(
             AuxiliaryUserNoteCardState(
                 statusLabel = "Queued",
+                footerStatus = MessageStatusModel("Queued", MessageStatusTone.Neutral),
                 text = "Wait for approval.",
                 timeLabel = null,
                 tone = PendingSteerToneState.Warning,
@@ -5272,6 +5288,7 @@ class ThreadPresentationTest {
         assertEquals(
             AuxiliaryUserNoteCardState(
                 statusLabel = "",
+                footerStatus = null,
                 text = "Keep going component by component.",
                 timeLabel = null,
                 tone = PendingSteerToneState.QueuedUserMessage,

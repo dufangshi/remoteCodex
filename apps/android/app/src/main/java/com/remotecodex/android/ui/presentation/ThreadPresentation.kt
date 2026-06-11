@@ -226,6 +226,7 @@ enum class PendingSteerToneState {
 
 data class AuxiliaryUserNoteCardState(
     val statusLabel: String,
+    val footerStatus: MessageStatusModel?,
     val text: String,
     val timeLabel: String?,
     val tone: PendingSteerToneState,
@@ -3509,6 +3510,7 @@ fun buildPendingSteerCardState(steer: TimelineSteerPreview): AuxiliaryUserNoteCa
     val statusLabel = steer.statusLabel?.trim()?.takeIf { it.isNotEmpty() } ?: "Queued"
     return AuxiliaryUserNoteCardState(
         statusLabel = statusLabel,
+        footerStatus = graphChatMessageStatusModel(statusLabel),
         text = steer.prompt.trim(),
         timeLabel = steer.timeLabel.trim().takeIf { it.isNotEmpty() },
         tone = if (isGraphChatQueuedLikeUserStatus(statusLabel)) {
@@ -3522,6 +3524,7 @@ fun buildPendingSteerCardState(steer: TimelineSteerPreview): AuxiliaryUserNoteCa
 fun buildEphemeralUserNoteCardState(text: String): AuxiliaryUserNoteCardState {
     return AuxiliaryUserNoteCardState(
         statusLabel = "",
+        footerStatus = null,
         text = text.trim(),
         timeLabel = null,
         tone = PendingSteerToneState.QueuedUserMessage,
