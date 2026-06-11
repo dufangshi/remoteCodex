@@ -56,6 +56,8 @@ import com.remotecodex.android.ui.model.ComposerMcpAuthStatusPreview
 import com.remotecodex.android.ui.model.ComposerMcpServerPreview
 import com.remotecodex.android.ui.model.ComposerMcpToolPreview
 import com.remotecodex.android.ui.model.ComposerPromptPreview
+import com.remotecodex.android.ui.model.ThreadGoalPreview
+import com.remotecodex.android.ui.model.ThreadGoalStatusPreview
 import com.remotecodex.android.ui.presentation.ComposerActionState
 import com.remotecodex.android.ui.presentation.ComposerAttachmentActionKind
 import com.remotecodex.android.ui.presentation.ComposerAttachmentActionState
@@ -160,6 +162,9 @@ fun ThreadComposer(
     var goalComposeMode by remember(composer.goalComposeMode, composer.goalPanel.composeMode) {
         mutableStateOf(composer.goalComposeMode || composer.goalPanel.composeMode)
     }
+    var goalLocalError by remember(composer.goalPanel.localError) { mutableStateOf(composer.goalPanel.localError) }
+    var goalPreviewStatus by remember { mutableStateOf<String?>(null) }
+    var currentGoalPreview by remember(composer.goalPanel.currentGoal) { mutableStateOf(composer.goalPanel.currentGoal) }
     val selectedContext = composer.context.copy(model = selectedModel)
     val queuedAttachmentCount = draftPrompt.attachments.size
     val statusChips = buildComposerStatusStrip(
@@ -263,6 +268,8 @@ fun ThreadComposer(
     val goalPanelState = buildComposerGoalPanelState(
         composer.goalPanel.copy(
             composeMode = goalComposeMode,
+            localError = goalLocalError,
+            currentGoal = currentGoalPreview,
             fastMode = composer.fastMode || composer.goalPanel.fastMode,
         ),
     )
@@ -397,10 +404,13 @@ fun ThreadComposer(
                             }
                             ComposerToolboxActionDecisionKind.ExitGoalCompose -> {
                                 goalComposeMode = false
+                                goalLocalError = null
                                 openMenu = null
                             }
                             ComposerToolboxActionDecisionKind.EnterGoalCompose -> {
                                 goalComposeMode = true
+                                goalLocalError = null
+                                goalPreviewStatus = null
                                 slashPanelView = ComposerSlashPanelViewState.Root
                                 openMenu = null
                             }
@@ -463,6 +473,9 @@ fun ThreadComposer(
         forkPreviewStatus?.let { status ->
             ComposerPreviewFeedback(message = status)
         }
+        goalPreviewStatus?.let { status ->
+            ComposerPreviewFeedback(message = status)
+        }
         ComposerToolbarRow(
             toolbarState = toolbarState,
             settingsToolbarState = settingsToolbarState,
@@ -490,7 +503,31 @@ fun ThreadComposer(
             promptSlotState = promptSlotState,
             shellPromptInputState = shellPromptInputState,
             goalPanelState = goalPanelState,
-            onCancelGoal = { goalComposeMode = false },
+            onCancelGoal = {
+                goalComposeMode = false
+                goalLocalError = null
+            },
+            onSubmitGoal = {
+                val objective = draftPrompt.text.trim()
+                if (objective.isBlank()) {
+                    goalLocalError = "Goal objective cannot be empty."
+                    goalPreviewStatus = null
+                } else if (!composer.goalPanel.updateAvailable) {
+                    goalLocalError = "/goal is unavailable in this view."
+                    goalPreviewStatus = null
+                } else {
+                    goalLocalError = null
+                    goalComposeMode = false
+                    goalPreviewStatus = "Goal preview set: $objective"
+                    currentGoalPreview = ThreadGoalPreview(
+                        objective = objective,
+                        status = ThreadGoalStatusPreview.Active,
+                        tokenBudget = composer.goalPanel.tokenBudget,
+                        tokensUsed = 0,
+                    )
+                    draftPrompt = draftPrompt.copy(text = "", attachments = emptyList())
+                }
+            },
             submitReady = submitInputState != null,
         )
         ComposerStatusStrip(chips = statusChips)
@@ -745,6 +782,7 @@ private fun ComposerFrameSlotsPreview(
     shellPromptInputState: ComposerShellPromptInputState?,
     goalPanelState: ComposerGoalPanelState,
     onCancelGoal: () -> Unit,
+    onSubmitGoal: () -> Unit,
     submitReady: Boolean,
 ) {
     Column(
@@ -762,6 +800,7 @@ private fun ComposerFrameSlotsPreview(
             GoalComposePreviewCard(
                 state = goalPanelState.composeCard,
                 onCancelGoal = onCancelGoal,
+                onSubmitGoal = onSubmitGoal,
             )
         }
         if (frameState.showShellPromptSlot && shellPromptInputState != null) {
@@ -1762,6 +1801,7 @@ private fun GoalPreviewGroup(goalPanelState: ComposerGoalPanelState) {
 private fun GoalComposePreviewCard(
     state: ComposerGoalComposeCardState,
     onCancelGoal: (() -> Unit)? = null,
+    onSubmitGoal: (() -> Unit)? = null,
 ) {
     if (!state.visible) {
         return
@@ -1819,10 +1859,19 @@ private fun GoalComposePreviewCard(
             } else {
                 GraphBadge(label = state.cancelLabel, variant = GraphBadgeVariant.Outline)
             }
-            GraphBadge(
-                label = state.primaryLabel,
-                variant = if (state.primaryEnabled) GraphBadgeVariant.Default else GraphBadgeVariant.Outline,
-            )
+            if (onSubmitGoal != null && state.primaryEnabled) {
+                GoalComposeActionBadge(
+                    label = state.primaryLabel,
+                    onClick = onSubmitGoal,
+                    contentDescription = "Submit goal",
+                    primary = true,
+                )
+            } else if (onSubmitGoal == null || !state.primaryEnabled) {
+                GraphBadge(
+                    label = state.primaryLabel,
+                    variant = if (state.primaryEnabled) GraphBadgeVariant.Default else GraphBadgeVariant.Outline,
+                )
+            }
         }
     }
 }
@@ -1831,17 +1880,23 @@ private fun GoalComposePreviewCard(
 private fun GoalComposeActionBadge(
     label: String,
     onClick: () -> Unit,
+    contentDescription: String = label,
+    primary: Boolean = false,
 ) {
     Text(
         text = label,
         modifier = Modifier
-            .semantics { contentDescription = label }
+            .semantics { this.contentDescription = contentDescription }
             .clip(RoundedCornerShape(999.dp))
-            .background(ThreadColors.SurfaceStrong)
-            .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
+            .background(if (primary) ThreadColors.Primary else ThreadColors.SurfaceStrong)
+            .border(
+                1.dp,
+                if (primary) ThreadColors.Primary else ThreadColors.Border,
+                RoundedCornerShape(999.dp),
+            )
             .clickable(onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 4.dp),
-        color = ThreadColors.ForegroundMuted,
+        color = if (primary) ThreadColors.PrimaryForeground else ThreadColors.ForegroundMuted,
         style = MaterialTheme.typography.labelSmall,
         fontWeight = FontWeight.SemiBold,
         maxLines = 1,

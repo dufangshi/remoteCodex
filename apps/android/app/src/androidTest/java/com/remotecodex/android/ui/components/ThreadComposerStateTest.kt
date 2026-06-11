@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.remotecodex.android.ui.model.ComposerPreview
+import com.remotecodex.android.ui.model.ComposerPromptPreview
 import com.remotecodex.android.ui.theme.RemoteCodexTheme
 import org.junit.Rule
 import org.junit.Test
@@ -265,12 +266,51 @@ class ThreadComposerStateTest {
 
         composeRule.onNodeWithText("Max tokens (k): 12.5").assertExists()
         composeRule.onNodeWithText("Describe the goal the backend should continue working toward.").assertExists()
-        composeRule.onNodeWithContentDescription("Set goal").assertExists()
+        composeRule.onNodeWithText("Set goal").assertExists()
+        composeRule.onNodeWithContentDescription("Submit goal").assertExists()
         composeRule.onNodeWithText("Slash toolbox").assertDoesNotExist()
 
         composeRule.onNodeWithContentDescription("Cancel").performClick()
 
         composeRule.onNodeWithContentDescription("Send Prompt").assertExists()
+        composeRule.onNodeWithText("Max tokens (k): 12.5").assertDoesNotExist()
+    }
+
+    @Test
+    fun goalSubmitRejectsEmptyPreviewObjective() {
+        setComposerContent(
+            composer = ComposerPreview(
+                prompt = ComposerPromptPreview(text = "", attachments = emptyList()),
+            ),
+        )
+
+        composeRule.onNodeWithContentDescription("Open slash toolbox").performClick()
+        composeRule.onNodeWithContentDescription("Goal").performClick()
+
+        composeRule.onNodeWithContentDescription("Submit goal").performClick()
+
+        composeRule.onNodeWithText("Goal objective cannot be empty.").assertExists()
+        composeRule.onNodeWithText("Max tokens (k): 12.5").assertExists()
+    }
+
+    @Test
+    fun goalSubmitSetsPreviewGoalAndClearsDraft() {
+        setComposerContent(
+            composer = ComposerPreview(
+                prompt = ComposerPromptPreview(
+                    text = "Ship the native Android goal lifecycle",
+                ),
+            ),
+        )
+
+        composeRule.onNodeWithContentDescription("Open slash toolbox").performClick()
+        composeRule.onNodeWithContentDescription("Goal").performClick()
+
+        composeRule.onNodeWithContentDescription("Submit goal").performClick()
+
+        composeRule.onNodeWithText("Goal preview set: Ship the native Android goal lifecycle").assertExists()
+        composeRule.onNodeWithText("Ask the backend to inspect, modify, or explain code...").assertExists()
+        composeRule.onNodeWithText("No files").assertExists()
         composeRule.onNodeWithText("Max tokens (k): 12.5").assertDoesNotExist()
     }
 
