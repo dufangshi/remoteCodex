@@ -119,17 +119,17 @@ private fun nonImageInlineSegments(text: String): List<GraphChatInlineSegment> {
 private fun inlineStyleSegments(text: String): List<GraphChatInlineSegment> {
     if (text.isEmpty()) return emptyList()
 
-    val pattern = Regex("(\\\\\\([^\\n]+?\\\\\\)|\\$(?!\\s)[^$\\n]+?(?<!\\s)\\$|`[^`\\n]+`|~~[^~\\n]+~~|\\*\\*[^*\\n]+\\*\\*|__[^_\\n]+__|(?<!\\w)\\*[^*\\n]+\\*(?!\\w)|(?<!\\w)_[^_\\n]+_(?!\\w))")
     val segments = mutableListOf<GraphChatInlineSegment>()
     var cursor = 0
 
-    for (match in pattern.findAll(text)) {
-        val start = match.range.first
+    while (cursor < text.length) {
+        val match = findNextInlineStyleMatch(text, cursor) ?: break
+        val start = match.start
         if (start > cursor) {
             segments += GraphChatInlineSegment.Text(text.substring(cursor, start))
         }
         segments += styledInlineSegment(match.value)
-        cursor = match.range.last + 1
+        cursor = match.endExclusive
     }
 
     if (cursor < text.length) {
@@ -137,6 +137,84 @@ private fun inlineStyleSegments(text: String): List<GraphChatInlineSegment> {
     }
 
     return segments
+}
+
+private data class InlineStyleMatch(
+    val start: Int,
+    val endExclusive: Int,
+    val value: String,
+)
+
+private val inlineStylePatterns = listOf(
+    Regex("\\\\\\([^\\n]+?\\\\\\)"),
+    Regex("\\$(?!\\s)[^$\\n]+?(?<!\\s)\\$"),
+    Regex("~~[^~\\n]+~~"),
+    Regex("\\*\\*[^*\\n]+\\*\\*"),
+    Regex("__[^_\\n]+__"),
+    Regex("(?<!\\w)\\*[^*\\n]+\\*(?!\\w)"),
+    Regex("(?<!\\w)_[^_\\n]+_(?!\\w)"),
+)
+
+private fun findNextInlineStyleMatch(text: String, startIndex: Int): InlineStyleMatch? {
+    val codeMatch = findNextInlineCodeSpan(text, startIndex)
+    val patternMatch = inlineStylePatterns
+        .mapNotNull { pattern -> pattern.find(text, startIndex) }
+        .minByOrNull { it.range.first }
+        ?.let { match ->
+            InlineStyleMatch(
+                start = match.range.first,
+                endExclusive = match.range.last + 1,
+                value = match.value,
+            )
+        }
+
+    return listOfNotNull(codeMatch, patternMatch)
+        .minWithOrNull(compareBy<InlineStyleMatch> { it.start }.thenBy { it.endExclusive })
+}
+
+private fun findNextInlineCodeSpan(text: String, startIndex: Int): InlineStyleMatch? {
+    var index = text.indexOf('`', startIndex)
+    while (index >= 0) {
+        val delimiterLength = countRepeatedCharacter(text, index, '`')
+        val closingIndex = findClosingBacktickDelimiter(
+            text = text,
+            startIndex = index + delimiterLength,
+            delimiterLength = delimiterLength,
+        )
+        if (closingIndex >= 0) {
+            return InlineStyleMatch(
+                start = index,
+                endExclusive = closingIndex + delimiterLength,
+                value = text.substring(index, closingIndex + delimiterLength),
+            )
+        }
+        index = text.indexOf('`', index + delimiterLength)
+    }
+    return null
+}
+
+private fun findClosingBacktickDelimiter(
+    text: String,
+    startIndex: Int,
+    delimiterLength: Int,
+): Int {
+    var index = text.indexOf('`', startIndex)
+    while (index >= 0) {
+        val runLength = countRepeatedCharacter(text, index, '`')
+        if (runLength == delimiterLength) {
+            return index
+        }
+        index = text.indexOf('`', index + runLength)
+    }
+    return -1
+}
+
+private fun countRepeatedCharacter(text: String, startIndex: Int, character: Char): Int {
+    var index = startIndex
+    while (index < text.length && text[index] == character) {
+        index += 1
+    }
+    return index - startIndex
 }
 
 private fun styledInlineSegment(raw: String): GraphChatInlineSegment {
@@ -148,7 +226,8 @@ private fun styledInlineSegment(raw: String): GraphChatInlineSegment {
             GraphChatInlineSegment.Math(raw.substring(1, raw.length - 1))
         }
         raw.startsWith("`") && raw.endsWith("`") -> {
-            GraphChatInlineSegment.Code(raw.substring(1, raw.length - 1))
+            val delimiterLength = countRepeatedCharacter(raw, 0, '`')
+            GraphChatInlineSegment.Code(raw.substring(delimiterLength, raw.length - delimiterLength))
         }
         raw.startsWith("~~") && raw.endsWith("~~") -> {
             GraphChatInlineSegment.Strikethrough(raw.substring(2, raw.length - 2))

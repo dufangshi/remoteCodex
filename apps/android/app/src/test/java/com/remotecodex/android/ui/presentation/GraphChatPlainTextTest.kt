@@ -73,6 +73,22 @@ class GraphChatPlainTextTest {
     }
 
     @Test
+    fun parsesMultiBacktickInlineCodeSpansLikeMarkdown() {
+        val segments = graphChatInlineSegments(
+            "Use ``code with ` backtick`` and leave `unterminated alone.",
+        )
+
+        assertEquals(
+            listOf(
+                GraphChatInlineSegment.Text("Use "),
+                GraphChatInlineSegment.Code("code with ` backtick"),
+                GraphChatInlineSegment.Text(" and leave `unterminated alone."),
+            ),
+            segments,
+        )
+    }
+
+    @Test
     fun parsesMarkdownImagesAsInlineImageSegments() {
         val segments = graphChatInlineSegments("Before ![shell preview](apps/android/output/shell-preview.png) after [docs](https://example.com).")
 
