@@ -223,6 +223,52 @@ class RichMessageBlocksTest {
     }
 
     @Test
+    fun parsesCodeFenceInfoStringsLikeWebMarkdownRenderer() {
+        val blocks = parseRichMessageBlocks(
+            """
+            ```kotlin title=Main.kt
+            val value = 3
+            ```
+
+            ~~~~ json filename=data.json
+            {"ok": true}
+            ~~~~~
+            """.trimIndent(),
+        )
+
+        assertEquals(
+            listOf(
+                RichMessageBlock.Code(language = "kotlin", code = "val value = 3\n"),
+                RichMessageBlock.Code(language = "json", code = "{\"ok\": true}\n"),
+            ),
+            blocks,
+        )
+    }
+
+    @Test
+    fun preservesShorterFenceInsideLongerCodeBlock() {
+        val blocks = parseRichMessageBlocks(
+            """
+            ````markdown
+            ```kotlin
+            val nested = true
+            ```
+            ````
+            """.trimIndent(),
+        )
+
+        assertEquals(
+            listOf(
+                RichMessageBlock.Code(
+                    language = "markdown",
+                    code = "```kotlin\nval nested = true\n```\n",
+                ),
+            ),
+            blocks,
+        )
+    }
+
+    @Test
     fun parsesDisplayMathBlocks() {
         val blocks = parseRichMessageBlocks(
             """

@@ -106,11 +106,11 @@ fun parseRichMessageBlocks(content: String): List<RichMessageBlock> {
             continue
         }
 
-        val fenceMatch = Regex("^(```|~~~)([A-Za-z0-9_-]*)\\s*$").matchEntire(trimmed.trim())
-        if (fenceMatch != null) {
+        val fenceOpening = readCodeFenceOpening(trimmed.trim())
+        if (fenceOpening != null) {
             flushParagraph()
-            codeFenceMarker = fenceMatch.groupValues[1]
-            codeLanguage = fenceMatch.groupValues.getOrNull(2).orEmpty()
+            codeFenceMarker = fenceOpening.marker
+            codeLanguage = fenceOpening.language
             index += 1
             continue
         }
@@ -223,7 +223,27 @@ private fun isClosingCodeFence(trimmed: String, marker: String): Boolean {
     if (marker.isBlank()) {
         return false
     }
-    return trimmed == marker
+    val fenceCharacter = marker.first()
+    if (trimmed.any { it != fenceCharacter }) {
+        return false
+    }
+    return trimmed.length >= marker.length
+}
+
+private data class CodeFenceOpening(
+    val marker: String,
+    val language: String,
+)
+
+private fun readCodeFenceOpening(trimmed: String): CodeFenceOpening? {
+    val match = Regex("^(`{3,}|~{3,})(.*)$").matchEntire(trimmed) ?: return null
+    val marker = match.groupValues[1]
+    val info = match.groupValues.getOrNull(2).orEmpty().trim()
+    val language = info
+        .substringBefore(' ')
+        .takeIf { Regex("[A-Za-z0-9_-]+").matches(it) }
+        .orEmpty()
+    return CodeFenceOpening(marker = marker, language = language)
 }
 
 private data class ListItemReadResult(
