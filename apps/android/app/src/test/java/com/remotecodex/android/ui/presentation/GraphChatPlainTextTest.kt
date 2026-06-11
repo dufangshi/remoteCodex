@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.Locale
 
 class GraphChatPlainTextTest {
     @Test
@@ -96,5 +97,13 @@ class GraphChatPlainTextTest {
         assertEquals("${"a".repeat(LargeMessagePreviewChars)}\n\n...", graphChatMessagePreviewText(text, expanded = false))
         assertEquals(text, graphChatMessagePreviewText(text, expanded = true))
         assertEquals(text, graphChatMessagePreviewText(text, expanded = false, streaming = true))
+    }
+
+    @Test
+    fun formatsLargeMessageShowMoreLabelWithGroupedCharacterCount() {
+        assertEquals(
+            "Show more (4,020 chars)",
+            graphChatShowMoreLabel(LargeMessagePreviewChars + 20, Locale.US),
+        )
     }
 }

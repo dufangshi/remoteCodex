@@ -50,6 +50,7 @@ import com.remotecodex.android.ui.presentation.hasLikelyMarkdownSyntax
 import com.remotecodex.android.ui.presentation.graphChatHighlightedCode
 import com.remotecodex.android.ui.presentation.graphChatInlineSegments
 import com.remotecodex.android.ui.presentation.graphChatMessagePreviewText
+import com.remotecodex.android.ui.presentation.graphChatShowMoreLabel
 import com.remotecodex.android.ui.presentation.graphChatToolEntries
 import com.remotecodex.android.ui.presentation.looksLikeMoleculeStructure
 import com.remotecodex.android.ui.presentation.RichMessageBlock
@@ -132,7 +133,7 @@ fun RichMessageContent(
                 label = if (expanded) {
                     "Show less"
                 } else {
-                    "Show more (${processedContent.length} chars)"
+                    graphChatShowMoreLabel(processedContent.length)
                 },
                 modifier = Modifier.fillMaxWidth(),
                 size = GraphButtonSize.Small,

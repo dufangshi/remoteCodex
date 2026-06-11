@@ -1,5 +1,8 @@
 package com.remotecodex.android.ui.presentation
 
+import java.text.NumberFormat
+import java.util.Locale
+
 const val LargeMessagePreviewChars = 4_000
 
 sealed interface GraphChatPlainTextSegment {
@@ -31,6 +34,14 @@ fun graphChatMessagePreviewText(
 
 fun shouldShowGraphChatMessageExpansion(text: String, streaming: Boolean = false): Boolean {
     return !streaming && text.length > LargeMessagePreviewChars
+}
+
+fun graphChatShowMoreLabel(
+    charCount: Int,
+    locale: Locale = Locale.getDefault(),
+): String {
+    val formattedCount = NumberFormat.getIntegerInstance(locale).format(charCount)
+    return "Show more ($formattedCount chars)"
 }
 
 fun graphChatPlainTextSegments(text: String): List<GraphChatPlainTextSegment> {
