@@ -245,6 +245,17 @@ class ThreadComposerStateTest {
         composeRule.onNodeWithText("/fork").assertDoesNotExist()
     }
 
+    @Test
+    fun planModeChipTogglesPreviewCollaborationMode() {
+        setComposerContent()
+
+        composeRule.onNodeWithContentDescription("Plan not pressed").performClick()
+
+        composeRule.onNodeWithContentDescription("Plan pressed").assertExists()
+        composeRule.onNodeWithContentDescription("Plan pressed").performClick()
+        composeRule.onNodeWithContentDescription("Plan not pressed").assertExists()
+    }
+
     private fun setComposerContent(composer: ComposerPreview = ComposerPreview()) {
         composeRule.setContent {
             RemoteCodexTheme(dark = true) {

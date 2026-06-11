@@ -156,6 +156,7 @@ fun ThreadComposer(
     var selectedModel by remember(composer.context.model) { mutableStateOf(composer.context.model) }
     var selectedReasoningEffort by remember(composer.reasoningEffort) { mutableStateOf(composer.reasoningEffort) }
     var draftPrompt by remember(composer.prompt) { mutableStateOf(composer.prompt) }
+    var planModeSelected by remember(composer.planModeActive) { mutableStateOf(composer.planModeActive) }
     val selectedContext = composer.context.copy(model = selectedModel)
     val queuedAttachmentCount = draftPrompt.attachments.size
     val statusChips = buildComposerStatusStrip(
@@ -197,7 +198,7 @@ fun ThreadComposer(
         settingsBusy = composer.settingsBusy,
         fastMode = composer.fastMode,
         planModeAvailable = composer.planModeAvailable,
-        planModeActive = composer.planModeActive,
+        planModeActive = planModeSelected,
     )
     val settingsToolbarState = buildComposerSettingsToolbarState(
         settingsState = settingsState,
@@ -492,6 +493,7 @@ fun ThreadComposer(
                     label = settingsToolbarState.planButton.label,
                     selected = settingsToolbarState.planButton.selected,
                     pressed = settingsToolbarState.planPressed,
+                    onClick = { planModeSelected = !planModeSelected },
                 )
             }
             ComposerModeChip(label = queuedAttachmentCount.attachmentCountLabel(), selected = queuedAttachmentCount > 0)
@@ -1586,20 +1588,27 @@ private fun InlineToggle(
 }
 
 @Composable
-private fun ComposerModeChip(label: String, selected: Boolean, pressed: Boolean = selected) {
+private fun ComposerModeChip(
+    label: String,
+    selected: Boolean,
+    pressed: Boolean = selected,
+    onClick: (() -> Unit)? = null,
+) {
     val background = if (selected) ThreadColors.WarningSoft else ThreadColors.SurfaceStrong
     val foreground = if (selected) ThreadColors.Warning else ThreadColors.ForegroundMuted
+    val stateLabel = if (pressed) "pressed" else "not pressed"
     Text(
         text = label,
         modifier = Modifier
             .semantics {
-                contentDescription = label
+                contentDescription = "$label $stateLabel"
                 stateDescription = if (pressed) "Pressed" else "Not pressed"
                 this.selected = selected
             }
             .clip(RoundedCornerShape(999.dp))
             .background(background)
             .border(1.dp, ThreadColors.Border, RoundedCornerShape(999.dp))
+            .then(onClick?.let { Modifier.clickable(onClick = it) } ?: Modifier)
             .padding(horizontal = 10.dp, vertical = 6.dp),
         color = foreground,
         style = MaterialTheme.typography.labelSmall,
