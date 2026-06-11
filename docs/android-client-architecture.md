@@ -190,34 +190,78 @@ The visual direction is close to the web mobile thread view, but not a literal D
 
 Shell and terminal access are intentionally paused for Android because exposing a remote command surface needs a separate product and security decision. Existing shell API adapters, presentation models, and `ShellPanel.kt` stay in the tree for now, but Android keeps `AndroidFeatureFlags.ShellEnabled = false`, hides shell destinations and composer controls, skips shell state loading by default, and does not call backend shell APIs in the normal thread-detail path. Shell is not part of the active Android parity backlog; future work should only re-enable it behind an explicit policy and permission model.
 
-Still open:
+### Android Backlog
 
-- Full app shell destination behavior is still open: the connected home now switches between Workspaces/Threads and uses the supervisor snapshot, but workspace drill-in, runtime restart/install/build actions, config archives, and richer thread-list filtering are not yet complete.
-- Full markdown/GFM parity beyond the current native subset, especially KaTeX-quality math typesetting, advanced nested list edge cases, advanced syntax highlighting, and non-molecule plugin-rendered inline artifacts. Current Android math support keeps inline and display formulas readable as native monospaced notation but does not shape TeX into full mathematical layout.
-- Real image loading for markdown image sources is still open; Android currently renders stable native placeholders with alt text and basename.
-- Full Shiki parity for code blocks: language grammars, themes, token scopes, and line metadata are still open. Current Android highlighting is intentionally lightweight, with native copy affordances already present on fenced code and tool blocks.
-- Full graph-ui primitive behavior: pressed/loading states, focus polish, icon slots, real editable input controls, long-press tooltip popovers, Dialog trigger/portal parity, and broader reuse outside molecule controls, accordion surfaces, input groups, sliders, and thread action dialogs.
-- Full graph-chat tool block parity: robust JSON parsing, richer formatting for nested values, streaming result reconciliation, and plugin-aware renderers. Current Android support is lightweight and preview-oriented, with native copy actions, top-level primitive value styling, raw output blocks, and structured key/value parameter/result sections.
-- Full history entry ordering parity with persisted server events; current native dispatcher preserves the preview item/group stream and top request-entry `sortKey` order, but does not yet consume server event cursors.
-- Full `ThreadTimeline.tsx` behavior: scroll anchoring, tail visibility, server-managed history paging, deferred history detail cache, request anchoring by turn id, and live output attachment are still not implemented.
-- Full pending request lifecycle is still open for WebSocket-created requests, immediate plan-decision submit behavior, optimistic busy state, richer backend errors, and event-based answered-note reconciliation. REST detail parsing and `respond` submission are now present for request-user-input style pending requests.
-- Full history item and user attachment interactions beyond the new server-backed deferred detail and image asset loading: richer full-detail content types, attachment drill-in flows, and broader clipboard actions.
-- Broader copy affordances for deferred-detail history items; assistant replies, reasoning text, fenced code, tool blocks, native history item summaries/details, and image paths already have clipboard feedback.
-- Remaining real thread action wiring behind native dialogs: export PDF/HTML and fuller post-delete navigation refresh. Rename and delete now call the real thread REST APIs from the detail route with busy/error states.
-- Full artifact-specific viewers, including interactive molecule and graph panels.
-- Real molecule viewer behavior behind the current native control chips: 3D renderer, robust bond perception, frame slider/playback, atom selection, camera updates, copy/download/screenshot actions, and unit-cell toggling.
-- Real graph editor behavior behind the current native graph summary: React Flow layout parity, draggable nodes, live connection preview, selectable edges, and graph pan/zoom.
-- Remaining real composer actions behind the current native sample menus: MCP config write and hook create/update editable forms. Model updates, reasoning effort updates, fast mode, plan mode, goal update, compact, fork, transcript export request, skills/MCP/hooks reads, and hook trust/untrust now call real thread APIs from the detail route.
-- Real composer input behavior behind the current grouped prompt surface: editable rich text, clipboard paste sanitization, drag/drop extraction, context usage from the backend, and slider value persistence. Attachment file picking now inserts Web-compatible placeholders and submits multipart uploads from the REST-backed thread detail route.
-- Real workspace actions behind the current native action chips: refresh and file mutation. Workspace tree, file selection, load-more preview, raw open/copy, file download, and system file-picker upload now call the backend from the thread detail route.
-- Full workspace tree parity beyond backend `ThreadWorkspaceTreeNode` basics: artifact/event/live roots, interactive preview source selection, and molecule snapshot generation.
-- Broader workspace card reuse across file previews, graph node detail, and future plugin panels.
-- Real resizable workspace panel behavior on tablet/desktop form factors; current Android coverage keeps stable panel boundaries and handle visuals without drag resizing.
-- Real garbage folder mutation behind the current empty-garbage confirmation skeleton.
-- Full WebSocket event reducer, relay device deletion/revocation, and shared-session selection. Android now has a first-pass websocket client that subscribes to supervisor thread events and refreshes thread detail for matching `threadId` values, but it still relies on full-detail reconciliation instead of applying `thread.output.delta` and item lifecycle events locally.
-- A backend claim-code flow is still open. The current relay model is: login to the relay, create a device, copy the one-time `rcd_...` token to the private backend, and run `remote-codex relay-supervisor` with that token. A future smoother path can let the backend print a short claim code and let a logged-in Web or Android client bind that pending backend to the account.
-- Remaining plugin policy work: uninstall is waiting on a backend route, and trusted renderer policy still needs an explicit product model. Android now supports plugin refresh, persisted import, and enable/disable against the supervisor API.
-- Screenshot-based E2E after emulator access is available.
+This backlog is intentionally unprioritized until the user provides an explicit order. Once ordered, copy the selected sequence into an active implementation list and work through it item by item. Shell and terminal parity are excluded by policy unless they are explicitly re-enabled.
+
+#### A. App Shell And Settings
+
+- A1. Workspace drill-in page: add a workspace detail route for threads, files, status, and workspace-scoped actions.
+- A2. Thread list filtering and grouping: add status filters, search, sorting, active/needs-attention/recent groupings, and mobile-friendly list controls.
+- A3. Provider config archives: support low-risk archive list/create backup for `/api/config/providers/:provider/archives`; defer apply until restart policy is explicit.
+- A4. Runtime install/update/build/restart actions: expose host-changing runtime operations only after confirmation and recovery UX are defined.
+- A5. Relay device management: add device delete/revoke, richer status refresh, and a smoother claim-code or backend binding flow if the relay model gains one.
+- A6. Plugin policy completion: add uninstall when the backend route exists, plus trusted renderer policy and clearer plugin permission/risk states.
+
+#### B. Thread Timeline And Realtime State
+
+- B1. WebSocket event reducer: apply `thread.*` events locally instead of using full-detail refresh as the primary update path.
+- B2. Streaming output merge: support `thread.output.delta` append, de-duplication, materialized item reconciliation, and reconnect recovery.
+- B3. Timeline scroll behavior: add scroll anchoring, tail visibility, jump-to-latest parity, and stable position when older history loads.
+- B4. Server-managed history paging: implement turn paging, `beforeTurnId`, deferred detail caching, and incremental older-history loading.
+- B5. Request anchoring and answered-note reconciliation: anchor requests by turn/item and reconcile answered notes from events and refreshed detail.
+- B6. Pending request lifecycle: complete WebSocket-created request insertion, immediate plan-decision submit behavior, optimistic busy state, duplicate-submit guards, and richer backend error recovery.
+- B7. History ordering and event cursor: consume persisted event order or a future monotonic cursor instead of relying only on aggregate projection order.
+
+#### C. Composer And Thread Actions
+
+- C1. Composer rich text input: add paste sanitization, drag/drop extraction, and richer attachment text insertion rules.
+- C2. Context usage and slider persistence: drive usage from backend data and persist editable context/reasoning settings where supported.
+- C3. MCP config write: add native editable forms for MCP configuration changes.
+- C4. Hook create/update forms: add native forms for hook creation, editing, and command-template configuration.
+- C5. Export post-flow hardening: improve PDF/HTML edge cases, file naming, duplicate export state, and failure recovery.
+- C6. Thread deletion navigation refresh: complete post-delete home/list/detail navigation and refresh behavior.
+
+#### D. Workspace And Files
+
+- D1. Workspace refresh and file mutation: add refresh behavior plus file write, rename, delete, and other supported mutations.
+- D2. Garbage folder mutation: wire the empty-garbage confirmation to a real backend mutation and refresh the workspace state.
+- D3. Workspace tree parity: add artifact/event/live roots, preview source switching, and Web-like explorer state.
+- D4. File preview drill-in: improve binary, large-file, image, unknown-type, and attachment detail flows.
+- D5. Workspace card reuse: broaden workspace info cards across file previews, graph node detail, and future plugin panels.
+
+#### E. Markdown, Code, And Images
+
+- E1. Full Markdown/GFM parity: improve nested lists, task lists, tables, HTML fallback, and edge-case block parsing.
+- E2. KaTeX-quality math rendering: replace readable monospaced math fallback with real math layout.
+- E3. Markdown image loading: load real markdown image sources instead of stable placeholders when safe and supported.
+- E4. Shiki parity for code blocks: add richer language grammars, themes, token scopes, line metadata, and diff/code viewer details.
+- E5. Non-molecule inline artifacts: define and implement renderers or fallback policy for plugin-rendered inline artifact types.
+
+#### F. Tool Calls, History Items, And Artifacts
+
+- F1. Tool block JSON formatting: make nested object/array formatting robust with clearer disclosure and copy behavior.
+- F2. Streaming tool result reconciliation: merge streaming tool calls/results with materialized history without flicker or duplication.
+- F3. Plugin-aware tool/artifact renderers: decide native renderer, WebView fallback, or server-rendered preview strategy.
+- F4. History item detail content types: expand deferred-detail rendering for richer outputs and attachment drill-in flows.
+- F5. Broader clipboard affordances: align copy actions across every detail, summary, output, and attachment view.
+- F6. Full artifact viewers: implement artifact-specific viewers beyond the current fallbacks.
+- F7. Molecule 3D viewer: add 3D rendering, bond perception, frame slider/playback, atom selection, camera controls, screenshots, and unit-cell toggling.
+- F8. Graph editor/viewer: add pan/zoom, draggable nodes, edge selection, live connection preview, and React Flow layout parity.
+
+#### G. UI Primitive And Interaction Polish
+
+- G1. Graph UI primitive states: complete pressed, loading, focus, active, disabled, and error states across buttons, badges, dialogs, inputs, and sliders.
+- G2. Long-press tooltip/popover behavior: add mobile explanations for dense icon controls where content descriptions are not enough.
+- G3. Dialog trigger/portal parity: align trigger, focus, back/escape, and overlay behavior with the Web primitives.
+- G4. Tablet/desktop resizable panels: implement drag resizing for larger Android form factors.
+- G5. Screenshot-based visual E2E: create repeatable emulator screenshot checks against representative Android surfaces and Web reference states.
+
+#### H. Voice And Notifications
+
+- H1. Native voice session: implement microphone permission, audio session management, push-to-talk, barge-in, Bluetooth headset handling, and foreground/background lifecycle.
+- H2. Voice action protocol: connect Android voice mode to backend voice session, action, and confirmation policy when available.
+- H3. Push notification bridge: add Android notifications for completed turns, failures, permission required, input required, and agent disconnects.
 
 ## Build
 
