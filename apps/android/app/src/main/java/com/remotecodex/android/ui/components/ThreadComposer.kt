@@ -33,6 +33,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.ui.model.ComposerPreview
 import com.remotecodex.android.ui.presentation.ComposerActionState
+import com.remotecodex.android.ui.presentation.ComposerAttachmentActionKind
+import com.remotecodex.android.ui.presentation.ComposerAttachmentActionState
 import com.remotecodex.android.ui.presentation.ComposerContextUsageState
 import com.remotecodex.android.ui.presentation.ComposerJumpLatestState
 import com.remotecodex.android.ui.presentation.ComposerPrimaryActionKind
@@ -41,6 +43,7 @@ import com.remotecodex.android.ui.presentation.ComposerSelectionOptionState
 import com.remotecodex.android.ui.presentation.ComposerStatusChipModel
 import com.remotecodex.android.ui.presentation.ComposerStatusTone
 import com.remotecodex.android.ui.presentation.buildComposerActionState
+import com.remotecodex.android.ui.presentation.buildComposerAttachmentActions
 import com.remotecodex.android.ui.presentation.buildComposerContextUsageState
 import com.remotecodex.android.ui.presentation.buildComposerJumpLatestState
 import com.remotecodex.android.ui.presentation.buildComposerModelOptions
@@ -1430,20 +1433,15 @@ private fun HookStatusRow(
 
 @Composable
 private fun AttachmentPanel() {
+    val actions = buildComposerAttachmentActions()
     ComposerMenuSurface(title = "Add attachment", subtitle = "Prompt context") {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            AttachmentButton(
-                label = "Photo",
-                detail = "camera or gallery",
-                icon = AttachmentTileIcon.Photo,
-                modifier = Modifier.weight(1f),
-            )
-            AttachmentButton(
-                label = "File",
-                detail = "workspace upload",
-                icon = AttachmentTileIcon.File,
-                modifier = Modifier.weight(1f),
-            )
+            actions.forEach { action ->
+                AttachmentButton(
+                    action = action,
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
         AttachmentPreviewStrip()
     }
@@ -1581,11 +1579,13 @@ private fun ToolboxRow(command: String, status: String, description: String) {
 
 @Composable
 private fun AttachmentButton(
-    label: String,
-    detail: String,
-    icon: AttachmentTileIcon,
+    action: ComposerAttachmentActionState,
     modifier: Modifier = Modifier,
 ) {
+    val icon = when (action.kind) {
+        ComposerAttachmentActionKind.Photo -> AttachmentTileIcon.Photo
+        ComposerAttachmentActionKind.File -> AttachmentTileIcon.File
+    }
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
@@ -1610,7 +1610,7 @@ private fun AttachmentButton(
             verticalArrangement = Arrangement.spacedBy(3.dp),
         ) {
             Text(
-                text = label,
+                text = action.label,
                 color = ThreadColors.Foreground,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
@@ -1618,7 +1618,7 @@ private fun AttachmentButton(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = detail,
+                text = action.detail,
                 color = ThreadColors.ForegroundMuted,
                 style = MaterialTheme.typography.labelSmall,
                 maxLines = 1,

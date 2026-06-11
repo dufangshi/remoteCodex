@@ -389,6 +389,25 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun buildsComposerAttachmentActions() {
+        assertEquals(
+            listOf(
+                ComposerAttachmentActionState(
+                    label = "Photo",
+                    detail = "Camera or image library",
+                    kind = ComposerAttachmentActionKind.Photo,
+                ),
+                ComposerAttachmentActionState(
+                    label = "File",
+                    detail = "Workspace or local file",
+                    kind = ComposerAttachmentActionKind.File,
+                ),
+            ),
+            buildComposerAttachmentActions(),
+        )
+    }
+
+    @Test
     fun buildsStructuredFileChangeSummarySegments() {
         assertEquals(
             listOf(

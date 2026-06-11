@@ -113,6 +113,32 @@ data class ComposerSelectionOptionState(
     val selected: Boolean,
 )
 
+enum class ComposerAttachmentActionKind {
+    Photo,
+    File,
+}
+
+data class ComposerAttachmentActionState(
+    val label: String,
+    val detail: String,
+    val kind: ComposerAttachmentActionKind,
+)
+
+fun buildComposerAttachmentActions(): List<ComposerAttachmentActionState> {
+    return listOf(
+        ComposerAttachmentActionState(
+            label = "Photo",
+            detail = "Camera or image library",
+            kind = ComposerAttachmentActionKind.Photo,
+        ),
+        ComposerAttachmentActionState(
+            label = "File",
+            detail = "Workspace or local file",
+            kind = ComposerAttachmentActionKind.File,
+        ),
+    )
+}
+
 fun buildComposerModelOptions(
     currentModel: String?,
     options: List<ComposerModelOptionPreview>,
