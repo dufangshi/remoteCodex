@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.remotecodex.android.settings.ThemeMode
 import com.remotecodex.android.ui.model.DetailPreview
+import com.remotecodex.android.ui.model.ThreadRoomPreview
 import com.remotecodex.android.ui.components.AppShellNavigationPanel
 import com.remotecodex.android.ui.components.AppShellSettingsPanel
 import com.remotecodex.android.ui.components.GraphChatMainShell
@@ -56,6 +57,8 @@ fun ThreadDetailPreviewScreen(
     var settingsOpen by remember { mutableStateOf(false) }
     var roomsOpen by remember { mutableStateOf(false) }
     var threadActionDialog by remember { mutableStateOf<ThreadActionDialog?>(null) }
+    var threadActionRoom by remember { mutableStateOf<ThreadRoomPreview?>(null) }
+    var copiedSessionRoomId by remember { mutableStateOf<String?>(null) }
     var openDetail by remember { mutableStateOf<DetailPreview?>(null) }
     GraphChatShellRoot {
         GraphChatShellFrame {
@@ -115,7 +118,22 @@ fun ThreadDetailPreviewScreen(
                 onClose = { roomsOpen = false },
                 onCreateThread = {
                     roomsOpen = false
+                    threadActionRoom = null
                     threadActionDialog = ThreadActionDialog.Create
+                },
+                copiedSessionRoomId = copiedSessionRoomId,
+                onRenameThread = { room ->
+                    roomsOpen = false
+                    threadActionRoom = room
+                    threadActionDialog = ThreadActionDialog.Rename
+                },
+                onCopySessionId = { room ->
+                    copiedSessionRoomId = room.id
+                },
+                onDeleteThread = { room ->
+                    roomsOpen = false
+                    threadActionRoom = room
+                    threadActionDialog = ThreadActionDialog.Delete
                 },
                 modifier = Modifier.fillMaxSize(),
             )
@@ -155,9 +173,12 @@ fun ThreadDetailPreviewScreen(
         threadActionDialog?.let { dialog ->
             ThreadActionDialogOverlay(
                 dialog = dialog,
-                threadTitle = detail.title,
+                threadTitle = threadActionRoom?.title ?: detail.title,
                 exportTurns = ThreadPreviewSample.exportTurns,
-                onClose = { threadActionDialog = null },
+                onClose = {
+                    threadActionDialog = null
+                    threadActionRoom = null
+                },
                 modifier = Modifier
                     .fillMaxSize()
                     .navigationBarsPadding(),

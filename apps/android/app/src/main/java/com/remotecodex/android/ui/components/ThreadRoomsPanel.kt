@@ -42,6 +42,10 @@ fun ThreadRoomsPanel(
     rooms: List<ThreadRoomPreview>,
     onClose: () -> Unit,
     onCreateThread: () -> Unit,
+    copiedSessionRoomId: String?,
+    onRenameThread: (ThreadRoomPreview) -> Unit,
+    onCopySessionId: (ThreadRoomPreview) -> Unit,
+    onDeleteThread: (ThreadRoomPreview) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -117,7 +121,13 @@ fun ThreadRoomsPanel(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(rooms, key = { it.id }) { room ->
-                ThreadRoomCard(room = room)
+                ThreadRoomCard(
+                    room = room,
+                    copied = copiedSessionRoomId == room.id,
+                    onRenameThread = { onRenameThread(room) },
+                    onCopySessionId = { onCopySessionId(room) },
+                    onDeleteThread = { onDeleteThread(room) },
+                )
             }
         }
     }
@@ -152,7 +162,13 @@ private fun RoomsListHeader(count: Int) {
 }
 
 @Composable
-private fun ThreadRoomCard(room: ThreadRoomPreview) {
+private fun ThreadRoomCard(
+    room: ThreadRoomPreview,
+    copied: Boolean,
+    onRenameThread: () -> Unit,
+    onCopySessionId: () -> Unit,
+    onDeleteThread: () -> Unit,
+) {
     val background = if (room.active) ThreadColors.SurfaceStrong else ThreadColors.Surface
     val border = if (room.active) ThreadColors.BorderStrong else ThreadColors.Border
     Row(
@@ -199,12 +215,21 @@ private fun ThreadRoomCard(room: ThreadRoomPreview) {
                 RoomQuietButton(
                     kind = RoomsGlyphKind.Rename,
                     contentDescription = "Rename thread ${room.title}",
+                    onClick = onRenameThread,
                 )
                 if (room.sessionId != null) {
-                    RoomQuietButton(
-                        kind = RoomsGlyphKind.Copy,
-                        contentDescription = "Copy session ID",
-                    )
+                    if (copied) {
+                        GraphBadge(
+                            label = "Copied",
+                            variant = GraphBadgeVariant.Outline,
+                        )
+                    } else {
+                        RoomQuietButton(
+                            kind = RoomsGlyphKind.Copy,
+                            contentDescription = "Copy session ID",
+                            onClick = onCopySessionId,
+                        )
+                    }
                 }
                 if (room.active) {
                     GraphBadge(
@@ -241,6 +266,7 @@ private fun ThreadRoomCard(room: ThreadRoomPreview) {
                 kind = RoomsGlyphKind.Delete,
                 danger = true,
                 contentDescription = "Delete thread ${room.title}",
+                onClick = onDeleteThread,
             )
         }
     }
@@ -251,6 +277,7 @@ private fun RoomQuietButton(
     kind: RoomsGlyphKind,
     contentDescription: String,
     danger: Boolean = false,
+    onClick: () -> Unit,
 ) {
     val color = if (danger) ThreadColors.Danger else ThreadColors.ForegroundMuted
     Box(
@@ -263,6 +290,7 @@ private fun RoomQuietButton(
                 if (danger) ThreadColors.Danger.copy(alpha = 0.36f) else ThreadColors.Border.copy(alpha = 0.72f),
                 CircleShape,
             )
+            .clickable(onClick = onClick)
             .semantics { this.contentDescription = contentDescription },
         contentAlignment = Alignment.Center,
     ) {
