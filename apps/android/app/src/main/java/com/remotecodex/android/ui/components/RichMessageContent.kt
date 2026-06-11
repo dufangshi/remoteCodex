@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -45,7 +46,9 @@ import androidx.compose.ui.unit.dp
 import com.remotecodex.android.ui.presentation.GraphChatInlineSegment
 import com.remotecodex.android.ui.presentation.GraphChatToolEntry
 import com.remotecodex.android.ui.presentation.GraphChatToolValueKind
+import com.remotecodex.android.ui.presentation.MathToken
 import com.remotecodex.android.ui.presentation.basenameFromAssetPath
+import com.remotecodex.android.ui.presentation.buildMathPresentation
 import com.remotecodex.android.ui.presentation.hasLikelyMarkdownSyntax
 import com.remotecodex.android.ui.presentation.graphChatHighlightedCode
 import com.remotecodex.android.ui.presentation.graphChatInlineSegments
@@ -194,6 +197,7 @@ private fun RichHtmlBlock(source: String) {
 
 @Composable
 private fun RichMathBlock(expression: String) {
+    val presentation = remember(expression) { buildMathPresentation(expression) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -203,18 +207,26 @@ private fun RichMathBlock(expression: String) {
             .padding(horizontal = 11.dp, vertical = 9.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Formula",
+                modifier = Modifier.weight(1f),
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            CopyCodeButton(value = presentation.copyText)
+        }
         Text(
-            text = "Formula",
-            color = ThreadColors.Info,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Text(
-            text = expression.ifBlank { "empty" },
+            text = mathAnnotatedString(presentation.tokens),
             modifier = Modifier.horizontalScroll(rememberScrollState()),
             color = ThreadColors.Foreground,
-            style = MaterialTheme.typography.bodyMedium,
-            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Medium,
         )
     }
 }
@@ -901,11 +913,46 @@ private fun AnnotatedString.Builder.appendInlineMathSegment(expression: String) 
         SpanStyle(
             color = ThreadColors.Info,
             background = ThreadColors.InfoSoft.copy(alpha = 0.58f),
-            fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Medium,
         ),
     ) {
-        append(expression)
+        append(mathAnnotatedString(buildMathPresentation(expression).tokens))
+    }
+}
+
+@Composable
+private fun mathAnnotatedString(tokens: List<MathToken>): AnnotatedString {
+    return buildAnnotatedString {
+        if (tokens.isEmpty()) {
+            append("empty")
+        }
+        tokens.forEach { token ->
+            when (token) {
+                is MathToken.Text -> append(token.text)
+                is MathToken.Superscript -> {
+                    withStyle(
+                        SpanStyle(
+                            baselineShift = BaselineShift.Superscript,
+                            fontSize = MaterialTheme.typography.bodySmall.fontSize,
+                            fontWeight = FontWeight.Medium,
+                        ),
+                    ) {
+                        append(token.text)
+                    }
+                }
+                is MathToken.Subscript -> {
+                    withStyle(
+                        SpanStyle(
+                            baselineShift = BaselineShift.Subscript,
+                            fontSize = MaterialTheme.typography.bodySmall.fontSize,
+                            fontWeight = FontWeight.Medium,
+                        ),
+                    ) {
+                        append(token.text)
+                    }
+                }
+            }
+        }
     }
 }
 
