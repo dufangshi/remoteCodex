@@ -420,10 +420,119 @@ private fun ComposerModeChip(label: String, selected: Boolean) {
 private fun SlashToolboxPanel() {
     ComposerMenuSurface(title = "Slash toolbox", subtitle = "Thread actions") {
         ToolboxRow(command = "/goal", status = "Open", description = "Create or update the active thread goal.")
-        ToolboxRow(command = "/fork", status = "Idle only", description = "Fork from latest or selected turn.")
+        ForkPreviewGroup()
         ToolboxRow(command = "/skills", status = "Open", description = "Inspect skills and copy invocation names.")
         ToolboxRow(command = "/mcp", status = "Open", description = "Inspect MCP servers, tools, resources, and auth.")
         ToolboxRow(command = "/hooks", status = "Open", description = "Review hook trust and project hook source.")
+    }
+}
+
+@Composable
+private fun ForkPreviewGroup() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(ThreadColors.Surface)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "/fork",
+                modifier = Modifier.weight(1f),
+                color = ThreadColors.Foreground,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            GraphBadge(
+                label = "Idle only",
+                variant = GraphBadgeVariant.Outline,
+            )
+        }
+        Text(
+            text = "Fork is only available while the thread is idle.",
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        ForkActionRow(label = "Fork from latest", state = "Run")
+        ForkActionRow(label = "Fork from selected turn", state = "Pick")
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            forkTurnPreviewItems.forEach { item ->
+                ForkTurnRow(item = item)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ForkActionRow(
+    label: String,
+    state: String,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(ThreadColors.SurfaceStrong)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(10.dp))
+            .padding(horizontal = 10.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.weight(1f),
+            color = ThreadColors.ForegroundSoft,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = state,
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun ForkTurnRow(item: ForkTurnPreviewItem) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(ThreadColors.CodeBackground)
+            .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(10.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = "Turn ${item.index}",
+            modifier = Modifier.weight(1f),
+            color = ThreadColors.CodeForeground,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        GraphBadge(
+            label = item.status,
+            variant = GraphBadgeVariant.Outline,
+        )
     }
 }
 
@@ -739,6 +848,11 @@ private data class ShellToolPreviewItem(
     val tone: ShellToolTone = ShellToolTone.Neutral,
 )
 
+private data class ForkTurnPreviewItem(
+    val index: Int,
+    val status: String,
+)
+
 private enum class ShellToolTone {
     Neutral,
     Info,
@@ -760,6 +874,12 @@ private val shellToolPreviewItems = listOf(
     ShellToolPreviewItem(label = "TAB"),
     ShellToolPreviewItem(label = "UP"),
     ShellToolPreviewItem(label = "DOWN"),
+)
+
+private val forkTurnPreviewItems = listOf(
+    ForkTurnPreviewItem(index = 12, status = "completed"),
+    ForkTurnPreviewItem(index = 11, status = "interrupted"),
+    ForkTurnPreviewItem(index = 10, status = "failed"),
 )
 
 private enum class ComposerToolIcon {
