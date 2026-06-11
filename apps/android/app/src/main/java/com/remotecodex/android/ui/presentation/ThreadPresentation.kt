@@ -108,6 +108,7 @@ data class ComposerActionState(
 data class ComposerJumpLatestState(
     val visible: Boolean,
     val active: Boolean,
+    val accessibilityLabel: String,
     val title: String,
 )
 
@@ -1579,7 +1580,8 @@ fun buildComposerJumpLatestState(
     return ComposerJumpLatestState(
         visible = visible,
         active = visible && followTail,
-        title = if (followTail) "Latest turn is in view" else "Jump to latest",
+        accessibilityLabel = "Jump to latest",
+        title = if (followTail) "Latest turn is in view" else "Jump to the latest messages",
     )
 }
 

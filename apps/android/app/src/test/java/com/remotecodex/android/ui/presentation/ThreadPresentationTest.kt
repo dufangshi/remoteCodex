@@ -203,7 +203,8 @@ class ThreadPresentationTest {
             ComposerJumpLatestState(
                 visible = true,
                 active = false,
-                title = "Jump to latest",
+                accessibilityLabel = "Jump to latest",
+                title = "Jump to the latest messages",
             ),
             buildComposerJumpLatestState(
                 activeView = ComposerActiveView.Chat,
@@ -214,6 +215,7 @@ class ThreadPresentationTest {
             ComposerJumpLatestState(
                 visible = true,
                 active = true,
+                accessibilityLabel = "Jump to latest",
                 title = "Latest turn is in view",
             ),
             buildComposerJumpLatestState(
@@ -229,7 +231,8 @@ class ThreadPresentationTest {
             ComposerJumpLatestState(
                 visible = false,
                 active = false,
-                title = "Jump to latest",
+                accessibilityLabel = "Jump to latest",
+                title = "Jump to the latest messages",
             ),
             buildComposerJumpLatestState(
                 activeView = ComposerActiveView.Shell,
@@ -247,7 +250,8 @@ class ThreadPresentationTest {
                 jumpLatest = ComposerJumpLatestState(
                     visible = true,
                     active = false,
-                    title = "Jump to latest",
+                    accessibilityLabel = "Jump to latest",
+                    title = "Jump to the latest messages",
                 ),
                 showPromptSlot = true,
                 showGoalSlot = true,
@@ -272,6 +276,7 @@ class ThreadPresentationTest {
                 jumpLatest = ComposerJumpLatestState(
                     visible = false,
                     active = false,
+                    accessibilityLabel = "Jump to latest",
                     title = "Latest turn is in view",
                 ),
                 showPromptSlot = false,

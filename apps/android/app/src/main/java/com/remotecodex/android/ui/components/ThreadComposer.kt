@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -282,8 +283,8 @@ private fun ComposerJumpLatestButton(state: ComposerJumpLatestState) {
         return
     }
     val foreground = if (state.active) ThreadColors.Info else ThreadColors.ForegroundSoft
-    val background = if (state.active) ThreadColors.InfoSoft.copy(alpha = 0.48f) else ThreadColors.SurfaceStrong
-    val border = if (state.active) ThreadColors.Info.copy(alpha = 0.38f) else ThreadColors.Border
+    val background = if (state.active) ThreadColors.InfoSoft.copy(alpha = 0.18f) else ThreadColors.SurfaceStrong.copy(alpha = 0.74f)
+    val border = if (state.active) ThreadColors.Info.copy(alpha = 0.36f) else ThreadColors.BorderStrong
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Center,
@@ -291,22 +292,18 @@ private fun ComposerJumpLatestButton(state: ComposerJumpLatestState) {
     ) {
         Row(
             modifier = Modifier
+                .semantics {
+                    contentDescription = state.accessibilityLabel
+                    stateDescription = state.title
+                }
                 .clip(RoundedCornerShape(999.dp))
                 .background(background)
                 .border(1.dp, border, RoundedCornerShape(999.dp))
-                .padding(horizontal = 10.dp, vertical = 3.dp),
+                .padding(horizontal = 16.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            horizontalArrangement = Arrangement.Center,
         ) {
             ComposerJumpLatestGlyph(color = foreground)
-            Text(
-                text = state.title,
-                color = foreground,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
         }
     }
 }
