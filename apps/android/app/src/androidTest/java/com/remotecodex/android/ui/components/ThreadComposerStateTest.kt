@@ -284,6 +284,22 @@ class ThreadComposerStateTest {
     }
 
     @Test
+    fun compactToolboxActionStartsPreviewBusyStateAndClosesMenu() {
+        setComposerContent(composer = ComposerPreview(busy = false, compactBusy = false))
+
+        composeRule.onNodeWithContentDescription("Open slash toolbox").performClick()
+        composeRule.onNodeWithText("Run").assertExists()
+
+        composeRule.onNodeWithContentDescription("Compact thread").performClick()
+
+        composeRule.onNodeWithText("Compact preview started").assertExists()
+        composeRule.onNodeWithText("Slash toolbox").assertDoesNotExist()
+
+        composeRule.onNodeWithContentDescription("Open slash toolbox").performClick()
+        composeRule.onNodeWithText("Busy").assertExists()
+    }
+
+    @Test
     fun goalToolboxActionEntersAndCancelsGoalComposePreview() {
         setComposerContent()
 

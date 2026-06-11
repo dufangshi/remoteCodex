@@ -167,6 +167,8 @@ fun ThreadComposer(
     var goalPreviewStatus by remember { mutableStateOf<String?>(null) }
     var currentGoalPreview by remember(composer.goalPanel.currentGoal) { mutableStateOf(composer.goalPanel.currentGoal) }
     var fastModePreviewStatus by remember { mutableStateOf<String?>(null) }
+    var compactBusyPreview by remember(composer.compactBusy) { mutableStateOf(composer.compactBusy) }
+    var compactPreviewStatus by remember { mutableStateOf<String?>(null) }
     val selectedContext = composer.context.copy(model = selectedModel)
     val queuedAttachmentCount = draftPrompt.attachments.size
     val statusChips = buildComposerStatusStrip(
@@ -245,7 +247,7 @@ fun ThreadComposer(
     val toolboxItems = buildComposerToolboxItems(
         items = composer.toolboxItems,
         fastMode = fastModeSelected,
-        compactBusy = composer.compactBusy,
+        compactBusy = compactBusyPreview,
         goalComposeMode = goalComposeMode,
         goalStatus = composer.goalStatus,
         busy = composer.busy,
@@ -400,9 +402,13 @@ fun ThreadComposer(
                                     slashPanelView = targetPanel
                                 }
                             }
-                            ComposerToolboxActionDecisionKind.RunCompact,
-                            -> if (actionDecision.closeMenu) {
-                                openMenu = null
+                            ComposerToolboxActionDecisionKind.RunCompact -> {
+                                compactBusyPreview = true
+                                compactPreviewStatus = "Compact preview started"
+                                if (actionDecision.closeMenu) {
+                                    slashPanelView = ComposerSlashPanelViewState.Root
+                                    openMenu = null
+                                }
                             }
                             ComposerToolboxActionDecisionKind.ExitGoalCompose -> {
                                 goalComposeMode = false
@@ -487,6 +493,9 @@ fun ThreadComposer(
             ComposerPreviewFeedback(message = status)
         }
         fastModePreviewStatus?.let { status ->
+            ComposerPreviewFeedback(message = status)
+        }
+        compactPreviewStatus?.let { status ->
             ComposerPreviewFeedback(message = status)
         }
         ComposerToolbarRow(
