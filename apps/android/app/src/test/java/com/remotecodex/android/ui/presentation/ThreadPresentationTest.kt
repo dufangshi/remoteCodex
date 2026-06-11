@@ -2407,6 +2407,60 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun resetsComposerMenuLifecycleWhenSlashMenuCloses() {
+        assertEquals(
+            ComposerMenuLifecycleState(
+                shouldResetSlashPanelView = true,
+                shouldResetMcpPanelMode = true,
+                shouldClearMcpConfigStatus = true,
+                shouldClearHookConfigStatus = true,
+                targetSlashPanelView = ComposerSlashPanelViewState.Root,
+                targetMcpPanelMode = ComposerMcpPanelModePreview.List,
+            ),
+            buildComposerMenuLifecycleState(
+                openMenu = null,
+                slashPanelView = ComposerSlashPanelViewPreview.Mcp,
+            ),
+        )
+    }
+
+    @Test
+    fun resetsOnlyMcpLifecycleWhenLeavingMcpSubpanel() {
+        assertEquals(
+            ComposerMenuLifecycleState(
+                shouldResetSlashPanelView = false,
+                shouldResetMcpPanelMode = true,
+                shouldClearMcpConfigStatus = true,
+                shouldClearHookConfigStatus = false,
+                targetSlashPanelView = null,
+                targetMcpPanelMode = ComposerMcpPanelModePreview.List,
+            ),
+            buildComposerMenuLifecycleState(
+                openMenu = ComposerToolbarMenuState.Slash,
+                slashPanelView = ComposerSlashPanelViewPreview.Skills,
+            ),
+        )
+    }
+
+    @Test
+    fun retainsComposerMenuLifecycleWhileMcpSubpanelIsOpen() {
+        assertEquals(
+            ComposerMenuLifecycleState(
+                shouldResetSlashPanelView = false,
+                shouldResetMcpPanelMode = false,
+                shouldClearMcpConfigStatus = false,
+                shouldClearHookConfigStatus = false,
+                targetSlashPanelView = null,
+                targetMcpPanelMode = null,
+            ),
+            buildComposerMenuLifecycleState(
+                openMenu = ComposerToolbarMenuState.Slash,
+                slashPanelView = ComposerSlashPanelViewPreview.Mcp,
+            ),
+        )
+    }
+
+    @Test
     fun parsesAndFormatsGoalTokenBudgetsInThousands() {
         assertNull(parseGoalTokenBudgetThousands(""))
         assertEquals(12_500, parseGoalTokenBudgetThousands("12.5"))

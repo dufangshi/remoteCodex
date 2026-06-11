@@ -391,6 +391,15 @@ data class ComposerSlashToolboxPanelState(
     val emptyMessage: String?,
 )
 
+data class ComposerMenuLifecycleState(
+    val shouldResetSlashPanelView: Boolean,
+    val shouldResetMcpPanelMode: Boolean,
+    val shouldClearMcpConfigStatus: Boolean,
+    val shouldClearHookConfigStatus: Boolean,
+    val targetSlashPanelView: ComposerSlashPanelViewState?,
+    val targetMcpPanelMode: ComposerMcpPanelModePreview?,
+)
+
 enum class ComposerForkActionKind {
     Latest,
     SelectedTurn,
@@ -1061,6 +1070,26 @@ private fun slashPanelViewState(view: ComposerSlashPanelViewPreview): ComposerSl
         ComposerSlashPanelViewPreview.Fork -> ComposerSlashPanelViewState.Fork
         ComposerSlashPanelViewPreview.ForkTurns -> ComposerSlashPanelViewState.ForkTurns
     }
+}
+
+fun buildComposerMenuLifecycleState(
+    openMenu: ComposerToolbarMenuState?,
+    slashPanelView: ComposerSlashPanelViewPreview,
+): ComposerMenuLifecycleState {
+    val slashOpen = openMenu == ComposerToolbarMenuState.Slash
+    val viewingMcp = slashOpen && slashPanelView == ComposerSlashPanelViewPreview.Mcp
+    return ComposerMenuLifecycleState(
+        shouldResetSlashPanelView = !slashOpen && slashPanelView != ComposerSlashPanelViewPreview.Root,
+        shouldResetMcpPanelMode = !viewingMcp,
+        shouldClearMcpConfigStatus = !viewingMcp,
+        shouldClearHookConfigStatus = !slashOpen,
+        targetSlashPanelView = if (!slashOpen && slashPanelView != ComposerSlashPanelViewPreview.Root) {
+            ComposerSlashPanelViewState.Root
+        } else {
+            null
+        },
+        targetMcpPanelMode = if (!viewingMcp) ComposerMcpPanelModePreview.List else null,
+    )
 }
 
 private fun composerToolboxItemStatus(

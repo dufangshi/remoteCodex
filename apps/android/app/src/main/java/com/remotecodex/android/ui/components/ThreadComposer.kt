@@ -59,6 +59,7 @@ import com.remotecodex.android.ui.presentation.ComposerMcpPanelState
 import com.remotecodex.android.ui.presentation.ComposerMcpServerRowState
 import com.remotecodex.android.ui.presentation.ComposerMcpStatusMessageState
 import com.remotecodex.android.ui.presentation.ComposerMcpStatusTone
+import com.remotecodex.android.ui.presentation.ComposerMenuLifecycleState
 import com.remotecodex.android.ui.presentation.ComposerPrimaryActionKind
 import com.remotecodex.android.ui.presentation.ComposerPromptAttachmentState
 import com.remotecodex.android.ui.presentation.ComposerShellPromptInputState
@@ -91,6 +92,7 @@ import com.remotecodex.android.ui.presentation.buildComposerForkPanelState
 import com.remotecodex.android.ui.presentation.buildComposerFrameState
 import com.remotecodex.android.ui.presentation.buildComposerGoalPanelState
 import com.remotecodex.android.ui.presentation.buildComposerHooksPanelState
+import com.remotecodex.android.ui.presentation.buildComposerMenuLifecycleState
 import com.remotecodex.android.ui.presentation.buildComposerMcpPanelState
 import com.remotecodex.android.ui.presentation.buildComposerModelOptions
 import com.remotecodex.android.ui.presentation.buildComposerPromptSlotState
@@ -201,6 +203,10 @@ fun ThreadComposer(
         view = composer.slashPanelView,
         items = toolboxItems,
     )
+    val menuLifecycleState = buildComposerMenuLifecycleState(
+        openMenu = openMenu.toToolbarMenuState(),
+        slashPanelView = composer.slashPanelView,
+    )
     val forkPanelState = buildComposerForkPanelState(
         busy = composer.busy,
         forkBusy = composer.forkBusy,
@@ -234,6 +240,7 @@ fun ThreadComposer(
             when (openMenu) {
                 ComposerMenu.Slash -> SlashToolboxPanel(
                     panelState = slashToolboxPanelState,
+                    menuLifecycleState = menuLifecycleState,
                     forkPanelState = forkPanelState,
                     skillsPanelState = skillsPanelState,
                     mcpPanelState = mcpPanelState,
@@ -1216,6 +1223,7 @@ private fun ComposerModeChip(label: String, selected: Boolean, pressed: Boolean 
 @Composable
 private fun SlashToolboxPanel(
     panelState: ComposerSlashToolboxPanelState,
+    menuLifecycleState: ComposerMenuLifecycleState,
     forkPanelState: ComposerForkPanelState,
     skillsPanelState: ComposerSkillsPanelState,
     mcpPanelState: ComposerMcpPanelState,
@@ -1224,7 +1232,11 @@ private fun SlashToolboxPanel(
     if (!panelState.surfaceVisible) {
         return
     }
-    ComposerMenuSurface(title = panelState.title, subtitle = panelState.subtitle) {
+    ComposerMenuSurface(
+        title = panelState.title,
+        subtitle = panelState.subtitle,
+        stateDescription = composerMenuLifecycleDescription(menuLifecycleState),
+    ) {
         if (panelState.showRootItems) {
             if (panelState.items.isEmpty()) {
                 EmptyToolboxState(message = panelState.emptyMessage.orEmpty())
@@ -2246,11 +2258,17 @@ private fun ShellToolsPanel(panelState: ComposerShellToolsPanelState) {
 private fun ComposerMenuSurface(
     title: String,
     subtitle: String,
+    stateDescription: String? = null,
     content: @Composable () -> Unit,
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .then(
+                stateDescription?.let { description ->
+                    Modifier.semantics { this.stateDescription = description }
+                } ?: Modifier,
+            )
             .clip(RoundedCornerShape(16.dp))
             .background(ThreadColors.CodeBackground)
             .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(16.dp))
@@ -2386,6 +2404,26 @@ private fun toolboxPanelLabel(decision: ComposerToolboxActionDecisionState): Str
         null,
         -> "panel"
     }
+}
+
+private fun composerMenuLifecycleDescription(
+    state: ComposerMenuLifecycleState,
+): String {
+    val actions = buildList {
+        if (state.shouldResetSlashPanelView) {
+            add("reset slash panel")
+        }
+        if (state.shouldResetMcpPanelMode) {
+            add("reset MCP panel")
+        }
+        if (state.shouldClearMcpConfigStatus) {
+            add("clear MCP status")
+        }
+        if (state.shouldClearHookConfigStatus) {
+            add("clear hook status")
+        }
+    }
+    return if (actions.isEmpty()) "menu state retained" else actions.joinToString(", ")
 }
 
 @Composable
