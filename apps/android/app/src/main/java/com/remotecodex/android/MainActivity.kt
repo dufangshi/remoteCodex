@@ -16,6 +16,7 @@ import com.remotecodex.android.api.SupervisorHomeSnapshot
 import com.remotecodex.android.settings.AppSettingsRepository
 import com.remotecodex.android.settings.ThemeMode
 import com.remotecodex.android.ui.screen.SupervisorConnectionSetupScreen
+import com.remotecodex.android.ui.screen.SupervisorHomeScreen
 import com.remotecodex.android.ui.screen.ThreadDetailPreviewScreen
 import com.remotecodex.android.ui.theme.RemoteCodexTheme
 import kotlinx.coroutines.Dispatchers
@@ -34,6 +35,7 @@ class MainActivity : ComponentActivity() {
             var supervisorConnection by remember {
                 mutableStateOf(settingsRepository.readSupervisorConnection())
             }
+            var connectedRoute by remember { mutableStateOf(ConnectedRoute.Home) }
             var homeSnapshot by remember { mutableStateOf<SupervisorHomeSnapshot?>(null) }
             var homeSnapshotLoading by remember { mutableStateOf(false) }
             var homeSnapshotError by remember { mutableStateOf<String?>(null) }
@@ -63,30 +65,60 @@ class MainActivity : ComponentActivity() {
                         onConnectionReady = { config: SupervisorConnectionConfig, _ ->
                             settingsRepository.writeSupervisorConnection(config)
                             supervisorConnection = config
+                            connectedRoute = ConnectedRoute.Home
                         },
                     )
                 } else {
-                    ThreadDetailPreviewScreen(
-                        themeMode = themeMode,
-                        darkThemeActive = darkThemeActive,
-                        supervisorConnection = connection,
-                        homeSnapshot = homeSnapshot,
-                        homeSnapshotLoading = homeSnapshotLoading,
-                        homeSnapshotError = homeSnapshotError,
-                        onThemeModeSelected = { nextMode ->
-                            themeMode = nextMode
-                            settingsRepository.writeThemeMode(nextMode)
-                        },
-                        onChangeConnection = {
-                            settingsRepository.clearSupervisorConnection()
-                            homeSnapshot = null
-                            homeSnapshotError = null
-                            homeSnapshotLoading = false
-                            supervisorConnection = null
-                        },
-                    )
+                    when (connectedRoute) {
+                        ConnectedRoute.Home -> SupervisorHomeScreen(
+                            supervisorConnection = connection,
+                            homeSnapshot = homeSnapshot,
+                            homeSnapshotLoading = homeSnapshotLoading,
+                            homeSnapshotError = homeSnapshotError,
+                            themeMode = themeMode,
+                            darkThemeActive = darkThemeActive,
+                            onThemeModeSelected = { nextMode ->
+                                themeMode = nextMode
+                                settingsRepository.writeThemeMode(nextMode)
+                            },
+                            onOpenThreadPreview = { connectedRoute = ConnectedRoute.ThreadPreview },
+                            onChangeConnection = {
+                                settingsRepository.clearSupervisorConnection()
+                                homeSnapshot = null
+                                homeSnapshotError = null
+                                homeSnapshotLoading = false
+                                connectedRoute = ConnectedRoute.Home
+                                supervisorConnection = null
+                            },
+                        )
+                        ConnectedRoute.ThreadPreview -> ThreadDetailPreviewScreen(
+                            themeMode = themeMode,
+                            darkThemeActive = darkThemeActive,
+                            supervisorConnection = connection,
+                            homeSnapshot = homeSnapshot,
+                            homeSnapshotLoading = homeSnapshotLoading,
+                            homeSnapshotError = homeSnapshotError,
+                            onThemeModeSelected = { nextMode ->
+                                themeMode = nextMode
+                                settingsRepository.writeThemeMode(nextMode)
+                            },
+                            onChangeConnection = {
+                                settingsRepository.clearSupervisorConnection()
+                                homeSnapshot = null
+                                homeSnapshotError = null
+                                homeSnapshotLoading = false
+                                connectedRoute = ConnectedRoute.Home
+                                supervisorConnection = null
+                            },
+                        )
+                    }
                 }
             }
         }
     }
+}
+
+private enum class ConnectedRoute {
+    Home,
+    ThreadPreview,
 }

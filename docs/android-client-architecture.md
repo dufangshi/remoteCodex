@@ -108,6 +108,7 @@ Android equivalents are intentionally native Compose components:
 - `ShellPanel.kt`
 - `RemoteCodexTheme.kt`
 - `RichMessageContent.kt`
+- `SupervisorHomeScreen.kt`
 
 The current thread detail screen is sample-data driven through `ThreadPreviewSample.kt`. The app shell now gates that preview behind a real connection setup screen, but the connected state only proves the selected supervisor or relay endpoint can authenticate and answer health/session requests.
 
@@ -119,7 +120,7 @@ The visual direction is close to the web mobile thread view, but not a literal D
 
 | Web thread-ui source | Android native equivalent | Current status |
 | --- | --- | --- |
-| `AppShellNavigation.tsx` | `AppShellPanels.kt` + `ThreadTopBar.kt` | Native app shell drawer with Workspaces/Threads/Shells sample navigation, supervisor summary, settings entry, shared close icon controls, and active-state badges. |
+| `AppShellNavigation.tsx` | `SupervisorHomeScreen.kt` + `AppShellPanels.kt` + `ThreadTopBar.kt` | Native connected home with Workspaces/Threads/Shells destinations, supervisor summary, live workspace/thread counts, recent thread/workspace rows from the supervisor snapshot, settings/change-connection actions, plus the in-thread app shell drawer with shared close icon controls and active-state badges. |
 | `AppShellNavContext.tsx` | `ThreadDetailPreviewScreen.kt` state + `ThemeMode.kt` | Local Compose state for nav/settings visibility plus persisted System/Light/Dark theme mode. |
 | `AppShellSettingsDialog` appearance section | `AppShellSettingsPanel` + `AppSettingsRepository.kt` | Settings panel with explicit System/Light/Dark theme selection, native theme glyphs, Active badges, and shared-preferences persistence. |
 | `AppShellSettingsDialog` plugin section | `AppShellSettingsPanel` + `AppShellPreview` | Read-only native plugin/renderers skeleton showing enabled state with shared selection glyphs, renderer status with graph badges, plugin source badges, capabilities, and import-policy placeholder. |
@@ -185,7 +186,7 @@ The visual direction is close to the web mobile thread view, but not a literal D
 
 Still open:
 
-- Real app shell navigation destinations: workspace home, thread list, shell list, import plugin, and backend settings are still preview-only.
+- Full app shell destination behavior is still open: the connected home now lists Workspaces/Threads/Shells and uses the supervisor snapshot, but workspace home, shell list, import plugin, backend settings, and thread-list drill-in actions are not yet complete.
 - Full markdown/GFM parity beyond the current native subset, especially KaTeX-quality math typesetting, advanced nested list edge cases, advanced syntax highlighting, and non-molecule plugin-rendered inline artifacts. Current Android math support keeps inline and display formulas readable as native monospaced notation but does not shape TeX into full mathematical layout.
 - Real image loading for markdown image sources is still open; Android currently renders stable native placeholders with alt text and basename.
 - Full Shiki parity for code blocks: language grammars, themes, token scopes, and line metadata are still open. Current Android highlighting is intentionally lightweight, with native copy affordances already present on fenced code and tool blocks.
