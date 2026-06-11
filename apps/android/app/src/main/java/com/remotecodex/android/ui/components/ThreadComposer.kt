@@ -422,7 +422,7 @@ private fun SlashToolboxPanel() {
         ToolboxRow(command = "/goal", status = "Open", description = "Create or update the active thread goal.")
         ForkPreviewGroup()
         SkillsPreviewGroup()
-        ToolboxRow(command = "/mcp", status = "Open", description = "Inspect MCP servers, tools, resources, and auth.")
+        McpPreviewGroup()
         ToolboxRow(command = "/hooks", status = "Open", description = "Review hook trust and project hook source.")
     }
 }
@@ -654,6 +654,155 @@ private fun SkillWarningRow(
             color = ThreadColors.ForegroundMuted,
             style = MaterialTheme.typography.labelSmall,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun McpPreviewGroup() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(ThreadColors.Surface)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    text = "/mcp",
+                    color = ThreadColors.Foreground,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "~/.codex/config.toml",
+                    color = ThreadColors.ForegroundMuted,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            GraphBadge(
+                label = "Add MCP",
+                variant = GraphBadgeVariant.Outline,
+            )
+        }
+        McpAddOptionRow(
+            title = "HTTP / Streamable HTTP",
+            mode = "Form",
+            description = "Add an MCP server with a name and URL.",
+        )
+        McpAddOptionRow(
+            title = "stdio / raw block",
+            mode = "TOML",
+            description = "Write a single provider config block.",
+        )
+        mcpServerPreviewItems.forEach { item ->
+            McpServerRow(item = item)
+        }
+    }
+}
+
+@Composable
+private fun McpAddOptionRow(
+    title: String,
+    mode: String,
+    description: String,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(ThreadColors.SurfaceStrong)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(10.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = title,
+                modifier = Modifier.weight(1f),
+                color = ThreadColors.ForegroundSoft,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = mode,
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+            )
+        }
+        Text(
+            text = description,
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun McpServerRow(item: McpServerPreviewItem) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(ThreadColors.CodeBackground)
+            .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(10.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    text = item.name,
+                    color = ThreadColors.CodeForeground,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "${item.toolCount} tools | ${item.resourceCount} resources | ${item.templateCount} templates",
+                    color = ThreadColors.ForegroundMuted,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            GraphBadge(
+                label = item.authStatus,
+                variant = GraphBadgeVariant.Outline,
+            )
+        }
+        Text(
+            text = item.toolPreview,
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
     }
@@ -984,6 +1133,15 @@ private data class SkillPreviewItem(
     val copied: Boolean = false,
 )
 
+private data class McpServerPreviewItem(
+    val name: String,
+    val toolCount: Int,
+    val resourceCount: Int,
+    val templateCount: Int,
+    val authStatus: String,
+    val toolPreview: String,
+)
+
 private enum class ShellToolTone {
     Neutral,
     Info,
@@ -1026,6 +1184,25 @@ private val skillsPreviewItems = listOf(
         scope = "global",
         invokeName = "\$openai-docs",
         description = "Looks up current OpenAI API guidance and returns source-backed answers.",
+    ),
+)
+
+private val mcpServerPreviewItems = listOf(
+    McpServerPreviewItem(
+        name = "openaiDeveloperDocs",
+        toolCount = 4,
+        resourceCount = 0,
+        templateCount = 0,
+        authStatus = "ready",
+        toolPreview = "Search docs | Fetch doc | OpenAPI spec | Endpoint list",
+    ),
+    McpServerPreviewItem(
+        name = "local-workspace",
+        toolCount = 7,
+        resourceCount = 3,
+        templateCount = 2,
+        authStatus = "local",
+        toolPreview = "Read file | List resources | Inspect schema | Run task",
     ),
 )
 
