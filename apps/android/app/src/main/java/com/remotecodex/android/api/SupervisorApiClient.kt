@@ -183,6 +183,33 @@ class SupervisorApiClient(
         }
     }
 
+    fun fetchThreadExportTurns(threadId: String): SupervisorThreadExportTurns {
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/export-turns"),
+        ).toThreadExportTurns()
+    }
+
+    fun downloadThreadTranscriptExport(threadId: String, request: ExportThreadRequest): SupervisorFileDownload {
+        val query = buildQuery(
+            "format" to request.format,
+            "mode" to request.mode,
+            "limit" to request.limit?.toString(),
+            "turnIds" to request.turnIds.takeIf { it.isNotEmpty() }?.joinToString(","),
+            "profile" to request.profile,
+            "includeTokenAndPrice" to request.includeTokenAndPrice.toString(),
+            "includeCommandOutput" to request.includeCommandOutput?.toString(),
+            "includeAbsolutePaths" to request.includeAbsolutePaths?.toString(),
+        )
+        return requestDownload(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/exports/pdf$query"),
+            fallbackFilename = if (request.format == "html") {
+                "remote-codex-transcript.html"
+            } else {
+                "remote-codex-transcript.pdf"
+            },
+        )
+    }
+
     fun forkThread(threadId: String, request: ForkThreadRequest): SupervisorThreadForkResult {
         val body = JSONObject()
             .put("mode", request.mode)
@@ -410,6 +437,26 @@ class SupervisorApiClient(
             throw SupervisorClientError.Parse("Response was not a valid JSON array.", error)
         }
     }
+
+    private fun requestDownload(path: String, fallbackFilename: String): SupervisorFileDownload {
+        val response = transport.request(
+            SupervisorHttpRequest(
+                url = config.normalizedBaseUrl + path,
+                method = "GET",
+                bearerToken = config.authToken,
+                accept = "*/*",
+            ),
+        )
+        if (response.statusCode !in 200..299) {
+            val message = response.body?.let(::parseErrorMessage) ?: "HTTP ${response.statusCode}"
+            throw SupervisorClientError.Http(response.statusCode, message, response.body)
+        }
+        return SupervisorFileDownload(
+            filename = parseContentDispositionFilename(response.headers["content-disposition"]) ?: fallbackFilename,
+            contentType = response.headers["content-type"],
+            bytes = response.bytes ?: response.body?.toByteArray(Charsets.UTF_8) ?: ByteArray(0),
+        )
+    }
 }
 
 data class SupervisorHttpRequest(
@@ -417,11 +464,14 @@ data class SupervisorHttpRequest(
     val method: String,
     val body: String? = null,
     val bearerToken: String? = null,
+    val accept: String = "application/json",
 )
 
 data class SupervisorHttpResponse(
     val statusCode: Int,
     val body: String?,
+    val headers: Map<String, String> = emptyMap(),
+    val bytes: ByteArray? = null,
 )
 
 interface SupervisorHttpTransport {
@@ -435,7 +485,7 @@ class UrlConnectionSupervisorHttpTransport : SupervisorHttpTransport {
                 requestMethod = request.method
                 connectTimeout = 10_000
                 readTimeout = 15_000
-                setRequestProperty("Accept", "application/json")
+                setRequestProperty("Accept", request.accept)
                 request.bearerToken?.takeIf { it.isNotBlank() }?.let { token ->
                     setRequestProperty("Authorization", "Bearer $token")
                 }
@@ -454,8 +504,20 @@ class UrlConnectionSupervisorHttpTransport : SupervisorHttpTransport {
         try {
             val status = connection.responseCode
             val stream = if (status in 200..299) connection.inputStream else connection.errorStream
-            val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
-            return SupervisorHttpResponse(statusCode = status, body = body)
+            val bytes = stream?.use { it.readBytes() }
+            val contentType = connection.getHeaderField("Content-Type")
+            val body = if (contentType?.contains("text", ignoreCase = true) == true ||
+                contentType?.contains("json", ignoreCase = true) == true
+            ) {
+                bytes?.toString(Charsets.UTF_8)
+            } else {
+                null
+            }
+            val headers = connection.headerFields
+                .filterKeys { key -> key != null }
+                .mapKeys { (key, _) -> key.lowercase() }
+                .mapValues { (_, values) -> values.firstOrNull().orEmpty() }
+            return SupervisorHttpResponse(statusCode = status, body = body, headers = headers, bytes = bytes)
         } catch (error: IOException) {
             throw SupervisorClientError.Network("Supervisor request failed.", error)
         } finally {
@@ -683,6 +745,26 @@ private fun JSONObject.toThreadForkResult(): SupervisorThreadForkResult {
     )
 }
 
+private fun JSONObject.toThreadExportTurns(): SupervisorThreadExportTurns {
+    val turnsJson = optJSONArray("turns") ?: org.json.JSONArray()
+    return SupervisorThreadExportTurns(
+        turns = List(turnsJson.length()) { index ->
+            turnsJson.getJSONObject(index).toThreadExportTurnOption()
+        },
+        totalTurnCount = optInt("totalTurnCount", turnsJson.length()),
+    )
+}
+
+private fun JSONObject.toThreadExportTurnOption(): SupervisorThreadExportTurnOption {
+    return SupervisorThreadExportTurnOption(
+        turnId = optString("turnId"),
+        turnIndex = optInt("turnIndex", 0),
+        startedAt = optNullableString("startedAt"),
+        status = optString("status"),
+        userPromptPreview = optString("userPromptPreview"),
+    )
+}
+
 private fun JSONObject.toThreadSkills(): SupervisorThreadSkills {
     val skillsJson = optJSONArray("skills") ?: org.json.JSONArray()
     val errorsJson = optJSONArray("errors") ?: org.json.JSONArray()
@@ -907,4 +989,27 @@ private fun parseErrorMessage(body: String): String {
     } catch (_: Exception) {
         body.ifBlank { "Request failed." }
     }
+}
+
+private fun parseContentDispositionFilename(value: String?): String? {
+    if (value.isNullOrBlank()) {
+        return null
+    }
+    val utf8Match = Regex("""filename\*=UTF-8''([^;]+)""", RegexOption.IGNORE_CASE).find(value)
+    if (utf8Match != null) {
+        val encoded = utf8Match.groupValues.getOrNull(1)?.trim().orEmpty()
+        return runCatching {
+            java.net.URLDecoder.decode(encoded, Charsets.UTF_8.name())
+        }.getOrDefault(encoded).takeIf { it.isNotBlank() }
+    }
+    val quotedMatch = Regex("filename=\"([^\"]+)\"", RegexOption.IGNORE_CASE).find(value)
+    if (quotedMatch != null) {
+        return quotedMatch.groupValues.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
+    }
+    return Regex("""filename=([^;]+)""", RegexOption.IGNORE_CASE)
+        .find(value)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
 }

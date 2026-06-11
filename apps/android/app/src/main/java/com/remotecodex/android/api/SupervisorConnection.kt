@@ -318,6 +318,36 @@ data class SupervisorThreadForkResult(
     val sourceTurnIndex: Int?,
 )
 
+data class SupervisorThreadExportTurns(
+    val turns: List<SupervisorThreadExportTurnOption>,
+    val totalTurnCount: Int,
+)
+
+data class SupervisorThreadExportTurnOption(
+    val turnId: String,
+    val turnIndex: Int,
+    val startedAt: String?,
+    val status: String,
+    val userPromptPreview: String,
+)
+
+data class ExportThreadRequest(
+    val format: String = "pdf",
+    val mode: String,
+    val limit: Int? = null,
+    val turnIds: List<String> = emptyList(),
+    val profile: String = "review",
+    val includeTokenAndPrice: Boolean = true,
+    val includeCommandOutput: Boolean? = null,
+    val includeAbsolutePaths: Boolean? = null,
+)
+
+data class SupervisorFileDownload(
+    val filename: String,
+    val contentType: String?,
+    val bytes: ByteArray,
+)
+
 data class SupervisorThreadSkills(
     val cwd: String,
     val skills: List<SupervisorAgentSkill>,

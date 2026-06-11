@@ -10,6 +10,8 @@ import com.remotecodex.android.api.SupervisorAgentMcpServer
 import com.remotecodex.android.api.SupervisorAgentMcpTool
 import com.remotecodex.android.api.SupervisorAgentSkill
 import com.remotecodex.android.api.SupervisorAgentSkillError
+import com.remotecodex.android.api.SupervisorThreadExportTurnOption
+import com.remotecodex.android.api.SupervisorThreadExportTurns
 import com.remotecodex.android.api.SupervisorThreadHooks
 import com.remotecodex.android.api.SupervisorThreadForkTurnOption
 import com.remotecodex.android.api.SupervisorThreadMcpServers
@@ -126,6 +128,18 @@ class ThreadDetailMapperTest {
                     status = "completed",
                 ),
             ),
+            exportTurns = SupervisorThreadExportTurns(
+                turns = listOf(
+                    SupervisorThreadExportTurnOption(
+                        turnId = "turn-1",
+                        turnIndex = 1,
+                        startedAt = "2026-06-11T18:58:00Z",
+                        status = "completed",
+                        userPromptPreview = "Continue",
+                    ),
+                ),
+                totalTurnCount = 1,
+            ),
             skills = SupervisorThreadSkills(
                 cwd = "/repo",
                 skills = listOf(
@@ -202,6 +216,9 @@ class ThreadDetailMapperTest {
         assertEquals("turn-1", preview.composer.forkTurnOptions.turns.single().turnId)
         assertEquals(1, preview.composer.forkTurnOptions.turns.single().turnIndex)
         assertEquals("completed", preview.composer.forkTurnOptions.turns.single().status)
+        assertEquals("turn-1", preview.exportTurns.single().id)
+        assertEquals(1, preview.exportTurns.single().number)
+        assertEquals("Continue", preview.exportTurns.single().promptPreview)
         assertEquals("android-client", preview.composer.skillsPanel.skills.single().name)
         assertEquals("Native Android", preview.composer.skillsPanel.skills.single().interfaceShortDescription)
         assertEquals("Bad skill", preview.composer.skillsPanel.errors.single().message)

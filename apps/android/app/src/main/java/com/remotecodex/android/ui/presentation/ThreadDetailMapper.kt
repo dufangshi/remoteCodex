@@ -3,6 +3,7 @@ package com.remotecodex.android.ui.presentation
 import com.remotecodex.android.api.SupervisorThreadDetail
 import com.remotecodex.android.api.SupervisorThreadActionQuestion
 import com.remotecodex.android.api.SupervisorThreadActionRequest
+import com.remotecodex.android.api.SupervisorThreadExportTurns
 import com.remotecodex.android.api.SupervisorThreadHooks
 import com.remotecodex.android.api.SupervisorThreadForkTurnOption
 import com.remotecodex.android.api.SupervisorThreadMcpServers
@@ -37,6 +38,7 @@ import com.remotecodex.android.ui.model.ComposerSkillErrorPreview
 import com.remotecodex.android.ui.model.ComposerSkillPreview
 import com.remotecodex.android.ui.model.ComposerSkillScopePreview
 import com.remotecodex.android.ui.model.ComposerSkillsPanelPreview
+import com.remotecodex.android.ui.model.ExportTurnPreview
 import com.remotecodex.android.ui.model.MessageAuthor
 import com.remotecodex.android.ui.model.MessagePreview
 import com.remotecodex.android.ui.model.PendingRequestKindPreview
@@ -68,6 +70,7 @@ fun buildThreadDetailPreviewFromSupervisor(
     workspaceTree: SupervisorWorkspaceTreeNode? = null,
     workspaceFilePreview: SupervisorWorkspaceFilePreview? = null,
     shellState: SupervisorThreadShellState? = null,
+    exportTurns: SupervisorThreadExportTurns? = null,
     forkTurns: List<SupervisorThreadForkTurnOption>? = null,
     forkTurnsError: String? = null,
     skills: SupervisorThreadSkills? = null,
@@ -125,6 +128,24 @@ fun buildThreadDetailPreviewFromSupervisor(
             },
         ),
         pendingRequests = detail.pendingRequests.map { request -> request.toPendingRequestPreview() },
+        exportTurns = exportTurns?.turns?.map { turn ->
+            ExportTurnPreview(
+                id = turn.turnId,
+                number = turn.turnIndex,
+                timeLabel = turn.startedAt?.let(::shortTimeLabel) ?: "Queued",
+                status = turn.status.toThreadStatus(),
+                promptPreview = turn.userPromptPreview,
+            )
+        } ?: detail.turns.mapIndexed { index, turn ->
+            ExportTurnPreview(
+                id = turn.id,
+                number = index + 1,
+                timeLabel = turn.startedAt?.let(::shortTimeLabel) ?: "Queued",
+                status = turn.status.toThreadStatus(),
+                promptPreview = turn.items.firstOrNull { item -> item.kind == "userMessage" }?.text
+                    ?: "Turn ${index + 1}",
+            )
+        },
         workspacePreview = detail.workspace.toWorkspacePreview(
             tree = workspaceTree,
             filePreview = workspaceFilePreview,

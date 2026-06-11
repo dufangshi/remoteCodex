@@ -20,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.remotecodex.android.api.ExportThreadRequest
 import com.remotecodex.android.api.ForkThreadRequest
 import com.remotecodex.android.api.RespondThreadRequest
 import com.remotecodex.android.api.RespondThreadRequestAnswer
@@ -76,6 +77,7 @@ fun ThreadDetailScreen(
     var pendingGoalUpdate by remember(threadId) { mutableStateOf<UpdateThreadGoalRequest?>(null) }
     var pendingCompact by remember(threadId) { mutableStateOf(false) }
     var pendingForkRequest by remember(threadId) { mutableStateOf<ForkThreadRequest?>(null) }
+    var pendingExportRequest by remember(threadId) { mutableStateOf<ExportThreadRequest?>(null) }
     var pendingTrustHook by remember(threadId) { mutableStateOf<TrustThreadHookRequest?>(null) }
     var pendingUntrustHook by remember(threadId) { mutableStateOf<UntrustThreadHookRequest?>(null) }
     var pendingCreateShell by remember(threadId) { mutableStateOf(false) }
@@ -251,6 +253,22 @@ fun ThreadDetailScreen(
                 onOpenThread(forkResult.thread.thread.id)
             }
             .onFailure { throwable -> threadActionError = throwable.message ?: "Fork failed." }
+    }
+
+    LaunchedEffect(pendingExportRequest) {
+        val exportRequest = pendingExportRequest ?: return@LaunchedEffect
+        threadActionBusy = true
+        threadActionError = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching { client.downloadThreadTranscriptExport(threadId, exportRequest) }
+        }
+        threadActionBusy = false
+        pendingExportRequest = null
+        result
+            .onSuccess { download ->
+                threadActionError = "Export ready: ${download.filename} (${download.bytes.size} bytes)"
+            }
+            .onFailure { throwable -> threadActionError = throwable.message ?: "Export failed." }
     }
 
     LaunchedEffect(pendingTrustHook) {
@@ -513,6 +531,9 @@ fun ThreadDetailScreen(
             onForkTurn = { turnId ->
                 pendingForkRequest = ForkThreadRequest(mode = "turn", turnId = turnId)
             },
+            onExportThread = { exportRequest ->
+                pendingExportRequest = exportRequest
+            },
             onTrustHook = { key, currentHash ->
                 pendingTrustHook = TrustThreadHookRequest(key = key, currentHash = currentHash)
             },
@@ -606,6 +627,7 @@ private fun SupervisorApiClient.fetchThreadDetailPreview(
         }
     }
     val shellState = runCatching { fetchThreadShellState(threadId) }.getOrNull()
+    val exportTurnsResult = runCatching { fetchThreadExportTurns(threadId) }
     val forkTurnsResult = runCatching { fetchThreadForkTurns(threadId) }
     val skillsResult = runCatching { fetchThreadSkills(threadId) }
     val mcpServersResult = runCatching { fetchThreadMcpServers(threadId) }
@@ -615,6 +637,7 @@ private fun SupervisorApiClient.fetchThreadDetailPreview(
         workspaceTree = tree,
         workspaceFilePreview = filePreview,
         shellState = shellState,
+        exportTurns = exportTurnsResult.getOrNull(),
         forkTurns = forkTurnsResult.getOrNull(),
         forkTurnsError = forkTurnsResult.exceptionOrNull()?.message,
         skills = skillsResult.getOrNull(),

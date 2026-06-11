@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import com.remotecodex.android.settings.ThemeMode
 import com.remotecodex.android.api.SupervisorConnectionConfig
 import com.remotecodex.android.api.SupervisorHomeSnapshot
+import com.remotecodex.android.api.ExportThreadRequest
 import com.remotecodex.android.api.UpdateThreadGoalRequest
 import com.remotecodex.android.api.UpdateThreadSettingsRequest
 import com.remotecodex.android.ui.model.DetailPreview
@@ -104,6 +105,7 @@ fun ThreadDetailSurface(
     onCompactThread: (() -> Unit)? = null,
     onForkLatest: (() -> Unit)? = null,
     onForkTurn: ((String) -> Unit)? = null,
+    onExportThread: ((ExportThreadRequest) -> Unit)? = null,
     onTrustHook: ((String, String) -> Unit)? = null,
     onUntrustHook: ((String) -> Unit)? = null,
     onCreateShell: (() -> Unit)? = null,
@@ -308,7 +310,7 @@ fun ThreadDetailSurface(
                 ThreadActionDialogOverlay(
                     dialog = dialog,
                     threadTitle = threadActionRoom?.title ?: displayedDetail.title,
-                    exportTurns = ThreadPreviewSample.exportTurns,
+                    exportTurns = displayedDetail.exportTurns,
                     onClose = {
                         threadActionDialog = null
                         threadActionRoom = null
@@ -316,6 +318,7 @@ fun ThreadDetailSurface(
                     busy = threadActionBusy,
                     error = threadActionError,
                     onRenameThread = onRenameThread,
+                    onExportThread = onExportThread,
                     onDeleteThread = onDeleteThread,
                     modifier = Modifier
                         .fillMaxSize()

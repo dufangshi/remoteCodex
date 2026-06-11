@@ -645,6 +645,7 @@ object ThreadPreviewSample {
                 ),
             ),
         ),
+        exportTurns = exportTurns,
         workspacePreview = WorkspacePreview(
             title = "Workspace",
             rootLabel = "remoteCodex-main",

@@ -209,6 +209,62 @@ class SupervisorApiClientTest {
     }
 
     @Test
+    fun threadExportTurnsAndDownloadUseRelayDevicePath() {
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(
+                200,
+                """{"turns":[{"turnId":"turn-1","turnIndex":1,"startedAt":"2026-01-03T00:00:00.000Z","status":"completed","userPromptPreview":"Ship export"}],"totalTurnCount":1}""",
+            ),
+            SupervisorHttpResponse(
+                statusCode = 200,
+                body = null,
+                headers = mapOf(
+                    "content-disposition" to """attachment; filename="android-export.html"""",
+                    "content-type" to "text/html",
+                ),
+                bytes = "<html>ok</html>".toByteArray(),
+            ),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        val turns = client.fetchThreadExportTurns("thread-1")
+        val download = client.downloadThreadTranscriptExport(
+            "thread-1",
+            ExportThreadRequest(
+                format = "html",
+                mode = "selected",
+                turnIds = listOf("turn-1"),
+                includeTokenAndPrice = false,
+            ),
+        )
+
+        assertEquals("turn-1", turns.turns.single().turnId)
+        assertEquals("Ship export", turns.turns.single().userPromptPreview)
+        assertEquals("android-export.html", download.filename)
+        assertEquals("text/html", download.contentType)
+        assertEquals("<html>ok</html>", download.bytes.toString(Charsets.UTF_8))
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1/export-turns",
+            transport.requests[0].url,
+        )
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1/exports/pdf?format=html&mode=selected&turnIds=turn-1&profile=review&includeTokenAndPrice=false",
+            transport.requests[1].url,
+        )
+        assertEquals("*/*", transport.requests[1].accept)
+        assertEquals("relay-token", transport.requests[0].bearerToken)
+        assertEquals("relay-token", transport.requests[1].bearerToken)
+    }
+
+    @Test
     fun composerPanelsUseRelayDevicePathAndParseSkillsMcpHooks() {
         val transport = RecordingTransport(
             SupervisorHttpResponse(

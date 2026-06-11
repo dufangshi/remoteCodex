@@ -24,6 +24,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.remotecodex.android.api.ExportThreadRequest
 import com.remotecodex.android.ui.model.ExportTurnPreview
 import com.remotecodex.android.ui.model.ThreadStatus
 import com.remotecodex.android.ui.presentation.exportStatusLabel
@@ -56,6 +57,7 @@ fun ThreadActionDialogOverlay(
     busy: Boolean = false,
     error: String? = null,
     onRenameThread: ((String) -> Unit)? = null,
+    onExportThread: ((ExportThreadRequest) -> Unit)? = null,
     onDeleteThread: (() -> Unit)? = null,
 ) {
     GraphDialogOverlay(
@@ -76,6 +78,9 @@ fun ThreadActionDialogOverlay(
             ThreadActionDialog.Export -> ExportTranscriptDialogPreview(
                 exportTurns = exportTurns,
                 onClose = onClose,
+                busy = busy,
+                error = error,
+                onExportThread = onExportThread,
             )
             ThreadActionDialog.Delete -> DeleteThreadDialogPreview(
                 threadTitle = threadTitle,
@@ -241,6 +246,9 @@ private fun ThreadTitleField(
 private fun ExportTranscriptDialogPreview(
     exportTurns: List<ExportTurnPreview>,
     onClose: () -> Unit,
+    busy: Boolean,
+    error: String?,
+    onExportThread: ((ExportThreadRequest) -> Unit)?,
 ) {
     var exportMode by rememberSaveable { mutableStateOf(ExportMode.Latest) }
     var exportFormat by rememberSaveable { mutableStateOf(ExportFormat.Pdf) }
@@ -256,7 +264,8 @@ private fun ExportTranscriptDialogPreview(
     } else {
         selectedTurnCount
     }
-    val canExport = !exportBusy && (exportMode == ExportMode.Latest || selectedTurnCount > 0)
+    val effectiveBusy = busy || exportBusy
+    val canExport = !effectiveBusy && (exportMode == ExportMode.Latest || selectedTurnCount > 0)
     val exportSummary = if (exportMode == ExportMode.Custom && selectedTurnCount == 0) {
         "Select at least one turn to export"
     } else {
@@ -282,17 +291,46 @@ private fun ExportTranscriptDialogPreview(
                     overflow = TextOverflow.Ellipsis,
                 )
                 GraphDialogFooter(
-                    primaryLabel = if (exportBusy) "Exporting..." else "Export ${exportFormat.label}",
+                    primaryLabel = if (effectiveBusy) "Exporting..." else "Export ${exportFormat.label}",
                     primaryTone = GraphDialogActionTone.Warning,
                     onCancel = onClose,
                     primaryEnabled = canExport,
-                    onPrimary = { exportBusy = true },
+                    onPrimary = {
+                        val request = ExportThreadRequest(
+                            format = exportFormat.name.lowercase(),
+                            mode = if (exportMode == ExportMode.Latest) "latest" else "selected",
+                            limit = if (exportMode == ExportMode.Latest) 10 else null,
+                            turnIds = if (exportMode == ExportMode.Custom) selectedTurnIds else emptyList(),
+                            profile = "review",
+                            includeTokenAndPrice = includeTokenAndPrice,
+                        )
+                        if (onExportThread != null) {
+                            onExportThread(request)
+                        } else {
+                            exportBusy = true
+                        }
+                    },
                     compact = true,
                 )
             }
         },
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            error?.takeIf { it.isNotBlank() }?.let { message ->
+                Text(
+                    text = message,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(ThreadColors.WarningSoft)
+                        .border(1.dp, ThreadColors.Warning.copy(alpha = 0.36f), RoundedCornerShape(10.dp))
+                        .padding(10.dp),
+                    color = ThreadColors.Warning,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ChoicePill(
                     label = "Latest 10",

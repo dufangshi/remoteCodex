@@ -152,6 +152,7 @@ data class ThreadDetailPreview(
     val turns: List<TurnPreview>,
     val timelineAuxiliary: TimelineAuxiliaryPreview = TimelineAuxiliaryPreview(),
     val pendingRequests: List<PendingRequestPreview> = emptyList(),
+    val exportTurns: List<ExportTurnPreview> = emptyList(),
     val workspacePreview: WorkspacePreview,
     val shellPreview: ShellPreview,
     val composer: ComposerPreview = ComposerPreview(),
