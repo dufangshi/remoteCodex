@@ -88,10 +88,10 @@ import com.remotecodex.android.ui.presentation.GraphChatMessageFrameState
 import com.remotecodex.android.ui.presentation.GraphChatHistoryStatusState
 import com.remotecodex.android.ui.presentation.GraphChatHistoryStatusTone
 import com.remotecodex.android.ui.presentation.MessageStatusModel
+import com.remotecodex.android.ui.presentation.MessageStatusTone
 import com.remotecodex.android.ui.presentation.ComposerStatusTone
 import com.remotecodex.android.ui.presentation.AuxiliaryUserNoteCardState
 import com.remotecodex.android.ui.presentation.GraphChatPlainTextSegment
-import com.remotecodex.android.ui.presentation.PendingSteerToneState
 import com.remotecodex.android.ui.presentation.TimelineNoteToneState
 import com.remotecodex.android.ui.presentation.UserMessageAttachmentState
 import com.remotecodex.android.ui.presentation.buildGraphChatImageHistoryState
@@ -408,51 +408,23 @@ private fun EphemeralUserNoteCard(text: String) {
 
 @Composable
 private fun AuxiliaryUserNoteCard(state: AuxiliaryUserNoteCardState) {
-    val queuedLike = state.tone == PendingSteerToneState.QueuedUserMessage
-    val background = if (queuedLike) ThreadColors.UserBubble else ThreadColors.WarningSoft.copy(alpha = 0.46f)
-    val border = if (queuedLike) ThreadColors.UserBubbleBorder else ThreadColors.Warning.copy(alpha = 0.36f)
-    val statusColor = if (queuedLike) ThreadColors.UserBubbleText.copy(alpha = 0.76f) else ThreadColors.Warning
-    val promptColor = if (queuedLike) ThreadColors.UserBubbleText else ThreadColors.ForegroundSoft
-    val timeColor = if (queuedLike) ThreadColors.UserBubbleText.copy(alpha = 0.58f) else ThreadColors.ForegroundMuted
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(11.dp))
-            .background(background)
-            .border(1.dp, border, RoundedCornerShape(11.dp))
-            .padding(11.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        if (state.statusLabel.isNotEmpty()) {
-            Text(
-                text = state.statusLabel,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(ThreadColors.Panel.copy(alpha = 0.72f))
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                color = statusColor,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
-        Text(
-            text = state.text,
-            modifier = Modifier.weight(1f),
-            color = promptColor,
-            style = MaterialTheme.typography.labelMedium,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-        state.timeLabel?.let { timeLabel ->
-            Text(
-                text = timeLabel,
-                color = timeColor,
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-            )
-        }
-    }
+    val footerState = GraphChatMessageFrameState(
+        isUser = true,
+        senderLabel = null,
+        headerStatus = null,
+        footerStatus = state.statusLabel
+            .takeIf { it.isNotEmpty() }
+            ?.let { label -> MessageStatusModel(label, MessageStatusTone.Neutral) },
+        showReasoningBeforeContent = false,
+        showFooterMetadata = state.statusLabel.isNotEmpty() || state.timeLabel != null,
+        showCopyAction = false,
+        timeLabel = state.timeLabel,
+    )
+    UserMessageFrameContent(
+        text = state.text,
+        frameState = footerState,
+        modifier = Modifier.messageBubbleContainer(isUser = true),
+    )
 }
 
 private enum class TimelineNoteTone {
@@ -673,8 +645,10 @@ private fun MessageBubble(
             ReasoningAccordion(items = message.reasoningItems)
         }
         if (frameState.isUser) {
-            UserMessageBody(text = message.richText)
-            UserMessageFooter(frameState = frameState)
+            UserMessageFrameContent(
+                text = message.richText,
+                frameState = frameState,
+            )
         } else {
             RichMessageContent(content = message.richText)
         }
@@ -705,6 +679,23 @@ private fun MessageBubble(
                 HistoryGroupCard(group = entry.group, onOpenDetail = onOpenDetail)
             },
         )
+    }
+}
+
+@Composable
+private fun UserMessageFrameContent(
+    text: String,
+    frameState: GraphChatMessageFrameState,
+    modifier: Modifier = Modifier,
+    trailingContent: @Composable () -> Unit = {},
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        UserMessageBody(text = text)
+        trailingContent()
+        UserMessageFooter(frameState = frameState)
     }
 }
 
