@@ -1993,6 +1993,30 @@ class ThreadPresentationTest {
     }
 
     @Test
+    fun keepsShellComposerSendEnabledWhenPromptDisabled() {
+        assertEquals(
+            false,
+            buildComposerPromptSlotState(
+                prompt = ComposerPromptPreview(
+                    text = "ls",
+                    placeholder = "Shell command",
+                    disabled = true,
+                ),
+                activeView = ComposerActiveView.Shell,
+                actionState = ComposerActionState(
+                    primaryLabel = "Send",
+                    primaryKind = ComposerPrimaryActionKind.Send,
+                    interruptLabel = "Send Ctrl-C",
+                    showInterrupt = false,
+                    sendEnabled = true,
+                ),
+                busy = false,
+                goalBusy = false,
+            ).sendDisabled,
+        )
+    }
+
+    @Test
     fun buildsShellComposerPromptInputState() {
         assertEquals(
             ComposerShellPromptInputState(

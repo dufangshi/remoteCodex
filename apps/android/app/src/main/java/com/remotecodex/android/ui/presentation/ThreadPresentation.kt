@@ -2167,6 +2167,11 @@ fun buildComposerPromptSlotState(
         goalComposeMode && !isShellView -> "Describe the goal the backend should continue working toward..."
         else -> prompt.placeholder.takeIf { it.isNotBlank() } ?: "Ask Codex"
     }
+    val promptSendDisabled = if (isShellView) {
+        !actionState.sendEnabled || goalBusy || busy
+    } else {
+        !actionState.sendEnabled || goalBusy || busy || prompt.disabled
+    }
     val activeAttachments = if (isShellView) {
         emptyList()
     } else {
@@ -2182,7 +2187,7 @@ fun buildComposerPromptSlotState(
         canInterrupt = actionState.showInterrupt || actionState.primaryKind == ComposerPrimaryActionKind.Stop,
         interruptLabel = actionState.interruptLabel,
         sendButtonLabel = actionState.primaryLabel,
-        sendDisabled = !actionState.sendEnabled || goalBusy || busy || prompt.disabled,
+        sendDisabled = promptSendDisabled,
         attachmentChips = activeAttachments.map(::buildComposerPromptAttachmentState),
         inputModeLabel = if (isShellView) "Shell input" else "Prompt",
         promptSegments = if (isShellView) {
