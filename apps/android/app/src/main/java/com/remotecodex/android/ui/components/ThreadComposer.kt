@@ -423,7 +423,7 @@ private fun SlashToolboxPanel() {
         ForkPreviewGroup()
         SkillsPreviewGroup()
         McpPreviewGroup()
-        ToolboxRow(command = "/hooks", status = "Open", description = "Review hook trust and project hook source.")
+        HooksPreviewGroup()
     }
 }
 
@@ -808,6 +808,205 @@ private fun McpServerRow(item: McpServerPreviewItem) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun HooksPreviewGroup() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(ThreadColors.Surface)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(12.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    text = "/hooks",
+                    color = ThreadColors.Foreground,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = ".codex/hooks.json",
+                    color = ThreadColors.ForegroundMuted,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            GraphBadge(
+                label = "Add Hook",
+                variant = GraphBadgeVariant.Outline,
+            )
+        }
+        HookFormPreview()
+        HookStatusRow(
+            message = "Project hook changed since last trust.",
+            tone = HookStatusTone.Warning,
+        )
+        hooksPreviewItems.forEach { item ->
+            HookPreviewRow(item = item)
+        }
+    }
+}
+
+@Composable
+private fun HookFormPreview() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(ThreadColors.SurfaceStrong)
+            .border(1.dp, ThreadColors.Border, RoundedCornerShape(10.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HookFieldPreview(label = "Scope", value = "Project", modifier = Modifier.weight(1f))
+            HookFieldPreview(label = "Event", value = "PreToolUse", modifier = Modifier.weight(1f))
+        }
+        HookFieldPreview(label = "Matcher", value = "Bash")
+        HookFieldPreview(label = "Command", value = "scripts/check-command.sh", mono = true)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HookFieldPreview(label = "Timeout", value = "30s", modifier = Modifier.weight(1f))
+            HookFieldPreview(label = "Status", value = "Checking shell command", modifier = Modifier.weight(1f))
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            GraphBadge(label = "Back", variant = GraphBadgeVariant.Outline)
+            GraphBadge(label = "Write Hook", variant = GraphBadgeVariant.Default)
+        }
+    }
+}
+
+@Composable
+private fun HookFieldPreview(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    mono: Boolean = false,
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(9.dp))
+            .background(ThreadColors.CodeBackground)
+            .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(9.dp))
+            .padding(horizontal = 9.dp, vertical = 7.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Text(
+            text = label,
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = value,
+            color = ThreadColors.CodeForeground,
+            style = if (mono) MaterialTheme.typography.labelSmall else MaterialTheme.typography.bodySmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun HookPreviewRow(item: HookPreviewItem) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(ThreadColors.CodeBackground)
+            .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(10.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Text(
+            text = if (item.matcher.isBlank()) item.event else "${item.event} | ${item.matcher}",
+            color = ThreadColors.CodeForeground,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = item.command,
+            color = ThreadColors.ForegroundMuted,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (item.statusMessage.isNotBlank()) {
+            Text(
+                text = item.statusMessage,
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            GraphBadge(label = "Edit", variant = GraphBadgeVariant.Outline)
+            GraphBadge(label = item.trust, variant = GraphBadgeVariant.Outline)
+            GraphBadge(label = item.source, variant = GraphBadgeVariant.Outline)
+            GraphBadge(label = if (item.enabled) "Enabled" else "Disabled", variant = GraphBadgeVariant.Outline)
+            GraphBadge(label = "${item.timeoutSec}s", variant = GraphBadgeVariant.Outline)
+        }
+    }
+}
+
+@Composable
+private fun HookStatusRow(
+    message: String,
+    tone: HookStatusTone,
+) {
+    val foreground = when (tone) {
+        HookStatusTone.Warning -> ThreadColors.Warning
+        HookStatusTone.Error -> ThreadColors.Danger
+        HookStatusTone.Success -> ThreadColors.Success
+    }
+    val background = when (tone) {
+        HookStatusTone.Warning -> ThreadColors.WarningSoft.copy(alpha = 0.52f)
+        HookStatusTone.Error -> ThreadColors.DangerSoft.copy(alpha = 0.56f)
+        HookStatusTone.Success -> ThreadColors.SuccessSoft.copy(alpha = 0.54f)
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(background)
+            .border(1.dp, foreground.copy(alpha = 0.34f), RoundedCornerShape(10.dp))
+            .padding(10.dp),
+    ) {
+        Text(
+            text = message,
+            color = foreground,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
 @Composable
 private fun AttachmentPanel() {
     ComposerMenuSurface(title = "Add attachment", subtitle = "Prompt context") {
@@ -1142,10 +1341,27 @@ private data class McpServerPreviewItem(
     val toolPreview: String,
 )
 
+private data class HookPreviewItem(
+    val event: String,
+    val matcher: String,
+    val command: String,
+    val statusMessage: String,
+    val trust: String,
+    val source: String,
+    val enabled: Boolean,
+    val timeoutSec: Int,
+)
+
 private enum class ShellToolTone {
     Neutral,
     Info,
     Danger,
+}
+
+private enum class HookStatusTone {
+    Warning,
+    Error,
+    Success,
 }
 
 private enum class AttachmentTileIcon {
@@ -1203,6 +1419,29 @@ private val mcpServerPreviewItems = listOf(
         templateCount = 2,
         authStatus = "local",
         toolPreview = "Read file | List resources | Inspect schema | Run task",
+    ),
+)
+
+private val hooksPreviewItems = listOf(
+    HookPreviewItem(
+        event = "PreToolUse",
+        matcher = "Bash",
+        command = "scripts/check-command.sh",
+        statusMessage = "Checking shell command",
+        trust = "modified",
+        source = "project",
+        enabled = true,
+        timeoutSec = 30,
+    ),
+    HookPreviewItem(
+        event = "UserPromptSubmit",
+        matcher = "",
+        command = "scripts/log-prompt.sh",
+        statusMessage = "Prompt audit",
+        trust = "trusted",
+        source = "global",
+        enabled = true,
+        timeoutSec = 10,
     ),
 )
 
