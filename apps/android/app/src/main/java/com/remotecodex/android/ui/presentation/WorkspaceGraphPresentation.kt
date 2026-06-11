@@ -23,6 +23,9 @@ data class WorkspaceGraphNodeState(
     val id: String,
     val label: String,
     val description: String?,
+    val canvasLabel: String,
+    val canvasDescription: String?,
+    val statusLabel: String?,
     val role: WorkspaceGraphNodeRole,
     val status: ToolStatus?,
     val xFraction: Float,
@@ -127,6 +130,8 @@ fun buildWorkspaceGraphState(inputNodes: List<WorkspaceGraphInputNode>): Workspa
         val depth = depths[node.id] ?: 0
         val group = groupedIds[depth].orEmpty()
         val indexInDepth = group.indexOf(node.id).coerceAtLeast(0)
+        val normalizedLabel = node.name.trim().ifEmpty { node.id }
+        val normalizedDescription = node.description?.trim()?.takeIf { it.isNotEmpty() }
         val xFraction = if (maxDepth == 0) {
             0.5f
         } else {
@@ -135,8 +140,11 @@ fun buildWorkspaceGraphState(inputNodes: List<WorkspaceGraphInputNode>): Workspa
         val yFraction = (indexInDepth + 1).toFloat() / (group.size + 1).toFloat()
         WorkspaceGraphNodeState(
             id = node.id,
-            label = node.name.trim().ifEmpty { node.id },
-            description = node.description?.trim()?.takeIf { it.isNotEmpty() },
+            label = normalizedLabel,
+            description = normalizedDescription,
+            canvasLabel = workspaceGraphCanvasLabel(normalizedLabel),
+            canvasDescription = normalizedDescription?.let(::workspaceGraphCanvasDescription),
+            statusLabel = node.status?.let(::toolStatusLabel),
             role = node.role,
             status = node.status,
             xFraction = xFraction,
@@ -202,4 +210,19 @@ private fun workspaceGraphRoleLabel(role: WorkspaceGraphNodeRole): String {
         WorkspaceGraphNodeRole.Tool -> "Tool"
         WorkspaceGraphNodeRole.Artifact -> "Artifact"
     }
+}
+
+private fun workspaceGraphCanvasLabel(label: String): String {
+    return label.trim().ellipsizeWorkspaceGraphText(maxChars = 18)
+}
+
+private fun workspaceGraphCanvasDescription(description: String): String {
+    return description.trim().ellipsizeWorkspaceGraphText(maxChars = 28)
+}
+
+private fun String.ellipsizeWorkspaceGraphText(maxChars: Int): String {
+    if (length <= maxChars) {
+        return this
+    }
+    return "${take(maxChars - 3).trimEnd()}..."
 }

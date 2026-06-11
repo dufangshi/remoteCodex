@@ -31,17 +31,23 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.remotecodex.android.ui.model.ToolCallPreview
 import com.remotecodex.android.ui.model.ToolStatus
 import com.remotecodex.android.ui.model.WorkspaceNodeKind
@@ -51,8 +57,8 @@ import com.remotecodex.android.ui.presentation.WorkspaceGraphNodeRole
 import com.remotecodex.android.ui.presentation.WorkspaceGraphNodeState
 import com.remotecodex.android.ui.presentation.WorkspaceGraphRowState
 import com.remotecodex.android.ui.presentation.WorkspaceGraphState
-import com.remotecodex.android.ui.presentation.toolStatusLabel
 import com.remotecodex.android.ui.presentation.buildWorkspaceGraphState
+import com.remotecodex.android.ui.presentation.toolStatusLabel
 import com.remotecodex.android.ui.theme.ThreadColors
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -110,6 +116,29 @@ fun WorkspacePanel(
             )
         }
     }
+}
+
+private fun edgeAnchor(
+    center: Offset,
+    toward: Offset,
+    cardWidth: Float,
+    cardHeight: Float,
+): Offset {
+    val dx = toward.x - center.x
+    val dy = toward.y - center.y
+    if (dx == 0f && dy == 0f) {
+        return center
+    }
+    val halfWidth = cardWidth / 2f
+    val halfHeight = cardHeight / 2f
+    val scale = minOf(
+        if (dx == 0f) Float.POSITIVE_INFINITY else halfWidth / kotlin.math.abs(dx),
+        if (dy == 0f) Float.POSITIVE_INFINITY else halfHeight / kotlin.math.abs(dy),
+    )
+    return Offset(
+        x = center.x + dx * scale,
+        y = center.y + dy * scale,
+    )
 }
 
 @Composable
@@ -1071,16 +1100,25 @@ private fun GraphHelperStrip(graphState: WorkspaceGraphState) {
 
 @Composable
 private fun WorkspaceGraphCanvas(graphState: WorkspaceGraphState) {
+    val textMeasurer = rememberTextMeasurer()
+    val graphNodeBackground = ThreadColors.Panel
+    val graphNodeBorder = ThreadColors.BorderStrong
+    val graphNodeText = ThreadColors.Foreground
+    val graphNodeMutedText = ThreadColors.ForegroundMuted
+    val graphNodeStatusText = ThreadColors.ForegroundSoft
     val nodeColors = graphState.nodes.associate { node ->
         node.id to graphNodeColor(node)
     }
     Canvas(
         modifier = Modifier
             .fillMaxWidth()
-            .height(190.dp)
+            .height(230.dp)
             .background(ThreadColors.CodeBackground)
             .padding(12.dp),
     ) {
+        val cardWidth = 146.dp.toPx()
+        val cardHeight = 62.dp.toPx()
+        val cornerRadius = 10.dp.toPx()
         val nodePoints = graphState.nodes.associate { node ->
             node.id to Offset(
                 x = size.width * node.xFraction,
@@ -1092,8 +1130,8 @@ private fun WorkspaceGraphCanvas(graphState: WorkspaceGraphState) {
             val end = nodePoints[edge.targetId]
             if (start != null && end != null) {
                 drawFloatingEdge(
-                    start = start,
-                    end = end,
+                    start = edgeAnchor(start, end, cardWidth, cardHeight),
+                    end = edgeAnchor(end, start, cardWidth, cardHeight),
                     color = androidx.compose.ui.graphics.Color(0xFF64748B),
                 )
             }
@@ -1101,18 +1139,65 @@ private fun WorkspaceGraphCanvas(graphState: WorkspaceGraphState) {
         graphState.nodes.forEach { node ->
             val point = nodePoints[node.id] ?: return@forEach
             val fill = nodeColors[node.id] ?: androidx.compose.ui.graphics.Color(0xFFE5E7EB)
-            val radius = if (node.role == WorkspaceGraphNodeRole.Thread) 14f else 11f
+            val topLeft = Offset(
+                x = (point.x - cardWidth / 2f).coerceIn(0f, size.width - cardWidth),
+                y = (point.y - cardHeight / 2f).coerceIn(0f, size.height - cardHeight),
+            )
+            drawRoundRect(
+                color = graphNodeBackground,
+                topLeft = topLeft,
+                size = Size(cardWidth, cardHeight),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(cornerRadius, cornerRadius),
+                style = Fill,
+            )
+            drawRoundRect(
+                color = graphNodeBorder.copy(alpha = 0.72f),
+                topLeft = topLeft,
+                size = Size(cardWidth, cardHeight),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(cornerRadius, cornerRadius),
+                style = Stroke(width = 1.4.dp.toPx()),
+            )
             drawCircle(
                 color = fill,
-                radius = radius,
-                center = point,
+                radius = 4.5.dp.toPx(),
+                center = Offset(topLeft.x + 14.dp.toPx(), topLeft.y + 18.dp.toPx()),
             )
-            drawCircle(
-                color = androidx.compose.ui.graphics.Color(0xFF111827).copy(alpha = 0.32f),
-                radius = radius + 4f,
-                center = point,
-                style = Stroke(width = 2f),
+            drawText(
+                textMeasurer = textMeasurer,
+                text = node.canvasLabel,
+                topLeft = Offset(topLeft.x + 25.dp.toPx(), topLeft.y + 9.dp.toPx()),
+                style = TextStyle(
+                    color = graphNodeText,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+                maxLines = 1,
             )
+            node.canvasDescription?.let { description ->
+                drawText(
+                    textMeasurer = textMeasurer,
+                    text = description,
+                    topLeft = Offset(topLeft.x + 12.dp.toPx(), topLeft.y + 31.dp.toPx()),
+                    style = TextStyle(
+                        color = graphNodeMutedText,
+                        fontSize = 9.sp,
+                    ),
+                    maxLines = 1,
+                )
+            }
+            node.statusLabel?.let { statusLabel ->
+                drawText(
+                    textMeasurer = textMeasurer,
+                    text = statusLabel,
+                    topLeft = Offset(topLeft.x + 12.dp.toPx(), topLeft.y + 45.dp.toPx()),
+                    style = TextStyle(
+                        color = graphNodeStatusText,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                    maxLines = 1,
+                )
+            }
         }
     }
 }

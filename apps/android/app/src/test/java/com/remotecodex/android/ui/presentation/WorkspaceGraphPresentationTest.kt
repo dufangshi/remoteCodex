@@ -114,4 +114,24 @@ class WorkspaceGraphPresentationTest {
         assertEquals("cmd: ./gradlew test", state.rows.first { it.label == "shell.exec" }.detail)
         assertEquals("Live node", state.helperLabels.last())
     }
+
+    @Test
+    fun buildsCompactCanvasLabelsForStyledGraphNodes() {
+        val state = buildWorkspaceGraphState(
+            listOf(
+                WorkspaceGraphInputNode(
+                    id = "artifact",
+                    name = "Very long generated artifact title",
+                    description = "This description is too long for the mobile graph node card",
+                    role = WorkspaceGraphNodeRole.Artifact,
+                    status = ToolStatus.Failed,
+                ),
+            ),
+        )
+
+        val node = state.nodes.single()
+        assertEquals("Very long gener...", node.canvasLabel)
+        assertEquals("This description is too l...", node.canvasDescription)
+        assertEquals("Failed", node.statusLabel)
+    }
 }
