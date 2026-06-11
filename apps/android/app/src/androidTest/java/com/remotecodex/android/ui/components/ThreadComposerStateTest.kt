@@ -339,6 +339,38 @@ class ThreadComposerStateTest {
     }
 
     @Test
+    fun jumpLatestButtonUpdatesFollowTailPreviewState() {
+        setComposerContent(
+            composer = ComposerPreview(
+                activeView = ComposerActiveView.Chat,
+                followTail = false,
+            ),
+        )
+
+        composeRule.onNodeWithText("Paused").assertExists()
+        composeRule.onNode(
+            SemanticsMatcher.expectValue(
+                SemanticsProperties.ContentDescription,
+                listOf("Jump to latest"),
+            ) and SemanticsMatcher.expectValue(
+                SemanticsProperties.StateDescription,
+                "Jump to the latest messages",
+            ),
+        ).performClick()
+
+        composeRule.onNodeWithText("Following").assertExists()
+        composeRule.onNode(
+            SemanticsMatcher.expectValue(
+                SemanticsProperties.ContentDescription,
+                listOf("Jump to latest"),
+            ) and SemanticsMatcher.expectValue(
+                SemanticsProperties.StateDescription,
+                "Latest turn is in view",
+            ),
+        ).assertExists()
+    }
+
+    @Test
     fun attachmentChipRemovalUpdatesDraftPreviewState() {
         setComposerContent(
             composer = ComposerPreview(

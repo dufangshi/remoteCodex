@@ -163,6 +163,7 @@ fun ThreadComposer(
     var selectedModel by remember(composer.context.model) { mutableStateOf(composer.context.model) }
     var selectedReasoningEffort by remember(composer.reasoningEffort) { mutableStateOf(composer.reasoningEffort) }
     var draftPrompt by remember(composer.prompt) { mutableStateOf(composer.prompt) }
+    var followTailPreview by remember(composer.followTail) { mutableStateOf(composer.followTail) }
     var planModeSelected by remember(composer.planModeActive) { mutableStateOf(composer.planModeActive) }
     var fastModeSelected by remember(composer.fastMode) { mutableStateOf(composer.fastMode) }
     var goalComposeMode by remember(composer.goalComposeMode, composer.goalPanel.composeMode) {
@@ -181,7 +182,7 @@ fun ThreadComposer(
     val statusChips = buildComposerStatusStrip(
         threadConnected = composer.threadConnected,
         busy = composer.busy,
-        followTail = composer.followTail,
+        followTail = followTailPreview,
         activeView = activeViewPreview,
         workspaceModeLabel = composer.workspaceModeLabel,
     )
@@ -286,7 +287,7 @@ fun ThreadComposer(
     )
     val frameState = buildComposerFrameState(
         activeView = activeViewPreview,
-        followTail = composer.followTail,
+        followTail = followTailPreview,
         goalComposeMode = goalPanelState.composeCard.visible,
         error = composer.error,
     )
@@ -515,7 +516,12 @@ fun ThreadComposer(
             }
         }
 
-        ComposerJumpLatestButton(state = frameState.jumpLatest)
+        ComposerJumpLatestButton(
+            state = frameState.jumpLatest,
+            onClick = {
+                followTailPreview = true
+            },
+        )
         forkPreviewStatus?.let { status ->
             ComposerPreviewFeedback(message = status)
         }
@@ -624,7 +630,10 @@ fun ThreadComposer(
 }
 
 @Composable
-private fun ComposerJumpLatestButton(state: ComposerJumpLatestState) {
+private fun ComposerJumpLatestButton(
+    state: ComposerJumpLatestState,
+    onClick: () -> Unit,
+) {
     if (!state.visible) {
         return
     }
@@ -641,8 +650,10 @@ private fun ComposerJumpLatestButton(state: ComposerJumpLatestState) {
                 .semantics {
                     contentDescription = state.accessibilityLabel
                     stateDescription = state.title
+                    role = Role.Button
                 }
                 .clip(RoundedCornerShape(999.dp))
+                .clickable(onClick = onClick)
                 .background(background)
                 .border(1.dp, border, RoundedCornerShape(999.dp))
                 .padding(horizontal = 16.dp, vertical = 2.dp),
