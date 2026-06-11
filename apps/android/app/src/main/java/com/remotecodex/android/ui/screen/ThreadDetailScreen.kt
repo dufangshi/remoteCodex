@@ -20,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.remotecodex.android.api.ForkThreadRequest
 import com.remotecodex.android.api.RespondThreadRequest
 import com.remotecodex.android.api.RespondThreadRequestAnswer
 import com.remotecodex.android.api.CreateSupervisorShellRequest
@@ -59,6 +60,7 @@ fun ThreadDetailScreen(
     homeSnapshotError: String?,
     onThemeModeSelected: (ThemeMode) -> Unit,
     onChangeConnection: () -> Unit,
+    onOpenThread: (String) -> Unit,
     onBackToHome: () -> Unit,
 ) {
     var detail by remember(threadId) { mutableStateOf<ThreadDetailPreview?>(null) }
@@ -71,6 +73,7 @@ fun ThreadDetailScreen(
     var pendingSettingsUpdate by remember(threadId) { mutableStateOf<UpdateThreadSettingsRequest?>(null) }
     var pendingGoalUpdate by remember(threadId) { mutableStateOf<UpdateThreadGoalRequest?>(null) }
     var pendingCompact by remember(threadId) { mutableStateOf(false) }
+    var pendingForkRequest by remember(threadId) { mutableStateOf<ForkThreadRequest?>(null) }
     var pendingCreateShell by remember(threadId) { mutableStateOf(false) }
     var pendingTerminateShellId by remember(threadId) { mutableStateOf<String?>(null) }
     var selectedWorkspaceFilePath by remember(threadId) { mutableStateOf<String?>(null) }
@@ -228,6 +231,22 @@ fun ThreadDetailScreen(
                 refreshNonce += 1
             }
             .onFailure { throwable -> error = throwable.message ?: "Compact failed." }
+    }
+
+    LaunchedEffect(pendingForkRequest) {
+        val forkRequest = pendingForkRequest ?: return@LaunchedEffect
+        threadActionBusy = true
+        threadActionError = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching { client.forkThread(threadId, forkRequest) }
+        }
+        threadActionBusy = false
+        pendingForkRequest = null
+        result
+            .onSuccess { forkResult ->
+                onOpenThread(forkResult.thread.thread.id)
+            }
+            .onFailure { throwable -> threadActionError = throwable.message ?: "Fork failed." }
     }
 
     LaunchedEffect(pendingCreateShell) {
@@ -444,6 +463,12 @@ fun ThreadDetailScreen(
             onCompactThread = {
                 pendingCompact = true
             },
+            onForkLatest = {
+                pendingForkRequest = ForkThreadRequest(mode = "latest")
+            },
+            onForkTurn = { turnId ->
+                pendingForkRequest = ForkThreadRequest(mode = "turn", turnId = turnId)
+            },
             onCreateShell = {
                 pendingCreateShell = true
             },
@@ -531,11 +556,14 @@ private fun SupervisorApiClient.fetchThreadDetailPreview(
         }
     }
     val shellState = runCatching { fetchThreadShellState(threadId) }.getOrNull()
+    val forkTurnsResult = runCatching { fetchThreadForkTurns(threadId) }
     return buildThreadDetailPreviewFromSupervisor(
         detail = detail,
         workspaceTree = tree,
         workspaceFilePreview = filePreview,
         shellState = shellState,
+        forkTurns = forkTurnsResult.getOrNull(),
+        forkTurnsError = forkTurnsResult.exceptionOrNull()?.message,
     )
 }
 

@@ -5,6 +5,7 @@ import com.remotecodex.android.api.SupervisorThreadActionQuestion
 import com.remotecodex.android.api.SupervisorThreadActionQuestionOption
 import com.remotecodex.android.api.SupervisorThreadActionRequest
 import com.remotecodex.android.api.SupervisorThreadAnsweredRequestNote
+import com.remotecodex.android.api.SupervisorThreadForkTurnOption
 import com.remotecodex.android.api.SupervisorThreadSummary
 import com.remotecodex.android.api.SupervisorThreadTurn
 import com.remotecodex.android.api.SupervisorThreadTurnItem
@@ -109,6 +110,14 @@ class ThreadDetailMapperTest {
                 goalStatus = "active",
                 goalObjective = "Ship Android client",
             ),
+            forkTurns = listOf(
+                SupervisorThreadForkTurnOption(
+                    turnId = "turn-1",
+                    turnIndex = 1,
+                    startedAt = "2026-06-11T18:58:00Z",
+                    status = "completed",
+                ),
+            ),
             now = Instant.parse("2026-06-11T19:00:00Z"),
         )
 
@@ -130,6 +139,9 @@ class ThreadDetailMapperTest {
         assertTrue(preview.composer.fastMode)
         assertTrue(preview.composer.planModeActive)
         assertEquals("danger-full-access", preview.composer.workspaceModeLabel)
+        assertEquals("turn-1", preview.composer.forkTurnOptions.turns.single().turnId)
+        assertEquals(1, preview.composer.forkTurnOptions.turns.single().turnIndex)
+        assertEquals("completed", preview.composer.forkTurnOptions.turns.single().status)
 
         val turn = preview.turns.single()
         assertEquals("complete", turn.statusLabel)

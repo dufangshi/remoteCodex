@@ -102,6 +102,8 @@ fun ThreadDetailSurface(
     onUpdateThreadSettings: ((UpdateThreadSettingsRequest) -> Unit)? = null,
     onUpdateThreadGoal: ((UpdateThreadGoalRequest) -> Unit)? = null,
     onCompactThread: (() -> Unit)? = null,
+    onForkLatest: (() -> Unit)? = null,
+    onForkTurn: ((String) -> Unit)? = null,
     onCreateShell: (() -> Unit)? = null,
     onTerminateShell: ((String) -> Unit)? = null,
     onSendShellInput: ((String) -> Unit)? = null,
@@ -215,6 +217,8 @@ fun ThreadDetailSurface(
                     onUpdateSettings = onUpdateThreadSettings,
                     onUpdateGoal = onUpdateThreadGoal,
                     onCompactThread = onCompactThread,
+                    onForkLatest = onForkLatest,
+                    onForkTurn = onForkTurn,
                     onSendShellInput = onSendShellInput,
                     onSendShellControl = onSendShellControl,
                     modifier = Modifier

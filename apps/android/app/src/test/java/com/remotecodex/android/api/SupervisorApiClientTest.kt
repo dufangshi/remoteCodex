@@ -157,6 +157,58 @@ class SupervisorApiClientTest {
     }
 
     @Test
+    fun forkThreadUsesRelayDevicePathAndParsesForkResult() {
+        val workspaceJson = """{"id":"workspace-1","label":"Remote Codex","absPath":"/repo","isFavorite":false,"lastOpenedAt":null}"""
+        val forkedThreadJson = """{"id":"thread-2","workspaceId":"workspace-1","title":"Forked Android API","status":"idle","model":"gpt-5","updatedAt":"2026-01-03T00:00:00.000Z","summaryText":"Forked"}"""
+        val forkedDetailJson = """{"thread":$forkedThreadJson,"workspace":$workspaceJson,"workspacePathStatus":"present","turns":[],"pendingRequests":[],"answeredRequestNotes":[],"pendingSteers":[],"liveItems":{"items":[]}}"""
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(
+                200,
+                """[{"turnId":"turn-1","turnIndex":1,"startedAt":"2026-01-03T00:00:00.000Z","status":"completed"}]""",
+            ),
+            SupervisorHttpResponse(
+                200,
+                """{"thread":$forkedDetailJson,"sourceThreadId":"thread-1","sourceTurnId":"turn-1","sourceTurnIndex":1}""",
+            ),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        val options = client.fetchThreadForkTurns("thread-1")
+        val result = client.forkThread("thread-1", ForkThreadRequest(mode = "turn", turnId = "turn-1"))
+
+        assertEquals("turn-1", options.single().turnId)
+        assertEquals(1, options.single().turnIndex)
+        assertEquals("completed", options.single().status)
+        assertEquals("thread-2", result.thread.thread.id)
+        assertEquals("thread-1", result.sourceThreadId)
+        assertEquals("turn-1", result.sourceTurnId)
+        assertEquals(1, result.sourceTurnIndex)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1/fork-turns",
+            transport.requests[0].url,
+        )
+        assertEquals("GET", transport.requests[0].method)
+        assertEquals("relay-token", transport.requests[0].bearerToken)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1/fork",
+            transport.requests[1].url,
+        )
+        assertEquals("POST", transport.requests[1].method)
+        assertEquals("relay-token", transport.requests[1].bearerToken)
+        val body = transport.requests[1].body!!
+        assertTrue(body.contains("\"mode\":\"turn\""))
+        assertTrue(body.contains("\"turnId\":\"turn-1\""))
+    }
+
+    @Test
     fun workspaceTreeAndPreviewUseRelayDevicePath() {
         val transport = RecordingTransport(
             SupervisorHttpResponse(

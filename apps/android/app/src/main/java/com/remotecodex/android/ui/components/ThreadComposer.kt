@@ -161,6 +161,8 @@ fun ThreadComposer(
     onUpdateSettings: ((UpdateThreadSettingsRequest) -> Unit)? = null,
     onUpdateGoal: ((UpdateThreadGoalRequest) -> Unit)? = null,
     onCompactThread: (() -> Unit)? = null,
+    onForkLatest: (() -> Unit)? = null,
+    onForkTurn: ((String) -> Unit)? = null,
     onSendShellInput: ((String) -> Unit)? = null,
     onSendShellControl: ((String) -> Unit)? = null,
 ) {
@@ -391,12 +393,22 @@ fun ThreadComposer(
                         copiedSkillName = skillName
                     },
                     onForkLatest = {
-                        forkPreviewStatus = "Fork preview started from latest turn"
+                        if (onForkLatest != null) {
+                            onForkLatest()
+                            forkPreviewStatus = "Fork requested from latest turn"
+                        } else {
+                            forkPreviewStatus = "Fork preview started from latest turn"
+                        }
                         slashPanelView = ComposerSlashPanelViewState.Root
                         openMenu = null
                     },
-                    onForkTurn = { turnTitle ->
-                        forkPreviewStatus = "Fork preview started from $turnTitle"
+                    onForkTurn = { turn ->
+                        if (onForkTurn != null) {
+                            onForkTurn(turn.turnId)
+                            forkPreviewStatus = "Fork requested from ${turn.title}"
+                        } else {
+                            forkPreviewStatus = "Fork preview started from ${turn.title}"
+                        }
                         slashPanelView = ComposerSlashPanelViewState.Root
                         openMenu = null
                     },
@@ -2151,7 +2163,7 @@ private fun SlashToolboxPanel(
     onHookSave: (ComposerHookFormPreview) -> Unit,
     onToolboxAction: (ComposerToolboxActionDecisionState) -> Unit,
     onForkLatest: () -> Unit,
-    onForkTurn: (String) -> Unit,
+    onForkTurn: (ComposerForkTurnPickerRowState) -> Unit,
 ) {
     if (!panelState.surfaceVisible) {
         return
@@ -2510,7 +2522,7 @@ private fun ForkPreviewGroup(
     showTurnPicker: Boolean,
     onSlashPanelViewChange: (ComposerSlashPanelViewState) -> Unit = {},
     onForkLatest: () -> Unit = {},
-    onForkTurn: (String) -> Unit = {},
+    onForkTurn: (ComposerForkTurnPickerRowState) -> Unit = {},
 ) {
     Column(
         modifier = Modifier
@@ -2572,7 +2584,7 @@ private fun ForkPreviewGroup(
                 forkPanelState.turnPicker.rows.forEach { item ->
                     ForkTurnRow(
                         item = item,
-                        onClick = { onForkTurn(item.title) },
+                        onClick = { onForkTurn(item) },
                     )
                 }
                 forkPanelState.turnPicker.emptyMessage?.let { message ->

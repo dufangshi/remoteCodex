@@ -3,6 +3,7 @@ package com.remotecodex.android.ui.presentation
 import com.remotecodex.android.api.SupervisorThreadDetail
 import com.remotecodex.android.api.SupervisorThreadActionQuestion
 import com.remotecodex.android.api.SupervisorThreadActionRequest
+import com.remotecodex.android.api.SupervisorThreadForkTurnOption
 import com.remotecodex.android.api.SupervisorThreadShellState
 import com.remotecodex.android.api.SupervisorThreadTurn
 import com.remotecodex.android.api.SupervisorThreadTurnItem
@@ -13,6 +14,9 @@ import com.remotecodex.android.api.SupervisorWorkspaceTreeNode
 import com.remotecodex.android.ui.model.ArtifactPreview
 import com.remotecodex.android.ui.model.ComposerContextAvailability
 import com.remotecodex.android.ui.model.ComposerContextPreview
+import com.remotecodex.android.ui.model.ComposerForkTurnOptionPreview
+import com.remotecodex.android.ui.model.ComposerForkTurnOptionsPreview
+import com.remotecodex.android.ui.model.ComposerPanelLoadStatusPreview
 import com.remotecodex.android.ui.model.ComposerPreview
 import com.remotecodex.android.ui.model.ComposerPromptPreview
 import com.remotecodex.android.ui.model.MessageAuthor
@@ -46,6 +50,8 @@ fun buildThreadDetailPreviewFromSupervisor(
     workspaceTree: SupervisorWorkspaceTreeNode? = null,
     workspaceFilePreview: SupervisorWorkspaceFilePreview? = null,
     shellState: SupervisorThreadShellState? = null,
+    forkTurns: List<SupervisorThreadForkTurnOption>? = null,
+    forkTurnsError: String? = null,
     now: Instant = Instant.now(),
 ): ThreadDetailPreview {
     val workspaceLabel = detail.workspace.label.ifBlank { basename(detail.workspace.absPath) }
@@ -118,6 +124,7 @@ fun buildThreadDetailPreviewFromSupervisor(
             fastMode = detail.thread.fastMode,
             planModeActive = detail.thread.collaborationMode == "plan",
             workspaceModeLabel = detail.thread.sandboxMode ?: "workspace write",
+            forkTurnOptions = buildForkTurnOptionsPreview(forkTurns, forkTurnsError),
             goalPanel = com.remotecodex.android.ui.model.ComposerGoalPanelPreview(
                 currentGoal = detail.goalObjective?.takeIf { it.isNotBlank() }?.let { objective ->
                     ThreadGoalPreview(
@@ -127,6 +134,27 @@ fun buildThreadDetailPreviewFromSupervisor(
                 },
             ),
         ),
+    )
+}
+
+private fun buildForkTurnOptionsPreview(
+    forkTurns: List<SupervisorThreadForkTurnOption>?,
+    error: String?,
+): ComposerForkTurnOptionsPreview {
+    return ComposerForkTurnOptionsPreview(
+        status = when {
+            error != null -> ComposerPanelLoadStatusPreview.Failed
+            forkTurns == null -> ComposerPanelLoadStatusPreview.Loading
+            else -> ComposerPanelLoadStatusPreview.Ready
+        },
+        error = error,
+        turns = forkTurns?.map { turn ->
+            ComposerForkTurnOptionPreview(
+                turnId = turn.turnId,
+                turnIndex = turn.turnIndex,
+                status = turn.status,
+            )
+        } ?: emptyList(),
     )
 }
 

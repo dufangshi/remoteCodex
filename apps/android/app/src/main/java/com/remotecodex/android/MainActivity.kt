@@ -140,6 +140,9 @@ class MainActivity : ComponentActivity() {
                                 connectedRoute = ConnectedRoute.Home
                                 supervisorConnection = null
                             },
+                            onOpenThread = { nextThreadId ->
+                                connectedRoute = ConnectedRoute.ThreadDetail(nextThreadId)
+                            },
                             onBackToHome = { connectedRoute = ConnectedRoute.Home },
                         )
                     }

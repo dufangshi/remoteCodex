@@ -299,6 +299,25 @@ data class SupervisorThreadDetail(
         ?.text
 }
 
+data class SupervisorThreadForkTurnOption(
+    val turnId: String,
+    val turnIndex: Int,
+    val startedAt: String?,
+    val status: String,
+)
+
+data class ForkThreadRequest(
+    val mode: String,
+    val turnId: String? = null,
+)
+
+data class SupervisorThreadForkResult(
+    val thread: SupervisorThreadDetail,
+    val sourceThreadId: String,
+    val sourceTurnId: String?,
+    val sourceTurnIndex: Int?,
+)
+
 data class SendThreadPromptRequest(
     val prompt: String,
     val clientRequestId: String? = null,

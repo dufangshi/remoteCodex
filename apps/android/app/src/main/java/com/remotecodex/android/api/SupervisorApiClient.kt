@@ -175,6 +175,25 @@ class SupervisorApiClient(
         ).toThreadShellState()
     }
 
+    fun fetchThreadForkTurns(threadId: String): List<SupervisorThreadForkTurnOption> {
+        return requestArray(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/fork-turns"),
+        ).map { item ->
+            item.toThreadForkTurnOption()
+        }
+    }
+
+    fun forkThread(threadId: String, request: ForkThreadRequest): SupervisorThreadForkResult {
+        val body = JSONObject()
+            .put("mode", request.mode)
+        request.turnId?.takeIf { it.isNotBlank() }?.let { body.put("turnId", it) }
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/fork"),
+            method = "POST",
+            body = body.toString(),
+        ).toThreadForkResult()
+    }
+
     fun createThreadShell(threadId: String, request: CreateSupervisorShellRequest = CreateSupervisorShellRequest()): SupervisorThreadShellState {
         val body = JSONObject()
         request.cols?.let { body.put("cols", it) }
@@ -600,6 +619,28 @@ private fun JSONObject.toThreadDetail(): SupervisorThreadDetail {
         liveItemCount = liveItemsJson?.optJSONArray("items")?.length() ?: 0,
         goalStatus = goalJson?.optNullableString("status"),
         goalObjective = goalJson?.optNullableString("objective"),
+    )
+}
+
+private fun JSONObject.toThreadForkTurnOption(): SupervisorThreadForkTurnOption {
+    return SupervisorThreadForkTurnOption(
+        turnId = optString("turnId"),
+        turnIndex = optInt("turnIndex", 0),
+        startedAt = optNullableString("startedAt"),
+        status = optString("status"),
+    )
+}
+
+private fun JSONObject.toThreadForkResult(): SupervisorThreadForkResult {
+    return SupervisorThreadForkResult(
+        thread = getJSONObject("thread").toThreadDetail(),
+        sourceThreadId = optString("sourceThreadId"),
+        sourceTurnId = optNullableString("sourceTurnId"),
+        sourceTurnIndex = if (has("sourceTurnIndex") && !isNull("sourceTurnIndex")) {
+            optInt("sourceTurnIndex")
+        } else {
+            null
+        },
     )
 }
 
