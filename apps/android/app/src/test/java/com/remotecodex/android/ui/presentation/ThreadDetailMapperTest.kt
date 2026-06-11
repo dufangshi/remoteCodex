@@ -5,7 +5,15 @@ import com.remotecodex.android.api.SupervisorThreadActionQuestion
 import com.remotecodex.android.api.SupervisorThreadActionQuestionOption
 import com.remotecodex.android.api.SupervisorThreadActionRequest
 import com.remotecodex.android.api.SupervisorThreadAnsweredRequestNote
+import com.remotecodex.android.api.SupervisorAgentHook
+import com.remotecodex.android.api.SupervisorAgentMcpServer
+import com.remotecodex.android.api.SupervisorAgentMcpTool
+import com.remotecodex.android.api.SupervisorAgentSkill
+import com.remotecodex.android.api.SupervisorAgentSkillError
+import com.remotecodex.android.api.SupervisorThreadHooks
 import com.remotecodex.android.api.SupervisorThreadForkTurnOption
+import com.remotecodex.android.api.SupervisorThreadMcpServers
+import com.remotecodex.android.api.SupervisorThreadSkills
 import com.remotecodex.android.api.SupervisorThreadSummary
 import com.remotecodex.android.api.SupervisorThreadTurn
 import com.remotecodex.android.api.SupervisorThreadTurnItem
@@ -118,6 +126,58 @@ class ThreadDetailMapperTest {
                     status = "completed",
                 ),
             ),
+            skills = SupervisorThreadSkills(
+                cwd = "/repo",
+                skills = listOf(
+                    SupervisorAgentSkill(
+                        name = "android-client",
+                        description = "Android client work",
+                        shortDescription = "Android work",
+                        interfaceShortDescription = "Native Android",
+                        path = "/repo/.codex/skills/android-client/SKILL.md",
+                        scope = "repo",
+                        enabled = true,
+                    ),
+                ),
+                errors = listOf(SupervisorAgentSkillError(path = "/bad/SKILL.md", message = "Bad skill")),
+            ),
+            mcpServers = SupervisorThreadMcpServers(
+                servers = listOf(
+                    SupervisorAgentMcpServer(
+                        name = "docs",
+                        authStatus = "unsupported",
+                        tools = listOf(SupervisorAgentMcpTool(name = "search_docs", title = "Search docs", description = null)),
+                        resourceCount = 1,
+                        resourceTemplateCount = 2,
+                    ),
+                ),
+            ),
+            hooks = SupervisorThreadHooks(
+                cwd = "/repo",
+                hooks = listOf(
+                    SupervisorAgentHook(
+                        key = "hook-1",
+                        eventName = "preToolUse",
+                        handlerType = "command",
+                        matcher = "Bash",
+                        command = "scripts/check.sh",
+                        timeoutSec = 30,
+                        statusMessage = "Checking",
+                        sourcePath = "/repo/.codex/hooks.json",
+                        source = "project",
+                        pluginId = null,
+                        displayOrder = 1,
+                        enabled = true,
+                        isManaged = false,
+                        currentHash = "hash-1",
+                        trustStatus = "modified",
+                    ),
+                ),
+                warnings = listOf("Review hook"),
+                errors = emptyList(),
+                globalHooksPath = "/home/u/.codex/hooks.json",
+                projectHooksPath = "/repo/.codex/hooks.json",
+            ),
             now = Instant.parse("2026-06-11T19:00:00Z"),
         )
 
@@ -142,6 +202,14 @@ class ThreadDetailMapperTest {
         assertEquals("turn-1", preview.composer.forkTurnOptions.turns.single().turnId)
         assertEquals(1, preview.composer.forkTurnOptions.turns.single().turnIndex)
         assertEquals("completed", preview.composer.forkTurnOptions.turns.single().status)
+        assertEquals("android-client", preview.composer.skillsPanel.skills.single().name)
+        assertEquals("Native Android", preview.composer.skillsPanel.skills.single().interfaceShortDescription)
+        assertEquals("Bad skill", preview.composer.skillsPanel.errors.single().message)
+        assertEquals("docs", preview.composer.mcpPanel.servers.single().name)
+        assertEquals("Search docs", preview.composer.mcpPanel.servers.single().tools.single().title)
+        assertEquals("hook-1", preview.composer.hooksPanel.hooks.single().key)
+        assertEquals("hash-1", preview.composer.hooksPanel.hooks.single().currentHash)
+        assertEquals("Review hook", preview.composer.hooksPanel.warnings.single())
 
         val turn = preview.turns.single()
         assertEquals("complete", turn.statusLabel)

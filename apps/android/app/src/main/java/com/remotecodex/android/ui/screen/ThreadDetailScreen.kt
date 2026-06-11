@@ -32,6 +32,8 @@ import com.remotecodex.android.api.SupervisorHomeSnapshot
 import com.remotecodex.android.api.SupervisorShellEvent
 import com.remotecodex.android.api.SupervisorSocketConnection
 import com.remotecodex.android.api.SupervisorWorkspaceTreeNode
+import com.remotecodex.android.api.TrustThreadHookRequest
+import com.remotecodex.android.api.UntrustThreadHookRequest
 import com.remotecodex.android.api.UpdateThreadGoalRequest
 import com.remotecodex.android.api.UpdateThreadRequest
 import com.remotecodex.android.api.UpdateThreadSettingsRequest
@@ -74,6 +76,8 @@ fun ThreadDetailScreen(
     var pendingGoalUpdate by remember(threadId) { mutableStateOf<UpdateThreadGoalRequest?>(null) }
     var pendingCompact by remember(threadId) { mutableStateOf(false) }
     var pendingForkRequest by remember(threadId) { mutableStateOf<ForkThreadRequest?>(null) }
+    var pendingTrustHook by remember(threadId) { mutableStateOf<TrustThreadHookRequest?>(null) }
+    var pendingUntrustHook by remember(threadId) { mutableStateOf<UntrustThreadHookRequest?>(null) }
     var pendingCreateShell by remember(threadId) { mutableStateOf(false) }
     var pendingTerminateShellId by remember(threadId) { mutableStateOf<String?>(null) }
     var selectedWorkspaceFilePath by remember(threadId) { mutableStateOf<String?>(null) }
@@ -247,6 +251,46 @@ fun ThreadDetailScreen(
                 onOpenThread(forkResult.thread.thread.id)
             }
             .onFailure { throwable -> threadActionError = throwable.message ?: "Fork failed." }
+    }
+
+    LaunchedEffect(pendingTrustHook) {
+        val request = pendingTrustHook ?: return@LaunchedEffect
+        threadActionBusy = true
+        threadActionError = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                client.trustThreadHook(threadId, request)
+                client.fetchThreadDetailPreview(threadId, selectedWorkspaceFilePath = selectedWorkspaceFilePath)
+            }
+        }
+        threadActionBusy = false
+        pendingTrustHook = null
+        result
+            .onSuccess { preview ->
+                detail = preview
+                refreshNonce += 1
+            }
+            .onFailure { throwable -> threadActionError = throwable.message ?: "Trust hook failed." }
+    }
+
+    LaunchedEffect(pendingUntrustHook) {
+        val request = pendingUntrustHook ?: return@LaunchedEffect
+        threadActionBusy = true
+        threadActionError = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                client.untrustThreadHook(threadId, request)
+                client.fetchThreadDetailPreview(threadId, selectedWorkspaceFilePath = selectedWorkspaceFilePath)
+            }
+        }
+        threadActionBusy = false
+        pendingUntrustHook = null
+        result
+            .onSuccess { preview ->
+                detail = preview
+                refreshNonce += 1
+            }
+            .onFailure { throwable -> threadActionError = throwable.message ?: "Untrust hook failed." }
     }
 
     LaunchedEffect(pendingCreateShell) {
@@ -469,6 +513,12 @@ fun ThreadDetailScreen(
             onForkTurn = { turnId ->
                 pendingForkRequest = ForkThreadRequest(mode = "turn", turnId = turnId)
             },
+            onTrustHook = { key, currentHash ->
+                pendingTrustHook = TrustThreadHookRequest(key = key, currentHash = currentHash)
+            },
+            onUntrustHook = { key ->
+                pendingUntrustHook = UntrustThreadHookRequest(key = key)
+            },
             onCreateShell = {
                 pendingCreateShell = true
             },
@@ -557,6 +607,9 @@ private fun SupervisorApiClient.fetchThreadDetailPreview(
     }
     val shellState = runCatching { fetchThreadShellState(threadId) }.getOrNull()
     val forkTurnsResult = runCatching { fetchThreadForkTurns(threadId) }
+    val skillsResult = runCatching { fetchThreadSkills(threadId) }
+    val mcpServersResult = runCatching { fetchThreadMcpServers(threadId) }
+    val hooksResult = runCatching { fetchThreadHooks(threadId) }
     return buildThreadDetailPreviewFromSupervisor(
         detail = detail,
         workspaceTree = tree,
@@ -564,6 +617,12 @@ private fun SupervisorApiClient.fetchThreadDetailPreview(
         shellState = shellState,
         forkTurns = forkTurnsResult.getOrNull(),
         forkTurnsError = forkTurnsResult.exceptionOrNull()?.message,
+        skills = skillsResult.getOrNull(),
+        skillsError = skillsResult.exceptionOrNull()?.message,
+        mcpServers = mcpServersResult.getOrNull(),
+        mcpServersError = mcpServersResult.exceptionOrNull()?.message,
+        hooks = hooksResult.getOrNull(),
+        hooksError = hooksResult.exceptionOrNull()?.message,
     )
 }
 

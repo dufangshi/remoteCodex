@@ -104,6 +104,8 @@ fun ThreadDetailSurface(
     onCompactThread: (() -> Unit)? = null,
     onForkLatest: (() -> Unit)? = null,
     onForkTurn: ((String) -> Unit)? = null,
+    onTrustHook: ((String, String) -> Unit)? = null,
+    onUntrustHook: ((String) -> Unit)? = null,
     onCreateShell: (() -> Unit)? = null,
     onTerminateShell: ((String) -> Unit)? = null,
     onSendShellInput: ((String) -> Unit)? = null,
@@ -219,6 +221,8 @@ fun ThreadDetailSurface(
                     onCompactThread = onCompactThread,
                     onForkLatest = onForkLatest,
                     onForkTurn = onForkTurn,
+                    onTrustHook = onTrustHook,
+                    onUntrustHook = onUntrustHook,
                     onSendShellInput = onSendShellInput,
                     onSendShellControl = onSendShellControl,
                     modifier = Modifier

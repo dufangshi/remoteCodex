@@ -962,6 +962,7 @@ data class ComposerHookRowState(
     val title: String,
     val commandLabel: String,
     val statusMessage: String?,
+    val currentHash: String?,
     val editAction: ComposerHookActionState?,
     val trustAction: ComposerHookActionState?,
     val editForm: ComposerHookFormPreview?,
@@ -1188,6 +1189,7 @@ fun buildComposerHooksPanelState(
                 },
                 commandLabel = hook.command?.takeIf { it.isNotBlank() } ?: hook.handlerType.name.lowercase(),
                 statusMessage = hook.statusMessage?.takeIf { it.isNotBlank() },
+                currentHash = hook.currentHash,
                 editAction = if (editable) {
                     ComposerHookActionState(
                         label = "Edit",

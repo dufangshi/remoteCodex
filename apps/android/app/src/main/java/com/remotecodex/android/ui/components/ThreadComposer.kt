@@ -163,6 +163,8 @@ fun ThreadComposer(
     onCompactThread: (() -> Unit)? = null,
     onForkLatest: (() -> Unit)? = null,
     onForkTurn: ((String) -> Unit)? = null,
+    onTrustHook: ((String, String) -> Unit)? = null,
+    onUntrustHook: ((String) -> Unit)? = null,
     onSendShellInput: ((String) -> Unit)? = null,
     onSendShellControl: ((String) -> Unit)? = null,
 ) {
@@ -436,15 +438,23 @@ fun ThreadComposer(
                         hooksPanelMode = ComposerHooksPanelModePreview.Edit
                         hooksPanelSuccess = null
                     },
-                    onHookTrustChange = { key, nextStatus, label ->
-                        hooksPanelHooks = hooksPanelHooks.map { hook ->
-                            if (hook.key == key) {
-                                hook.copy(trustStatus = nextStatus)
-                            } else {
-                                hook
+                    onHookTrustChange = { key, currentHash, nextStatus, label ->
+                        if (nextStatus == ComposerHookTrustStatusPreview.Trusted && onTrustHook != null && currentHash != null) {
+                            onTrustHook(key, currentHash)
+                            hooksPanelSuccess = "Hook trust requested"
+                        } else if (nextStatus == ComposerHookTrustStatusPreview.Untrusted && onUntrustHook != null) {
+                            onUntrustHook(key)
+                            hooksPanelSuccess = "Hook review requested"
+                        } else {
+                            hooksPanelHooks = hooksPanelHooks.map { hook ->
+                                if (hook.key == key) {
+                                    hook.copy(trustStatus = nextStatus)
+                                } else {
+                                    hook
+                                }
                             }
+                            hooksPanelSuccess = label
                         }
-                        hooksPanelSuccess = label
                     },
                     onHookSave = { form ->
                         val savedHook = form.toPreviewHook()
@@ -2159,7 +2169,7 @@ private fun SlashToolboxPanel(
     onMcpSave: (ComposerMcpFormState) -> Unit,
     onHooksPanelModeChange: (ComposerHooksPanelModePreview) -> Unit,
     onHookEdit: (ComposerHookFormPreview) -> Unit,
-    onHookTrustChange: (String, ComposerHookTrustStatusPreview, String) -> Unit,
+    onHookTrustChange: (String, String?, ComposerHookTrustStatusPreview, String) -> Unit,
     onHookSave: (ComposerHookFormPreview) -> Unit,
     onToolboxAction: (ComposerToolboxActionDecisionState) -> Unit,
     onForkLatest: () -> Unit,
@@ -3182,7 +3192,7 @@ private fun HooksPreviewGroup(
     hooksPanelState: ComposerHooksPanelState,
     onHooksPanelModeChange: (ComposerHooksPanelModePreview) -> Unit,
     onHookEdit: (ComposerHookFormPreview) -> Unit,
-    onHookTrustChange: (String, ComposerHookTrustStatusPreview, String) -> Unit,
+    onHookTrustChange: (String, String?, ComposerHookTrustStatusPreview, String) -> Unit,
     onHookSave: (ComposerHookFormPreview) -> Unit,
 ) {
     Column(
@@ -3364,7 +3374,7 @@ private fun HookFieldPreview(
 private fun HookPreviewRow(
     item: ComposerHookRowState,
     onEdit: (ComposerHookFormPreview) -> Unit,
-    onTrustChange: (String, ComposerHookTrustStatusPreview, String) -> Unit,
+    onTrustChange: (String, String?, ComposerHookTrustStatusPreview, String) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -3422,11 +3432,13 @@ private fun HookPreviewRow(
                             when (action.kind) {
                                 ComposerHookActionKind.Trust -> onTrustChange(
                                     item.key,
+                                    item.currentHash,
                                     ComposerHookTrustStatusPreview.Trusted,
                                     "Hook trusted: ${item.title}",
                                 )
                                 ComposerHookActionKind.Untrust -> onTrustChange(
                                     item.key,
+                                    item.currentHash,
                                     ComposerHookTrustStatusPreview.Untrusted,
                                     "Hook marked for review: ${item.title}",
                                 )

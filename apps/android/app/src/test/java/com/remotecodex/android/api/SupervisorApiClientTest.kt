@@ -209,6 +209,83 @@ class SupervisorApiClientTest {
     }
 
     @Test
+    fun composerPanelsUseRelayDevicePathAndParseSkillsMcpHooks() {
+        val transport = RecordingTransport(
+            SupervisorHttpResponse(
+                200,
+                """{"cwd":"/repo","skills":[{"name":"android-client","description":"Android work","shortDescription":"Android","interface":{"shortDescription":"Native Android"},"path":"/repo/.codex/skills/android-client/SKILL.md","scope":"repo","enabled":true}],"errors":[{"path":"/bad/SKILL.md","message":"bad skill"}]}""",
+            ),
+            SupervisorHttpResponse(
+                200,
+                """{"servers":[{"name":"docs","authStatus":"unsupported","tools":[{"name":"search_docs","title":"Search docs","description":"Search"}],"resourceCount":1,"resourceTemplateCount":2}]}""",
+            ),
+            SupervisorHttpResponse(
+                200,
+                """{"cwd":"/repo","hooks":[{"key":"hook-1","eventName":"preToolUse","handlerType":"command","matcher":"Bash","command":"scripts/check.sh","timeoutSec":30,"statusMessage":"Checking","sourcePath":"/repo/.codex/hooks.json","source":"project","pluginId":null,"displayOrder":1,"enabled":true,"isManaged":false,"currentHash":"hash-1","trustStatus":"modified"}],"warnings":["review hook"],"errors":[{"path":"/bad/hooks.json","message":"bad hook"}],"globalHooksPath":"/home/u/.codex/hooks.json","projectHooksPath":"/repo/.codex/hooks.json"}""",
+            ),
+            SupervisorHttpResponse(
+                200,
+                """{"cwd":"/repo","hooks":[],"warnings":[],"errors":[],"globalHooksPath":"/home/u/.codex/hooks.json","projectHooksPath":"/repo/.codex/hooks.json"}""",
+            ),
+            SupervisorHttpResponse(
+                200,
+                """{"cwd":"/repo","hooks":[],"warnings":[],"errors":[],"globalHooksPath":"/home/u/.codex/hooks.json","projectHooksPath":"/repo/.codex/hooks.json"}""",
+            ),
+        )
+        val client = SupervisorApiClient(
+            SupervisorConnectionConfig(
+                mode = SupervisorConnectionMode.Relay,
+                baseUrl = "https://relay.example.test",
+                authToken = "relay-token",
+                relayDeviceId = "device-1",
+            ),
+            transport,
+        )
+
+        val skills = client.fetchThreadSkills("thread-1")
+        val mcp = client.fetchThreadMcpServers("thread-1")
+        val hooks = client.fetchThreadHooks("thread-1")
+        client.trustThreadHook("thread-1", TrustThreadHookRequest(key = "hook-1", currentHash = "hash-1"))
+        client.untrustThreadHook("thread-1", UntrustThreadHookRequest(key = "hook-1"))
+
+        assertEquals("android-client", skills.skills.single().name)
+        assertEquals("Native Android", skills.skills.single().interfaceShortDescription)
+        assertEquals("bad skill", skills.errors.single().message)
+        assertEquals("docs", mcp.servers.single().name)
+        assertEquals("Search docs", mcp.servers.single().tools.single().title)
+        assertEquals("hook-1", hooks.hooks.single().key)
+        assertEquals("hash-1", hooks.hooks.single().currentHash)
+        assertEquals("modified", hooks.hooks.single().trustStatus)
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1/skills",
+            transport.requests[0].url,
+        )
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1/mcp-servers",
+            transport.requests[1].url,
+        )
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1/hooks",
+            transport.requests[2].url,
+        )
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1/hooks/trust",
+            transport.requests[3].url,
+        )
+        assertEquals("POST", transport.requests[3].method)
+        assertTrue(transport.requests[3].body!!.contains("\"currentHash\":\"hash-1\""))
+        assertEquals(
+            "https://relay.example.test/relay/devices/device-1/api/threads/thread-1/hooks/untrust",
+            transport.requests[4].url,
+        )
+        assertEquals("POST", transport.requests[4].method)
+        assertTrue(transport.requests[4].body!!.contains("\"key\":\"hook-1\""))
+        transport.requests.forEach { request ->
+            assertEquals("relay-token", request.bearerToken)
+        }
+    }
+
+    @Test
     fun workspaceTreeAndPreviewUseRelayDevicePath() {
         val transport = RecordingTransport(
             SupervisorHttpResponse(

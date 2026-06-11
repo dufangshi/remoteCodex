@@ -318,6 +318,86 @@ data class SupervisorThreadForkResult(
     val sourceTurnIndex: Int?,
 )
 
+data class SupervisorThreadSkills(
+    val cwd: String,
+    val skills: List<SupervisorAgentSkill>,
+    val errors: List<SupervisorAgentSkillError>,
+)
+
+data class SupervisorAgentSkill(
+    val name: String,
+    val description: String,
+    val shortDescription: String?,
+    val interfaceShortDescription: String?,
+    val path: String,
+    val scope: String,
+    val enabled: Boolean,
+)
+
+data class SupervisorAgentSkillError(
+    val path: String,
+    val message: String,
+)
+
+data class SupervisorThreadMcpServers(
+    val servers: List<SupervisorAgentMcpServer>,
+)
+
+data class SupervisorAgentMcpServer(
+    val name: String,
+    val authStatus: String,
+    val tools: List<SupervisorAgentMcpTool>,
+    val resourceCount: Int,
+    val resourceTemplateCount: Int,
+)
+
+data class SupervisorAgentMcpTool(
+    val name: String,
+    val title: String?,
+    val description: String?,
+)
+
+data class SupervisorThreadHooks(
+    val cwd: String,
+    val hooks: List<SupervisorAgentHook>,
+    val warnings: List<String>,
+    val errors: List<SupervisorAgentHookError>,
+    val globalHooksPath: String,
+    val projectHooksPath: String,
+)
+
+data class SupervisorAgentHook(
+    val key: String,
+    val eventName: String,
+    val handlerType: String,
+    val matcher: String?,
+    val command: String?,
+    val timeoutSec: Int,
+    val statusMessage: String?,
+    val sourcePath: String,
+    val source: String,
+    val pluginId: String?,
+    val displayOrder: Int,
+    val enabled: Boolean,
+    val isManaged: Boolean,
+    val currentHash: String?,
+    val trustStatus: String,
+)
+
+data class SupervisorAgentHookError(
+    val path: String,
+    val message: String,
+)
+
+data class TrustThreadHookRequest(
+    val key: String,
+    val currentHash: String,
+)
+
+data class UntrustThreadHookRequest(
+    val key: String,
+)
+
 data class SendThreadPromptRequest(
     val prompt: String,
     val clientRequestId: String? = null,

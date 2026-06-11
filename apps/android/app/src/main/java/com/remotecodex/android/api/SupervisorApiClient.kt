@@ -194,6 +194,45 @@ class SupervisorApiClient(
         ).toThreadForkResult()
     }
 
+    fun fetchThreadSkills(threadId: String): SupervisorThreadSkills {
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/skills"),
+        ).toThreadSkills()
+    }
+
+    fun fetchThreadMcpServers(threadId: String): SupervisorThreadMcpServers {
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/mcp-servers"),
+        ).toThreadMcpServers()
+    }
+
+    fun fetchThreadHooks(threadId: String): SupervisorThreadHooks {
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/hooks"),
+        ).toThreadHooks()
+    }
+
+    fun trustThreadHook(threadId: String, request: TrustThreadHookRequest): SupervisorThreadHooks {
+        val body = JSONObject()
+            .put("key", request.key)
+            .put("currentHash", request.currentHash)
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/hooks/trust"),
+            method = "POST",
+            body = body.toString(),
+        ).toThreadHooks()
+    }
+
+    fun untrustThreadHook(threadId: String, request: UntrustThreadHookRequest): SupervisorThreadHooks {
+        val body = JSONObject()
+            .put("key", request.key)
+        return requestJson(
+            config.restPath("/api/threads/${urlEncodePathSegment(threadId)}/hooks/untrust"),
+            method = "POST",
+            body = body.toString(),
+        ).toThreadHooks()
+    }
+
     fun createThreadShell(threadId: String, request: CreateSupervisorShellRequest = CreateSupervisorShellRequest()): SupervisorThreadShellState {
         val body = JSONObject()
         request.cols?.let { body.put("cols", it) }
@@ -641,6 +680,115 @@ private fun JSONObject.toThreadForkResult(): SupervisorThreadForkResult {
         } else {
             null
         },
+    )
+}
+
+private fun JSONObject.toThreadSkills(): SupervisorThreadSkills {
+    val skillsJson = optJSONArray("skills") ?: org.json.JSONArray()
+    val errorsJson = optJSONArray("errors") ?: org.json.JSONArray()
+    return SupervisorThreadSkills(
+        cwd = optString("cwd"),
+        skills = List(skillsJson.length()) { index ->
+            skillsJson.getJSONObject(index).toAgentSkill()
+        },
+        errors = List(errorsJson.length()) { index ->
+            errorsJson.getJSONObject(index).toAgentSkillError()
+        },
+    )
+}
+
+private fun JSONObject.toAgentSkill(): SupervisorAgentSkill {
+    val interfaceJson = optJSONObject("interface")
+    return SupervisorAgentSkill(
+        name = optString("name"),
+        description = optString("description"),
+        shortDescription = optNullableString("shortDescription"),
+        interfaceShortDescription = interfaceJson?.optNullableString("shortDescription"),
+        path = optString("path"),
+        scope = optString("scope"),
+        enabled = optBoolean("enabled", true),
+    )
+}
+
+private fun JSONObject.toAgentSkillError(): SupervisorAgentSkillError {
+    return SupervisorAgentSkillError(
+        path = optString("path"),
+        message = optString("message"),
+    )
+}
+
+private fun JSONObject.toThreadMcpServers(): SupervisorThreadMcpServers {
+    val serversJson = optJSONArray("servers") ?: org.json.JSONArray()
+    return SupervisorThreadMcpServers(
+        servers = List(serversJson.length()) { index ->
+            serversJson.getJSONObject(index).toAgentMcpServer()
+        },
+    )
+}
+
+private fun JSONObject.toAgentMcpServer(): SupervisorAgentMcpServer {
+    val toolsJson = optJSONArray("tools") ?: org.json.JSONArray()
+    return SupervisorAgentMcpServer(
+        name = optString("name"),
+        authStatus = optString("authStatus"),
+        tools = List(toolsJson.length()) { index ->
+            toolsJson.getJSONObject(index).toAgentMcpTool()
+        },
+        resourceCount = optInt("resourceCount", 0),
+        resourceTemplateCount = optInt("resourceTemplateCount", 0),
+    )
+}
+
+private fun JSONObject.toAgentMcpTool(): SupervisorAgentMcpTool {
+    return SupervisorAgentMcpTool(
+        name = optString("name"),
+        title = optNullableString("title"),
+        description = optNullableString("description"),
+    )
+}
+
+private fun JSONObject.toThreadHooks(): SupervisorThreadHooks {
+    val hooksJson = optJSONArray("hooks") ?: org.json.JSONArray()
+    val warningsJson = optJSONArray("warnings") ?: org.json.JSONArray()
+    val errorsJson = optJSONArray("errors") ?: org.json.JSONArray()
+    return SupervisorThreadHooks(
+        cwd = optString("cwd"),
+        hooks = List(hooksJson.length()) { index ->
+            hooksJson.getJSONObject(index).toAgentHook()
+        },
+        warnings = List(warningsJson.length()) { index -> warningsJson.optString(index) },
+        errors = List(errorsJson.length()) { index ->
+            errorsJson.getJSONObject(index).toAgentHookError()
+        },
+        globalHooksPath = optString("globalHooksPath"),
+        projectHooksPath = optString("projectHooksPath"),
+    )
+}
+
+private fun JSONObject.toAgentHook(): SupervisorAgentHook {
+    return SupervisorAgentHook(
+        key = optString("key"),
+        eventName = optString("eventName"),
+        handlerType = optString("handlerType"),
+        matcher = optNullableString("matcher"),
+        command = optNullableString("command"),
+        timeoutSec = optInt("timeoutSec", 0),
+        statusMessage = optNullableString("statusMessage"),
+        sourcePath = optString("sourcePath"),
+        source = optString("source"),
+        pluginId = optNullableString("pluginId"),
+        displayOrder = optInt("displayOrder", 0),
+        enabled = optBoolean("enabled", true),
+        isManaged = optBoolean("isManaged", false),
+        currentHash = optNullableString("currentHash"),
+        trustStatus = optString("trustStatus"),
+    )
+}
+
+private fun JSONObject.toAgentHookError(): SupervisorAgentHookError {
+    return SupervisorAgentHookError(
+        path = optString("path"),
+        message = optString("message"),
     )
 }
 

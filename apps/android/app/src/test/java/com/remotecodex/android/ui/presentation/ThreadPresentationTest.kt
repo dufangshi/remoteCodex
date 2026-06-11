@@ -3921,6 +3921,7 @@ class ThreadPresentationTest {
                         title = "PreToolUse · Bash",
                         commandLabel = "scripts/check-command.sh",
                         statusMessage = "Checking shell command",
+                        currentHash = "hash",
                         editAction = ComposerHookActionState(
                             label = "Edit",
                             enabled = true,
@@ -3953,6 +3954,7 @@ class ThreadPresentationTest {
                         title = "UserPromptSubmit",
                         commandLabel = "scripts/log-prompt.sh",
                         statusMessage = null,
+                        currentHash = "hash",
                         editAction = ComposerHookActionState(
                             label = "Edit",
                             enabled = true,

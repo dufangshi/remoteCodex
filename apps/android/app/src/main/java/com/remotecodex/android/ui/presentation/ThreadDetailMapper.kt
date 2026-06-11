@@ -3,8 +3,11 @@ package com.remotecodex.android.ui.presentation
 import com.remotecodex.android.api.SupervisorThreadDetail
 import com.remotecodex.android.api.SupervisorThreadActionQuestion
 import com.remotecodex.android.api.SupervisorThreadActionRequest
+import com.remotecodex.android.api.SupervisorThreadHooks
 import com.remotecodex.android.api.SupervisorThreadForkTurnOption
+import com.remotecodex.android.api.SupervisorThreadMcpServers
 import com.remotecodex.android.api.SupervisorThreadShellState
+import com.remotecodex.android.api.SupervisorThreadSkills
 import com.remotecodex.android.api.SupervisorThreadTurn
 import com.remotecodex.android.api.SupervisorThreadTurnItem
 import com.remotecodex.android.api.SupervisorThreadTurnTokenUsage
@@ -16,9 +19,24 @@ import com.remotecodex.android.ui.model.ComposerContextAvailability
 import com.remotecodex.android.ui.model.ComposerContextPreview
 import com.remotecodex.android.ui.model.ComposerForkTurnOptionPreview
 import com.remotecodex.android.ui.model.ComposerForkTurnOptionsPreview
+import com.remotecodex.android.ui.model.ComposerHookErrorPreview
+import com.remotecodex.android.ui.model.ComposerHookEventNamePreview
+import com.remotecodex.android.ui.model.ComposerHookHandlerTypePreview
+import com.remotecodex.android.ui.model.ComposerHookPreview
+import com.remotecodex.android.ui.model.ComposerHookSourcePreview
+import com.remotecodex.android.ui.model.ComposerHookTrustStatusPreview
+import com.remotecodex.android.ui.model.ComposerHooksPanelPreview
+import com.remotecodex.android.ui.model.ComposerMcpAuthStatusPreview
+import com.remotecodex.android.ui.model.ComposerMcpPanelPreview
+import com.remotecodex.android.ui.model.ComposerMcpServerPreview
+import com.remotecodex.android.ui.model.ComposerMcpToolPreview
 import com.remotecodex.android.ui.model.ComposerPanelLoadStatusPreview
 import com.remotecodex.android.ui.model.ComposerPreview
 import com.remotecodex.android.ui.model.ComposerPromptPreview
+import com.remotecodex.android.ui.model.ComposerSkillErrorPreview
+import com.remotecodex.android.ui.model.ComposerSkillPreview
+import com.remotecodex.android.ui.model.ComposerSkillScopePreview
+import com.remotecodex.android.ui.model.ComposerSkillsPanelPreview
 import com.remotecodex.android.ui.model.MessageAuthor
 import com.remotecodex.android.ui.model.MessagePreview
 import com.remotecodex.android.ui.model.PendingRequestKindPreview
@@ -52,6 +70,12 @@ fun buildThreadDetailPreviewFromSupervisor(
     shellState: SupervisorThreadShellState? = null,
     forkTurns: List<SupervisorThreadForkTurnOption>? = null,
     forkTurnsError: String? = null,
+    skills: SupervisorThreadSkills? = null,
+    skillsError: String? = null,
+    mcpServers: SupervisorThreadMcpServers? = null,
+    mcpServersError: String? = null,
+    hooks: SupervisorThreadHooks? = null,
+    hooksError: String? = null,
     now: Instant = Instant.now(),
 ): ThreadDetailPreview {
     val workspaceLabel = detail.workspace.label.ifBlank { basename(detail.workspace.absPath) }
@@ -125,6 +149,9 @@ fun buildThreadDetailPreviewFromSupervisor(
             planModeActive = detail.thread.collaborationMode == "plan",
             workspaceModeLabel = detail.thread.sandboxMode ?: "workspace write",
             forkTurnOptions = buildForkTurnOptionsPreview(forkTurns, forkTurnsError),
+            skillsPanel = buildSkillsPanelPreview(skills, skillsError),
+            mcpPanel = buildMcpPanelPreview(mcpServers, mcpServersError),
+            hooksPanel = buildHooksPanelPreview(hooks, hooksError),
             goalPanel = com.remotecodex.android.ui.model.ComposerGoalPanelPreview(
                 currentGoal = detail.goalObjective?.takeIf { it.isNotBlank() }?.let { objective ->
                     ThreadGoalPreview(
@@ -135,6 +162,96 @@ fun buildThreadDetailPreviewFromSupervisor(
             ),
         ),
     )
+}
+
+private fun buildSkillsPanelPreview(
+    skills: SupervisorThreadSkills?,
+    error: String?,
+): ComposerSkillsPanelPreview {
+    return ComposerSkillsPanelPreview(
+        status = panelStatus(skills != null, error),
+        error = error,
+        skills = skills?.skills?.map { skill ->
+            ComposerSkillPreview(
+                name = skill.name,
+                displayName = null,
+                scope = skill.scope.toSkillScopePreview(),
+                description = skill.description,
+                shortDescription = skill.shortDescription,
+                interfaceShortDescription = skill.interfaceShortDescription,
+                path = skill.path,
+                enabled = skill.enabled,
+            )
+        } ?: emptyList(),
+        errors = skills?.errors?.map { skillError ->
+            ComposerSkillErrorPreview(path = skillError.path, message = skillError.message)
+        } ?: emptyList(),
+        copiedSkillName = null,
+    )
+}
+
+private fun buildMcpPanelPreview(
+    mcpServers: SupervisorThreadMcpServers?,
+    error: String?,
+): ComposerMcpPanelPreview {
+    return ComposerMcpPanelPreview(
+        status = panelStatus(mcpServers != null, error),
+        error = error,
+        configPath = null,
+        configEditing = false,
+        servers = mcpServers?.servers?.map { server ->
+            ComposerMcpServerPreview(
+                name = server.name,
+                authStatus = server.authStatus.toMcpAuthStatusPreview(),
+                tools = server.tools.map { tool ->
+                    ComposerMcpToolPreview(name = tool.name, title = tool.title)
+                },
+                resourceCount = server.resourceCount,
+                resourceTemplateCount = server.resourceTemplateCount,
+            )
+        } ?: emptyList(),
+    )
+}
+
+private fun buildHooksPanelPreview(
+    hooks: SupervisorThreadHooks?,
+    error: String?,
+): ComposerHooksPanelPreview {
+    return ComposerHooksPanelPreview(
+        status = panelStatus(hooks != null, error),
+        error = error,
+        hostConfigFilesAvailable = false,
+        hookTrustAvailable = true,
+        projectHooksPath = hooks?.projectHooksPath?.takeIf { it.isNotBlank() },
+        warnings = hooks?.warnings ?: emptyList(),
+        errors = hooks?.errors?.map { hookError ->
+            ComposerHookErrorPreview(path = hookError.path, message = hookError.message)
+        } ?: emptyList(),
+        hooks = hooks?.hooks?.map { hook ->
+            ComposerHookPreview(
+                key = hook.key,
+                eventName = hook.eventName.toHookEventNamePreview(),
+                handlerType = hook.handlerType.toHookHandlerTypePreview(),
+                matcher = hook.matcher,
+                command = hook.command,
+                timeoutSec = hook.timeoutSec,
+                statusMessage = hook.statusMessage,
+                source = hook.source.toHookSourcePreview(),
+                enabled = hook.enabled,
+                isManaged = hook.isManaged,
+                currentHash = hook.currentHash,
+                trustStatus = hook.trustStatus.toHookTrustStatusPreview(),
+            )
+        } ?: emptyList(),
+    )
+}
+
+private fun panelStatus(hasData: Boolean, error: String?): ComposerPanelLoadStatusPreview {
+    return when {
+        error != null -> ComposerPanelLoadStatusPreview.Failed
+        hasData -> ComposerPanelLoadStatusPreview.Ready
+        else -> ComposerPanelLoadStatusPreview.Loading
+    }
 }
 
 private fun buildForkTurnOptionsPreview(
@@ -156,6 +273,69 @@ private fun buildForkTurnOptionsPreview(
             )
         } ?: emptyList(),
     )
+}
+
+private fun String.toSkillScopePreview(): ComposerSkillScopePreview {
+    return when (this) {
+        "system" -> ComposerSkillScopePreview.System
+        "admin" -> ComposerSkillScopePreview.Admin
+        "user" -> ComposerSkillScopePreview.User
+        else -> ComposerSkillScopePreview.Repo
+    }
+}
+
+private fun String.toMcpAuthStatusPreview(): ComposerMcpAuthStatusPreview {
+    return when (this) {
+        "notLoggedIn" -> ComposerMcpAuthStatusPreview.NotLoggedIn
+        "bearerToken" -> ComposerMcpAuthStatusPreview.BearerToken
+        "oAuth" -> ComposerMcpAuthStatusPreview.OAuth
+        else -> ComposerMcpAuthStatusPreview.Unsupported
+    }
+}
+
+private fun String.toHookEventNamePreview(): ComposerHookEventNamePreview {
+    return when (this) {
+        "permissionRequest" -> ComposerHookEventNamePreview.PermissionRequest
+        "postToolUse" -> ComposerHookEventNamePreview.PostToolUse
+        "preCompact" -> ComposerHookEventNamePreview.PreCompact
+        "postCompact" -> ComposerHookEventNamePreview.PostCompact
+        "sessionStart" -> ComposerHookEventNamePreview.SessionStart
+        "userPromptSubmit" -> ComposerHookEventNamePreview.UserPromptSubmit
+        "stop" -> ComposerHookEventNamePreview.Stop
+        else -> ComposerHookEventNamePreview.PreToolUse
+    }
+}
+
+private fun String.toHookHandlerTypePreview(): ComposerHookHandlerTypePreview {
+    return when (this) {
+        "prompt" -> ComposerHookHandlerTypePreview.Prompt
+        "agent" -> ComposerHookHandlerTypePreview.Agent
+        else -> ComposerHookHandlerTypePreview.Command
+    }
+}
+
+private fun String.toHookSourcePreview(): ComposerHookSourcePreview {
+    return when (this) {
+        "system" -> ComposerHookSourcePreview.System
+        "user" -> ComposerHookSourcePreview.User
+        "project" -> ComposerHookSourcePreview.Project
+        "mdm" -> ComposerHookSourcePreview.Mdm
+        "sessionFlags" -> ComposerHookSourcePreview.SessionFlags
+        "plugin" -> ComposerHookSourcePreview.Plugin
+        "cloudRequirements" -> ComposerHookSourcePreview.CloudRequirements
+        "legacyManagedConfigFile" -> ComposerHookSourcePreview.LegacyManagedConfigFile
+        "legacyManagedConfigMdm" -> ComposerHookSourcePreview.LegacyManagedConfigMdm
+        else -> ComposerHookSourcePreview.Unknown
+    }
+}
+
+private fun String.toHookTrustStatusPreview(): ComposerHookTrustStatusPreview {
+    return when (this) {
+        "managed" -> ComposerHookTrustStatusPreview.Managed
+        "trusted" -> ComposerHookTrustStatusPreview.Trusted
+        "modified" -> ComposerHookTrustStatusPreview.Modified
+        else -> ComposerHookTrustStatusPreview.Untrusted
+    }
 }
 
 private fun SupervisorThreadActionRequest.toPendingRequestPreview(): PendingRequestPreview {
