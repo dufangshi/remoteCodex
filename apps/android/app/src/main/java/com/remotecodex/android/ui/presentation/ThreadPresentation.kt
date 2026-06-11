@@ -2096,7 +2096,7 @@ fun buildComposerSettingsToolbarState(
             label = actionState.primaryLabel,
             accessibilityLabel = if (goalComposeMode) "Set goal" else "Send Prompt",
             title = actionState.primaryLabel,
-            enabled = !goalBusy && if (isChatView) !promptDisabled else true,
+            enabled = actionState.sendEnabled && !goalBusy && if (isChatView) !promptDisabled else true,
             primaryKind = actionState.primaryKind,
         ),
         updateActions = settingsState.updateActions,
@@ -2173,7 +2173,7 @@ fun buildComposerPromptSlotState(
         canInterrupt = actionState.showInterrupt || actionState.primaryKind == ComposerPrimaryActionKind.Stop,
         interruptLabel = actionState.interruptLabel,
         sendButtonLabel = actionState.primaryLabel,
-        sendDisabled = goalBusy || busy || prompt.disabled,
+        sendDisabled = !actionState.sendEnabled || goalBusy || busy || prompt.disabled,
         attachmentChips = activeAttachments.map(::buildComposerPromptAttachmentState),
         inputModeLabel = if (isShellView) "Shell input" else "Prompt",
         promptSegments = if (isShellView) {

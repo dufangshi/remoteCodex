@@ -861,7 +861,7 @@ class ThreadPresentationTest {
     }
 
     @Test
-    fun disablesChatSendButtonFromPromptDisabledButNotShellSendButton() {
+    fun disablesComposerSettingsToolbarSendButtonFromPromptAndActionState() {
         val settings = ComposerSettingsState(
             modelLabel = "gpt-test",
             modelEnabled = true,
@@ -892,7 +892,7 @@ class ThreadPresentationTest {
             ).sendButton.enabled,
         )
         assertEquals(
-            true,
+            false,
             buildComposerSettingsToolbarState(
                 settingsState = settings,
                 openMenu = null,
@@ -1870,6 +1870,29 @@ class ThreadPresentationTest {
                 busy = false,
                 goalBusy = true,
             ),
+        )
+    }
+
+    @Test
+    fun disablesShellComposerPromptSlotFromActionState() {
+        assertEquals(
+            true,
+            buildComposerPromptSlotState(
+                prompt = ComposerPromptPreview(
+                    text = "pnpm test",
+                    placeholder = "Shell command",
+                ),
+                activeView = ComposerActiveView.Shell,
+                actionState = ComposerActionState(
+                    primaryLabel = "Send",
+                    primaryKind = ComposerPrimaryActionKind.Send,
+                    interruptLabel = "Send Ctrl-C",
+                    showInterrupt = true,
+                    sendEnabled = false,
+                ),
+                busy = false,
+                goalBusy = false,
+            ).sendDisabled,
         )
     }
 
