@@ -236,6 +236,7 @@ class ThreadPresentationTest {
             ArtifactHistorySummary(
                 title = "Ethanol molecule",
                 summary = "XYZ, 9 atoms, 1 frame",
+                detailText = "preview fallback",
                 typeLabel = "chemistry.molecule3d",
                 rendererLabel = null,
             ),
@@ -256,6 +257,7 @@ class ThreadPresentationTest {
             ArtifactHistorySummary(
                 title = "artifact fallback",
                 summary = "preview fallback",
+                detailText = "preview fallback",
                 typeLabel = "artifact",
                 rendererLabel = "No renderer",
             ),

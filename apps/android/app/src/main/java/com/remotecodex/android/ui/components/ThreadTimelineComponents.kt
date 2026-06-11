@@ -1128,6 +1128,7 @@ private fun ArtifactHistorySummaryBlock(
     item: HistoryItemPreview,
     colors: HistoryItemColors,
 ) {
+    var expanded by remember(item.summary, item.detail, item.artifactTitle, item.artifactSummary) { mutableStateOf(false) }
     val summary = artifactHistorySummary(
         text = item.summary,
         previewText = item.detail,
@@ -1142,6 +1143,7 @@ private fun ArtifactHistorySummaryBlock(
             .clip(RoundedCornerShape(7.dp))
             .background(ThreadColors.Panel.copy(alpha = 0.58f))
             .border(1.dp, colors.border.copy(alpha = 0.55f), RoundedCornerShape(7.dp))
+            .clickable { expanded = !expanded }
             .padding(9.dp),
         verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
@@ -1193,6 +1195,34 @@ private fun ArtifactHistorySummaryBlock(
                     maxLines = 1,
                 )
             }
+            Text(
+                text = if (expanded) "Hide" else "Open",
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(colors.foreground.copy(alpha = 0.10f))
+                    .border(1.dp, colors.foreground.copy(alpha = 0.22f), RoundedCornerShape(999.dp))
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                color = colors.foreground,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+            )
+        }
+        if (expanded) {
+            Text(
+                text = summary.detailText,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(ThreadColors.CodeBackground.copy(alpha = 0.88f))
+                    .border(1.dp, ThreadColors.Border.copy(alpha = 0.72f), RoundedCornerShape(7.dp))
+                    .padding(9.dp),
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 8,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

@@ -45,6 +45,7 @@ data class HookHistorySummary(
 data class ArtifactHistorySummary(
     val title: String,
     val summary: String,
+    val detailText: String,
     val typeLabel: String,
     val rendererLabel: String?,
 )
@@ -348,10 +349,15 @@ fun artifactHistorySummary(
         ?.takeIf { it.isNotEmpty() }
         ?: previewText?.trim()?.takeIf { it.isNotEmpty() }
         ?: text.trim()
+    val detailText = previewText?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: artifactSummary?.trim()?.takeIf { it.isNotEmpty() }
+        ?: text.trim()
     val typeLabel = artifactType?.trim()?.takeIf { it.isNotEmpty() } ?: "artifact"
     return ArtifactHistorySummary(
         title = title,
         summary = summary,
+        detailText = detailText,
         typeLabel = typeLabel,
         rendererLabel = if (hasRenderer) null else "No renderer",
     )
