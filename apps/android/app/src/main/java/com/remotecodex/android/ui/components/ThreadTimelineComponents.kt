@@ -72,6 +72,7 @@ import com.remotecodex.android.ui.presentation.formatTrailingPathLabel
 import com.remotecodex.android.ui.presentation.graphChatMessageStatusModel
 import com.remotecodex.android.ui.presentation.historyGroupRowOrdinalLabel
 import com.remotecodex.android.ui.presentation.hookHistorySummary
+import com.remotecodex.android.ui.presentation.MessageStatusModel
 import com.remotecodex.android.ui.presentation.parseUserMessageSegments
 import com.remotecodex.android.ui.presentation.planStepStatusAccessibilityLabel
 import com.remotecodex.android.ui.presentation.summarizeInlinePreviewText
@@ -631,6 +632,7 @@ private fun MessageBubble(
         }
         if (isUser) {
             UserMessageBody(text = message.richText)
+            UserMessageFooter(messageStatus = messageStatus, timeLabel = message.timeLabel)
         } else {
             RichMessageContent(content = message.richText)
         }
@@ -661,20 +663,30 @@ private fun MessageBubble(
                 HistoryGroupCard(group = entry.group, onOpenDetail = onOpenDetail)
             },
         )
-        if (isUser) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                messageStatus?.let { MessageStatusBadge(model = it, compact = true) }
-                Text(
-                    text = message.timeLabel,
-                    modifier = Modifier.padding(start = 8.dp),
-                    color = ThreadColors.ForegroundMuted,
-                    style = MaterialTheme.typography.labelSmall,
-                )
-            }
+    }
+}
+
+@Composable
+private fun UserMessageFooter(
+    messageStatus: MessageStatusModel?,
+    timeLabel: String,
+) {
+    if (messageStatus == null && timeLabel.isBlank()) {
+        return
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        messageStatus?.let { MessageStatusBadge(model = it, compact = true) }
+        if (timeLabel.isNotBlank()) {
+            Text(
+                text = timeLabel,
+                modifier = Modifier.padding(start = 8.dp),
+                color = ThreadColors.ForegroundMuted,
+                style = MaterialTheme.typography.labelSmall,
+            )
         }
     }
 }
