@@ -287,6 +287,24 @@ class ThreadComposerStateTest {
     }
 
     @Test
+    fun settingsMenusUpdateModelAndEffortPreviewState() {
+        setComposerContent(composer = ComposerPreview(fastMode = false))
+
+        composeRule.onNodeWithContentDescription("gpt-5.4").performClick()
+        composeRule.onNodeWithContentDescription("Model").assertExists()
+        composeRule.onNodeWithText("gpt-5-codex").performClick()
+
+        composeRule.onNodeWithContentDescription("gpt-5-codex").assertExists()
+        composeRule.onNodeWithContentDescription("High").assertExists()
+
+        composeRule.onNodeWithContentDescription("High").performClick()
+        composeRule.onNodeWithContentDescription("Reasoning effort").assertExists()
+        composeRule.onNodeWithText("Low").performClick()
+
+        composeRule.onNodeWithContentDescription("Low").assertExists()
+    }
+
+    @Test
     fun compactToolboxActionStartsPreviewBusyStateAndClosesMenu() {
         setComposerContent(composer = ComposerPreview(busy = false, compactBusy = false))
 

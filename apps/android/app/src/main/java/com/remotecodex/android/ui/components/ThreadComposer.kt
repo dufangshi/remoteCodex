@@ -3068,8 +3068,10 @@ private fun ModelPickerPanel(
     modelOptions: List<ComposerSelectionOptionState>,
     onSelectModel: (String) -> Unit,
 ) {
-    ComposerMenuSurface(title = "Model", subtitle = "Runtime preference") {
-        ContextUsageRow()
+    CompactSettingsMenuSurface(
+        title = "Model",
+        width = 192.dp,
+    ) {
         settingsState.modelDisabledReason?.let { reason ->
             ComposerMenuNotice(text = reason)
         }
@@ -3094,19 +3096,11 @@ private fun EffortPickerPanel(
     effortOptions: List<ComposerSelectionOptionState>,
     onSelectEffort: (String) -> Unit,
 ) {
-    ComposerMenuSurface(title = "Reasoning effort", subtitle = "Per-thread setting") {
-        ValueSliderPreview(
-            label = "Effort budget",
-            valueLabel = settingsState.effortLabel,
-            fraction = if (settingsState.effortEnabled) 0.58f else 0f,
-        )
-        Text(
-            text = settingsState.effortTitle,
-            color = ThreadColors.ForegroundMuted,
-            style = MaterialTheme.typography.labelSmall,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
+    CompactSettingsMenuSurface(
+        title = "Reasoning effort",
+        width = 160.dp,
+        stateDescription = settingsState.effortTitle,
+    ) {
         effortOptions.forEach { option ->
             SelectionRow(
                 label = option.label,
@@ -3114,6 +3108,36 @@ private fun EffortPickerPanel(
                 selected = option.selected,
                 onClick = { onSelectEffort(option.value) },
             )
+        }
+    }
+}
+
+@Composable
+private fun CompactSettingsMenuSurface(
+    title: String,
+    width: androidx.compose.ui.unit.Dp,
+    stateDescription: String? = null,
+    content: @Composable () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .wrapContentWidth(Alignment.Start),
+    ) {
+        Column(
+            modifier = Modifier
+                .width(width)
+                .semantics {
+                    contentDescription = title
+                    stateDescription?.let { this.stateDescription = it }
+                }
+                .clip(RoundedCornerShape(16.dp))
+                .background(ThreadColors.CodeBackground)
+                .border(1.dp, ThreadColors.BorderStrong, RoundedCornerShape(16.dp))
+                .padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            content()
         }
     }
 }
